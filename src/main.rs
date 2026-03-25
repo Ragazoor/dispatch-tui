@@ -1,5 +1,6 @@
 mod db;
 mod models;
+mod tui;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
