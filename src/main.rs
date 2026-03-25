@@ -1,5 +1,7 @@
 mod db;
+mod dispatch;
 mod models;
+mod tmux;
 mod tui;
 
 use anyhow::Result;
