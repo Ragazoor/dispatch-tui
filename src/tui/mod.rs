@@ -80,6 +80,7 @@ pub struct App {
     pub detail_text: Option<String>,
     pub tmux_outputs: HashMap<i64, String>,
     pub status_message: Option<String>,
+    pub error_popup: Option<String>,
     pub repo_paths: Vec<String>,
     pub should_quit: bool,
 }
@@ -96,6 +97,7 @@ impl App {
             detail_text: None,
             tmux_outputs: HashMap::new(),
             status_message: None,
+            error_popup: None,
             repo_paths: Vec::new(),
             should_quit: false,
         }
@@ -182,6 +184,9 @@ impl App {
                         let task_clone = task.clone();
                         return vec![Command::Dispatch { task: task_clone }];
                     }
+                    self.status_message = Some(
+                        "Move task to Ready before dispatching (press m)".to_string(),
+                    );
                 }
                 vec![Command::None]
             }
@@ -289,7 +294,7 @@ impl App {
             }
 
             Message::Error(msg) => {
-                self.status_message = Some(msg);
+                self.error_popup = Some(msg);
                 vec![Command::None]
             }
         }
@@ -454,9 +459,9 @@ mod tests {
     }
 
     #[test]
-    fn error_sets_status_message() {
+    fn error_sets_error_popup() {
         let mut app = App::new(vec![]);
         app.update(Message::Error("Something went wrong".to_string()));
-        assert_eq!(app.status_message.as_deref(), Some("Something went wrong"));
+        assert_eq!(app.error_popup.as_deref(), Some("Something went wrong"));
     }
 }

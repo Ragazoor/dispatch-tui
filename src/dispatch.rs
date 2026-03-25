@@ -21,6 +21,7 @@ pub fn dispatch_agent(
     repo_path: &str,
     mcp_port: u16,
 ) -> Result<DispatchResult> {
+    let repo_path = expand_tilde(repo_path);
     let slug = slugify(title);
     let worktree_name = format!("{task_id}-{slug}");
     let worktree_path = format!("{repo_path}/.worktrees/{worktree_name}");
@@ -30,21 +31,28 @@ pub fn dispatch_agent(
     fs::create_dir_all(format!("{repo_path}/.worktrees"))
         .context("failed to create .worktrees directory")?;
 
-    // 2. Create git worktree.
-    let status = Command::new("git")
+    // 2. Create git worktree (-B resets the branch if it already exists).
+    let output = Command::new("git")
         .args([
             "-C",
-            repo_path,
+            &repo_path,
             "worktree",
             "add",
             &worktree_path,
-            "-b",
+            "-B",
             &worktree_name,
         ])
-        .status()
+        .output()
         .context("failed to spawn git worktree add")?;
-    if !status.success() {
-        anyhow::bail!("git worktree add failed with status {}", status);
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // Show the last meaningful line (git prints progress first, error last)
+        let msg = stderr
+            .lines()
+            .rev()
+            .find(|l| !l.trim().is_empty())
+            .unwrap_or(stderr.trim());
+        anyhow::bail!("git worktree add failed: {msg}");
     }
 
     // 3. Write .mcp.json into the worktree so Claude picks up the MCP server.
@@ -52,7 +60,7 @@ pub fn dispatch_agent(
         r#"{{"mcpServers":{{"task-orchestrator":{{"url":"http://localhost:{mcp_port}/mcp"}}}}}}"#
     );
     fs::write(format!("{worktree_path}/.mcp.json"), &mcp_config)
-        .context("failed to write .mcp.json")?;
+        .with_context(|| format!("failed to write {worktree_path}/.mcp.json"))?;
 
     // 4. Open a new tmux window rooted at the worktree.
     tmux::new_window(&tmux_window, &worktree_path)
@@ -93,15 +101,16 @@ pub fn cleanup_task(repo_path: &str, worktree_path: &str, tmux_window: &str) -> 
     }
 
     // Remove the git worktree.
-    let status = Command::new("git")
+    let output = Command::new("git")
         .args(["worktree", "remove", "--force", worktree_path])
-        .status()
+        .output()
         .context("failed to spawn git worktree remove")?;
-    if !status.success() {
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
         anyhow::bail!(
-            "git worktree remove failed with status {} for path {}",
-            status,
-            worktree_path
+            "git worktree remove failed for path {}: {}",
+            worktree_path,
+            stderr.trim()
         );
     }
 
@@ -115,7 +124,7 @@ pub fn cleanup_task(repo_path: &str, worktree_path: &str, tmux_window: &str) -> 
         // failed partway through).
         let _ = Command::new("git")
             .args(["-C", repo_path, "branch", "-D", branch])
-            .status();
+            .output();
     }
 
     Ok(())
@@ -139,6 +148,16 @@ When your work is complete, update the task status to 'review' via the MCP \
 server. If MCP is unavailable, run: \
 task-orchestrator update {task_id} review"
     )
+}
+
+/// Expand a leading `~` or `~/` to the user's home directory.
+fn expand_tilde(path: &str) -> String {
+    if path == "~" || path.starts_with("~/") {
+        if let Some(home) = std::env::var_os("HOME") {
+            return format!("{}{}", home.to_string_lossy(), &path[1..]);
+        }
+    }
+    path.to_string()
 }
 
 /// Escape single-quote characters so the prompt can be safely wrapped in
@@ -186,5 +205,22 @@ mod tests {
     fn build_prompt_contains_mcp_fallback() {
         let prompt = build_prompt(7, "Title", "Desc", 3142);
         assert!(prompt.contains("task-orchestrator update 7 review"));
+    }
+
+    #[test]
+    fn expand_tilde_with_path() {
+        let home = std::env::var("HOME").unwrap();
+        assert_eq!(expand_tilde("~/projects/foo"), format!("{home}/projects/foo"));
+    }
+
+    #[test]
+    fn expand_tilde_bare() {
+        let home = std::env::var("HOME").unwrap();
+        assert_eq!(expand_tilde("~"), home);
+    }
+
+    #[test]
+    fn expand_tilde_absolute_unchanged() {
+        assert_eq!(expand_tilde("/home/user/foo"), "/home/user/foo");
     }
 }

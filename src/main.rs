@@ -254,14 +254,14 @@ async fn execute_commands(
                 } else {
                     // Existing task — update its status and dispatch fields
                     if let Err(e) = rt.database.update_status(task.id, task.status) {
-                        app.status_message = Some(format!("DB error updating status: {e}"));
+                        app.error_popup = Some(format!("DB error updating status: {e}"));
                     }
                     if let Err(e) = rt.database.update_dispatch(
                         task.id,
                         task.worktree.as_deref(),
                         task.tmux_window.as_deref(),
                     ) {
-                        app.status_message = Some(format!("DB error updating dispatch: {e}"));
+                        app.error_popup = Some(format!("DB error updating dispatch: {e}"));
                     }
                 }
             }
@@ -270,7 +270,7 @@ async fn execute_commands(
                 if let Err(e) = rt.database.delete_task(id) {
                     // id=0 tasks were never persisted — not a real error
                     if id != 0 {
-                        app.status_message = Some(format!("DB error deleting task: {e}"));
+                        app.error_popup = Some(format!("DB error deleting task: {e}"));
                     }
                 }
             }
@@ -293,7 +293,7 @@ async fn execute_commands(
                             });
                         }
                         Err(e) => {
-                            let _ = tx.send(Message::Error(format!("Dispatch failed: {e}")));
+                            let _ = tx.send(Message::Error(format!("Dispatch failed: {e:#}")));
                         }
                     }
                 });
@@ -303,23 +303,22 @@ async fn execute_commands(
                 let tx = rt.msg_tx.clone();
 
                 tokio::task::spawn_blocking(move || {
+                    // Check if the window is still alive first to avoid
+                    // capturing from a dead window (which would error).
+                    if let Ok(false) = tmux::has_window(&window) {
+                        let _ = tx.send(Message::WindowGone(id));
+                        return;
+                    }
+
                     match tmux::capture_pane(&window, 5) {
                         Ok(output) => {
                             let _ = tx.send(Message::TmuxOutput { id, output });
                         }
                         Err(e) => {
-                            // Non-fatal: log as a status message rather than crashing.
                             let _ = tx.send(Message::Error(format!(
                                 "tmux capture failed for window {window}: {e}"
                             )));
                         }
-                    }
-
-                    // Check if the window is still alive. If it's gone, signal
-                    // that the window exited. The main loop will check the task's
-                    // current status before advancing.
-                    if let Ok(false) = tmux::has_window(&window) {
-                        let _ = tx.send(Message::WindowGone(id));
                     }
                 });
             }
@@ -385,7 +384,7 @@ async fn execute_commands(
 
                             // Update DB and in-memory state
                             if let Err(e) = rt.database.update_task(task_id, &title, &description, &repo_path, new_status) {
-                                app.status_message = Some(format!("DB error updating task: {e}"));
+                                app.error_popup = Some(format!("DB error updating task: {e}"));
                             }
                             if let Some(t) = app.tasks.iter_mut().find(|t| t.id == task_id) {
                                 t.title = title;
@@ -417,7 +416,7 @@ async fn execute_commands(
                         let _ = cmds;
                     }
                     Err(e) => {
-                        app.status_message = Some(format!("DB refresh failed: {e}"));
+                        app.error_popup = Some(format!("DB refresh failed: {e}"));
                     }
                 }
             }

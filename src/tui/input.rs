@@ -5,6 +5,11 @@ use super::{App, Command, InputMode, Message, MoveDirection};
 impl App {
     /// Translate a terminal key event into zero or more commands, depending on current mode.
     pub fn handle_key(&mut self, key: KeyEvent) -> Vec<Command> {
+        if self.error_popup.is_some() {
+            self.error_popup = None;
+            return vec![Command::None];
+        }
+
         match &self.mode.clone() {
             InputMode::Normal => self.handle_key_normal(key),
             InputMode::InputTitle => self.handle_key_text_input(key),
