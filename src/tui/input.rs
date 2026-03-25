@@ -73,6 +73,19 @@ impl App {
                 }
             }
 
+            KeyCode::Char('g') => {
+                if let Some(task) = self.selected_task() {
+                    if let Some(window) = &task.tmux_window {
+                        vec![Command::JumpToTmux { window: window.clone() }]
+                    } else {
+                        self.status_message = Some("No active session".to_string());
+                        vec![]
+                    }
+                } else {
+                    vec![]
+                }
+            }
+
             KeyCode::Char('m') => {
                 if let Some(task) = self.selected_task() {
                     let id = task.id;

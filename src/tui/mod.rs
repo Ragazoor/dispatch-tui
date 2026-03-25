@@ -725,4 +725,25 @@ mod tests {
         assert!(cmds.is_empty());
         assert!(app.status_message.is_some());
     }
+
+    #[test]
+    fn g_key_with_live_window_jumps() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let mut task = make_task(4, TaskStatus::Running);
+        task.tmux_window = Some("task-4".to_string());
+        let mut app = App::new(vec![task]);
+        app.selected_column = 2; // Running column
+        let cmds = app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+        assert!(matches!(&cmds[0], Command::JumpToTmux { window } if window == "task-4"));
+    }
+
+    #[test]
+    fn g_key_without_window_shows_message() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+        app.selected_column = 0;
+        let cmds = app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+        assert!(cmds.is_empty());
+        assert!(app.status_message.as_deref().unwrap().contains("No active session"));
+    }
 }
