@@ -1,5 +1,6 @@
 mod db;
 mod dispatch;
+mod mcp;
 mod models;
 mod tmux;
 mod tui;
@@ -116,17 +117,25 @@ async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
     let database = Arc::new(db::Database::open(db_path)?);
     let tasks = database.list_all()?;
 
-    // 2. Create App
+    // 2. Spawn MCP server
+    let mcp_db = database.clone();
+    tokio::spawn(async move {
+        if let Err(e) = mcp::serve(mcp_db, port).await {
+            eprintln!("MCP server error: {e}");
+        }
+    });
+
+    // 3. Create App
     let mut app = App::new(tasks);
 
-    // 3. Set up terminal
+    // 4. Set up terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // 4. Create two channels:
+    // 5. Create two channels:
     //    - key_rx: raw crossterm KeyEvents from the blocking poll thread
     //    - msg_rx: higher-level Messages (e.g. from dispatch results in Phase 3)
     let (key_tx, mut key_rx) = mpsc::unbounded_channel::<crossterm::event::KeyEvent>();
@@ -146,10 +155,10 @@ async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
         }
     });
 
-    // 5. Tick interval (2 seconds)
+    // 6. Tick interval (2 seconds)
     let mut tick_interval = interval(Duration::from_secs(2));
 
-    // 6. Main loop
+    // 7. Main loop
     let result = run_loop(
         &mut app,
         &mut terminal,
@@ -162,7 +171,7 @@ async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
     )
     .await;
 
-    // 7. Cleanup terminal
+    // 8. Cleanup terminal
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
