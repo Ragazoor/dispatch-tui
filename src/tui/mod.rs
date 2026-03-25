@@ -210,16 +210,13 @@ impl App {
             }
 
             Message::WindowGone(id) => {
-                // Only auto-advance if the task is still Running
-                if let Some(task) = self.tasks.iter().find(|t| t.id == id) {
-                    if task.status == TaskStatus::Running {
-                        return self.update(Message::MoveTask {
-                            id,
-                            direction: MoveDirection::Forward,
-                        });
-                    }
+                if let Some(task) = self.tasks.iter_mut().find(|t| t.id == id) {
+                    task.tmux_window = None;
+                    let task_clone = task.clone();
+                    vec![Command::PersistTask(task_clone)]
+                } else {
+                    vec![]
                 }
-                vec![]
             }
 
             Message::NotesLoaded { task_id, notes } => {
@@ -588,6 +585,27 @@ mod tests {
 
         let cmds = app.update(Message::Tick);
         assert!(!cmds.iter().any(|c| matches!(c, Command::LoadNotes(_))));
+    }
+
+    #[test]
+    fn window_gone_clears_tmux_window_and_persists() {
+        let mut task = make_task(4, TaskStatus::Running);
+        task.worktree = Some("/repo/.worktrees/4-task-4".to_string());
+        task.tmux_window = Some("task-4".to_string());
+        let mut app = App::new(vec![task]);
+
+        let cmds = app.update(Message::WindowGone(4));
+
+        // Task should stay Running
+        let task = app.tasks.iter().find(|t| t.id == 4).unwrap();
+        assert_eq!(task.status, TaskStatus::Running);
+        // tmux_window should be cleared
+        assert!(task.tmux_window.is_none());
+        // worktree should be preserved
+        assert!(task.worktree.is_some());
+        // Should emit PersistTask to write cleared tmux_window to DB
+        assert_eq!(cmds.len(), 1);
+        assert!(matches!(&cmds[0], Command::PersistTask(t) if t.tmux_window.is_none()));
     }
 
     #[test]
