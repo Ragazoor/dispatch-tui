@@ -255,75 +255,7 @@ async fn execute_commands(
             }
 
             Command::EditTaskInEditor(task) => {
-                let task_id = task.id;
-                let tmp = std::env::temp_dir().join(format!("task-{task_id}.txt"));
-                let content = format_editor_content(&task.title, &task.description, &task.repo_path, task.status.as_str());
-                std::fs::write(&tmp, &content)?;
-
-                // Pause the input polling thread so vim can read keypresses
-                rt.input_paused.store(true, Ordering::Relaxed);
-                std::thread::sleep(Duration::from_millis(150));
-
-                // Suspend TUI
-                disable_raw_mode()?;
-                execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-                terminal.show_cursor()?;
-
-                // Open editor
-                let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
-                let status = std::process::Command::new(&editor)
-                    .arg(&tmp)
-                    .status();
-
-                // Resume TUI
-                enable_raw_mode()?;
-                execute!(terminal.backend_mut(), EnterAlternateScreen)?;
-                terminal.hide_cursor()?;
-                terminal.clear()?;
-
-                // Resume input polling thread
-                rt.input_paused.store(false, Ordering::Relaxed);
-
-                if let Ok(exit) = status {
-                    if exit.success() {
-                        // Parse the edited file
-                        if let Ok(edited) = std::fs::read_to_string(&tmp) {
-                            let mut title = task.title.clone();
-                            let mut description = task.description.clone();
-                            let mut repo_path = task.repo_path.clone();
-                            let mut new_status = task.status;
-
-                            let fields = parse_editor_content(&edited);
-                            if !fields.title.is_empty() {
-                                title = fields.title;
-                            }
-                            if !fields.description.is_empty() {
-                                description = fields.description;
-                            }
-                            if !fields.repo_path.is_empty() {
-                                repo_path = fields.repo_path;
-                            }
-                            if let Some(s) = models::TaskStatus::parse(&fields.status) {
-                                new_status = s;
-                            }
-
-                            // Update DB and in-memory state
-                            if let Err(e) = rt.database.update_task(task_id, &title, &description, &repo_path, new_status) {
-                                app.error_popup = Some(format!("DB error updating task: {e}"));
-                            }
-                            if let Some(t) = app.tasks.iter_mut().find(|t| t.id == task_id) {
-                                t.title = title;
-                                t.description = description;
-                                t.repo_path = repo_path;
-                                t.status = new_status;
-                                t.updated_at = chrono::Utc::now();
-                            }
-                            app.clamp_selection();
-                        }
-                    }
-                }
-
-                let _ = std::fs::remove_file(&tmp);
+                handle_edit_in_editor(app, task, rt, terminal)?;
             }
 
             Command::SaveRepoPath(path) => {
@@ -373,5 +305,87 @@ async fn execute_commands(
         }
     }
 
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// handle_edit_in_editor — open $EDITOR for a task and apply changes
+// ---------------------------------------------------------------------------
+
+fn handle_edit_in_editor(
+    app: &mut App,
+    task: models::Task,
+    rt: &TuiRuntime,
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+) -> Result<()> {
+    let task_id = task.id;
+    let tmp = std::env::temp_dir().join(format!("task-{task_id}.txt"));
+    let content = format_editor_content(&task.title, &task.description, &task.repo_path, task.status.as_str());
+    std::fs::write(&tmp, &content)?;
+
+    // Pause the input polling thread so vim can read keypresses
+    rt.input_paused.store(true, Ordering::Relaxed);
+    std::thread::sleep(Duration::from_millis(150));
+
+    // Suspend TUI
+    disable_raw_mode()?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    terminal.show_cursor()?;
+
+    // Open editor
+    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
+    let status = std::process::Command::new(&editor)
+        .arg(&tmp)
+        .status();
+
+    // Resume TUI
+    enable_raw_mode()?;
+    execute!(terminal.backend_mut(), EnterAlternateScreen)?;
+    terminal.hide_cursor()?;
+    terminal.clear()?;
+
+    // Resume input polling thread
+    rt.input_paused.store(false, Ordering::Relaxed);
+
+    if let Ok(exit) = status {
+        if exit.success() {
+            // Parse the edited file
+            if let Ok(edited) = std::fs::read_to_string(&tmp) {
+                let mut title = task.title.clone();
+                let mut description = task.description.clone();
+                let mut repo_path = task.repo_path.clone();
+                let mut new_status = task.status;
+
+                let fields = parse_editor_content(&edited);
+                if !fields.title.is_empty() {
+                    title = fields.title;
+                }
+                if !fields.description.is_empty() {
+                    description = fields.description;
+                }
+                if !fields.repo_path.is_empty() {
+                    repo_path = fields.repo_path;
+                }
+                if let Some(s) = models::TaskStatus::parse(&fields.status) {
+                    new_status = s;
+                }
+
+                // Update DB and in-memory state
+                if let Err(e) = rt.database.update_task(task_id, &title, &description, &repo_path, new_status) {
+                    app.error_popup = Some(format!("DB error updating task: {e}"));
+                }
+                if let Some(t) = app.tasks.iter_mut().find(|t| t.id == task_id) {
+                    t.title = title;
+                    t.description = description;
+                    t.repo_path = repo_path;
+                    t.status = new_status;
+                    t.updated_at = chrono::Utc::now();
+                }
+                app.clamp_selection();
+            }
+        }
+    }
+
+    let _ = std::fs::remove_file(&tmp);
     Ok(())
 }
