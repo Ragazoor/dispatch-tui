@@ -112,8 +112,21 @@ impl App {
                         return vec![];
                     }
 
-                    // Clean up worktree/tmux when moving backward from a dispatched state
+                    // Clean up worktree/tmux when moving backward from a dispatched state,
+                    // or when moving forward to Done.
                     let cleanup = if matches!(direction, MoveDirection::Backward) {
+                        match task.worktree.take() {
+                            Some(wt) => Some(Command::Cleanup {
+                                repo_path: task.repo_path.clone(),
+                                worktree: wt,
+                                tmux_window: task.tmux_window.take(),
+                            }),
+                            None => {
+                                task.tmux_window.take(); // clear even if no worktree
+                                None
+                            },
+                        }
+                    } else if new_status == TaskStatus::Done {
                         match task.worktree.take() {
                             Some(wt) => Some(Command::Cleanup {
                                 repo_path: task.repo_path.clone(),
@@ -636,5 +649,43 @@ mod tests {
         let cached = app.notes.get(&1).unwrap();
         assert_eq!(cached.len(), 1);
         assert_eq!(cached[0].content, "Agent progress");
+    }
+
+    #[test]
+    fn move_forward_to_done_emits_cleanup() {
+        let mut task = make_task(5, TaskStatus::Review);
+        task.worktree = Some("/repo/.worktrees/5-task-5".to_string());
+        task.tmux_window = None; // session closed, but worktree remains
+        let mut app = App::new(vec![task]);
+
+        let cmds = app.update(Message::MoveTask {
+            id: 5,
+            direction: MoveDirection::Forward,
+        });
+
+        let task = app.tasks.iter().find(|t| t.id == 5).unwrap();
+        assert_eq!(task.status, TaskStatus::Done);
+        assert!(task.worktree.is_none());
+        // Should have Cleanup + PersistTask
+        assert_eq!(cmds.len(), 2);
+        assert!(matches!(&cmds[0], Command::Cleanup { tmux_window: None, .. }));
+        assert!(matches!(&cmds[1], Command::PersistTask(_)));
+    }
+
+    #[test]
+    fn move_forward_to_done_with_live_window_emits_cleanup() {
+        let mut task = make_task(5, TaskStatus::Review);
+        task.worktree = Some("/repo/.worktrees/5-task-5".to_string());
+        task.tmux_window = Some("task-5".to_string());
+        let mut app = App::new(vec![task]);
+
+        let cmds = app.update(Message::MoveTask {
+            id: 5,
+            direction: MoveDirection::Forward,
+        });
+
+        assert_eq!(cmds.len(), 2);
+        assert!(matches!(&cmds[0], Command::Cleanup { tmux_window: Some(_), .. }));
+        assert!(matches!(&cmds[1], Command::PersistTask(_)));
     }
 }
