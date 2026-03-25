@@ -136,12 +136,15 @@ fn render_columns(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
+    // When in input mode, show the input form instead of detail
+    if render_input_form(frame, app, area) {
+        return;
+    }
+
     let content = if app.detail_visible {
         if let Some(text) = &app.detail_text {
             text.as_str()
         } else if let Some(task) = app.selected_task() {
-            // Build a temporary display (we can't own a String here, use the stored text)
-            // detail_text should have been set by ToggleDetail; fall back gracefully.
             task.title.as_str()
         } else {
             "No task selected"
@@ -159,6 +162,78 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(paragraph, area);
 }
 
+/// Renders the input form in the detail panel area. Returns true if it rendered.
+fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
+    let completed = Style::default().fg(Color::White);
+    let active = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+    let hint = Style::default().fg(Color::DarkGray);
+
+    let lines: Vec<Line> = match &app.mode {
+        InputMode::InputTitle => {
+            vec![
+                Line::from(Span::styled(
+                    format!("  Title: {}_ ", app.input_buffer),
+                    active,
+                )),
+                Line::from(""),
+                Line::from(Span::styled("  Enter to confirm, Esc to cancel", hint)),
+            ]
+        }
+        InputMode::InputDescription { title } => {
+            vec![
+                Line::from(Span::styled(format!("  Title: {title}"), completed)),
+                Line::from(Span::styled(
+                    format!("  Description: {}_ ", app.input_buffer),
+                    active,
+                )),
+                Line::from(""),
+                Line::from(Span::styled("  Enter to confirm, Esc to cancel", hint)),
+            ]
+        }
+        InputMode::InputRepoPath {
+            title,
+            description,
+        } => {
+            let mut lines = vec![
+                Line::from(Span::styled(format!("  Title: {title}"), completed)),
+                Line::from(Span::styled(
+                    format!("  Description: {description}"),
+                    completed,
+                )),
+                Line::from(Span::styled(
+                    format!("  Repo path: {}_ ", app.input_buffer),
+                    active,
+                )),
+            ];
+            // Show saved repo paths if available and user hasn't started typing
+            if app.input_buffer.is_empty() {
+                for (i, path) in app.repo_paths.iter().enumerate() {
+                    lines.push(Line::from(Span::styled(
+                        format!("    [{}] {path}", i + 1),
+                        hint,
+                    )));
+                }
+            }
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "  Type a path or press 1-9 to select, Enter to confirm, Esc to cancel",
+                hint,
+            )));
+            lines
+        }
+        _ => return false,
+    };
+
+    let block = Block::default()
+        .title(" New Task ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow));
+
+    let paragraph = Paragraph::new(lines).block(block);
+    frame.render_widget(paragraph, area);
+    true
+}
+
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let text = if let Some(msg) = &app.status_message {
         msg.as_str().to_string()
@@ -168,15 +243,9 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 "q:quit  h/l:col  j/k:row  n:new  m/M:move  d:dispatch  Enter:detail  x:delete"
                     .to_string()
             }
-            InputMode::InputTitle => {
-                format!("Title> {}", app.input_buffer)
-            }
-            InputMode::InputDescription { .. } => {
-                format!("Description> {}", app.input_buffer)
-            }
-            InputMode::InputRepoPath { .. } => {
-                format!("Repo path> {}", app.input_buffer)
-            }
+            InputMode::InputTitle => "Creating task: enter title".to_string(),
+            InputMode::InputDescription { .. } => "Creating task: enter description".to_string(),
+            InputMode::InputRepoPath { .. } => "Creating task: enter repo path".to_string(),
             InputMode::ConfirmDelete => "Delete? (y/n)".to_string(),
         }
     };

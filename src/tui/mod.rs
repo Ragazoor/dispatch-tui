@@ -78,6 +78,7 @@ pub struct App {
     pub detail_text: Option<String>,
     pub tmux_outputs: HashMap<i64, String>,
     pub status_message: Option<String>,
+    pub repo_paths: Vec<String>,
     pub should_quit: bool,
 }
 
@@ -93,6 +94,7 @@ impl App {
             detail_text: None,
             tmux_outputs: HashMap::new(),
             status_message: None,
+            repo_paths: Vec::new(),
             should_quit: false,
         }
     }
