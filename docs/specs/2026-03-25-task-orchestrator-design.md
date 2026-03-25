@@ -67,12 +67,20 @@ CREATE TABLE tasks (
     id          INTEGER PRIMARY KEY,
     title       TEXT NOT NULL,
     description TEXT NOT NULL,
-    repo_path   TEXT NOT NULL,
+    repo_path   TEXT NOT NULL,  -- absolute path to git repository root
     status      TEXT NOT NULL DEFAULT 'backlog',  -- backlog|ready|running|review|done
-    worktree    TEXT,          -- path to created worktree (set on dispatch)
+    worktree    TEXT,          -- absolute path to created worktree (set on dispatch)
     tmux_window TEXT,          -- tmux window identifier (set on dispatch)
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE notes (
+    id         INTEGER PRIMARY KEY,
+    task_id    INTEGER NOT NULL REFERENCES tasks(id),
+    content    TEXT NOT NULL,
+    source     TEXT NOT NULL DEFAULT 'user',  -- user|agent|system
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 ```
 
@@ -138,26 +146,34 @@ Backlog --> Ready --> Running --> Review --> Done
 
 Every 2 seconds:
 1. Read task list from SQLite (picks up MCP/CLI updates)
-2. For Running tasks: capture last N lines from tmux pane via `tmux capture-pane`
+2. For Running tasks: capture last 5 lines from tmux pane via `tmux capture-pane -t <window> -p -S -5`
 3. Re-render the board
 
 ## Agent Dispatch
 
 ### Dispatch flow (pressing `d` on a Ready task)
 
-1. Create worktree: `git -C <repo_path> worktree add .worktrees/<task-id>-<slugified-title>`
-2. Create tmux window in current session: `tmux new-window -n <task-id> -c <worktree_path>`
-3. Write `.mcp.json` into the worktree pointing to the orchestrator's MCP server
+Only tasks in `ready` status can be dispatched. The `d` key is a no-op for other statuses.
+
+1. Create worktree: `git -C <repo_path> worktree add <repo_path>/.worktrees/<task-id>-<slugified-title>`
+2. Create tmux window in current session: `tmux new-window -n task-<task-id> -c <worktree_path>`
+3. Write `.mcp.json` into the worktree root (Claude Code discovers MCP servers from the working directory's `.mcp.json`)
 4. Send command to the tmux window: `claude --prompt "<task description>"`
 5. Update task in SQLite: status -> `running`, set worktree path and tmux window id
 
+### Worktree cleanup
+
+When a task is moved to `done`, the TUI offers to clean up:
+- Remove the git worktree (`git -C <repo_path> worktree remove <worktree_path>`)
+- Close the tmux window if still open (`tmux kill-window -t <tmux_window>`)
+
 ### Process exit detection
 
-Safety net: the TUI's refresh cycle checks if a Running task's tmux window still exists. If the window is gone and the task is still `running`, it gets marked as `review` with a note indicating auto-detection rather than agent-reported completion.
+Safety net: the TUI's refresh cycle checks if a Running task's tmux window still exists. If the window is gone and the task is still `running`, it gets marked as `review` with a system note indicating auto-detection rather than agent-reported completion.
 
 ## MCP Server
 
-Listens on `localhost:3142` (configurable). Exposes tools to Claude Code agents:
+Listens on `localhost:3142`. Uses MCP Streamable HTTP transport (the standard for HTTP-based MCP servers). Exposes tools to Claude Code agents:
 
 | Tool | Parameters | Effect |
 |------|-----------|--------|
@@ -273,6 +289,17 @@ Event (key press, tick, MCP update)
 5. **tmux windows in same session**: TUI runs in tmux already, so agents get new windows (tabs) in the same session rather than separate sessions.
 6. **MCP for agent communication**: Claude Code natively supports MCP. The orchestrator's MCP server lets agents call `update_task` to report completion.
 7. **No github-assistant coupling**: Standalone tool focused on task creation and agent dispatch. PR monitoring is a separate concern for later.
+
+## Configuration
+
+CLI flags on the `tui` subcommand:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--db` | `~/.local/share/task-orchestrator/tasks.db` | SQLite database path |
+| `--port` | `3142` | MCP server port |
+
+Environment variables override flags: `TASK_ORCHESTRATOR_DB`, `TASK_ORCHESTRATOR_PORT`.
 
 ## Success Criteria
 
