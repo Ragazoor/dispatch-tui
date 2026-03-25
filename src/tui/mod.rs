@@ -236,7 +236,7 @@ impl App {
                 let mut cmds: Vec<Command> = self
                     .tasks
                     .iter()
-                    .filter(|t| t.status == TaskStatus::Running)
+                    .filter(|t| t.tmux_window.is_some())
                     .filter_map(|t| {
                         t.tmux_window.clone().map(|window| Command::CaptureTmux {
                             id: t.id,
@@ -417,6 +417,17 @@ mod tests {
         assert_eq!(cmds.len(), 2);
         assert!(matches!(&cmds[0], Command::CaptureTmux { id: 4, window } if window == "main:task-4"));
         assert!(matches!(&cmds[1], Command::RefreshFromDb));
+    }
+
+    #[test]
+    fn tick_captures_review_task_with_live_window() {
+        let mut task = make_task(5, TaskStatus::Review);
+        task.tmux_window = Some("task-5".to_string());
+        let mut app = App::new(vec![task]);
+
+        let cmds = app.update(Message::Tick);
+
+        assert!(cmds.iter().any(|c| matches!(c, Command::CaptureTmux { id: 5, .. })));
     }
 
     #[test]
