@@ -47,6 +47,7 @@ pub enum Command {
     DeleteTask(i64),
     Dispatch { task: Task },
     CaptureTmux { id: i64, window: String },
+    EditTaskInEditor(Task),
     SaveRepoPath(String),
     RefreshFromDb,
     None,

@@ -59,6 +59,14 @@ impl App {
 
             KeyCode::Enter => self.update(Message::ToggleDetail),
 
+            KeyCode::Char('e') => {
+                if let Some(task) = self.selected_task() {
+                    vec![Command::EditTaskInEditor(task.clone())]
+                } else {
+                    vec![Command::None]
+                }
+            }
+
             KeyCode::Char('x') => {
                 // Delete selected task — enter confirm mode
                 if self.selected_task().is_some() {

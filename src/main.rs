@@ -215,7 +215,7 @@ async fn run_loop(
             }
         };
 
-        execute_commands(app, commands, database, msg_tx, port).await?;
+        execute_commands(app, commands, database, msg_tx, port, terminal).await?;
     }
 
     Ok(())
@@ -227,6 +227,7 @@ async fn execute_commands(
     database: &Arc<db::Database>,
     msg_tx: &mpsc::UnboundedSender<Message>,
     port: u16,
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
 ) -> Result<()> {
     for command in commands {
         match command {
@@ -305,6 +306,75 @@ async fn execute_commands(
                         _ => {} // still running or error — leave it
                     }
                 });
+            }
+
+            Command::EditTaskInEditor(task) => {
+                let task_id = task.id;
+                let tmp = std::env::temp_dir().join(format!("task-{task_id}.txt"));
+                let content = format!(
+                    "title: {}\ndescription: {}\nrepo_path: {}\nstatus: {}\n",
+                    task.title, task.description, task.repo_path, task.status.as_str()
+                );
+                std::fs::write(&tmp, &content)?;
+
+                // Suspend TUI
+                disable_raw_mode()?;
+                execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+                terminal.show_cursor()?;
+
+                // Open editor
+                let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
+                let status = std::process::Command::new(&editor)
+                    .arg(&tmp)
+                    .status();
+
+                // Resume TUI
+                enable_raw_mode()?;
+                execute!(terminal.backend_mut(), EnterAlternateScreen)?;
+                terminal.hide_cursor()?;
+                terminal.clear()?;
+
+                if let Ok(exit) = status {
+                    if exit.success() {
+                        // Parse the edited file
+                        if let Ok(edited) = std::fs::read_to_string(&tmp) {
+                            let mut title = task.title.clone();
+                            let mut description = task.description.clone();
+                            let mut repo_path = task.repo_path.clone();
+                            let mut new_status = task.status;
+
+                            for line in edited.lines() {
+                                if let Some((key, value)) = line.split_once(':') {
+                                    let value = value.trim().to_string();
+                                    match key.trim() {
+                                        "title" => title = value,
+                                        "description" => description = value,
+                                        "repo_path" => repo_path = value,
+                                        "status" => {
+                                            if let Some(s) = models::TaskStatus::from_str(&value) {
+                                                new_status = s;
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+
+                            // Update DB and in-memory state
+                            let _ = database.update_task(task_id, &title, &description, &repo_path, new_status);
+                            if let Some(t) = app.tasks.iter_mut().find(|t| t.id == task_id) {
+                                t.title = title;
+                                t.description = description;
+                                t.repo_path = repo_path;
+                                t.status = new_status;
+                                t.updated_at = chrono::Utc::now();
+                            }
+                            app.clamp_selection();
+                        }
+                    }
+                }
+
+                let _ = std::fs::remove_file(&tmp);
             }
 
             Command::SaveRepoPath(path) => {

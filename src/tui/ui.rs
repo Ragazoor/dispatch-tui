@@ -240,7 +240,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         match &app.mode {
             InputMode::Normal => {
-                "q:quit  h/l:col  j/k:row  n:new  m/M:move  d:dispatch  Enter:detail  x:delete"
+                "q:quit  h/l:col  j/k:row  n:new  e:edit  m/M:move  d:dispatch  Enter:detail  x:delete"
                     .to_string()
             }
             InputMode::InputTitle => "Creating task: enter title".to_string(),
