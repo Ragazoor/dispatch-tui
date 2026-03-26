@@ -117,6 +117,7 @@ pub struct Task {
     pub status: TaskStatus,
     pub worktree: Option<String>,
     pub tmux_window: Option<String>,
+    pub plan: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

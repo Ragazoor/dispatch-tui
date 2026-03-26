@@ -11,6 +11,7 @@ fn make_task(id: i64, status: TaskStatus) -> Task {
         status,
         worktree: None,
         tmux_window: None,
+        plan: None,
         created_at: now,
         updated_at: now,
     }

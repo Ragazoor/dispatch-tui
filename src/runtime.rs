@@ -117,7 +117,7 @@ impl TuiRuntime {
     fn exec_persist_task(&self, app: &mut App, mut task: models::Task) {
         if task.id == 0 {
             // New task — insert into db and update the in-app id
-            match self.database.create_task(&task.title, &task.description, &task.repo_path) {
+            match self.database.create_task(&task.title, &task.description, &task.repo_path, task.plan.as_deref(), task.status) {
                 Ok(new_id) => {
                     task.id = new_id;
                     // Update the placeholder task in app.tasks (id 0) with the real id.
@@ -256,7 +256,7 @@ impl TuiRuntime {
                     }
 
                     // Update DB and in-memory state
-                    if let Err(e) = self.database.update_task(task_id, &title, &description, &repo_path, new_status) {
+                    if let Err(e) = self.database.update_task(task_id, &title, &description, &repo_path, new_status, task.plan.as_deref()) {
                         app.update(Message::Error(format!("DB error updating task: {e}")));
                     }
                     app.update(Message::TaskEdited {

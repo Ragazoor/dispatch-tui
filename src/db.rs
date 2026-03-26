@@ -11,14 +11,14 @@ use crate::models::{Note, NoteSource, Task, TaskStatus};
 // ---------------------------------------------------------------------------
 
 pub trait TaskStore: Send + Sync {
-    fn create_task(&self, title: &str, description: &str, repo_path: &str) -> Result<i64>;
+    fn create_task(&self, title: &str, description: &str, repo_path: &str, plan: Option<&str>, status: TaskStatus) -> Result<i64>;
     fn get_task(&self, id: i64) -> Result<Option<Task>>;
     fn list_all(&self) -> Result<Vec<Task>>;
     fn list_by_status(&self, status: TaskStatus) -> Result<Vec<Task>>;
     fn update_status(&self, id: i64, status: TaskStatus) -> Result<()>;
     fn update_dispatch(&self, id: i64, worktree: Option<&str>, tmux_window: Option<&str>) -> Result<()>;
     fn delete_task(&self, id: i64) -> Result<()>;
-    fn update_task(&self, id: i64, title: &str, description: &str, repo_path: &str, status: TaskStatus) -> Result<()>;
+    fn update_task(&self, id: i64, title: &str, description: &str, repo_path: &str, status: TaskStatus, plan: Option<&str>) -> Result<()>;
     fn add_note(&self, task_id: i64, content: &str, source: NoteSource) -> Result<i64>;
     fn list_notes(&self, task_id: i64) -> Result<Vec<Note>>;
     fn list_repo_paths(&self) -> Result<Vec<String>>;
@@ -76,6 +76,7 @@ impl Database {
                 status      TEXT NOT NULL DEFAULT 'backlog',
                 worktree    TEXT,
                 tmux_window TEXT,
+                plan        TEXT,
                 created_at  TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
             );
@@ -94,6 +95,9 @@ impl Database {
         )
         .context("Failed to create schema")?;
 
+        // Migration: add plan column if it doesn't exist (idempotent).
+        let _ = conn.execute_batch("ALTER TABLE tasks ADD COLUMN plan TEXT");
+
         Ok(())
     }
 
@@ -106,11 +110,13 @@ impl Database {
         title: &str,
         description: &str,
         repo_path: &str,
+        plan: Option<&str>,
+        status: TaskStatus,
     ) -> Result<i64> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO tasks (title, description, repo_path) VALUES (?1, ?2, ?3)",
-            params![title, description, repo_path],
+            "INSERT INTO tasks (title, description, repo_path, plan, status) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![title, description, repo_path, plan, status.as_str()],
         )
         .context("Failed to insert task")?;
         Ok(conn.last_insert_rowid())
@@ -120,7 +126,7 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
             "SELECT id, title, description, repo_path, status, worktree, tmux_window,
-                    created_at, updated_at
+                    plan, created_at, updated_at
              FROM tasks WHERE id = ?1",
             params![id],
             row_to_task,
@@ -134,7 +140,7 @@ impl Database {
         let mut stmt = conn
             .prepare(
                 "SELECT id, title, description, repo_path, status, worktree, tmux_window,
-                        created_at, updated_at
+                        plan, created_at, updated_at
                  FROM tasks ORDER BY id",
             )
             .context("Failed to prepare list_all")?;
@@ -151,7 +157,7 @@ impl Database {
         let mut stmt = conn
             .prepare(
                 "SELECT id, title, description, repo_path, status, worktree, tmux_window,
-                        created_at, updated_at
+                        plan, created_at, updated_at
                  FROM tasks WHERE status = ?1 ORDER BY id",
             )
             .context("Failed to prepare list_by_status")?;
@@ -273,12 +279,13 @@ impl Database {
         description: &str,
         repo_path: &str,
         status: TaskStatus,
+        plan: Option<&str>,
     ) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         let changed = conn
             .execute(
-                "UPDATE tasks SET title = ?1, description = ?2, repo_path = ?3, status = ?4, updated_at = datetime('now') WHERE id = ?5",
-                params![title, description, repo_path, status.as_str(), id],
+                "UPDATE tasks SET title = ?1, description = ?2, repo_path = ?3, status = ?4, plan = ?5, updated_at = datetime('now') WHERE id = ?6",
+                params![title, description, repo_path, status.as_str(), plan, id],
             )
             .context("Failed to update task")?;
         if changed == 0 {
@@ -289,8 +296,8 @@ impl Database {
 }
 
 impl TaskStore for Database {
-    fn create_task(&self, title: &str, description: &str, repo_path: &str) -> Result<i64> {
-        Database::create_task(self, title, description, repo_path)
+    fn create_task(&self, title: &str, description: &str, repo_path: &str, plan: Option<&str>, status: TaskStatus) -> Result<i64> {
+        Database::create_task(self, title, description, repo_path, plan, status)
     }
     fn get_task(&self, id: i64) -> Result<Option<Task>> {
         Database::get_task(self, id)
@@ -310,8 +317,8 @@ impl TaskStore for Database {
     fn delete_task(&self, id: i64) -> Result<()> {
         Database::delete_task(self, id)
     }
-    fn update_task(&self, id: i64, title: &str, description: &str, repo_path: &str, status: TaskStatus) -> Result<()> {
-        Database::update_task(self, id, title, description, repo_path, status)
+    fn update_task(&self, id: i64, title: &str, description: &str, repo_path: &str, status: TaskStatus, plan: Option<&str>) -> Result<()> {
+        Database::update_task(self, id, title, description, repo_path, status, plan)
     }
     fn add_note(&self, task_id: i64, content: &str, source: NoteSource) -> Result<i64> {
         Database::add_note(self, task_id, content, source)
@@ -346,6 +353,7 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         status,
         worktree: row.get("worktree")?,
         tmux_window: row.get("tmux_window")?,
+        plan: row.get("plan")?,
         created_at: parse_datetime(&created_str),
         updated_at: parse_datetime(&updated_str),
     })
@@ -389,7 +397,7 @@ mod tests {
     #[test]
     fn create_and_get() {
         let db = in_memory_db();
-        let id = db.create_task("My Task", "A description", "/repo/path").unwrap();
+        let id = db.create_task("My Task", "A description", "/repo/path", None, TaskStatus::Backlog).unwrap();
         let task = db.get_task(id).unwrap().expect("task should exist");
         assert_eq!(task.id, id);
         assert_eq!(task.title, "My Task");
@@ -403,9 +411,9 @@ mod tests {
     #[test]
     fn list_all() {
         let db = in_memory_db();
-        db.create_task("Task A", "desc", "/a").unwrap();
-        db.create_task("Task B", "desc", "/b").unwrap();
-        db.create_task("Task C", "desc", "/c").unwrap();
+        db.create_task("Task A", "desc", "/a", None, TaskStatus::Backlog).unwrap();
+        db.create_task("Task B", "desc", "/b", None, TaskStatus::Backlog).unwrap();
+        db.create_task("Task C", "desc", "/c", None, TaskStatus::Backlog).unwrap();
         let tasks = db.list_all().unwrap();
         assert_eq!(tasks.len(), 3);
         assert_eq!(tasks[0].title, "Task A");
@@ -416,9 +424,9 @@ mod tests {
     #[test]
     fn list_by_status() {
         let db = in_memory_db();
-        let id1 = db.create_task("Task A", "desc", "/a").unwrap();
-        let id2 = db.create_task("Task B", "desc", "/b").unwrap();
-        db.create_task("Task C", "desc", "/c").unwrap();
+        let id1 = db.create_task("Task A", "desc", "/a", None, TaskStatus::Backlog).unwrap();
+        let id2 = db.create_task("Task B", "desc", "/b", None, TaskStatus::Backlog).unwrap();
+        db.create_task("Task C", "desc", "/c", None, TaskStatus::Backlog).unwrap();
 
         db.update_status(id1, TaskStatus::Ready).unwrap();
         db.update_status(id2, TaskStatus::Ready).unwrap();
@@ -434,7 +442,7 @@ mod tests {
     #[test]
     fn update_status() {
         let db = in_memory_db();
-        let id = db.create_task("My Task", "desc", "/repo").unwrap();
+        let id = db.create_task("My Task", "desc", "/repo", None, TaskStatus::Backlog).unwrap();
 
         let task = db.get_task(id).unwrap().unwrap();
         assert_eq!(task.status, TaskStatus::Backlog);
@@ -457,7 +465,7 @@ mod tests {
     #[test]
     fn update_dispatch_fields() {
         let db = in_memory_db();
-        let id = db.create_task("My Task", "desc", "/repo").unwrap();
+        let id = db.create_task("My Task", "desc", "/repo", None, TaskStatus::Backlog).unwrap();
 
         db.update_dispatch(id, Some("/worktrees/my-task"), Some("session:my-task"))
             .unwrap();
@@ -483,7 +491,7 @@ mod tests {
     #[test]
     fn add_and_list_notes() {
         let db = in_memory_db();
-        let task_id = db.create_task("My Task", "desc", "/repo").unwrap();
+        let task_id = db.create_task("My Task", "desc", "/repo", None, TaskStatus::Backlog).unwrap();
 
         let n1 = db.add_note(task_id, "User note", NoteSource::User).unwrap();
         let n2 = db.add_note(task_id, "Agent note", NoteSource::Agent).unwrap();
@@ -504,9 +512,25 @@ mod tests {
     }
 
     #[test]
+    fn create_task_with_plan() {
+        let db = in_memory_db();
+        let id = db.create_task("Planned Task", "desc", "/repo", Some("docs/plan.md"), TaskStatus::Backlog).unwrap();
+        let task = db.get_task(id).unwrap().unwrap();
+        assert_eq!(task.plan.as_deref(), Some("docs/plan.md"));
+    }
+
+    #[test]
+    fn create_task_without_plan() {
+        let db = in_memory_db();
+        let id = db.create_task("Simple Task", "desc", "/repo", None, TaskStatus::Backlog).unwrap();
+        let task = db.get_task(id).unwrap().unwrap();
+        assert!(task.plan.is_none());
+    }
+
+    #[test]
     fn delete_task_cascades_notes() {
         let db = in_memory_db();
-        let task_id = db.create_task("My Task", "desc", "/repo").unwrap();
+        let task_id = db.create_task("My Task", "desc", "/repo", None, TaskStatus::Backlog).unwrap();
         db.add_note(task_id, "Note 1", NoteSource::User).unwrap();
         db.add_note(task_id, "Note 2", NoteSource::Agent).unwrap();
 

@@ -61,7 +61,7 @@ pub fn dispatch_agent(task: &Task, mcp_port: u16) -> Result<DispatchResult> {
         .context("failed to create tmux window")?;
 
     // 5. Write the prompt file and launch Claude in interactive mode.
-    let prompt = build_prompt(task.id, &task.title, &task.description, mcp_port);
+    let prompt = build_prompt(task.id, &task.title, &task.description, mcp_port, task.plan.as_deref());
     let prompt_file = format!("{worktree_path}/.claude-prompt");
     fs::write(&prompt_file, &prompt)
         .with_context(|| format!("failed to write {prompt_file}"))?;
@@ -161,13 +161,21 @@ fn build_tmux_window_name(task_id: i64) -> String {
     format!("task-{task_id}")
 }
 
-fn build_prompt(task_id: i64, title: &str, description: &str, mcp_port: u16) -> String {
+fn build_prompt(task_id: i64, title: &str, description: &str, mcp_port: u16, plan: Option<&str>) -> String {
+    let plan_section = match plan {
+        Some(path) => format!(
+            "\n\nPlan: {path}\nRead this file for the full implementation plan. Follow it step by step."
+        ),
+        None => String::new(),
+    };
+
     format!(
         "You are an autonomous coding agent. \
 Your task is:\n\
   ID: {task_id}\n\
   Title: {title}\n\
-  Description: {description}\n\
+  Description: {description}\
+{plan_section}\n\
 \n\
 An MCP server is available at http://localhost:{mcp_port}/mcp — use it to \
 update task status and post notes as you work (tool: task-orchestrator). \
@@ -197,7 +205,7 @@ mod tests {
 
     #[test]
     fn build_prompt_contains_task_info() {
-        let prompt = build_prompt(42, "Fix bug", "A nasty crash", 3142);
+        let prompt = build_prompt(42, "Fix bug", "A nasty crash", 3142, None);
         assert!(prompt.contains("42"));
         assert!(prompt.contains("Fix bug"));
         assert!(prompt.contains("A nasty crash"));
@@ -207,7 +215,7 @@ mod tests {
 
     #[test]
     fn build_prompt_contains_mcp_fallback() {
-        let prompt = build_prompt(7, "Title", "Desc", 3142);
+        let prompt = build_prompt(7, "Title", "Desc", 3142, None);
         assert!(prompt.contains("task-orchestrator update 7 review"));
     }
 
@@ -232,5 +240,17 @@ mod tests {
     fn resume_window_name_matches_dispatch() {
         // The resume window name should use the same naming convention as dispatch
         assert_eq!(build_tmux_window_name(42), "task-42");
+    }
+
+    #[test]
+    fn build_prompt_includes_plan_path() {
+        let prompt = build_prompt(1, "Task", "Desc", 3142, Some("docs/plans/my-plan.md"));
+        assert!(prompt.contains("Plan: docs/plans/my-plan.md"));
+    }
+
+    #[test]
+    fn build_prompt_without_plan_omits_plan_section() {
+        let prompt = build_prompt(1, "Task", "Desc", 3142, None);
+        assert!(!prompt.contains("Plan:"));
     }
 }
