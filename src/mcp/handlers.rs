@@ -289,19 +289,12 @@ fn handle_create_task(state: &McpState, id: Option<Value>, args: Value) -> JsonR
         &parsed.description,
         &parsed.repo_path,
         parsed.plan.as_deref(),
+        status,
     ) {
-        Ok(task_id) => {
-            // If plan was provided, also update status to ready
-            if status == TaskStatus::Ready {
-                if let Err(e) = state.db.update_status(task_id, status) {
-                    return JsonRpcResponse::err(id, -32603, format!("Database error: {e}"));
-                }
-            }
-            JsonRpcResponse::ok(
-                id,
-                json!({"content": [{"type": "text", "text": format!("Task {task_id} created")}]}),
-            )
-        }
+        Ok(task_id) => JsonRpcResponse::ok(
+            id,
+            json!({"content": [{"type": "text", "text": format!("Task {task_id} created")}]}),
+        ),
         Err(e) => JsonRpcResponse::err(id, -32603, format!("Database error: {e}")),
     }
 }
@@ -378,7 +371,7 @@ mod tests {
     #[tokio::test]
     async fn update_task_valid() {
         let state = test_state();
-        let task_id = state.db.create_task("Test", "desc", "/repo", None).unwrap();
+        let task_id = state.db.create_task("Test", "desc", "/repo", None, crate::models::TaskStatus::Backlog).unwrap();
 
         let resp = call(
             &state,
@@ -398,7 +391,7 @@ mod tests {
     #[tokio::test]
     async fn update_task_invalid_status() {
         let state = test_state();
-        let task_id = state.db.create_task("Test", "desc", "/repo", None).unwrap();
+        let task_id = state.db.create_task("Test", "desc", "/repo", None, crate::models::TaskStatus::Backlog).unwrap();
 
         let resp = call(
             &state,
@@ -426,7 +419,7 @@ mod tests {
     #[tokio::test]
     async fn add_note_valid() {
         let state = test_state();
-        let task_id = state.db.create_task("Test", "desc", "/repo", None).unwrap();
+        let task_id = state.db.create_task("Test", "desc", "/repo", None, crate::models::TaskStatus::Backlog).unwrap();
 
         let resp = call(
             &state,
@@ -447,7 +440,7 @@ mod tests {
     #[tokio::test]
     async fn get_task_found() {
         let state = test_state();
-        let task_id = state.db.create_task("My Task", "desc", "/repo", None).unwrap();
+        let task_id = state.db.create_task("My Task", "desc", "/repo", None, crate::models::TaskStatus::Backlog).unwrap();
 
         let resp = call(
             &state,
