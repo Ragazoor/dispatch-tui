@@ -191,11 +191,10 @@ Your task is:\n\
   Description: {description}\
 {plan_section}\n\
 \n\
+Task status transitions (running/review) are managed automatically via hooks. \
+Do not call update_task for status changes. \
 An MCP server is available at http://localhost:{mcp_port}/mcp — use it to \
-update task status and post notes as you work (tool: task-orchestrator). \
-When your work is complete, update the task status to 'review' via the MCP \
-server. If MCP is unavailable, run: \
-task-orchestrator update {task_id} review"
+post notes as you work (tool: task-orchestrator, tool name: add_note)."
     )
 }
 
@@ -224,13 +223,14 @@ mod tests {
         assert!(prompt.contains("Fix bug"));
         assert!(prompt.contains("A nasty crash"));
         assert!(prompt.contains("3142"));
-        assert!(prompt.contains("review"));
+        assert!(prompt.contains("automatically via hooks"));
     }
 
     #[test]
-    fn build_prompt_contains_mcp_fallback() {
+    fn build_prompt_mentions_automatic_hooks() {
         let prompt = build_prompt(7, "Title", "Desc", 3142, None);
-        assert!(prompt.contains("task-orchestrator update 7 review"));
+        assert!(prompt.contains("automatically via hooks"));
+        assert!(!prompt.contains("update the task status to 'review'"));
     }
 
     #[test]
