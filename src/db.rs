@@ -33,6 +33,14 @@ pub trait TaskStore: Send + Sync {
         title: Option<&str>,
         description: Option<&str>,
     ) -> Result<()>;
+    fn create_task_returning(
+        &self,
+        title: &str,
+        description: &str,
+        repo_path: &str,
+        plan: Option<&str>,
+        status: TaskStatus,
+    ) -> Result<Task>;
 }
 
 // ---------------------------------------------------------------------------
@@ -342,6 +350,19 @@ impl TaskStore for Database {
         )
         .optional()
         .context("Failed to find task by plan")
+    }
+
+    fn create_task_returning(
+        &self,
+        title: &str,
+        description: &str,
+        repo_path: &str,
+        plan: Option<&str>,
+        status: TaskStatus,
+    ) -> Result<Task> {
+        let id = self.create_task(title, description, repo_path, plan, status)?;
+        self.get_task(id)?
+            .ok_or_else(|| anyhow::anyhow!("Task {id} vanished after insert"))
     }
 
     fn patch_task(
@@ -748,6 +769,27 @@ mod tests {
     fn list_repo_paths_empty_by_default() {
         let db = in_memory_db();
         assert!(db.list_repo_paths().unwrap().is_empty());
+    }
+
+    #[test]
+    fn create_task_returning_returns_full_task() {
+        let db = in_memory_db();
+        let task = db.create_task_returning("Title", "Desc", "/repo", None, TaskStatus::Backlog).unwrap();
+        assert_eq!(task.title, "Title");
+        assert_eq!(task.description, "Desc");
+        assert_eq!(task.repo_path, "/repo");
+        assert_eq!(task.status, TaskStatus::Backlog);
+        assert!(task.worktree.is_none());
+        assert!(task.tmux_window.is_none());
+        assert!(task.plan.is_none());
+    }
+
+    #[test]
+    fn create_task_returning_with_plan() {
+        let db = in_memory_db();
+        let task = db.create_task_returning("T", "D", "/r", Some("plan.md"), TaskStatus::Ready).unwrap();
+        assert_eq!(task.plan.as_deref(), Some("plan.md"));
+        assert_eq!(task.status, TaskStatus::Ready);
     }
 
     #[test]
