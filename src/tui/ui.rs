@@ -116,7 +116,11 @@ fn render_columns(frame: &mut Frame, app: &App, area: Rect, now: DateTime<Utc>) 
 
                 // Build the title portion
                 let title_text = if status == TaskStatus::Running {
-                    if let Some(output) = app.tmux_outputs.get(&task.id) {
+                    if app.crashed_tasks().contains(&task.id) {
+                        format!("{} [crashed]", truncate(&task.title, 28))
+                    } else if app.stale_tasks().contains(&task.id) {
+                        format!("{} [stale]", truncate(&task.title, 30))
+                    } else if let Some(output) = app.tmux_outputs.get(&task.id) {
                         let last_line = output.lines().last().unwrap_or("").trim();
                         if !last_line.is_empty() {
                             format!(
@@ -150,8 +154,22 @@ fn render_columns(frame: &mut Frame, app: &App, area: Rect, now: DateTime<Utc>) 
                         Span::styled(title_text, Style::default()),
                         Span::styled(age_suffix, age_style),
                     ]))
+                } else if status == TaskStatus::Running
+                    && app.crashed_tasks().contains(&task.id)
+                {
+                    ListItem::new(Line::from(Span::styled(
+                        title_text,
+                        Style::default().fg(Color::Red),
+                    )))
+                } else if status == TaskStatus::Running
+                    && app.stale_tasks().contains(&task.id)
+                {
+                    ListItem::new(Line::from(Span::styled(
+                        title_text,
+                        Style::default().fg(Color::Yellow),
+                    )))
                 } else {
-                    // Running or no age
+                    // Normal running or no age
                     ListItem::new(Line::from(Span::styled(title_text, Style::default())))
                 }
             })
@@ -181,11 +199,22 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect, now: DateTime<Utc>) {
     }
 
     let lines: Vec<Line> = if let Some(task) = app.selected_task() {
+        let status_suffix = if app.crashed_tasks().contains(&task.id) {
+            " (crashed)".to_string()
+        } else if app.stale_tasks().contains(&task.id) {
+            let mins = app.last_output_change.get(&task.id)
+                .map(|t| t.elapsed().as_secs() / 60)
+                .unwrap_or(0);
+            format!(" (stale - inactive {}m)", mins)
+        } else {
+            String::new()
+        };
         let mut l = vec![
             Line::from(format!(
-                "ID: {}  Status: {}  Repo: {}",
+                "ID: {}  Status: {}{}  Repo: {}",
                 task.id,
                 task.status.as_str(),
+                status_suffix,
                 task.repo_path
             )),
             Line::from(format!("Title: {}", task.title)),
@@ -298,18 +327,43 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
             )));
             lines
         }
+        InputMode::ConfirmRetry(id) => {
+            let label = if app.crashed_tasks().contains(id) {
+                "crashed"
+            } else {
+                "stale"
+            };
+            let warning = Style::default().fg(Color::Red).add_modifier(Modifier::BOLD);
+            let hint = Style::default().fg(Color::DarkGray);
+            vec![
+                Line::from(Span::styled(
+                    format!("  Agent is {label}. What do you want to do?"),
+                    warning,
+                )),
+                Line::from(""),
+                Line::from(Span::styled("  [r] Resume (--continue in existing worktree)", hint)),
+                Line::from(Span::styled("  [f] Fresh start (clean worktree + new dispatch)", hint)),
+                Line::from(Span::styled("  [Esc] Cancel", hint)),
+            ]
+        }
         _ => return false,
     };
 
     let block_title = match &app.mode {
         InputMode::QuickDispatch => " Quick Dispatch ",
+        InputMode::ConfirmRetry(_) => " Retry Agent ",
         _ => " New Task ",
+    };
+
+    let border_color = match &app.mode {
+        InputMode::ConfirmRetry(_) => Color::Red,
+        _ => Color::Yellow,
     };
 
     let block = Block::default()
         .title(block_title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow));
+        .border_style(Style::default().fg(border_color));
 
     let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(paragraph, area);
@@ -371,7 +425,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             InputMode::InputRepoPath => "Creating task: enter repo path".to_string(),
             InputMode::ConfirmDelete => "Delete? (y/n)".to_string(),
             InputMode::QuickDispatch => "Quick dispatch: select repo path".to_string(),
-            InputMode::ConfirmRetry(_) => "Retry agent? (r)esume  (f)resh  (k)ill  Esc to cancel".to_string(),
+            InputMode::ConfirmRetry(_) => "[r] Resume  [f] Fresh start  [Esc] Cancel".to_string(),
         }
     };
 
