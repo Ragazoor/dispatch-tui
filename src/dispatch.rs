@@ -231,8 +231,8 @@ the user wants, call `update_task` with a descriptive `title` (and optionally \
 Task status transitions (running/review) are managed automatically via hooks. \
 Do not call update_task for status changes.\n\
 An MCP server is available at http://localhost:{mcp_port}/mcp — use it to \
-post notes as you work (tool: task-orchestrator, tool name: add_note) and \
-rename this task (tool: task-orchestrator, tool name: update_task — set the title field)."
+query and update tasks (tool: task-orchestrator). Use update_task to rename \
+this task with a descriptive title, and get_task to check current state."
     )
 }
 
@@ -359,7 +359,8 @@ mod tests {
     fn build_quick_dispatch_prompt_mentions_mcp() {
         let prompt = build_quick_dispatch_prompt(1, "Quick task", "", 3142);
         assert!(prompt.contains("3142"));
-        assert!(prompt.contains("add_note"));
+        assert!(prompt.contains("update_task"));
+        assert!(!prompt.contains("add_note"));
     }
 
     #[test]
