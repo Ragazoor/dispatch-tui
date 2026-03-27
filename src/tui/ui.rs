@@ -7,7 +7,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
 
-use crate::models::{TaskStatus, Staleness, format_age};
+use crate::models::{TaskStatus, Staleness, format_age, format_detail_age};
 use super::{App, InputMode};
 
 /// Column color per status
@@ -27,27 +27,6 @@ fn staleness_color(staleness: Staleness) -> Color {
         Staleness::Fresh => Color::Green,
         Staleness::Aging => Color::Yellow,
         Staleness::Stale => Color::Red,
-    }
-}
-
-/// Format age for the detail panel — slightly more verbose than card labels.
-fn format_detail_age(updated_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
-    let age = now.signed_duration_since(updated_at);
-    let total_hours = age.num_hours().max(0);
-
-    if total_hours < 1 {
-        "less than 1 hour".to_string()
-    } else if total_hours == 1 {
-        "1 hour".to_string()
-    } else if total_hours < 24 {
-        format!("{total_hours} hours")
-    } else {
-        let days = total_hours / 24;
-        if days == 1 {
-            "1 day".to_string()
-        } else {
-            format!("{days} days")
-        }
     }
 }
 

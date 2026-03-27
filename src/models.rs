@@ -193,7 +193,7 @@ impl Staleness {
     /// Determine staleness tier from the age of `updated_at` relative to `now`.
     pub fn from_age(updated_at: DateTime<Utc>, now: DateTime<Utc>) -> Self {
         let age = now.signed_duration_since(updated_at);
-        let hours = age.num_hours();
+        let hours = age.num_hours().max(0);
         if hours < 3 * 24 {
             Staleness::Fresh
         } else if hours < 7 * 24 {
@@ -224,6 +224,32 @@ pub fn format_age(updated_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
             format!("{days}d")
         } else {
             format!("{}w", days / 7)
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// format_detail_age
+// ---------------------------------------------------------------------------
+
+/// Format age for the detail panel — slightly more verbose than card labels.
+/// Returns strings like "less than 1 hour", "1 hour", "5 hours", "1 day", "3 days".
+pub fn format_detail_age(updated_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
+    let age = now.signed_duration_since(updated_at);
+    let total_hours = age.num_hours().max(0);
+
+    if total_hours < 1 {
+        "less than 1 hour".to_string()
+    } else if total_hours == 1 {
+        "1 hour".to_string()
+    } else if total_hours < 24 {
+        format!("{total_hours} hours")
+    } else {
+        let days = total_hours / 24;
+        if days == 1 {
+            "1 day".to_string()
+        } else {
+            format!("{days} days")
         }
     }
 }
@@ -469,6 +495,50 @@ mod tests {
         let now = Utc::now();
         let updated = now + chrono::Duration::hours(5);
         assert_eq!(format_age(updated, now), "<1h");
+    }
+
+    // --- format_detail_age ---
+
+    #[test]
+    fn format_detail_age_minutes() {
+        let now = Utc::now();
+        let updated = now - chrono::Duration::minutes(30);
+        assert_eq!(format_detail_age(updated, now), "less than 1 hour");
+    }
+
+    #[test]
+    fn format_detail_age_one_hour() {
+        let now = Utc::now();
+        let updated = now - chrono::Duration::hours(1);
+        assert_eq!(format_detail_age(updated, now), "1 hour");
+    }
+
+    #[test]
+    fn format_detail_age_hours() {
+        let now = Utc::now();
+        let updated = now - chrono::Duration::hours(5);
+        assert_eq!(format_detail_age(updated, now), "5 hours");
+    }
+
+    #[test]
+    fn format_detail_age_one_day() {
+        let now = Utc::now();
+        let updated = now - chrono::Duration::hours(24);
+        assert_eq!(format_detail_age(updated, now), "1 day");
+    }
+
+    #[test]
+    fn format_detail_age_days() {
+        let now = Utc::now();
+        let updated = now - chrono::Duration::days(10);
+        assert_eq!(format_detail_age(updated, now), "10 days");
+    }
+
+    #[test]
+    fn format_detail_age_future() {
+        let now = Utc::now();
+        let updated = now + chrono::Duration::hours(3);
+        assert_eq!(format_detail_age(updated, now), "less than 1 hour");
     }
 
 }
