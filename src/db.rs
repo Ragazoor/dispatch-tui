@@ -284,27 +284,22 @@ impl TaskStore for Database {
 
     fn update_title_description(&self, id: TaskId, title: Option<&str>, description: Option<&str>) -> Result<()> {
         let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
-        let mut parts = Vec::new();
-        let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-
-        if let Some(t) = title {
-            parts.push("title = ?");
-            params_vec.push(Box::new(t.to_string()));
+        let rows = match (title, description) {
+            (Some(t), Some(d)) => conn.execute(
+                "UPDATE tasks SET title = ?1, description = ?2, updated_at = datetime('now') WHERE id = ?3",
+                params![t, d, id.0],
+            ),
+            (Some(t), None) => conn.execute(
+                "UPDATE tasks SET title = ?1, updated_at = datetime('now') WHERE id = ?2",
+                params![t, id.0],
+            ),
+            (None, Some(d)) => conn.execute(
+                "UPDATE tasks SET description = ?1, updated_at = datetime('now') WHERE id = ?2",
+                params![d, id.0],
+            ),
+            (None, None) => return Ok(()),
         }
-        if let Some(d) = description {
-            parts.push("description = ?");
-            params_vec.push(Box::new(d.to_string()));
-        }
-        if parts.is_empty() {
-            return Ok(());
-        }
-        parts.push("updated_at = datetime('now')");
-        params_vec.push(Box::new(id.0));
-
-        let sql = format!("UPDATE tasks SET {} WHERE id = ?", parts.join(", "));
-        let params_refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
-        let rows = conn.execute(&sql, params_refs.as_slice())
-            .context("Failed to update title/description")?;
+        .context("Failed to update title/description")?;
         if rows == 0 {
             anyhow::bail!("Task {id} not found");
         }
