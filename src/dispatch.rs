@@ -73,7 +73,7 @@ fn dispatch_with_prompt(
     })
 }
 
-pub fn dispatch_agent(task: &Task, mcp_port: u16, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
+pub fn dispatch_agent(task: &Task, _mcp_port: u16, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
     let prompt = build_prompt(task.id, &task.title, &task.description, task.plan.as_deref());
     dispatch_with_prompt(task, &prompt, runner)
 }

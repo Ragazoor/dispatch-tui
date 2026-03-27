@@ -244,15 +244,20 @@ impl TuiRuntime {
         }
     }
 
-    fn exec_dispatch(&self, task: models::Task) {
+    fn spawn_dispatch<F>(&self, task: models::Task, dispatch_fn: F, label: &'static str)
+    where
+        F: FnOnce(&models::Task, u16, &dyn ProcessRunner) -> Result<models::DispatchResult>
+            + Send
+            + 'static,
+    {
         let tx = self.msg_tx.clone();
         let port = self.port;
         let runner = self.runner.clone();
 
         tokio::task::spawn_blocking(move || {
             let id = task.id;
-            tracing::info!(task_id = id, "dispatching task");
-            match dispatch::dispatch_agent(&task, port, &*runner) {
+            tracing::info!(task_id = id, label, "dispatching");
+            match dispatch_fn(&task, port, &*runner) {
                 Ok(result) => {
                     // receiver dropped = app shutting down; nothing to log
                     let _ = tx.send(Message::Dispatched {
@@ -263,34 +268,18 @@ impl TuiRuntime {
                     });
                 }
                 Err(e) => {
-                    let _ = tx.send(Message::Error(format!("Dispatch failed: {e:#}")));
+                    let _ = tx.send(Message::Error(format!("{label} failed: {e:#}")));
                 }
             }
         });
     }
 
-    fn exec_brainstorm(&self, task: models::Task) {
-        let tx = self.msg_tx.clone();
-        let port = self.port;
-        let runner = self.runner.clone();
+    fn exec_dispatch(&self, task: models::Task) {
+        self.spawn_dispatch(task, dispatch::dispatch_agent, "Dispatch");
+    }
 
-        tokio::task::spawn_blocking(move || {
-            let id = task.id;
-            tracing::info!(task_id = id, "brainstorming task");
-            match dispatch::brainstorm_agent(&task, port, &*runner) {
-                Ok(result) => {
-                    let _ = tx.send(Message::Dispatched {
-                        id,
-                        worktree: result.worktree_path,
-                        tmux_window: result.tmux_window,
-                        switch_focus: false,
-                    });
-                }
-                Err(e) => {
-                    let _ = tx.send(Message::Error(format!("Brainstorm dispatch failed: {e:#}")));
-                }
-            }
-        });
+    fn exec_brainstorm(&self, task: models::Task) {
+        self.spawn_dispatch(task, dispatch::brainstorm_agent, "Brainstorm");
     }
 
     fn exec_capture_tmux(&self, id: i64, window: String) {
