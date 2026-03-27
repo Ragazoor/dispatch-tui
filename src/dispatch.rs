@@ -50,9 +50,7 @@ pub fn dispatch_agent(task: &Task, mcp_port: u16) -> Result<DispatchResult> {
     }
 
     // 3. Write .mcp.json into the worktree so Claude picks up the MCP server.
-    let mcp_config = format!(
-        r#"{{"mcpServers":{{"task-orchestrator":{{"url":"http://localhost:{mcp_port}/mcp"}}}}}}"#
-    );
+    let mcp_config = build_mcp_config(mcp_port);
     fs::write(format!("{worktree_path}/.mcp.json"), &mcp_config)
         .with_context(|| format!("failed to write {worktree_path}/.mcp.json"))?;
 
@@ -157,6 +155,12 @@ pub fn resume_agent(
 // Helpers
 // ---------------------------------------------------------------------------
 
+fn build_mcp_config(mcp_port: u16) -> String {
+    format!(
+        r#"{{"mcpServers":{{"task-orchestrator":{{"type":"http","url":"http://localhost:{mcp_port}/mcp"}}}}}}"#
+    )
+}
+
 fn build_tmux_window_name(task_id: i64) -> String {
     format!("task-{task_id}")
 }
@@ -252,6 +256,15 @@ mod tests {
     fn build_prompt_without_plan_omits_plan_section() {
         let prompt = build_prompt(1, "Task", "Desc", 3142, None);
         assert!(!prompt.contains("Plan:"));
+    }
+
+    #[test]
+    fn mcp_config_matches_schema() {
+        let config: serde_json::Value =
+            serde_json::from_str(&build_mcp_config(3142)).expect("valid JSON");
+        let server = &config["mcpServers"]["task-orchestrator"];
+        assert_eq!(server["type"], "http");
+        assert_eq!(server["url"], "http://localhost:3142/mcp");
     }
 
 }
