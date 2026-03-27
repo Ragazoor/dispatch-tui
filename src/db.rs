@@ -17,6 +17,7 @@ pub trait TaskStore: Send + Sync {
     fn list_by_status(&self, status: TaskStatus) -> Result<Vec<Task>>;
     fn update_status(&self, id: i64, status: TaskStatus) -> Result<()>;
     fn update_dispatch(&self, id: i64, worktree: Option<&str>, tmux_window: Option<&str>) -> Result<()>;
+    fn persist_task(&self, id: i64, status: TaskStatus, worktree: Option<&str>, tmux_window: Option<&str>) -> Result<()>;
     fn delete_task(&self, id: i64) -> Result<()>;
     fn update_task(&self, id: i64, title: &str, description: &str, repo_path: &str, status: TaskStatus, plan: Option<&str>) -> Result<()>;
     fn add_note(&self, task_id: i64, content: &str, source: NoteSource) -> Result<i64>;
@@ -197,6 +198,20 @@ impl TaskStore for Database {
                 params![worktree, tmux_window, id],
             )
             .context("Failed to update dispatch fields")?;
+        if rows == 0 {
+            anyhow::bail!("Task {} not found", id);
+        }
+        Ok(())
+    }
+
+    fn persist_task(&self, id: i64, status: TaskStatus, worktree: Option<&str>, tmux_window: Option<&str>) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn
+            .execute(
+                "UPDATE tasks SET status = ?1, worktree = ?2, tmux_window = ?3, updated_at = datetime('now') WHERE id = ?4",
+                params![status.as_str(), worktree, tmux_window, id],
+            )
+            .context("Failed to persist task")?;
         if rows == 0 {
             anyhow::bail!("Task {} not found", id);
         }
@@ -452,6 +467,19 @@ mod tests {
         let db = in_memory_db();
         let result = db.get_task(9999).unwrap();
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn persist_task_updates_status_and_dispatch_atomically() {
+        let db = in_memory_db();
+        let id = db.create_task("Task", "desc", "/repo", None, TaskStatus::Backlog).unwrap();
+
+        db.persist_task(id, TaskStatus::Running, Some("/wt/task"), Some("task-1")).unwrap();
+
+        let task = db.get_task(id).unwrap().unwrap();
+        assert_eq!(task.status, TaskStatus::Running);
+        assert_eq!(task.worktree.as_deref(), Some("/wt/task"));
+        assert_eq!(task.tmux_window.as_deref(), Some("task-1"));
     }
 
     #[test]

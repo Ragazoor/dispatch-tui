@@ -130,16 +130,14 @@ impl TuiRuntime {
                 }
             }
         } else {
-            // Existing task — update its status and dispatch fields
-            if let Err(e) = self.database.update_status(task.id, task.status) {
-                app.update(Message::Error(format!("DB error updating status: {e}")));
-            }
-            if let Err(e) = self.database.update_dispatch(
+            // Existing task — update status and dispatch fields atomically
+            if let Err(e) = self.database.persist_task(
                 task.id,
+                task.status,
                 task.worktree.as_deref(),
                 task.tmux_window.as_deref(),
             ) {
-                app.update(Message::Error(format!("DB error updating dispatch: {e}")));
+                app.update(Message::Error(format!("DB error persisting task: {e}")));
             }
         }
     }
