@@ -1497,3 +1497,23 @@ fn archive_panel_confirm_delete_removes_task() {
     assert!(app.tasks.is_empty());
     assert!(cmds.iter().any(|c| matches!(c, Command::DeleteTask(1))));
 }
+
+#[test]
+fn archived_tasks_not_in_kanban_columns() {
+    let app = App::new(vec![
+        make_task(1, TaskStatus::Backlog),
+        make_task(2, TaskStatus::Archived),
+    ], Duration::from_secs(300));
+
+    for &status in TaskStatus::ALL {
+        let tasks = app.tasks_by_status(status);
+        for t in &tasks {
+            assert_ne!(t.status, TaskStatus::Archived,
+                "archived task should not appear in {} column", status.as_str());
+        }
+    }
+
+    let archived = app.archived_tasks();
+    assert_eq!(archived.len(), 1);
+    assert_eq!(archived[0].id, 2);
+}
