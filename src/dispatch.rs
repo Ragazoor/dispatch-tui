@@ -469,4 +469,99 @@ mod tests {
         let calls = mock.recorded_calls();
         assert_eq!(calls.len(), 1, "only the git call should have been made");
     }
+
+    #[test]
+    fn brainstorm_creates_worktree_then_opens_tmux() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+        let worktree_dir = dir.path().join(".worktrees").join("42-fix-bug");
+        std::fs::create_dir_all(&worktree_dir).unwrap();
+
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // git worktree add
+            MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux send-keys -l
+            MockProcessRunner::ok(), // tmux send-keys Enter
+        ]);
+
+        let task = make_task(&repo_path);
+        brainstorm_agent(&task, 3142, &mock).unwrap();
+
+        let calls = mock.recorded_calls();
+        assert_eq!(calls[0].0, "git", "first call should be git");
+        assert!(calls[0].1.contains(&"worktree".to_string()));
+        assert_eq!(calls[1].0, "tmux");
+        assert_eq!(calls[1].1[0], "new-window");
+    }
+
+    #[test]
+    fn brainstorm_sends_brainstorm_prompt() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+        let worktree_dir = dir.path().join(".worktrees").join("42-fix-bug");
+        std::fs::create_dir_all(&worktree_dir).unwrap();
+
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // git worktree add
+            MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux send-keys -l
+            MockProcessRunner::ok(), // tmux send-keys Enter
+        ]);
+
+        let task = make_task(&repo_path);
+        brainstorm_agent(&task, 3142, &mock).unwrap();
+
+        // Verify the prompt file was written with brainstorm content
+        let prompt_file = worktree_dir.join(".claude-prompt");
+        let prompt = std::fs::read_to_string(prompt_file).unwrap();
+        assert!(prompt.contains("brainstorm"), "prompt should mention brainstorming");
+        assert!(prompt.contains("implementation plan"), "prompt should mention planning");
+    }
+
+    #[test]
+    fn quick_dispatch_creates_worktree_then_opens_tmux() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+        let worktree_dir = dir.path().join(".worktrees").join("42-fix-bug");
+        std::fs::create_dir_all(&worktree_dir).unwrap();
+
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // git worktree add
+            MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux send-keys -l
+            MockProcessRunner::ok(), // tmux send-keys Enter
+        ]);
+
+        let task = make_task(&repo_path);
+        quick_dispatch_agent(&task, 3142, &mock).unwrap();
+
+        let calls = mock.recorded_calls();
+        assert_eq!(calls[0].0, "git");
+        assert!(calls[0].1.contains(&"worktree".to_string()));
+        assert_eq!(calls[1].0, "tmux");
+        assert_eq!(calls[1].1[0], "new-window");
+    }
+
+    #[test]
+    fn quick_dispatch_sends_rename_prompt() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+        let worktree_dir = dir.path().join(".worktrees").join("42-fix-bug");
+        std::fs::create_dir_all(&worktree_dir).unwrap();
+
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // git worktree add
+            MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux send-keys -l
+            MockProcessRunner::ok(), // tmux send-keys Enter
+        ]);
+
+        let task = make_task(&repo_path);
+        quick_dispatch_agent(&task, 3142, &mock).unwrap();
+
+        let prompt_file = worktree_dir.join(".claude-prompt");
+        let prompt = std::fs::read_to_string(prompt_file).unwrap();
+        assert!(prompt.contains("placeholder"), "prompt should mention placeholder title");
+        assert!(prompt.contains("update_task"), "prompt should mention update_task for rename");
+    }
 }
