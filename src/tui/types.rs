@@ -1,4 +1,4 @@
-use crate::models::{Note, Task, TaskStatus};
+use crate::models::{Task, TaskStatus};
 
 // ---------------------------------------------------------------------------
 // MoveDirection
@@ -30,7 +30,6 @@ pub enum Message {
     TmuxOutput { id: i64, output: String },
     WindowGone(i64),
     RefreshTasks(Vec<Task>),
-    NotesLoaded { task_id: i64, notes: Vec<Note> },
     ResumeTask(i64),
     Resumed { id: i64, tmux_window: String },
     Error(String),
@@ -55,7 +54,6 @@ pub enum Command {
     JumpToTmux { window: String },
     EditTaskInEditor(Task),
     SaveRepoPath(String),
-    LoadNotes(i64),
     RefreshFromDb,
 }
 

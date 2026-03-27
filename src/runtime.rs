@@ -327,21 +327,6 @@ impl TuiRuntime {
         app.update(Message::RepoPathsUpdated(paths));
     }
 
-    fn exec_load_notes(&self, task_id: i64) {
-        let db = self.database.clone();
-        let tx = self.msg_tx.clone();
-        tokio::task::spawn_blocking(move || {
-            match db.list_notes(task_id) {
-                Ok(notes) => {
-                    let _ = tx.send(Message::NotesLoaded { task_id, notes });
-                }
-                Err(e) => {
-                    let _ = tx.send(Message::Error(format!("Failed to load notes: {e}")));
-                }
-            }
-        });
-    }
-
     fn exec_refresh_from_db(&self, app: &mut App) {
         // Re-read all tasks from SQLite to pick up MCP/CLI updates
         match self.database.list_all() {
@@ -457,7 +442,6 @@ async fn execute_commands(
             Command::CaptureTmux { id, window } => rt.exec_capture_tmux(id, window),
             Command::EditTaskInEditor(task) => rt.exec_edit_in_editor(app, task, terminal)?,
             Command::SaveRepoPath(path) => rt.exec_save_repo_path(app, path),
-            Command::LoadNotes(task_id) => rt.exec_load_notes(task_id),
             Command::RefreshFromDb => rt.exec_refresh_from_db(app),
             Command::Cleanup { repo_path, worktree, tmux_window } =>
                 rt.exec_cleanup(repo_path, worktree, tmux_window),

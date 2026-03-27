@@ -293,26 +293,6 @@ fn repo_path_nonempty_used_as_is() {
 }
 
 #[test]
-fn tick_emits_load_notes_when_detail_visible() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
-    app.detail_visible = true;
-    app.selected_column = 0;
-    app.selected_row[0] = 0;
-
-    let cmds = app.update(Message::Tick);
-    assert!(cmds.iter().any(|c| matches!(c, Command::LoadNotes(1))));
-}
-
-#[test]
-fn tick_skips_load_notes_when_detail_hidden() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
-    app.detail_visible = false;
-
-    let cmds = app.update(Message::Tick);
-    assert!(!cmds.iter().any(|c| matches!(c, Command::LoadNotes(_))));
-}
-
-#[test]
 fn task_edited_updates_fields() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     app.update(Message::TaskEdited {
@@ -356,25 +336,6 @@ fn window_gone_clears_tmux_window_and_persists() {
     // Should emit PersistTask to write cleared tmux_window to DB
     assert_eq!(cmds.len(), 1);
     assert!(matches!(&cmds[0], Command::PersistTask(t) if t.tmux_window.is_none()));
-}
-
-#[test]
-fn notes_loaded_stores_in_cache() {
-    use crate::models::{Note, NoteSource};
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
-
-    let notes = vec![Note {
-        id: 1,
-        task_id: 1,
-        content: "Agent progress".to_string(),
-        source: NoteSource::Agent,
-        created_at: chrono::Utc::now(),
-    }];
-
-    app.update(Message::NotesLoaded { task_id: 1, notes });
-    let cached = app.notes.get(&1).unwrap();
-    assert_eq!(cached.len(), 1);
-    assert_eq!(cached[0].content, "Agent progress");
 }
 
 #[test]

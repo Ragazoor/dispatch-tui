@@ -6,7 +6,7 @@ pub use types::*;
 
 use std::collections::HashMap;
 
-use crate::models::{Note, Task, TaskStatus};
+use crate::models::{Task, TaskStatus};
 
 // ---------------------------------------------------------------------------
 // App
@@ -21,7 +21,6 @@ pub struct App {
     pub(in crate::tui) task_draft: Option<TaskDraft>,
     pub(in crate::tui) detail_visible: bool,
     pub(in crate::tui) tmux_outputs: HashMap<i64, String>,
-    pub(in crate::tui) notes: HashMap<i64, Vec<Note>>,
     pub(in crate::tui) status_message: Option<String>,
     pub(in crate::tui) error_popup: Option<String>,
     pub(in crate::tui) repo_paths: Vec<String>,
@@ -39,7 +38,6 @@ impl App {
             task_draft: None,
             detail_visible: false,
             tmux_outputs: HashMap::new(),
-            notes: HashMap::new(),
             status_message: None,
             error_popup: None,
             repo_paths: Vec::new(),
@@ -56,7 +54,6 @@ impl App {
     pub fn input_buffer(&self) -> &str { &self.input_buffer }
     pub fn detail_visible(&self) -> bool { self.detail_visible }
     pub fn tmux_outputs(&self) -> &HashMap<i64, String> { &self.tmux_outputs }
-    pub fn notes(&self) -> &HashMap<i64, Vec<Note>> { &self.notes }
     pub fn status_message(&self) -> Option<&str> { self.status_message.as_deref() }
     pub fn error_popup(&self) -> Option<&str> { self.error_popup.as_deref() }
     pub fn repo_paths(&self) -> &[String] { &self.repo_paths }
@@ -114,7 +111,6 @@ impl App {
             Message::ToggleDetail => self.handle_toggle_detail(),
             Message::TmuxOutput { id, output } => self.handle_tmux_output(id, output),
             Message::WindowGone(id) => self.handle_window_gone(id),
-            Message::NotesLoaded { task_id, notes } => self.handle_notes_loaded(task_id, notes),
             Message::RefreshTasks(tasks) => self.handle_refresh_tasks(tasks),
             Message::ResumeTask(id) => self.handle_resume_task(id),
             Message::Resumed { id, tmux_window } => self.handle_resumed(id, tmux_window),
@@ -264,11 +260,6 @@ impl App {
         }
     }
 
-    fn handle_notes_loaded(&mut self, task_id: i64, notes: Vec<Note>) -> Vec<Command> {
-        self.notes.insert(task_id, notes);
-        vec![]
-    }
-
     fn handle_refresh_tasks(&mut self, new_tasks: Vec<Task>) -> Vec<Command> {
         // Merge DB state into in-memory state, preserving tmux_outputs
         self.tasks = new_tasks;
@@ -290,11 +281,6 @@ impl App {
             })
             .collect();
         cmds.push(Command::RefreshFromDb);
-        if self.detail_visible {
-            if let Some(task) = self.selected_task() {
-                cmds.push(Command::LoadNotes(task.id));
-            }
-        }
         cmds
     }
 

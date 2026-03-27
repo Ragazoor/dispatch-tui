@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
 
-use crate::models::{NoteSource, TaskStatus};
+use crate::models::TaskStatus;
 use super::{App, InputMode};
 
 /// Column color per status
@@ -173,23 +173,6 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
             l.push(Line::from(""));
             for line in output.lines() {
                 l.push(Line::from(line.to_string()));
-            }
-        }
-        if let Some(notes) = app.notes.get(&task.id) {
-            if !notes.is_empty() {
-                l.push(Line::from(""));
-                l.push(Line::from(Span::styled(
-                    format!("Notes ({})", notes.len()),
-                    Style::default().add_modifier(Modifier::BOLD),
-                )));
-                for note in notes {
-                    let prefix = match note.source {
-                        NoteSource::Agent => "[agent]",
-                        NoteSource::User => "[user]",
-                        NoteSource::System => "[sys]",
-                    };
-                    l.push(Line::from(format!("  {} {}", prefix, note.content)));
-                }
             }
         }
         l
