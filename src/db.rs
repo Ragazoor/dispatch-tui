@@ -737,6 +737,32 @@ mod tests {
     }
 
     #[test]
+    fn save_and_list_repo_paths() {
+        let db = in_memory_db();
+        assert!(db.list_repo_paths().unwrap().is_empty());
+        db.save_repo_path("/home/user/project").unwrap();
+        db.save_repo_path("/home/user/other").unwrap();
+        let paths = db.list_repo_paths().unwrap();
+        assert_eq!(paths.len(), 2);
+        assert!(paths.contains(&"/home/user/project".to_string()));
+        assert!(paths.contains(&"/home/user/other".to_string()));
+    }
+
+    #[test]
+    fn save_repo_path_deduplicates() {
+        let db = in_memory_db();
+        db.save_repo_path("/home/user/project").unwrap();
+        db.save_repo_path("/home/user/project").unwrap();
+        assert_eq!(db.list_repo_paths().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn list_repo_paths_empty_by_default() {
+        let db = in_memory_db();
+        assert!(db.list_repo_paths().unwrap().is_empty());
+    }
+
+    #[test]
     fn update_task_partial_applies_all_fields() {
         let db = in_memory_db();
         let id = db
