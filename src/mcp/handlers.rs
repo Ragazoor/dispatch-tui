@@ -105,6 +105,8 @@ struct UpdateTaskArgs {
     #[serde(deserialize_with = "deserialize_flexible_i64")]
     task_id: i64,
     status: String,
+    #[serde(default)]
+    plan: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -146,7 +148,7 @@ fn tool_definitions() -> Value {
         "tools": [
             {
                 "name": "update_task",
-                "description": "Update the status of a task",
+                "description": "Update the status of a task, and optionally attach a plan file path",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -158,6 +160,10 @@ fn tool_definitions() -> Value {
                             "type": "string",
                             "description": "New status: backlog, ready, running, review, or done",
                             "enum": ["backlog", "ready", "running", "review", "done"]
+                        },
+                        "plan": {
+                            "type": "string",
+                            "description": "Absolute file path to the implementation plan (optional). Used by brainstorming agents to attach a plan after writing it."
                         }
                     },
                     "required": ["task_id", "status"]
@@ -289,13 +295,18 @@ fn handle_update_task(state: &McpState, id: Option<Value>, args: Value) -> JsonR
             )
         }
     };
-    match state.db.update_status(parsed.task_id, status) {
-        Ok(()) => JsonRpcResponse::ok(
-            id,
-            json!({"content": [{"type": "text", "text": format!("Task {} updated to {}", parsed.task_id, parsed.status)}]}),
-        ),
-        Err(e) => JsonRpcResponse::err(id, -32603, format!("Database error: {e}")),
+    if let Err(e) = state.db.update_status(parsed.task_id, status) {
+        return JsonRpcResponse::err(id, -32603, format!("Database error: {e}"));
     }
+    if let Some(plan) = &parsed.plan {
+        if let Err(e) = state.db.update_plan(parsed.task_id, Some(plan)) {
+            return JsonRpcResponse::err(id, -32603, format!("Database error updating plan: {e}"));
+        }
+    }
+    JsonRpcResponse::ok(
+        id,
+        json!({"content": [{"type": "text", "text": format!("Task {} updated to {}", parsed.task_id, parsed.status)}]}),
+    )
 }
 
 fn handle_add_note(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {
@@ -681,5 +692,44 @@ mod tests {
         let result = resp.result.unwrap();
         let text = result["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("My Task"));
+    }
+
+    #[tokio::test]
+    async fn update_task_with_plan() {
+        let state = test_state();
+        let task_id = state.db.create_task("Test", "desc", "/repo", None, crate::models::TaskStatus::Backlog).unwrap();
+
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({
+                "name": "update_task",
+                "arguments": { "task_id": task_id, "status": "ready", "plan": "/path/to/plan.md" }
+            })),
+        ).await;
+        assert!(resp.error.is_none());
+
+        let task = state.db.get_task(task_id).unwrap().unwrap();
+        assert_eq!(task.status, crate::models::TaskStatus::Ready);
+        assert_eq!(task.plan.as_deref(), Some("/path/to/plan.md"));
+    }
+
+    #[tokio::test]
+    async fn update_task_without_plan_preserves_existing() {
+        let state = test_state();
+        let task_id = state.db.create_task("Test", "desc", "/repo", Some("/existing.md"), crate::models::TaskStatus::Backlog).unwrap();
+
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({
+                "name": "update_task",
+                "arguments": { "task_id": task_id, "status": "ready" }
+            })),
+        ).await;
+        assert!(resp.error.is_none());
+
+        let task = state.db.get_task(task_id).unwrap().unwrap();
+        assert_eq!(task.plan.as_deref(), Some("/existing.md"), "plan should be preserved when not provided");
     }
 }

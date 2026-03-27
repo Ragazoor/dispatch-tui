@@ -344,6 +344,59 @@ fn update_changes_status() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// plan
+// ---------------------------------------------------------------------------
+
+#[test]
+fn plan_attaches_to_existing_task() {
+    let db = NamedTempFile::new().unwrap();
+    let plan = make_plan_file("Plan Target", "Attach a plan.");
+    let db_path = db.path().to_str().unwrap();
+
+    // Create a task first
+    binary()
+        .args([
+            "--db", db_path, "create", "--from-plan", plan.path().to_str().unwrap(),
+            "--repo-path", "/tmp/test-repo",
+        ])
+        .output()
+        .unwrap();
+
+    // Write a separate plan file to attach
+    let attach_plan = make_plan_file("Detailed Plan", "Step by step.");
+
+    let out = binary()
+        .args(["--db", db_path, "plan", "1", attach_plan.path().to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("Plan attached to task #1"),
+        "Expected confirmation, got: {stdout}"
+    );
+}
+
+#[test]
+fn plan_nonexistent_file_fails() {
+    let db = NamedTempFile::new().unwrap();
+    let out = binary()
+        .args([
+            "--db", db.path().to_str().unwrap(), "plan", "1", "/tmp/nonexistent-plan-99999.md",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "Expected failure for missing plan file"
+    );
+}
+
 #[test]
 fn update_unknown_status_fails() {
     let db = NamedTempFile::new().unwrap();

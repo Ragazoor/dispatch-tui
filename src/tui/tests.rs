@@ -450,13 +450,12 @@ fn d_key_on_running_no_window_resumes() {
 }
 
 #[test]
-fn d_key_on_backlog_shows_warning() {
-
+fn d_key_on_backlog_brainstorms() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     app.selected_column = 0; // Backlog column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
-    assert!(cmds.is_empty());
-    assert!(app.status_message.is_some());
+    assert_eq!(cmds.len(), 1);
+    assert!(matches!(&cmds[0], Command::Brainstorm { task } if task.id == 1));
 }
 
 #[test]
@@ -495,6 +494,24 @@ fn g_key_with_live_window_jumps() {
     app.selected_column = 2; // Running column
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert!(matches!(&cmds[0], Command::JumpToTmux { window } if window == "task-4"));
+}
+
+#[test]
+fn brainstorm_only_backlog_tasks() {
+    let mut app = make_app();
+
+    // Task 1 is Backlog — should brainstorm
+    let cmds = app.update(Message::BrainstormTask(1));
+    assert_eq!(cmds.len(), 1);
+    assert!(matches!(&cmds[0], Command::Brainstorm { task } if task.id == 1));
+
+    // Task 3 is Ready — should not brainstorm
+    let cmds = app.update(Message::BrainstormTask(3));
+    assert!(cmds.is_empty());
+
+    // Task 5 is Done — should not brainstorm
+    let cmds = app.update(Message::BrainstormTask(5));
+    assert!(cmds.is_empty());
 }
 
 #[test]

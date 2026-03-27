@@ -203,6 +203,27 @@ impl TuiRuntime {
         });
     }
 
+    fn exec_brainstorm(&self, task: models::Task) {
+        let tx = self.msg_tx.clone();
+        let port = self.port;
+
+        tokio::task::spawn_blocking(move || {
+            let id = task.id;
+            match dispatch::brainstorm_agent(&task, port) {
+                Ok(result) => {
+                    let _ = tx.send(Message::Dispatched {
+                        id,
+                        worktree: result.worktree_path,
+                        tmux_window: result.tmux_window,
+                    });
+                }
+                Err(e) => {
+                    let _ = tx.send(Message::Error(format!("Brainstorm dispatch failed: {e:#}")));
+                }
+            }
+        });
+    }
+
     fn exec_capture_tmux(&self, id: i64, window: String) {
         let tx = self.msg_tx.clone();
 
@@ -432,6 +453,7 @@ async fn execute_commands(
                 rt.exec_insert_task(app, title, description, repo_path),
             Command::DeleteTask(id) => rt.exec_delete_task(app, id),
             Command::Dispatch { task } => rt.exec_dispatch(task),
+            Command::Brainstorm { task } => rt.exec_brainstorm(task),
             Command::CaptureTmux { id, window } => rt.exec_capture_tmux(id, window),
             Command::EditTaskInEditor(task) => rt.exec_edit_in_editor(app, task, terminal)?,
             Command::SaveRepoPath(path) => rt.exec_save_repo_path(app, path),

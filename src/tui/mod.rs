@@ -106,6 +106,7 @@ impl App {
             Message::NavigateRow(delta) => self.handle_navigate_row(delta),
             Message::MoveTask { id, direction } => self.handle_move_task(id, direction),
             Message::DispatchTask(id) => self.handle_dispatch_task(id),
+            Message::BrainstormTask(id) => self.handle_brainstorm_task(id),
             Message::Dispatched { id, worktree, tmux_window } =>
                 self.handle_dispatched(id, worktree, tmux_window),
             Message::TaskCreated { task } => self.handle_task_created(task),
@@ -204,6 +205,15 @@ impl App {
         if let Some(task) = self.find_task(id) {
             if task.status == TaskStatus::Ready {
                 return vec![Command::Dispatch { task: task.clone() }];
+            }
+        }
+        vec![]
+    }
+
+    fn handle_brainstorm_task(&mut self, id: i64) -> Vec<Command> {
+        if let Some(task) = self.find_task(id) {
+            if task.status == TaskStatus::Backlog {
+                return vec![Command::Brainstorm { task: task.clone() }];
             }
         }
         vec![]

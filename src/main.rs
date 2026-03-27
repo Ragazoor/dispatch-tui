@@ -56,6 +56,13 @@ enum Commands {
         #[arg(long)]
         description: Option<String>,
     },
+    /// Attach a plan file to an existing task
+    Plan {
+        /// Task ID
+        id: i64,
+        /// Path to the plan file
+        path: PathBuf,
+    },
 }
 
 fn default_db_path() -> PathBuf {
@@ -130,6 +137,18 @@ async fn main() -> Result<()> {
 
             let id = db.create_task(&title, &description, &repo_path_str, Some(&plan_str), models::TaskStatus::Ready)?;
             println!("Created task #{}: \"{}\" [ready]", id, title);
+        }
+        Commands::Plan { id, path } => {
+            if !path.exists() {
+                anyhow::bail!("Plan file not found: {}", path.display());
+            }
+            let plan_path = std::fs::canonicalize(&path)
+                .map_err(|e| anyhow::anyhow!("Failed to resolve plan path {}: {}", path.display(), e))?;
+            let plan_str = plan_path.to_string_lossy();
+
+            let db = db::Database::open(&cli.db)?;
+            db.update_plan(id, Some(&plan_str))?;
+            println!("Plan attached to task #{}: {}", id, plan_str);
         }
     }
 

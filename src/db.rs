@@ -20,6 +20,7 @@ pub trait TaskStore: Send + Sync {
     fn persist_task(&self, id: i64, status: TaskStatus, worktree: Option<&str>, tmux_window: Option<&str>) -> Result<()>;
     fn delete_task(&self, id: i64) -> Result<()>;
     fn update_task(&self, id: i64, title: &str, description: &str, repo_path: &str, status: TaskStatus, plan: Option<&str>) -> Result<()>;
+    fn update_plan(&self, id: i64, plan: Option<&str>) -> Result<()>;
     fn add_note(&self, task_id: i64, content: &str, source: NoteSource) -> Result<i64>;
     fn list_notes(&self, task_id: i64) -> Result<Vec<Note>>;
     fn list_repo_paths(&self) -> Result<Vec<String>>;
@@ -246,6 +247,20 @@ impl TaskStore for Database {
             )
             .context("Failed to update task")?;
         if changed == 0 {
+            anyhow::bail!("Task {id} not found");
+        }
+        Ok(())
+    }
+
+    fn update_plan(&self, id: i64, plan: Option<&str>) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn
+            .execute(
+                "UPDATE tasks SET plan = ?1, updated_at = datetime('now') WHERE id = ?2",
+                params![plan, id],
+            )
+            .context("Failed to update plan")?;
+        if rows == 0 {
             anyhow::bail!("Task {id} not found");
         }
         Ok(())
@@ -566,5 +581,32 @@ mod tests {
 
         let found = db.find_task_by_plan("/plans/any.md").unwrap();
         assert!(found.is_none());
+    }
+
+    #[test]
+    fn update_plan_sets_and_clears() {
+        let db = in_memory_db();
+        let id = db.create_task("Task", "desc", "/repo", None, TaskStatus::Backlog).unwrap();
+
+        // Initially no plan
+        let task = db.get_task(id).unwrap().unwrap();
+        assert!(task.plan.is_none());
+
+        // Set plan
+        db.update_plan(id, Some("docs/plans/my-plan.md")).unwrap();
+        let task = db.get_task(id).unwrap().unwrap();
+        assert_eq!(task.plan.as_deref(), Some("docs/plans/my-plan.md"));
+
+        // Clear plan
+        db.update_plan(id, None).unwrap();
+        let task = db.get_task(id).unwrap().unwrap();
+        assert!(task.plan.is_none());
+    }
+
+    #[test]
+    fn update_plan_nonexistent_task() {
+        let db = in_memory_db();
+        let result = db.update_plan(9999, Some("plan.md"));
+        assert!(result.is_err());
     }
 }

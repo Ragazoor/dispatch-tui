@@ -44,6 +44,9 @@ impl App {
                     let has_window = task.tmux_window.is_some();
                     let has_worktree = task.worktree.is_some();
                     match status {
+                        TaskStatus::Backlog => {
+                            self.update(Message::BrainstormTask(id))
+                        }
                         TaskStatus::Ready => {
                             self.update(Message::DispatchTask(id))
                         }
@@ -62,9 +65,9 @@ impl App {
                                 vec![]
                             }
                         }
-                        _ => {
+                        TaskStatus::Done => {
                             self.status_message = Some(
-                                "Move task to Ready before dispatching (press m)".to_string(),
+                                "Task is done".to_string(),
                             );
                             vec![]
                         }
