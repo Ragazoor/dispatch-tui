@@ -65,6 +65,12 @@ enum Commands {
         /// Path to the plan file
         path: PathBuf,
     },
+    /// Configure Claude Code to allow agents to use the MCP server
+    Setup {
+        /// MCP server port
+        #[arg(long, env = "TASK_ORCHESTRATOR_PORT", default_value = "3142")]
+        port: u16,
+    },
 }
 
 fn parse_status(s: &str) -> anyhow::Result<models::TaskStatus> {
@@ -159,6 +165,9 @@ async fn main() -> Result<()> {
 
             let id = db.create_task(&title, &description, &repo_path_str, Some(&plan_str), models::TaskStatus::Ready)?;
             println!("Created task #{}: \"{}\" [ready]", id, title);
+        }
+        Commands::Setup { port } => {
+            task_orchestrator::setup::run_setup(port)?;
         }
         Commands::Plan { id, path } => {
             if !path.exists() {
