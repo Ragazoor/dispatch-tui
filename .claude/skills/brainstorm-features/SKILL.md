@@ -1,6 +1,6 @@
 ---
 name: brainstorm-features
-description: This skill should be used when the user asks to "brainstorm features", "brainstorm new features", "generate feature ideas", "what features should we add", "suggest improvements", or wants to explore UX, DevX, or UI improvements for the task orchestrator TUI.
+description: This skill should be used when the user asks to "brainstorm features", "brainstorm new features", "generate feature ideas", "what features should we add", "suggest improvements", "what should we build next", "feature backlog ideas", "ideate on features", or wants to explore UX, DevX, or UI improvements for the task orchestrator TUI.
 ---
 
 # Brainstorm Features

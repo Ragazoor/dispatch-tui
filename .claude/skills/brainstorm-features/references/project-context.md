@@ -2,14 +2,14 @@
 
 This reference provides pointers to project files and stable domain context for brainstorming features.
 
-## Files to Read for Current State
+## Sources to Consult for Current State
 
-These files contain the latest project state. Read them before generating ideas — do not rely on this reference alone for anything that may have changed.
+These sources contain the latest project state. Consult them before generating ideas — do not rely on this reference alone for anything that may have changed.
 
 - **`CLAUDE.md`** — Architecture overview, key files, conventions, module structure
 - **`TODOS.md`** — Known improvement areas and future phase ideas
 - **`Cargo.toml`** — Dependencies and crate versions
-- **Recent git log** (`git log --oneline -20`) — Current development momentum
+- **Recent git log** — Run `git log --oneline -20` for current development momentum
 
 ## Source Files by Category
 
@@ -25,6 +25,7 @@ These files contain the latest project state. Read them before generating ideas 
 - `src/mcp/mod.rs` — Axum MCP server setup
 - `src/runtime.rs` — TUI main loop, command execution, startup/shutdown
 - `src/plan.rs` — Plan file metadata parsing for plan-to-task pipeline
+- `src/editor.rs` — External editor integration for task editing
 
 ### UI (Visual & Layout)
 - `src/tui/ui.rs` — Ratatui rendering: columns, detail panel, status bar, task cards
