@@ -195,6 +195,13 @@ pub fn slugify(input: &str) -> String {
 // Staleness
 // ---------------------------------------------------------------------------
 
+/// Tasks updated within this many hours are considered fresh.
+const FRESH_THRESHOLD_HOURS: i64 = 3 * 24; // 3 days
+/// Tasks updated within this many hours are aging (not yet stale).
+const AGING_THRESHOLD_HOURS: i64 = 7 * 24; // 7 days
+/// Days threshold above which format_age switches to weeks.
+const WEEKS_THRESHOLD_DAYS: i64 = 14;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Staleness {
     Fresh,  // < 3 days
@@ -207,9 +214,9 @@ impl Staleness {
     pub fn from_age(updated_at: DateTime<Utc>, now: DateTime<Utc>) -> Self {
         let age = now.signed_duration_since(updated_at);
         let hours = age.num_hours().max(0);
-        if hours < 3 * 24 {
+        if hours < FRESH_THRESHOLD_HOURS {
             Staleness::Fresh
-        } else if hours < 7 * 24 {
+        } else if hours < AGING_THRESHOLD_HOURS {
             Staleness::Aging
         } else {
             Staleness::Stale
@@ -233,7 +240,7 @@ pub fn format_age(updated_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
         format!("{hours}h")
     } else {
         let days = hours / 24;
-        if days < 14 {
+        if days < WEEKS_THRESHOLD_DAYS {
             format!("{days}d")
         } else {
             format!("{}w", days / 7)
