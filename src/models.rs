@@ -179,6 +179,32 @@ pub fn slugify(input: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Staleness
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Staleness {
+    Fresh,  // < 3 days
+    Aging,  // 3-7 days
+    Stale,  // > 7 days
+}
+
+impl Staleness {
+    /// Determine staleness tier from the age of `updated_at` relative to `now`.
+    pub fn from_age(updated_at: DateTime<Utc>, now: DateTime<Utc>) -> Self {
+        let age = now.signed_duration_since(updated_at);
+        let hours = age.num_hours();
+        if hours < 3 * 24 {
+            Staleness::Fresh
+        } else if hours < 7 * 24 {
+            Staleness::Aging
+        } else {
+            Staleness::Stale
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -301,6 +327,59 @@ mod tests {
     fn task_status_from_str_error() {
         let result: Result<TaskStatus, _> = "bogus".parse();
         assert!(result.is_err());
+    }
+
+    // --- Staleness ---
+
+    #[test]
+    fn staleness_fresh() {
+        let now = Utc::now();
+        let updated = now - chrono::Duration::hours(71);
+        assert_eq!(Staleness::from_age(updated, now), Staleness::Fresh);
+    }
+
+    #[test]
+    fn staleness_fresh_boundary() {
+        let now = Utc::now();
+        // Exactly 3 days minus 1 second => still Fresh
+        let updated = now - chrono::Duration::seconds(3 * 24 * 3600 - 1);
+        assert_eq!(Staleness::from_age(updated, now), Staleness::Fresh);
+    }
+
+    #[test]
+    fn staleness_aging() {
+        let now = Utc::now();
+        let updated = now - chrono::Duration::days(3);
+        assert_eq!(Staleness::from_age(updated, now), Staleness::Aging);
+    }
+
+    #[test]
+    fn staleness_aging_boundary() {
+        let now = Utc::now();
+        // Exactly 7 days minus 1 second => still Aging
+        let updated = now - chrono::Duration::seconds(7 * 24 * 3600 - 1);
+        assert_eq!(Staleness::from_age(updated, now), Staleness::Aging);
+    }
+
+    #[test]
+    fn staleness_stale() {
+        let now = Utc::now();
+        let updated = now - chrono::Duration::days(7);
+        assert_eq!(Staleness::from_age(updated, now), Staleness::Stale);
+    }
+
+    #[test]
+    fn staleness_very_stale() {
+        let now = Utc::now();
+        let updated = now - chrono::Duration::days(30);
+        assert_eq!(Staleness::from_age(updated, now), Staleness::Stale);
+    }
+
+    #[test]
+    fn staleness_future_is_fresh() {
+        let now = Utc::now();
+        let updated = now + chrono::Duration::hours(1);
+        assert_eq!(Staleness::from_age(updated, now), Staleness::Fresh);
     }
 
 }
