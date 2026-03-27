@@ -123,62 +123,6 @@ pub struct Task {
 }
 
 // ---------------------------------------------------------------------------
-// NoteSource
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum NoteSource {
-    User,
-    Agent,
-    System,
-}
-
-impl NoteSource {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            NoteSource::User => "user",
-            NoteSource::Agent => "agent",
-            NoteSource::System => "system",
-        }
-    }
-
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "user" => Some(NoteSource::User),
-            "agent" => Some(NoteSource::Agent),
-            "system" => Some(NoteSource::System),
-            _ => None,
-        }
-    }
-}
-
-impl std::fmt::Display for NoteSource {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl std::str::FromStr for NoteSource {
-    type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::parse(s).ok_or_else(|| format!("unknown note source: {s}"))
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Note
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-pub struct Note {
-    pub id: i64,
-    pub task_id: i64,
-    pub content: String,
-    pub source: NoteSource,
-    pub created_at: DateTime<Utc>,
-}
-
-// ---------------------------------------------------------------------------
 // DispatchResult
 // ---------------------------------------------------------------------------
 
@@ -293,25 +237,6 @@ mod tests {
         assert!(TaskStatus::from_column_index(999).is_none());
     }
 
-    // --- NoteSource ---
-
-    #[test]
-    fn note_source_roundtrip() {
-        for (src, s) in [
-            (NoteSource::User, "user"),
-            (NoteSource::Agent, "agent"),
-            (NoteSource::System, "system"),
-        ] {
-            assert_eq!(src.as_str(), s);
-            assert_eq!(NoteSource::parse(s), Some(src));
-        }
-    }
-
-    #[test]
-    fn note_source_invalid() {
-        assert!(NoteSource::parse("unknown").is_none());
-    }
-
     // --- slugify ---
 
     #[test]
@@ -378,26 +303,4 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[test]
-    fn note_source_display() {
-        for (src, s) in [
-            (NoteSource::User, "user"),
-            (NoteSource::Agent, "agent"),
-            (NoteSource::System, "system"),
-        ] {
-            assert_eq!(format!("{src}"), s);
-        }
-    }
-
-    #[test]
-    fn note_source_from_str_roundtrip() {
-        for (src, s) in [
-            (NoteSource::User, "user"),
-            (NoteSource::Agent, "agent"),
-            (NoteSource::System, "system"),
-        ] {
-            let parsed: NoteSource = s.parse().unwrap();
-            assert_eq!(parsed, src);
-        }
-    }
 }

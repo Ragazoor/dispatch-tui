@@ -4,7 +4,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use std::path::Path;
 use std::sync::Mutex;
 
-use crate::models::{Note, NoteSource, Task, TaskStatus};
+use crate::models::{Task, TaskStatus};
 
 // ---------------------------------------------------------------------------
 // TaskStore trait
@@ -21,8 +21,6 @@ pub trait TaskStore: Send + Sync {
     fn delete_task(&self, id: i64) -> Result<()>;
     fn update_task(&self, id: i64, title: &str, description: &str, repo_path: &str, status: TaskStatus, plan: Option<&str>) -> Result<()>;
     fn update_plan(&self, id: i64, plan: Option<&str>) -> Result<()>;
-    fn add_note(&self, task_id: i64, content: &str, source: NoteSource) -> Result<i64>;
-    fn list_notes(&self, task_id: i64) -> Result<Vec<Note>>;
     fn list_repo_paths(&self) -> Result<Vec<String>>;
     fn save_repo_path(&self, path: &str) -> Result<()>;
     fn find_task_by_plan(&self, plan: &str) -> Result<Option<Task>>;
@@ -275,32 +273,6 @@ impl TaskStore for Database {
         Ok(())
     }
 
-    fn add_note(&self, task_id: i64, content: &str, source: NoteSource) -> Result<i64> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "INSERT INTO notes (task_id, content, source) VALUES (?1, ?2, ?3)",
-            params![task_id, content, source.as_str()],
-        )
-        .context("Failed to insert note")?;
-        Ok(conn.last_insert_rowid())
-    }
-
-    fn list_notes(&self, task_id: i64) -> Result<Vec<Note>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, task_id, content, source, created_at
-                 FROM notes WHERE task_id = ?1 ORDER BY id",
-            )
-            .context("Failed to prepare list_notes")?;
-        let notes = stmt
-            .query_map(params![task_id], row_to_note)
-            .context("Failed to query notes")?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .context("Failed to collect notes")?;
-        Ok(notes)
-    }
-
     fn list_repo_paths(&self) -> Result<Vec<String>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
@@ -361,21 +333,6 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         plan: row.get("plan")?,
         created_at: parse_datetime(&created_str),
         updated_at: parse_datetime(&updated_str),
-    })
-}
-
-fn row_to_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<Note> {
-    let source_str: String = row.get("source")?;
-    let source = NoteSource::parse(&source_str).unwrap_or(NoteSource::User);
-
-    let created_str: String = row.get("created_at")?;
-
-    Ok(Note {
-        id: row.get("id")?,
-        task_id: row.get("task_id")?,
-        content: row.get("content")?,
-        source,
-        created_at: parse_datetime(&created_str),
     })
 }
 
@@ -507,29 +464,6 @@ mod tests {
     }
 
     #[test]
-    fn add_and_list_notes() {
-        let db = in_memory_db();
-        let task_id = db.create_task("My Task", "desc", "/repo", None, TaskStatus::Backlog).unwrap();
-
-        let n1 = db.add_note(task_id, "User note", NoteSource::User).unwrap();
-        let n2 = db.add_note(task_id, "Agent note", NoteSource::Agent).unwrap();
-        let n3 = db.add_note(task_id, "System note", NoteSource::System).unwrap();
-
-        let notes = db.list_notes(task_id).unwrap();
-        assert_eq!(notes.len(), 3);
-
-        assert_eq!(notes[0].id, n1);
-        assert_eq!(notes[0].content, "User note");
-        assert_eq!(notes[0].source, NoteSource::User);
-
-        assert_eq!(notes[1].id, n2);
-        assert_eq!(notes[1].source, NoteSource::Agent);
-
-        assert_eq!(notes[2].id, n3);
-        assert_eq!(notes[2].source, NoteSource::System);
-    }
-
-    #[test]
     fn create_task_with_plan() {
         let db = in_memory_db();
         let id = db.create_task("Planned Task", "desc", "/repo", Some("docs/plan.md"), TaskStatus::Backlog).unwrap();
@@ -543,25 +477,6 @@ mod tests {
         let id = db.create_task("Simple Task", "desc", "/repo", None, TaskStatus::Backlog).unwrap();
         let task = db.get_task(id).unwrap().unwrap();
         assert!(task.plan.is_none());
-    }
-
-    #[test]
-    fn delete_task_cascades_notes() {
-        let db = in_memory_db();
-        let task_id = db.create_task("My Task", "desc", "/repo", None, TaskStatus::Backlog).unwrap();
-        db.add_note(task_id, "Note 1", NoteSource::User).unwrap();
-        db.add_note(task_id, "Note 2", NoteSource::Agent).unwrap();
-
-        // Confirm notes exist
-        assert_eq!(db.list_notes(task_id).unwrap().len(), 2);
-
-        db.delete_task(task_id).unwrap();
-
-        // Task is gone
-        assert!(db.get_task(task_id).unwrap().is_none());
-
-        // Notes cascade-deleted
-        assert_eq!(db.list_notes(task_id).unwrap().len(), 0);
     }
 
     #[test]
