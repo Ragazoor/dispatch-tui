@@ -612,10 +612,8 @@ mod tests {
 
         let calls = mock.recorded_calls();
         assert_eq!(calls.len(), 1);
-        assert!(
-            calls[0].1.contains(&"select-window".to_string())
-                || calls[0].1.contains(&"my-window".to_string())
-        );
+        assert!(calls[0].1.contains(&"select-window".to_string()));
+        assert!(calls[0].1.contains(&"my-window".to_string()));
         assert!(app.error_popup().is_none());
     }
 
