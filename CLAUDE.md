@@ -56,8 +56,10 @@ Backlog → Ready → Running → Review → Done
 - **Ready** = eligible for dispatch (`d` key)
 - **Running** = agent dispatched in interactive mode, tmux output shown on card
 - Closing a tmux session preserves the worktree; press `d` to resume with `claude --continue`
-- Agents advance their own status to Review via the MCP `update_task` tool
+- Status transitions (running/review) are handled by project-level Claude Code hooks in `.claude/settings.local.json` that extract the task ID from the git branch name
 - Press `g` to jump to an agent's tmux window
+
+> **TODO:** Project-level hooks assume worktree branches follow the `{id}-{slug}` naming convention and that `task-orchestrator` is in PATH. For the general case (multi-project dispatch, non-worktree setups), consider MCP-based status reporting or a dedicated CLI subcommand that infers context.
 
 ## MCP Server
 

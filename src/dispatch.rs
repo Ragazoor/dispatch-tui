@@ -14,7 +14,7 @@ use crate::tmux;
 ///
 /// This function is **synchronous** and should be called via
 /// `tokio::task::spawn_blocking` from async contexts.
-pub fn dispatch_agent(task: &Task, mcp_port: u16, db_path: &str) -> Result<DispatchResult> {
+pub fn dispatch_agent(task: &Task, mcp_port: u16) -> Result<DispatchResult> {
     let repo_path = expand_tilde(&task.repo_path);
     let slug = slugify(&task.title);
     let worktree_name = format!("{}-{slug}", task.id);
@@ -55,14 +55,6 @@ pub fn dispatch_agent(task: &Task, mcp_port: u16, db_path: &str) -> Result<Dispa
     );
     fs::write(format!("{worktree_path}/.mcp.json"), &mcp_config)
         .with_context(|| format!("failed to write {worktree_path}/.mcp.json"))?;
-
-    // 3b. Write .claude/settings.json with status hooks.
-    let claude_dir = format!("{worktree_path}/.claude");
-    fs::create_dir_all(&claude_dir)
-        .with_context(|| format!("failed to create {claude_dir}"))?;
-    let hooks_config = build_hooks_config(task.id, db_path);
-    fs::write(format!("{claude_dir}/settings.json"), &hooks_config)
-        .with_context(|| format!("failed to write {claude_dir}/settings.json"))?;
 
     // 4. Open a new tmux window rooted at the worktree.
     tmux::new_window(&tmux_window, &worktree_path)
@@ -169,12 +161,6 @@ fn build_tmux_window_name(task_id: i64) -> String {
     format!("task-{task_id}")
 }
 
-fn build_hooks_config(task_id: i64, db_path: &str) -> String {
-    format!(
-        r#"{{"hooks":{{"Stop":[{{"type":"command","command":"task-orchestrator --db {db_path} update {task_id} review"}}],"UserPromptSubmit":[{{"type":"command","command":"task-orchestrator --db {db_path} update {task_id} running"}}]}}}}"#
-    )
-}
-
 fn build_prompt(task_id: i64, title: &str, description: &str, mcp_port: u16, plan: Option<&str>) -> String {
     let plan_section = match plan {
         Some(path) => format!(
@@ -268,18 +254,4 @@ mod tests {
         assert!(!prompt.contains("Plan:"));
     }
 
-    #[test]
-    fn build_hooks_config_contains_task_id_and_db_path() {
-        let config = build_hooks_config(42, "/home/user/.local/share/task-orchestrator/tasks.db");
-        let parsed: serde_json::Value = serde_json::from_str(&config)
-            .expect("hooks config should be valid JSON");
-
-        let stop_cmd = parsed["hooks"]["Stop"][0]["command"].as_str().unwrap();
-        assert!(stop_cmd.contains("update 42 review"), "Stop hook should update to review");
-        assert!(stop_cmd.contains("--db /home/user/.local/share/task-orchestrator/tasks.db"));
-
-        let submit_cmd = parsed["hooks"]["UserPromptSubmit"][0]["command"].as_str().unwrap();
-        assert!(submit_cmd.contains("update 42 running"), "UserPromptSubmit hook should update to running");
-        assert!(submit_cmd.contains("--db /home/user/.local/share/task-orchestrator/tasks.db"));
-    }
 }
