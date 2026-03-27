@@ -75,6 +75,12 @@ impl App {
                             );
                             vec![]
                         }
+                        TaskStatus::Archived => {
+                            self.status_message = Some(
+                                "Task is archived".to_string(),
+                            );
+                            vec![]
+                        }
                     }
                 } else {
                     vec![]

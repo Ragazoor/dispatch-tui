@@ -18,6 +18,7 @@ fn column_color(status: TaskStatus) -> Color {
         TaskStatus::Running => Color::Yellow,
         TaskStatus::Review => Color::Magenta,
         TaskStatus::Done => Color::Green,
+        TaskStatus::Archived => Color::DarkGray,
     }
 }
 
@@ -525,6 +526,7 @@ pub(in crate::tui) fn action_hints(task: Option<&Task>) -> Vec<Span<'static>> {
                 push_hint("[M]", "back");
                 push_hint("[x]", "delete");
             }
+            TaskStatus::Archived => {}
         }
     }
 
