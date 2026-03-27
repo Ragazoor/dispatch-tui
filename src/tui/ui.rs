@@ -323,29 +323,45 @@ fn render_error_popup(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
-    let text = if let Some(msg) = &app.status_message {
-        msg.as_str().to_string()
-    } else {
-        match &app.mode {
-            InputMode::Normal => {
-                "q:quit  h/l:col  j/k:row  n:new  D:quick  e:edit  m/M:move  d:dispatch  Enter:detail  x:delete"
-                    .to_string()
-            }
-            InputMode::InputTitle => "Creating task: enter title".to_string(),
-            InputMode::InputDescription => "Creating task: enter description".to_string(),
-            InputMode::InputRepoPath => "Creating task: enter repo path".to_string(),
-            InputMode::ConfirmDelete => "Delete? (y/n)".to_string(),
-            InputMode::QuickDispatch => "Quick dispatch: select repo path".to_string(),
+    if let Some(msg) = &app.status_message {
+        let bar = Paragraph::new(msg.as_str())
+            .style(Style::default().fg(Color::Yellow));
+        frame.render_widget(bar, area);
+        return;
+    }
+
+    match &app.mode {
+        InputMode::Normal => {
+            let spans = action_hints(app.selected_task());
+            let bar = Paragraph::new(Line::from(spans));
+            frame.render_widget(bar, area);
         }
-    };
-
-    let style = match app.mode {
-        InputMode::Normal => Style::default().fg(Color::DarkGray),
-        _ => Style::default().fg(Color::Yellow),
-    };
-
-    let bar = Paragraph::new(text).style(style);
-    frame.render_widget(bar, area);
+        InputMode::InputTitle => {
+            let bar = Paragraph::new("Creating task: enter title")
+                .style(Style::default().fg(Color::Yellow));
+            frame.render_widget(bar, area);
+        }
+        InputMode::InputDescription => {
+            let bar = Paragraph::new("Creating task: enter description")
+                .style(Style::default().fg(Color::Yellow));
+            frame.render_widget(bar, area);
+        }
+        InputMode::InputRepoPath => {
+            let bar = Paragraph::new("Creating task: enter repo path")
+                .style(Style::default().fg(Color::Yellow));
+            frame.render_widget(bar, area);
+        }
+        InputMode::ConfirmDelete => {
+            let bar = Paragraph::new("Delete? (y/n)")
+                .style(Style::default().fg(Color::Yellow));
+            frame.render_widget(bar, area);
+        }
+        InputMode::QuickDispatch => {
+            let bar = Paragraph::new("Quick dispatch: select repo path")
+                .style(Style::default().fg(Color::Yellow));
+            frame.render_widget(bar, area);
+        }
+    }
 }
 
 /// Build context-sensitive keybinding hint spans for the status bar.
