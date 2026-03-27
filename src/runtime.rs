@@ -104,6 +104,32 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
+// TerminalSuspend — RAII guard for leaving/re-entering the alternate screen
+// ---------------------------------------------------------------------------
+
+struct TerminalSuspend<'a> {
+    terminal: &'a mut Terminal<CrosstermBackend<io::Stdout>>,
+}
+
+impl<'a> TerminalSuspend<'a> {
+    fn new(terminal: &'a mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<Self> {
+        disable_raw_mode()?;
+        execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+        terminal.show_cursor()?;
+        Ok(TerminalSuspend { terminal })
+    }
+}
+
+impl Drop for TerminalSuspend<'_> {
+    fn drop(&mut self) {
+        let _ = enable_raw_mode();
+        let _ = execute!(self.terminal.backend_mut(), EnterAlternateScreen);
+        let _ = self.terminal.hide_cursor();
+        let _ = self.terminal.clear();
+    }
+}
+
+// ---------------------------------------------------------------------------
 // TuiRuntime — shared context for command execution
 // ---------------------------------------------------------------------------
 
@@ -216,10 +242,8 @@ impl TuiRuntime {
         self.input_paused.store(true, Ordering::Relaxed);
         std::thread::sleep(Duration::from_millis(150));
 
-        // Suspend TUI
-        disable_raw_mode()?;
-        execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-        terminal.show_cursor()?;
+        // Suspend TUI (RAII guard restores on drop, even if editor panics)
+        let _guard = TerminalSuspend::new(terminal)?;
 
         // Open editor
         let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
@@ -227,11 +251,8 @@ impl TuiRuntime {
             .arg(&tmp)
             .status();
 
-        // Resume TUI
-        enable_raw_mode()?;
-        execute!(terminal.backend_mut(), EnterAlternateScreen)?;
-        terminal.hide_cursor()?;
-        terminal.clear()?;
+        // Guard restores terminal on drop
+        drop(_guard);
 
         // Resume input polling thread
         self.input_paused.store(false, Ordering::Relaxed);
