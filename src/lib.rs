@@ -7,4 +7,5 @@ pub mod plan;
 pub mod process;
 pub mod runtime;
 pub mod tmux;
+pub mod setup;
 pub mod tui;
