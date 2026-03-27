@@ -1517,3 +1517,47 @@ fn archived_tasks_not_in_kanban_columns() {
     assert_eq!(archived.len(), 1);
     assert_eq!(archived[0].id, 2);
 }
+
+// --- End-to-end archive flow ---
+
+#[test]
+fn full_archive_flow() {
+    // Create a running task with worktree
+    let mut task = make_task(1, TaskStatus::Running);
+    task.worktree = Some("/wt/1-test".to_string());
+    task.tmux_window = Some("dev:1-test".to_string());
+    let mut app = App::new(vec![task, make_task(2, TaskStatus::Backlog)], Duration::from_secs(300));
+
+    // Navigate to Running column (column 2)
+    app.handle_key(make_key(KeyCode::Right));
+    app.handle_key(make_key(KeyCode::Right));
+
+    // Press x to archive
+    app.handle_key(make_key(KeyCode::Char('x')));
+    assert_eq!(app.mode, InputMode::ConfirmArchive);
+
+    // Confirm
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+    assert_eq!(app.mode, InputMode::Normal);
+
+    // Task should be archived with cleanup
+    let task = app.tasks.iter().find(|t| t.id == 1).unwrap();
+    assert_eq!(task.status, TaskStatus::Archived);
+    assert!(task.worktree.is_none());
+    assert!(cmds.iter().any(|c| matches!(c, Command::Cleanup { .. })));
+
+    // Toggle archive panel
+    app.handle_key(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::SHIFT));
+    assert!(app.show_archived);
+
+    // Should see 1 archived task
+    assert_eq!(app.archived_tasks().len(), 1);
+
+    // Hard delete from archive
+    app.handle_key(make_key(KeyCode::Char('x')));
+    assert_eq!(app.mode, InputMode::ConfirmDelete);
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+    assert!(cmds.iter().any(|c| matches!(c, Command::DeleteTask(1))));
+    assert!(app.archived_tasks().is_empty());
+}
