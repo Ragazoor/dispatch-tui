@@ -141,9 +141,9 @@ impl App {
             Message::QuickDispatch { repo_path } => self.handle_quick_dispatch(repo_path),
             Message::StaleAgent(id) => self.handle_stale_agent(id),
             Message::AgentCrashed(id) => self.handle_agent_crashed(id),
-            Message::KillAndRetry(_) => vec![],
-            Message::RetryResume(_) => vec![],
-            Message::RetryFresh(_) => vec![],
+            Message::KillAndRetry(id) => self.handle_kill_and_retry(id),
+            Message::RetryResume(id) => self.handle_retry_resume(id),
+            Message::RetryFresh(id) => self.handle_retry_fresh(id),
         }
     }
 
@@ -426,6 +426,66 @@ impl App {
             description: String::new(),
             repo_path,
         }]
+    }
+
+    fn handle_kill_and_retry(&mut self, id: i64) -> Vec<Command> {
+        self.mode = InputMode::ConfirmRetry(id);
+        let label = if self.crashed_tasks.contains(&id) {
+            "crashed"
+        } else {
+            "stale"
+        };
+        self.status_message = Some(format!(
+            "Agent {} - [r] Resume  [f] Fresh start  [Esc] Cancel", label
+        ));
+        vec![]
+    }
+
+    fn handle_retry_resume(&mut self, id: i64) -> Vec<Command> {
+        self.mode = InputMode::Normal;
+        self.status_message = None;
+        self.clear_agent_tracking(id);
+
+        if let Some(task) = self.find_task_mut(id) {
+            let old_window = task.tmux_window.take();
+            let task_clone = task.clone();
+
+            let mut cmds = Vec::new();
+            if let Some(window) = old_window {
+                cmds.push(Command::KillTmuxWindow { window });
+            }
+            cmds.push(Command::Resume { task: task_clone });
+            cmds
+        } else {
+            vec![]
+        }
+    }
+
+    fn handle_retry_fresh(&mut self, id: i64) -> Vec<Command> {
+        self.mode = InputMode::Normal;
+        self.status_message = None;
+        self.clear_agent_tracking(id);
+
+        if let Some(task) = self.find_task_mut(id) {
+            let worktree = task.worktree.take();
+            let tmux_window = task.tmux_window.take();
+            task.status = TaskStatus::Ready;
+            let task_clone = task.clone();
+
+            let mut cmds = Vec::new();
+            if let Some(wt) = worktree {
+                cmds.push(Command::Cleanup {
+                    repo_path: task_clone.repo_path.clone(),
+                    worktree: wt,
+                    tmux_window,
+                });
+            }
+            cmds.push(Command::PersistTask(task_clone.clone()));
+            cmds.push(Command::Dispatch { task: task_clone });
+            cmds
+        } else {
+            vec![]
+        }
     }
 }
 

@@ -1117,3 +1117,54 @@ fn new_app_has_empty_agent_tracking() {
     assert!(app.stale_tasks().is_empty());
     assert!(app.crashed_tasks().is_empty());
 }
+
+#[test]
+fn kill_and_retry_enters_confirm_mode() {
+    let mut app = App::new(vec![
+        make_task(4, TaskStatus::Running),
+    ], Duration::from_secs(300));
+    app.tasks[0].tmux_window = Some("task-4".to_string());
+    app.stale_tasks.insert(4);
+
+    app.update(Message::KillAndRetry(4));
+    assert!(matches!(app.mode, InputMode::ConfirmRetry(4)));
+}
+
+#[test]
+fn retry_resume_emits_kill_and_resume() {
+    let mut app = App::new(vec![
+        make_task(4, TaskStatus::Running),
+    ], Duration::from_secs(300));
+    app.tasks[0].tmux_window = Some("task-4".to_string());
+    app.tasks[0].worktree = Some("/repo/.worktrees/4-task-4".to_string());
+    app.stale_tasks.insert(4);
+    app.crashed_tasks.insert(4);
+    app.mode = InputMode::ConfirmRetry(4);
+
+    let cmds = app.update(Message::RetryResume(4));
+
+    assert!(!app.stale_tasks.contains(&4));
+    assert!(!app.crashed_tasks.contains(&4));
+    assert_eq!(app.mode, InputMode::Normal);
+    assert!(cmds.iter().any(|c| matches!(c, Command::KillTmuxWindow { .. })));
+    assert!(cmds.iter().any(|c| matches!(c, Command::Resume { .. })));
+}
+
+#[test]
+fn retry_fresh_emits_cleanup_and_dispatch() {
+    let mut app = App::new(vec![
+        make_task(4, TaskStatus::Running),
+    ], Duration::from_secs(300));
+    app.tasks[0].tmux_window = Some("task-4".to_string());
+    app.tasks[0].worktree = Some("/repo/.worktrees/4-task-4".to_string());
+    app.stale_tasks.insert(4);
+    app.mode = InputMode::ConfirmRetry(4);
+
+    let cmds = app.update(Message::RetryFresh(4));
+
+    assert!(!app.stale_tasks.contains(&4));
+    assert_eq!(app.mode, InputMode::Normal);
+    assert_eq!(app.tasks[0].status, TaskStatus::Ready);
+    assert!(cmds.iter().any(|c| matches!(c, Command::Cleanup { .. })));
+    assert!(cmds.iter().any(|c| matches!(c, Command::Dispatch { .. })));
+}
