@@ -1,6 +1,6 @@
 //! Integration test: full task lifecycle through App::update() with a real (in-memory) DB.
 
-use task_orchestrator::db::Database;
+use task_orchestrator::db::{Database, TaskStore};
 use task_orchestrator::models::TaskStatus;
 use task_orchestrator::tui::{App, Command, Message, MoveDirection};
 

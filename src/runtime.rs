@@ -14,6 +14,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::interval;
 
+use crate::db::TaskStore;
 use crate::editor::{format_editor_content, parse_editor_content};
 use crate::tui::{self, App, Command, Message};
 use crate::{db, dispatch, models, mcp, tmux};
