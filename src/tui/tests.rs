@@ -1923,11 +1923,11 @@ fn refresh_tasks_prunes_stale_selections() {
 fn render_empty_board_shows_all_column_headers() {
     let app = App::new(vec![], Duration::from_secs(300));
     let buf = render_to_buffer(&app, 100, 20);
-    assert!(buffer_contains(&buf, "BACKLOG"));
-    assert!(buffer_contains(&buf, "READY"));
-    assert!(buffer_contains(&buf, "RUNNING"));
-    assert!(buffer_contains(&buf, "REVIEW"));
-    assert!(buffer_contains(&buf, "DONE"));
+    assert!(buffer_contains(&buf, "backlog"));
+    assert!(buffer_contains(&buf, "ready"));
+    assert!(buffer_contains(&buf, "running"));
+    assert!(buffer_contains(&buf, "review"));
+    assert!(buffer_contains(&buf, "done"));
 }
 
 #[test]

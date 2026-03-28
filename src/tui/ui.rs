@@ -119,11 +119,22 @@ fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
         .split(area);
 
     for (col_idx, &status) in TaskStatus::ALL.iter().enumerate() {
-        let count = app.tasks_by_status(status).len();
+        let count = app.column_items_for_status(status).len();
+        let is_focused = app.selected_column() == col_idx;
         let color = column_color(status);
-        let text = format!("{}: {}", status.as_str().to_uppercase(), count);
+
+        let (prefix, style) = if is_focused {
+            ("\u{25b8} ", Style::default()
+                .fg(color)
+                .add_modifier(Modifier::BOLD)
+                .add_modifier(Modifier::UNDERLINED))
+        } else {
+            ("\u{25e6} ", Style::default().fg(Color::Rgb(86, 95, 137)))
+        };
+
+        let text = format!("{}{} {}", prefix, status.as_str(), count);
         let paragraph = Paragraph::new(text)
-            .style(Style::default().fg(color).add_modifier(Modifier::BOLD))
+            .style(style)
             .alignment(Alignment::Center);
         frame.render_widget(paragraph, segments[col_idx]);
     }
