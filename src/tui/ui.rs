@@ -13,12 +13,36 @@ use super::{App, ColumnItem, InputMode, ViewMode};
 /// Column color per status
 fn column_color(status: TaskStatus) -> Color {
     match status {
-        TaskStatus::Backlog => Color::DarkGray,
-        TaskStatus::Ready => Color::Blue,
-        TaskStatus::Running => Color::Yellow,
-        TaskStatus::Review => Color::Magenta,
-        TaskStatus::Done => Color::Green,
-        TaskStatus::Archived => Color::DarkGray,
+        TaskStatus::Backlog => Color::Rgb(86, 95, 137),
+        TaskStatus::Ready => Color::Rgb(122, 162, 247),
+        TaskStatus::Running => Color::Rgb(224, 175, 104),
+        TaskStatus::Review => Color::Rgb(187, 154, 247),
+        TaskStatus::Done => Color::Rgb(158, 206, 106),
+        TaskStatus::Archived => Color::Rgb(86, 95, 137),
+    }
+}
+
+/// Dark-tinted background for the cursor card in each column.
+fn cursor_bg_color(status: TaskStatus) -> Color {
+    match status {
+        TaskStatus::Backlog => Color::Rgb(26, 28, 48),
+        TaskStatus::Ready => Color::Rgb(26, 34, 64),
+        TaskStatus::Running => Color::Rgb(48, 38, 20),
+        TaskStatus::Review => Color::Rgb(38, 26, 48),
+        TaskStatus::Done => Color::Rgb(26, 38, 28),
+        TaskStatus::Archived => Color::Rgb(26, 28, 48),
+    }
+}
+
+/// Unicode status icon for the metadata line of each card.
+fn status_icon(status: TaskStatus) -> &'static str {
+    match status {
+        TaskStatus::Backlog => "◦",
+        TaskStatus::Ready => "⬡",
+        TaskStatus::Running => "◉",
+        TaskStatus::Review => "◎",
+        TaskStatus::Done => "✓",
+        TaskStatus::Archived => "◦",
     }
 }
 
