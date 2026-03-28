@@ -469,6 +469,7 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         worktree: row.get("worktree")?,
         tmux_window: row.get("tmux_window")?,
         plan: row.get("plan")?,
+        epic_id: None,
         created_at: parse_datetime(&created_str),
         updated_at: parse_datetime(&updated_str),
     })

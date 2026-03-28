@@ -166,6 +166,7 @@ pub struct Task {
     pub worktree: Option<String>,
     pub tmux_window: Option<String>,
     pub plan: Option<String>,
+    pub epic_id: Option<EpicId>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -628,6 +629,44 @@ mod tests {
     fn epic_id_equality() {
         assert_eq!(EpicId(1), EpicId(1));
         assert_ne!(EpicId(1), EpicId(2));
+    }
+
+    #[test]
+    fn task_epic_id_defaults_to_none() {
+        let now = Utc::now();
+        let task = Task {
+            id: TaskId(1),
+            title: "Test".to_string(),
+            description: "Desc".to_string(),
+            repo_path: "/repo".to_string(),
+            status: TaskStatus::Backlog,
+            worktree: None,
+            tmux_window: None,
+            plan: None,
+            epic_id: None,
+            created_at: now,
+            updated_at: now,
+        };
+        assert!(task.epic_id.is_none());
+    }
+
+    #[test]
+    fn task_with_epic_id() {
+        let now = Utc::now();
+        let task = Task {
+            id: TaskId(1),
+            title: "Test".to_string(),
+            description: "Desc".to_string(),
+            repo_path: "/repo".to_string(),
+            status: TaskStatus::Backlog,
+            worktree: None,
+            tmux_window: None,
+            plan: None,
+            epic_id: Some(EpicId(5)),
+            created_at: now,
+            updated_at: now,
+        };
+        assert_eq!(task.epic_id, Some(EpicId(5)));
     }
 
     #[test]

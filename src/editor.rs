@@ -70,6 +70,7 @@ mod tests {
             worktree: None,
             tmux_window: None,
             plan: plan.map(|s| s.to_string()),
+            epic_id: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

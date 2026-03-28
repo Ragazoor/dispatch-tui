@@ -265,6 +265,7 @@ mod tests {
             worktree: None,
             tmux_window: None,
             plan: None,
+            epic_id: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
