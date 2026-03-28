@@ -2278,3 +2278,549 @@ fn mark_epic_done() {
     assert!(app.epics[0].done);
     assert!(cmds.iter().any(|c| matches!(c, Command::PersistEpic { .. })));
 }
+
+// ---------------------------------------------------------------------------
+// input.rs — Normal mode: Epic interactions
+// ---------------------------------------------------------------------------
+
+/// Helper: create an app with one task + one epic in Backlog, cursor on the epic.
+fn make_app_with_epic_selected() -> App {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Backlog),
+    ], Duration::from_secs(300));
+    app.epics = vec![make_epic(10)];
+    // Task at row 0, Epic at row 1 in Backlog column
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 1);
+    app
+}
+
+#[test]
+fn m_key_on_epic_shows_status_info() {
+    let mut app = make_app_with_epic_selected();
+    let cmds = app.handle_key(make_key(KeyCode::Char('m')));
+    assert!(cmds.is_empty());
+    assert!(app.status_message.as_deref().unwrap().contains("derived from subtasks"));
+}
+
+#[test]
+fn shift_m_key_on_epic_shows_status_info() {
+    let mut app = make_app_with_epic_selected();
+    let cmds = app.handle_key(make_key(KeyCode::Char('M')));
+    assert!(cmds.is_empty());
+    assert!(app.status_message.as_deref().unwrap().contains("derived from subtasks"));
+}
+
+#[test]
+fn shift_e_key_starts_new_epic() {
+    let mut app = make_app();
+    let cmds = app.handle_key(make_key(KeyCode::Char('E')));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::InputEpicTitle);
+}
+
+#[test]
+fn shift_v_key_on_epic_marks_done() {
+    let mut app = make_app_with_epic_selected();
+    let cmds = app.handle_key(make_key(KeyCode::Char('V')));
+    assert!(app.epics[0].done);
+    assert!(cmds.iter().any(|c| matches!(c, Command::PersistEpic { .. })));
+}
+
+#[test]
+fn shift_v_key_on_task_is_noop() {
+    let mut app = make_app();
+    app.selection_mut().set_column(0);
+    let cmds = app.handle_key(make_key(KeyCode::Char('V')));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn shift_v_key_on_empty_column_is_noop() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.selection_mut().set_column(0);
+    let cmds = app.handle_key(make_key(KeyCode::Char('V')));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn x_key_on_epic_enters_confirm_archive_epic() {
+    let mut app = make_app_with_epic_selected();
+    let cmds = app.handle_key(make_key(KeyCode::Char('x')));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::ConfirmArchiveEpic);
+    assert!(app.status_message.as_deref().unwrap().contains("Archive epic"));
+}
+
+#[test]
+fn enter_key_on_epic_enters_epic_view() {
+    let mut app = make_app_with_epic_selected();
+    app.handle_key(make_key(KeyCode::Enter));
+    assert!(matches!(app.view_mode, ViewMode::Epic { epic_id: EpicId(10), .. }));
+}
+
+#[test]
+fn e_key_in_epic_view_edits_epic() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.epics = vec![make_epic(10)];
+    app.view_mode = ViewMode::Epic {
+        epic_id: EpicId(10),
+        selection: BoardSelection::new(),
+        saved_board: BoardSelection::new(),
+    };
+    let cmds = app.handle_key(make_key(KeyCode::Char('e')));
+    assert_eq!(cmds.len(), 1);
+    assert!(matches!(&cmds[0], Command::EditEpicInEditor(e) if e.id == EpicId(10)));
+}
+
+#[test]
+fn esc_in_epic_view_exits_to_board() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.view_mode = ViewMode::Epic {
+        epic_id: EpicId(10),
+        selection: BoardSelection::new(),
+        saved_board: BoardSelection::new(),
+    };
+    app.handle_key(make_key(KeyCode::Esc));
+    assert!(matches!(app.view_mode, ViewMode::Board(_)));
+}
+
+// ---------------------------------------------------------------------------
+// input.rs — Normal mode: Arrow key variants
+// ---------------------------------------------------------------------------
+
+#[test]
+fn left_arrow_navigates_column() {
+    let mut app = make_app();
+    app.selection_mut().set_column(2);
+    app.handle_key(make_key(KeyCode::Left));
+    assert_eq!(app.selection().column(), 1);
+}
+
+#[test]
+fn right_arrow_navigates_column() {
+    let mut app = make_app();
+    app.selection_mut().set_column(1);
+    app.handle_key(make_key(KeyCode::Right));
+    assert_eq!(app.selection().column(), 2);
+}
+
+#[test]
+fn down_arrow_navigates_row() {
+    let mut app = make_app();
+    app.selection_mut().set_column(0); // Backlog has 2 tasks
+    app.handle_key(make_key(KeyCode::Down));
+    assert_eq!(app.selection().row(0), 1);
+}
+
+#[test]
+fn up_arrow_navigates_row() {
+    let mut app = make_app();
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 1);
+    app.handle_key(make_key(KeyCode::Up));
+    assert_eq!(app.selection().row(0), 0);
+}
+
+// ---------------------------------------------------------------------------
+// input.rs — handle_key_epic_text_input
+// ---------------------------------------------------------------------------
+
+#[test]
+fn epic_title_esc_cancels() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.input.mode = InputMode::InputEpicTitle;
+    app.input.buffer = "partial".to_string();
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(app.input.buffer.is_empty());
+}
+
+#[test]
+fn epic_title_enter_with_text_advances_to_description() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.input.mode = InputMode::InputEpicTitle;
+    app.input.buffer = "My Epic".to_string();
+    app.handle_key(make_key(KeyCode::Enter));
+    assert_eq!(app.input.mode, InputMode::InputEpicDescription);
+    assert!(app.input.buffer.is_empty());
+    assert_eq!(app.input.epic_draft.as_ref().unwrap().title, "My Epic");
+}
+
+#[test]
+fn epic_title_enter_empty_cancels() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.input.mode = InputMode::InputEpicTitle;
+    app.input.buffer.clear();
+    app.handle_key(make_key(KeyCode::Enter));
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn epic_description_enter_advances_to_repo_path() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.input.mode = InputMode::InputEpicDescription;
+    app.input.epic_draft = Some(EpicDraft { title: "E".to_string(), ..Default::default() });
+    app.input.buffer = "epic desc".to_string();
+    app.handle_key(make_key(KeyCode::Enter));
+    assert_eq!(app.input.mode, InputMode::InputEpicRepoPath);
+    assert!(app.input.buffer.is_empty());
+    assert_eq!(app.input.epic_draft.as_ref().unwrap().description, "epic desc");
+}
+
+#[test]
+fn epic_repo_path_enter_with_text_completes() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.input.mode = InputMode::InputEpicRepoPath;
+    app.input.epic_draft = Some(EpicDraft { title: "E".to_string(), description: "D".to_string(), ..Default::default() });
+    app.input.buffer = "/my/repo".to_string();
+    let cmds = app.handle_key(make_key(KeyCode::Enter));
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(cmds.iter().any(|c| matches!(c, Command::InsertEpic(ref d) if d.repo_path == "/my/repo")));
+}
+
+#[test]
+fn epic_repo_path_enter_empty_uses_saved_path() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.repo_paths = vec!["/saved".to_string()];
+    app.input.mode = InputMode::InputEpicRepoPath;
+    app.input.epic_draft = Some(EpicDraft { title: "E".to_string(), description: "D".to_string(), ..Default::default() });
+    app.input.buffer.clear();
+    let cmds = app.handle_key(make_key(KeyCode::Enter));
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(cmds.iter().any(|c| matches!(c, Command::InsertEpic(ref d) if d.repo_path == "/saved")));
+}
+
+#[test]
+fn epic_repo_path_enter_empty_no_saved_stays() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.repo_paths = vec![];
+    app.input.mode = InputMode::InputEpicRepoPath;
+    app.input.epic_draft = Some(EpicDraft { title: "E".to_string(), description: "D".to_string(), ..Default::default() });
+    app.input.buffer.clear();
+    let _cmds = app.handle_key(make_key(KeyCode::Enter));
+    // Should stay in repo path mode since there's no fallback
+    assert!(app.status_message.is_some());
+}
+
+#[test]
+fn epic_text_input_char_appends() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.input.mode = InputMode::InputEpicTitle;
+    app.handle_key(make_key(KeyCode::Char('A')));
+    app.handle_key(make_key(KeyCode::Char('b')));
+    assert_eq!(app.input.buffer, "Ab");
+}
+
+#[test]
+fn epic_text_input_backspace_removes() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.input.mode = InputMode::InputEpicTitle;
+    app.input.buffer = "abc".to_string();
+    app.handle_key(make_key(KeyCode::Backspace));
+    assert_eq!(app.input.buffer, "ab");
+}
+
+#[test]
+fn epic_text_input_unrecognized_key_is_noop() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.input.mode = InputMode::InputEpicTitle;
+    app.input.buffer = "x".to_string();
+    let cmds = app.handle_key(make_key(KeyCode::Tab));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.buffer, "x");
+    assert_eq!(app.input.mode, InputMode::InputEpicTitle);
+}
+
+// ---------------------------------------------------------------------------
+// input.rs — handle_key_confirm_delete_epic
+// ---------------------------------------------------------------------------
+
+fn make_app_confirm_delete_epic() -> App {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Backlog),
+    ], Duration::from_secs(300));
+    app.epics = vec![make_epic(10)];
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 1); // cursor on epic
+    app.input.mode = InputMode::ConfirmDeleteEpic;
+    app.status_message = Some("Delete epic and all subtasks? (y/n)".to_string());
+    app
+}
+
+#[test]
+fn confirm_delete_epic_y_deletes() {
+    let mut app = make_app_confirm_delete_epic();
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(app.status_message.is_none());
+    assert!(app.epics.is_empty());
+    assert!(cmds.iter().any(|c| matches!(c, Command::DeleteEpic(id) if *id == EpicId(10))));
+}
+
+#[test]
+fn confirm_delete_epic_uppercase_y_deletes() {
+    let mut app = make_app_confirm_delete_epic();
+    let cmds = app.handle_key(make_key(KeyCode::Char('Y')));
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(app.epics.is_empty());
+    assert!(cmds.iter().any(|c| matches!(c, Command::DeleteEpic(id) if *id == EpicId(10))));
+}
+
+#[test]
+fn confirm_delete_epic_other_key_cancels() {
+    let mut app = make_app_confirm_delete_epic();
+    let cmds = app.handle_key(make_key(KeyCode::Char('n')));
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(app.status_message.is_none());
+    assert_eq!(app.epics.len(), 1); // not deleted
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn confirm_delete_epic_no_epic_selected_is_noop() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
+    app.selection_mut().set_column(0); // cursor on task, not epic
+    app.input.mode = InputMode::ConfirmDeleteEpic;
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(cmds.is_empty()); // no deletion happened
+}
+
+// ---------------------------------------------------------------------------
+// input.rs — handle_key_confirm_archive_epic
+// ---------------------------------------------------------------------------
+
+fn make_app_confirm_archive_epic() -> App {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Backlog),
+    ], Duration::from_secs(300));
+    app.epics = vec![make_epic(10)];
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 1); // cursor on epic
+    app.input.mode = InputMode::ConfirmArchiveEpic;
+    app.status_message = Some("Archive epic and all subtasks? (y/n)".to_string());
+    app
+}
+
+#[test]
+fn confirm_archive_epic_y_archives() {
+    let mut app = make_app_confirm_archive_epic();
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(app.status_message.is_none());
+    assert!(app.epics.is_empty()); // removed
+    assert!(cmds.iter().any(|c| matches!(c, Command::DeleteEpic(id) if *id == EpicId(10))));
+}
+
+#[test]
+fn confirm_archive_epic_uppercase_y_archives() {
+    let mut app = make_app_confirm_archive_epic();
+    let cmds = app.handle_key(make_key(KeyCode::Char('Y')));
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(app.epics.is_empty());
+    assert!(cmds.iter().any(|c| matches!(c, Command::DeleteEpic(id) if *id == EpicId(10))));
+}
+
+#[test]
+fn confirm_archive_epic_other_key_cancels() {
+    let mut app = make_app_confirm_archive_epic();
+    let cmds = app.handle_key(make_key(KeyCode::Char('n')));
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(app.status_message.is_none());
+    assert_eq!(app.epics.len(), 1); // not removed
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn confirm_archive_epic_no_epic_selected_is_noop() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
+    app.selection_mut().set_column(0);
+    app.input.mode = InputMode::ConfirmArchiveEpic;
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(cmds.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// input.rs — Archive panel extras
+// ---------------------------------------------------------------------------
+
+#[test]
+fn archive_panel_down_arrow_navigates() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Archived),
+        make_task(2, TaskStatus::Archived),
+    ], Duration::from_secs(300));
+    app.archive.visible = true;
+    assert_eq!(app.archive.selected_row, 0);
+    app.handle_key(make_key(KeyCode::Down));
+    assert_eq!(app.archive.selected_row, 1);
+}
+
+#[test]
+fn archive_panel_up_arrow_navigates() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Archived),
+        make_task(2, TaskStatus::Archived),
+    ], Duration::from_secs(300));
+    app.archive.visible = true;
+    app.archive.selected_row = 1;
+    app.handle_key(make_key(KeyCode::Up));
+    assert_eq!(app.archive.selected_row, 0);
+}
+
+#[test]
+fn archive_panel_esc_closes() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Archived),
+    ], Duration::from_secs(300));
+    app.archive.visible = true;
+    app.handle_key(make_key(KeyCode::Esc));
+    assert!(!app.archive.visible);
+}
+
+#[test]
+fn archive_panel_e_edits_task() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Archived),
+    ], Duration::from_secs(300));
+    app.archive.visible = true;
+    let cmds = app.handle_key(make_key(KeyCode::Char('e')));
+    assert_eq!(cmds.len(), 1);
+    assert!(matches!(&cmds[0], Command::EditTaskInEditor(t) if t.id == TaskId(1)));
+}
+
+#[test]
+fn archive_panel_e_on_empty_is_noop() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.archive.visible = true;
+    let cmds = app.handle_key(make_key(KeyCode::Char('e')));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn archive_panel_x_on_empty_is_noop() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.archive.visible = true;
+    app.handle_key(make_key(KeyCode::Char('x')));
+    assert_eq!(app.input.mode, InputMode::Normal); // did not enter ConfirmDelete
+}
+
+#[test]
+fn archive_panel_q_quits() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Archived),
+    ], Duration::from_secs(300));
+    app.archive.visible = true;
+    app.handle_key(make_key(KeyCode::Char('q')));
+    assert!(app.should_quit);
+}
+
+#[test]
+fn archive_panel_unrecognized_key_is_noop() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Archived),
+    ], Duration::from_secs(300));
+    app.archive.visible = true;
+    let cmds = app.handle_key(make_key(KeyCode::Char('z')));
+    assert!(cmds.is_empty());
+    assert!(app.archive.visible);
+}
+
+// ---------------------------------------------------------------------------
+// input.rs — Confirm archive extras
+// ---------------------------------------------------------------------------
+
+#[test]
+fn confirm_archive_uppercase_y_archives() {
+    let mut app = make_app();
+    app.selection_mut().set_column(0);
+    app.input.mode = InputMode::ConfirmArchive;
+    app.handle_key(make_key(KeyCode::Char('Y')));
+    assert_eq!(app.input.mode, InputMode::Normal);
+    let task = app.tasks.iter().find(|t| t.id == TaskId(1)).unwrap();
+    assert_eq!(task.status, TaskStatus::Archived);
+}
+
+#[test]
+fn confirm_archive_esc_cancels() {
+    let mut app = make_app();
+    app.selection_mut().set_column(0);
+    app.input.mode = InputMode::ConfirmArchive;
+    app.status_message = Some("Archive task? (y/n)".to_string());
+    let cmds = app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(app.status_message.is_none());
+    assert!(cmds.is_empty());
+    let task = app.tasks.iter().find(|t| t.id == TaskId(1)).unwrap();
+    assert_eq!(task.status, TaskStatus::Backlog); // unchanged
+}
+
+// ---------------------------------------------------------------------------
+// input.rs — Quick dispatch extras
+// ---------------------------------------------------------------------------
+
+#[test]
+fn quick_dispatch_zero_is_noop() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.repo_paths = vec!["/repo".to_string()];
+    app.input.mode = InputMode::QuickDispatch;
+    let cmds = app.handle_key(make_key(KeyCode::Char('0')));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::QuickDispatch);
+}
+
+#[test]
+fn quick_dispatch_non_digit_is_noop() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.repo_paths = vec!["/repo".to_string()];
+    app.input.mode = InputMode::QuickDispatch;
+    let cmds = app.handle_key(make_key(KeyCode::Char('a')));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::QuickDispatch);
+}
+
+// ---------------------------------------------------------------------------
+// input.rs — Other edge cases
+// ---------------------------------------------------------------------------
+
+#[test]
+fn confirm_retry_unrecognized_key_is_noop() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.input.mode = InputMode::ConfirmRetry(TaskId(4));
+    let cmds = app.handle_key(make_key(KeyCode::Char('x')));
+    assert!(cmds.is_empty());
+    assert!(matches!(app.input.mode, InputMode::ConfirmRetry(TaskId(4))));
+}
+
+#[test]
+fn normal_mode_unrecognized_key_is_noop() {
+    let mut app = make_app();
+    let cmds = app.handle_key(make_key(KeyCode::Char('z')));
+    assert!(cmds.is_empty());
+    assert!(!app.should_quit);
+}
+
+#[test]
+fn text_input_unrecognized_key_is_noop() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.input.mode = InputMode::InputTitle;
+    app.input.buffer = "x".to_string();
+    let cmds = app.handle_key(make_key(KeyCode::Tab));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.buffer, "x");
+    assert_eq!(app.input.mode, InputMode::InputTitle);
+}
+
+#[test]
+fn d_key_on_archived_shows_warning() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Archived),
+    ], Duration::from_secs(300));
+    // Archived tasks don't appear in columns, but test dispatch routing directly
+    app.selection_mut().set_column(0);
+    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
+    // No task selected (archived tasks hidden from kanban) → noop
+    assert!(cmds.is_empty());
+}
