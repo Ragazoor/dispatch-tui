@@ -19,6 +19,76 @@ pub struct TaskUpdate<'a> {
 }
 
 // ---------------------------------------------------------------------------
+// TaskPatch — builder for selective field updates
+// ---------------------------------------------------------------------------
+
+/// Builder for partial task updates. Each field is `None` by default (= don't
+/// change). For nullable columns (`plan`, `worktree`, `tmux_window`) we use
+/// a double-Option: `None` = don't change, `Some(None)` = set NULL,
+/// `Some(Some(x))` = set value.
+#[derive(Debug, Default)]
+pub struct TaskPatch<'a> {
+    pub status: Option<TaskStatus>,
+    pub plan: Option<Option<&'a str>>,
+    pub title: Option<&'a str>,
+    pub description: Option<&'a str>,
+    pub repo_path: Option<&'a str>,
+    pub worktree: Option<Option<&'a str>>,
+    pub tmux_window: Option<Option<&'a str>>,
+}
+
+impl<'a> TaskPatch<'a> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn status(mut self, status: TaskStatus) -> Self {
+        self.status = Some(status);
+        self
+    }
+
+    pub fn plan(mut self, plan: Option<&'a str>) -> Self {
+        self.plan = Some(plan);
+        self
+    }
+
+    pub fn title(mut self, title: &'a str) -> Self {
+        self.title = Some(title);
+        self
+    }
+
+    pub fn description(mut self, description: &'a str) -> Self {
+        self.description = Some(description);
+        self
+    }
+
+    pub fn repo_path(mut self, repo_path: &'a str) -> Self {
+        self.repo_path = Some(repo_path);
+        self
+    }
+
+    pub fn worktree(mut self, worktree: Option<&'a str>) -> Self {
+        self.worktree = Some(worktree);
+        self
+    }
+
+    pub fn tmux_window(mut self, tmux_window: Option<&'a str>) -> Self {
+        self.tmux_window = Some(tmux_window);
+        self
+    }
+
+    pub fn has_changes(&self) -> bool {
+        self.status.is_some()
+            || self.plan.is_some()
+            || self.title.is_some()
+            || self.description.is_some()
+            || self.repo_path.is_some()
+            || self.worktree.is_some()
+            || self.tmux_window.is_some()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // TaskStore trait
 // ---------------------------------------------------------------------------
 
@@ -39,14 +109,7 @@ pub trait TaskStore: Send + Sync {
     fn list_repo_paths(&self) -> Result<Vec<String>>;
     fn save_repo_path(&self, path: &str) -> Result<()>;
     fn find_task_by_plan(&self, plan: &str) -> Result<Option<Task>>;
-    fn patch_task(
-        &self,
-        id: TaskId,
-        status: Option<TaskStatus>,
-        plan: Option<Option<&str>>,
-        title: Option<&str>,
-        description: Option<&str>,
-    ) -> Result<()>;
+    fn patch_task(&self, id: TaskId, patch: &TaskPatch<'_>) -> Result<()>;
     fn create_task_returning(
         &self,
         title: &str,
@@ -388,46 +451,55 @@ impl TaskStore for Database {
             .ok_or_else(|| anyhow::anyhow!("Task {id} vanished after insert"))
     }
 
-    fn patch_task(
-        &self,
-        id: TaskId,
-        status: Option<TaskStatus>,
-        plan: Option<Option<&str>>,
-        title: Option<&str>,
-        description: Option<&str>,
-    ) -> Result<()> {
+    fn patch_task(&self, id: TaskId, patch: &TaskPatch<'_>) -> Result<()> {
         let conn = self.conn()?;
 
-        // Fetch current values for fields not being patched
+        // Fetch current values for all patchable fields
         let existing = conn.query_row(
-            "SELECT title, description, status, plan FROM tasks WHERE id = ?1",
+            "SELECT title, description, repo_path, status, plan, worktree, tmux_window
+             FROM tasks WHERE id = ?1",
             params![id.0],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
-                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
                 ))
             },
         ).optional().context("Failed to fetch task for patch")?;
 
-        let (cur_title, cur_desc, cur_status, cur_plan) = match existing {
-            Some(row) => row,
-            None => anyhow::bail!("Task {id} not found"),
-        };
+        let (cur_title, cur_desc, cur_repo, cur_status, cur_plan, cur_worktree, cur_tmux) =
+            match existing {
+                Some(row) => row,
+                None => anyhow::bail!("Task {id} not found"),
+            };
 
-        let final_status = status.map(|s| s.as_str().to_string()).unwrap_or(cur_status);
-        let final_title = title.unwrap_or(&cur_title);
-        let final_desc = description.unwrap_or(&cur_desc);
-        let final_plan: Option<&str> = match plan {
+        let final_status = patch.status.map(|s| s.as_str().to_string()).unwrap_or(cur_status);
+        let final_title = patch.title.unwrap_or(&cur_title);
+        let final_desc = patch.description.unwrap_or(&cur_desc);
+        let final_repo = patch.repo_path.unwrap_or(&cur_repo);
+        let final_plan: Option<&str> = match patch.plan {
             Some(p) => p,
             None => cur_plan.as_deref(),
         };
+        let final_worktree: Option<&str> = match patch.worktree {
+            Some(w) => w,
+            None => cur_worktree.as_deref(),
+        };
+        let final_tmux: Option<&str> = match patch.tmux_window {
+            Some(t) => t,
+            None => cur_tmux.as_deref(),
+        };
 
         conn.execute(
-            "UPDATE tasks SET title = ?1, description = ?2, status = ?3, plan = ?4, updated_at = datetime('now') WHERE id = ?5",
-            params![final_title, final_desc, final_status, final_plan, id.0],
+            "UPDATE tasks SET title = ?1, description = ?2, repo_path = ?3, status = ?4,
+                    plan = ?5, worktree = ?6, tmux_window = ?7, updated_at = datetime('now')
+             WHERE id = ?8",
+            params![final_title, final_desc, final_repo, final_status, final_plan, final_worktree, final_tmux, id.0],
         ).context("Failed to patch task")?;
 
         Ok(())
@@ -833,14 +905,11 @@ mod tests {
         let id = db
             .create_task("title", "desc", "/repo", None, TaskStatus::Backlog)
             .unwrap();
-        db.patch_task(
-            id,
-            Some(TaskStatus::Ready),
-            Some(Some("plan.md")),
-            Some("new title"),
-            None,
-        )
-        .unwrap();
+        let patch = TaskPatch::new()
+            .status(TaskStatus::Ready)
+            .plan(Some("plan.md"))
+            .title("new title");
+        db.patch_task(id, &patch).unwrap();
         let task = db.get_task(id).unwrap().unwrap();
         assert_eq!(task.status, TaskStatus::Ready);
         assert_eq!(task.plan.as_deref(), Some("plan.md"));
@@ -854,7 +923,8 @@ mod tests {
         let id = db
             .create_task("title", "desc", "/repo", Some("plan.md"), TaskStatus::Ready)
             .unwrap();
-        db.patch_task(id, None, None, None, None).unwrap();
+        let patch = TaskPatch::new();
+        db.patch_task(id, &patch).unwrap();
         let task = db.get_task(id).unwrap().unwrap();
         assert_eq!(task.title, "title");
         assert_eq!(task.plan.as_deref(), Some("plan.md"));
@@ -899,10 +969,67 @@ mod tests {
         let id = db
             .create_task("title", "desc", "/repo", Some("plan.md"), TaskStatus::Ready)
             .unwrap();
-        db.patch_task(id, None, Some(None), None, None)
-            .unwrap();
+        let patch = TaskPatch::new().plan(None);
+        db.patch_task(id, &patch).unwrap();
         let task = db.get_task(id).unwrap().unwrap();
         assert!(task.plan.is_none());
+    }
+
+    #[test]
+    fn patch_task_sets_dispatch_fields() {
+        let db = in_memory_db();
+        let id = db
+            .create_task("title", "desc", "/repo", None, TaskStatus::Backlog)
+            .unwrap();
+        let patch = TaskPatch::new()
+            .worktree(Some("/repo/.worktrees/1-my-task"))
+            .tmux_window(Some("session:1-my-task"));
+        db.patch_task(id, &patch).unwrap();
+        let task = db.get_task(id).unwrap().unwrap();
+        assert_eq!(task.worktree.as_deref(), Some("/repo/.worktrees/1-my-task"));
+        assert_eq!(task.tmux_window.as_deref(), Some("session:1-my-task"));
+    }
+
+    #[test]
+    fn patch_task_clears_dispatch_fields() {
+        let db = in_memory_db();
+        let id = db
+            .create_task("title", "desc", "/repo", None, TaskStatus::Running)
+            .unwrap();
+        // Set dispatch fields first
+        let patch = TaskPatch::new()
+            .worktree(Some("/repo/.worktrees/1-my-task"))
+            .tmux_window(Some("session:1-my-task"));
+        db.patch_task(id, &patch).unwrap();
+        let task = db.get_task(id).unwrap().unwrap();
+        assert!(task.worktree.is_some());
+        assert!(task.tmux_window.is_some());
+
+        // Clear them
+        let patch = TaskPatch::new()
+            .worktree(None)
+            .tmux_window(None);
+        db.patch_task(id, &patch).unwrap();
+        let task = db.get_task(id).unwrap().unwrap();
+        assert!(task.worktree.is_none());
+        assert!(task.tmux_window.is_none());
+    }
+
+    #[test]
+    fn patch_task_status_and_dispatch_together() {
+        let db = in_memory_db();
+        let id = db
+            .create_task("title", "desc", "/repo", None, TaskStatus::Ready)
+            .unwrap();
+        let patch = TaskPatch::new()
+            .status(TaskStatus::Running)
+            .worktree(Some("/repo/.worktrees/1-my-task"))
+            .tmux_window(Some("session:1-my-task"));
+        db.patch_task(id, &patch).unwrap();
+        let task = db.get_task(id).unwrap().unwrap();
+        assert_eq!(task.status, TaskStatus::Running);
+        assert_eq!(task.worktree.as_deref(), Some("/repo/.worktrees/1-my-task"));
+        assert_eq!(task.tmux_window.as_deref(), Some("session:1-my-task"));
     }
 
     #[test]
