@@ -840,6 +840,39 @@ mod tests {
         response
     }
 
+    // -- Shared helpers --------------------------------------------------------
+
+    /// Create a task with sensible defaults, returning the TaskId.
+    fn create_task_fixture(state: &Arc<McpState>) -> crate::models::TaskId {
+        state
+            .db
+            .create_task("Test Task", "test description", "/repo", None, TaskStatus::Backlog)
+            .unwrap()
+    }
+
+    /// Assert response is an error whose message contains `substr`.
+    fn assert_error(resp: &JsonRpcResponse, substr: &str) {
+        let err = resp.error.as_ref().unwrap_or_else(|| {
+            panic!("expected error containing {substr:?}, got success: {:?}", resp.result)
+        });
+        assert!(
+            err.message.contains(substr),
+            "expected error containing {substr:?}, got: {:?}",
+            err.message,
+        );
+    }
+
+    /// Extract the text content from a successful MCP response.
+    fn extract_response_text(resp: &JsonRpcResponse) -> String {
+        let result = resp.result.as_ref().unwrap_or_else(|| {
+            panic!("expected success, got error: {:?}", resp.error)
+        });
+        result["content"][0]["text"]
+            .as_str()
+            .expect("missing text in response content")
+            .to_string()
+    }
+
     #[tokio::test]
     async fn initialize_returns_capabilities() {
         let state = test_state();
@@ -866,7 +899,7 @@ mod tests {
     #[tokio::test]
     async fn update_task_valid() {
         let state = test_state();
-        let task_id = state.db.create_task("Test", "desc", "/repo", None, crate::models::TaskStatus::Backlog).unwrap();
+        let task_id = create_task_fixture(&state);
 
         let resp = call(
             &state,
@@ -886,7 +919,7 @@ mod tests {
     #[tokio::test]
     async fn update_task_invalid_status() {
         let state = test_state();
-        let task_id = state.db.create_task("Test", "desc", "/repo", None, crate::models::TaskStatus::Backlog).unwrap();
+        let task_id = create_task_fixture(&state);
 
         let resp = call(
             &state,
@@ -896,8 +929,7 @@ mod tests {
                 "arguments": { "task_id": task_id.0, "status": "bogus" }
             })),
         ).await;
-        assert!(resp.error.is_some());
-        assert!(resp.error.unwrap().message.contains("Unknown status"));
+        assert_error(&resp, "Unknown status");
     }
 
     #[tokio::test]
@@ -1559,5 +1591,441 @@ mod tests {
             })),
         ).await;
         assert!(resp.error.is_none(), "should accept string task_id: {:?}", resp.error);
+    }
+
+    // =======================================================================
+    // Epic tool tests
+    // =======================================================================
+
+    #[tokio::test]
+    async fn create_epic_minimal() {
+        let state = test_state();
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({
+                "name": "create_epic",
+                "arguments": { "title": "My Epic", "repo_path": "/repo" }
+            })),
+        ).await;
+        let text = extract_response_text(&resp);
+        assert!(text.contains("Epic"));
+        assert!(text.contains("created"));
+
+        let epics = state.db.list_epics().unwrap();
+        assert_eq!(epics.len(), 1);
+        assert_eq!(epics[0].title, "My Epic");
+        assert_eq!(epics[0].repo_path, "/repo");
+    }
+
+    #[tokio::test]
+    async fn create_epic_with_all_fields() {
+        let state = test_state();
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({
+                "name": "create_epic",
+                "arguments": {
+                    "title": "Full Epic",
+                    "repo_path": "/repo",
+                    "description": "Epic desc",
+                    "plan": "# Plan\n- Step 1"
+                }
+            })),
+        ).await;
+        assert!(resp.error.is_none(), "{:?}", resp.error);
+
+        let epics = state.db.list_epics().unwrap();
+        assert_eq!(epics[0].description, "Epic desc");
+        assert_eq!(epics[0].plan, "# Plan\n- Step 1");
+    }
+
+    #[tokio::test]
+    async fn create_epic_missing_title() {
+        let state = test_state();
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({
+                "name": "create_epic",
+                "arguments": { "repo_path": "/repo" }
+            })),
+        ).await;
+        assert_error(&resp, "Invalid arguments");
+    }
+
+    #[tokio::test]
+    async fn create_epic_missing_repo_path() {
+        let state = test_state();
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({
+                "name": "create_epic",
+                "arguments": { "title": "No Repo" }
+            })),
+        ).await;
+        assert_error(&resp, "Invalid arguments");
+    }
+
+    #[tokio::test]
+    async fn get_epic_found() {
+        let state = test_state();
+        let epic = state.db.create_epic("Get Me", "desc", "plan", "/repo").unwrap();
+
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({
+                "name": "get_epic",
+                "arguments": { "epic_id": epic.id.0 }
+            })),
+        ).await;
+        let text = extract_response_text(&resp);
+        assert!(text.contains("Get Me"));
+        assert!(text.contains("desc"));
+        assert!(text.contains("/repo"));
+    }
+
+    #[tokio::test]
+    async fn get_epic_not_found() {
+        let state = test_state();
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({
+                "name": "get_epic",
+                "arguments": { "epic_id": 9999 }
+            })),
+        ).await;
+        assert_error(&resp, "not found");
+    }
+
+    #[tokio::test]
+    async fn get_epic_shows_subtask_summary() {
+        let state = test_state();
+        let epic = state.db.create_epic("With Tasks", "", "", "/repo").unwrap();
+        let t1 = state.db.create_task("Sub 1", "", "/repo", None, TaskStatus::Done).unwrap();
+        let t2 = state.db.create_task("Sub 2", "", "/repo", None, TaskStatus::Backlog).unwrap();
+        state.db.set_task_epic_id(t1, Some(epic.id)).unwrap();
+        state.db.set_task_epic_id(t2, Some(epic.id)).unwrap();
+
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({
+                "name": "get_epic",
+                "arguments": { "epic_id": epic.id.0 }
+            })),
+        ).await;
+        let text = extract_response_text(&resp);
+        assert!(text.contains("1/2 done"), "expected subtask summary, got: {text}");
+    }
+
+    #[tokio::test]
+    async fn get_epic_accepts_string_id() {
+        let state = test_state();
+        let epic = state.db.create_epic("String ID", "", "", "/repo").unwrap();
+
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({
+                "name": "get_epic",
+                "arguments": { "epic_id": epic.id.0.to_string() }
+            })),
+        ).await;
+        assert!(resp.error.is_none(), "should accept string epic_id: {:?}", resp.error);
+        let text = extract_response_text(&resp);
+        assert!(text.contains("String ID"));
+    }
+
+    #[tokio::test]
+    async fn list_epics_empty() {
+        let state = test_state();
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({ "name": "list_epics", "arguments": {} })),
+        ).await;
+        let text = extract_response_text(&resp);
+        assert!(text.contains("No epics found"));
+    }
+
+    #[tokio::test]
+    async fn list_epics_with_items() {
+        let state = test_state();
+        state.db.create_epic("Epic A", "desc a", "", "/repo").unwrap();
+        state.db.create_epic("Epic B", "desc b", "", "/repo").unwrap();
+
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({ "name": "list_epics", "arguments": {} })),
+        ).await;
+        let text = extract_response_text(&resp);
+        assert!(text.contains("Epic A"));
+        assert!(text.contains("Epic B"));
+    }
+
+    #[tokio::test]
+    async fn list_epics_shows_subtask_counts() {
+        let state = test_state();
+        let epic = state.db.create_epic("Tracked", "", "", "/repo").unwrap();
+        let t1 = state.db.create_task("Done", "", "/repo", None, TaskStatus::Done).unwrap();
+        let t2 = state.db.create_task("Pending", "", "/repo", None, TaskStatus::Backlog).unwrap();
+        state.db.set_task_epic_id(t1, Some(epic.id)).unwrap();
+        state.db.set_task_epic_id(t2, Some(epic.id)).unwrap();
+
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({ "name": "list_epics", "arguments": {} })),
+        ).await;
+        let text = extract_response_text(&resp);
+        assert!(text.contains("1/2 done"), "expected subtask counts, got: {text}");
+    }
+
+    #[tokio::test]
+    async fn update_epic_title() {
+        let state = test_state();
+        let epic = state.db.create_epic("Old Title", "", "", "/repo").unwrap();
+
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({
+                "name": "update_epic",
+                "arguments": { "epic_id": epic.id.0, "title": "New Title" }
+            })),
+        ).await;
+        let text = extract_response_text(&resp);
+        assert!(text.contains("updated"));
+        assert!(text.contains("title"));
+
+        let updated = state.db.get_epic(epic.id).unwrap().unwrap();
+        assert_eq!(updated.title, "New Title");
+    }
+
+    #[tokio::test]
+    async fn update_epic_mark_done() {
+        let state = test_state();
+        let epic = state.db.create_epic("To Finish", "", "", "/repo").unwrap();
+
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({
+                "name": "update_epic",
+                "arguments": { "epic_id": epic.id.0, "done": true }
+            })),
+        ).await;
+        let text = extract_response_text(&resp);
+        assert!(text.contains("done"));
+
+        let updated = state.db.get_epic(epic.id).unwrap().unwrap();
+        assert!(updated.done);
+    }
+
+    #[tokio::test]
+    async fn update_epic_multiple_fields() {
+        let state = test_state();
+        let epic = state.db.create_epic("Old", "old desc", "old plan", "/repo").unwrap();
+
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({
+                "name": "update_epic",
+                "arguments": {
+                    "epic_id": epic.id.0,
+                    "title": "New",
+                    "description": "new desc",
+                    "plan": "new plan"
+                }
+            })),
+        ).await;
+        assert!(resp.error.is_none());
+
+        let updated = state.db.get_epic(epic.id).unwrap().unwrap();
+        assert_eq!(updated.title, "New");
+        assert_eq!(updated.description, "new desc");
+        assert_eq!(updated.plan, "new plan");
+    }
+
+    #[tokio::test]
+    async fn update_epic_accepts_string_id() {
+        let state = test_state();
+        let epic = state.db.create_epic("Str Epic", "", "", "/repo").unwrap();
+
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({
+                "name": "update_epic",
+                "arguments": { "epic_id": epic.id.0.to_string(), "title": "Updated" }
+            })),
+        ).await;
+        assert!(resp.error.is_none(), "should accept string epic_id: {:?}", resp.error);
+    }
+
+    // =======================================================================
+    // Additional edge case tests
+    // =======================================================================
+
+    #[tokio::test]
+    async fn list_tasks_invalid_status_string() {
+        let state = test_state();
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({ "name": "list_tasks", "arguments": { "status": "bogus" } })),
+        ).await;
+        assert_error(&resp, "Unknown status");
+    }
+
+    #[tokio::test]
+    async fn list_tasks_invalid_status_in_array() {
+        let state = test_state();
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({ "name": "list_tasks", "arguments": { "status": ["backlog", "bogus"] } })),
+        ).await;
+        assert_error(&resp, "Invalid status in array");
+    }
+
+    #[tokio::test]
+    async fn list_tasks_status_as_number_errors() {
+        let state = test_state();
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({ "name": "list_tasks", "arguments": { "status": 42 } })),
+        ).await;
+        assert_error(&resp, "string or array");
+    }
+
+    #[tokio::test]
+    async fn claim_task_rejects_done_task() {
+        let state = test_state();
+        let task_id = state.db.create_task("Done", "desc", "/repo", None, TaskStatus::Done).unwrap();
+
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({
+                "name": "claim_task",
+                "arguments": {
+                    "task_id": task_id.0,
+                    "worktree": "/repo/.worktrees/5-other",
+                    "tmux_window": "task-5"
+                }
+            })),
+        ).await;
+        assert_error(&resp, "already");
+    }
+
+    #[tokio::test]
+    async fn claim_task_rejects_review_task() {
+        let state = test_state();
+        let task_id = state.db.create_task("Review", "desc", "/repo", None, TaskStatus::Review).unwrap();
+
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({
+                "name": "claim_task",
+                "arguments": {
+                    "task_id": task_id.0,
+                    "worktree": "/repo/.worktrees/5-other",
+                    "tmux_window": "task-5"
+                }
+            })),
+        ).await;
+        assert_error(&resp, "already");
+    }
+
+    #[tokio::test]
+    async fn claim_task_worktree_without_worktrees_dir() {
+        let state = test_state();
+        // Task repo is "/repo", worktree path has no /.worktrees/ segment
+        // so the full path is used as the repo — should match when equal
+        let task_id = state.db.create_task("Direct", "desc", "/repo", None, TaskStatus::Ready).unwrap();
+
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({
+                "name": "claim_task",
+                "arguments": {
+                    "task_id": task_id.0,
+                    "worktree": "/repo",
+                    "tmux_window": "task-5"
+                }
+            })),
+        ).await;
+        assert!(resp.error.is_none(), "should match when worktree equals repo: {:?}", resp.error);
+    }
+
+    #[tokio::test]
+    async fn create_task_with_epic_id() {
+        let state = test_state();
+        let epic = state.db.create_epic("Parent Epic", "", "", "/repo").unwrap();
+
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({
+                "name": "create_task",
+                "arguments": {
+                    "title": "Epic Child",
+                    "repo_path": "/repo",
+                    "epic_id": epic.id.0
+                }
+            })),
+        ).await;
+        assert!(resp.error.is_none(), "{:?}", resp.error);
+
+        let subtasks = state.db.list_tasks_for_epic(epic.id).unwrap();
+        assert_eq!(subtasks.len(), 1);
+        assert_eq!(subtasks[0].title, "Epic Child");
+    }
+
+    #[tokio::test]
+    async fn create_task_with_string_epic_id() {
+        let state = test_state();
+        let epic = state.db.create_epic("Parent", "", "", "/repo").unwrap();
+
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({
+                "name": "create_task",
+                "arguments": {
+                    "title": "String Epic Child",
+                    "repo_path": "/repo",
+                    "epic_id": epic.id.0.to_string()
+                }
+            })),
+        ).await;
+        assert!(resp.error.is_none(), "should accept string epic_id: {:?}", resp.error);
+
+        let subtasks = state.db.list_tasks_for_epic(epic.id).unwrap();
+        assert_eq!(subtasks.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn tools_list_includes_epic_tools() {
+        let state = test_state();
+        let resp = call(&state, "tools/list", None).await;
+        let result = resp.result.unwrap();
+        let tools = result["tools"].as_array().unwrap();
+        let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+        assert!(names.contains(&"create_epic"));
+        assert!(names.contains(&"get_epic"));
+        assert!(names.contains(&"list_epics"));
+        assert!(names.contains(&"update_epic"));
     }
 }
