@@ -123,6 +123,18 @@ The TUI tick fires every ~2 seconds (`src/runtime.rs`). Each tick:
 - **Test helpers** (`src/tui/tests.rs`): `make_app()` creates a default App, `make_task()` creates a task with defaults, `render_to_buffer()` renders to an in-memory terminal, `buffer_contains()` searches rendered output.
 - **Runtime tests** (`src/runtime.rs`): Use `test_runtime()` to get a `TuiRuntime` + `App` wired to in-memory DB, mock runner, and real message channels.
 
+### Integration Tests
+
+`tests/` contains CLI integration tests (`tests/cli.rs`) and a full lifecycle test (`tests/lifecycle.rs`). These test the binary's subcommands (create, list, update, plan) against a real SQLite database.
+
+### Property-Based Tests
+
+`proptest` (dev-dependency) is used for fuzzing `parse_plan` in `src/plan.rs`. Use this pattern for any parser or transformer that should handle arbitrary input without panicking.
+
+## MCP Schema Maintenance
+
+Tool definitions in `mcp/handlers.rs` (`tool_definitions()`) must be manually kept in sync with the typed argument structs (`UpdateTaskArgs`, `GetTaskArgs`, etc.). There is no compile-time check — test coverage catches most drift.
+
 ## Conventions
 
 - Rust edition 2021, SQLite with bundled `libsqlite3-sys`
@@ -133,3 +145,4 @@ The TUI tick fires every ~2 seconds (`src/runtime.rs`). Each tick:
 - **Column count**: `TaskStatus::COLUMN_COUNT` is the canonical source. Never hardcode `5`.
 - **Database abstraction**: `db::TaskStore` trait abstracts persistence. `TuiRuntime` and `McpState` hold `Arc<dyn TaskStore>`. Tests can provide mock implementations.
 - **Task lookup**: Use `App::find_task(id)` / `find_task_mut(id)` instead of inline `.iter().find()`.
+- **Error handling**: Message handlers should return `Vec<Command>` with error messages displayed via the status bar, never panic.
