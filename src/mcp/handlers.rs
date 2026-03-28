@@ -1190,6 +1190,103 @@ mod tests {
         assert!(resp.error.unwrap().message.contains("not found"));
     }
 
+    /// Validates that JSON schemas in `tool_definitions()` match the argument structs.
+    /// Catches drift when a field is added/removed from a struct but not the schema
+    /// (or vice versa). The `expected_props` lists must be kept in sync with struct
+    /// fields — if you add a field to a struct, add it here too; the test then fails
+    /// if the schema wasn't also updated.
+    #[test]
+    fn tool_schemas_match_arg_structs() {
+        use std::collections::BTreeSet;
+
+        let defs = tool_definitions();
+        let tools_arr = defs["tools"].as_array().unwrap();
+        let tools: std::collections::HashMap<&str, &Value> = tools_arr
+            .iter()
+            .map(|t| (t["name"].as_str().unwrap(), t))
+            .collect();
+
+        fn schema_props<'a>(tool: &'a Value) -> (BTreeSet<&'a str>, BTreeSet<&'a str>) {
+            let schema = &tool["inputSchema"];
+            let props: BTreeSet<&str> = schema["properties"]
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(|k| k.as_str())
+                .collect();
+            let required: BTreeSet<&str> = schema
+                .get("required")
+                .and_then(Value::as_array)
+                .map(|arr| arr.iter().map(|v| v.as_str().unwrap()).collect())
+                .unwrap_or_default();
+            (props, required)
+        }
+
+        // (tool_name, expected_properties, expected_required, full_payload)
+        // expected_properties MUST match the struct fields — update when structs change.
+        let cases: Vec<(&str, BTreeSet<&str>, BTreeSet<&str>, Value)> = vec![
+            (
+                "update_task",
+                BTreeSet::from(["task_id", "status", "plan", "title", "description"]),
+                BTreeSet::from(["task_id"]),
+                json!({"task_id": 1, "status": "done", "plan": "/p.md", "title": "t", "description": "d"}),
+            ),
+            (
+                "get_task",
+                BTreeSet::from(["task_id"]),
+                BTreeSet::from(["task_id"]),
+                json!({"task_id": 1}),
+            ),
+            (
+                "create_task",
+                BTreeSet::from(["title", "repo_path", "description", "plan"]),
+                BTreeSet::from(["title", "repo_path"]),
+                json!({"title": "t", "repo_path": "/r", "description": "d", "plan": "/p.md"}),
+            ),
+            (
+                "list_tasks",
+                BTreeSet::from(["status"]),
+                BTreeSet::new(),
+                json!({"status": "ready"}),
+            ),
+            (
+                "claim_task",
+                BTreeSet::from(["task_id", "worktree", "tmux_window"]),
+                BTreeSet::from(["task_id", "worktree", "tmux_window"]),
+                json!({"task_id": 1, "worktree": "/w", "tmux_window": "tw"}),
+            ),
+        ];
+
+        // Verify we cover exactly the tools that exist
+        let expected_names: BTreeSet<&str> = cases.iter().map(|(name, _, _, _)| *name).collect();
+        let actual_names: BTreeSet<&str> = tools.keys().copied().collect();
+        assert_eq!(actual_names, expected_names, "Tool list mismatch — update this test when adding/removing tools");
+
+        for (name, exp_props, exp_required, payload) in &cases {
+            let tool = tools[name];
+            let (actual_props, actual_required) = schema_props(tool);
+
+            assert_eq!(
+                &actual_props, exp_props,
+                "Property mismatch for '{name}'"
+            );
+            assert_eq!(
+                &actual_required, exp_required,
+                "Required field mismatch for '{name}'"
+            );
+
+            // Verify the full payload deserializes into the struct
+            match *name {
+                "update_task" => { serde_json::from_value::<UpdateTaskArgs>(payload.clone()).unwrap(); }
+                "get_task" => { serde_json::from_value::<GetTaskArgs>(payload.clone()).unwrap(); }
+                "create_task" => { serde_json::from_value::<CreateTaskArgs>(payload.clone()).unwrap(); }
+                "list_tasks" => { serde_json::from_value::<ListTasksArgs>(payload.clone()).unwrap(); }
+                "claim_task" => { serde_json::from_value::<ClaimTaskArgs>(payload.clone()).unwrap(); }
+                other => panic!("No deserialization check for tool: {other}"),
+            }
+        }
+    }
+
     #[tokio::test]
     async fn claim_task_accepts_string_task_id() {
         let state = test_state();
