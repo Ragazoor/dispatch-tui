@@ -139,6 +139,38 @@ impl Drop for TerminalSuspend<'_> {
 }
 
 // ---------------------------------------------------------------------------
+// InputPausedGuard — RAII guard for pausing input + suspending the terminal
+// ---------------------------------------------------------------------------
+
+struct InputPausedGuard<'a> {
+    input_paused: Arc<AtomicBool>,
+    terminal_guard: Option<TerminalSuspend<'a>>,
+}
+
+impl<'a> InputPausedGuard<'a> {
+    fn new(
+        input_paused: &Arc<AtomicBool>,
+        terminal: &'a mut Terminal<CrosstermBackend<io::Stdout>>,
+    ) -> Result<Self> {
+        input_paused.store(true, Ordering::Relaxed);
+        std::thread::sleep(Duration::from_millis(150));
+        let terminal_guard = TerminalSuspend::new(terminal)?;
+        Ok(InputPausedGuard {
+            input_paused: Arc::clone(input_paused),
+            terminal_guard: Some(terminal_guard),
+        })
+    }
+}
+
+impl Drop for InputPausedGuard<'_> {
+    fn drop(&mut self) {
+        // Restore terminal first, then resume input (matches original ordering)
+        drop(self.terminal_guard.take());
+        self.input_paused.store(false, Ordering::Relaxed);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // TuiRuntime — shared context for command execution
 // ---------------------------------------------------------------------------
 
@@ -297,24 +329,15 @@ impl TuiRuntime {
         );
         std::io::Write::write_all(tmp.as_file_mut(), content.as_bytes())?;
 
-        // Pause the input polling thread so vim can read keypresses
-        self.input_paused.store(true, Ordering::Relaxed);
-        std::thread::sleep(Duration::from_millis(150));
+        // Pause input + suspend TUI (RAII guard restores on drop)
+        let _guard = InputPausedGuard::new(&self.input_paused, terminal)?;
 
-        // Suspend TUI (RAII guard restores on drop, even if editor panics)
-        let _guard = TerminalSuspend::new(terminal)?;
-
-        // Open editor
         let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
         let status = std::process::Command::new(&editor)
             .arg(tmp.path())
             .status();
 
-        // Guard restores terminal on drop
         drop(_guard);
-
-        // Resume input polling thread
-        self.input_paused.store(false, Ordering::Relaxed);
 
         match status {
             Ok(exit) if exit.success() => {
@@ -426,16 +449,13 @@ impl TuiRuntime {
             .tempfile()?;
         std::io::Write::write_all(tmp.as_file_mut(), content.as_bytes())?;
 
-        self.input_paused.store(true, Ordering::Relaxed);
-        std::thread::sleep(Duration::from_millis(150));
-        let _guard = TerminalSuspend::new(terminal)?;
+        let _guard = InputPausedGuard::new(&self.input_paused, terminal)?;
 
         let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
         let status = std::process::Command::new(&editor)
             .arg(tmp.path())
             .status();
         drop(_guard);
-        self.input_paused.store(false, Ordering::Relaxed);
 
         match status {
             Ok(exit) if exit.success() => {
