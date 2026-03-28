@@ -133,7 +133,7 @@ async fn main() -> Result<()> {
                     println!("Task {} not updated (status is not {})", id, condition);
                 }
             } else {
-                db.update_status(models::TaskId(id), new_status)?;
+                db.patch_task(models::TaskId(id), &db::TaskPatch::new().status(new_status))?;
                 println!("Task {} updated to {}", id, status);
             }
         }
@@ -194,7 +194,7 @@ async fn main() -> Result<()> {
             let plan_str = plan_path.to_string_lossy();
 
             let db = db::Database::open(&cli.db)?;
-            db.update_plan(models::TaskId(id), Some(&plan_str))?;
+            db.patch_task(models::TaskId(id), &db::TaskPatch::new().plan(Some(&plan_str)))?;
             println!("Plan attached to task #{}: {}", id, plan_str);
         }
     }

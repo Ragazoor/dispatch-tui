@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use task_orchestrator::db::{Database, TaskStore};
+use task_orchestrator::db::{self, Database, TaskStore};
 use task_orchestrator::models::{Task, TaskId, TaskStatus};
 use task_orchestrator::tui::{App, Command, Message, MoveDirection};
 
@@ -17,11 +17,12 @@ fn execute(db: &Database, cmds: &[Command]) {
     for cmd in cmds {
         match cmd {
             Command::PersistTask(task) => {
-                let _ = db.persist_task(
+                let _ = db.patch_task(
                     task.id,
-                    task.status,
-                    task.worktree.as_deref(),
-                    task.tmux_window.as_deref(),
+                    &db::TaskPatch::new()
+                        .status(task.status)
+                        .worktree(task.worktree.as_deref())
+                        .tmux_window(task.tmux_window.as_deref()),
                 );
             }
             Command::DeleteTask(id) => {

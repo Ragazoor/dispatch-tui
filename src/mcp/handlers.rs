@@ -4,6 +4,7 @@ use axum::{Json, extract::State, http::StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::db;
 use crate::models::{TaskId, TaskStatus};
 
 use super::McpState;
@@ -358,15 +359,21 @@ fn handle_update_task(state: &McpState, id: Option<Value>, args: Value) -> JsonR
         None
     };
 
-    let plan = parsed.plan.as_ref().map(|p| Some(p.as_str()));
+    let mut patch = db::TaskPatch::new();
+    if let Some(s) = status {
+        patch = patch.status(s);
+    }
+    if let Some(ref p) = parsed.plan {
+        patch = patch.plan(Some(p.as_str()));
+    }
+    if let Some(ref t) = parsed.title {
+        patch = patch.title(t);
+    }
+    if let Some(ref d) = parsed.description {
+        patch = patch.description(d);
+    }
 
-    if let Err(e) = state.db.patch_task(
-        TaskId(parsed.task_id),
-        status,
-        plan,
-        parsed.title.as_deref(),
-        parsed.description.as_deref(),
-    ) {
+    if let Err(e) = state.db.patch_task(TaskId(parsed.task_id), &patch) {
         return JsonRpcResponse::err(id, -32603, format!("Database error: {e}"));
     }
 
@@ -574,11 +581,12 @@ fn handle_claim_task(state: &McpState, id: Option<Value>, args: Value) -> JsonRp
     }
 
     // 4. Atomically set status + worktree + tmux_window
-    if let Err(e) = state.db.persist_task(
+    if let Err(e) = state.db.patch_task(
         TaskId(parsed.task_id),
-        TaskStatus::Running,
-        Some(&parsed.worktree),
-        Some(&parsed.tmux_window),
+        &db::TaskPatch::new()
+            .status(TaskStatus::Running)
+            .worktree(Some(&parsed.worktree))
+            .tmux_window(Some(&parsed.tmux_window)),
     ) {
         return JsonRpcResponse::err(id, -32603, format!("Database error: {e}"));
     }

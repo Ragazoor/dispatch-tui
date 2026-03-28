@@ -196,11 +196,12 @@ impl TuiRuntime {
     }
 
     fn exec_persist_task(&self, app: &mut App, task: models::Task) {
-        if let Err(e) = self.database.persist_task(
+        if let Err(e) = self.database.patch_task(
             task.id,
-            task.status,
-            task.worktree.as_deref(),
-            task.tmux_window.as_deref(),
+            &db::TaskPatch::new()
+                .status(task.status)
+                .worktree(task.worktree.as_deref())
+                .tmux_window(task.tmux_window.as_deref()),
         ) {
             app.update(Message::Error(format!("DB error persisting task: {e}")));
         }
@@ -330,15 +331,14 @@ impl TuiRuntime {
                     }
                     let plan = if fields.plan.is_empty() { None } else { Some(fields.plan) };
 
-                    if let Err(e) = self.database.update_task(
+                    if let Err(e) = self.database.patch_task(
                         task_id,
-                        &db::TaskUpdate {
-                            title: &title,
-                            description: &description,
-                            repo_path: &repo_path,
-                            status: new_status,
-                            plan: plan.as_deref(),
-                        },
+                        &db::TaskPatch::new()
+                            .status(new_status)
+                            .title(&title)
+                            .description(&description)
+                            .repo_path(&repo_path)
+                            .plan(plan.as_deref()),
                     ) {
                         app.update(Message::Error(format!("DB error updating task: {e}")));
                     }
@@ -400,7 +400,7 @@ impl TuiRuntime {
         if shared {
             // Other active tasks share this worktree — just detach this task
             tracing::info!(task_id = id.0, "worktree shared, detaching only");
-            if let Err(e) = self.database.update_dispatch(id, None, None) {
+            if let Err(e) = self.database.patch_task(id, &db::TaskPatch::new().worktree(None).tmux_window(None)) {
                 let _ = self.msg_tx.send(Message::Error(format!("Detach failed: {e:#}")));
             }
             return;
@@ -786,8 +786,8 @@ mod tests {
         let id_b = app.tasks()[1].id;
 
         let worktree = "/repo/.worktrees/1-task-a";
-        rt.database.persist_task(id_a, models::TaskStatus::Running, Some(worktree), Some("task-1")).unwrap();
-        rt.database.persist_task(id_b, models::TaskStatus::Running, Some(worktree), Some("task-1")).unwrap();
+        rt.database.patch_task(id_a, &db::TaskPatch::new().status(models::TaskStatus::Running).worktree(Some(worktree)).tmux_window(Some("task-1"))).unwrap();
+        rt.database.patch_task(id_b, &db::TaskPatch::new().status(models::TaskStatus::Running).worktree(Some(worktree)).tmux_window(Some("task-1"))).unwrap();
 
         // Cleanup task A — should detach only (worktree is shared)
         rt.exec_cleanup(id_a, "/repo".into(), worktree.into(), Some("task-1".into()));
