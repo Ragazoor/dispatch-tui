@@ -1,7 +1,10 @@
 use anyhow::{Context, Result};
 use serde_json::{json, Map, Value};
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
+
+const HOOK_SCRIPT: &str = include_str!("../hooks/task-status-hook");
 
 // ---------------------------------------------------------------------------
 // MCP config merging
@@ -95,6 +98,38 @@ pub fn merge_permissions(existing: Option<Value>) -> PermissionsMergeResult {
 }
 
 // ---------------------------------------------------------------------------
+// Hook script installation
+// ---------------------------------------------------------------------------
+
+fn local_bin_dir() -> Result<PathBuf> {
+    let home = std::env::var("HOME").context("$HOME is not set")?;
+    Ok(PathBuf::from(home).join(".local").join("bin"))
+}
+
+pub fn install_hook_script() -> Result<bool> {
+    let bin_dir = local_bin_dir()?;
+    fs::create_dir_all(&bin_dir)
+        .with_context(|| format!("Failed to create {}", bin_dir.display()))?;
+
+    let hook_path = bin_dir.join("task-status-hook");
+
+    if hook_path.exists() {
+        let existing = fs::read_to_string(&hook_path)
+            .with_context(|| format!("Failed to read {}", hook_path.display()))?;
+        if existing == HOOK_SCRIPT {
+            return Ok(false);
+        }
+    }
+
+    fs::write(&hook_path, HOOK_SCRIPT)
+        .with_context(|| format!("Failed to write {}", hook_path.display()))?;
+    fs::set_permissions(&hook_path, fs::Permissions::from_mode(0o755))
+        .with_context(|| format!("Failed to set permissions on {}", hook_path.display()))?;
+
+    Ok(true)
+}
+
+// ---------------------------------------------------------------------------
 // File I/O helpers
 // ---------------------------------------------------------------------------
 
@@ -159,6 +194,14 @@ pub fn run_setup(port: u16) -> Result<()> {
         println!(
             "Permissions: all MCP tool permissions already present in ~/.claude/settings.json"
         );
+    }
+
+    // 3. Hook script
+    if install_hook_script()? {
+        println!("Hook script: installed task-status-hook to ~/.local/bin/");
+        any_changes = true;
+    } else {
+        println!("Hook script: task-status-hook already up to date in ~/.local/bin/");
     }
 
     if any_changes {
@@ -284,6 +327,20 @@ mod tests {
         }));
         let result = merge_permissions(existing);
         assert_eq!(result.added_count, 0);
+    }
+
+    // -- Hook script --
+
+    #[test]
+    fn hook_script_is_valid_bash() {
+        assert!(HOOK_SCRIPT.starts_with("#!/usr/bin/env bash"));
+    }
+
+    #[test]
+    fn hook_script_handles_all_events() {
+        assert!(HOOK_SCRIPT.contains("PreToolUse)"));
+        assert!(HOOK_SCRIPT.contains("Stop)"));
+        assert!(HOOK_SCRIPT.contains("Notification)"));
     }
 
     // -- File I/O --
