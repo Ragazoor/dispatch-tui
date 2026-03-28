@@ -129,6 +129,20 @@ struct CreateTaskArgs {
     plan: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct ListTasksArgs {
+    #[serde(default)]
+    status: Option<Value>,
+}
+
+#[derive(Deserialize)]
+struct ClaimTaskArgs {
+    #[serde(deserialize_with = "deserialize_flexible_i64")]
+    task_id: i64,
+    worktree: String,
+    tmux_window: String,
+}
+
 fn parse_args<T: serde::de::DeserializeOwned>(
     id: Option<Value>,
     args: Value,
@@ -214,6 +228,44 @@ fn tool_definitions() -> Value {
                     },
                     "required": ["title", "repo_path"]
                 }
+            },
+            {
+                "name": "list_tasks",
+                "description": "List tasks on the kanban board, optionally filtered by status.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "status": {
+                            "description": "Filter by status. Single string or array of strings.",
+                            "oneOf": [
+                                { "type": "string", "enum": ["backlog", "ready", "running", "review", "done"] },
+                                { "type": "array", "items": { "type": "string", "enum": ["backlog", "ready", "running", "review", "done"] } }
+                            ]
+                        }
+                    }
+                }
+            },
+            {
+                "name": "claim_task",
+                "description": "Claim a backlog or ready task into your current worktree. Sets the task to running and associates it with your worktree and tmux window. Only tasks in the same repo can be claimed.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "task_id": {
+                            "type": "integer",
+                            "description": "The task ID to claim"
+                        },
+                        "worktree": {
+                            "type": "string",
+                            "description": "Your current worktree path (from git rev-parse --show-toplevel)"
+                        },
+                        "tmux_window": {
+                            "type": "string",
+                            "description": "Your current tmux window name (from tmux display-message -p '#W')"
+                        }
+                    },
+                    "required": ["task_id", "worktree", "tmux_window"]
+                }
             }
         ]
     })
@@ -253,6 +305,8 @@ pub async fn handle_mcp(
                 "update_task" => handle_update_task(&state, id, args),
                 "get_task" => handle_get_task(&state, id, args),
                 "create_task" => handle_create_task(&state, id, args),
+                "list_tasks" => handle_list_tasks(&state, id, args),
+                "claim_task" => handle_claim_task(&state, id, args),
                 other => JsonRpcResponse::err(id, -32602, format!("Unknown tool: {other}")),
             }
         }
@@ -385,6 +439,151 @@ fn handle_get_task(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcR
     }
 }
 
+fn handle_list_tasks(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {
+    let parsed = match parse_args::<ListTasksArgs>(id.clone(), args) {
+        Ok(a) => a,
+        Err(resp) => return resp,
+    };
+    tracing::info!(status = ?parsed.status, "MCP list_tasks");
+
+    let status_filter: Option<Vec<TaskStatus>> = match parsed.status {
+        Some(Value::String(ref s)) => match TaskStatus::parse(s) {
+            Some(st) => Some(vec![st]),
+            None => {
+                return JsonRpcResponse::err(
+                    id,
+                    -32602,
+                    format!("Unknown status: {s}. Valid values: backlog, ready, running, review, done"),
+                );
+            }
+        },
+        Some(Value::Array(ref arr)) => {
+            let mut statuses = Vec::new();
+            for v in arr {
+                match v.as_str().and_then(TaskStatus::parse) {
+                    Some(st) => statuses.push(st),
+                    None => {
+                        return JsonRpcResponse::err(
+                            id,
+                            -32602,
+                            format!("Invalid status in array: {v}"),
+                        );
+                    }
+                }
+            }
+            Some(statuses)
+        }
+        Some(_) => {
+            return JsonRpcResponse::err(id, -32602, "status must be a string or array of strings");
+        }
+        None => None,
+    };
+
+    let tasks = match state.db.list_all() {
+        Ok(t) => t,
+        Err(e) => return JsonRpcResponse::err(id, -32603, format!("Database error: {e}")),
+    };
+
+    let filtered: Vec<_> = match &status_filter {
+        Some(statuses) => tasks.into_iter().filter(|t| statuses.contains(&t.status)).collect(),
+        None => tasks,
+    };
+
+    if filtered.is_empty() {
+        return JsonRpcResponse::ok(
+            id,
+            json!({"content": [{"type": "text", "text": "No tasks found"}]}),
+        );
+    }
+
+    let lines: Vec<String> = filtered
+        .iter()
+        .map(|t| {
+            let desc_preview = if t.description.len() > 200 {
+                let end = t.description.char_indices()
+                    .take_while(|(i, _)| *i < 200)
+                    .last()
+                    .map(|(i, c)| i + c.len_utf8())
+                    .unwrap_or(0);
+                format!("{}...", &t.description[..end])
+            } else {
+                t.description.clone()
+            };
+            format!(
+                "- [{}] {} ({}): {}",
+                t.id, t.title, t.status.as_str(), desc_preview
+            )
+        })
+        .collect();
+
+    let text = lines.join("\n");
+    JsonRpcResponse::ok(
+        id,
+        json!({"content": [{"type": "text", "text": text}]}),
+    )
+}
+
+fn handle_claim_task(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {
+    let parsed = match parse_args::<ClaimTaskArgs>(id.clone(), args) {
+        Ok(a) => a,
+        Err(resp) => return resp,
+    };
+    tracing::info!(task_id = parsed.task_id, worktree = %parsed.worktree, "MCP claim_task");
+
+    // 1. Fetch the task
+    let task = match state.db.get_task(TaskId(parsed.task_id)) {
+        Ok(Some(t)) => t,
+        Ok(None) => {
+            return JsonRpcResponse::err(id, -32602, format!("Task {} not found", parsed.task_id));
+        }
+        Err(e) => {
+            return JsonRpcResponse::err(id, -32603, format!("Database error: {e}"));
+        }
+    };
+
+    // 2. Validate status is backlog or ready
+    if task.status != TaskStatus::Backlog && task.status != TaskStatus::Ready {
+        return JsonRpcResponse::err(
+            id,
+            -32602,
+            format!("Task {} is already {}", parsed.task_id, task.status.as_str()),
+        );
+    }
+
+    // 3. Same-repo check: derive repo from worktree by stripping /.worktrees/<anything>
+    let repo_from_worktree = parsed
+        .worktree
+        .find("/.worktrees/")
+        .map(|idx| &parsed.worktree[..idx])
+        .unwrap_or(&parsed.worktree);
+
+    if repo_from_worktree != task.repo_path {
+        return JsonRpcResponse::err(
+            id,
+            -32602,
+            format!(
+                "Repo mismatch: task belongs to {}, your worktree is in {}",
+                task.repo_path, repo_from_worktree
+            ),
+        );
+    }
+
+    // 4. Atomically set status + worktree + tmux_window
+    if let Err(e) = state.db.persist_task(
+        TaskId(parsed.task_id),
+        TaskStatus::Running,
+        Some(&parsed.worktree),
+        Some(&parsed.tmux_window),
+    ) {
+        return JsonRpcResponse::err(id, -32603, format!("Database error: {e}"));
+    }
+
+    JsonRpcResponse::ok(
+        id,
+        json!({"content": [{"type": "text", "text": format!("Task {} claimed: {}", parsed.task_id, task.title)}]}),
+    )
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -429,6 +628,8 @@ mod tests {
         assert!(names.contains(&"update_task"));
         assert!(names.contains(&"get_task"));
         assert!(names.contains(&"create_task"));
+        assert!(names.contains(&"list_tasks"));
+        assert!(names.contains(&"claim_task"));
     }
 
     #[tokio::test]
@@ -797,5 +998,210 @@ mod tests {
 
         let task = state.db.get_task(task_id).unwrap().unwrap();
         assert_eq!(task.plan.as_deref(), Some("/existing.md"), "plan should be preserved when not provided");
+    }
+
+    // -- list_tasks tests -------------------------------------------------------
+
+    #[tokio::test]
+    async fn list_tasks_returns_all_when_no_filter() {
+        let state = test_state();
+        state.db.create_task("Task A", "desc a", "/repo", None, TaskStatus::Backlog).unwrap();
+        state.db.create_task("Task B", "desc b", "/repo", None, TaskStatus::Ready).unwrap();
+
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({ "name": "list_tasks", "arguments": {} })),
+        ).await;
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("Task A"));
+        assert!(text.contains("Task B"));
+    }
+
+    #[tokio::test]
+    async fn list_tasks_filters_by_single_status() {
+        let state = test_state();
+        state.db.create_task("Backlog Task", "desc", "/repo", None, TaskStatus::Backlog).unwrap();
+        state.db.create_task("Ready Task", "desc", "/repo", None, TaskStatus::Ready).unwrap();
+
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({ "name": "list_tasks", "arguments": { "status": "ready" } })),
+        ).await;
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(!text.contains("Backlog Task"));
+        assert!(text.contains("Ready Task"));
+    }
+
+    #[tokio::test]
+    async fn list_tasks_filters_by_multiple_statuses() {
+        let state = test_state();
+        state.db.create_task("Backlog Task", "desc", "/repo", None, TaskStatus::Backlog).unwrap();
+        state.db.create_task("Ready Task", "desc", "/repo", None, TaskStatus::Ready).unwrap();
+        state.db.create_task("Running Task", "desc", "/repo", None, TaskStatus::Running).unwrap();
+
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({ "name": "list_tasks", "arguments": { "status": ["backlog", "ready"] } })),
+        ).await;
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("Backlog Task"));
+        assert!(text.contains("Ready Task"));
+        assert!(!text.contains("Running Task"));
+    }
+
+    #[tokio::test]
+    async fn list_tasks_empty_result() {
+        let state = test_state();
+
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({ "name": "list_tasks", "arguments": { "status": "ready" } })),
+        ).await;
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("No tasks found"));
+    }
+
+    // -- claim_task tests -------------------------------------------------------
+
+    #[tokio::test]
+    async fn claim_task_success() {
+        let state = test_state();
+        let task_id = state.db.create_task("Claimable", "desc", "/repo", None, TaskStatus::Ready).unwrap();
+
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({
+                "name": "claim_task",
+                "arguments": {
+                    "task_id": task_id.0,
+                    "worktree": "/repo/.worktrees/5-other-task",
+                    "tmux_window": "task-5"
+                }
+            })),
+        ).await;
+        assert!(resp.error.is_none(), "claim should succeed: {:?}", resp.error);
+
+        let task = state.db.get_task(task_id).unwrap().unwrap();
+        assert_eq!(task.status, TaskStatus::Running);
+        assert_eq!(task.worktree.as_deref(), Some("/repo/.worktrees/5-other-task"));
+        assert_eq!(task.tmux_window.as_deref(), Some("task-5"));
+    }
+
+    #[tokio::test]
+    async fn claim_task_backlog_also_works() {
+        let state = test_state();
+        let task_id = state.db.create_task("Backlog Task", "desc", "/repo", None, TaskStatus::Backlog).unwrap();
+
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({
+                "name": "claim_task",
+                "arguments": {
+                    "task_id": task_id.0,
+                    "worktree": "/repo/.worktrees/5-other-task",
+                    "tmux_window": "task-5"
+                }
+            })),
+        ).await;
+        assert!(resp.error.is_none());
+
+        let task = state.db.get_task(task_id).unwrap().unwrap();
+        assert_eq!(task.status, TaskStatus::Running);
+    }
+
+    #[tokio::test]
+    async fn claim_task_rejects_running_task() {
+        let state = test_state();
+        let task_id = state.db.create_task("Running", "desc", "/repo", None, TaskStatus::Running).unwrap();
+
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({
+                "name": "claim_task",
+                "arguments": {
+                    "task_id": task_id.0,
+                    "worktree": "/repo/.worktrees/5-other",
+                    "tmux_window": "task-5"
+                }
+            })),
+        ).await;
+        assert!(resp.error.is_some());
+        assert!(resp.error.unwrap().message.contains("already"));
+    }
+
+    #[tokio::test]
+    async fn claim_task_rejects_different_repo() {
+        let state = test_state();
+        let task_id = state.db.create_task("Other Repo", "desc", "/other-repo", None, TaskStatus::Ready).unwrap();
+
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({
+                "name": "claim_task",
+                "arguments": {
+                    "task_id": task_id.0,
+                    "worktree": "/repo/.worktrees/5-other-task",
+                    "tmux_window": "task-5"
+                }
+            })),
+        ).await;
+        assert!(resp.error.is_some());
+        assert!(resp.error.unwrap().message.contains("repo"));
+    }
+
+    #[tokio::test]
+    async fn claim_task_not_found() {
+        let state = test_state();
+
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({
+                "name": "claim_task",
+                "arguments": {
+                    "task_id": 9999,
+                    "worktree": "/repo/.worktrees/5-other",
+                    "tmux_window": "task-5"
+                }
+            })),
+        ).await;
+        assert!(resp.error.is_some());
+        assert!(resp.error.unwrap().message.contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn claim_task_accepts_string_task_id() {
+        let state = test_state();
+        let task_id = state.db.create_task("Claimable", "desc", "/repo", None, TaskStatus::Ready).unwrap();
+
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({
+                "name": "claim_task",
+                "arguments": {
+                    "task_id": task_id.0.to_string(),
+                    "worktree": "/repo/.worktrees/5-other-task",
+                    "tmux_window": "task-5"
+                }
+            })),
+        ).await;
+        assert!(resp.error.is_none(), "should accept string task_id: {:?}", resp.error);
     }
 }
