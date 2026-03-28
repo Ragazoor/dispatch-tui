@@ -128,6 +128,8 @@ fn render_columns(frame: &mut Frame, app: &App, area: Rect, now: DateTime<Utc>) 
                 let is_cursor = is_focused && row_idx == selected_row;
                 let is_batch_selected = app.selected_tasks.contains(&task.id);
                 let select_prefix = if is_batch_selected { "* " } else { "  " };
+                let is_crashed = app.crashed_tasks().contains(&task.id);
+                let is_stale = app.stale_tasks().contains(&task.id);
                 let show_age = status != TaskStatus::Running;
 
                 // Build the age suffix for non-Running tasks
@@ -141,11 +143,11 @@ fn render_columns(frame: &mut Frame, app: &App, area: Rect, now: DateTime<Utc>) 
 
                 // Build the title portion
                 let title_text = if status == TaskStatus::Running {
-                    if app.crashed_tasks().contains(&task.id) {
+                    if is_crashed {
                         format!("{} [crashed]", truncate(&task.title, 26))
-                    } else if app.stale_tasks().contains(&task.id) {
+                    } else if is_stale {
                         format!("{} [stale]", truncate(&task.title, 28))
-                    } else if let Some(output) = app.tmux_outputs.get(&task.id) {
+                    } else if let Some(output) = app.agents.tmux_outputs.get(&task.id) {
                         let last_line = output.lines().last().unwrap_or("").trim();
                         if !last_line.is_empty() {
                             format!(
@@ -186,17 +188,13 @@ fn render_columns(frame: &mut Frame, app: &App, area: Rect, now: DateTime<Utc>) 
                         Span::styled(title_text, batch_style),
                         Span::styled(age_suffix, age_style),
                     ]))
-                } else if status == TaskStatus::Running
-                    && app.crashed_tasks().contains(&task.id)
-                {
+                } else if status == TaskStatus::Running && is_crashed {
                     let style = Style::default().fg(Color::Red).patch(batch_style);
                     ListItem::new(Line::from(vec![
                         Span::styled(select_prefix, style),
                         Span::styled(title_text, style),
                     ]))
-                } else if status == TaskStatus::Running
-                    && app.stale_tasks().contains(&task.id)
-                {
+                } else if status == TaskStatus::Running && is_stale {
                     let style = Style::default().fg(Color::Yellow).patch(batch_style);
                     ListItem::new(Line::from(vec![
                         Span::styled(select_prefix, style),
@@ -289,7 +287,7 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect, now: DateTime<Utc>) {
         let status_suffix = if app.crashed_tasks().contains(&task.id) {
             " (crashed)".to_string()
         } else if app.stale_tasks().contains(&task.id) {
-            let mins = app.last_output_change.get(&task.id)
+            let mins = app.agents.last_output_change.get(&task.id)
                 .map(|t| t.elapsed().as_secs() / 60)
                 .unwrap_or(0);
             format!(" (stale - inactive {}m)", mins)
@@ -320,7 +318,7 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect, now: DateTime<Utc>) {
                 format_detail_age(task.updated_at, now)
             )),
         ];
-        if let Some(output) = app.tmux_outputs.get(&task.id) {
+        if let Some(output) = app.agents.tmux_outputs.get(&task.id) {
             l.push(Line::from(""));
             for line in output.lines() {
                 l.push(Line::from(line.to_string()));
@@ -343,11 +341,11 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
     let active = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
     let hint = Style::default().fg(Color::DarkGray);
 
-    let lines: Vec<Line> = match &app.mode {
+    let lines: Vec<Line> = match &app.input.mode {
         InputMode::InputTitle => {
             vec![
                 Line::from(Span::styled(
-                    format!("  Title: {}_ ", app.input_buffer),
+                    format!("  Title: {}_ ", app.input.buffer),
                     active,
                 )),
                 Line::from(""),
@@ -355,11 +353,11 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
             ]
         }
         InputMode::InputDescription => {
-            let title = app.task_draft.as_ref().map(|d| d.title.as_str()).unwrap_or("");
+            let title = app.input.task_draft.as_ref().map(|d| d.title.as_str()).unwrap_or("");
             vec![
                 Line::from(Span::styled(format!("  Title: {title}"), completed)),
                 Line::from(Span::styled(
-                    format!("  Description: {}_ ", app.input_buffer),
+                    format!("  Description: {}_ ", app.input.buffer),
                     active,
                 )),
                 Line::from(""),
@@ -367,8 +365,8 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
             ]
         }
         InputMode::InputRepoPath => {
-            let title = app.task_draft.as_ref().map(|d| d.title.as_str()).unwrap_or("");
-            let description = app.task_draft.as_ref().map(|d| d.description.as_str()).unwrap_or("");
+            let title = app.input.task_draft.as_ref().map(|d| d.title.as_str()).unwrap_or("");
+            let description = app.input.task_draft.as_ref().map(|d| d.description.as_str()).unwrap_or("");
             let mut lines = vec![
                 Line::from(Span::styled(format!("  Title: {title}"), completed)),
                 Line::from(Span::styled(
@@ -376,12 +374,12 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
                     completed,
                 )),
                 Line::from(Span::styled(
-                    format!("  Repo path: {}_ ", app.input_buffer),
+                    format!("  Repo path: {}_ ", app.input.buffer),
                     active,
                 )),
             ];
             // Show saved repo paths if available and user hasn't started typing
-            if app.input_buffer.is_empty() {
+            if app.input.buffer.is_empty() {
                 for (i, path) in app.repo_paths.iter().enumerate() {
                     lines.push(Line::from(Span::styled(
                         format!("    [{}] {path}", i + 1),
@@ -436,13 +434,13 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
         _ => return false,
     };
 
-    let block_title = match &app.mode {
+    let block_title = match &app.input.mode {
         InputMode::QuickDispatch => " Quick Dispatch ",
         InputMode::ConfirmRetry(_) => " Retry Agent ",
         _ => " New Task ",
     };
 
-    let border_color = match &app.mode {
+    let border_color = match &app.input.mode {
         InputMode::ConfirmRetry(_) => Color::Red,
         _ => Color::Yellow,
     };
@@ -525,7 +523,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    match &app.mode {
+    match &app.input.mode {
         InputMode::Normal => {
             let spans = if !app.selected_tasks.is_empty() {
                 batch_action_hints(app.selected_tasks.len())
