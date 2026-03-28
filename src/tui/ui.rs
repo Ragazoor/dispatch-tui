@@ -140,97 +140,116 @@ fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
     }
 }
 
-/// Format the title text for a task card, including status annotations for running tasks.
-fn format_task_title(task: &Task, status: TaskStatus, app: &App, age_suffix: &str) -> String {
-    let max_title = 36_usize.saturating_sub(age_suffix.len());
-
-    if status != TaskStatus::Running {
-        return truncate(&task.title, max_title);
-    }
-
-    let is_crashed = app.crashed_tasks().contains(&task.id);
-    let is_stale = app.stale_tasks().contains(&task.id);
-
-    if is_crashed {
-        format!("{} [crashed]", truncate(&task.title, 26))
-    } else if is_stale {
-        format!("{} [stale]", truncate(&task.title, 28))
-    } else if let Some(output) = app.agents.tmux_outputs.get(&task.id) {
-        let last_line = output.lines().last().unwrap_or("").trim();
-        if !last_line.is_empty() {
-            format!(
-                "{} [{}]",
-                truncate(&task.title, 18),
-                truncate(last_line, 15)
-            )
-        } else {
-            truncate(&task.title, 36)
-        }
-    } else {
-        truncate(&task.title, 36)
-    }
+/// Format the title text for a task card (line 1 only — status annotations are on line 2).
+fn format_task_title(task: &Task, max_title: usize) -> String {
+    truncate(&task.title, max_title)
 }
 
-/// Build a styled ListItem for a task card in a kanban column.
+/// Build a styled two-line ListItem for a task card in a kanban column.
+/// Line 1: stripe + title
+/// Line 2: status icon + age/activity metadata
 fn build_task_list_item<'a>(
     task: &Task,
     status: TaskStatus,
     app: &App,
     now: DateTime<Utc>,
     is_cursor: bool,
-    column_color: Color,
+    col_color: Color,
 ) -> ListItem<'a> {
     let is_batch_selected = app.selected_tasks.contains(&task.id);
     let select_prefix = if is_batch_selected { "* " } else { "  " };
-    let show_age = status != TaskStatus::Running;
 
-    let age_suffix = if show_age {
-        format!(" {}", format_age(task.updated_at, now))
-    } else {
-        String::new()
-    };
+    let title_text = format_task_title(task, 32);
 
-    let title_text = format_task_title(task, status, app, &age_suffix);
-
-    let batch_style = if is_batch_selected {
+    // Line 1: prefix + stripe + title
+    let stripe_style = Style::default().fg(col_color);
+    let title_style = if is_batch_selected {
         Style::default().add_modifier(Modifier::BOLD)
     } else {
         Style::default()
     };
 
-    if is_cursor {
-        let cursor_style = Style::default()
-            .bg(column_color)
-            .fg(Color::Black)
-            .add_modifier(Modifier::BOLD);
-        let full_label = format!("{select_prefix}{title_text}{age_suffix}");
-        ListItem::new(Line::from(Span::styled(full_label, cursor_style)))
-    } else if show_age && !age_suffix.is_empty() {
-        let staleness = Staleness::from_age(task.updated_at, now);
-        let age_style = Style::default().fg(staleness_color(staleness)).patch(batch_style);
-        ListItem::new(Line::from(vec![
-            Span::styled(select_prefix.to_string(), batch_style),
-            Span::styled(title_text, batch_style),
-            Span::styled(age_suffix, age_style),
-        ]))
-    } else if status == TaskStatus::Running && app.crashed_tasks().contains(&task.id) {
-        let style = Style::default().fg(Color::Red).patch(batch_style);
-        ListItem::new(Line::from(vec![
-            Span::styled(select_prefix.to_string(), style),
-            Span::styled(title_text, style),
-        ]))
-    } else if status == TaskStatus::Running && app.stale_tasks().contains(&task.id) {
-        let style = Style::default().fg(Color::Yellow).patch(batch_style);
-        ListItem::new(Line::from(vec![
-            Span::styled(select_prefix.to_string(), style),
-            Span::styled(title_text, style),
-        ]))
+    let line1 = Line::from(vec![
+        Span::styled(select_prefix.to_string(), title_style),
+        Span::styled("\u{258e}", stripe_style),
+        Span::styled(format!(" {title_text}"), title_style),
+    ]);
+
+    // Line 2: metadata
+    let is_crashed = app.crashed_tasks().contains(&task.id);
+    let is_stale = app.stale_tasks().contains(&task.id);
+
+    let line2 = if is_crashed {
+        Line::from(vec![
+            Span::raw("   "),
+            Span::styled("\u{26a0} crashed", Style::default().fg(Color::Red)),
+        ])
+    } else if is_stale {
+        let mins = app.agents.last_output_change.get(&task.id)
+            .map(|t| t.elapsed().as_secs() / 60)
+            .unwrap_or(0);
+        Line::from(vec![
+            Span::raw("   "),
+            Span::styled(
+                format!("\u{25c9} stale \u{00b7} {}m", mins),
+                Style::default().fg(Color::Yellow),
+            ),
+        ])
+    } else if status == TaskStatus::Running {
+        if let Some(output) = app.agents.tmux_outputs.get(&task.id) {
+            let last_line = output.lines().last().unwrap_or("").trim();
+            if !last_line.is_empty() {
+                Line::from(vec![
+                    Span::raw("   "),
+                    Span::styled(
+                        format!("{} {} ", status_icon(status), truncate(last_line, 20)),
+                        Style::default().fg(Color::Rgb(86, 95, 137)),
+                    ),
+                ])
+            } else {
+                Line::from(vec![
+                    Span::raw("   "),
+                    Span::styled(
+                        format!("{} running", status_icon(status)),
+                        Style::default().fg(Color::Rgb(86, 95, 137)),
+                    ),
+                ])
+            }
+        } else {
+            Line::from(vec![
+                Span::raw("   "),
+                Span::styled(
+                    format!("{} running", status_icon(status)),
+                    Style::default().fg(Color::Rgb(86, 95, 137)),
+                ),
+            ])
+        }
     } else {
-        ListItem::new(Line::from(vec![
-            Span::styled(select_prefix.to_string(), batch_style),
-            Span::styled(title_text, batch_style),
-        ]))
+        let age = format_age(task.updated_at, now);
+        let staleness = Staleness::from_age(task.updated_at, now);
+        Line::from(vec![
+            Span::raw("   "),
+            Span::styled(
+                format!("{} {}", status_icon(status), age),
+                Style::default().fg(staleness_color(staleness)),
+            ),
+        ])
+    };
+
+    // Build two-line ListItem
+    let mut item = ListItem::new(vec![line1, line2]);
+
+    // Cursor gets tinted background via ListItem::style() for full-width fill
+    if is_cursor {
+        item = item.style(
+            Style::default()
+                .bg(cursor_bg_color(status))
+                .fg(Color::Rgb(192, 202, 245))
+                .add_modifier(Modifier::BOLD),
+        );
     }
+
+    item
 }
 
 fn render_columns(frame: &mut Frame, app: &App, area: Rect, now: DateTime<Utc>) {

@@ -1966,7 +1966,7 @@ fn render_crashed_task_shows_label() {
     let mut app = App::new(vec![task], Duration::from_secs(300));
     app.agents.crashed_tasks.insert(TaskId(1));
     let buf = render_to_buffer(&app, 120, 20);
-    assert!(buffer_contains(&buf, "[crashed]"));
+    assert!(buffer_contains(&buf, "crashed"));
 }
 
 #[test]
@@ -1976,7 +1976,7 @@ fn render_stale_task_shows_label() {
     let mut app = App::new(vec![task], Duration::from_secs(300));
     app.agents.stale_tasks.insert(TaskId(1));
     let buf = render_to_buffer(&app, 120, 20);
-    assert!(buffer_contains(&buf, "[stale]"));
+    assert!(buffer_contains(&buf, "stale"));
 }
 
 #[test]
