@@ -4,7 +4,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use std::path::Path;
 use std::sync::Mutex;
 
-use crate::models::{Task, TaskId, TaskStatus};
+use crate::models::{Epic, EpicId, Task, TaskId, TaskStatus};
 
 // ---------------------------------------------------------------------------
 // TaskPatch — builder for selective field updates
@@ -101,6 +101,15 @@ pub trait TaskStore: Send + Sync {
         status: TaskStatus,
     ) -> Result<Task>;
     fn has_other_tasks_with_worktree(&self, worktree: &str, exclude_id: TaskId) -> Result<bool>;
+
+    // Epic operations
+    fn create_epic(&self, title: &str, description: &str, plan: &str, repo_path: &str) -> Result<Epic>;
+    fn get_epic(&self, id: EpicId) -> Result<Option<Epic>>;
+    fn list_epics(&self) -> Result<Vec<Epic>>;
+    fn update_epic(&self, id: EpicId, title: Option<&str>, description: Option<&str>, plan: Option<&str>, done: Option<bool>) -> Result<()>;
+    fn delete_epic(&self, id: EpicId) -> Result<()>;
+    fn set_task_epic_id(&self, task_id: TaskId, epic_id: Option<EpicId>) -> Result<()>;
+    fn list_tasks_for_epic(&self, epic_id: EpicId) -> Result<Vec<Task>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -185,6 +194,29 @@ impl Database {
                 .context("Failed to update schema version to 2")?;
         }
 
+        if current_version < 3 {
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS epics (
+                    id          INTEGER PRIMARY KEY,
+                    title       TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    plan        TEXT NOT NULL DEFAULT '',
+                    repo_path   TEXT NOT NULL,
+                    done        INTEGER NOT NULL DEFAULT 0,
+                    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+                )",
+            )
+            .context("Failed to create epics table")?;
+
+            let _ = conn.execute_batch(
+                "ALTER TABLE tasks ADD COLUMN epic_id INTEGER REFERENCES epics(id)"
+            );
+
+            conn.pragma_update(None, "user_version", 3i64)
+                .context("Failed to update schema version to 3")?;
+        }
+
         Ok(())
     }
 
@@ -217,7 +249,7 @@ impl TaskStore for Database {
         let conn = self.conn()?;
         conn.query_row(
             "SELECT id, title, description, repo_path, status, worktree, tmux_window,
-                    plan, created_at, updated_at
+                    plan, epic_id, created_at, updated_at
              FROM tasks WHERE id = ?1",
             params![id.0],
             row_to_task,
@@ -231,7 +263,7 @@ impl TaskStore for Database {
         let mut stmt = conn
             .prepare(
                 "SELECT id, title, description, repo_path, status, worktree, tmux_window,
-                        plan, created_at, updated_at
+                        plan, epic_id, created_at, updated_at
                  FROM tasks ORDER BY id",
             )
             .context("Failed to prepare list_all")?;
@@ -248,7 +280,7 @@ impl TaskStore for Database {
         let mut stmt = conn
             .prepare(
                 "SELECT id, title, description, repo_path, status, worktree, tmux_window,
-                        plan, created_at, updated_at
+                        plan, epic_id, created_at, updated_at
                  FROM tasks WHERE status = ?1 ORDER BY id",
             )
             .context("Failed to prepare list_by_status")?;
@@ -310,7 +342,7 @@ impl TaskStore for Database {
         let conn = self.conn()?;
         conn.query_row(
             "SELECT id, title, description, repo_path, status, worktree, tmux_window,
-                    plan, created_at, updated_at
+                    plan, epic_id, created_at, updated_at
              FROM tasks WHERE plan = ?1",
             params![plan],
             row_to_task,
@@ -397,6 +429,113 @@ impl TaskStore for Database {
             .context("Failed to check shared worktree")?;
         Ok(count > 0)
     }
+
+    fn create_epic(&self, title: &str, description: &str, plan: &str, repo_path: &str) -> Result<Epic> {
+        let id = {
+            let conn = self.conn()?;
+            conn.execute(
+                "INSERT INTO epics (title, description, plan, repo_path) VALUES (?1, ?2, ?3, ?4)",
+                params![title, description, plan, repo_path],
+            )
+            .context("Failed to insert epic")?;
+            EpicId(conn.last_insert_rowid())
+        }; // MutexGuard dropped here — avoids deadlock when get_epic() re-locks
+        self.get_epic(id)?
+            .ok_or_else(|| anyhow::anyhow!("Epic {id} vanished after insert"))
+    }
+
+    fn get_epic(&self, id: EpicId) -> Result<Option<Epic>> {
+        let conn = self.conn()?;
+        conn.query_row(
+            "SELECT id, title, description, plan, repo_path, done, created_at, updated_at
+             FROM epics WHERE id = ?1",
+            params![id.0],
+            row_to_epic,
+        )
+        .optional()
+        .context("Failed to get epic")
+    }
+
+    fn list_epics(&self) -> Result<Vec<Epic>> {
+        let conn = self.conn()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, title, description, plan, repo_path, done, created_at, updated_at
+                 FROM epics ORDER BY id",
+            )
+            .context("Failed to prepare list_epics")?;
+        let epics = stmt
+            .query_map([], row_to_epic)
+            .context("Failed to query epics")?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .context("Failed to collect epics")?;
+        Ok(epics)
+    }
+
+    fn update_epic(&self, id: EpicId, title: Option<&str>, description: Option<&str>, plan: Option<&str>, done: Option<bool>) -> Result<()> {
+        let conn = self.conn()?;
+        let (cur_title, cur_desc, cur_plan, cur_done): (String, String, String, i64) = conn.query_row(
+            "SELECT title, description, plan, done FROM epics WHERE id = ?1",
+            params![id.0],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        ).optional().context("Failed to fetch epic for update")?
+            .ok_or_else(|| anyhow::anyhow!("Epic {id} not found"))?;
+
+        let final_title = title.unwrap_or(&cur_title);
+        let final_desc = description.unwrap_or(&cur_desc);
+        let final_plan = plan.unwrap_or(&cur_plan);
+        let final_done = done.map(|d| d as i64).unwrap_or(cur_done);
+
+        conn.execute(
+            "UPDATE epics SET title = ?1, description = ?2, plan = ?3, done = ?4, updated_at = datetime('now') WHERE id = ?5",
+            params![final_title, final_desc, final_plan, final_done, id.0],
+        ).context("Failed to update epic")?;
+        Ok(())
+    }
+
+    fn delete_epic(&self, id: EpicId) -> Result<()> {
+        let conn = self.conn()?;
+        conn.execute("DELETE FROM tasks WHERE epic_id = ?1", params![id.0])
+            .context("Failed to delete epic subtasks")?;
+        let rows = conn
+            .execute("DELETE FROM epics WHERE id = ?1", params![id.0])
+            .context("Failed to delete epic")?;
+        if rows == 0 {
+            anyhow::bail!("Epic {} not found", id);
+        }
+        Ok(())
+    }
+
+    fn set_task_epic_id(&self, task_id: TaskId, epic_id: Option<EpicId>) -> Result<()> {
+        let conn = self.conn()?;
+        let rows = conn
+            .execute(
+                "UPDATE tasks SET epic_id = ?1, updated_at = datetime('now') WHERE id = ?2",
+                params![epic_id.map(|e| e.0), task_id.0],
+            )
+            .context("Failed to set task epic_id")?;
+        if rows == 0 {
+            anyhow::bail!("Task {} not found", task_id);
+        }
+        Ok(())
+    }
+
+    fn list_tasks_for_epic(&self, epic_id: EpicId) -> Result<Vec<Task>> {
+        let conn = self.conn()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, title, description, repo_path, status, worktree, tmux_window,
+                        plan, epic_id, created_at, updated_at
+                 FROM tasks WHERE epic_id = ?1 ORDER BY id",
+            )
+            .context("Failed to prepare list_tasks_for_epic")?;
+        let tasks = stmt
+            .query_map(params![epic_id.0], row_to_task)
+            .context("Failed to query tasks for epic")?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .context("Failed to collect tasks for epic")?;
+        Ok(tasks)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -422,6 +561,26 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         worktree: row.get("worktree")?,
         tmux_window: row.get("tmux_window")?,
         plan: row.get("plan")?,
+        epic_id: row.get::<_, Option<i64>>("epic_id")
+            .unwrap_or(None)
+            .map(EpicId),
+        created_at: parse_datetime(&created_str),
+        updated_at: parse_datetime(&updated_str),
+    })
+}
+
+fn row_to_epic(row: &rusqlite::Row<'_>) -> rusqlite::Result<Epic> {
+    let created_str: String = row.get("created_at")?;
+    let updated_str: String = row.get("updated_at")?;
+    let done_int: i64 = row.get("done")?;
+
+    Ok(Epic {
+        id: EpicId(row.get("id")?),
+        title: row.get("title")?,
+        description: row.get("description")?,
+        plan: row.get("plan")?,
+        repo_path: row.get("repo_path")?,
+        done: done_int != 0,
         created_at: parse_datetime(&created_str),
         updated_at: parse_datetime(&updated_str),
     })
@@ -548,7 +707,7 @@ mod tests {
         let db = in_memory_db();
         let conn = db.conn.lock().unwrap();
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 2, "fresh DB should be at schema version 2");
+        assert_eq!(version, 3, "fresh DB should be at schema version 3");
     }
 
     #[test]
@@ -599,7 +758,7 @@ mod tests {
 
         // Version should be latest
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
 
         // Verify Migration 1 added the plan column
         let has_plan: bool = conn
@@ -832,5 +991,109 @@ mod tests {
         let db = in_memory_db();
         let updated = db.update_status_if(TaskId(9999), TaskStatus::Review, TaskStatus::Running).unwrap();
         assert!(!updated, "should return false for nonexistent task");
+    }
+
+    // --- Epic CRUD ---
+
+    #[test]
+    fn create_and_get_epic() {
+        let db = in_memory_db();
+        let epic = db.create_epic("Auth Rewrite", "Rewrite auth", "## Plan\n- Step 1", "/repo").unwrap();
+        assert_eq!(epic.title, "Auth Rewrite");
+        assert_eq!(epic.description, "Rewrite auth");
+        assert_eq!(epic.plan, "## Plan\n- Step 1");
+        assert_eq!(epic.repo_path, "/repo");
+        assert!(!epic.done);
+
+        let fetched = db.get_epic(epic.id).unwrap().unwrap();
+        assert_eq!(fetched.id, epic.id);
+        assert_eq!(fetched.title, "Auth Rewrite");
+    }
+
+    #[test]
+    fn list_epics() {
+        let db = in_memory_db();
+        db.create_epic("Epic A", "desc", "", "/a").unwrap();
+        db.create_epic("Epic B", "desc", "", "/b").unwrap();
+        let epics = db.list_epics().unwrap();
+        assert_eq!(epics.len(), 2);
+    }
+
+    #[test]
+    fn get_epic_nonexistent() {
+        let db = in_memory_db();
+        assert!(db.get_epic(EpicId(999)).unwrap().is_none());
+    }
+
+    #[test]
+    fn delete_epic_cascades_subtasks() {
+        let db = in_memory_db();
+        let epic = db.create_epic("Epic", "desc", "", "/repo").unwrap();
+        db.create_task("Sub 1", "desc", "/repo", None, TaskStatus::Backlog).unwrap();
+        let sub_id = db.create_task("Sub 2", "desc", "/repo", None, TaskStatus::Backlog).unwrap();
+
+        // Link sub 2 to epic
+        db.set_task_epic_id(sub_id, Some(epic.id)).unwrap();
+
+        db.delete_epic(epic.id).unwrap();
+
+        // Epic should be gone
+        assert!(db.get_epic(epic.id).unwrap().is_none());
+        // Sub 2 (linked to epic) should be deleted
+        assert!(db.get_task(sub_id).unwrap().is_none());
+        // Sub 1 (not linked) should still exist
+        assert_eq!(db.list_all().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn update_epic_done_flag() {
+        let db = in_memory_db();
+        let epic = db.create_epic("Epic", "desc", "", "/repo").unwrap();
+        assert!(!epic.done);
+
+        db.update_epic(epic.id, None, None, None, Some(true)).unwrap();
+        let updated = db.get_epic(epic.id).unwrap().unwrap();
+        assert!(updated.done);
+    }
+
+    #[test]
+    fn update_epic_title_and_plan() {
+        let db = in_memory_db();
+        let epic = db.create_epic("Old Title", "desc", "old plan", "/repo").unwrap();
+
+        db.update_epic(epic.id, Some("New Title"), None, Some("new plan"), None).unwrap();
+        let updated = db.get_epic(epic.id).unwrap().unwrap();
+        assert_eq!(updated.title, "New Title");
+        assert_eq!(updated.plan, "new plan");
+        assert_eq!(updated.description, "desc"); // unchanged
+    }
+
+    #[test]
+    fn task_epic_id_roundtrip() {
+        let db = in_memory_db();
+        let epic = db.create_epic("Epic", "desc", "", "/repo").unwrap();
+        let task_id = db.create_task("Task", "desc", "/repo", None, TaskStatus::Backlog).unwrap();
+
+        db.set_task_epic_id(task_id, Some(epic.id)).unwrap();
+        let task = db.get_task(task_id).unwrap().unwrap();
+        assert_eq!(task.epic_id, Some(epic.id));
+
+        db.set_task_epic_id(task_id, None).unwrap();
+        let task = db.get_task(task_id).unwrap().unwrap();
+        assert!(task.epic_id.is_none());
+    }
+
+    #[test]
+    fn list_tasks_for_epic() {
+        let db = in_memory_db();
+        let epic = db.create_epic("Epic", "desc", "", "/repo").unwrap();
+        let id1 = db.create_task("Sub A", "desc", "/repo", None, TaskStatus::Backlog).unwrap();
+        let _id2 = db.create_task("Standalone", "desc", "/repo", None, TaskStatus::Backlog).unwrap();
+
+        db.set_task_epic_id(id1, Some(epic.id)).unwrap();
+
+        let subtasks = db.list_tasks_for_epic(epic.id).unwrap();
+        assert_eq!(subtasks.len(), 1);
+        assert_eq!(subtasks[0].title, "Sub A");
     }
 }

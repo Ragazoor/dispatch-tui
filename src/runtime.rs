@@ -151,9 +151,16 @@ struct TuiRuntime {
 }
 
 impl TuiRuntime {
-    fn exec_insert_task(&self, app: &mut App, title: String, description: String, repo_path: String) {
+    fn exec_insert_task(&self, app: &mut App, title: String, description: String, repo_path: String, epic_id: Option<models::EpicId>) {
         match self.database.create_task_returning(&title, &description, &repo_path, None, models::TaskStatus::Backlog) {
-            Ok(task) => {
+            Ok(mut task) => {
+                if let Some(eid) = epic_id {
+                    if let Err(e) = self.database.set_task_epic_id(task.id, Some(eid)) {
+                        app.update(Message::Error(format!("DB error linking task to epic: {e}")));
+                        return;
+                    }
+                    task.epic_id = Some(eid);
+                }
                 app.update(Message::TaskCreated { task });
             }
             Err(e) => {
@@ -381,12 +388,121 @@ impl TuiRuntime {
         match self.database.list_all() {
             Ok(tasks) => {
                 let cmds = app.update(Message::RefreshTasks(tasks));
-                // Don't recurse into execute_commands for RefreshTasks
-                // since it only updates in-memory state (no side effects)
                 let _ = cmds;
             }
             Err(e) => {
                 app.update(Message::Error(format!("DB refresh failed: {e}")));
+            }
+        }
+        // Also refresh epics
+        self.exec_refresh_epics_from_db(app);
+    }
+
+    fn exec_insert_epic(&self, app: &mut App, title: String, description: String, repo_path: String) {
+        match self.database.create_epic(&title, &description, "", &repo_path) {
+            Ok(epic) => {
+                app.update(Message::EpicCreated(epic));
+            }
+            Err(e) => {
+                app.update(Message::Error(format!("DB error creating epic: {e}")));
+            }
+        }
+    }
+
+    fn exec_edit_epic_in_editor(
+        &self,
+        app: &mut App,
+        epic: models::Epic,
+        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    ) -> Result<()> {
+        let epic_id = epic.id;
+        let content = format!(
+            "# {}\n\n## Description\n{}\n\n## Plan\n{}",
+            epic.title, epic.description, epic.plan
+        );
+        let mut tmp = TempfileBuilder::new()
+            .prefix(&format!("epic-{}-", epic_id))
+            .suffix(".md")
+            .tempfile()?;
+        std::io::Write::write_all(tmp.as_file_mut(), content.as_bytes())?;
+
+        self.input_paused.store(true, Ordering::Relaxed);
+        std::thread::sleep(Duration::from_millis(150));
+        let _guard = TerminalSuspend::new(terminal)?;
+
+        let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
+        let status = std::process::Command::new(&editor)
+            .arg(tmp.path())
+            .status();
+        drop(_guard);
+        self.input_paused.store(false, Ordering::Relaxed);
+
+        match status {
+            Ok(exit) if exit.success() => {
+                if let Ok(edited) = std::fs::read_to_string(tmp.path()) {
+                    let mut title = epic.title.clone();
+                    let mut description = epic.description.clone();
+                    let mut plan = epic.plan.clone();
+                    let mut current_section = "";
+                    let mut section_lines: Vec<String> = Vec::new();
+                    for line in edited.lines() {
+                        if line.starts_with("# ") && !line.starts_with("## ") {
+                            title = line.trim_start_matches("# ").to_string();
+                        } else if line == "## Description" {
+                            current_section = "desc";
+                            section_lines.clear();
+                        } else if line == "## Plan" {
+                            if current_section == "desc" {
+                                description = section_lines.join("\n").trim().to_string();
+                            }
+                            current_section = "plan";
+                            section_lines.clear();
+                        } else {
+                            section_lines.push(line.to_string());
+                        }
+                    }
+                    match current_section {
+                        "desc" => description = section_lines.join("\n").trim().to_string(),
+                        "plan" => plan = section_lines.join("\n").trim().to_string(),
+                        _ => {}
+                    }
+
+                    if let Err(e) = self.database.update_epic(
+                        epic_id, Some(&title), Some(&description), Some(&plan), None,
+                    ) {
+                        app.update(Message::Error(format!("DB error updating epic: {e}")));
+                    }
+                    let mut updated = epic;
+                    updated.title = title;
+                    updated.description = description;
+                    updated.plan = plan;
+                    app.update(Message::EpicEdited(updated));
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn exec_delete_epic(&self, app: &mut App, id: models::EpicId) {
+        if let Err(e) = self.database.delete_epic(id) {
+            app.update(Message::Error(format!("DB error deleting epic: {e}")));
+        }
+    }
+
+    fn exec_persist_epic(&self, app: &mut App, id: models::EpicId, done: Option<bool>) {
+        if let Err(e) = self.database.update_epic(id, None, None, None, done) {
+            app.update(Message::Error(format!("DB error updating epic: {e}")));
+        }
+    }
+
+    fn exec_refresh_epics_from_db(&self, app: &mut App) {
+        match self.database.list_epics() {
+            Ok(epics) => {
+                app.update(Message::RefreshEpics(epics));
+            }
+            Err(e) => {
+                app.update(Message::Error(format!("DB epic refresh failed: {e}")));
             }
         }
     }
@@ -520,8 +636,8 @@ async fn execute_commands(
     for command in commands {
         match command {
             Command::PersistTask(task) => rt.exec_persist_task(app, task),
-            Command::InsertTask(draft) =>
-                rt.exec_insert_task(app, draft.title, draft.description, draft.repo_path),
+            Command::InsertTask { draft, epic_id } =>
+                rt.exec_insert_task(app, draft.title, draft.description, draft.repo_path, epic_id),
             Command::DeleteTask(id) => rt.exec_delete_task(app, id),
             Command::Dispatch { task } => rt.exec_dispatch(task),
             Command::Brainstorm { task } => rt.exec_brainstorm(task),
@@ -536,6 +652,13 @@ async fn execute_commands(
             Command::QuickDispatch(draft) =>
                 rt.exec_quick_dispatch(app, draft.title, draft.description, draft.repo_path),
             Command::KillTmuxWindow { window } => rt.exec_kill_tmux_window(window),
+            // Epic commands
+            Command::InsertEpic(draft) =>
+                rt.exec_insert_epic(app, draft.title, draft.description, draft.repo_path),
+            Command::EditEpicInEditor(epic) => rt.exec_edit_epic_in_editor(app, epic, terminal)?,
+            Command::DeleteEpic(id) => rt.exec_delete_epic(app, id),
+            Command::PersistEpic { id, done } => rt.exec_persist_epic(app, id, done),
+            Command::RefreshEpicsFromDb => rt.exec_refresh_epics_from_db(app),
         }
     }
 
@@ -567,7 +690,7 @@ mod tests {
     #[test]
     fn exec_insert_task_adds_to_db_and_app() {
         let (rt, mut app) = test_runtime();
-        rt.exec_insert_task(&mut app, "Test".into(), "Desc".into(), "/repo".into());
+        rt.exec_insert_task(&mut app, "Test".into(), "Desc".into(), "/repo".into(), None);
         assert_eq!(app.tasks().len(), 1);
         assert_eq!(app.tasks()[0].title, "Test");
         assert_eq!(rt.database.list_all().unwrap().len(), 1);
@@ -576,7 +699,7 @@ mod tests {
     #[test]
     fn exec_delete_task_removes_from_db() {
         let (rt, mut app) = test_runtime();
-        rt.exec_insert_task(&mut app, "Test".into(), "Desc".into(), "/repo".into());
+        rt.exec_insert_task(&mut app, "Test".into(), "Desc".into(), "/repo".into(), None);
         let id = app.tasks()[0].id;
         rt.exec_delete_task(&mut app, id);
         assert!(rt.database.list_all().unwrap().is_empty());
@@ -585,7 +708,7 @@ mod tests {
     #[test]
     fn exec_persist_task_saves_status_to_db() {
         let (rt, mut app) = test_runtime();
-        rt.exec_insert_task(&mut app, "Test".into(), "Desc".into(), "/repo".into());
+        rt.exec_insert_task(&mut app, "Test".into(), "Desc".into(), "/repo".into(), None);
         let mut task = app.tasks()[0].clone();
         task.status = models::TaskStatus::Ready;
         task.worktree = Some("/repo/.worktrees/1-test".into());
@@ -779,8 +902,8 @@ mod tests {
         let (rt, mut app) = test_runtime();
 
         // Create two tasks sharing the same worktree
-        rt.exec_insert_task(&mut app, "Task A".into(), "desc".into(), "/repo".into());
-        rt.exec_insert_task(&mut app, "Task B".into(), "desc".into(), "/repo".into());
+        rt.exec_insert_task(&mut app, "Task A".into(), "desc".into(), "/repo".into(), None);
+        rt.exec_insert_task(&mut app, "Task B".into(), "desc".into(), "/repo".into(), None);
 
         let id_a = app.tasks()[0].id;
         let id_b = app.tasks()[1].id;

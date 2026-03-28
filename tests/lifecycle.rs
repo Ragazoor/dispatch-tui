@@ -52,6 +52,7 @@ fn full_lifecycle() {
             worktree: None,
             tmux_window: None,
             plan: None,
+            epic_id: None,
             created_at: now,
             updated_at: now,
         },

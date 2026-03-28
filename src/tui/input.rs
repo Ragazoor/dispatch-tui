@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
-use super::{App, Command, InputMode, Message, MoveDirection};
+use super::{App, ColumnItem, Command, InputMode, Message, MoveDirection, ViewMode};
 use crate::models::{TaskId, TaskStatus};
 
 impl App {
@@ -19,6 +19,11 @@ impl App {
             InputMode::QuickDispatch => self.handle_key_quick_dispatch(key),
             InputMode::ConfirmRetry(id) => self.handle_key_confirm_retry(key, id),
             InputMode::ConfirmArchive => self.handle_key_confirm_archive(key),
+            InputMode::InputEpicTitle
+            | InputMode::InputEpicDescription
+            | InputMode::InputEpicRepoPath => self.handle_key_epic_text_input(key),
+            InputMode::ConfirmDeleteEpic => self.handle_key_confirm_delete_epic(key),
+            InputMode::ConfirmArchiveEpic => self.handle_key_confirm_archive_epic(key),
         }
     }
 
@@ -36,9 +41,20 @@ impl App {
             KeyCode::Char('k') | KeyCode::Up => self.update(Message::NavigateRow(-1)),
 
             KeyCode::Char('n') => self.update(Message::StartNewTask),
+            KeyCode::Char('E') => self.update(Message::StartNewEpic),
             KeyCode::Char('d') => self.handle_key_dispatch(),
-            KeyCode::Char('m') => self.handle_key_move(MoveDirection::Forward),
-            KeyCode::Char('M') => self.handle_key_move(MoveDirection::Backward),
+            KeyCode::Char('m') => {
+                if matches!(self.selected_column_item(), Some(ColumnItem::Epic(_))) {
+                    return self.update(Message::StatusInfo("Epic status is derived from subtasks".to_string()));
+                }
+                self.handle_key_move(MoveDirection::Forward)
+            }
+            KeyCode::Char('M') => {
+                if matches!(self.selected_column_item(), Some(ColumnItem::Epic(_))) {
+                    return self.update(Message::StatusInfo("Epic status is derived from subtasks".to_string()));
+                }
+                self.handle_key_move(MoveDirection::Backward)
+            }
 
             KeyCode::Char('g') => {
                 if let Some(task) = self.selected_task() {
@@ -61,9 +77,21 @@ impl App {
                 }
             }
 
-            KeyCode::Enter => self.update(Message::ToggleDetail),
+            KeyCode::Enter => {
+                match self.selected_column_item() {
+                    Some(ColumnItem::Epic(epic)) => {
+                        let id = epic.id;
+                        self.update(Message::EnterEpic(id))
+                    }
+                    _ => self.update(Message::ToggleDetail),
+                }
+            }
 
             KeyCode::Char('e') => {
+                if let ViewMode::Epic { epic_id, .. } = &self.view_mode {
+                    let id = *epic_id;
+                    return self.update(Message::EditEpic(id));
+                }
                 if let Some(task) = self.selected_task() {
                     vec![Command::EditTaskInEditor(task.clone())]
                 } else {
@@ -71,16 +99,32 @@ impl App {
                 }
             }
 
-            KeyCode::Char('x') => {
-                if !self.selected_tasks.is_empty() {
-                    let count = self.selected_tasks.len();
-                    self.input.mode = InputMode::ConfirmArchive;
-                    self.status_message = Some(format!("Archive {} tasks? (y/n)", count));
-                } else if self.selected_task().is_some() {
-                    self.input.mode = InputMode::ConfirmArchive;
-                    self.status_message = Some("Archive task? (y/n)".to_string());
+            KeyCode::Char('V') => {
+                if let Some(ColumnItem::Epic(epic)) = self.selected_column_item() {
+                    let id = epic.id;
+                    self.update(Message::MarkEpicDone(id))
+                } else {
+                    vec![]
                 }
-                vec![]
+            }
+
+            KeyCode::Char('x') => {
+                match self.selected_column_item() {
+                    Some(ColumnItem::Epic(_)) => {
+                        self.update(Message::ConfirmArchiveEpic)
+                    }
+                    _ => {
+                        if !self.selected_tasks.is_empty() {
+                            let count = self.selected_tasks.len();
+                            self.input.mode = InputMode::ConfirmArchive;
+                            self.status_message = Some(format!("Archive {} tasks? (y/n)", count));
+                        } else if self.selected_task().is_some() {
+                            self.input.mode = InputMode::ConfirmArchive;
+                            self.status_message = Some("Archive task? (y/n)".to_string());
+                        }
+                        vec![]
+                    }
+                }
             }
 
             KeyCode::Char('D') => {
@@ -99,7 +143,9 @@ impl App {
             KeyCode::Char('H') => self.update(Message::ToggleArchive),
 
             KeyCode::Esc => {
-                if !self.selected_tasks.is_empty() {
+                if matches!(self.view_mode, ViewMode::Epic { .. }) {
+                    self.update(Message::ExitEpic)
+                } else if !self.selected_tasks.is_empty() {
                     self.update(Message::ClearSelection)
                 } else {
                     vec![]
@@ -281,6 +327,64 @@ impl App {
                 } else if let Some(task) = self.selected_task() {
                     let id = task.id;
                     self.update(Message::ArchiveTask(id))
+                } else {
+                    vec![]
+                }
+            }
+            _ => {
+                self.input.mode = InputMode::Normal;
+                self.status_message = None;
+                vec![]
+            }
+        }
+    }
+
+    fn handle_key_epic_text_input(&mut self, key: KeyEvent) -> Vec<Command> {
+        match key.code {
+            KeyCode::Esc => self.update(Message::CancelInput),
+            KeyCode::Enter => {
+                let value = self.input.buffer.trim().to_string();
+                match self.input.mode.clone() {
+                    InputMode::InputEpicTitle => self.update(Message::SubmitEpicTitle(value)),
+                    InputMode::InputEpicDescription => self.update(Message::SubmitEpicDescription(value)),
+                    InputMode::InputEpicRepoPath => self.update(Message::SubmitEpicRepoPath(value)),
+                    _ => vec![],
+                }
+            }
+            KeyCode::Backspace => self.update(Message::InputBackspace),
+            KeyCode::Char(c) => self.update(Message::InputChar(c)),
+            _ => vec![],
+        }
+    }
+
+    fn handle_key_confirm_delete_epic(&mut self, key: KeyEvent) -> Vec<Command> {
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                self.input.mode = InputMode::Normal;
+                self.status_message = None;
+                if let Some(ColumnItem::Epic(epic)) = self.selected_column_item() {
+                    let id = epic.id;
+                    self.update(Message::DeleteEpic(id))
+                } else {
+                    vec![]
+                }
+            }
+            _ => {
+                self.input.mode = InputMode::Normal;
+                self.status_message = None;
+                vec![]
+            }
+        }
+    }
+
+    fn handle_key_confirm_archive_epic(&mut self, key: KeyEvent) -> Vec<Command> {
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                self.input.mode = InputMode::Normal;
+                self.status_message = None;
+                if let Some(ColumnItem::Epic(epic)) = self.selected_column_item() {
+                    let id = epic.id;
+                    self.update(Message::ArchiveEpic(id))
                 } else {
                     vec![]
                 }

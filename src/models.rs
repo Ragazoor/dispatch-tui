@@ -124,6 +124,65 @@ impl std::fmt::Display for TaskId {
 }
 
 // ---------------------------------------------------------------------------
+// EpicId
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct EpicId(pub i64);
+
+impl std::fmt::Display for EpicId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Epic
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct Epic {
+    pub id: EpicId,
+    pub title: String,
+    pub description: String,
+    pub plan: String,
+    pub repo_path: String,
+    pub done: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Compute the derived kanban status for an epic based on its subtask statuses.
+/// The `done` flag on the epic is the only stored state; everything else is derived.
+pub fn epic_status(epic: &Epic, subtask_statuses: &[TaskStatus]) -> TaskStatus {
+    if epic.done {
+        return TaskStatus::Done;
+    }
+    if subtask_statuses.is_empty() {
+        return TaskStatus::Backlog;
+    }
+
+    let all_done = subtask_statuses.iter().all(|s| *s == TaskStatus::Done);
+    if all_done {
+        return TaskStatus::Review;
+    }
+
+    let any_advanced = subtask_statuses.iter().any(|s| {
+        matches!(s, TaskStatus::Running | TaskStatus::Review | TaskStatus::Done)
+    });
+    if any_advanced {
+        return TaskStatus::Running;
+    }
+
+    let any_ready = subtask_statuses.contains(&TaskStatus::Ready);
+    if any_ready {
+        return TaskStatus::Ready;
+    }
+
+    TaskStatus::Backlog
+}
+
+// ---------------------------------------------------------------------------
 // Task
 // ---------------------------------------------------------------------------
 
@@ -137,6 +196,7 @@ pub struct Task {
     pub worktree: Option<String>,
     pub tmux_window: Option<String>,
     pub plan: Option<String>,
+    pub epic_id: Option<EpicId>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -585,6 +645,132 @@ mod tests {
         let now = Utc::now();
         let updated = now + chrono::Duration::hours(3);
         assert_eq!(format_detail_age(updated, now), "less than 1 hour");
+    }
+
+    // --- EpicId ---
+
+    #[test]
+    fn epic_id_display() {
+        let id = EpicId(42);
+        assert_eq!(format!("{id}"), "42");
+    }
+
+    #[test]
+    fn epic_id_equality() {
+        assert_eq!(EpicId(1), EpicId(1));
+        assert_ne!(EpicId(1), EpicId(2));
+    }
+
+    #[test]
+    fn task_epic_id_defaults_to_none() {
+        let now = Utc::now();
+        let task = Task {
+            id: TaskId(1),
+            title: "Test".to_string(),
+            description: "Desc".to_string(),
+            repo_path: "/repo".to_string(),
+            status: TaskStatus::Backlog,
+            worktree: None,
+            tmux_window: None,
+            plan: None,
+            epic_id: None,
+            created_at: now,
+            updated_at: now,
+        };
+        assert!(task.epic_id.is_none());
+    }
+
+    #[test]
+    fn task_with_epic_id() {
+        let now = Utc::now();
+        let task = Task {
+            id: TaskId(1),
+            title: "Test".to_string(),
+            description: "Desc".to_string(),
+            repo_path: "/repo".to_string(),
+            status: TaskStatus::Backlog,
+            worktree: None,
+            tmux_window: None,
+            plan: None,
+            epic_id: Some(EpicId(5)),
+            created_at: now,
+            updated_at: now,
+        };
+        assert_eq!(task.epic_id, Some(EpicId(5)));
+    }
+
+    #[test]
+    fn epic_struct_fields() {
+        let now = Utc::now();
+        let epic = Epic {
+            id: EpicId(1),
+            title: "Auth Rewrite".to_string(),
+            description: "Rewrite auth system".to_string(),
+            plan: "## Steps\n- Step 1\n- Step 2".to_string(),
+            repo_path: "/repo".to_string(),
+            done: false,
+            created_at: now,
+            updated_at: now,
+        };
+        assert_eq!(epic.id, EpicId(1));
+        assert!(!epic.done);
+    }
+
+    // --- epic_status ---
+
+    fn make_epic_for_status(done: bool) -> Epic {
+        Epic {
+            id: EpicId(1), title: String::new(), description: String::new(),
+            plan: String::new(), repo_path: String::new(), done,
+            created_at: Utc::now(), updated_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn epic_status_done_flag_overrides() {
+        let epic = make_epic_for_status(true);
+        assert_eq!(epic_status(&epic, &[]), TaskStatus::Done);
+    }
+
+    #[test]
+    fn epic_status_no_subtasks_is_backlog() {
+        let epic = make_epic_for_status(false);
+        assert_eq!(epic_status(&epic, &[]), TaskStatus::Backlog);
+    }
+
+    #[test]
+    fn epic_status_all_backlog() {
+        let epic = make_epic_for_status(false);
+        let statuses = [TaskStatus::Backlog, TaskStatus::Backlog];
+        assert_eq!(epic_status(&epic, &statuses), TaskStatus::Backlog);
+    }
+
+    #[test]
+    fn epic_status_some_ready() {
+        let epic = make_epic_for_status(false);
+        let statuses = [TaskStatus::Backlog, TaskStatus::Ready];
+        assert_eq!(epic_status(&epic, &statuses), TaskStatus::Ready);
+    }
+
+    #[test]
+    fn epic_status_some_running() {
+        let epic = make_epic_for_status(false);
+        let statuses = [TaskStatus::Ready, TaskStatus::Running];
+        assert_eq!(epic_status(&epic, &statuses), TaskStatus::Running);
+    }
+
+    #[test]
+    fn epic_status_some_done_means_running() {
+        let epic = make_epic_for_status(false);
+        let statuses = [TaskStatus::Ready, TaskStatus::Done];
+        assert_eq!(epic_status(&epic, &statuses), TaskStatus::Running);
+    }
+
+    #[test]
+    fn epic_status_all_done_is_review() {
+        let epic = make_epic_for_status(false);
+        let statuses = [TaskStatus::Done, TaskStatus::Done];
+        assert_eq!(epic_status(&epic, &statuses), TaskStatus::Review);
     }
 
 }

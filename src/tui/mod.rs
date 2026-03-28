@@ -7,7 +7,7 @@ pub use types::*;
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
-use crate::models::{Task, TaskId, TaskStatus};
+use crate::models::{Epic, EpicId, Task, TaskId, TaskStatus, epic_status};
 
 // ---------------------------------------------------------------------------
 // App
@@ -15,8 +15,8 @@ use crate::models::{Task, TaskId, TaskStatus};
 
 pub struct App {
     pub(in crate::tui) tasks: Vec<Task>,
-    pub(in crate::tui) selected_column: usize,
-    pub(in crate::tui) selected_row: [usize; TaskStatus::COLUMN_COUNT],
+    pub(in crate::tui) epics: Vec<Epic>,
+    pub(in crate::tui) view_mode: ViewMode,
     pub(in crate::tui) detail_visible: bool,
     pub(in crate::tui) status_message: Option<String>,
     pub(in crate::tui) error_popup: Option<String>,
@@ -32,8 +32,8 @@ impl App {
     pub fn new(tasks: Vec<Task>, inactivity_timeout: Duration) -> Self {
         App {
             tasks,
-            selected_column: 0,
-            selected_row: [0; TaskStatus::COLUMN_COUNT],
+            epics: Vec::new(),
+            view_mode: ViewMode::default(),
             detail_visible: false,
             status_message: None,
             error_popup: None,
@@ -46,11 +46,29 @@ impl App {
         }
     }
 
+    /// Get the current selection state (from whichever view mode is active).
+    pub fn selection(&self) -> &BoardSelection {
+        match &self.view_mode {
+            ViewMode::Board(sel) => sel,
+            ViewMode::Epic { selection, .. } => selection,
+        }
+    }
+
+    /// Get mutable access to the current selection state.
+    pub(in crate::tui) fn selection_mut(&mut self) -> &mut BoardSelection {
+        match &mut self.view_mode {
+            ViewMode::Board(sel) => sel,
+            ViewMode::Epic { selection, .. } => selection,
+        }
+    }
+
     // Read-only accessors for code outside the tui module
     pub fn tasks(&self) -> &[Task] { &self.tasks }
     pub fn should_quit(&self) -> bool { self.should_quit }
-    pub fn selected_column(&self) -> usize { self.selected_column }
-    pub fn selected_row(&self) -> &[usize; TaskStatus::COLUMN_COUNT] { &self.selected_row }
+    pub fn selected_column(&self) -> usize { self.selection().column() }
+    pub fn selected_row(&self) -> &[usize; TaskStatus::COLUMN_COUNT] { &self.selection().selected_row }
+    pub fn view_mode(&self) -> &ViewMode { &self.view_mode }
+    pub fn epics(&self) -> &[Epic] { &self.epics }
     pub fn mode(&self) -> &InputMode { &self.input.mode }
     pub fn input_buffer(&self) -> &str { &self.input.buffer }
     pub fn detail_visible(&self) -> bool { self.detail_visible }
@@ -66,9 +84,26 @@ impl App {
     pub fn selected_archive_row(&self) -> usize { self.archive.selected_row }
     pub fn selected_tasks(&self) -> &HashSet<TaskId> { &self.selected_tasks }
 
-    /// Return all tasks for a given status, ordered as they appear in self.tasks.
+    /// Return tasks visible in the current view.
+    /// Board view: standalone tasks only (epic_id is None).
+    /// Epic view: only subtasks of the active epic.
+    pub fn tasks_for_current_view(&self) -> Vec<&Task> {
+        match &self.view_mode {
+            ViewMode::Board(_) => {
+                self.tasks.iter().filter(|t| t.epic_id.is_none() && t.status != TaskStatus::Archived).collect()
+            }
+            ViewMode::Epic { epic_id, .. } => {
+                self.tasks.iter().filter(|t| t.epic_id == Some(*epic_id) && t.status != TaskStatus::Archived).collect()
+            }
+        }
+    }
+
+    /// Return tasks for a given status in the current view.
     pub fn tasks_by_status(&self, status: TaskStatus) -> Vec<&Task> {
-        self.tasks.iter().filter(|t| t.status == status).collect()
+        self.tasks_for_current_view()
+            .into_iter()
+            .filter(|t| t.status == status)
+            .collect()
     }
 
     /// Return all archived tasks, ordered as they appear in self.tasks.
@@ -76,23 +111,66 @@ impl App {
         self.tasks.iter().filter(|t| t.status == TaskStatus::Archived).collect()
     }
 
-    /// Return the currently selected task (in the focused column), if any.
+    /// Build a list of items (tasks + epics) for a column in the current view.
+    /// In board view, epics are included (positioned by derived status).
+    /// In epic view, only subtasks are included (no epic cards).
+    pub fn column_items_for_status(&self, status: TaskStatus) -> Vec<ColumnItem<'_>> {
+        let tasks = self.tasks_by_status(status);
+        let mut items: Vec<ColumnItem<'_>> = tasks.into_iter().map(ColumnItem::Task).collect();
+
+        if matches!(self.view_mode, ViewMode::Board(_)) {
+            for epic in &self.epics {
+                if epic_status(epic, &self.subtask_statuses(epic.id)) == status {
+                    items.push(ColumnItem::Epic(epic));
+                }
+            }
+        }
+
+        items.sort_by_key(|item| match item {
+            ColumnItem::Task(t) => t.created_at,
+            ColumnItem::Epic(e) => e.created_at,
+        });
+
+        items
+    }
+
+    /// Get the statuses of all subtasks belonging to an epic.
+    fn subtask_statuses(&self, epic_id: EpicId) -> Vec<TaskStatus> {
+        self.tasks
+            .iter()
+            .filter(|t| t.epic_id == Some(epic_id) && t.status != TaskStatus::Archived)
+            .map(|t| t.status)
+            .collect()
+    }
+
+    /// Return the item (task or epic) currently under the cursor.
+    pub fn selected_column_item(&self) -> Option<ColumnItem<'_>> {
+        let col = self.selection().column();
+        let status = TaskStatus::from_column_index(col)?;
+        let items = self.column_items_for_status(status);
+        let row = self.selection().row(col);
+        items.into_iter().nth(row)
+    }
+
+    /// Return the currently selected task (if the cursor is on a task), or None
+    /// if the cursor is on an epic or the column is empty.
     pub fn selected_task(&self) -> Option<&Task> {
-        let status = TaskStatus::from_column_index(self.selected_column)?;
-        let col_tasks = self.tasks_by_status(status);
-        let row = self.selected_row[self.selected_column];
-        col_tasks.get(row).copied()
+        match self.selected_column_item() {
+            Some(ColumnItem::Task(task)) => Some(task),
+            _ => None,
+        }
     }
 
     /// Clamp all selected_row values to be within bounds for each column.
     pub fn clamp_selection(&mut self) {
         for col in 0..TaskStatus::COLUMN_COUNT {
             if let Some(status) = TaskStatus::from_column_index(col) {
-                let count = self.tasks_by_status(status).len();
+                let count = self.column_items_for_status(status).len();
+                let sel = self.selection_mut();
                 if count == 0 {
-                    self.selected_row[col] = 0;
-                } else if self.selected_row[col] >= count {
-                    self.selected_row[col] = count - 1;
+                    sel.set_row(col, 0);
+                } else if sel.row(col) >= count {
+                    sel.set_row(col, count - 1);
                 }
             }
         }
@@ -179,6 +257,23 @@ impl App {
             Message::SelectQuickDispatchRepo(idx) => self.handle_select_quick_dispatch_repo(idx),
             Message::CancelRetry => self.handle_cancel_retry(),
             Message::StatusInfo(msg) => self.handle_status_info(msg),
+            // Epic messages
+            Message::EnterEpic(epic_id) => self.handle_enter_epic(epic_id),
+            Message::ExitEpic => self.handle_exit_epic(),
+            Message::RefreshEpics(epics) => self.handle_refresh_epics(epics),
+            Message::CreateEpic => vec![],
+            Message::EpicCreated(epic) => self.handle_epic_created(epic),
+            Message::EditEpic(id) => self.handle_edit_epic(id),
+            Message::EpicEdited(epic) => self.handle_epic_edited(epic),
+            Message::DeleteEpic(id) => self.handle_delete_epic(id),
+            Message::ConfirmDeleteEpic => self.handle_confirm_delete_epic(),
+            Message::MarkEpicDone(id) => self.handle_mark_epic_done(id),
+            Message::ArchiveEpic(id) => self.handle_archive_epic(id),
+            Message::ConfirmArchiveEpic => self.handle_confirm_archive_epic(),
+            Message::StartNewEpic => self.handle_start_new_epic(),
+            Message::SubmitEpicTitle(v) => self.handle_submit_epic_title(v),
+            Message::SubmitEpicDescription(v) => self.handle_submit_epic_description(v),
+            Message::SubmitEpicRepoPath(v) => self.handle_submit_epic_repo_path(v),
         }
     }
 
@@ -192,21 +287,21 @@ impl App {
     }
 
     fn handle_navigate_column(&mut self, delta: isize) -> Vec<Command> {
-        let new_col = (self.selected_column as isize + delta)
+        let new_col = (self.selection().column() as isize + delta)
             .clamp(0, (TaskStatus::COLUMN_COUNT - 1) as isize) as usize;
-        self.selected_column = new_col;
+        self.selection_mut().set_column(new_col);
         self.clamp_selection();
         vec![]
     }
 
     fn handle_navigate_row(&mut self, delta: isize) -> Vec<Command> {
-        let col = self.selected_column;
+        let col = self.selection().column();
         if let Some(status) = TaskStatus::from_column_index(col) {
-            let count = self.tasks_by_status(status).len();
+            let count = self.column_items_for_status(status).len();
             if count > 0 {
-                let new_row = (self.selected_row[col] as isize + delta)
-                    .clamp(0, count as isize - 1) as usize;
-                self.selected_row[col] = new_row;
+                let current = self.selection().row(col);
+                let new_row = (current as isize + delta).clamp(0, count as isize - 1) as usize;
+                self.selection_mut().set_row(col, new_row);
             }
         }
         vec![]
@@ -729,8 +824,177 @@ impl App {
         draft.repo_path = repo_path.clone();
         self.input.mode = InputMode::Normal;
         self.status_message = None;
+        let epic_id = match &self.view_mode {
+            ViewMode::Epic { epic_id, .. } => Some(*epic_id),
+            _ => None,
+        };
         vec![
-            Command::InsertTask(draft),
+            Command::InsertTask { draft, epic_id },
+            Command::SaveRepoPath(repo_path),
+        ]
+    }
+
+    // -----------------------------------------------------------------------
+    // Epic handlers
+    // -----------------------------------------------------------------------
+
+    fn handle_enter_epic(&mut self, epic_id: EpicId) -> Vec<Command> {
+        let saved_board = match &self.view_mode {
+            ViewMode::Board(sel) => sel.clone(),
+            ViewMode::Epic { saved_board, .. } => saved_board.clone(),
+        };
+        self.view_mode = ViewMode::Epic {
+            epic_id,
+            selection: BoardSelection::new(),
+            saved_board,
+        };
+        self.detail_visible = false;
+        vec![]
+    }
+
+    fn handle_exit_epic(&mut self) -> Vec<Command> {
+        if let ViewMode::Epic { saved_board, .. } = &self.view_mode {
+            self.view_mode = ViewMode::Board(saved_board.clone());
+        }
+        self.detail_visible = false;
+        vec![]
+    }
+
+    fn handle_refresh_epics(&mut self, epics: Vec<Epic>) -> Vec<Command> {
+        self.epics = epics;
+        vec![]
+    }
+
+    fn handle_epic_created(&mut self, epic: Epic) -> Vec<Command> {
+        self.epics.push(epic);
+        vec![]
+    }
+
+    fn handle_edit_epic(&mut self, id: EpicId) -> Vec<Command> {
+        if let Some(epic) = self.epics.iter().find(|e| e.id == id) {
+            vec![Command::EditEpicInEditor(epic.clone())]
+        } else {
+            vec![]
+        }
+    }
+
+    fn handle_epic_edited(&mut self, epic: Epic) -> Vec<Command> {
+        if let Some(e) = self.epics.iter_mut().find(|e| e.id == epic.id) {
+            e.title = epic.title;
+            e.description = epic.description;
+            e.plan = epic.plan;
+            e.updated_at = chrono::Utc::now();
+        }
+        vec![]
+    }
+
+    fn handle_delete_epic(&mut self, id: EpicId) -> Vec<Command> {
+        self.epics.retain(|e| e.id != id);
+        self.tasks.retain(|t| t.epic_id != Some(id));
+        // If we were viewing this epic, exit
+        if matches!(&self.view_mode, ViewMode::Epic { epic_id, .. } if *epic_id == id) {
+            self.handle_exit_epic();
+        }
+        self.clamp_selection();
+        vec![Command::DeleteEpic(id)]
+    }
+
+    fn handle_confirm_delete_epic(&mut self) -> Vec<Command> {
+        if matches!(self.selected_column_item(), Some(ColumnItem::Epic(_))) {
+            self.input.mode = InputMode::ConfirmDeleteEpic;
+            self.status_message = Some("Delete epic and all subtasks? (y/n)".to_string());
+        }
+        vec![]
+    }
+
+    fn handle_mark_epic_done(&mut self, id: EpicId) -> Vec<Command> {
+        if let Some(epic) = self.epics.iter_mut().find(|e| e.id == id) {
+            epic.done = true;
+        }
+        vec![Command::PersistEpic { id, done: Some(true) }]
+    }
+
+    fn handle_archive_epic(&mut self, id: EpicId) -> Vec<Command> {
+        let mut cmds = Vec::new();
+        let subtask_ids: Vec<TaskId> = self.tasks
+            .iter()
+            .filter(|t| t.epic_id == Some(id) && t.status != TaskStatus::Archived)
+            .map(|t| t.id)
+            .collect();
+        for task_id in subtask_ids {
+            cmds.extend(self.handle_archive_task(task_id));
+        }
+        self.epics.retain(|e| e.id != id);
+        if matches!(&self.view_mode, ViewMode::Epic { epic_id, .. } if *epic_id == id) {
+            self.handle_exit_epic();
+        }
+        self.clamp_selection();
+        cmds.push(Command::DeleteEpic(id));
+        cmds
+    }
+
+    fn handle_confirm_archive_epic(&mut self) -> Vec<Command> {
+        if matches!(self.selected_column_item(), Some(ColumnItem::Epic(_))) {
+            self.input.mode = InputMode::ConfirmArchiveEpic;
+            self.status_message = Some("Archive epic and all subtasks? (y/n)".to_string());
+        }
+        vec![]
+    }
+
+    fn handle_start_new_epic(&mut self) -> Vec<Command> {
+        self.input.mode = InputMode::InputEpicTitle;
+        self.input.buffer.clear();
+        self.input.epic_draft = None;
+        self.status_message = Some("Epic title: ".to_string());
+        vec![]
+    }
+
+    fn handle_submit_epic_title(&mut self, value: String) -> Vec<Command> {
+        self.input.buffer.clear();
+        if value.is_empty() {
+            self.input.mode = InputMode::Normal;
+            self.status_message = None;
+        } else {
+            self.input.epic_draft = Some(EpicDraft {
+                title: value,
+                description: String::new(),
+                repo_path: String::new(),
+            });
+            self.input.mode = InputMode::InputEpicDescription;
+            self.status_message = Some("Epic description: ".to_string());
+        }
+        vec![]
+    }
+
+    fn handle_submit_epic_description(&mut self, value: String) -> Vec<Command> {
+        self.input.buffer.clear();
+        if let Some(ref mut draft) = self.input.epic_draft {
+            draft.description = value;
+        }
+        self.input.mode = InputMode::InputEpicRepoPath;
+        self.status_message = Some("Epic repo path: ".to_string());
+        vec![]
+    }
+
+    fn handle_submit_epic_repo_path(&mut self, value: String) -> Vec<Command> {
+        self.input.buffer.clear();
+        let repo_path = if value.is_empty() {
+            if let Some(first) = self.repo_paths.first() {
+                first.clone()
+            } else {
+                self.status_message = Some("Repo path required".to_string());
+                return vec![];
+            }
+        } else {
+            value
+        };
+
+        let mut draft = self.input.epic_draft.take().unwrap_or_default();
+        draft.repo_path = repo_path.clone();
+        self.input.mode = InputMode::Normal;
+        self.status_message = None;
+        vec![
+            Command::InsertEpic(draft),
             Command::SaveRepoPath(repo_path),
         ]
     }
