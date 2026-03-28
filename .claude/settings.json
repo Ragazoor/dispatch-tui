@@ -16,24 +16,35 @@
     ]
   },
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "task-status-hook"
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "matcher": "",
         "hooks": [
           {
             "type": "command",
-            "command": "ID=$(git rev-parse --abbrev-ref HEAD | grep -oP '^\\d+'); [ -n \"$ID\" ] && task-orchestrator update \"$ID\" review --only-if running || true"
+            "command": "task-status-hook"
           }
         ]
       }
     ],
-    "UserPromptSubmit": [
+    "Notification": [
       {
         "matcher": "",
         "hooks": [
           {
             "type": "command",
-            "command": "ID=$(git rev-parse --abbrev-ref HEAD | grep -oP '^\\d+'); [ -n \"$ID\" ] && task-orchestrator update \"$ID\" running --only-if running || true"
+            "command": "task-status-hook"
           }
         ]
       }
