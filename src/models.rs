@@ -174,7 +174,7 @@ pub fn epic_status(epic: &Epic, subtask_statuses: &[TaskStatus]) -> TaskStatus {
         return TaskStatus::Running;
     }
 
-    let any_ready = subtask_statuses.iter().any(|s| *s == TaskStatus::Ready);
+    let any_ready = subtask_statuses.contains(&TaskStatus::Ready);
     if any_ready {
         return TaskStatus::Ready;
     }

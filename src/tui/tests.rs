@@ -128,25 +128,25 @@ fn quit_sets_flag() {
 #[test]
 fn navigate_column_clamps() {
     let mut app = make_app();
-    app.selected_column = 0;
+    app.selection_mut().set_column(0);
     app.update(Message::NavigateColumn(-1));
-    assert_eq!(app.selected_column, 0); // can't go below 0
+    assert_eq!(app.selection().column(), 0); // can't go below 0
 
-    app.selected_column = 4;
+    app.selection_mut().set_column(4);
     app.update(Message::NavigateColumn(1));
-    assert_eq!(app.selected_column, 4); // can't go above 4
+    assert_eq!(app.selection().column(), 4); // can't go above 4
 }
 
 #[test]
 fn navigate_row_clamps() {
     let mut app = make_app();
     // Backlog has 2 tasks (id 1, 2). Selected row starts at 0.
-    app.selected_column = 0;
+    app.selection_mut().set_column(0);
     app.update(Message::NavigateRow(-1));
-    assert_eq!(app.selected_row[0], 0); // can't go below 0
+    assert_eq!(app.selection().row(0), 0); // can't go below 0
 
     app.update(Message::NavigateRow(10));
-    assert_eq!(app.selected_row[0], 1); // clamps to last item index
+    assert_eq!(app.selection().row(0), 1); // clamps to last item index
 }
 
 #[test]
@@ -428,7 +428,7 @@ fn move_forward_to_done_with_live_window_emits_cleanup() {
 fn d_key_on_ready_dispatches() {
 
     let mut app = App::new(vec![make_task(3, TaskStatus::Ready)], Duration::from_secs(300));
-    app.selected_column = 1; // Ready column
+    app.selection_mut().set_column(1); // Ready column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(matches!(&cmds[0], Command::Dispatch { .. }));
 }
@@ -440,7 +440,7 @@ fn d_key_on_running_with_window_shows_warning() {
     task.tmux_window = Some("task-4".to_string());
     task.worktree = Some("/repo/.worktrees/4-task-4".to_string());
     let mut app = App::new(vec![task], Duration::from_secs(300));
-    app.selected_column = 2; // Running column
+    app.selection_mut().set_column(2); // Running column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
     assert!(app.status_message.as_deref().unwrap().contains("already running"));
@@ -453,7 +453,7 @@ fn d_key_on_running_no_window_resumes() {
     task.worktree = Some("/repo/.worktrees/4-task-4".to_string());
     task.tmux_window = None;
     let mut app = App::new(vec![task], Duration::from_secs(300));
-    app.selected_column = 2; // Running column
+    app.selection_mut().set_column(2); // Running column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(matches!(&cmds[0], Command::Resume { .. }));
 }
@@ -461,7 +461,7 @@ fn d_key_on_running_no_window_resumes() {
 #[test]
 fn d_key_on_backlog_brainstorms() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
-    app.selected_column = 0; // Backlog column
+    app.selection_mut().set_column(0); // Backlog column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert_eq!(cmds.len(), 1);
     assert!(matches!(&cmds[0], Command::Brainstorm { task } if task.id == TaskId(1)));
@@ -471,7 +471,7 @@ fn d_key_on_backlog_brainstorms() {
 fn d_key_on_done_shows_warning() {
 
     let mut app = App::new(vec![make_task(1, TaskStatus::Done)], Duration::from_secs(300));
-    app.selected_column = 4; // Done column
+    app.selection_mut().set_column(4); // Done column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
     assert!(app.status_message.is_some());
@@ -484,7 +484,7 @@ fn d_key_on_running_no_worktree_no_window_shows_warning() {
     task.worktree = None;
     task.tmux_window = None;
     let mut app = App::new(vec![task], Duration::from_secs(300));
-    app.selected_column = 2; // Running column
+    app.selection_mut().set_column(2); // Running column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
     assert!(app
@@ -500,7 +500,7 @@ fn g_key_with_live_window_jumps() {
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some("task-4".to_string());
     let mut app = App::new(vec![task], Duration::from_secs(300));
-    app.selected_column = 2; // Running column
+    app.selection_mut().set_column(2); // Running column
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert!(matches!(&cmds[0], Command::JumpToTmux { window } if window == "task-4"));
 }
@@ -527,7 +527,7 @@ fn brainstorm_only_backlog_tasks() {
 fn g_key_without_window_shows_message() {
 
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
-    app.selected_column = 0;
+    app.selection_mut().set_column(0);
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert!(cmds.is_empty());
     assert!(app.status_message.as_deref().unwrap().contains("No active session"));
@@ -709,7 +709,7 @@ fn escape_from_repo_path_mode_cancels() {
 #[test]
 fn confirm_delete_y_deletes_task() {
     let mut app = make_app();
-    app.selected_column = 0;
+    app.selection_mut().set_column(0);
     app.input.mode = InputMode::ConfirmDelete;
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert_eq!(app.input.mode, InputMode::Normal);
@@ -721,7 +721,7 @@ fn confirm_delete_y_deletes_task() {
 #[test]
 fn confirm_delete_uppercase_y_deletes_task() {
     let mut app = make_app();
-    app.selected_column = 0;
+    app.selection_mut().set_column(0);
     app.input.mode = InputMode::ConfirmDelete;
     let cmds = app.handle_key(make_key(KeyCode::Char('Y')));
     assert_eq!(app.input.mode, InputMode::Normal);
@@ -732,7 +732,7 @@ fn confirm_delete_uppercase_y_deletes_task() {
 #[test]
 fn confirm_delete_n_cancels() {
     let mut app = make_app();
-    app.selected_column = 0;
+    app.selection_mut().set_column(0);
     app.input.mode = InputMode::ConfirmDelete;
     let cmds = app.handle_key(make_key(KeyCode::Char('n')));
     assert_eq!(app.input.mode, InputMode::Normal);
@@ -744,7 +744,7 @@ fn confirm_delete_n_cancels() {
 #[test]
 fn confirm_delete_esc_cancels() {
     let mut app = make_app();
-    app.selected_column = 0;
+    app.selection_mut().set_column(0);
     app.input.mode = InputMode::ConfirmDelete;
     let cmds = app.handle_key(make_key(KeyCode::Esc));
     assert_eq!(app.input.mode, InputMode::Normal);
@@ -757,7 +757,7 @@ fn confirm_delete_esc_cancels() {
 #[test]
 fn x_key_enters_confirm_archive_mode() {
     let mut app = make_app();
-    app.selected_column = 0; // Backlog has tasks
+    app.selection_mut().set_column(0); // Backlog has tasks
     let cmds = app.handle_key(make_key(KeyCode::Char('x')));
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::ConfirmArchive);
@@ -767,7 +767,7 @@ fn x_key_enters_confirm_archive_mode() {
 #[test]
 fn confirm_archive_y_emits_archive_task() {
     let mut app = make_app();
-    app.selected_column = 0;
+    app.selection_mut().set_column(0);
     app.handle_key(make_key(KeyCode::Char('x')));
     let _ = app.handle_key(make_key(KeyCode::Char('y')));
     assert_eq!(app.input.mode, InputMode::Normal);
@@ -779,7 +779,7 @@ fn confirm_archive_y_emits_archive_task() {
 #[test]
 fn confirm_archive_n_cancels() {
     let mut app = make_app();
-    app.selected_column = 0;
+    app.selection_mut().set_column(0);
     app.handle_key(make_key(KeyCode::Char('x')));
     let _ = app.handle_key(make_key(KeyCode::Char('n')));
     assert_eq!(app.input.mode, InputMode::Normal);
@@ -791,7 +791,7 @@ fn confirm_archive_n_cancels() {
 #[test]
 fn x_key_on_empty_column_is_noop() {
     let mut app = make_app();
-    app.selected_column = 3; // Review column is empty
+    app.selection_mut().set_column(3); // Review column is empty
     app.handle_key(make_key(KeyCode::Char('x')));
     assert_eq!(app.input.mode, InputMode::Normal); // did NOT enter ConfirmArchive
 }
@@ -1104,21 +1104,21 @@ fn tmux_output_overwrites_previous() {
 #[test]
 fn refresh_tasks_replaces_and_clamps() {
     let mut app = make_app();
-    app.selected_row[0] = 1; // row 1 of Backlog (has 2 items)
+    app.selection_mut().set_row(0, 1); // row 1 of Backlog (has 2 items)
     app.update(Message::RefreshTasks(vec![make_task(10, TaskStatus::Backlog)]));
     assert_eq!(app.tasks.len(), 1);
     assert_eq!(app.tasks[0].id, TaskId(10));
-    assert_eq!(app.selected_row[0], 0); // clamped from 1 to 0
+    assert_eq!(app.selection().row(0), 0); // clamped from 1 to 0
 }
 
 #[test]
 fn refresh_tasks_empty_clamps_all_rows_to_zero() {
     let mut app = make_app();
-    app.selected_row[0] = 1;
-    app.selected_row[1] = 1;
+    app.selection_mut().set_row(0, 1);
+    app.selection_mut().set_row(1, 1);
     app.update(Message::RefreshTasks(vec![]));
     assert!(app.tasks.is_empty());
-    assert!(app.selected_row.iter().all(|&r| r == 0));
+    assert!(app.selection().selected_row.iter().all(|&r| r == 0));
 }
 
 // --- Key actions on Review status ---
@@ -1129,7 +1129,7 @@ fn d_key_on_review_with_window_shows_warning() {
     task.tmux_window = Some("task-5".to_string());
     task.worktree = Some("/repo/.worktrees/5-task-5".to_string());
     let mut app = App::new(vec![task], Duration::from_secs(300));
-    app.selected_column = 3; // Review column
+    app.selection_mut().set_column(3); // Review column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
     assert!(app.status_message.as_deref().unwrap().contains("already running"));
@@ -1141,7 +1141,7 @@ fn d_key_on_review_no_window_with_worktree_resumes() {
     task.worktree = Some("/repo/.worktrees/5-task-5".to_string());
     task.tmux_window = None;
     let mut app = App::new(vec![task], Duration::from_secs(300));
-    app.selected_column = 3; // Review column
+    app.selection_mut().set_column(3); // Review column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(matches!(&cmds[0], Command::Resume { .. }));
 }
@@ -1152,7 +1152,7 @@ fn d_key_on_review_no_worktree_no_window_shows_warning() {
     task.worktree = None;
     task.tmux_window = None;
     let mut app = App::new(vec![task], Duration::from_secs(300));
-    app.selected_column = 3; // Review column
+    app.selection_mut().set_column(3); // Review column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
     assert!(app.status_message.as_deref().unwrap().contains("No worktree"));
@@ -1163,7 +1163,7 @@ fn d_key_on_review_no_worktree_no_window_shows_warning() {
 #[test]
 fn d_key_on_empty_column_is_noop() {
     let mut app = App::new(vec![], Duration::from_secs(300));
-    app.selected_column = 0;
+    app.selection_mut().set_column(0);
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
 }
@@ -1171,7 +1171,7 @@ fn d_key_on_empty_column_is_noop() {
 #[test]
 fn g_key_on_empty_column_is_noop() {
     let mut app = App::new(vec![], Duration::from_secs(300));
-    app.selected_column = 0;
+    app.selection_mut().set_column(0);
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert!(cmds.is_empty());
 }
@@ -1179,7 +1179,7 @@ fn g_key_on_empty_column_is_noop() {
 #[test]
 fn m_key_on_empty_column_is_noop() {
     let mut app = App::new(vec![], Duration::from_secs(300));
-    app.selected_column = 0;
+    app.selection_mut().set_column(0);
     let cmds = app.handle_key(make_key(KeyCode::Char('m')));
     assert!(cmds.is_empty());
 }
@@ -1187,7 +1187,7 @@ fn m_key_on_empty_column_is_noop() {
 #[test]
 fn shift_m_key_on_empty_column_is_noop() {
     let mut app = App::new(vec![], Duration::from_secs(300));
-    app.selected_column = 0;
+    app.selection_mut().set_column(0);
     let cmds = app.handle_key(make_key(KeyCode::Char('M')));
     assert!(cmds.is_empty());
 }
@@ -1195,7 +1195,7 @@ fn shift_m_key_on_empty_column_is_noop() {
 #[test]
 fn e_key_on_empty_column_is_noop() {
     let mut app = App::new(vec![], Duration::from_secs(300));
-    app.selected_column = 0;
+    app.selection_mut().set_column(0);
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
     assert!(cmds.is_empty());
 }
@@ -1294,7 +1294,7 @@ fn action_hints_no_task() {
 #[test]
 fn e_key_emits_edit_task_in_editor() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
-    app.selected_column = 0;
+    app.selection_mut().set_column(0);
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
     assert_eq!(cmds.len(), 1);
     assert!(matches!(&cmds[0], Command::EditTaskInEditor(t) if t.id == TaskId(1)));
@@ -1366,8 +1366,8 @@ fn d_key_on_stale_running_task_enters_retry_mode() {
     app.tasks[0].tmux_window = Some("task-4".to_string());
     app.agents.stale_tasks.insert(TaskId(4));
     // Navigate to Running column (index 2)
-    app.selected_column = 2;
-    app.selected_row[2] = 0;
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
 
     app.handle_key(make_key(KeyCode::Char('d')));
     assert!(matches!(app.input.mode, InputMode::ConfirmRetry(TaskId(4))));
@@ -1380,8 +1380,8 @@ fn d_key_on_crashed_running_task_enters_retry_mode() {
     ], Duration::from_secs(300));
     app.tasks[0].tmux_window = Some("task-4".to_string());
     app.agents.crashed_tasks.insert(TaskId(4));
-    app.selected_column = 2;
-    app.selected_row[2] = 0;
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
 
     app.handle_key(make_key(KeyCode::Char('d')));
     assert!(matches!(app.input.mode, InputMode::ConfirmRetry(TaskId(4))));
@@ -1528,7 +1528,7 @@ fn confirm_delete_start_enters_mode() {
 #[test]
 fn confirm_delete_yes_deletes_selected_task() {
     let mut app = make_app();
-    app.selected_column = 0; // Backlog has tasks
+    app.selection_mut().set_column(0); // Backlog has tasks
     let cmds = app.update(Message::ConfirmDeleteYes);
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(cmds.iter().any(|c| matches!(c, Command::DeleteTask(_))));

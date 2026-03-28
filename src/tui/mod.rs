@@ -7,7 +7,7 @@ pub use types::*;
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
-use crate::models::{Task, TaskId, TaskStatus};
+use crate::models::{Epic, EpicId, Task, TaskId, TaskStatus, epic_status};
 
 // ---------------------------------------------------------------------------
 // App
@@ -15,8 +15,8 @@ use crate::models::{Task, TaskId, TaskStatus};
 
 pub struct App {
     pub(in crate::tui) tasks: Vec<Task>,
-    pub(in crate::tui) selected_column: usize,
-    pub(in crate::tui) selected_row: [usize; TaskStatus::COLUMN_COUNT],
+    pub(in crate::tui) epics: Vec<Epic>,
+    pub(in crate::tui) view_mode: ViewMode,
     pub(in crate::tui) detail_visible: bool,
     pub(in crate::tui) status_message: Option<String>,
     pub(in crate::tui) error_popup: Option<String>,
@@ -32,8 +32,8 @@ impl App {
     pub fn new(tasks: Vec<Task>, inactivity_timeout: Duration) -> Self {
         App {
             tasks,
-            selected_column: 0,
-            selected_row: [0; TaskStatus::COLUMN_COUNT],
+            epics: Vec::new(),
+            view_mode: ViewMode::default(),
             detail_visible: false,
             status_message: None,
             error_popup: None,
@@ -46,11 +46,29 @@ impl App {
         }
     }
 
+    /// Get the current selection state (from whichever view mode is active).
+    pub fn selection(&self) -> &BoardSelection {
+        match &self.view_mode {
+            ViewMode::Board(sel) => sel,
+            ViewMode::Epic { selection, .. } => selection,
+        }
+    }
+
+    /// Get mutable access to the current selection state.
+    pub(in crate::tui) fn selection_mut(&mut self) -> &mut BoardSelection {
+        match &mut self.view_mode {
+            ViewMode::Board(sel) => sel,
+            ViewMode::Epic { selection, .. } => selection,
+        }
+    }
+
     // Read-only accessors for code outside the tui module
     pub fn tasks(&self) -> &[Task] { &self.tasks }
     pub fn should_quit(&self) -> bool { self.should_quit }
-    pub fn selected_column(&self) -> usize { self.selected_column }
-    pub fn selected_row(&self) -> &[usize; TaskStatus::COLUMN_COUNT] { &self.selected_row }
+    pub fn selected_column(&self) -> usize { self.selection().column() }
+    pub fn selected_row(&self) -> &[usize; TaskStatus::COLUMN_COUNT] { &self.selection().selected_row }
+    pub fn view_mode(&self) -> &ViewMode { &self.view_mode }
+    pub fn epics(&self) -> &[Epic] { &self.epics }
     pub fn mode(&self) -> &InputMode { &self.input.mode }
     pub fn input_buffer(&self) -> &str { &self.input.buffer }
     pub fn detail_visible(&self) -> bool { self.detail_visible }
@@ -78,9 +96,10 @@ impl App {
 
     /// Return the currently selected task (in the focused column), if any.
     pub fn selected_task(&self) -> Option<&Task> {
-        let status = TaskStatus::from_column_index(self.selected_column)?;
+        let col = self.selection().column();
+        let status = TaskStatus::from_column_index(col)?;
         let col_tasks = self.tasks_by_status(status);
-        let row = self.selected_row[self.selected_column];
+        let row = self.selection().row(col);
         col_tasks.get(row).copied()
     }
 
@@ -89,10 +108,11 @@ impl App {
         for col in 0..TaskStatus::COLUMN_COUNT {
             if let Some(status) = TaskStatus::from_column_index(col) {
                 let count = self.tasks_by_status(status).len();
+                let sel = self.selection_mut();
                 if count == 0 {
-                    self.selected_row[col] = 0;
-                } else if self.selected_row[col] >= count {
-                    self.selected_row[col] = count - 1;
+                    sel.set_row(col, 0);
+                } else if sel.row(col) >= count {
+                    sel.set_row(col, count - 1);
                 }
             }
         }
@@ -192,21 +212,21 @@ impl App {
     }
 
     fn handle_navigate_column(&mut self, delta: isize) -> Vec<Command> {
-        let new_col = (self.selected_column as isize + delta)
+        let new_col = (self.selection().column() as isize + delta)
             .clamp(0, (TaskStatus::COLUMN_COUNT - 1) as isize) as usize;
-        self.selected_column = new_col;
+        self.selection_mut().set_column(new_col);
         self.clamp_selection();
         vec![]
     }
 
     fn handle_navigate_row(&mut self, delta: isize) -> Vec<Command> {
-        let col = self.selected_column;
+        let col = self.selection().column();
         if let Some(status) = TaskStatus::from_column_index(col) {
             let count = self.tasks_by_status(status).len();
             if count > 0 {
-                let new_row = (self.selected_row[col] as isize + delta)
-                    .clamp(0, count as isize - 1) as usize;
-                self.selected_row[col] = new_row;
+                let current = self.selection().row(col);
+                let new_row = (current as isize + delta).clamp(0, count as isize - 1) as usize;
+                self.selection_mut().set_row(col, new_row);
             }
         }
         vec![]

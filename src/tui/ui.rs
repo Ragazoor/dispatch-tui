@@ -187,7 +187,7 @@ fn render_columns(frame: &mut Frame, app: &App, area: Rect, now: DateTime<Utc>) 
 
     for (col_idx, &status) in TaskStatus::ALL.iter().enumerate() {
         let col_area = column_areas[col_idx];
-        let is_focused = app.selected_column == col_idx;
+        let is_focused = app.selected_column() == col_idx;
         let color = column_color(status);
 
         let (border_type, border_style, title_style) = if is_focused {
@@ -212,7 +212,7 @@ fn render_columns(frame: &mut Frame, app: &App, area: Rect, now: DateTime<Utc>) 
             .borders(Borders::ALL)
             .border_type(border_type)
             .border_style(border_style);
-        let selected_row = app.selected_row[col_idx];
+        let selected_row = app.selected_row()[col_idx];
 
         let items: Vec<ListItem> = tasks
             .iter()
