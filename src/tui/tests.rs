@@ -2029,6 +2029,84 @@ fn truncate_respects_max_length() {
 }
 
 // ---------------------------------------------------------------------------
+// Rendering tests — v2.0 cosmetic redesign
+// ---------------------------------------------------------------------------
+
+#[test]
+fn render_v2_task_card_shows_stripe() {
+    let app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
+    let buf = render_to_buffer(&app, 120, 20);
+    assert!(buffer_contains(&buf, "\u{258e}"), "task card should have stripe character");
+}
+
+#[test]
+fn render_v2_backlog_task_shows_status_icon() {
+    let app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
+    let buf = render_to_buffer(&app, 120, 20);
+    assert!(buffer_contains(&buf, "\u{25e6}"), "backlog task should show \u{25e6} icon");
+}
+
+#[test]
+fn render_v2_running_task_shows_status_icon() {
+    let mut task = make_task(1, TaskStatus::Running);
+    task.tmux_window = Some("win-1".to_string());
+    let app = App::new(vec![task], Duration::from_secs(300));
+    let buf = render_to_buffer(&app, 120, 20);
+    assert!(buffer_contains(&buf, "\u{25c9}"), "running task should show \u{25c9} icon");
+}
+
+#[test]
+fn render_v2_focused_column_shows_arrow() {
+    let app = App::new(vec![], Duration::from_secs(300));
+    let buf = render_to_buffer(&app, 120, 20);
+    // Default focus is on first column (Backlog), should show \u{25b8}
+    assert!(buffer_contains(&buf, "\u{25b8}"), "focused column should show \u{25b8} indicator");
+}
+
+#[test]
+fn render_v2_unfocused_columns_show_dot() {
+    let app = App::new(vec![], Duration::from_secs(300));
+    let buf = render_to_buffer(&app, 120, 20);
+    // Unfocused columns should show \u{25e6}
+    assert!(buffer_contains(&buf, "\u{25e6}"), "unfocused columns should show \u{25e6} indicator");
+}
+
+#[test]
+fn render_v2_detail_panel_shows_inline_metadata() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
+    app.update(Message::ToggleDetail);
+    let buf = render_to_buffer(&app, 120, 20);
+    // The compact detail panel shows "title \u{00b7} #id \u{00b7} status \u{00b7} repo" on one line
+    // Check for the middle-dot separator which is new in v2
+    assert!(buffer_contains(&buf, "\u{00b7}"), "detail panel should use \u{00b7} separator");
+    assert!(buffer_contains(&buf, "#1"), "detail panel should show task ID with # prefix");
+}
+
+#[test]
+fn render_v2_status_bar_no_brackets() {
+    let app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
+    let buf = render_to_buffer(&app, 120, 20);
+    let content: String = buf.content().iter().map(|cell| cell.symbol()).collect();
+    // Old format had [n], [q] etc. New format should NOT have brackets
+    assert!(!content.contains("[n]"), "status bar should not use bracket format");
+    assert!(!content.contains("[q]"), "status bar should not use bracket format");
+    // But should still contain the action words
+    assert!(buffer_contains(&buf, "new"), "status bar should show 'new' hint");
+    assert!(buffer_contains(&buf, "quit"), "status bar should show 'quit' hint");
+}
+
+#[test]
+fn render_v2_done_task_shows_checkmark() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Done)], Duration::from_secs(300));
+    // Navigate to Done column (column index 4)
+    for _ in 0..4 {
+        app.update(Message::NavigateColumn(1));
+    }
+    let buf = render_to_buffer(&app, 120, 20);
+    assert!(buffer_contains(&buf, "\u{2713}"), "done task should show \u{2713} icon");
+}
+
+// ---------------------------------------------------------------------------
 // Stress tests
 // ---------------------------------------------------------------------------
 
