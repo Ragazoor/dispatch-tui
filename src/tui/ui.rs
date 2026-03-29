@@ -298,7 +298,7 @@ fn render_columns(frame: &mut Frame, app: &App, area: Rect, now: DateTime<Utc>) 
                 let is_cursor = is_focused && row_idx == selected_row;
                 match item {
                     ColumnItem::Task(task) => build_task_list_item(task, status, app, now, is_cursor, color),
-                    ColumnItem::Epic(epic) => render_epic_item(epic, is_cursor, app, color),
+                    ColumnItem::Epic(epic) => render_epic_item(epic, is_cursor, app, status),
                 }
             })
             .collect();
@@ -321,7 +321,7 @@ fn render_epic_item(
     epic: &Epic,
     is_cursor: bool,
     app: &App,
-    _col_color: Color,
+    status: TaskStatus,
 ) -> ListItem<'static> {
     let subtask_statuses: Vec<TaskStatus> = app.tasks()
         .iter()
@@ -370,7 +370,7 @@ fn render_epic_item(
     if is_cursor {
         item = item.style(
             Style::default()
-                .bg(Color::Rgb(38, 26, 48))
+                .bg(cursor_bg_color(status))
                 .fg(Color::Rgb(192, 202, 245))
                 .add_modifier(Modifier::BOLD),
         );
