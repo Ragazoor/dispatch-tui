@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use std::fs;
 
-use crate::models::{DispatchResult, ResumeResult, Task, TaskId, slugify};
+use crate::models::{DispatchResult, EpicId, ResumeResult, Task, TaskId, slugify};
 use crate::process::ProcessRunner;
 use crate::tmux;
 
@@ -85,6 +85,11 @@ pub fn brainstorm_agent(task: &Task, mcp_port: u16, runner: &dyn ProcessRunner) 
 
 pub fn quick_dispatch_agent(task: &Task, mcp_port: u16, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
     let prompt = build_quick_dispatch_prompt(task.id, &task.title, &task.description, mcp_port);
+    dispatch_with_prompt(task, &prompt, runner)
+}
+
+pub fn epic_planning_agent(task: &Task, epic_id: EpicId, epic_title: &str, epic_description: &str, mcp_port: u16, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
+    let prompt = build_epic_planning_prompt(epic_id, epic_title, epic_description, mcp_port);
     dispatch_with_prompt(task, &prompt, runner)
 }
 
@@ -339,6 +344,47 @@ attach the plan (tool: task-orchestrator, tool name: update_task — set the pla
     )
 }
 
+fn build_epic_planning_prompt(epic_id: EpicId, title: &str, description: &str, mcp_port: u16) -> String {
+    format!(
+        "You are a planning agent. Your job is ONLY to plan — do NOT implement anything.\n\
+\n\
+## Context\n\
+\n\
+Epic ID: {epic_id}\n\
+Epic Title: {title}\n\
+Epic Description: {description}\n\
+\n\
+An MCP server is available at http://localhost:{mcp_port}/mcp — use it to \
+query and update tasks/epics (tool: task-orchestrator).\n\
+\n\
+## Instructions\n\
+\n\
+Follow these steps in order:\n\
+\n\
+### Step 1: Understand the Epic\n\
+Fetch the full epic details via MCP: get_epic({epic_id_raw})\n\
+\n\
+### Step 2: Brainstorm the Design\n\
+Run /brainstorming to explore the problem space and design the solution \
+with the user. Use the epic's description as your starting context.\n\
+\n\
+### Step 3: Create Implementation Plan\n\
+The brainstorming skill will transition to /writing-plans. Follow that \
+through to produce a detailed implementation plan.\n\
+\n\
+### Step 4: Decompose into Subtasks\n\
+After the implementation plan is written, run /decompose-plan {epic_id_raw}\n\
+This will read the plan and interactively create subtasks under the epic.\n\
+\n\
+IMPORTANT: Do NOT start implementing. Your job ends after decomposition.",
+        epic_id = epic_id,
+        title = title,
+        description = description,
+        mcp_port = mcp_port,
+        epic_id_raw = epic_id.0,
+    )
+}
+
 /// Expand a leading `~` or `~/` to the user's home directory.
 fn expand_tilde(path: &str) -> String {
     if path == "~" || path.starts_with("~/") {
@@ -357,7 +403,7 @@ fn expand_tilde(path: &str) -> String {
 mod tests {
     use super::*;
     use crate::process::{MockProcessRunner, exit_fail};
-    use crate::models::{Task, TaskId, TaskStatus};
+    use crate::models::{EpicId, Task, TaskId, TaskStatus};
     use chrono::Utc;
     use std::process::Output;
 
@@ -674,6 +720,18 @@ mod tests {
     }
 
     // --- finish_task tests ---
+
+    #[test]
+    fn epic_planning_prompt_contains_epic_id_and_skills() {
+        let prompt = build_epic_planning_prompt(EpicId(42), "Redesign auth", "Rework the login flow", 3142);
+        assert!(prompt.contains("42"));
+        assert!(prompt.contains("Redesign auth"));
+        assert!(prompt.contains("/brainstorming"));
+        assert!(prompt.contains("/writing-plans"));
+        assert!(prompt.contains("/decompose-plan"));
+        assert!(prompt.contains("Do NOT start implementing"));
+        assert!(prompt.contains("3142"));
+    }
 
     #[test]
     fn finish_task_happy_path() {
