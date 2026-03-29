@@ -2036,7 +2036,11 @@ fn truncate_respects_max_length() {
 fn render_v2_task_card_shows_stripe() {
     let app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
     let buf = render_to_buffer(&app, 120, 20);
-    assert!(buffer_contains(&buf, "\u{258e}"), "task card should have stripe character");
+    // Cursor card uses thicker stripe ▌ (U+258C), non-cursor uses ▎ (U+258E)
+    assert!(
+        buffer_contains(&buf, "\u{258c}") || buffer_contains(&buf, "\u{258e}"),
+        "task card should have stripe character"
+    );
 }
 
 #[test]

@@ -22,15 +22,27 @@ fn column_color(status: TaskStatus) -> Color {
     }
 }
 
-/// Dark-tinted background for the cursor card in each column.
+/// Tinted background for the cursor card in each column.
 fn cursor_bg_color(status: TaskStatus) -> Color {
     match status {
-        TaskStatus::Backlog => Color::Rgb(26, 28, 48),
-        TaskStatus::Ready => Color::Rgb(26, 34, 64),
-        TaskStatus::Running => Color::Rgb(48, 38, 20),
-        TaskStatus::Review => Color::Rgb(38, 26, 48),
-        TaskStatus::Done => Color::Rgb(26, 38, 28),
-        TaskStatus::Archived => Color::Rgb(26, 28, 48),
+        TaskStatus::Backlog => Color::Rgb(34, 38, 66),
+        TaskStatus::Ready => Color::Rgb(32, 46, 82),
+        TaskStatus::Running => Color::Rgb(62, 50, 28),
+        TaskStatus::Review => Color::Rgb(50, 34, 66),
+        TaskStatus::Done => Color::Rgb(32, 52, 36),
+        TaskStatus::Archived => Color::Rgb(34, 38, 66),
+    }
+}
+
+/// Faint background wash for the focused column, tinted to the column color.
+fn column_bg_color(status: TaskStatus) -> Color {
+    match status {
+        TaskStatus::Backlog => Color::Rgb(22, 24, 38),
+        TaskStatus::Ready => Color::Rgb(22, 26, 42),
+        TaskStatus::Running => Color::Rgb(32, 28, 20),
+        TaskStatus::Review => Color::Rgb(28, 22, 36),
+        TaskStatus::Done => Color::Rgb(22, 30, 24),
+        TaskStatus::Archived => Color::Rgb(22, 24, 38),
     }
 }
 
@@ -163,6 +175,8 @@ fn build_task_list_item<'a>(
     let title_text = format_task_title(task, 32);
 
     // Line 1: prefix + stripe + title
+    // Cursor gets a thicker stripe (▌) as a left accent bar
+    let stripe_char = if is_cursor { "\u{258c}" } else { "\u{258e}" };
     let stripe_style = Style::default().fg(col_color);
     let title_style = if is_batch_selected {
         Style::default().add_modifier(Modifier::BOLD)
@@ -172,7 +186,7 @@ fn build_task_list_item<'a>(
 
     let line1 = Line::from(vec![
         Span::styled(select_prefix.to_string(), title_style),
-        Span::styled("\u{258e}", stripe_style),
+        Span::styled(stripe_char, stripe_style),
         Span::styled(format!(" {title_text}"), title_style),
     ]);
 
@@ -281,8 +295,17 @@ fn render_columns(frame: &mut Frame, app: &App, area: Rect, now: DateTime<Utc>) 
             })
             .collect();
 
-        let list = List::new(items);
-        frame.render_widget(list, col_area);
+        if is_focused {
+            let block = Block::default()
+                .style(Style::default().bg(column_bg_color(status)));
+            let inner = block.inner(col_area);
+            frame.render_widget(block, col_area);
+            let list = List::new(items);
+            frame.render_widget(list, inner);
+        } else {
+            let list = List::new(items);
+            frame.render_widget(list, col_area);
+        }
     }
 }
 
@@ -306,10 +329,11 @@ fn render_epic_item(
 
     let title_text = truncate(&epic.title, 28);
 
-    // Line 1: stripe + title
+    // Line 1: stripe + title (thicker stripe for cursor)
+    let stripe_char = if is_cursor { "\u{258c}" } else { "\u{258e}" };
     let line1 = Line::from(vec![
         Span::raw("  "),
-        Span::styled("\u{258e}", Style::default().fg(Color::Rgb(187, 154, 247))),
+        Span::styled(stripe_char, Style::default().fg(Color::Rgb(187, 154, 247))),
         Span::styled(
             format!(" {title_text}"),
             Style::default().fg(Color::Rgb(187, 154, 247)).add_modifier(Modifier::BOLD),
