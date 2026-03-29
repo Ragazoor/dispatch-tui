@@ -846,6 +846,11 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 .style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
+        InputMode::ConfirmDone(_) => {
+            let bar = Paragraph::new("Mark task as Done? (y/n)")
+                .style(Style::default().fg(Color::Yellow));
+            frame.render_widget(bar, area);
+        }
         InputMode::InputEpicTitle => {
             let bar = Paragraph::new("Creating epic: enter title")
                 .style(Style::default().fg(Color::Magenta));

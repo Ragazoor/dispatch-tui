@@ -89,6 +89,9 @@ pub enum Message {
     CancelFinish,
     FinishComplete(TaskId),
     FinishFailed { id: TaskId, error: String, is_conflict: bool },
+    // Done confirmation (no cleanup, just status change)
+    ConfirmDone,
+    CancelDone,
 }
 
 // ---------------------------------------------------------------------------
@@ -141,6 +144,7 @@ pub enum InputMode {
     ConfirmRetry(TaskId),
     ConfirmArchive,
     ConfirmFinish(TaskId),
+    ConfirmDone(TaskId),
     // Epic input modes
     InputEpicTitle,
     InputEpicDescription,

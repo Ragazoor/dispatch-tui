@@ -286,6 +286,8 @@ impl App {
             Message::FinishComplete(id) => self.handle_finish_complete(id),
             Message::FinishFailed { id, error, is_conflict } =>
                 self.handle_finish_failed(id, error, is_conflict),
+            // Done confirmation (no cleanup, just status change)
+            Message::ConfirmDone | Message::CancelDone => vec![],
             // Epic messages
             Message::EnterEpic(epic_id) => self.handle_enter_epic(epic_id),
             Message::ExitEpic => self.handle_exit_epic(),
