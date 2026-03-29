@@ -110,14 +110,21 @@ fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
 fn format_task_title(task: &Task, status: TaskStatus, app: &App, age_suffix: &str) -> String {
     let max_title = 36_usize.saturating_sub(age_suffix.len());
 
+    let is_conflict = app.merge_conflict_tasks().contains(&task.id);
+
     if status != TaskStatus::Running {
+        if is_conflict {
+            return format!("{} [conflict]", truncate(&task.title, 25));
+        }
         return truncate(&task.title, max_title);
     }
 
     let is_crashed = app.crashed_tasks().contains(&task.id);
     let is_stale = app.stale_tasks().contains(&task.id);
 
-    if is_crashed {
+    if is_conflict {
+        format!("{} [conflict]", truncate(&task.title, 25))
+    } else if is_crashed {
         format!("{} [crashed]", truncate(&task.title, 26))
     } else if is_stale {
         format!("{} [stale]", truncate(&task.title, 28))
@@ -179,7 +186,9 @@ fn build_task_list_item<'a>(
             Span::styled(title_text, batch_style),
             Span::styled(age_suffix, age_style),
         ]))
-    } else if status == TaskStatus::Running && app.crashed_tasks().contains(&task.id) {
+    } else if app.merge_conflict_tasks().contains(&task.id)
+        || (status == TaskStatus::Running && app.crashed_tasks().contains(&task.id))
+    {
         let style = Style::default().fg(Color::Red).patch(batch_style);
         ListItem::new(Line::from(vec![
             Span::styled(select_prefix.to_string(), style),
@@ -625,7 +634,7 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     let popup_width = (area.width * 80 / 100).clamp(40, 72);
-    let popup_height = (area.height * 80 / 100).clamp(23, 28);
+    let popup_height = (area.height * 80 / 100).clamp(23, 29);
     let x = area.x + (area.width.saturating_sub(popup_width)) / 2;
     let y = area.y + (area.height.saturating_sub(popup_height)) / 2;
     let popup_area = Rect::new(x, y, popup_width, popup_height);
@@ -682,6 +691,10 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled("  H", key), Span::styled(" history    ", desc),
             Span::styled("V", key), Span::styled(" epic done  ", desc),
             Span::styled("Space", key), Span::styled(" select", desc),
+        ]),
+        Line::from(vec![
+            Span::styled("  f", key), Span::styled(" finish     ", desc),
+            Span::styled("(Review: merge + clean up worktree)", note),
         ]),
         Line::from(""),
         Line::from(Span::styled("  * d is context-dependent:", note)),
@@ -841,7 +854,21 @@ pub(in crate::tui) fn action_hints(task: Option<&Task>) -> Vec<Span<'static>> {
                 push_hint("[M]", "back");
                 push_hint("[x]", "archive");
             }
-            TaskStatus::Running | TaskStatus::Review => {
+            TaskStatus::Running => {
+                if task.tmux_window.is_some() {
+                    push_hint("[g]", "o to session");
+                } else if task.worktree.is_some() {
+                    push_hint("[d]", "resume");
+                }
+                push_hint("[e]", "dit");
+                push_hint("[m]", "ove");
+                push_hint("[M]", "back");
+                push_hint("[x]", "archive");
+            }
+            TaskStatus::Review => {
+                if task.worktree.is_some() {
+                    push_hint("[f]", "inish");
+                }
                 if task.tmux_window.is_some() {
                     push_hint("[g]", "o to session");
                 } else if task.worktree.is_some() {
