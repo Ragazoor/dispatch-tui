@@ -244,7 +244,7 @@ fn dispatch_from_review_is_noop() {
 }
 
 #[test]
-fn move_backward_from_running_emits_cleanup() {
+fn move_backward_from_running_detaches_but_keeps_worktree() {
     let mut task = make_task(4, TaskStatus::Running);
     task.worktree = Some("/repo/.worktrees/4-task-4".to_string());
     task.tmux_window = Some("task-4".to_string());
@@ -255,15 +255,15 @@ fn move_backward_from_running_emits_cleanup() {
         direction: MoveDirection::Backward,
     });
 
-    // Should emit Cleanup then PersistTask
+    // Should emit KillTmuxWindow then PersistTask (no Cleanup)
     assert_eq!(cmds.len(), 2);
-    assert!(matches!(&cmds[0], Command::Cleanup { .. }));
+    assert!(matches!(&cmds[0], Command::KillTmuxWindow { window } if window == "task-4"));
     assert!(matches!(&cmds[1], Command::PersistTask(_)));
 
-    // In-memory task should have cleared dispatch fields
+    // Worktree preserved, tmux_window cleared
     let task = app.tasks.iter().find(|t| t.id == TaskId(4)).unwrap();
     assert_eq!(task.status, TaskStatus::Ready);
-    assert!(task.worktree.is_none());
+    assert_eq!(task.worktree.as_deref(), Some("/repo/.worktrees/4-task-4"));
     assert!(task.tmux_window.is_none());
 }
 

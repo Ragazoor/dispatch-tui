@@ -229,6 +229,12 @@ impl App {
         }
     }
 
+    /// Take the tmux_window from a task and build a KillTmuxWindow command.
+    /// Leaves the worktree intact so the task can be resumed later.
+    fn take_detach(task: &mut Task) -> Option<Command> {
+        task.tmux_window.take().map(|window| Command::KillTmuxWindow { window })
+    }
+
     /// Process a message and return a list of side-effect commands.
     pub fn update(&mut self, msg: Message) -> Vec<Command> {
         match msg {
@@ -359,9 +365,9 @@ impl App {
                 return vec![];
             }
 
-            // Clean up worktree/tmux when moving backward from a dispatched state
-            let cleanup = if matches!(direction, MoveDirection::Backward) {
-                Self::take_cleanup(task)
+            // Kill tmux window when moving backward, but keep worktree for resume
+            let detach = if matches!(direction, MoveDirection::Backward) {
+                Self::take_detach(task)
             } else {
                 None
             };
@@ -372,7 +378,7 @@ impl App {
             self.clamp_selection();
 
             let mut cmds = Vec::new();
-            if let Some(c) = cleanup {
+            if let Some(c) = detach {
                 cmds.push(c);
             }
             cmds.push(Command::PersistTask(task_clone));
