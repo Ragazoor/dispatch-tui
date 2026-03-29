@@ -2657,8 +2657,24 @@ fn make_app_confirm_delete_epic() -> App {
     app.selection_mut().set_column(0);
     app.selection_mut().set_row(0, 1); // cursor on epic
     app.input.mode = InputMode::ConfirmDeleteEpic;
-    app.status_message = Some("Delete epic and all subtasks? (y/n)".to_string());
+    app.status_message = Some("Delete epic \"Epic 10\" and subtasks? (y/n)".to_string());
     app
+}
+
+#[test]
+fn confirm_delete_epic_enters_mode_with_title() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Backlog),
+    ], Duration::from_secs(300));
+    app.epics = vec![make_epic(10)];
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 1); // cursor on epic
+    app.update(Message::ConfirmDeleteEpic);
+    assert_eq!(app.input.mode, InputMode::ConfirmDeleteEpic);
+    assert_eq!(
+        app.status_message.as_deref(),
+        Some("Delete epic \"Epic 10\" and subtasks? (y/n)")
+    );
 }
 
 #[test]

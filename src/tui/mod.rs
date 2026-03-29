@@ -921,9 +921,10 @@ impl App {
     }
 
     fn handle_confirm_delete_epic(&mut self) -> Vec<Command> {
-        if matches!(self.selected_column_item(), Some(ColumnItem::Epic(_))) {
+        if let Some(ColumnItem::Epic(epic)) = self.selected_column_item() {
+            let title = truncate_title(&epic.title, 30);
             self.input.mode = InputMode::ConfirmDeleteEpic;
-            self.status_message = Some("Delete epic and all subtasks? (y/n)".to_string());
+            self.status_message = Some(format!("Delete epic {title} and subtasks? (y/n)"));
         }
         vec![]
     }
