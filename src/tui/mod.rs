@@ -28,6 +28,15 @@ pub struct App {
     pub(in crate::tui) selected_tasks: HashSet<TaskId>,
 }
 
+/// Format a title for display in confirmation prompts, truncating if longer than `max_len`.
+pub(in crate::tui) fn truncate_title(title: &str, max_len: usize) -> String {
+    if title.len() <= max_len {
+        format!("\"{title}\"")
+    } else {
+        format!("\"{}...\"", &title[..max_len.saturating_sub(3)])
+    }
+}
+
 impl App {
     pub fn new(tasks: Vec<Task>, inactivity_timeout: Duration) -> Self {
         App {
@@ -702,9 +711,12 @@ impl App {
     }
 
     fn handle_confirm_delete_start(&mut self) -> Vec<Command> {
-        if self.selected_task().is_some() {
+        if let Some(task) = self.selected_task() {
+            let title = truncate_title(&task.title, 30);
+            let status = task.status.as_str();
+            let warning = if task.worktree.is_some() { " (has worktree)" } else { "" };
             self.input.mode = InputMode::ConfirmDelete;
-            self.status_message = Some("Delete task? (y/n)".to_string());
+            self.status_message = Some(format!("Delete {title} [{status}]{warning}? (y/n)"));
         }
         vec![]
     }

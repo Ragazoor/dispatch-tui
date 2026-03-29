@@ -1519,14 +1519,18 @@ fn confirm_delete_start_enters_mode() {
     let mut app = make_app();
     app.update(Message::ConfirmDeleteStart);
     assert_eq!(app.input.mode, InputMode::ConfirmDelete);
-    assert_eq!(app.status_message.as_deref(), Some("Delete task? (y/n)"));
+    // make_app() selects column 0, row 0 = Task 1 (Backlog)
+    assert_eq!(
+        app.status_message.as_deref(),
+        Some("Delete \"Task 1\" [backlog]? (y/n)")
+    );
 }
 
 #[test]
 fn cancel_delete_returns_to_normal() {
     let mut app = App::new(vec![], Duration::from_secs(300));
     app.input.mode = InputMode::ConfirmDelete;
-    app.status_message = Some("Delete task? (y/n)".to_string());
+    app.status_message = Some("Delete \"Task 1\" [backlog]? (y/n)".to_string());
     app.update(Message::CancelDelete);
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(app.status_message.is_none());
@@ -2983,4 +2987,38 @@ fn help_overlay_hidden_in_normal_mode() {
     let app = make_app();
     let buf = render_to_buffer(&app, 80, 30);
     assert!(!buffer_contains(&buf, "Navigation"));
+}
+
+// --- truncate_title ---
+
+#[test]
+fn truncate_title_short() {
+    assert_eq!(super::truncate_title("Fix bug", 30), "\"Fix bug\"");
+}
+
+#[test]
+fn truncate_title_exact_limit() {
+    let title = "a".repeat(30);
+    assert_eq!(super::truncate_title(&title, 30), format!("\"{}\"", title));
+}
+
+#[test]
+fn truncate_title_over_limit() {
+    let title = "Refactor the authentication middleware system";
+    assert_eq!(super::truncate_title(title, 30), "\"Refactor the authentication...\"");
+}
+
+#[test]
+fn confirm_delete_start_running_with_worktree_shows_warning() {
+    let mut task = make_task(4, TaskStatus::Running);
+    task.worktree = Some("/wt/4-test".to_string());
+    let mut app = App::new(vec![task], Duration::from_secs(300));
+    // Task is in Running column (column 2), navigate there
+    app.selection_mut().set_column(2);
+    app.update(Message::ConfirmDeleteStart);
+    assert_eq!(app.input.mode, InputMode::ConfirmDelete);
+    assert_eq!(
+        app.status_message.as_deref(),
+        Some("Delete \"Task 4\" [running] (has worktree)? (y/n)")
+    );
 }
