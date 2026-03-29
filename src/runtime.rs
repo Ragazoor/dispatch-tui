@@ -183,12 +183,16 @@ struct TuiRuntime {
 }
 
 impl TuiRuntime {
+    fn db_error(action: &str, e: impl std::fmt::Display) -> String {
+        format!("DB error {action}: {e}")
+    }
+
     fn exec_insert_task(&self, app: &mut App, title: String, description: String, repo_path: String, epic_id: Option<models::EpicId>) {
         match self.database.create_task_returning(&title, &description, &repo_path, None, models::TaskStatus::Backlog) {
             Ok(mut task) => {
                 if let Some(eid) = epic_id {
                     if let Err(e) = self.database.set_task_epic_id(task.id, Some(eid)) {
-                        app.update(Message::Error(format!("DB error linking task to epic: {e}")));
+                        app.update(Message::Error(Self::db_error("linking task to epic", e)));
                         return;
                     }
                     task.epic_id = Some(eid);
@@ -196,7 +200,7 @@ impl TuiRuntime {
                 app.update(Message::TaskCreated { task });
             }
             Err(e) => {
-                app.update(Message::Error(format!("DB error creating task: {e}")));
+                app.update(Message::Error(Self::db_error("creating task", e)));
             }
         }
     }
@@ -229,7 +233,7 @@ impl TuiRuntime {
                 });
             }
             Err(e) => {
-                app.update(Message::Error(format!("DB error creating task: {e}")));
+                app.update(Message::Error(Self::db_error("creating task", e)));
             }
         }
     }
@@ -242,13 +246,13 @@ impl TuiRuntime {
                 .worktree(task.worktree.as_deref())
                 .tmux_window(task.tmux_window.as_deref()),
         ) {
-            app.update(Message::Error(format!("DB error persisting task: {e}")));
+            app.update(Message::Error(Self::db_error("persisting task", e)));
         }
     }
 
     fn exec_delete_task(&self, app: &mut App, id: TaskId) {
         if let Err(e) = self.database.delete_task(id) {
-            app.update(Message::Error(format!("DB error deleting task: {e}")));
+            app.update(Message::Error(Self::db_error("deleting task", e)));
         }
     }
 
@@ -370,7 +374,7 @@ impl TuiRuntime {
                             .repo_path(&repo_path)
                             .plan(plan.as_deref()),
                     ) {
-                        app.update(Message::Error(format!("DB error updating task: {e}")));
+                        app.update(Message::Error(Self::db_error("updating task", e)));
                     }
                     app.update(Message::TaskEdited(tui::TaskEdit {
                         id: task_id,
@@ -414,7 +418,7 @@ impl TuiRuntime {
                 let _ = cmds;
             }
             Err(e) => {
-                app.update(Message::Error(format!("DB refresh failed: {e}")));
+                app.update(Message::Error(Self::db_error("refreshing tasks", e)));
             }
         }
         // Also refresh epics
@@ -427,7 +431,7 @@ impl TuiRuntime {
                 app.update(Message::EpicCreated(epic));
             }
             Err(e) => {
-                app.update(Message::Error(format!("DB error creating epic: {e}")));
+                app.update(Message::Error(Self::db_error("creating epic", e)));
             }
         }
     }
@@ -491,7 +495,7 @@ impl TuiRuntime {
                         epic_id,
                         &EpicPatch::new().title(&title).description(&description).plan(&plan),
                     ) {
-                        app.update(Message::Error(format!("DB error updating epic: {e}")));
+                        app.update(Message::Error(Self::db_error("updating epic", e)));
                     }
                     let mut updated = epic;
                     updated.title = title;
@@ -507,14 +511,14 @@ impl TuiRuntime {
 
     fn exec_delete_epic(&self, app: &mut App, id: models::EpicId) {
         if let Err(e) = self.database.delete_epic(id) {
-            app.update(Message::Error(format!("DB error deleting epic: {e}")));
+            app.update(Message::Error(Self::db_error("deleting epic", e)));
         }
     }
 
     fn exec_persist_epic(&self, app: &mut App, id: models::EpicId, done: Option<bool>) {
         if let Some(d) = done {
             if let Err(e) = self.database.patch_epic(id, &EpicPatch::new().done(d)) {
-                app.update(Message::Error(format!("DB error updating epic: {e}")));
+                app.update(Message::Error(Self::db_error("updating epic", e)));
             }
         }
     }
@@ -525,7 +529,7 @@ impl TuiRuntime {
                 app.update(Message::RefreshEpics(epics));
             }
             Err(e) => {
-                app.update(Message::Error(format!("DB epic refresh failed: {e}")));
+                app.update(Message::Error(Self::db_error("refreshing epics", e)));
             }
         }
     }
@@ -693,6 +697,14 @@ mod tests {
     use super::*;
     use crate::db::Database;
     use crate::process::MockProcessRunner;
+
+    #[test]
+    fn db_error_formats_consistently() {
+        assert_eq!(
+            TuiRuntime::db_error("creating task", "disk full"),
+            "DB error creating task: disk full"
+        );
+    }
 
     fn test_runtime() -> (TuiRuntime, App) {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
