@@ -185,9 +185,10 @@ impl App {
             KeyCode::Char('H') | KeyCode::Esc => self.update(Message::ToggleArchive),
             KeyCode::Char('x') => {
                 let archived = self.archived_tasks();
-                if archived.get(self.archive.selected_row).is_some() {
+                if let Some(task) = archived.get(self.archive.selected_row) {
+                    let title = super::truncate_title(&task.title, 30);
                     self.input.mode = InputMode::ConfirmDelete;
-                    self.status_message = Some("Delete permanently? (y/n)".to_string());
+                    self.status_message = Some(format!("Delete {title}? (y/n)"));
                 }
                 vec![]
             }

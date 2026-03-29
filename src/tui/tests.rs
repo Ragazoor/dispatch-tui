@@ -1519,14 +1519,18 @@ fn confirm_delete_start_enters_mode() {
     let mut app = make_app();
     app.update(Message::ConfirmDeleteStart);
     assert_eq!(app.input.mode, InputMode::ConfirmDelete);
-    assert_eq!(app.status_message.as_deref(), Some("Delete task? (y/n)"));
+    // make_app() selects column 0, row 0 = Task 1 (Backlog)
+    assert_eq!(
+        app.status_message.as_deref(),
+        Some("Delete \"Task 1\" [backlog]? (y/n)")
+    );
 }
 
 #[test]
 fn cancel_delete_returns_to_normal() {
     let mut app = App::new(vec![], Duration::from_secs(300));
     app.input.mode = InputMode::ConfirmDelete;
-    app.status_message = Some("Delete task? (y/n)".to_string());
+    app.status_message = Some("Delete \"Task 1\" [backlog]? (y/n)".to_string());
     app.update(Message::CancelDelete);
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(app.status_message.is_none());
@@ -1678,6 +1682,10 @@ fn archive_panel_x_enters_confirm_delete() {
 
     app.handle_key(make_key(KeyCode::Char('x')));
     assert_eq!(app.input.mode, InputMode::ConfirmDelete);
+    assert_eq!(
+        app.status_message.as_deref(),
+        Some("Delete \"Task 1\"? (y/n)")
+    );
 }
 
 #[test]
@@ -2649,8 +2657,24 @@ fn make_app_confirm_delete_epic() -> App {
     app.selection_mut().set_column(0);
     app.selection_mut().set_row(0, 1); // cursor on epic
     app.input.mode = InputMode::ConfirmDeleteEpic;
-    app.status_message = Some("Delete epic and all subtasks? (y/n)".to_string());
+    app.status_message = Some("Delete epic \"Epic 10\" and subtasks? (y/n)".to_string());
     app
+}
+
+#[test]
+fn confirm_delete_epic_enters_mode_with_title() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Backlog),
+    ], Duration::from_secs(300));
+    app.epics = vec![make_epic(10)];
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 1); // cursor on epic
+    app.update(Message::ConfirmDeleteEpic);
+    assert_eq!(app.input.mode, InputMode::ConfirmDeleteEpic);
+    assert_eq!(
+        app.status_message.as_deref(),
+        Some("Delete epic \"Epic 10\" and subtasks? (y/n)")
+    );
 }
 
 #[test]
@@ -3234,4 +3258,46 @@ fn confirm_finish_n_key_cancels() {
     app.handle_key(make_key(KeyCode::Char('n')));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(app.status_message.is_none());
+}
+
+// --- truncate_title ---
+
+#[test]
+fn truncate_title_short() {
+    assert_eq!(super::truncate_title("Fix bug", 30), "\"Fix bug\"");
+}
+
+#[test]
+fn truncate_title_exact_limit() {
+    let title = "a".repeat(30);
+    assert_eq!(super::truncate_title(&title, 30), format!("\"{}\"", title));
+}
+
+#[test]
+fn truncate_title_over_limit() {
+    let title = "Refactor the authentication middleware system";
+    assert_eq!(super::truncate_title(title, 30), "\"Refactor the authentication...\"");
+}
+
+#[test]
+fn truncate_title_multibyte_chars() {
+    // Multi-byte UTF-8 characters must not panic on truncation
+    let title = "Fix the caf\u{00e9} rendering bug now";
+    // 31 chars, should truncate at char boundary not byte boundary
+    assert!(super::truncate_title(title, 10).ends_with("...\""));
+}
+
+#[test]
+fn confirm_delete_start_running_with_worktree_shows_warning() {
+    let mut task = make_task(4, TaskStatus::Running);
+    task.worktree = Some("/wt/4-test".to_string());
+    let mut app = App::new(vec![task], Duration::from_secs(300));
+    // Task is in Running column (column 2), navigate there
+    app.selection_mut().set_column(2);
+    app.update(Message::ConfirmDeleteStart);
+    assert_eq!(app.input.mode, InputMode::ConfirmDelete);
+    assert_eq!(
+        app.status_message.as_deref(),
+        Some("Delete \"Task 4\" [running] (has worktree)? (y/n)")
+    );
 }

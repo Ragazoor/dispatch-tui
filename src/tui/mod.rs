@@ -29,6 +29,16 @@ pub struct App {
     pub(in crate::tui) merge_conflict_tasks: HashSet<TaskId>,
 }
 
+/// Format a title for display in confirmation prompts, truncating if longer than `max_len` chars.
+pub(in crate::tui) fn truncate_title(title: &str, max_len: usize) -> String {
+    if title.chars().count() <= max_len {
+        format!("\"{title}\"")
+    } else {
+        let truncated: String = title.chars().take(max_len.saturating_sub(3)).collect();
+        format!("\"{truncated}...\"")
+    }
+}
+
 impl App {
     pub fn new(tasks: Vec<Task>, inactivity_timeout: Duration) -> Self {
         App {
@@ -723,9 +733,12 @@ impl App {
     }
 
     fn handle_confirm_delete_start(&mut self) -> Vec<Command> {
-        if self.selected_task().is_some() {
+        if let Some(task) = self.selected_task() {
+            let title = truncate_title(&task.title, 30);
+            let status = task.status.as_str();
+            let warning = if task.worktree.is_some() { " (has worktree)" } else { "" };
             self.input.mode = InputMode::ConfirmDelete;
-            self.status_message = Some("Delete task? (y/n)".to_string());
+            self.status_message = Some(format!("Delete {title} [{status}]{warning}? (y/n)"));
         }
         vec![]
     }
@@ -1012,9 +1025,10 @@ impl App {
     }
 
     fn handle_confirm_delete_epic(&mut self) -> Vec<Command> {
-        if matches!(self.selected_column_item(), Some(ColumnItem::Epic(_))) {
+        if let Some(ColumnItem::Epic(epic)) = self.selected_column_item() {
+            let title = truncate_title(&epic.title, 30);
             self.input.mode = InputMode::ConfirmDeleteEpic;
-            self.status_message = Some("Delete epic and all subtasks? (y/n)".to_string());
+            self.status_message = Some(format!("Delete epic {title} and subtasks? (y/n)"));
         }
         vec![]
     }
