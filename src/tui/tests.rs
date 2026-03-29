@@ -3076,3 +3076,57 @@ fn confirm_finish_clears_conflict_flag() {
     app.update(Message::ConfirmFinish);
     assert!(!app.merge_conflict_tasks().contains(&TaskId(1)));
 }
+
+#[test]
+fn f_key_on_review_task_starts_finish() {
+    let mut app = App::new(vec![{
+        let mut t = make_task(1, TaskStatus::Review);
+        t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+        t
+    }], Duration::from_secs(300));
+    app.update(Message::NavigateColumn(3));
+
+    app.handle_key(make_key(KeyCode::Char('f')));
+    assert!(matches!(app.input.mode, InputMode::ConfirmFinish(_)));
+}
+
+#[test]
+fn f_key_on_non_review_task_is_noop() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Ready),
+    ], Duration::from_secs(300));
+    app.update(Message::NavigateColumn(1));
+
+    app.handle_key(make_key(KeyCode::Char('f')));
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn confirm_finish_y_key_emits_command() {
+    let mut app = App::new(vec![{
+        let mut t = make_task(1, TaskStatus::Review);
+        t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+        t.tmux_window = Some("task-1".to_string());
+        t
+    }], Duration::from_secs(300));
+    app.update(Message::NavigateColumn(3));
+
+    app.handle_key(make_key(KeyCode::Char('f')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+    assert!(cmds.iter().any(|c| matches!(c, Command::Finish { .. })));
+}
+
+#[test]
+fn confirm_finish_n_key_cancels() {
+    let mut app = App::new(vec![{
+        let mut t = make_task(1, TaskStatus::Review);
+        t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+        t
+    }], Duration::from_secs(300));
+    app.update(Message::NavigateColumn(3));
+
+    app.handle_key(make_key(KeyCode::Char('f')));
+    app.handle_key(make_key(KeyCode::Char('n')));
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(app.status_message.is_none());
+}

@@ -45,6 +45,14 @@ impl App {
             KeyCode::Char('n') => self.update(Message::StartNewTask),
             KeyCode::Char('E') => self.update(Message::StartNewEpic),
             KeyCode::Char('d') => self.handle_key_dispatch(),
+            KeyCode::Char('f') => {
+                if let Some(task) = self.selected_task() {
+                    let id = task.id;
+                    self.update(Message::FinishTask(id))
+                } else {
+                    vec![]
+                }
+            }
             KeyCode::Char('m') => {
                 if matches!(self.selected_column_item(), Some(ColumnItem::Epic(_))) {
                     return self.update(Message::StatusInfo("Epic status is derived from subtasks".to_string()));
