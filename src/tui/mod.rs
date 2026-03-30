@@ -1566,7 +1566,9 @@ impl App {
     fn handle_close_repo_filter(&mut self) -> Vec<Command> {
         self.input.mode = InputMode::Normal;
         self.clamp_selection();
-        let value = self.repo_filter.iter().cloned().collect::<Vec<_>>().join("\n");
+        let mut paths: Vec<_> = self.repo_filter.iter().cloned().collect();
+        paths.sort();
+        let value = paths.join("\n");
         vec![Command::PersistStringSetting {
             key: "repo_filter".to_string(),
             value,

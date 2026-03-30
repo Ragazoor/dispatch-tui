@@ -53,10 +53,15 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
         .unwrap_or(true);
     app.set_notifications_enabled(notif_enabled);
 
-    // Load repo filter
+    // Load repo filter (intersect with known repo_paths to prune stale entries)
     if let Some(filter_str) = database.get_setting_string("repo_filter").unwrap_or(None) {
         if !filter_str.is_empty() {
-            let filter: HashSet<String> = filter_str.split('\n').map(|s| s.to_string()).collect();
+            let known: HashSet<&str> = app.repo_paths().iter().map(|s| s.as_str()).collect();
+            let filter: HashSet<String> = filter_str
+                .split('\n')
+                .filter(|s| known.contains(s))
+                .map(|s| s.to_string())
+                .collect();
             app.set_repo_filter(filter);
         }
     }

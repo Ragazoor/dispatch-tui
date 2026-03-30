@@ -127,7 +127,8 @@ fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
         .direction(Direction::Horizontal)
         .constraints({
             let mut c = vec![Constraint::Ratio(1, TaskStatus::COLUMN_COUNT as u32); TaskStatus::COLUMN_COUNT];
-            c.push(Constraint::Length(16));
+            c.push(Constraint::Length(14)); // filter indicator
+            c.push(Constraint::Length(6));  // notification indicator
             c
         })
         .split(area);
@@ -176,8 +177,19 @@ fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
         frame.render_widget(paragraph, segments[col_idx]);
     }
 
+    // Filter indicator
+    if !app.repo_filter().is_empty() {
+        let active = app.repo_filter().len();
+        let total = app.repo_paths().len();
+        let indicator = format!("[{active}/{total} repos]");
+        let p = Paragraph::new(indicator)
+            .style(Style::default().fg(Color::Rgb(86, 95, 137)))
+            .alignment(Alignment::Right);
+        frame.render_widget(p, segments[TaskStatus::COLUMN_COUNT]);
+    }
+
     // Notification indicator
-    let notif_area = segments[TaskStatus::COLUMN_COUNT];
+    let notif_area = segments[TaskStatus::COLUMN_COUNT + 1];
     if app.notifications_enabled() {
         let indicator = Paragraph::new("\u{1F514}")
             .style(Style::default().fg(Color::Yellow))
@@ -188,17 +200,6 @@ fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
             .style(Style::default().fg(Color::Rgb(86, 95, 137)))
             .alignment(Alignment::Right);
         frame.render_widget(indicator, notif_area);
-    }
-
-    // Filter indicator
-    if !app.repo_filter().is_empty() {
-        let active = app.repo_filter().len();
-        let total = app.repo_paths().len();
-        let indicator = format!("[{active}/{total} repos]");
-        let p = Paragraph::new(indicator)
-            .style(Style::default().fg(Color::Rgb(86, 95, 137)))
-            .alignment(Alignment::Right);
-        frame.render_widget(p, segments[TaskStatus::COLUMN_COUNT]);
     }
 }
 
