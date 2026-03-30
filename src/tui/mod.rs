@@ -29,6 +29,7 @@ pub struct App {
     pub(in crate::tui) selected_tasks: HashSet<TaskId>,
     pub(in crate::tui) merge_conflict_tasks: HashSet<TaskId>,
     pub(in crate::tui) pending_done_tasks: Vec<TaskId>,
+    pub(in crate::tui) notifications_enabled: bool,
 }
 
 /// Format a title for display in confirmation prompts, truncating if longer than `max_len` chars.
@@ -59,6 +60,7 @@ impl App {
             selected_tasks: HashSet::new(),
             merge_conflict_tasks: HashSet::new(),
             pending_done_tasks: Vec::new(),
+            notifications_enabled: true,
         }
     }
 
@@ -101,6 +103,11 @@ impl App {
     pub fn selected_tasks(&self) -> &HashSet<TaskId> { &self.selected_tasks }
     pub fn on_select_all(&self) -> bool { self.selection().on_select_all }
     pub fn merge_conflict_tasks(&self) -> &HashSet<TaskId> { &self.merge_conflict_tasks }
+    pub fn notifications_enabled(&self) -> bool { self.notifications_enabled }
+
+    pub fn set_notifications_enabled(&mut self, enabled: bool) {
+        self.notifications_enabled = enabled;
+    }
 
     /// Set a transient status message with auto-clear timestamp.
     pub(in crate::tui) fn set_status(&mut self, msg: String) {
@@ -316,6 +323,7 @@ impl App {
             // Done confirmation (no cleanup, just status change)
             Message::ConfirmDone => self.handle_confirm_done(),
             Message::CancelDone => self.handle_cancel_done(),
+            Message::ToggleNotifications => self.handle_toggle_notifications(),
             // Epic messages
             Message::DispatchEpic(id) => self.handle_dispatch_epic(id),
             Message::EnterEpic(epic_id) => self.handle_enter_epic(epic_id),
@@ -465,6 +473,16 @@ impl App {
         vec![]
     }
 
+    fn handle_toggle_notifications(&mut self) -> Vec<Command> {
+        self.notifications_enabled = !self.notifications_enabled;
+        let label = if self.notifications_enabled { "Notifications enabled" } else { "Notifications disabled" };
+        self.set_status(label.to_string());
+        vec![Command::PersistSetting {
+            key: "notifications_enabled".to_string(),
+            value: self.notifications_enabled,
+        }]
+    }
+
     fn handle_dispatch_task(&mut self, id: TaskId) -> Vec<Command> {
         if let Some(task) = self.find_task(id) {
             if task.status == TaskStatus::Ready {
@@ -560,6 +578,49 @@ impl App {
     }
 
     fn handle_refresh_tasks(&mut self, new_tasks: Vec<Task>) -> Vec<Command> {
+        let mut cmds = Vec::new();
+
+        if self.notifications_enabled {
+            for new_task in &new_tasks {
+                // Extract old state before any mutable borrows
+                let old_task = self.find_task(new_task.id);
+                let was_needs_input = old_task.is_some_and(|t| t.needs_input);
+                let was_review = old_task.is_some_and(|t| t.status == TaskStatus::Review);
+
+                // Detect needs_input transition: false → true
+                if new_task.needs_input && !was_needs_input
+                    && !self.agents.notified_needs_input.contains(&new_task.id)
+                {
+                    self.agents.notified_needs_input.insert(new_task.id);
+                    cmds.push(Command::SendNotification {
+                        title: format!("Task #{}: {}", new_task.id.0, new_task.title),
+                        body: "Agent needs your input".to_string(),
+                        urgent: true,
+                    });
+                }
+
+                // Detect review transition
+                if new_task.status == TaskStatus::Review && !was_review
+                    && !self.agents.notified_review.contains(&new_task.id)
+                {
+                    self.agents.notified_review.insert(new_task.id);
+                    cmds.push(Command::SendNotification {
+                        title: format!("Task #{}: {}", new_task.id.0, new_task.title),
+                        body: "Ready for review".to_string(),
+                        urgent: false,
+                    });
+                }
+
+                // Clear notified state when task leaves the triggering state
+                if new_task.status != TaskStatus::Review {
+                    self.agents.notified_review.remove(&new_task.id);
+                }
+                if !new_task.needs_input {
+                    self.agents.notified_needs_input.remove(&new_task.id);
+                }
+            }
+        }
+
         // Merge DB state into in-memory state, preserving tmux_outputs
         // Prune selections for tasks that no longer exist
         let valid_ids: HashSet<TaskId> = new_tasks.iter().map(|t| t.id).collect();
@@ -567,7 +628,7 @@ impl App {
         self.merge_conflict_tasks.retain(|id| valid_ids.contains(id));
         self.tasks = new_tasks;
         self.clamp_selection();
-        vec![]
+        cmds
     }
 
     fn handle_tick(&mut self) -> Vec<Command> {

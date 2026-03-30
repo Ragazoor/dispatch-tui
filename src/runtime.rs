@@ -46,6 +46,12 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     let paths = database.list_repo_paths().unwrap_or_default();
     app.update(Message::RepoPathsUpdated(paths));
 
+    // Load notification preference
+    let notif_enabled = database.get_setting_bool("notifications_enabled")
+        .unwrap_or(None)
+        .unwrap_or(true);
+    app.set_notifications_enabled(notif_enabled);
+
     // 4. Set up terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -406,12 +412,12 @@ impl TuiRuntime {
         app.update(Message::RepoPathsUpdated(paths));
     }
 
-    fn exec_refresh_from_db(&self, app: &mut App) {
+    fn exec_refresh_from_db(&self, app: &mut App) -> Vec<Command> {
+        let mut cmds = Vec::new();
         // Re-read all tasks from SQLite to pick up MCP/CLI updates
         match self.database.list_all() {
             Ok(tasks) => {
-                let cmds = app.update(Message::RefreshTasks(tasks));
-                let _ = cmds;
+                cmds = app.update(Message::RefreshTasks(tasks));
             }
             Err(e) => {
                 app.update(Message::Error(Self::db_error("refreshing tasks", e)));
@@ -419,6 +425,20 @@ impl TuiRuntime {
         }
         // Also refresh epics
         self.exec_refresh_epics_from_db(app);
+        cmds
+    }
+
+    fn exec_send_notification(&self, title: &str, body: &str, urgent: bool) {
+        let urgency = if urgent { "critical" } else { "normal" };
+        if let Err(e) = self.runner.run("notify-send", &["-u", urgency, title, body]) {
+            tracing::warn!("notify-send failed: {e}");
+        }
+    }
+
+    fn exec_persist_setting(&self, key: &str, value: bool) {
+        if let Err(e) = self.database.set_setting_bool(key, value) {
+            tracing::warn!("Failed to persist setting {key}: {e}");
+        }
     }
 
     fn exec_insert_epic(&self, app: &mut App, title: String, description: String, repo_path: String) {
@@ -698,8 +718,7 @@ async fn run_loop(
 
             // MCP mutation notification — immediate refresh
             Some(()) = mcp_notify_rx.recv() => {
-                rt.exec_refresh_from_db(app);
-                vec![]
+                rt.exec_refresh_from_db(app)
             }
 
             // Periodic tick for tmux capture
@@ -724,7 +743,8 @@ async fn execute_commands(
     rt: &TuiRuntime,
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
 ) -> Result<()> {
-    for command in commands {
+    let mut queue = std::collections::VecDeque::from(commands);
+    while let Some(command) = queue.pop_front() {
         match command {
             Command::PersistTask(task) => rt.exec_persist_task(app, task),
             Command::InsertTask { draft, epic_id } =>
@@ -735,7 +755,10 @@ async fn execute_commands(
             Command::CaptureTmux { id, window } => rt.exec_capture_tmux(id, window),
             Command::EditTaskInEditor(task) => rt.exec_edit_in_editor(app, task, terminal)?,
             Command::SaveRepoPath(path) => rt.exec_save_repo_path(app, path),
-            Command::RefreshFromDb => rt.exec_refresh_from_db(app),
+            Command::RefreshFromDb => {
+                let extra = rt.exec_refresh_from_db(app);
+                queue.extend(extra);
+            }
             Command::Cleanup { id, repo_path, worktree, tmux_window } =>
                 rt.exec_cleanup(id, repo_path, worktree, tmux_window),
             Command::Resume { task } => rt.exec_resume(task),
@@ -753,6 +776,10 @@ async fn execute_commands(
             Command::PersistEpic { id, done } => rt.exec_persist_epic(app, id, done),
             Command::RefreshEpicsFromDb => rt.exec_refresh_epics_from_db(app),
             Command::DispatchEpic { epic } => rt.exec_dispatch_epic(app, epic),
+            Command::SendNotification { title, body, urgent } =>
+                rt.exec_send_notification(&title, &body, urgent),
+            Command::PersistSetting { key, value } =>
+                rt.exec_persist_setting(&key, value),
         }
     }
 
@@ -838,6 +865,26 @@ mod tests {
         rt.exec_refresh_from_db(&mut app);
         assert_eq!(app.tasks().len(), 1);
         assert_eq!(app.tasks()[0].title, "External");
+    }
+
+    #[test]
+    fn exec_refresh_from_db_returns_commands_from_refresh() {
+        let (rt, mut app) = test_runtime();
+        // Insert a task directly into DB as Running
+        rt.database
+            .create_task("Test", "Desc", "/repo", None, models::TaskStatus::Running)
+            .unwrap();
+        // Load it into app
+        let cmds = rt.exec_refresh_from_db(&mut app);
+        assert!(cmds.is_empty()); // First load — no transition
+
+        // Now update it to Review directly in DB
+        let task = rt.database.list_all().unwrap()[0].clone();
+        rt.database.patch_task(task.id, &db::TaskPatch::new().status(models::TaskStatus::Review)).unwrap();
+
+        // Refresh should detect the transition and return a SendNotification
+        let cmds = rt.exec_refresh_from_db(&mut app);
+        assert!(cmds.iter().any(|c| matches!(c, Command::SendNotification { .. })));
     }
 
     #[test]
@@ -1197,5 +1244,74 @@ mod tests {
             }
             other => panic!("Expected FinishFailed, got: {other:?}"),
         }
+    }
+
+    #[test]
+    fn exec_send_notification_calls_notify_send() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // notify-send call
+        ]));
+        let rt = TuiRuntime {
+            database: db,
+            msg_tx: tx,
+            port: 3142,
+            input_paused: Arc::new(AtomicBool::new(false)),
+            runner: mock.clone(),
+        };
+        rt.exec_send_notification("Task #1: Fix bug", "Ready for review", false);
+        let calls = mock.recorded_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "notify-send");
+        assert!(calls[0].1.contains(&"Task #1: Fix bug".to_string()));
+        assert!(calls[0].1.contains(&"Ready for review".to_string()));
+    }
+
+    #[test]
+    fn exec_send_notification_urgent_uses_critical() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok(),
+        ]));
+        let rt = TuiRuntime {
+            database: db,
+            msg_tx: tx,
+            port: 3142,
+            input_paused: Arc::new(AtomicBool::new(false)),
+            runner: mock.clone(),
+        };
+        rt.exec_send_notification("Task #1: Fix bug", "Agent needs your input", true);
+        let calls = mock.recorded_calls();
+        assert!(calls[0].1.contains(&"critical".to_string()));
+    }
+
+    #[test]
+    fn exec_send_notification_failure_does_not_panic() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::fail("command not found"),
+        ]));
+        let rt = TuiRuntime {
+            database: db,
+            msg_tx: tx,
+            port: 3142,
+            input_paused: Arc::new(AtomicBool::new(false)),
+            runner: mock.clone(),
+        };
+        // Should not panic — just logs a warning
+        rt.exec_send_notification("Task #1: Fix bug", "Ready for review", false);
+    }
+
+    #[test]
+    fn exec_persist_setting_writes_to_db() {
+        let (rt, _app) = test_runtime();
+        rt.exec_persist_setting("notifications_enabled", true);
+        assert_eq!(
+            rt.database.get_setting_bool("notifications_enabled").unwrap(),
+            Some(true)
+        );
     }
 }

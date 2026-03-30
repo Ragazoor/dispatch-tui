@@ -4030,3 +4030,129 @@ fn column_scrolls_back_up_when_cursor_moves_up() {
         "first task should be visible after scrolling back up"
     );
 }
+
+#[test]
+fn toggle_notifications_flips_state() {
+    let mut app = make_app();
+    assert!(app.notifications_enabled()); // default: true
+    app.update(Message::ToggleNotifications);
+    assert!(!app.notifications_enabled());
+    app.update(Message::ToggleNotifications);
+    assert!(app.notifications_enabled());
+}
+
+#[test]
+fn refresh_tasks_emits_notification_on_review_transition() {
+    let mut app = make_app();
+    // Task 4 starts as Running
+    assert_eq!(app.tasks()[3].status, TaskStatus::Running);
+
+    // Simulate DB refresh where task 4 moved to Review
+    let mut updated = app.tasks().to_vec();
+    updated[3].status = TaskStatus::Review;
+    let cmds = app.update(Message::RefreshTasks(updated));
+
+    let notif_cmds: Vec<_> = cmds.iter().filter(|c| matches!(c, Command::SendNotification { .. })).collect();
+    assert_eq!(notif_cmds.len(), 1);
+    match &notif_cmds[0] {
+        Command::SendNotification { title, urgent, .. } => {
+            assert!(title.contains("Task 4"));
+            assert!(!urgent);
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn refresh_tasks_emits_urgent_notification_on_needs_input() {
+    let mut app = make_app();
+
+    let mut updated = app.tasks().to_vec();
+    updated[3].needs_input = true;
+    let cmds = app.update(Message::RefreshTasks(updated));
+
+    let notif_cmds: Vec<_> = cmds.iter().filter(|c| matches!(c, Command::SendNotification { .. })).collect();
+    assert_eq!(notif_cmds.len(), 1);
+    match &notif_cmds[0] {
+        Command::SendNotification { urgent, .. } => {
+            assert!(urgent);
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn refresh_tasks_does_not_duplicate_notifications() {
+    let mut app = make_app();
+
+    let mut updated = app.tasks().to_vec();
+    updated[3].status = TaskStatus::Review;
+    app.update(Message::RefreshTasks(updated.clone()));
+    // Second refresh with same state should not re-notify
+    let cmds = app.update(Message::RefreshTasks(updated));
+    let notif_cmds: Vec<_> = cmds.iter().filter(|c| matches!(c, Command::SendNotification { .. })).collect();
+    assert_eq!(notif_cmds.len(), 0);
+}
+
+#[test]
+fn refresh_tasks_skips_notification_when_disabled() {
+    let mut app = make_app();
+    app.update(Message::ToggleNotifications); // disable
+
+    let mut updated = app.tasks().to_vec();
+    updated[3].status = TaskStatus::Review;
+    let cmds = app.update(Message::RefreshTasks(updated));
+
+    let notif_cmds: Vec<_> = cmds.iter().filter(|c| matches!(c, Command::SendNotification { .. })).collect();
+    assert_eq!(notif_cmds.len(), 0);
+}
+
+#[test]
+fn key_n_uppercase_toggles_notifications() {
+    let mut app = make_app();
+    assert!(app.notifications_enabled());
+    let cmds = app.handle_key(make_key(KeyCode::Char('N')));
+    assert!(!app.notifications_enabled());
+    // Should emit PersistSetting command
+    assert!(cmds.iter().any(|c| matches!(c, Command::PersistSetting { .. })));
+    // Should show status message
+    assert!(app.status_message().unwrap().contains("disabled"));
+}
+
+#[test]
+fn refresh_tasks_clears_notified_when_task_leaves_review() {
+    let mut app = make_app();
+
+    // Move to review — triggers notification
+    let mut updated = app.tasks().to_vec();
+    updated[3].status = TaskStatus::Review;
+    app.update(Message::RefreshTasks(updated));
+
+    // Move to done — should clear notified state
+    let mut updated2 = app.tasks().to_vec();
+    updated2[3].status = TaskStatus::Done;
+    app.update(Message::RefreshTasks(updated2));
+
+    // Move back to review — should re-notify
+    let mut updated3 = app.tasks().to_vec();
+    updated3[3].status = TaskStatus::Review;
+    let cmds = app.update(Message::RefreshTasks(updated3));
+    let notif_cmds: Vec<_> = cmds.iter().filter(|c| matches!(c, Command::SendNotification { .. })).collect();
+    assert_eq!(notif_cmds.len(), 1);
+}
+
+#[test]
+fn summary_row_shows_bell_when_notifications_enabled() {
+    let mut app = make_app(); // notifications_enabled defaults to true
+    let buf = render_to_buffer(&mut app, 100, 20);
+    assert!(buffer_contains(&buf, "\u{1F514}")); // 🔔
+}
+
+#[test]
+fn summary_row_shows_muted_bell_and_hint_when_disabled() {
+    let mut app = make_app();
+    app.update(Message::ToggleNotifications); // disable
+    let buf = render_to_buffer(&mut app, 100, 20);
+    assert!(buffer_contains(&buf, "\u{1F515}")); // 🔕
+    assert!(buffer_contains(&buf, "[N]"));
+}

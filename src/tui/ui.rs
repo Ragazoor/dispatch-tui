@@ -128,9 +128,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
     let segments = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints(
-            [Constraint::Ratio(1, TaskStatus::COLUMN_COUNT as u32); TaskStatus::COLUMN_COUNT]
-        )
+        .constraints({
+            let mut c = vec![Constraint::Ratio(1, TaskStatus::COLUMN_COUNT as u32); TaskStatus::COLUMN_COUNT];
+            c.push(Constraint::Length(6));
+            c
+        })
         .split(area);
 
     for (col_idx, &status) in TaskStatus::ALL.iter().enumerate() {
@@ -175,6 +177,20 @@ fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
         let paragraph = Paragraph::new(Line::from(spans))
             .alignment(Alignment::Center);
         frame.render_widget(paragraph, segments[col_idx]);
+    }
+
+    // Notification indicator
+    let notif_area = segments[TaskStatus::COLUMN_COUNT];
+    if app.notifications_enabled() {
+        let indicator = Paragraph::new("\u{1F514}")
+            .style(Style::default().fg(Color::Yellow))
+            .alignment(Alignment::Right);
+        frame.render_widget(indicator, notif_area);
+    } else {
+        let indicator = Paragraph::new("\u{1F515} [N]")
+            .style(Style::default().fg(Color::Rgb(86, 95, 137)))
+            .alignment(Alignment::Right);
+        frame.render_widget(indicator, notif_area);
     }
 }
 
@@ -852,6 +868,7 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
         Line::from(Span::styled("  General", header)),
         Line::from(vec![
             Span::styled("  ?", key), Span::styled(" this help  ", desc),
+            Span::styled("N", key), Span::styled(" notify on/off  ", desc),
             Span::styled("q", key), Span::styled(" quit", desc),
         ]),
         Line::from(""),
