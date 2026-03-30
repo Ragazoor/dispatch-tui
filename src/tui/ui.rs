@@ -940,6 +940,8 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             let key_color = column_color(TaskStatus::ALL[app.selected_column()]);
             let spans = if !app.selected_tasks.is_empty() {
                 batch_action_hints(app.selected_tasks.len(), key_color)
+            } else if let Some(ColumnItem::Epic(epic)) = app.selected_column_item() {
+                epic_action_hints(epic, key_color)
             } else {
                 action_hints(app.selected_task(), key_color)
             };
@@ -1093,6 +1095,38 @@ pub(in crate::tui) fn action_hints(task: Option<&Task>, key_color: Color) -> Vec
             TaskStatus::Archived => {}
         }
     }
+
+    push_hint("a", "select all");
+    push_hint("n", "new");
+    push_hint("E", "epic");
+    push_hint("D", "quick");
+    push_hint("H", "history");
+    push_hint("q", "quit");
+
+    spans
+}
+
+/// Build context-sensitive keybinding hints for a selected epic.
+pub(in crate::tui) fn epic_action_hints(epic: &Epic, key_color: Color) -> Vec<Span<'static>> {
+    let label_style = Style::default().fg(Color::Rgb(86, 95, 137));
+
+    let mut spans: Vec<Span<'static>> = Vec::new();
+
+    let mut push_hint = |key: &'static str, label: &'static str| {
+        spans.push(Span::styled(
+            key,
+            Style::default().fg(key_color).add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(format!(" {label}  "), label_style));
+    };
+
+    push_hint("Enter", "open");
+    if epic.done {
+        push_hint("M", "undone");
+    } else {
+        push_hint("m", "done");
+    }
+    push_hint("x", "archive");
 
     push_hint("a", "select all");
     push_hint("n", "new");

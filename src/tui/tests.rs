@@ -1336,6 +1336,36 @@ fn action_hints_no_task() {
     assert!(!keys.contains(&"e"), "no-task has no edit");
 }
 
+// --- epic_action_hints ---
+
+#[test]
+fn epic_action_hints_not_done() {
+    let epic = make_epic(1);
+    let hints = ui::epic_action_hints(&epic, Color::Rgb(122, 162, 247));
+    let keys: Vec<&str> = hints.iter()
+        .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
+        .map(|s| s.content.as_ref())
+        .collect();
+    assert!(keys.contains(&"Enter"), "epic shows open");
+    assert!(keys.contains(&"m"), "epic shows done");
+    assert!(!keys.contains(&"M"), "non-done epic has no undone");
+    assert!(keys.contains(&"x"), "epic shows archive");
+    assert!(keys.contains(&"q"), "epic shows quit");
+}
+
+#[test]
+fn epic_action_hints_done() {
+    let mut epic = make_epic(1);
+    epic.done = true;
+    let hints = ui::epic_action_hints(&epic, Color::Rgb(122, 162, 247));
+    let keys: Vec<&str> = hints.iter()
+        .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
+        .map(|s| s.content.as_ref())
+        .collect();
+    assert!(keys.contains(&"M"), "done epic shows undone");
+    assert!(!keys.contains(&"m"), "done epic has no forward move");
+}
+
 // --- Edit key ---
 
 #[test]
