@@ -1,0 +1,474 @@
+-- allium: 3
+-- task-orchestrator.allium
+--
+-- Scope: Task orchestration and agent lifecycle management
+-- Includes: Task, Epic, dispatch, finish/merge, archive, agent health, MCP constraints
+-- Excludes:
+--   - TUI rendering, keyboard input, selection state (UI implementation)
+--   - Git worktree creation mechanics (infrastructure)
+--   - Tmux subprocess commands (infrastructure)
+--   - SQLite schema and migrations (persistence implementation)
+--   - JSON-RPC protocol details (transport implementation)
+--   - Slug generation, path expansion (implementation helpers)
+
+------------------------------------------------------------
+-- External Entities
+------------------------------------------------------------
+
+-- The git worktree and tmux window are provisioned externally.
+-- The spec treats them as opaque handles.
+
+external entity Worktree {
+    path: String
+    branch: String
+}
+
+external entity TmuxWindow {
+    name: String
+}
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+enum TaskStatus { backlog | ready | running | review | done | archived }
+
+------------------------------------------------------------
+-- Entities and Variants
+------------------------------------------------------------
+
+entity Task {
+    title: String
+    description: String
+    repo_path: String
+    status: TaskStatus
+    worktree: Worktree?
+    tmux_window: TmuxWindow?
+    plan: String?
+    epic: Epic?
+    needs_input: Boolean
+    created_at: Timestamp
+    updated_at: Timestamp
+
+    transitions status {
+        backlog -> ready
+        backlog -> running
+        ready -> running
+        ready -> backlog
+        running -> review
+        running -> ready
+        review -> done
+        review -> running
+        done -> review
+        done -> archived
+        -- Archive is accepted from any non-archived status
+        backlog -> archived
+        ready -> archived
+        running -> archived
+        review -> archived
+        terminal: archived
+    }
+
+    -- Derived
+    has_plan: plan != null
+    is_stale: Boolean                  -- computed from agent output monitoring
+    is_crashed: Boolean                -- computed from tmux window liveness
+}
+
+entity Epic {
+    title: String
+    description: String
+    repo_path: String
+    done: Boolean
+    created_at: Timestamp
+    updated_at: Timestamp
+
+    subtasks: Task with epic = this
+    active_subtasks: subtasks where status != archived
+    subtask_statuses: active_subtasks -> status
+
+    -- Derived kanban status (not persisted)
+    derived_status: derive_epic_status(this)
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    tick_interval: Duration = 2.seconds
+    inactivity_timeout: Duration = 5.minutes
+    status_message_expiry: Duration = 5.seconds
+    staleness_fresh_threshold: Duration = 3.days
+    staleness_aging_threshold: Duration = 7.days
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- == Task Creation ==
+
+rule CreateTask {
+    when: CreateTask(title, description, repo_path, plan?, epic?)
+
+    let status = if plan != null: ready else: backlog
+
+    ensures: Task.created(
+        title: title,
+        description: description,
+        repo_path: repo_path,
+        status: status,
+        plan: plan,
+        epic: epic,
+        needs_input: false,
+        created_at: now,
+        updated_at: now
+    )
+}
+
+rule CreateQuickTask {
+    when: QuickDispatch(repo_path)
+
+    ensures:
+        let task = Task.created(
+            title: "Quick task",
+            description: "",
+            repo_path: repo_path,
+            status: ready,
+            needs_input: false,
+            created_at: now,
+            updated_at: now
+        )
+        AgentDispatched(task: task, mode: quick)
+}
+
+-- == Dispatch ==
+
+rule DispatchTask {
+    when: DispatchTask(task)
+
+    requires: task.status = ready
+
+    ensures: task.status = running
+    ensures: task.worktree = Worktree.created(
+        path: task.repo_path + "/.worktrees/" + task.id + "-" + slugify(task.title),
+        branch: task.id + "-" + slugify(task.title)
+    )
+    ensures: task.tmux_window = TmuxWindow.created(name: "task-" + task.id)
+    ensures: AgentLaunched(task: task, mode: standard)
+}
+
+rule BrainstormTask {
+    when: BrainstormTask(task)
+
+    requires: task.status = backlog
+
+    ensures: task.status = running
+    ensures: task.worktree = Worktree.created(
+        path: task.repo_path + "/.worktrees/" + task.id + "-" + slugify(task.title),
+        branch: task.id + "-" + slugify(task.title)
+    )
+    ensures: task.tmux_window = TmuxWindow.created(name: "task-" + task.id)
+    ensures: AgentLaunched(task: task, mode: brainstorm)
+}
+
+rule ResumeTask {
+    when: ResumeTask(task)
+
+    requires: task.status in {running, review}
+    requires: task.worktree != null
+    requires: task.tmux_window = null
+
+    ensures: task.tmux_window = TmuxWindow.created(name: "task-" + task.id)
+    ensures: task.status = running
+    ensures: AgentLaunched(task: task, mode: resume)
+}
+
+-- == Status Movement ==
+
+rule MoveTaskForward {
+    when: MoveTask(task, forward)
+
+    requires: task.status != done
+    requires: task.status != archived
+
+    let next = next_status(task.status)
+
+    -- Moving to Done requires explicit confirmation via ConfirmDone
+    requires: next != done
+
+    ensures: task.status = next
+    ensures: task.updated_at = now
+}
+
+rule MoveTaskBackward {
+    when: MoveTask(task, backward)
+
+    requires: task.status != backlog
+    requires: task.status != archived
+
+    let prev = prev_status(task.status)
+
+    -- Kill tmux window when moving backward, but preserve worktree for resume
+    ensures: task.status = prev
+    ensures: task.tmux_window = null
+    ensures: task.updated_at = now
+}
+
+rule ConfirmDone {
+    when: ConfirmDone(task)
+
+    requires: task.status = review
+
+    ensures: task.status = done
+    ensures: task.tmux_window = null
+    ensures: task.updated_at = now
+}
+
+-- == Finish (Merge) ==
+
+rule FinishTaskSuccess {
+    when: FinishTask(task)
+
+    requires: task.status = review
+    requires: task.worktree != null
+
+    let branch = task.worktree.branch
+
+    -- Preconditions verified at execution time:
+    -- repo root must be on main branch
+    -- merge must succeed (no conflicts)
+
+    ensures: BranchMerged(branch: branch, into: "main")
+    ensures: task.tmux_window = null
+    ensures: task.status = done
+    ensures: task.updated_at = now
+
+    @guidance
+        -- Worktree is preserved after finish.
+        -- It will be cleaned up when the task is archived.
+}
+
+rule FinishTaskConflict {
+    when: MergeConflict(task)
+
+    -- Fires when FinishTask's merge encounters a conflict.
+    -- The merge is aborted and the task stays in review.
+
+    requires: task.status = review
+
+    ensures: task.status = review
+    ensures: UserInformed(about: merge_conflict, task: task)
+}
+
+-- == Archive ==
+
+rule ArchiveTask {
+    when: ArchiveTask(task)
+
+    requires: task.status != archived
+
+    ensures: task.status = archived
+    ensures:
+        if task.worktree != null:
+            not exists task.worktree
+    ensures: task.worktree = null
+    ensures: task.tmux_window = null
+    ensures: task.updated_at = now
+
+    @guidance
+        -- Removes the git worktree and tmux window if present.
+        -- Best-effort branch deletion.
+        -- The TUI typically restricts archive to Done tasks,
+        -- but the handler accepts any non-archived task.
+}
+
+-- == Agent Health ==
+
+rule DetectStaleAgent {
+    when: task: Task.is_stale becomes true
+
+    requires: task.status = running
+    requires: task.tmux_window != null
+
+    ensures: UserInformed(
+        about: agent_stale,
+        task: task
+    )
+}
+
+rule DetectCrashedAgent {
+    when: task: Task.is_crashed becomes true
+
+    requires: task.status = running
+
+    ensures: UserInformed(
+        about: agent_crashed,
+        task: task
+    )
+}
+
+rule RetryResume {
+    when: RetryResume(task)
+
+    requires: task.status = running
+    requires: task.worktree != null
+
+    ensures: task.tmux_window = TmuxWindow.created(name: "task-" + task.id)
+    ensures: AgentLaunched(task: task, mode: resume)
+}
+
+rule RetryFresh {
+    when: RetryFresh(task)
+
+    requires: task.status = running
+
+    -- Destroys existing worktree, resets to ready, then re-dispatches
+    ensures:
+        if task.worktree != null:
+            not exists task.worktree
+    ensures: task.worktree = null
+    ensures: task.tmux_window = null
+    ensures: task.status = ready
+    ensures: DispatchTask(task)
+}
+
+-- == MCP Constraints ==
+
+rule UpdateTaskViaMcp {
+    when: McpUpdateTask(task, status?, plan?, title?, description?)
+
+    requires: status != null or plan != null or title != null or description != null
+
+    -- Cannot set status to done or archived via MCP
+    requires: status != done
+    requires: status != archived
+
+    ensures:
+        if status != null: task.status = status
+    ensures:
+        if plan != null: task.plan = plan
+    ensures:
+        if title != null: task.title = title
+    ensures:
+        if description != null: task.description = description
+    ensures: task.updated_at = now
+}
+
+rule ClaimTaskViaMcp {
+    when: McpClaimTask(task, worktree, tmux_window)
+
+    requires: task.status in {backlog, ready}
+
+    ensures: task.status = running
+    ensures: task.worktree = worktree
+    ensures: task.tmux_window = tmux_window
+    ensures: task.updated_at = now
+}
+
+-- == Epics ==
+
+rule CreateEpic {
+    when: CreateEpic(title, description, repo_path)
+
+    ensures: Epic.created(
+        title: title,
+        description: description,
+        repo_path: repo_path,
+        done: false,
+        created_at: now,
+        updated_at: now
+    )
+}
+
+rule DispatchEpicPlanning {
+    when: DispatchEpic(epic)
+
+    requires: epic.derived_status = backlog
+
+    -- Creates a planning subtask and dispatches a planning agent.
+    -- The planning agent brainstorms, writes a plan, and decomposes
+    -- it into subtasks under this epic.
+    ensures:
+        let planning_task = Task.created(
+            title: "Plan: " + epic.title,
+            description: epic.description,
+            repo_path: epic.repo_path,
+            status: running,
+            epic: epic,
+            needs_input: false,
+            created_at: now,
+            updated_at: now
+        )
+        AgentLaunched(task: planning_task, mode: epic_planning)
+}
+
+rule MarkEpicDone {
+    when: MarkEpicDone(epic)
+
+    ensures: epic.done = true
+    ensures: epic.updated_at = now
+}
+
+rule ArchiveEpic {
+    when: ArchiveEpic(epic)
+
+    ensures:
+        for task in epic.active_subtasks:
+            ArchiveTask(task)
+    ensures: not exists epic
+}
+
+rule DeleteEpic {
+    when: DeleteEpic(epic)
+
+    -- Deletes epic and all linked subtasks
+    ensures:
+        for task in epic.subtasks:
+            not exists task
+    ensures: not exists epic
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+invariant RunningTaskHasWorktree {
+    for task in Tasks where status = running:
+        task.worktree != null
+}
+
+@invariant DoneRequiresHumanConfirmation
+    -- The Done status transition requires explicit human confirmation
+    -- via the TUI. MCP tools cannot set status to done or archived.
+    -- This is enforced in the McpUpdateTask rule preconditions and
+    -- the ConfirmDone rule requiring review status.
+
+@invariant EpicDerivedStatus
+    -- Epic kanban status is derived from subtask statuses, never stored.
+    -- Derivation logic:
+    --   epic.done = true              => done
+    --   no subtasks                   => backlog
+    --   all subtasks done             => review
+    --   any subtask running/review/done => running
+    --   any subtask ready             => ready
+    --   otherwise                     => backlog
+    -- The done flag on Epic is the only persisted status.
+    -- Everything else is computed at render time from subtask statuses.
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+-- Q1: Should stale/crashed detection trigger automatic status changes
+--     (e.g., moving back to Ready), or should it remain advisory-only
+--     as it is today?
+
+-- Q2: Should epic archive require all subtasks to be Done first,
+--     or should it force-archive regardless of subtask status
+--     (current behavior)?
+
+-- Q3: The needs_input flag is set but never cleared automatically.
+--     Should there be a rule for clearing it when the agent resumes
+--     producing output?
