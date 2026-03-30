@@ -189,6 +189,8 @@ pub struct Task {
     pub plan: Option<String>,
     pub epic_id: Option<EpicId>,
     pub needs_input: bool,
+    pub pr_url: Option<String>,
+    pub pr_number: Option<i64>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -670,6 +672,8 @@ mod tests {
             plan: None,
             epic_id: None,
             needs_input: false,
+            pr_url: None,
+            pr_number: None,
             created_at: now,
             updated_at: now,
         };
@@ -690,6 +694,8 @@ mod tests {
             plan: None,
             epic_id: Some(EpicId(5)),
             needs_input: false,
+            pr_url: None,
+            pr_number: None,
             created_at: now,
             updated_at: now,
         };

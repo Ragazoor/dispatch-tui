@@ -568,6 +568,8 @@ mod tests {
             plan: None,
             epic_id: None,
             needs_input: false,
+            pr_url: None,
+            pr_number: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

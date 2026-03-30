@@ -54,6 +54,8 @@ fn full_lifecycle() {
             plan: Some("plan.md".into()),
             epic_id: None,
             needs_input: false,
+            pr_url: None,
+            pr_number: None,
             created_at: now,
             updated_at: now,
         },

@@ -45,6 +45,8 @@ fn make_task(id: i64, status: TaskStatus) -> Task {
         plan: None,
         epic_id: None,
         needs_input: false,
+        pr_url: None,
+        pr_number: None,
         created_at: now,
         updated_at: now,
     }
@@ -190,6 +192,8 @@ fn task_created_adds_to_list() {
         plan: None,
         epic_id: None,
         needs_input: false,
+        pr_url: None,
+        pr_number: None,
         created_at: now,
         updated_at: now,
     };
