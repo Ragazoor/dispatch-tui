@@ -1,4 +1,4 @@
-# Task Orchestrator TUI
+# Dispatch
 
 A terminal kanban board for managing development tasks and dispatching Claude Code agents into isolated git worktrees + tmux windows.
 
@@ -64,11 +64,11 @@ Backlog → Ready → Running → Review → Done
 
 ## Hooks & Branch Naming
 
-Status update hooks in `.claude/settings.json` run when Claude Code starts or stops in a worktree. They parse the branch name, extract the task ID, and call `task-orchestrator update <id> <status>`.
+Status update hooks in `.claude/settings.json` run when Claude Code starts or stops in a worktree. They parse the branch name, extract the task ID, and call `dispatch update <id> <status>`.
 
 **Requirements:**
 - Worktree branches must follow `{id}-{slug}` (e.g. `42-fix-login-bug`). Non-conforming names silently skip status updates.
-- `task-orchestrator` must be in `PATH`. Add the debug binary: `export PATH="$PATH:$(pwd)/target/debug"`
+- `dispatch` must be in `PATH`. Add the debug binary: `export PATH="$PATH:$(pwd)/target/debug"`
 
 ## MCP Server
 
@@ -86,8 +86,8 @@ curl -s -X POST http://localhost:3142/mcp \
 
 | Flag | Env Var | Default |
 |------|---------|---------|
-| `--db` | `TASK_ORCHESTRATOR_DB` | `~/.local/share/task-orchestrator/tasks.db` |
-| `--port` | `TASK_ORCHESTRATOR_PORT` | `3142` |
+| `--db` | `DISPATCH_DB` | `~/.local/share/dispatch/tasks.db` |
+| `--port` | `DISPATCH_PORT` | `3142` |
 
 ## Adding a New Message/Command
 

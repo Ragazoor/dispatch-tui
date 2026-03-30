@@ -1,7 +1,7 @@
 -- allium: 3
--- task-orchestrator.allium
+-- dispatch.allium
 --
--- Scope: Task orchestration and agent lifecycle management
+-- Scope: Agent dispatch and lifecycle management
 -- Includes: Task, Epic, dispatch, finish/merge, archive, agent health, MCP constraints
 -- Excludes:
 --   - TUI rendering, keyboard input, selection state (UI implementation)

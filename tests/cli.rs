@@ -8,7 +8,7 @@ use std::process::Command;
 use tempfile::NamedTempFile;
 
 fn binary() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_task-orchestrator"))
+    Command::new(env!("CARGO_BIN_EXE_dispatch"))
 }
 
 fn make_plan_file(title: &str, goal: &str) -> NamedTempFile {

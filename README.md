@@ -1,4 +1,4 @@
-# Task Orchestrator TUI
+# Dispatch
 
 A terminal kanban board for managing development tasks and dispatching Claude Code agents. Create tasks, dispatch agents into isolated git worktrees and tmux windows, and monitor their progress — all from a single TUI.
 
@@ -13,7 +13,7 @@ cargo build --release
 ### TUI mode (main interface)
 
 ```bash
-task-orchestrator tui [--port 3142]
+dispatch tui [--port 3142]
 ```
 
 Launches the kanban board with 5 columns: Backlog, Ready, Running, Review, Done.
@@ -21,8 +21,8 @@ Launches the kanban board with 5 columns: Backlog, Ready, Running, Review, Done.
 ### CLI fallback (for agents)
 
 ```bash
-task-orchestrator update <task-id> <status>
-task-orchestrator list [--status <status>]
+dispatch update <task-id> <status>
+dispatch list [--status <status>]
 ```
 
 Agents use `update` to report task completion when the MCP server is unavailable.
@@ -48,7 +48,7 @@ When you press `d` on a Ready task:
 4. Launches `claude --prompt` with task description and completion instructions
 5. Task moves to Running; live output shown on the kanban card
 
-When the agent finishes, it calls `update_task` via MCP to move the task to Review. If the MCP server is down, the agent falls back to `task-orchestrator update <id> review`.
+When the agent finishes, it calls `update_task` via MCP to move the task to Review. If the MCP server is down, the agent falls back to `dispatch update <id> review`.
 
 ## MCP Server
 
@@ -62,8 +62,8 @@ Starts alongside the TUI on `localhost:3142` (configurable via `--port`). Expose
 
 | Flag | Env Var | Default |
 |------|---------|---------|
-| `--db` | `TASK_ORCHESTRATOR_DB` | `~/.local/share/task-orchestrator/tasks.db` |
-| `--port` | `TASK_ORCHESTRATOR_PORT` | `3142` |
+| `--db` | `DISPATCH_DB` | `~/.local/share/dispatch/tasks.db` |
+| `--port` | `DISPATCH_PORT` | `3142` |
 
 ## Architecture
 

@@ -2,17 +2,17 @@
   "permissions": {
     "allow": [
       "Bash(cargo:*)",
-      "Bash(task-orchestrator:*)",
+      "Bash(dispatch:*)",
       "Bash(git check-ignore:*)",
       "Bash(curl:*)",
       "Bash(printf '%s' '— Implementation Plan')",
       "Bash(git:*)",
       "Bash(find . -name *.sh -o -name *.bash)",
-      "mcp__task-orchestrator__get_task",
-      "mcp__task-orchestrator__update_task",
-      "mcp__task-orchestrator__create_task",
-      "mcp__task-orchestrator__list_tasks",
-      "mcp__task-orchestrator__claim_task"
+      "mcp__dispatch__get_task",
+      "mcp__dispatch__update_task",
+      "mcp__dispatch__create_task",
+      "mcp__dispatch__list_tasks",
+      "mcp__dispatch__claim_task"
     ]
   },
   "hooks": {
@@ -52,7 +52,7 @@
   },
   "enabledMcpjsonServers": [
     "vibe_kanban",
-    "task-orchestrator"
+    "dispatch"
   ],
   "enableAllProjectMcpServers": true
 }

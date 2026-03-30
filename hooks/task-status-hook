@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# task-status-hook — Bridge between Claude Code hooks and task-orchestrator.
+# task-status-hook — Bridge between Claude Code hooks and dispatch.
 #
-# Installed alongside task-orchestrator (or symlinked into PATH).
+# Installed alongside dispatch (or symlinked into PATH).
 # Called by Claude Code PreToolUse, Stop, and Notification hooks with JSON on stdin.
 # Extracts the task ID from the worktree directory name and updates task status.
 
@@ -16,8 +16,8 @@ ID=$(basename "${CWD:-}" | grep -oP '^\d+' || true)
 [ -z "$ID" ] && exit 0
 
 case "$EVENT" in
-    PreToolUse)   task-orchestrator update "$ID" running ;;
-    Stop)         task-orchestrator update "$ID" review  --only-if running ;;
-    Notification) task-orchestrator update "$ID" review  --only-if running --needs-input ;;
+    PreToolUse)   dispatch update "$ID" running ;;
+    Stop)         dispatch update "$ID" review  --only-if running ;;
+    Notification) dispatch update "$ID" review  --only-if running --needs-input ;;
     *)            exit 0 ;;
 esac
