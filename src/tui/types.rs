@@ -68,6 +68,7 @@ pub enum Message {
     StatusInfo(String),
     ToggleHelp,
     // Epic messages
+    DispatchEpic(EpicId),
     EnterEpic(EpicId),
     ExitEpic,
     RefreshEpics(Vec<Epic>),
@@ -122,6 +123,7 @@ pub enum Command {
     RefreshFromDb,
     QuickDispatch(TaskDraft),
     // Epic commands
+    DispatchEpic { epic: Epic },
     InsertEpic(EpicDraft),
     EditEpicInEditor(Epic),
     DeleteEpic(EpicId),

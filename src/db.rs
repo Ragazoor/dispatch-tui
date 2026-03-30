@@ -93,7 +93,6 @@ impl<'a> TaskPatch<'a> {
 pub struct EpicPatch<'a> {
     pub title: Option<&'a str>,
     pub description: Option<&'a str>,
-    pub plan: Option<&'a str>,
     pub done: Option<bool>,
 }
 
@@ -112,11 +111,6 @@ impl<'a> EpicPatch<'a> {
         self
     }
 
-    pub fn plan(mut self, plan: &'a str) -> Self {
-        self.plan = Some(plan);
-        self
-    }
-
     pub fn done(mut self, done: bool) -> Self {
         self.done = Some(done);
         self
@@ -125,7 +119,6 @@ impl<'a> EpicPatch<'a> {
     pub fn has_changes(&self) -> bool {
         self.title.is_some()
             || self.description.is_some()
-            || self.plan.is_some()
             || self.done.is_some()
     }
 }
@@ -157,7 +150,7 @@ pub trait TaskStore: Send + Sync {
     fn has_other_tasks_with_worktree(&self, worktree: &str, exclude_id: TaskId) -> Result<bool>;
 
     // Epic operations
-    fn create_epic(&self, title: &str, description: &str, plan: &str, repo_path: &str) -> Result<Epic>;
+    fn create_epic(&self, title: &str, description: &str, repo_path: &str) -> Result<Epic>;
     fn get_epic(&self, id: EpicId) -> Result<Option<Epic>>;
     fn list_epics(&self) -> Result<Vec<Epic>>;
     fn patch_epic(&self, id: EpicId, patch: &EpicPatch<'_>) -> Result<()>;
@@ -272,9 +265,34 @@ impl Database {
         }
 
         if current_version < 4 {
+            // Migration 4: add needs_input column + drop plan column from epics.
             let _ = conn.execute_batch(
                 "ALTER TABLE tasks ADD COLUMN needs_input INTEGER NOT NULL DEFAULT 0"
             );
+
+            // SQLite doesn't support DROP COLUMN before 3.35.0; recreate the table.
+            // Disable FK checks so DROP TABLE succeeds when tasks reference epics,
+            // and wrap in a transaction for atomicity.
+            conn.execute_batch(
+                "PRAGMA foreign_keys = OFF;
+                BEGIN;
+                CREATE TABLE epics_new (
+                    id          INTEGER PRIMARY KEY,
+                    title       TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    repo_path   TEXT NOT NULL,
+                    done        INTEGER NOT NULL DEFAULT 0,
+                    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                INSERT INTO epics_new (id, title, description, repo_path, done, created_at, updated_at)
+                    SELECT id, title, description, repo_path, done, created_at, updated_at FROM epics;
+                DROP TABLE epics;
+                ALTER TABLE epics_new RENAME TO epics;
+                COMMIT;
+                PRAGMA foreign_keys = ON;",
+            )
+            .context("Failed to migrate epics (drop plan column)")?;
             conn.pragma_update(None, "user_version", 4i64)
                 .context("Failed to update schema version to 4")?;
         }
@@ -496,12 +514,12 @@ impl TaskStore for Database {
         Ok(count > 0)
     }
 
-    fn create_epic(&self, title: &str, description: &str, plan: &str, repo_path: &str) -> Result<Epic> {
+    fn create_epic(&self, title: &str, description: &str, repo_path: &str) -> Result<Epic> {
         let id = {
             let conn = self.conn()?;
             conn.execute(
-                "INSERT INTO epics (title, description, plan, repo_path) VALUES (?1, ?2, ?3, ?4)",
-                params![title, description, plan, repo_path],
+                "INSERT INTO epics (title, description, repo_path) VALUES (?1, ?2, ?3)",
+                params![title, description, repo_path],
             )
             .context("Failed to insert epic")?;
             EpicId(conn.last_insert_rowid())
@@ -513,7 +531,7 @@ impl TaskStore for Database {
     fn get_epic(&self, id: EpicId) -> Result<Option<Epic>> {
         let conn = self.conn()?;
         conn.query_row(
-            "SELECT id, title, description, plan, repo_path, done, created_at, updated_at
+            "SELECT id, title, description, repo_path, done, created_at, updated_at
              FROM epics WHERE id = ?1",
             params![id.0],
             row_to_epic,
@@ -526,7 +544,7 @@ impl TaskStore for Database {
         let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, title, description, plan, repo_path, done, created_at, updated_at
+                "SELECT id, title, description, repo_path, done, created_at, updated_at
                  FROM epics ORDER BY id",
             )
             .context("Failed to prepare list_epics")?;
@@ -553,10 +571,6 @@ impl TaskStore for Database {
         if let Some(d) = patch.description {
             sets.push("description = ?");
             values.push(Box::new(d.to_string()));
-        }
-        if let Some(p) = patch.plan {
-            sets.push("plan = ?");
-            values.push(Box::new(p.to_string()));
         }
         if let Some(d) = patch.done {
             sets.push("done = ?");
@@ -666,7 +680,6 @@ fn row_to_epic(row: &rusqlite::Row<'_>) -> rusqlite::Result<Epic> {
         id: EpicId(row.get("id")?),
         title: row.get("title")?,
         description: row.get("description")?,
-        plan: row.get("plan")?,
         repo_path: row.get("repo_path")?,
         done: done_int != 0,
         created_at: parse_datetime(&created_str),
@@ -1086,10 +1099,9 @@ mod tests {
     #[test]
     fn create_and_get_epic() {
         let db = in_memory_db();
-        let epic = db.create_epic("Auth Rewrite", "Rewrite auth", "## Plan\n- Step 1", "/repo").unwrap();
+        let epic = db.create_epic("Auth Rewrite", "Rewrite auth", "/repo").unwrap();
         assert_eq!(epic.title, "Auth Rewrite");
         assert_eq!(epic.description, "Rewrite auth");
-        assert_eq!(epic.plan, "## Plan\n- Step 1");
         assert_eq!(epic.repo_path, "/repo");
         assert!(!epic.done);
 
@@ -1101,8 +1113,8 @@ mod tests {
     #[test]
     fn list_epics() {
         let db = in_memory_db();
-        db.create_epic("Epic A", "desc", "", "/a").unwrap();
-        db.create_epic("Epic B", "desc", "", "/b").unwrap();
+        db.create_epic("Epic A", "desc", "/a").unwrap();
+        db.create_epic("Epic B", "desc", "/b").unwrap();
         let epics = db.list_epics().unwrap();
         assert_eq!(epics.len(), 2);
     }
@@ -1116,7 +1128,7 @@ mod tests {
     #[test]
     fn delete_epic_cascades_subtasks() {
         let db = in_memory_db();
-        let epic = db.create_epic("Epic", "desc", "", "/repo").unwrap();
+        let epic = db.create_epic("Epic", "desc", "/repo").unwrap();
         db.create_task("Sub 1", "desc", "/repo", None, TaskStatus::Backlog).unwrap();
         let sub_id = db.create_task("Sub 2", "desc", "/repo", None, TaskStatus::Backlog).unwrap();
 
@@ -1136,7 +1148,7 @@ mod tests {
     #[test]
     fn patch_epic_done_flag() {
         let db = in_memory_db();
-        let epic = db.create_epic("Epic", "desc", "", "/repo").unwrap();
+        let epic = db.create_epic("Epic", "desc", "/repo").unwrap();
         assert!(!epic.done);
 
         db.patch_epic(epic.id, &EpicPatch::new().done(true)).unwrap();
@@ -1145,21 +1157,20 @@ mod tests {
     }
 
     #[test]
-    fn patch_epic_title_and_plan() {
+    fn patch_epic_title() {
         let db = in_memory_db();
-        let epic = db.create_epic("Old Title", "desc", "old plan", "/repo").unwrap();
+        let epic = db.create_epic("Old Title", "desc", "/repo").unwrap();
 
-        db.patch_epic(epic.id, &EpicPatch::new().title("New Title").plan("new plan")).unwrap();
+        db.patch_epic(epic.id, &EpicPatch::new().title("New Title")).unwrap();
         let updated = db.get_epic(epic.id).unwrap().unwrap();
         assert_eq!(updated.title, "New Title");
-        assert_eq!(updated.plan, "new plan");
         assert_eq!(updated.description, "desc"); // unchanged
     }
 
     #[test]
     fn task_epic_id_roundtrip() {
         let db = in_memory_db();
-        let epic = db.create_epic("Epic", "desc", "", "/repo").unwrap();
+        let epic = db.create_epic("Epic", "desc", "/repo").unwrap();
         let task_id = db.create_task("Task", "desc", "/repo", None, TaskStatus::Backlog).unwrap();
 
         db.set_task_epic_id(task_id, Some(epic.id)).unwrap();
@@ -1174,7 +1185,7 @@ mod tests {
     #[test]
     fn list_tasks_for_epic() {
         let db = in_memory_db();
-        let epic = db.create_epic("Epic", "desc", "", "/repo").unwrap();
+        let epic = db.create_epic("Epic", "desc", "/repo").unwrap();
         let id1 = db.create_task("Sub A", "desc", "/repo", None, TaskStatus::Backlog).unwrap();
         let _id2 = db.create_task("Standalone", "desc", "/repo", None, TaskStatus::Backlog).unwrap();
 

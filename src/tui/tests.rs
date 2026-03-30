@@ -2346,7 +2346,6 @@ fn make_epic(id: i64) -> Epic {
         id: EpicId(id),
         title: format!("Epic {id}"),
         description: String::new(),
-        plan: String::new(),
         repo_path: "/repo".to_string(),
         done: false,
         created_at: now,
@@ -2623,6 +2622,43 @@ fn esc_in_epic_view_exits_to_board() {
     };
     app.handle_key(make_key(KeyCode::Esc));
     assert!(matches!(app.view_mode, ViewMode::Board(_)));
+}
+
+#[test]
+fn d_key_on_backlog_epic_dispatches_epic() {
+    let mut app = make_app_with_epic_selected(); // epic at row 1 in Backlog
+    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
+    assert_eq!(cmds.len(), 1);
+    assert!(matches!(cmds[0], Command::DispatchEpic { ref epic } if epic.id == EpicId(10)));
+}
+
+// ---------------------------------------------------------------------------
+// DispatchEpic message
+// ---------------------------------------------------------------------------
+
+#[test]
+fn dispatch_epic_on_backlog_epic_produces_command() {
+    let mut app = make_app_with_epic_selected(); // epic at row 1, Backlog column
+    let cmds = app.update(Message::DispatchEpic(EpicId(10)));
+    assert_eq!(cmds.len(), 1);
+    assert!(matches!(cmds[0], Command::DispatchEpic { ref epic } if epic.id == EpicId(10)));
+}
+
+#[test]
+fn dispatch_epic_on_non_backlog_shows_status() {
+    let mut app = App::new(vec![
+        {
+            let mut t = make_task(1, TaskStatus::Ready);
+            t.epic_id = Some(EpicId(10));
+            t
+        },
+    ], Duration::from_secs(300));
+    app.epics = vec![make_epic(10)];
+
+    // Epic has a Ready subtask, so epic status is Ready (not Backlog)
+    let cmds = app.update(Message::DispatchEpic(EpicId(10)));
+    assert!(cmds.is_empty());
+    assert!(app.status_message.as_ref().unwrap().contains("Backlog"));
 }
 
 // ---------------------------------------------------------------------------
