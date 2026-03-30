@@ -53,6 +53,13 @@ fn provision_worktree(task: &Task, runner: &dyn ProcessRunner) -> Result<Provisi
     Ok(ProvisionResult { worktree_path, tmux_window })
 }
 
+fn rebase_preamble() -> &'static str {
+    "Before starting work, rebase your branch from main:\n\
+     ```\n\
+     git fetch origin && git rebase origin/main\n\
+     ```"
+}
+
 /// Provision worktree, write prompt file, launch Claude via tmux.
 /// Shared by all dispatch variants.
 fn dispatch_with_prompt(
@@ -62,8 +69,9 @@ fn dispatch_with_prompt(
 ) -> Result<DispatchResult> {
     let provision = provision_worktree(task, runner)?;
 
+    let full_prompt = format!("{}\n\n{prompt}", rebase_preamble());
     let prompt_file = format!("{}/.claude-prompt", provision.worktree_path);
-    fs::write(&prompt_file, prompt)
+    fs::write(&prompt_file, &full_prompt)
         .with_context(|| format!("failed to write {prompt_file}"))?;
     tmux::send_keys(
         &provision.tmux_window,
@@ -659,6 +667,15 @@ mod tests {
         let quick = build_quick_dispatch_prompt(TaskId(1), "Task", "Desc", 3142);
         assert!(quick.contains("placeholder"));
         assert!(!regular.contains("placeholder"));
+    }
+
+    #[test]
+    fn rebase_preamble_prepended_to_all_prompts() {
+        let body = build_prompt(TaskId(1), "Task", "Desc", None);
+        assert!(!body.contains("rebase")); // builder doesn't include it
+        let full = format!("{}\n\n{body}", rebase_preamble());
+        assert!(full.contains("rebase your branch from main"));
+        assert!(full.starts_with("Before starting work"));
     }
 
     #[test]
