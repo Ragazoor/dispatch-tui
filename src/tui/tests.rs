@@ -1869,17 +1869,14 @@ fn batch_move_forward_moves_all_selected() {
 }
 
 #[test]
-fn batch_move_preserves_selection() {
+fn batch_move_clears_selection() {
     let mut app = make_app();
     app.update(Message::ToggleSelect(TaskId(1)));
     app.update(Message::ToggleSelect(TaskId(2)));
 
     app.handle_key(make_key(KeyCode::Char('m')));
 
-    // Selection should persist after move
-    assert_eq!(app.selected_tasks.len(), 2);
-    assert!(app.selected_tasks.contains(&TaskId(1)));
-    assert!(app.selected_tasks.contains(&TaskId(2)));
+    assert!(app.selected_tasks.is_empty());
 }
 
 #[test]
@@ -1888,8 +1885,12 @@ fn batch_move_multiple_steps() {
     app.update(Message::ToggleSelect(TaskId(1)));
     app.update(Message::ToggleSelect(TaskId(2)));
 
-    // Move twice: Backlog -> Ready -> Running
+    // Move Backlog -> Ready (clears selection)
     app.handle_key(make_key(KeyCode::Char('m')));
+
+    // Re-select and move Ready -> Running
+    app.update(Message::ToggleSelect(TaskId(1)));
+    app.update(Message::ToggleSelect(TaskId(2)));
     app.handle_key(make_key(KeyCode::Char('m')));
 
     assert_eq!(app.find_task(TaskId(1)).unwrap().status, TaskStatus::Running);
