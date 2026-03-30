@@ -4647,3 +4647,63 @@ fn pr_polling_emits_check_for_review_tasks() {
     let cmds = app.update(Message::Tick);
     assert!(cmds.iter().any(|c| matches!(c, Command::CheckPrStatus { pr_number: 42, .. })));
 }
+
+// --- repo_filter ---
+
+#[test]
+fn repo_filter_empty_shows_all_tasks() {
+    let app = make_app();
+    // repo_filter is empty by default => all tasks visible
+    let visible = app.tasks_for_current_view();
+    assert_eq!(visible.len(), 4); // tasks 1,2,3,4 (Done tasks are visible, only Archived are excluded)
+}
+
+#[test]
+fn repo_filter_hides_non_matching_tasks() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut t1 = make_task(1, TaskStatus::Backlog);
+    t1.repo_path = "/repo-a".to_string();
+    let mut t2 = make_task(2, TaskStatus::Backlog);
+    t2.repo_path = "/repo-b".to_string();
+    app.tasks = vec![t1, t2];
+    app.repo_filter.insert("/repo-a".to_string());
+
+    let visible = app.tasks_for_current_view();
+    assert_eq!(visible.len(), 1);
+    assert_eq!(visible[0].id, TaskId(1));
+}
+
+#[test]
+fn repo_filter_applies_to_epics_in_column_items() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    let now = chrono::Utc::now();
+    app.epics = vec![
+        Epic {
+            id: EpicId(1), title: "A".into(), description: "".into(),
+            repo_path: "/repo-a".into(), done: false, created_at: now, updated_at: now,
+        },
+        Epic {
+            id: EpicId(2), title: "B".into(), description: "".into(),
+            repo_path: "/repo-b".into(), done: false, created_at: now, updated_at: now,
+        },
+    ];
+    app.repo_filter.insert("/repo-a".to_string());
+
+    let items = app.column_items_for_status(TaskStatus::Backlog);
+    assert_eq!(items.len(), 1); // only epic A
+}
+
+#[test]
+fn repo_filter_applies_to_archived_tasks() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut t1 = make_task(1, TaskStatus::Archived);
+    t1.repo_path = "/repo-a".to_string();
+    let mut t2 = make_task(2, TaskStatus::Archived);
+    t2.repo_path = "/repo-b".to_string();
+    app.tasks = vec![t1, t2];
+    app.repo_filter.insert("/repo-a".to_string());
+
+    let archived = app.archived_tasks();
+    assert_eq!(archived.len(), 1);
+    assert_eq!(archived[0].id, TaskId(1));
+}

@@ -30,6 +30,7 @@ pub struct App {
     pub(in crate::tui) rebase_conflict_tasks: HashSet<TaskId>,
     pub(in crate::tui) pending_done_tasks: Vec<TaskId>,
     pub(in crate::tui) notifications_enabled: bool,
+    pub(in crate::tui) repo_filter: HashSet<String>,
 }
 
 /// Format a title for display in confirmation prompts, truncating if longer than `max_len` chars.
@@ -61,6 +62,7 @@ impl App {
             rebase_conflict_tasks: HashSet::new(),
             pending_done_tasks: Vec::new(),
             notifications_enabled: true,
+            repo_filter: HashSet::new(),
         }
     }
 
@@ -104,6 +106,7 @@ impl App {
     pub fn on_select_all(&self) -> bool { self.selection().on_select_all }
     pub fn rebase_conflict_tasks(&self) -> &HashSet<TaskId> { &self.rebase_conflict_tasks }
     pub fn notifications_enabled(&self) -> bool { self.notifications_enabled }
+    pub fn repo_filter(&self) -> &HashSet<String> { &self.repo_filter }
 
     pub fn set_notifications_enabled(&mut self, enabled: bool) {
         self.notifications_enabled = enabled;
@@ -125,12 +128,15 @@ impl App {
     /// Board view: standalone tasks only (epic_id is None).
     /// Epic view: only subtasks of the active epic.
     pub fn tasks_for_current_view(&self) -> Vec<&Task> {
+        let repo_match = |t: &&Task| {
+            self.repo_filter.is_empty() || self.repo_filter.contains(&t.repo_path)
+        };
         match &self.view_mode {
             ViewMode::Board(_) => {
-                self.tasks.iter().filter(|t| t.epic_id.is_none() && t.status != TaskStatus::Archived).collect()
+                self.tasks.iter().filter(|t| t.epic_id.is_none() && t.status != TaskStatus::Archived).filter(repo_match).collect()
             }
             ViewMode::Epic { epic_id, .. } => {
-                self.tasks.iter().filter(|t| t.epic_id == Some(*epic_id) && t.status != TaskStatus::Archived).collect()
+                self.tasks.iter().filter(|t| t.epic_id == Some(*epic_id) && t.status != TaskStatus::Archived).filter(repo_match).collect()
             }
         }
     }
@@ -145,7 +151,10 @@ impl App {
 
     /// Return all archived tasks, ordered as they appear in self.tasks.
     pub fn archived_tasks(&self) -> Vec<&Task> {
-        self.tasks.iter().filter(|t| t.status == TaskStatus::Archived).collect()
+        self.tasks.iter()
+            .filter(|t| t.status == TaskStatus::Archived)
+            .filter(|t| self.repo_filter.is_empty() || self.repo_filter.contains(&t.repo_path))
+            .collect()
     }
 
     /// Build a list of items (tasks + epics) for a column in the current view.
@@ -157,6 +166,9 @@ impl App {
 
         if matches!(self.view_mode, ViewMode::Board(_)) {
             for epic in &self.epics {
+                if !self.repo_filter.is_empty() && !self.repo_filter.contains(&epic.repo_path) {
+                    continue;
+                }
                 if epic_status(epic, &self.subtask_statuses(epic.id)) == status {
                     items.push(ColumnItem::Epic(epic));
                 }
