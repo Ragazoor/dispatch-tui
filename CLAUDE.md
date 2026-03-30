@@ -140,7 +140,7 @@ Tool definitions in `mcp/handlers/dispatch.rs` (`tool_definitions()`) must be ma
 
 - **`patch_task` / `patch_epic`**: These build dynamic SQL from only the fields set in the patch. When adding a new column to `tasks` or `epics`, add a corresponding field to `TaskPatch` / `EpicPatch` and a new `if let Some(...)` branch in the patch method.
 - **MCP tool definitions**: See MCP Schema Maintenance above. The sync test catches drift, but remember to update both the JSON schema in `dispatch.rs` and the arg struct + the test's `cases` vec.
-- **`InputMode` carries data**: Some variants like `ConfirmRetry(TaskId)` and `ConfirmFinish(TaskId)` carry the target ID. Extract the ID from the mode in the handler — don't re-read from `selected_task()` as the cursor may have moved.
+- **`InputMode` carries data**: Some variants like `ConfirmRetry(TaskId)` and `ConfirmWrapUp(TaskId)` carry the target ID. Extract the ID from the mode in the handler — don't re-read from `selected_task()` as the cursor may have moved.
 - **`Instant` in tests**: `AgentTracking` uses `std::time::Instant` which cannot be faked. Tests that depend on elapsed time test the handler directly rather than going through `handle_tick`.
 
 ## InputMode Transitions
@@ -151,7 +151,10 @@ Normal ──E──▶ InputEpicTitle ──Enter──▶ InputEpicDescription
 Normal ──D──▶ QuickDispatch ──1-9──▶ Normal
 Normal ──x──▶ ConfirmArchive ──y──▶ Normal
 Normal ──m (Review→Done)──▶ ConfirmDone(id) ──y──▶ Normal
-Normal ──f──▶ ConfirmFinish(id) ──y──▶ Normal
+Normal ──f──▶ RepoFilter ──Enter/Esc──▶ Normal
+Normal ──W──▶ ConfirmWrapUp(id) ──r──▶ Normal (rebase)
+                                ──p──▶ Normal (PR)
+                                ──Esc──▶ Normal
 Normal ──d (stale/crashed)──▶ ConfirmRetry(id) ──r/f──▶ Normal
 Normal ──?──▶ Help ──?/Esc──▶ Normal
 
