@@ -313,6 +313,15 @@ impl Database {
                 .context("Failed to update schema version to 5")?;
         }
 
+        if current_version < 6 {
+            conn.execute_batch(
+                "UPDATE tasks SET status = 'backlog' WHERE status = 'ready'"
+            )
+            .context("Failed to migrate ready tasks to backlog")?;
+            conn.pragma_update(None, "user_version", 6i64)
+                .context("Failed to update schema version to 6")?;
+        }
+
         Ok(())
     }
 
@@ -781,11 +790,11 @@ mod tests {
         let id2 = db.create_task("Task B", "desc", "/b", None, TaskStatus::Backlog).unwrap();
         db.create_task("Task C", "desc", "/c", None, TaskStatus::Backlog).unwrap();
 
-        db.patch_task(id1, &TaskPatch::new().status(TaskStatus::Ready)).unwrap();
-        db.patch_task(id2, &TaskPatch::new().status(TaskStatus::Ready)).unwrap();
+        db.patch_task(id1, &TaskPatch::new().status(TaskStatus::Running)).unwrap();
+        db.patch_task(id2, &TaskPatch::new().status(TaskStatus::Running)).unwrap();
 
-        let ready = db.list_by_status(TaskStatus::Ready).unwrap();
-        assert_eq!(ready.len(), 2);
+        let running = db.list_by_status(TaskStatus::Running).unwrap();
+        assert_eq!(running.len(), 2);
 
         let backlog = db.list_by_status(TaskStatus::Backlog).unwrap();
         assert_eq!(backlog.len(), 1);
@@ -818,7 +827,7 @@ mod tests {
     #[test]
     fn find_task_by_plan_returns_match() {
         let db = in_memory_db();
-        let id = db.create_task("Planned", "desc", "/repo", Some("/plans/my-plan.md"), TaskStatus::Ready).unwrap();
+        let id = db.create_task("Planned", "desc", "/repo", Some("/plans/my-plan.md"), TaskStatus::Backlog).unwrap();
 
         let found = db.find_task_by_plan("/plans/my-plan.md").unwrap();
         assert!(found.is_some());
@@ -828,7 +837,7 @@ mod tests {
     #[test]
     fn find_task_by_plan_returns_none_when_no_match() {
         let db = in_memory_db();
-        db.create_task("Other", "desc", "/repo", Some("/plans/other.md"), TaskStatus::Ready).unwrap();
+        db.create_task("Other", "desc", "/repo", Some("/plans/other.md"), TaskStatus::Backlog).unwrap();
 
         let found = db.find_task_by_plan("/plans/nonexistent.md").unwrap();
         assert!(found.is_none());
@@ -864,7 +873,7 @@ mod tests {
         let db = in_memory_db();
         let conn = db.conn.lock().unwrap();
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 5, "fresh DB should be at schema version 5");
+        assert_eq!(version, 6, "fresh DB should be at schema version 6");
     }
 
     #[test]
@@ -915,13 +924,70 @@ mod tests {
 
         // Version should be latest
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 5);
+        assert_eq!(version, 6);
 
         // Verify Migration 1 added the plan column
         let has_plan: bool = conn
             .prepare("SELECT plan FROM tasks LIMIT 1")
             .is_ok();
         assert!(has_plan, "Migration 1 should have added the plan column");
+    }
+
+    #[test]
+    fn migration_6_converts_ready_to_backlog() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys=ON;
+             CREATE TABLE tasks (
+                 id INTEGER PRIMARY KEY,
+                 title TEXT NOT NULL,
+                 description TEXT NOT NULL,
+                 repo_path TEXT NOT NULL,
+                 status TEXT NOT NULL DEFAULT 'backlog',
+                 worktree TEXT,
+                 tmux_window TEXT,
+                 plan TEXT,
+                 epic_id INTEGER,
+                 needs_input INTEGER NOT NULL DEFAULT 0,
+                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+             );
+             CREATE TABLE repo_paths (
+                 id INTEGER PRIMARY KEY,
+                 path TEXT NOT NULL UNIQUE,
+                 last_used TEXT NOT NULL DEFAULT (datetime('now'))
+             );
+             CREATE TABLE epics (
+                 id INTEGER PRIMARY KEY,
+                 title TEXT NOT NULL,
+                 description TEXT NOT NULL,
+                 repo_path TEXT NOT NULL,
+                 done INTEGER NOT NULL DEFAULT 0,
+                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+             );
+             CREATE TABLE settings (
+                 key TEXT PRIMARY KEY,
+                 value TEXT NOT NULL
+             );
+             PRAGMA user_version = 5;",
+        ).unwrap();
+
+        // Insert a ready task
+        conn.execute(
+            "INSERT INTO tasks (title, description, repo_path, status) VALUES ('T', 'D', '/r', 'ready')",
+            [],
+        ).unwrap();
+
+        Database::init_schema(&conn).unwrap();
+
+        let status: String = conn
+            .query_row("SELECT status FROM tasks WHERE id = 1", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(status, "backlog");
+
+        let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
+        assert_eq!(version, 6);
     }
 
     #[test]
@@ -966,9 +1032,9 @@ mod tests {
     #[test]
     fn create_task_returning_with_plan() {
         let db = in_memory_db();
-        let task = db.create_task_returning("T", "D", "/r", Some("plan.md"), TaskStatus::Ready).unwrap();
+        let task = db.create_task_returning("T", "D", "/r", Some("plan.md"), TaskStatus::Backlog).unwrap();
         assert_eq!(task.plan.as_deref(), Some("plan.md"));
-        assert_eq!(task.status, TaskStatus::Ready);
+        assert_eq!(task.status, TaskStatus::Backlog);
     }
 
     #[test]
@@ -978,12 +1044,12 @@ mod tests {
             .create_task("title", "desc", "/repo", None, TaskStatus::Backlog)
             .unwrap();
         let patch = TaskPatch::new()
-            .status(TaskStatus::Ready)
+            .status(TaskStatus::Running)
             .plan(Some("plan.md"))
             .title("new title");
         db.patch_task(id, &patch).unwrap();
         let task = db.get_task(id).unwrap().unwrap();
-        assert_eq!(task.status, TaskStatus::Ready);
+        assert_eq!(task.status, TaskStatus::Running);
         assert_eq!(task.plan.as_deref(), Some("plan.md"));
         assert_eq!(task.title, "new title");
         assert_eq!(task.description, "desc"); // unchanged
@@ -993,14 +1059,14 @@ mod tests {
     fn patch_task_none_fields_unchanged() {
         let db = in_memory_db();
         let id = db
-            .create_task("title", "desc", "/repo", Some("plan.md"), TaskStatus::Ready)
+            .create_task("title", "desc", "/repo", Some("plan.md"), TaskStatus::Running)
             .unwrap();
         let patch = TaskPatch::new();
         db.patch_task(id, &patch).unwrap();
         let task = db.get_task(id).unwrap().unwrap();
         assert_eq!(task.title, "title");
         assert_eq!(task.plan.as_deref(), Some("plan.md"));
-        assert_eq!(task.status, TaskStatus::Ready);
+        assert_eq!(task.status, TaskStatus::Running);
     }
 
     #[test]
@@ -1054,7 +1120,7 @@ mod tests {
     fn patch_task_clears_plan() {
         let db = in_memory_db();
         let id = db
-            .create_task("title", "desc", "/repo", Some("plan.md"), TaskStatus::Ready)
+            .create_task("title", "desc", "/repo", Some("plan.md"), TaskStatus::Backlog)
             .unwrap();
         let patch = TaskPatch::new().plan(None);
         db.patch_task(id, &patch).unwrap();
@@ -1106,7 +1172,7 @@ mod tests {
     fn patch_task_status_and_dispatch_together() {
         let db = in_memory_db();
         let id = db
-            .create_task("title", "desc", "/repo", None, TaskStatus::Ready)
+            .create_task("title", "desc", "/repo", None, TaskStatus::Backlog)
             .unwrap();
         let patch = TaskPatch::new()
             .status(TaskStatus::Running)
