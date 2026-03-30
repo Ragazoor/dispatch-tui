@@ -4,10 +4,10 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
 
-use crate::models::{Epic, Task, TaskStatus, Staleness, format_age};
+use crate::models::{Epic, ReviewDecision, ReviewPr, Task, TaskStatus, Staleness, format_age};
 use super::{App, ColumnItem, InputMode, ViewMode};
 
 /// Column color per status
@@ -80,6 +80,15 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
     let now = Utc::now();
 
+    if matches!(app.view_mode(), ViewMode::ReviewBoard { .. }) {
+        render_review_board(frame, app, area);
+        if matches!(app.mode(), InputMode::Help) {
+            render_help_overlay(frame, app, area);
+        }
+        render_error_popup(frame, app, area);
+        return;
+    }
+
     let has_banner = matches!(app.view_mode(), ViewMode::Epic { .. });
 
     let vertical = Layout::default()
@@ -128,7 +137,7 @@ fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
         .constraints({
             let mut c = vec![Constraint::Ratio(1, TaskStatus::COLUMN_COUNT as u32); TaskStatus::COLUMN_COUNT];
             c.push(Constraint::Length(14)); // filter indicator
-            c.push(Constraint::Length(6));  // notification indicator
+            c.push(Constraint::Length(20)); // review badge + notification indicator
             c
         })
         .split(area);
@@ -188,19 +197,24 @@ fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
         frame.render_widget(p, segments[TaskStatus::COLUMN_COUNT]);
     }
 
-    // Notification indicator
+    // Review badge + Notification indicator
     let notif_area = segments[TaskStatus::COLUMN_COUNT + 1];
-    if app.notifications_enabled() {
-        let indicator = Paragraph::new("\u{1F514}")
-            .style(Style::default().fg(Color::Yellow))
-            .alignment(Alignment::Right);
-        frame.render_widget(indicator, notif_area);
-    } else {
-        let indicator = Paragraph::new("\u{1F515} [N]")
-            .style(Style::default().fg(Color::Rgb(86, 95, 137)))
-            .alignment(Alignment::Right);
-        frame.render_widget(indicator, notif_area);
+    let review_count = app.review_prs().len();
+    let mut right_parts: Vec<Span> = Vec::new();
+    if review_count > 0 {
+        right_parts.push(Span::styled(
+            format!("\u{21e5}{review_count} "),
+            Style::default().fg(Color::Rgb(86, 182, 194)),
+        ));
     }
+    if app.notifications_enabled() {
+        right_parts.push(Span::styled("\u{1F514}", Style::default().fg(Color::Yellow)));
+    } else {
+        right_parts.push(Span::styled("\u{1F515} [N]", Style::default().fg(Color::Rgb(86, 95, 137))));
+    }
+    let right_line = Line::from(right_parts);
+    let p = Paragraph::new(right_line).alignment(Alignment::Right);
+    frame.render_widget(p, notif_area);
 }
 
 /// Format the title text for a task card (line 1 only — status annotations are on line 2).
@@ -1268,4 +1282,198 @@ fn batch_action_hints(count: usize, key_color: Color) -> Vec<Span<'static>> {
     push_hint("Space", "toggle");
     push_hint("Esc", "clear");
     spans
+}
+
+// ---------------------------------------------------------------------------
+// Review board rendering
+// ---------------------------------------------------------------------------
+
+fn review_column_color(decision: ReviewDecision) -> Color {
+    match decision {
+        ReviewDecision::ReviewRequired => Color::Rgb(86, 182, 194),
+        ReviewDecision::ChangesRequested => Color::Rgb(224, 130, 130),
+        ReviewDecision::Approved => Color::Rgb(158, 206, 106),
+    }
+}
+
+fn review_cursor_bg_color(decision: ReviewDecision) -> Color {
+    match decision {
+        ReviewDecision::ReviewRequired => Color::Rgb(24, 48, 52),
+        ReviewDecision::ChangesRequested => Color::Rgb(56, 32, 32),
+        ReviewDecision::Approved => Color::Rgb(32, 52, 36),
+    }
+}
+
+fn review_column_bg_color(decision: ReviewDecision) -> Color {
+    match decision {
+        ReviewDecision::ReviewRequired => Color::Rgb(26, 36, 38),
+        ReviewDecision::ChangesRequested => Color::Rgb(36, 28, 28),
+        ReviewDecision::Approved => Color::Rgb(27, 36, 30),
+    }
+}
+
+/// Render the review board view.
+pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // summary row
+            Constraint::Min(1),    // board
+            Constraint::Length(1), // status bar
+        ])
+        .split(area);
+
+    render_review_summary_row(frame, app, chunks[0]);
+
+    if app.review_prs().is_empty() {
+        let p = Paragraph::new("No PRs awaiting your review")
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::DarkGray));
+        frame.render_widget(p, chunks[1]);
+    } else {
+        render_review_columns(frame, app, chunks[1]);
+    }
+
+    // Status bar
+    if let Some(msg) = app.status_message() {
+        let status = Paragraph::new(msg.to_string())
+            .style(Style::default().fg(Color::Yellow));
+        frame.render_widget(status, chunks[2]);
+    }
+}
+
+fn render_review_summary_row(frame: &mut Frame, app: &App, area: Rect) {
+    let sel = app.review_selection();
+    let selected_col = sel.map(|s| s.column()).unwrap_or(0);
+
+    let segments = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints({
+            let mut c = vec![
+                Constraint::Ratio(1, ReviewDecision::COLUMN_COUNT as u32);
+                ReviewDecision::COLUMN_COUNT
+            ];
+            c.push(Constraint::Length(12)); // Tab hint
+            c
+        })
+        .split(area);
+
+    for (i, decision) in ReviewDecision::ALL.iter().enumerate() {
+        let count = app.review_prs().iter()
+            .filter(|pr| pr.review_decision == *decision)
+            .count();
+        let is_focused = i == selected_col;
+        let prefix = if is_focused { "\u{25b8} " } else { "\u{25e6} " };
+        let label = format!("{prefix}{} ({count})", decision.as_str());
+
+        let color = review_column_color(*decision);
+        let style = if is_focused {
+            Style::default().fg(color).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+
+        let p = Paragraph::new(label).style(style);
+        frame.render_widget(p, segments[i]);
+    }
+
+    // Tab hint
+    let hint = Paragraph::new("\u{21e5} Tasks")
+        .alignment(Alignment::Right)
+        .style(Style::default().fg(Color::DarkGray));
+    frame.render_widget(hint, segments[ReviewDecision::COLUMN_COUNT]);
+}
+
+fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
+    let sel_col = app.review_selection().map(|s| s.column()).unwrap_or(0);
+
+    let col_areas = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(
+            [Constraint::Ratio(1, ReviewDecision::COLUMN_COUNT as u32); ReviewDecision::COLUMN_COUNT]
+        )
+        .split(area);
+
+    for (i, decision) in ReviewDecision::ALL.iter().enumerate() {
+        let is_focused = i == sel_col;
+        let prs: Vec<&ReviewPr> = app.review_prs().iter()
+            .filter(|pr| pr.review_decision == *decision)
+            .collect();
+
+        let selected_row = app.review_selection().map(|s| s.row(i)).unwrap_or(0);
+        let items: Vec<ListItem> = prs.iter().enumerate().map(|(row, pr)| {
+            build_review_pr_item(pr, *decision, is_focused && row == selected_row)
+        }).collect();
+
+        let bg = if is_focused {
+            review_column_bg_color(*decision)
+        } else {
+            Color::Reset
+        };
+
+        let list = List::new(items)
+            .block(Block::default().style(Style::default().bg(bg)));
+
+        let mut list_state = ListState::default();
+        if is_focused {
+            list_state.select(Some(selected_row));
+        }
+
+        frame.render_stateful_widget(list, col_areas[i], &mut list_state);
+
+        // Write back the list state for scroll tracking
+        if let Some(sel) = app.review_selection_mut() {
+            sel.list_states[i] = list_state;
+        }
+    }
+}
+
+fn build_review_pr_item(pr: &ReviewPr, decision: ReviewDecision, is_cursor: bool) -> ListItem<'static> {
+    let color = review_column_color(decision);
+    let now = Utc::now();
+    let age = format_age(pr.created_at, now);
+
+    // Line 1: stripe + repo#number + title
+    let stripe = if is_cursor { "\u{258c} " } else { "\u{258e} " };
+    let repo_short = pr.repo.split('/').last().unwrap_or(&pr.repo);
+    let header = format!("{repo_short}#{} {}", pr.number, pr.title);
+    let header_truncated = truncate(&header, 60);
+
+    let line1_style = if is_cursor {
+        Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(color)
+    };
+
+    let line1 = Line::from(vec![
+        Span::styled(stripe, Style::default().fg(color)),
+        Span::styled(header_truncated, line1_style),
+    ]);
+
+    // Line 2: author · age · +/-lines · draft
+    let mut meta_parts = vec![
+        format!("@{}", pr.author),
+        age,
+        format!("+{}/-{}", pr.additions, pr.deletions),
+    ];
+    if pr.is_draft {
+        meta_parts.push("DRAFT".to_string());
+    }
+    let meta = format!("  {} ", meta_parts.join(" \u{b7} "));
+
+    let meta_style = if is_cursor {
+        Style::default().fg(Color::Gray)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
+    let line2 = Line::from(Span::styled(meta, meta_style));
+
+    let bg = if is_cursor {
+        review_cursor_bg_color(decision)
+    } else {
+        Color::Reset
+    };
+
+    ListItem::new(vec![line1, line2]).style(Style::default().bg(bg))
 }
