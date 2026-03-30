@@ -85,7 +85,7 @@ enum Commands {
 fn parse_status(s: &str) -> anyhow::Result<models::TaskStatus> {
     models::TaskStatus::parse(s).ok_or_else(|| {
         anyhow::anyhow!(
-            "Unknown status: {s}. Valid values: backlog, ready, running, review, done"
+            "Unknown status: {s}. Valid values: backlog, running, review, done"
         )
     })
 }
@@ -184,8 +184,8 @@ async fn main() -> Result<()> {
                 return Ok(());
             }
 
-            let id = db.create_task(&title, &description, &repo_path_str, Some(&plan_str), models::TaskStatus::Ready)?;
-            println!("Created task #{}: \"{}\" [ready]", id, title);
+            let id = db.create_task(&title, &description, &repo_path_str, Some(&plan_str), models::TaskStatus::Backlog)?;
+            println!("Created task #{}: \"{}\" [backlog]", id, title);
         }
         Commands::Setup { port } => {
             dispatch::setup::run_setup(port)?;

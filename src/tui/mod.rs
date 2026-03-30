@@ -488,7 +488,7 @@ impl App {
 
     fn handle_dispatch_task(&mut self, id: TaskId) -> Vec<Command> {
         if let Some(task) = self.find_task(id) {
-            if task.status == TaskStatus::Ready {
+            if task.status == TaskStatus::Backlog {
                 return vec![Command::Dispatch { task: task.clone() }];
             }
         }
@@ -820,7 +820,7 @@ impl App {
                 return vec![];
             }
             let cleanup = Self::take_cleanup(task);
-            task.status = TaskStatus::Ready;
+            task.status = TaskStatus::Backlog;
             let task_clone = task.clone();
 
             let mut cmds = Vec::new();

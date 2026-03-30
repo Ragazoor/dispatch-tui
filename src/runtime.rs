@@ -212,7 +212,7 @@ impl TuiRuntime {
     }
 
     fn exec_quick_dispatch(&self, app: &mut App, title: String, description: String, repo_path: String) {
-        match self.database.create_task_returning(&title, &description, &repo_path, None, models::TaskStatus::Ready) {
+        match self.database.create_task_returning(&title, &description, &repo_path, None, models::TaskStatus::Backlog) {
             Ok(task) => {
                 app.update(Message::TaskCreated { task: task.clone() });
                 let _ = self.database.save_repo_path(&repo_path);
@@ -621,13 +621,13 @@ impl TuiRuntime {
             epic.title, epic.description
         );
 
-        // Create the planning subtask in DB as Ready
+        // Create the planning subtask in DB as Backlog
         let task = match self.database.create_task_returning(
             &title,
             &description,
             &epic.repo_path,
             None,
-            models::TaskStatus::Ready,
+            models::TaskStatus::Backlog,
         ) {
             Ok(mut task) => {
                 if let Err(e) = self.database.set_task_epic_id(task.id, Some(epic.id)) {

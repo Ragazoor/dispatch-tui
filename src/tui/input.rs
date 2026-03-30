@@ -233,12 +233,18 @@ impl App {
                 let status = task.status;
                 let has_window = task.tmux_window.is_some();
                 let has_worktree = task.worktree.is_some();
+                let has_plan = task.plan.is_some();
                 let is_problematic = self.agents.stale_tasks.contains(&id)
                     || self.agents.crashed_tasks.contains(&id);
 
                 match status {
-                    TaskStatus::Backlog => self.update(Message::BrainstormTask(id)),
-                    TaskStatus::Ready => self.update(Message::DispatchTask(id)),
+                    TaskStatus::Backlog => {
+                        if has_plan {
+                            self.update(Message::DispatchTask(id))
+                        } else {
+                            self.update(Message::BrainstormTask(id))
+                        }
+                    }
                     TaskStatus::Running | TaskStatus::Review => {
                         if is_problematic {
                             self.update(Message::KillAndRetry(id))
@@ -250,7 +256,7 @@ impl App {
                             self.update(Message::ResumeTask(id))
                         } else {
                             self.update(Message::StatusInfo(
-                                "No worktree to resume, move to Ready and re-dispatch".to_string(),
+                                "No worktree to resume, move to Backlog and re-dispatch".to_string(),
                             ))
                         }
                     }

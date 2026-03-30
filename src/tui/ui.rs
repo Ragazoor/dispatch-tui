@@ -14,7 +14,6 @@ use super::{App, ColumnItem, InputMode, ViewMode};
 fn column_color(status: TaskStatus) -> Color {
     match status {
         TaskStatus::Backlog => Color::Rgb(86, 95, 137),
-        TaskStatus::Ready => Color::Rgb(122, 162, 247),
         TaskStatus::Running => Color::Rgb(224, 175, 104),
         TaskStatus::Review => Color::Rgb(187, 154, 247),
         TaskStatus::Done => Color::Rgb(158, 206, 106),
@@ -26,7 +25,6 @@ fn column_color(status: TaskStatus) -> Color {
 fn cursor_bg_color(status: TaskStatus) -> Color {
     match status {
         TaskStatus::Backlog => Color::Rgb(34, 38, 66),
-        TaskStatus::Ready => Color::Rgb(32, 46, 82),
         TaskStatus::Running => Color::Rgb(62, 50, 28),
         TaskStatus::Review => Color::Rgb(50, 34, 66),
         TaskStatus::Done => Color::Rgb(32, 52, 36),
@@ -40,7 +38,6 @@ fn cursor_bg_color(status: TaskStatus) -> Color {
 fn column_bg_color(status: TaskStatus) -> Color {
     match status {
         TaskStatus::Backlog => Color::Rgb(28, 30, 44),
-        TaskStatus::Ready => Color::Rgb(27, 32, 48),
         TaskStatus::Running => Color::Rgb(38, 34, 26),
         TaskStatus::Review => Color::Rgb(34, 28, 44),
         TaskStatus::Done => Color::Rgb(27, 36, 30),
@@ -52,7 +49,6 @@ fn column_bg_color(status: TaskStatus) -> Color {
 fn status_icon(status: TaskStatus) -> &'static str {
     match status {
         TaskStatus::Backlog => "◦",
-        TaskStatus::Ready => "⬡",
         TaskStatus::Running => "◉",
         TaskStatus::Review => "◎",
         TaskStatus::Done => "✓",
@@ -276,10 +272,15 @@ fn build_task_list_item<'a>(
     } else {
         let age = format_age(task.updated_at, now);
         let staleness = Staleness::from_age(task.updated_at, now);
+        let plan_indicator = if task.plan.is_some() && status == TaskStatus::Backlog {
+            "▸ "
+        } else {
+            ""
+        };
         Line::from(vec![
             Span::raw("   "),
             Span::styled(
-                format!("{} {}", status_icon(status), age),
+                format!("{}{} {}", plan_indicator, status_icon(status), age),
                 Style::default().fg(staleness_color(staleness)),
             ),
         ])
@@ -868,7 +869,8 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
         ]),
         Line::from(""),
         Line::from(Span::styled("  * d is context-dependent:", note)),
-        Line::from(Span::styled("    Backlog \u{2192} brainstorm   Ready \u{2192} dispatch", note)),
+        Line::from(Span::styled("    Backlog (no plan) \u{2192} brainstorm", note)),
+        Line::from(Span::styled("    Backlog (has plan) \u{2192} dispatch", note)),
         Line::from(Span::styled("    Running \u{2192} resume (if window gone)", note)),
         Line::from(""),
         Line::from(Span::styled("  General", header)),
@@ -1019,16 +1021,10 @@ pub(in crate::tui) fn action_hints(task: Option<&Task>, key_color: Color) -> Vec
     if let Some(task) = task {
         match task.status {
             TaskStatus::Backlog => {
-                push_hint("d", "brainstorm");
+                let d_label = if task.plan.is_some() { "dispatch" } else { "brainstorm" };
+                push_hint("d", d_label);
                 push_hint("e", "edit");
                 push_hint("m", "move");
-                push_hint("x", "archive");
-            }
-            TaskStatus::Ready => {
-                push_hint("d", "dispatch");
-                push_hint("e", "edit");
-                push_hint("m", "move");
-                push_hint("M", "back");
                 push_hint("x", "archive");
             }
             TaskStatus::Running => {

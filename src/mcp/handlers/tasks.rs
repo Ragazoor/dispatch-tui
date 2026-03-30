@@ -157,11 +157,7 @@ pub(super) fn handle_create_task(state: &McpState, id: Option<Value>, args: Valu
             .unwrap_or_else(|_| p.to_string())
     });
 
-    let status = if plan.is_some() {
-        TaskStatus::Ready
-    } else {
-        TaskStatus::Backlog
-    };
+    let status = TaskStatus::Backlog;
 
     match state.db.create_task(
         &parsed.title,
@@ -318,8 +314,8 @@ pub(super) fn handle_claim_task(state: &McpState, id: Option<Value>, args: Value
         }
     };
 
-    // 2. Validate status is backlog or ready
-    if task.status != TaskStatus::Backlog && task.status != TaskStatus::Ready {
+    // 2. Validate status is backlog
+    if task.status != TaskStatus::Backlog {
         return JsonRpcResponse::err(
             id,
             -32602,

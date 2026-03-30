@@ -28,8 +28,8 @@ pub(super) fn tool_definitions() -> Value {
                         },
                         "status": {
                             "type": "string",
-                            "description": "New status: backlog, ready, running, or review. Setting done is not allowed via MCP — ask the human operator to move the task to done from the TUI.",
-                            "enum": ["backlog", "ready", "running", "review"]
+                            "description": "New status: backlog, running, or review. Setting done is not allowed via MCP — ask the human operator to move the task to done from the TUI.",
+                            "enum": ["backlog", "running", "review"]
                         },
                         "plan": {
                             "type": "string",
@@ -67,7 +67,7 @@ pub(super) fn tool_definitions() -> Value {
             },
             {
                 "name": "create_task",
-                "description": "Create a new task on the kanban board. If a plan file path is provided, the task is created in 'ready' status; otherwise it starts in 'backlog'.",
+                "description": "Create a new task on the kanban board. Tasks always start in 'backlog' status.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -85,7 +85,7 @@ pub(super) fn tool_definitions() -> Value {
                         },
                         "plan": {
                             "type": "string",
-                            "description": "Absolute file path to the implementation plan (optional). If provided, task starts in 'ready' status."
+                            "description": "Absolute file path to the implementation plan (optional)."
                         },
                         "epic_id": {
                             "type": "integer",
@@ -104,8 +104,8 @@ pub(super) fn tool_definitions() -> Value {
                         "status": {
                             "description": "Filter by status. Single string or array of strings.",
                             "oneOf": [
-                                { "type": "string", "enum": ["backlog", "ready", "running", "review", "done"] },
-                                { "type": "array", "items": { "type": "string", "enum": ["backlog", "ready", "running", "review", "done"] } }
+                                { "type": "string", "enum": ["backlog", "running", "review", "done"] },
+                                { "type": "array", "items": { "type": "string", "enum": ["backlog", "running", "review", "done"] } }
                             ]
                         }
                     }
@@ -113,7 +113,7 @@ pub(super) fn tool_definitions() -> Value {
             },
             {
                 "name": "claim_task",
-                "description": "Claim a backlog or ready task into your current worktree. Sets the task to running and associates it with your worktree and tmux window. Only tasks in the same repo can be claimed.",
+                "description": "Claim a backlog task into your current worktree. Sets the task to running and associates it with your worktree and tmux window. Only tasks in the same repo can be claimed.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
