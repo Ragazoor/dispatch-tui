@@ -4469,3 +4469,26 @@ fn confirm_pr_esc_cancels() {
     app.handle_key(make_key(KeyCode::Esc));
     assert!(matches!(app.mode(), InputMode::Normal));
 }
+
+#[test]
+fn pr_polling_skips_done_tasks() {
+    let mut task = make_task(1, TaskStatus::Done);
+    task.pr_number = Some(42);
+    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
+    let mut app = App::new(vec![task], Duration::from_secs(300));
+
+    let cmds = app.update(Message::Tick);
+    // Should NOT contain any CheckPrStatus command
+    assert!(!cmds.iter().any(|c| matches!(c, Command::CheckPrStatus { .. })));
+}
+
+#[test]
+fn pr_polling_emits_check_for_review_tasks() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.pr_number = Some(42);
+    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
+    let mut app = App::new(vec![task], Duration::from_secs(300));
+
+    let cmds = app.update(Message::Tick);
+    assert!(cmds.iter().any(|c| matches!(c, Command::CheckPrStatus { pr_number: 42, .. })));
+}

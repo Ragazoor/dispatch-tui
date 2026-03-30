@@ -686,6 +686,26 @@ impl App {
             cmds.extend(stale_cmds);
         }
 
+        // Poll PR status for review tasks with open PRs
+        let pr_poll_interval = Duration::from_secs(30);
+        let pr_tasks: Vec<(TaskId, i64, String)> = self
+            .tasks
+            .iter()
+            .filter(|t| t.status == TaskStatus::Review && t.pr_number.is_some())
+            .filter(|t| {
+                self.agents
+                    .last_pr_poll
+                    .get(&t.id)
+                    .is_none_or(|last| last.elapsed() > pr_poll_interval)
+            })
+            .map(|t| (t.id, t.pr_number.unwrap(), t.repo_path.clone()))
+            .collect();
+
+        for (id, pr_number, repo_path) in pr_tasks {
+            self.agents.last_pr_poll.insert(id, Instant::now());
+            cmds.push(Command::CheckPrStatus { id, pr_number, repo_path });
+        }
+
         cmds.push(Command::RefreshFromDb);
         cmds
     }

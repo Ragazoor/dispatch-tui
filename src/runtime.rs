@@ -683,6 +683,60 @@ impl TuiRuntime {
             }
         });
     }
+
+    fn exec_create_pr(
+        &self,
+        id: TaskId,
+        repo_path: String,
+        branch: String,
+        title: String,
+        description: String,
+    ) {
+        let tx = self.msg_tx.clone();
+        let runner = self.runner.clone();
+
+        tokio::task::spawn_blocking(move || {
+            match dispatch::create_pr(&repo_path, &branch, &title, &description, &*runner) {
+                Ok(result) => {
+                    let _ = tx.send(Message::PrCreated {
+                        id,
+                        pr_url: result.pr_url,
+                        pr_number: result.pr_number,
+                    });
+                }
+                Err(e) => {
+                    let _ = tx.send(Message::PrFailed {
+                        id,
+                        error: e.to_string(),
+                    });
+                }
+            }
+        });
+    }
+
+    fn exec_check_pr_status(
+        &self,
+        id: TaskId,
+        pr_number: i64,
+        repo_path: String,
+    ) {
+        let tx = self.msg_tx.clone();
+        let runner = self.runner.clone();
+
+        tokio::task::spawn_blocking(move || {
+            match dispatch::check_pr_status(pr_number, &repo_path, &*runner) {
+                Ok(dispatch::PrState::Merged) => {
+                    let _ = tx.send(Message::PrMerged(id));
+                }
+                Ok(_) => {
+                    // Still open or closed — no message needed
+                }
+                Err(e) => {
+                    tracing::warn!(task_id = id.0, "PR status check failed: {e}");
+                }
+            }
+        });
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -781,9 +835,10 @@ async fn execute_commands(
                 rt.exec_send_notification(&title, &body, urgent),
             Command::PersistSetting { key, value } =>
                 rt.exec_persist_setting(app, &key, value),
-            // PR commands — handlers added in a later task
-            Command::CreatePr { .. } => {}
-            Command::CheckPrStatus { .. } => {}
+            Command::CreatePr { id, repo_path, branch, title, description } =>
+                rt.exec_create_pr(id, repo_path, branch, title, description),
+            Command::CheckPrStatus { id, pr_number, repo_path } =>
+                rt.exec_check_pr_status(id, pr_number, repo_path),
         }
     }
 
@@ -1318,5 +1373,106 @@ mod tests {
             rt.database.get_setting_bool("notifications_enabled").unwrap(),
             Some(true)
         );
+    }
+
+    #[tokio::test]
+    async fn exec_create_pr_happy_path() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok(),  // git push
+            MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"),  // git remote get-url
+            MockProcessRunner::ok_with_stdout(b"https://github.com/org/repo/pull/42\n"),  // gh pr create
+        ]));
+        let rt = TuiRuntime {
+            database: db,
+            msg_tx: tx,
+            port: 3142,
+            input_paused: Arc::new(AtomicBool::new(false)),
+            runner: mock,
+        };
+
+        rt.exec_create_pr(
+            TaskId(1),
+            "/repo".to_string(),
+            "1-task".to_string(),
+            "Fix bug".to_string(),
+            "Description".to_string(),
+        );
+
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
+        assert!(matches!(msg, Message::PrCreated { id: TaskId(1), pr_number: 42, .. }));
+    }
+
+    #[tokio::test]
+    async fn exec_create_pr_push_fails() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::fail("fatal: no remote"),
+        ]));
+        let rt = TuiRuntime {
+            database: db,
+            msg_tx: tx,
+            port: 3142,
+            input_paused: Arc::new(AtomicBool::new(false)),
+            runner: mock,
+        };
+
+        rt.exec_create_pr(
+            TaskId(1),
+            "/repo".to_string(),
+            "1-task".to_string(),
+            "Fix bug".to_string(),
+            "Description".to_string(),
+        );
+
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
+        assert!(matches!(msg, Message::PrFailed { .. }));
+    }
+
+    #[tokio::test]
+    async fn exec_check_pr_status_sends_merged() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"),  // git remote get-url
+            MockProcessRunner::ok_with_stdout(b"MERGED\n"),  // gh pr view
+        ]));
+        let rt = TuiRuntime {
+            database: db,
+            msg_tx: tx,
+            port: 3142,
+            input_paused: Arc::new(AtomicBool::new(false)),
+            runner: mock,
+        };
+
+        rt.exec_check_pr_status(TaskId(1), 42, "/repo".to_string());
+
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
+        assert!(matches!(msg, Message::PrMerged(TaskId(1))));
+    }
+
+    #[tokio::test]
+    async fn exec_check_pr_status_open_sends_nothing() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"),  // git remote get-url
+            MockProcessRunner::ok_with_stdout(b"OPEN\n"),  // gh pr view
+        ]));
+        let rt = TuiRuntime {
+            database: db,
+            msg_tx: tx,
+            port: 3142,
+            input_paused: Arc::new(AtomicBool::new(false)),
+            runner: mock,
+        };
+
+        rt.exec_check_pr_status(TaskId(1), 42, "/repo".to_string());
+
+        // Should not send any message for open PRs
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        assert!(rx.try_recv().is_err());
     }
 }
