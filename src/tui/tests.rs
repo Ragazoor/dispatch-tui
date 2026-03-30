@@ -3041,7 +3041,7 @@ fn dispatch_epic_with_plan_brainstorms_subtask_without_plan() {
 }
 
 #[test]
-fn dispatch_epic_with_plan_no_backlog_subtasks_shows_status() {
+fn dispatch_epic_with_plan_no_backlog_subtasks_falls_back_to_planning() {
     let mut app = App::new(vec![], Duration::from_secs(300));
     let mut epic = make_epic(10);
     epic.plan = Some("docs/plan.md".to_string());
@@ -3057,8 +3057,8 @@ fn dispatch_epic_with_plan_no_backlog_subtasks_shows_status() {
     app.selection_mut().set_row(0, 0);
 
     let cmds = app.update(Message::DispatchEpic(EpicId(10)));
-    assert!(cmds.is_empty());
-    assert!(app.status_message.as_deref().unwrap().contains("No backlog subtasks"));
+    assert_eq!(cmds.len(), 1);
+    assert!(matches!(cmds[0], Command::DispatchEpic { ref epic } if epic.id == EpicId(10)));
 }
 
 // ---------------------------------------------------------------------------

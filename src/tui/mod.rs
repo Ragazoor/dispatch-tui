@@ -1603,8 +1603,7 @@ impl App {
                     vec![Command::Brainstorm { task: (*task).clone() }]
                 }
                 None => {
-                    self.set_status("No backlog subtasks to dispatch".to_string());
-                    vec![]
+                    vec![Command::DispatchEpic { epic: epic.clone() }]
                 }
             }
         } else {
