@@ -78,8 +78,11 @@ entity Epic {
     description: String
     repo_path: String
     done: Boolean
+    plan: String?
     created_at: Timestamp
     updated_at: Timestamp
+
+    has_plan: plan != null
 
     subtasks: Task with epic = this
     active_subtasks: subtasks where status != archived
@@ -525,9 +528,9 @@ rule ClaimTaskViaMcp {
 }
 
 rule UpdateEpicViaMcp {
-    when: McpUpdateEpic(epic, title?, description?, done?)
+    when: McpUpdateEpic(epic, title?, description?, done?, plan?)
 
-    requires: title != null or description != null or done != null
+    requires: title != null or description != null or done != null or plan != null
 
     ensures:
         if title != null: epic.title = title
@@ -535,6 +538,8 @@ rule UpdateEpicViaMcp {
         if description != null: epic.description = description
     ensures:
         if done != null: epic.done = done
+    ensures:
+        if plan != null: epic.plan = plan
     ensures: epic.updated_at = now
 }
 
@@ -557,6 +562,7 @@ rule DispatchEpicPlanning {
     when: DispatchEpic(epic)
 
     requires: epic.derived_status = backlog
+    requires: !epic.has_plan
 
     -- Creates a planning subtask and dispatches a planning agent.
     -- The planning agent brainstorms and writes an implementation plan
@@ -580,6 +586,29 @@ rule DispatchEpicPlanning {
         -- because the planning task has no plan — the agent's job is
         -- to create one. The dispatch provisions a worktree and tmux
         -- window and transitions the task to Running.
+}
+
+rule DispatchEpicSubtask {
+    when: DispatchEpic(epic)
+
+    requires: epic.derived_status = backlog
+    requires: epic.has_plan
+
+    -- Dispatches the next backlog subtask of this epic.
+    -- If the subtask has a plan, it is dispatched for implementation.
+    -- If not, it is dispatched for brainstorming.
+    ensures:
+        let next = epic.active_subtasks where status = backlog | first
+        if next != null:
+            if next.has_plan:
+                AgentLaunched(task: next, mode: implementation)
+            else:
+                AgentLaunched(task: next, mode: brainstorm)
+
+    @guidance
+        -- When no backlog subtasks remain, the TUI shows a status
+        -- message instead of dispatching. This rule only fires when
+        -- there is at least one backlog subtask.
 }
 
 rule MarkEpicDone {
