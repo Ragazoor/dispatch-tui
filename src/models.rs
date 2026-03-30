@@ -163,10 +163,8 @@ pub fn epic_status(epic: &Epic, subtask_statuses: &[TaskStatus]) -> TaskStatus {
         return TaskStatus::Review;
     }
 
-    let any_active = subtask_statuses
-        .iter()
-        .any(|s| matches!(s, TaskStatus::Running | TaskStatus::Done));
-    if any_active {
+    let any_running = subtask_statuses.contains(&TaskStatus::Running);
+    if any_running {
         return TaskStatus::Running;
     }
 
@@ -755,9 +753,16 @@ mod tests {
     }
 
     #[test]
-    fn epic_status_some_done_means_running() {
+    fn epic_status_done_and_backlog_is_backlog() {
         let epic = make_epic_for_status(false);
         let statuses = [TaskStatus::Backlog, TaskStatus::Done];
+        assert_eq!(epic_status(&epic, &statuses), TaskStatus::Backlog);
+    }
+
+    #[test]
+    fn epic_status_done_and_running_is_running() {
+        let epic = make_epic_for_status(false);
+        let statuses = [TaskStatus::Done, TaskStatus::Running];
         assert_eq!(epic_status(&epic, &statuses), TaskStatus::Running);
     }
 
