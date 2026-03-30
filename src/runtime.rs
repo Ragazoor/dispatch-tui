@@ -991,6 +991,7 @@ mod tests {
         let mock = Arc::new(MockProcessRunner::new(vec![
             MockProcessRunner::ok(),  // git worktree add
             MockProcessRunner::ok(),  // tmux new-window
+            MockProcessRunner::ok(),  // tmux set-hook (after-split-window)
             MockProcessRunner::ok(),  // tmux send-keys -l
             MockProcessRunner::ok(),  // tmux send-keys Enter
         ]));

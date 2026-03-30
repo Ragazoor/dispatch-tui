@@ -95,6 +95,20 @@ pub fn select_window(window: &str, runner: &dyn ProcessRunner) -> Result<()> {
     Ok(())
 }
 
+/// Set a per-window hook so that splitting a pane automatically `cd`s the new
+/// pane into the given working directory.
+pub fn set_after_split_hook(window: &str, working_dir: &str, runner: &dyn ProcessRunner) -> Result<()> {
+    let hook_cmd = format!("send-keys 'cd {}' Enter", working_dir);
+    let output = runner.run("tmux", &[
+        "set-hook", "-w", "-t", window,
+        "after-split-window", &hook_cmd,
+    ])?;
+    if !output.status.success() {
+        bail!("tmux set-hook failed with status {}", output.status);
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers (kept for arg-shape unit tests)
 // ---------------------------------------------------------------------------
@@ -136,6 +150,18 @@ fn window_activity_args(window: &str) -> Vec<String> {
         "-t".to_string(),
         window.to_string(),
         "#{window_activity}".to_string(),
+    ]
+}
+
+#[cfg(test)]
+fn set_after_split_hook_args(window: &str, working_dir: &str) -> Vec<String> {
+    vec![
+        "set-hook".to_string(),
+        "-w".to_string(),
+        "-t".to_string(),
+        window.to_string(),
+        "after-split-window".to_string(),
+        format!("send-keys 'cd {}' Enter", working_dir),
     ]
 }
 
@@ -259,5 +285,33 @@ mod tests {
     fn window_activity_fails_on_nonzero_exit() {
         let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no window")]);
         assert!(window_activity("task-42", &mock).is_err());
+    }
+
+    #[test]
+    fn set_after_split_hook_args_correct() {
+        let args = set_after_split_hook_args("task-42", "/some/path");
+        assert_eq!(
+            args,
+            vec![
+                "set-hook", "-w", "-t", "task-42",
+                "after-split-window", "send-keys 'cd /some/path' Enter",
+            ]
+        );
+    }
+
+    #[test]
+    fn set_after_split_hook_issues_correct_tmux_args() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+        set_after_split_hook("task-42", "/some/path", &mock).unwrap();
+        let calls = mock.recorded_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "tmux");
+        assert_eq!(
+            calls[0].1,
+            vec![
+                "set-hook", "-w", "-t", "task-42",
+                "after-split-window", "send-keys 'cd /some/path' Enter",
+            ]
+        );
     }
 }

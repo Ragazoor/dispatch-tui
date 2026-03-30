@@ -43,6 +43,9 @@ fn provision_worktree(task: &Task, runner: &dyn ProcessRunner) -> Result<Provisi
     tmux::new_window(&tmux_window, &worktree_path, runner)
         .context("failed to create tmux window")?;
 
+    tmux::set_after_split_hook(&tmux_window, &worktree_path, runner)
+        .context("failed to set tmux split hook")?;
+
     Ok(ProvisionResult { worktree_path, tmux_window })
 }
 
@@ -277,6 +280,9 @@ pub fn resume_agent(task_id: TaskId, worktree_path: &str, runner: &dyn ProcessRu
 
     tmux::new_window(&tmux_window, worktree_path, runner)
         .context("failed to create tmux window for resume")?;
+
+    tmux::set_after_split_hook(&tmux_window, worktree_path, runner)
+        .context("failed to set tmux split hook")?;
 
     tmux::send_keys(&tmux_window, "claude --continue", runner)
         .context("failed to send resume keys to tmux window")?;
@@ -678,6 +684,7 @@ mod tests {
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok(), // git worktree add
             MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux set-hook (after-split-window)
             MockProcessRunner::ok(), // tmux send-keys -l
             MockProcessRunner::ok(), // tmux send-keys Enter
         ]);
@@ -691,6 +698,8 @@ mod tests {
         assert!(calls[0].1.contains(&"add".to_string()));
         assert_eq!(calls[1].0, "tmux");
         assert_eq!(calls[1].1[0], "new-window");
+        assert_eq!(calls[2].0, "tmux");
+        assert_eq!(calls[2].1[0], "set-hook");
     }
 
     #[test]
@@ -703,6 +712,7 @@ mod tests {
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok(), // git worktree add
             MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux set-hook (after-split-window)
             MockProcessRunner::ok(), // tmux send-keys -l (the claude command)
             MockProcessRunner::ok(), // tmux send-keys Enter
         ]);
@@ -711,9 +721,9 @@ mod tests {
         dispatch_agent(&task, &mock).unwrap();
 
         let calls = mock.recorded_calls();
-        // The literal send-keys call (index 2) carries the claude invocation
+        // The literal send-keys call (index 3) carries the claude invocation
         assert!(
-            calls[2].1.iter().any(|a| a.contains("claude")),
+            calls[3].1.iter().any(|a| a.contains("claude")),
             "send-keys should include claude"
         );
     }
@@ -725,6 +735,7 @@ mod tests {
 
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux set-hook (after-split-window)
             MockProcessRunner::ok(), // tmux send-keys -l
             MockProcessRunner::ok(), // tmux send-keys Enter
         ]);
@@ -732,11 +743,12 @@ mod tests {
         resume_agent(TaskId(42), &worktree_path, &mock).unwrap();
 
         let calls = mock.recorded_calls();
-        assert_eq!(calls.len(), 3);
+        assert_eq!(calls.len(), 4);
         assert_eq!(calls[0].0, "tmux");
         assert_eq!(calls[0].1[0], "new-window");
+        assert_eq!(calls[1].1[0], "set-hook");
         assert!(calls.iter().all(|(prog, _)| prog != "git"), "resume should make no git calls");
-        assert!(calls[1].1.iter().any(|a| a.contains("--continue")));
+        assert!(calls[2].1.iter().any(|a| a.contains("--continue")));
     }
 
     #[test]
@@ -786,6 +798,7 @@ mod tests {
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok(), // git worktree add
             MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux set-hook (after-split-window)
             MockProcessRunner::ok(), // tmux send-keys -l
             MockProcessRunner::ok(), // tmux send-keys Enter
         ]);
@@ -810,6 +823,7 @@ mod tests {
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok(), // git worktree add
             MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux set-hook (after-split-window)
             MockProcessRunner::ok(), // tmux send-keys -l
             MockProcessRunner::ok(), // tmux send-keys Enter
         ]);
@@ -834,6 +848,7 @@ mod tests {
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok(), // git worktree add
             MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux set-hook (after-split-window)
             MockProcessRunner::ok(), // tmux send-keys -l
             MockProcessRunner::ok(), // tmux send-keys Enter
         ]);
@@ -858,6 +873,7 @@ mod tests {
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok(), // git worktree add
             MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux set-hook (after-split-window)
             MockProcessRunner::ok(), // tmux send-keys -l
             MockProcessRunner::ok(), // tmux send-keys Enter
         ]);
