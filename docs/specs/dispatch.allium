@@ -589,6 +589,15 @@ rule MarkEpicDone {
     ensures: epic.updated_at = now
 }
 
+rule MarkEpicUndone {
+    when: MarkEpicUndone(epic)
+
+    requires: epic.done = true
+
+    ensures: epic.done = false
+    ensures: epic.updated_at = now
+}
+
 rule ConfirmArchiveEpic {
     when: ConfirmArchiveEpic(epic)
 
