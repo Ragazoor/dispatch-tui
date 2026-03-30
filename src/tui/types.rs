@@ -48,6 +48,7 @@ pub enum Message {
     ToggleArchive,
     ToggleSelect(TaskId),
     ClearSelection,
+    SelectAllColumn,
     BatchMoveTasks { ids: Vec<TaskId>, direction: MoveDirection },
     BatchArchiveTasks(Vec<TaskId>),
     // Input routing messages

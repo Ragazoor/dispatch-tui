@@ -3669,3 +3669,67 @@ fn on_select_all_defaults_to_false() {
     let app = make_app();
     assert!(!app.on_select_all());
 }
+
+#[test]
+fn select_all_column_selects_all_tasks_in_column() {
+    let mut app = make_app();
+    // Cursor is on Backlog (column 0) which has tasks 1, 2
+    app.update(Message::SelectAllColumn);
+    assert!(app.selected_tasks.contains(&TaskId(1)));
+    assert!(app.selected_tasks.contains(&TaskId(2)));
+    assert_eq!(app.selected_tasks.len(), 2);
+}
+
+#[test]
+fn select_all_column_deselects_when_all_selected() {
+    let mut app = make_app();
+    app.update(Message::SelectAllColumn);
+    assert_eq!(app.selected_tasks.len(), 2);
+
+    app.update(Message::SelectAllColumn);
+    assert!(app.selected_tasks.is_empty());
+}
+
+#[test]
+fn select_all_column_selects_remaining_when_partially_selected() {
+    let mut app = make_app();
+    app.update(Message::ToggleSelect(TaskId(1)));
+    assert_eq!(app.selected_tasks.len(), 1);
+
+    app.update(Message::SelectAllColumn);
+    assert!(app.selected_tasks.contains(&TaskId(1)));
+    assert!(app.selected_tasks.contains(&TaskId(2)));
+    assert_eq!(app.selected_tasks.len(), 2);
+}
+
+#[test]
+fn select_all_column_noop_on_empty_column() {
+    let mut app = make_app();
+    // Navigate to Review column (empty in make_app)
+    app.update(Message::NavigateColumn(3));
+    app.update(Message::SelectAllColumn);
+    assert!(app.selected_tasks.is_empty());
+}
+
+#[test]
+fn select_all_column_only_affects_current_column() {
+    let mut app = make_app();
+    app.update(Message::ToggleSelect(TaskId(3)));
+    app.update(Message::SelectAllColumn);
+    assert!(app.selected_tasks.contains(&TaskId(1)));
+    assert!(app.selected_tasks.contains(&TaskId(2)));
+    assert!(app.selected_tasks.contains(&TaskId(3)));
+    assert_eq!(app.selected_tasks.len(), 3);
+}
+
+#[test]
+fn select_all_deselect_only_affects_current_column() {
+    let mut app = make_app();
+    app.update(Message::ToggleSelect(TaskId(3)));
+    app.update(Message::SelectAllColumn);
+    assert_eq!(app.selected_tasks.len(), 3);
+
+    app.update(Message::SelectAllColumn);
+    assert_eq!(app.selected_tasks.len(), 1);
+    assert!(app.selected_tasks.contains(&TaskId(3)));
+}

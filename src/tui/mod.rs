@@ -284,6 +284,7 @@ impl App {
             Message::ToggleArchive => self.handle_toggle_archive(),
             Message::ToggleSelect(id) => self.handle_toggle_select(id),
             Message::ClearSelection => self.handle_clear_selection(),
+            Message::SelectAllColumn => self.handle_select_all_column(),
             Message::BatchMoveTasks { ids, direction } => self.handle_batch_move_tasks(ids, direction),
             Message::BatchArchiveTasks(ids) => self.handle_batch_archive_tasks(ids),
             Message::DismissError => self.handle_dismiss_error(),
@@ -768,6 +769,32 @@ impl App {
 
     fn handle_clear_selection(&mut self) -> Vec<Command> {
         self.selected_tasks.clear();
+        vec![]
+    }
+
+    fn handle_select_all_column(&mut self) -> Vec<Command> {
+        let col = self.selection().column();
+        let Some(status) = TaskStatus::from_column_index(col) else {
+            return vec![];
+        };
+        let column_task_ids: Vec<TaskId> = self
+            .tasks_by_status(status)
+            .iter()
+            .map(|t| t.id)
+            .collect();
+        if column_task_ids.is_empty() {
+            return vec![];
+        }
+        let all_selected = column_task_ids.iter().all(|id| self.selected_tasks.contains(id));
+        if all_selected {
+            for id in &column_task_ids {
+                self.selected_tasks.remove(id);
+            }
+        } else {
+            for id in column_task_ids {
+                self.selected_tasks.insert(id);
+            }
+        }
         vec![]
     }
 
