@@ -132,21 +132,12 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 }
 
 fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
-    // Split into columns area + right sidebar, so column ratios match render_columns exactly
-    let top_split = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Min(0),      // columns — same width as render_columns
-            Constraint::Length(34),   // filter (14) + notification (20)
-        ])
-        .split(area);
-
     let col_segments = Layout::default()
         .direction(Direction::Horizontal)
         .constraints(
             [Constraint::Ratio(1, TaskStatus::COLUMN_COUNT as u32); TaskStatus::COLUMN_COUNT]
         )
-        .split(top_split[0]);
+        .split(area);
 
     for (col_idx, &status) in TaskStatus::ALL.iter().enumerate() {
         let count = app.column_items_for_status(status).len();
@@ -192,7 +183,7 @@ fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
         frame.render_widget(paragraph, col_segments[col_idx]);
     }
 
-    // Right sidebar: filter indicator + review badge + notification indicator
+    // Right-aligned overlay: filter indicator + review badge + notification indicator
     let mut right_parts: Vec<Span> = Vec::new();
     if !app.repo_filter().is_empty() {
         let active = app.repo_filter().len();
@@ -216,7 +207,7 @@ fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
     }
     let right_line = Line::from(right_parts);
     let p = Paragraph::new(right_line).alignment(Alignment::Right);
-    frame.render_widget(p, top_split[1]);
+    frame.render_widget(p, area);
 }
 
 /// Format the title text for a task card (line 1 only — status annotations are on line 2).

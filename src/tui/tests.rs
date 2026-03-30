@@ -2316,6 +2316,50 @@ fn render_columns_appear_left_to_right() {
 }
 
 #[test]
+fn render_columns_fill_terminal_width() {
+    // Regression test: columns must use the full terminal width, not leave a gap on the right.
+    // A previous bug reserved a 34-char right sidebar in the column content area.
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Done)],
+        Duration::from_secs(300),
+    );
+    let width: u16 = 120;
+    let buf = render_to_buffer(&mut app, width, 20);
+
+    // Find the rightmost x-position where "done" header text appears
+    let header = "done";
+    let mut header_x = None;
+    'outer: for y in 0..3u16 {
+        for x in (0..width).rev() {
+            let remaining = (width - x) as usize;
+            if remaining < header.len() {
+                continue;
+            }
+            let segment: String = (0..header.len() as u16)
+                .map(|dx| buf[(x + dx, y)].symbol().to_string())
+                .collect();
+            if segment == header {
+                header_x = Some(x);
+                break 'outer;
+            }
+        }
+    }
+    let done_col_x = header_x.expect("'done' column header not found");
+
+    // The "done" column header should be centered in the last quarter of the terminal.
+    // With 4 columns at width=120, each column is 30 chars wide, so the last column
+    // starts at x=90. The header should be somewhere after x=90.
+    // If the old bug exists (34-char sidebar), each column is only ~21 chars and the
+    // header would be well before x=90.
+    let expected_min_x = (width * 3 / 4) as u16;
+    assert!(
+        done_col_x >= expected_min_x,
+        "last column header 'done' at x={done_col_x}, expected >= {expected_min_x} — \
+         columns are not filling the terminal width"
+    );
+}
+
+#[test]
 fn render_help_overlay_shows_keybindings_help() {
     let mut app = App::new(vec![], Duration::from_secs(300));
     app.update(Message::ToggleHelp);
