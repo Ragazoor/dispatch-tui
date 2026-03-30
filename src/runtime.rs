@@ -1398,7 +1398,6 @@ mod tests {
         );
     }
 
-<<<<<<< HEAD
     #[tokio::test]
     async fn exec_create_pr_happy_path() {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
