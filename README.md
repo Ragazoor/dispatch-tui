@@ -130,3 +130,10 @@ The agent reports progress via the MCP server. When it finishes, it moves the ta
 |------|---------|---------|
 | `--db` | `DISPATCH_DB` | `~/.local/share/dispatch/tasks.db` |
 | `--port` | `DISPATCH_PORT` | `3142` |
+
+## Releasing
+
+1. Add a `CARGO_REGISTRY_TOKEN` secret to the GitHub repo (Settings → Secrets → Actions).
+   Get the token from https://crates.io/settings/tokens — scope: `publish-new` and `publish-update`.
+2. Push a version tag: `git tag v0.2.0 && git push origin v0.2.0`
+3. GitHub Actions builds the binary, creates a GitHub Release, and publishes to crates.io.
