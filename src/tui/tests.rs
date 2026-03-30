@@ -4140,3 +4140,19 @@ fn refresh_tasks_clears_notified_when_task_leaves_review() {
     let notif_cmds: Vec<_> = cmds.iter().filter(|c| matches!(c, Command::SendNotification { .. })).collect();
     assert_eq!(notif_cmds.len(), 1);
 }
+
+#[test]
+fn summary_row_shows_bell_when_notifications_enabled() {
+    let app = make_app(); // notifications_enabled defaults to true
+    let buf = render_to_buffer(&app, 100, 20);
+    assert!(buffer_contains(&buf, "\u{1F514}")); // 🔔
+}
+
+#[test]
+fn summary_row_shows_muted_bell_and_hint_when_disabled() {
+    let mut app = make_app();
+    app.update(Message::ToggleNotifications); // disable
+    let buf = render_to_buffer(&app, 100, 20);
+    assert!(buffer_contains(&buf, "\u{1F515}")); // 🔕
+    assert!(buffer_contains(&buf, "[N]"));
+}
