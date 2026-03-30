@@ -35,6 +35,8 @@ pub(super) struct UpdateEpicArgs {
     pub(super) description: Option<String>,
     #[serde(default)]
     pub(super) done: Option<bool>,
+    #[serde(default)]
+    pub(super) plan: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -72,8 +74,12 @@ pub(super) fn handle_get_epic(state: &McpState, id: Option<Value>, args: Value) 
             let subtasks = state.db.list_tasks_for_epic(epic.id).unwrap_or_default();
             let done = subtasks.iter().filter(|t| t.status == TaskStatus::Done).count();
             let total = subtasks.len();
+            let plan_line = match &epic.plan {
+                Some(p) => format!("\nPlan: {p}"),
+                None => String::new(),
+            };
             let text = format!(
-                "Epic {id}: {title}\nDescription: {desc}\nRepo: {repo}\nDone: {done_flag}\nSubtasks: {done}/{total} done",
+                "Epic {id}: {title}\nDescription: {desc}\nRepo: {repo}\nDone: {done_flag}{plan_line}\nSubtasks: {done}/{total} done",
                 id = epic.id,
                 title = epic.title,
                 desc = epic.description,
@@ -118,13 +124,14 @@ pub(super) fn handle_update_epic(state: &McpState, id: Option<Value>, args: Valu
 
     let has_update = parsed.title.is_some()
         || parsed.description.is_some()
-        || parsed.done.is_some();
+        || parsed.done.is_some()
+        || parsed.plan.is_some();
 
     if !has_update {
         return JsonRpcResponse::err(
             id,
             -32602,
-            "At least one of title, description, or done must be provided",
+            "At least one of title, description, done, or plan must be provided",
         );
     }
 
@@ -132,6 +139,7 @@ pub(super) fn handle_update_epic(state: &McpState, id: Option<Value>, args: Valu
     if let Some(ref t) = parsed.title { patch = patch.title(t); }
     if let Some(ref d) = parsed.description { patch = patch.description(d); }
     if let Some(d) = parsed.done { patch = patch.done(d); }
+    if let Some(ref p) = parsed.plan { patch = patch.plan(Some(p.as_str())); }
 
     if let Err(e) = state.db.patch_epic(EpicId(parsed.epic_id), &patch) {
         return JsonRpcResponse::err(id, -32603, format!("Database error: {e}"));
@@ -142,6 +150,7 @@ pub(super) fn handle_update_epic(state: &McpState, id: Option<Value>, args: Valu
     if parsed.title.is_some() { updated.push("title"); }
     if parsed.description.is_some() { updated.push("description"); }
     if parsed.done.is_some() { updated.push("done"); }
+    if parsed.plan.is_some() { updated.push("plan"); }
 
     JsonRpcResponse::ok(
         id,

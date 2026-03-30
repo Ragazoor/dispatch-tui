@@ -767,9 +767,9 @@ fn tool_schemas_match_arg_structs() {
         ),
         (
             "update_epic",
-            BTreeSet::from(["epic_id", "title", "description", "done"]),
+            BTreeSet::from(["epic_id", "title", "description", "done", "plan"]),
             BTreeSet::from(["epic_id"]),
-            json!({"epic_id": 1}),
+            json!({"epic_id": 1, "plan": "docs/plan.md"}),
         ),
     ];
 
@@ -1098,6 +1098,26 @@ async fn update_epic_accepts_string_id() {
         })),
     ).await;
     assert!(resp.error.is_none(), "should accept string epic_id: {:?}", resp.error);
+}
+
+#[tokio::test]
+async fn update_epic_plan() {
+    let state = test_state();
+    let epic = state.db.create_epic("Planned Epic", "", "/repo").unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_epic",
+            "arguments": { "epic_id": epic.id.0, "plan": "docs/plans/epic-plan.md" }
+        })),
+    ).await;
+    let text = extract_response_text(&resp);
+    assert!(text.contains("plan"), "response should mention plan: {text}");
+
+    let updated = state.db.get_epic(epic.id).unwrap().unwrap();
+    assert_eq!(updated.plan.as_deref(), Some("docs/plans/epic-plan.md"));
 }
 
 // =======================================================================

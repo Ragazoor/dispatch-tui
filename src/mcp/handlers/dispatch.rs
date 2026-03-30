@@ -164,14 +164,15 @@ pub(super) fn tool_definitions() -> Value {
             },
             {
                 "name": "update_epic",
-                "description": "Update an epic's title, description, or done status.",
+                "description": "Update an epic's title, description, done status, or plan.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "epic_id": { "type": "integer", "description": "The epic ID" },
                         "title": { "type": "string", "description": "New title" },
                         "description": { "type": "string", "description": "New description" },
-                        "done": { "type": "boolean", "description": "Mark epic as done" }
+                        "done": { "type": "boolean", "description": "Mark epic as done" },
+                        "plan": { "type": "string", "description": "Path to the plan file" }
                     },
                     "required": ["epic_id"]
                 }
