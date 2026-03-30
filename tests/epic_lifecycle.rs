@@ -1,5 +1,5 @@
-use task_orchestrator::db::{Database, EpicPatch, TaskPatch, TaskStore};
-use task_orchestrator::models::*;
+use dispatch::db::{Database, EpicPatch, TaskPatch, TaskStore};
+use dispatch::models::*;
 
 #[test]
 fn full_epic_lifecycle() {

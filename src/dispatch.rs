@@ -317,7 +317,7 @@ the user wants, call `update_task` with a descriptive `title` (and optionally \
 Task status transitions (running/review) are managed automatically via hooks. \
 Do not call update_task for status changes.\n\
 An MCP server is available at http://localhost:{mcp_port}/mcp — use it to \
-query and update tasks (tool: task-orchestrator). Use update_task to rename \
+query and update tasks (tool: dispatch). Use update_task to rename \
 this task with a descriptive title, and get_task to check current state."
     )
 }
@@ -340,7 +340,7 @@ implementation plan. When done, save the plan and attach it to the task:\n\
 After planning, ask whether to continue implementing or stop.\n\
 \n\
 An MCP server is available at http://localhost:{mcp_port}/mcp — use it to \
-attach the plan (tool: task-orchestrator, tool name: update_task — set the plan field)."
+attach the plan (tool: dispatch, tool name: update_task — set the plan field)."
     )
 }
 
@@ -355,7 +355,7 @@ Epic Title: {title}\n\
 Epic Description: {description}\n\
 \n\
 An MCP server is available at http://localhost:{mcp_port}/mcp — use it to \
-query and update tasks/epics (tool: task-orchestrator).\n\
+query and update tasks/epics (tool: dispatch).\n\
 \n\
 ## Instructions\n\
 \n\

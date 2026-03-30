@@ -193,7 +193,7 @@ pub async fn handle_mcp(
                     "tools": {}
                 },
                 "serverInfo": {
-                    "name": "task-orchestrator",
+                    "name": "dispatch",
                     "version": "0.1.0"
                 }
             }))

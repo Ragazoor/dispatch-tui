@@ -31,13 +31,13 @@ pub fn merge_mcp_config(existing: Option<Value>, port: u16) -> MergeResult {
         .or_insert_with(|| json!({}));
 
     if let Value::Object(servers_map) = servers {
-        if servers_map.get("task-orchestrator") == Some(&server_entry) {
+        if servers_map.get("dispatch") == Some(&server_entry) {
             return MergeResult {
                 value: Value::Object(root),
                 changed: false,
             };
         }
-        servers_map.insert("task-orchestrator".to_string(), server_entry);
+        servers_map.insert("dispatch".to_string(), server_entry);
     }
 
     MergeResult {
@@ -51,9 +51,9 @@ pub fn merge_mcp_config(existing: Option<Value>, port: u16) -> MergeResult {
 // ---------------------------------------------------------------------------
 
 const MCP_PERMISSIONS: &[&str] = &[
-    "mcp__task-orchestrator__update_task",
-    "mcp__task-orchestrator__get_task",
-    "mcp__task-orchestrator__create_task",
+    "mcp__dispatch__update_task",
+    "mcp__dispatch__get_task",
+    "mcp__dispatch__create_task",
 ];
 
 pub struct PermissionsMergeResult {
@@ -230,7 +230,7 @@ mod tests {
         let result = merge_mcp_config(existing, 3142);
         let expected = json!({
             "mcpServers": {
-                "task-orchestrator": {
+                "dispatch": {
                     "type": "http",
                     "url": "http://localhost:3142/mcp"
                 }
@@ -254,7 +254,7 @@ mod tests {
         assert!(result.changed);
         assert!(result.value["mcpServers"]["github"].is_object());
         assert_eq!(
-            result.value["mcpServers"]["task-orchestrator"]["url"],
+            result.value["mcpServers"]["dispatch"]["url"],
             "http://localhost:3142/mcp"
         );
     }
@@ -263,7 +263,7 @@ mod tests {
     fn merge_mcp_config_already_configured() {
         let existing = Some(json!({
             "mcpServers": {
-                "task-orchestrator": {
+                "dispatch": {
                     "type": "http",
                     "url": "http://localhost:3142/mcp"
                 }
@@ -277,7 +277,7 @@ mod tests {
     fn merge_mcp_config_custom_port() {
         let result = merge_mcp_config(None, 4000);
         assert_eq!(
-            result.value["mcpServers"]["task-orchestrator"]["url"],
+            result.value["mcpServers"]["dispatch"]["url"],
             "http://localhost:4000/mcp"
         );
     }
@@ -289,9 +289,9 @@ mod tests {
         let existing = None;
         let result = merge_permissions(existing);
         let allow = result.value["permissions"]["allow"].as_array().unwrap();
-        assert!(allow.contains(&json!("mcp__task-orchestrator__update_task")));
-        assert!(allow.contains(&json!("mcp__task-orchestrator__get_task")));
-        assert!(allow.contains(&json!("mcp__task-orchestrator__create_task")));
+        assert!(allow.contains(&json!("mcp__dispatch__update_task")));
+        assert!(allow.contains(&json!("mcp__dispatch__get_task")));
+        assert!(allow.contains(&json!("mcp__dispatch__create_task")));
         assert_eq!(result.added_count, 3);
     }
 
@@ -308,7 +308,7 @@ mod tests {
         let allow = result.value["permissions"]["allow"].as_array().unwrap();
         assert!(allow.contains(&json!("Bash(git:*)")));
         assert!(allow.contains(&json!("Read")));
-        assert!(allow.contains(&json!("mcp__task-orchestrator__update_task")));
+        assert!(allow.contains(&json!("mcp__dispatch__update_task")));
         assert_eq!(result.added_count, 3);
         assert_eq!(result.value["permissions"]["defaultMode"], "acceptEdits");
         assert!(result.value["hooks"]["Stop"].is_array());
@@ -319,9 +319,9 @@ mod tests {
         let existing = Some(json!({
             "permissions": {
                 "allow": [
-                    "mcp__task-orchestrator__update_task",
-                    "mcp__task-orchestrator__get_task",
-                    "mcp__task-orchestrator__create_task"
+                    "mcp__dispatch__update_task",
+                    "mcp__dispatch__get_task",
+                    "mcp__dispatch__create_task"
                 ]
             }
         }));

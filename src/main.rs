@@ -4,15 +4,15 @@ use std::path::PathBuf;
 use tracing::Level;
 use tracing_subscriber::EnvFilter;
 
-use task_orchestrator::{db, models, plan, runtime};
-use task_orchestrator::db::TaskStore;
+use dispatch::{db, models, plan, runtime};
+use dispatch::db::TaskStore;
 
 #[derive(Parser)]
-#[command(name = "task-orchestrator")]
-#[command(about = "A TUI task orchestrator for managing agent-driven development tasks")]
+#[command(name = "dispatch")]
+#[command(about = "A terminal kanban board for dispatching and managing AI agents")]
 struct Cli {
     /// Path to the database file
-    #[arg(long, env = "TASK_ORCHESTRATOR_DB", default_value_os_t = default_db_path())]
+    #[arg(long, env = "DISPATCH_DB", default_value_os_t = default_db_path())]
     db: PathBuf,
 
     #[command(subcommand)]
@@ -24,10 +24,10 @@ enum Commands {
     /// Launch the TUI interface
     Tui {
         /// MCP server port
-        #[arg(long, env = "TASK_ORCHESTRATOR_PORT", default_value = "3142")]
+        #[arg(long, env = "DISPATCH_PORT", default_value = "3142")]
         port: u16,
         /// Seconds of unchanged tmux output before marking agent stale
-        #[arg(long, env = "TASK_ORCHESTRATOR_INACTIVITY_TIMEOUT", default_value = "300")]
+        #[arg(long, env = "DISPATCH_INACTIVITY_TIMEOUT", default_value = "300")]
         inactivity_timeout: u64,
     },
     /// Update a task's status
@@ -77,7 +77,7 @@ enum Commands {
     /// Configure Claude Code to allow agents to use the MCP server
     Setup {
         /// MCP server port
-        #[arg(long, env = "TASK_ORCHESTRATOR_PORT", default_value = "3142")]
+        #[arg(long, env = "DISPATCH_PORT", default_value = "3142")]
         port: u16,
     },
 }
@@ -99,7 +99,7 @@ fn default_db_path() -> PathBuf {
                 .unwrap_or_else(|| PathBuf::from("."));
             home.join(".local").join("share")
         });
-    base.join("task-orchestrator").join("tasks.db")
+    base.join("dispatch").join("tasks.db")
 }
 
 #[tokio::main]
@@ -188,7 +188,7 @@ async fn main() -> Result<()> {
             println!("Created task #{}: \"{}\" [ready]", id, title);
         }
         Commands::Setup { port } => {
-            task_orchestrator::setup::run_setup(port)?;
+            dispatch::setup::run_setup(port)?;
         }
         Commands::Plan { id, path } => {
             if !path.exists() {
