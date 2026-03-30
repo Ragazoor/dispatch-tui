@@ -3930,7 +3930,7 @@ fn esc_clears_selection_and_exits_toggle() {
 }
 
 #[test]
-fn space_is_noop_on_toggle_row() {
+fn space_is_noop_when_on_select_all() {
     let mut app = make_app();
     app.handle_key(make_key(KeyCode::Char('k')));
     app.handle_key(make_key(KeyCode::Char(' ')));
@@ -3938,7 +3938,7 @@ fn space_is_noop_on_toggle_row() {
 }
 
 #[test]
-fn dispatch_is_noop_on_toggle_row() {
+fn dispatch_is_noop_when_on_select_all() {
     let mut app = make_app();
     app.handle_key(make_key(KeyCode::Char('k')));
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
@@ -3949,7 +3949,8 @@ fn dispatch_is_noop_on_toggle_row() {
 fn render_shows_select_all_toggle_in_focused_column() {
     let app = make_app();
     let buf = render_to_buffer(&app, 120, 30);
-    assert!(buffer_contains(&buf, "Select [a]ll"));
+    assert!(buffer_contains(&buf, "[ ]"));
+    assert!(!buffer_contains(&buf, "Select [a]ll"));
 }
 
 #[test]
