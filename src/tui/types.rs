@@ -41,7 +41,7 @@ pub enum Message {
     Error(String),
     TaskEdited(TaskEdit),
     RepoPathsUpdated(Vec<String>),
-    QuickDispatch { repo_path: String },
+    QuickDispatch { repo_path: String, epic_id: Option<EpicId> },
     StaleAgent(TaskId),
     AgentCrashed(TaskId),
     KillAndRetry(TaskId),
@@ -147,7 +147,7 @@ pub enum Command {
     EditTaskInEditor(Task),
     SaveRepoPath(String),
     RefreshFromDb,
-    QuickDispatch(TaskDraft),
+    QuickDispatch { draft: TaskDraft, epic_id: Option<EpicId> },
     // Epic commands
     DispatchEpic { epic: Epic },
     InsertEpic(EpicDraft),

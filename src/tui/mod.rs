@@ -331,7 +331,7 @@ impl App {
             Message::TaskEdited(edit) =>
                 self.handle_task_edited(edit),
             Message::RepoPathsUpdated(paths) => self.handle_repo_paths_updated(paths),
-            Message::QuickDispatch { repo_path } => self.handle_quick_dispatch(repo_path),
+            Message::QuickDispatch { repo_path, epic_id } => self.handle_quick_dispatch(repo_path, epic_id),
             Message::StaleAgent(id) => self.handle_stale_agent(id),
             Message::AgentCrashed(id) => self.handle_agent_crashed(id),
             Message::KillAndRetry(id) => self.handle_kill_and_retry(id),
@@ -930,12 +930,15 @@ impl App {
         vec![]
     }
 
-    fn handle_quick_dispatch(&mut self, repo_path: String) -> Vec<Command> {
-        vec![Command::QuickDispatch(TaskDraft {
-            title: "Quick task".to_string(),
-            description: String::new(),
-            repo_path,
-        })]
+    fn handle_quick_dispatch(&mut self, repo_path: String, epic_id: Option<EpicId>) -> Vec<Command> {
+        vec![Command::QuickDispatch {
+            draft: TaskDraft {
+                title: "Quick task".to_string(),
+                description: String::new(),
+                repo_path,
+            },
+            epic_id,
+        }]
     }
 
     fn handle_kill_and_retry(&mut self, id: TaskId) -> Vec<Command> {
@@ -1247,7 +1250,7 @@ impl App {
             let repo_path = self.repo_paths[idx].clone();
             self.input.mode = InputMode::Normal;
             self.clear_status();
-            self.handle_quick_dispatch(repo_path)
+            self.handle_quick_dispatch(repo_path, None)
         } else {
             vec![]
         }

@@ -813,7 +813,7 @@ fn shift_d_with_one_repo_emits_quick_dispatch() {
     app.repo_paths = vec!["/repo".to_string()];
     let cmds = app.handle_key(make_shift_key(KeyCode::Char('D')));
     assert_eq!(cmds.len(), 1);
-    assert!(matches!(&cmds[0], Command::QuickDispatch(ref d) if d.repo_path == "/repo"));
+    assert!(matches!(&cmds[0], Command::QuickDispatch { ref draft, epic_id: None } if draft.repo_path == "/repo"));
     assert_eq!(app.input.mode, InputMode::Normal);
 }
 
@@ -843,7 +843,7 @@ fn quick_dispatch_mode_number_selects_repo() {
     app.input.mode = InputMode::QuickDispatch;
     let cmds = app.handle_key(make_key(KeyCode::Char('2')));
     assert_eq!(cmds.len(), 1);
-    assert!(matches!(&cmds[0], Command::QuickDispatch(ref d) if d.repo_path == "/repo2"));
+    assert!(matches!(&cmds[0], Command::QuickDispatch { ref draft, epic_id: None } if draft.repo_path == "/repo2"));
     assert_eq!(app.input.mode, InputMode::Normal);
 }
 
@@ -870,10 +870,29 @@ fn quick_dispatch_mode_invalid_number_is_noop() {
 #[test]
 fn quick_dispatch_message_emits_command() {
     let mut app = App::new(vec![], Duration::from_secs(300));
-    let cmds = app.update(Message::QuickDispatch { repo_path: "/my/repo".to_string() });
+    let cmds = app.update(Message::QuickDispatch { repo_path: "/my/repo".to_string(), epic_id: None });
     assert_eq!(cmds.len(), 1);
-    assert!(matches!(&cmds[0], Command::QuickDispatch(ref d)
-        if d.title == "Quick task" && d.repo_path == "/my/repo"));
+    assert!(matches!(&cmds[0], Command::QuickDispatch { ref draft, epic_id: None }
+        if draft.title == "Quick task" && draft.repo_path == "/my/repo"));
+}
+
+#[test]
+fn shift_d_in_epic_view_quick_dispatches_subtask() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut epic = make_epic(10);
+    epic.repo_path = "/epic/repo".to_string();
+    app.epics = vec![epic];
+    app.view_mode = ViewMode::Epic {
+        epic_id: EpicId(10),
+        selection: BoardSelection::new(),
+        saved_board: BoardSelection::new(),
+    };
+    let cmds = app.handle_key(make_shift_key(KeyCode::Char('D')));
+    assert_eq!(cmds.len(), 1);
+    assert!(matches!(&cmds[0],
+        Command::QuickDispatch { ref draft, epic_id: Some(EpicId(10)) }
+        if draft.repo_path == "/epic/repo"
+    ));
 }
 
 #[test]
@@ -1687,7 +1706,7 @@ fn select_quick_dispatch_repo_dispatches() {
     app.repo_paths = vec!["/repo1".to_string(), "/repo2".to_string()];
     let cmds = app.update(Message::SelectQuickDispatchRepo(1));
     assert_eq!(app.input.mode, InputMode::Normal);
-    assert!(cmds.iter().any(|c| matches!(c, Command::QuickDispatch(ref d) if d.repo_path == "/repo2")));
+    assert!(cmds.iter().any(|c| matches!(c, Command::QuickDispatch { ref draft, .. } if draft.repo_path == "/repo2")));
 }
 
 #[test]

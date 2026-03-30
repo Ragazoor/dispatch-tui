@@ -225,9 +225,16 @@ impl TuiRuntime {
         }
     }
 
-    fn exec_quick_dispatch(&self, app: &mut App, title: String, description: String, repo_path: String) {
+    fn exec_quick_dispatch(&self, app: &mut App, title: String, description: String, repo_path: String, epic_id: Option<models::EpicId>) {
         match self.database.create_task_returning(&title, &description, &repo_path, None, models::TaskStatus::Backlog) {
-            Ok(task) => {
+            Ok(mut task) => {
+                if let Some(eid) = epic_id {
+                    if let Err(e) = self.database.set_task_epic_id(task.id, Some(eid)) {
+                        app.update(Message::Error(Self::db_error("linking task to epic", e)));
+                        return;
+                    }
+                    task.epic_id = Some(eid);
+                }
                 app.update(Message::TaskCreated { task: task.clone() });
                 let _ = self.database.save_repo_path(&repo_path);
                 let paths = self.database.list_repo_paths().unwrap_or_default();
@@ -875,8 +882,8 @@ async fn execute_commands(
                 rt.exec_cleanup(id, repo_path, worktree, tmux_window),
             Command::Resume { task } => rt.exec_resume(task),
             Command::JumpToTmux { window } => rt.exec_jump_to_tmux(app, window),
-            Command::QuickDispatch(draft) =>
-                rt.exec_quick_dispatch(app, draft.title, draft.description, draft.repo_path),
+            Command::QuickDispatch { draft, epic_id } =>
+                rt.exec_quick_dispatch(app, draft.title, draft.description, draft.repo_path, epic_id),
             Command::KillTmuxWindow { window } => rt.exec_kill_tmux_window(window),
             Command::Finish { id, repo_path, branch, worktree, tmux_window } =>
                 rt.exec_finish(id, repo_path, branch, worktree, tmux_window),
