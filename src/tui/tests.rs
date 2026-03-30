@@ -5187,6 +5187,19 @@ fn load_filter_preset_unknown_name_is_noop() {
 }
 
 #[test]
+fn load_filter_preset_skips_stale_paths() {
+    let mut app = make_app();
+    app.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
+    // Preset contains a path that no longer exists in repo_paths
+    let preset_repos: HashSet<String> = ["/repo-a".to_string(), "/gone".to_string()].into_iter().collect();
+    app.filter_presets = vec![("stale".to_string(), preset_repos)];
+
+    app.update(Message::LoadFilterPreset("stale".to_string()));
+    assert!(app.repo_filter.contains("/repo-a"));
+    assert!(!app.repo_filter.contains("/gone"), "Stale path should be excluded");
+}
+
+#[test]
 fn start_delete_preset_with_no_presets_is_noop() {
     let mut app = make_app();
     app.input.mode = InputMode::RepoFilter;

@@ -169,7 +169,6 @@ pub enum Command {
     PersistStringSetting { key: String, value: String },
     PersistFilterPreset { name: String, repo_paths: String },
     DeleteFilterPreset(String),
-    LoadFilterPresets,
     CreatePr {
         id: TaskId,
         repo_path: String,

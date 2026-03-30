@@ -164,6 +164,10 @@ Normal ──D──▶ QuickDispatch ──1-9──▶ Normal
 Normal ──x──▶ ConfirmArchive ──y──▶ Normal
 Normal ──m (Review→Done)──▶ ConfirmDone(id) ──y──▶ Normal
 Normal ──f──▶ RepoFilter ──Enter/Esc──▶ Normal
+              RepoFilter ──s──▶ InputPresetName ──Enter──▶ RepoFilter
+                                                ──Esc──▶ RepoFilter
+              RepoFilter ──x (presets exist)──▶ ConfirmDeletePreset ──A-Z──▶ RepoFilter
+                                                                    ──Esc──▶ RepoFilter
 Normal ──W──▶ ConfirmWrapUp(id) ──r──▶ Normal (rebase)
                                 ──p──▶ Normal (PR)
                                 ──Esc──▶ Normal

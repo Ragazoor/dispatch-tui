@@ -509,28 +509,6 @@ impl TuiRuntime {
         }
     }
 
-    fn exec_load_filter_presets(&self, app: &mut App) {
-        match self.database.list_filter_presets() {
-            Ok(raw) => {
-                let presets: Vec<(String, HashSet<String>)> = raw
-                    .into_iter()
-                    .map(|(name, paths_str)| {
-                        let set: HashSet<String> = paths_str
-                            .split('\n')
-                            .filter(|s| !s.is_empty())
-                            .map(|s| s.to_string())
-                            .collect();
-                        (name, set)
-                    })
-                    .collect();
-                app.update(Message::FilterPresetsLoaded(presets));
-            }
-            Err(e) => {
-                app.update(Message::Error(Self::db_error("loading filter presets", e)));
-            }
-        }
-    }
-
     fn exec_insert_epic(&self, app: &mut App, title: String, description: String, repo_path: String) {
         match self.database.create_epic(&title, &description, &repo_path) {
             Ok(epic) => {
@@ -982,8 +960,6 @@ async fn execute_commands(
                 rt.exec_persist_filter_preset(app, &name, &repo_paths),
             Command::DeleteFilterPreset(name) =>
                 rt.exec_delete_filter_preset(app, &name),
-            Command::LoadFilterPresets =>
-                rt.exec_load_filter_presets(app),
         }
     }
 

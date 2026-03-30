@@ -1885,7 +1885,7 @@ impl App {
         let repos: HashSet<String> = self.repo_filter.clone();
         // Update or insert in the presets list
         if let Some(existing) = self.filter_presets.iter_mut().find(|(n, _)| *n == name) {
-            existing.1 = repos.clone();
+            existing.1.clone_from(&repos);
         } else {
             self.filter_presets.push((name.clone(), repos));
             self.filter_presets.sort_by(|a, b| a.0.cmp(&b.0));
@@ -1903,7 +1903,9 @@ impl App {
 
     fn handle_load_filter_preset(&mut self, name: String) -> Vec<Command> {
         if let Some((_, repos)) = self.filter_presets.iter().find(|(n, _)| *n == name) {
-            self.repo_filter = repos.clone();
+            // Intersect with known repo_paths to skip stale entries
+            let known: HashSet<&String> = self.repo_paths.iter().collect();
+            self.repo_filter = repos.iter().filter(|p| known.contains(p)).cloned().collect();
             self.clamp_selection();
             self.set_status(format!("Loaded preset \"{name}\""));
         }
