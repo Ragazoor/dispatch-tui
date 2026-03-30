@@ -1421,24 +1421,29 @@ impl App {
         let Some(epic) = self.epics.iter().find(|e| e.id == id) else {
             return vec![];
         };
-        let status = crate::models::epic_status(epic, &self.subtask_statuses(id));
+        let subtask_statuses = self.subtask_statuses(id);
+        let status = crate::models::epic_status(epic, &subtask_statuses);
+
         if status != TaskStatus::Backlog {
-            self.set_status("Epic must be in Backlog to dispatch".to_string());
+            self.set_status("No backlog tasks in epic".to_string());
             return vec![];
         }
 
         if epic.plan.is_some() {
-            // Epic has a plan — dispatch the next backlog subtask
-            let next_backlog = self
+            // Epic has a plan — dispatch the next backlog subtask sorted by sort_order
+            let mut backlog_subtasks: Vec<&Task> = self
                 .tasks
                 .iter()
-                .find(|t| t.epic_id == Some(id) && t.status == TaskStatus::Backlog);
-            match next_backlog {
+                .filter(|t| t.epic_id == Some(id) && t.status == TaskStatus::Backlog)
+                .collect();
+            backlog_subtasks.sort_by_key(|t| (t.sort_order.unwrap_or(t.id.0), t.id.0));
+
+            match backlog_subtasks.first() {
                 Some(task) if task.plan.is_some() => {
-                    vec![Command::Dispatch { task: task.clone() }]
+                    vec![Command::Dispatch { task: (*task).clone() }]
                 }
                 Some(task) => {
-                    vec![Command::Brainstorm { task: task.clone() }]
+                    vec![Command::Brainstorm { task: (*task).clone() }]
                 }
                 None => {
                     self.set_status("No backlog subtasks to dispatch".to_string());

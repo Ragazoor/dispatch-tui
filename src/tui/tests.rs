@@ -2961,7 +2961,7 @@ fn dispatch_epic_on_non_backlog_shows_status() {
     // Epic has a Running subtask, so epic status is Running (not Backlog)
     let cmds = app.update(Message::DispatchEpic(EpicId(10)));
     assert!(cmds.is_empty());
-    assert!(app.status_message.as_ref().unwrap().contains("Backlog"));
+    assert!(app.status_message.as_ref().unwrap().contains("No backlog tasks"));
 }
 
 #[test]
@@ -4828,4 +4828,63 @@ fn reorder_task_up_swaps_sort_order() {
     assert_eq!(cmds.iter().filter(|c| matches!(c, Command::PersistTask(_))).count(), 2);
     // Cursor should have moved up
     assert_eq!(app.selection().row(0), 0);
+}
+
+// --- Epic dispatch: next backlog subtask ---
+
+#[test]
+fn dispatch_epic_with_backlog_subtasks_dispatches_first_by_sort_order() {
+    let mut app = make_app();
+
+    // Create epic
+    let epic = make_epic(1);
+    app.epics = vec![epic];
+
+    // Create two backlog subtasks with different sort orders
+    let mut t1 = make_task(10, TaskStatus::Backlog);
+    t1.epic_id = Some(EpicId(1));
+    t1.sort_order = Some(200);
+    t1.title = "Second task".to_string();
+    let mut t2 = make_task(11, TaskStatus::Backlog);
+    t2.epic_id = Some(EpicId(1));
+    t2.sort_order = Some(100);
+    t2.title = "First task".to_string();
+    app.tasks = vec![t1, t2];
+
+    let cmds = app.update(Message::DispatchEpic(EpicId(1)));
+
+    // Should dispatch the task with lower sort_order (task 11, sort_order=100)
+    assert!(cmds.iter().any(|c| matches!(c, Command::Dispatch { task } if task.id == TaskId(11))));
+}
+
+#[test]
+fn dispatch_epic_no_subtasks_falls_back_to_planning() {
+    let mut app = make_app();
+
+    let epic = make_epic(1);
+    app.epics = vec![epic];
+    // No subtasks
+
+    let cmds = app.update(Message::DispatchEpic(EpicId(1)));
+
+    // Should fall back to planning dispatch
+    assert!(cmds.iter().any(|c| matches!(c, Command::DispatchEpic { .. })));
+}
+
+#[test]
+fn dispatch_epic_all_done_shows_message() {
+    let mut app = make_app();
+
+    let epic = make_epic(1);
+    app.epics = vec![epic];
+
+    let mut t1 = make_task(10, TaskStatus::Done);
+    t1.epic_id = Some(EpicId(1));
+    app.tasks = vec![t1];
+
+    let cmds = app.update(Message::DispatchEpic(EpicId(1)));
+
+    // Epic status is Review (all subtasks done) — should not dispatch
+    assert!(cmds.is_empty());
+    assert!(app.status_message.as_deref().unwrap().contains("No backlog tasks"));
 }
