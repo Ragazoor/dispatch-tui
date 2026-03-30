@@ -4530,11 +4530,11 @@ fn repo_filter_applies_to_epics_in_column_items() {
     app.epics = vec![
         Epic {
             id: EpicId(1), title: "A".into(), description: "".into(),
-            repo_path: "/repo-a".into(), done: false, created_at: now, updated_at: now,
+            repo_path: "/repo-a".into(), done: false, plan: None, created_at: now, updated_at: now,
         },
         Epic {
             id: EpicId(2), title: "B".into(), description: "".into(),
-            repo_path: "/repo-b".into(), done: false, created_at: now, updated_at: now,
+            repo_path: "/repo-b".into(), done: false, plan: None, created_at: now, updated_at: now,
         },
     ];
     app.repo_filter.insert("/repo-a".to_string());
