@@ -871,6 +871,8 @@ async fn execute_commands(
                 rt.exec_check_pr_status(id, pr_number, repo_path),
             Command::PersistStringSetting { key, value } =>
                 rt.exec_persist_string_setting(app, &key, &value),
+            Command::FetchReviewPrs => { /* TODO: implemented in a later task */ }
+            Command::OpenInBrowser { url: _ } => { /* TODO: implemented in a later task */ }
         }
     }
 

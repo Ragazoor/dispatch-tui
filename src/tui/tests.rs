@@ -4891,3 +4891,70 @@ fn dispatch_epic_all_done_shows_message() {
     assert!(cmds.is_empty());
     assert!(app.status_message.as_deref().unwrap().contains("No backlog tasks"));
 }
+
+// ---------------------------------------------------------------------------
+// Review board tests
+// ---------------------------------------------------------------------------
+
+use crate::models::ReviewDecision;
+
+fn make_review_pr(number: i64, author: &str, decision: ReviewDecision) -> crate::models::ReviewPr {
+    crate::models::ReviewPr {
+        number,
+        title: format!("PR {number}"),
+        author: author.to_string(),
+        repo: "acme/app".to_string(),
+        url: format!("https://github.com/acme/app/pull/{number}"),
+        is_draft: false,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+        additions: 10,
+        deletions: 5,
+        review_decision: decision,
+        labels: vec![],
+    }
+}
+
+#[test]
+fn switch_to_review_board_preserves_task_selection() {
+    let mut app = make_app();
+    // Move cursor to column 1
+    app.update(Message::NavigateColumn(1));
+    assert_eq!(app.selected_column(), 1);
+
+    // Switch to review board
+    app.update(Message::SwitchToReviewBoard);
+    assert!(matches!(app.view_mode(), ViewMode::ReviewBoard { .. }));
+
+    // Switch back
+    app.update(Message::SwitchToTaskBoard);
+    assert!(matches!(app.view_mode(), ViewMode::Board(_)));
+    // Task board cursor should be restored
+    assert_eq!(app.selected_column(), 1);
+}
+
+#[test]
+fn review_prs_loaded_updates_state() {
+    let mut app = make_app();
+    let prs = vec![make_review_pr(42, "alice", ReviewDecision::ReviewRequired)];
+    app.update(Message::ReviewPrsLoaded(prs));
+    assert_eq!(app.review_prs().len(), 1);
+    assert_eq!(app.review_prs()[0].number, 42);
+    assert!(!app.review_board_loading());
+}
+
+#[test]
+fn review_prs_fetch_failed_sets_error() {
+    let mut app = make_app();
+    app.update(Message::ReviewPrsFetchFailed("auth error".to_string()));
+    assert!(!app.review_board_loading());
+    assert!(app.status_message().unwrap().contains("auth error"));
+}
+
+#[test]
+fn switch_to_review_board_sets_loading() {
+    let mut app = make_app();
+    let cmds = app.update(Message::SwitchToReviewBoard);
+    assert!(app.review_board_loading());
+    assert!(cmds.iter().any(|c| matches!(c, Command::FetchReviewPrs)));
+}
