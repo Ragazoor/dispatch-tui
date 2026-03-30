@@ -341,13 +341,13 @@ impl App {
             Message::SubmitEpicTitle(v) => self.handle_submit_epic_title(v),
             Message::SubmitEpicDescription(v) => self.handle_submit_epic_description(v),
             Message::SubmitEpicRepoPath(v) => self.handle_submit_epic_repo_path(v),
-            // PR flow — handlers added in a later task
-            Message::CreatePrTask(_) => vec![],
-            Message::ConfirmPrStart => vec![],
-            Message::CancelPr => vec![],
-            Message::PrCreated { .. } => vec![],
-            Message::PrFailed { .. } => vec![],
-            Message::PrMerged(_) => vec![],
+            // PR flow
+            Message::CreatePrTask(id) => self.handle_create_pr_task(id),
+            Message::ConfirmPrStart => self.handle_confirm_pr_start(),
+            Message::CancelPr => self.handle_cancel_pr(),
+            Message::PrCreated { id, pr_url, pr_number } => self.handle_pr_created(id, pr_url, pr_number),
+            Message::PrFailed { id, error } => self.handle_pr_failed(id, error),
+            Message::PrMerged(id) => self.handle_pr_merged(id),
         }
     }
 
@@ -1204,6 +1204,110 @@ impl App {
         }
         self.set_status(error);
         vec![]
+    }
+
+    // -----------------------------------------------------------------------
+    // PR handlers
+    // -----------------------------------------------------------------------
+
+    fn handle_create_pr_task(&mut self, id: TaskId) -> Vec<Command> {
+        let branch = match self.find_task(id) {
+            Some(t) if t.status == TaskStatus::Review => {
+                match t.worktree.as_deref().and_then(Self::branch_from_worktree) {
+                    Some(b) => b,
+                    None => return vec![],
+                }
+            }
+            _ => return vec![],
+        };
+
+        self.input.mode = InputMode::ConfirmPr(id);
+        self.set_status(format!("Create PR for {}? (y/n)", branch));
+        vec![]
+    }
+
+    fn handle_confirm_pr_start(&mut self) -> Vec<Command> {
+        let id = match self.input.mode {
+            InputMode::ConfirmPr(id) => id,
+            _ => return vec![],
+        };
+        self.input.mode = InputMode::Normal;
+        self.set_status("Creating PR...".to_string());
+
+        if let Some(task) = self.find_task(id) {
+            let worktree = match &task.worktree {
+                Some(wt) => wt.clone(),
+                None => return vec![],
+            };
+            let branch = match Self::branch_from_worktree(&worktree) {
+                Some(b) => b,
+                None => return vec![],
+            };
+            vec![Command::CreatePr {
+                id,
+                repo_path: task.repo_path.clone(),
+                branch,
+                title: task.title.clone(),
+                description: task.description.clone(),
+            }]
+        } else {
+            vec![]
+        }
+    }
+
+    fn handle_cancel_pr(&mut self) -> Vec<Command> {
+        self.input.mode = InputMode::Normal;
+        self.clear_status();
+        vec![]
+    }
+
+    fn handle_pr_created(&mut self, id: TaskId, pr_url: String, pr_number: i64) -> Vec<Command> {
+        if let Some(task) = self.find_task_mut(id) {
+            task.pr_url = Some(pr_url.clone());
+            task.pr_number = Some(pr_number);
+            let task_clone = task.clone();
+            self.set_status(format!("PR #{pr_number} created: {pr_url}"));
+            vec![Command::PersistTask(task_clone)]
+        } else {
+            vec![]
+        }
+    }
+
+    fn handle_pr_failed(&mut self, _id: TaskId, error: String) -> Vec<Command> {
+        self.set_status(error);
+        vec![]
+    }
+
+    fn handle_pr_merged(&mut self, id: TaskId) -> Vec<Command> {
+        let mut cmds = Vec::new();
+
+        if let Some(task) = self.find_task_mut(id) {
+            let pr_number = task.pr_number.unwrap_or(0);
+            let title = task.title.clone();
+
+            // Detach: kill tmux window but preserve worktree
+            if let Some(window) = task.tmux_window.take() {
+                cmds.push(Command::KillTmuxWindow { window });
+            }
+            task.status = TaskStatus::Done;
+            let task_clone = task.clone();
+
+            self.clear_agent_tracking(id);
+            self.clamp_selection();
+            self.set_status(format!("PR #{pr_number} merged — task #{id} moved to Done"));
+
+            cmds.push(Command::PersistTask(task_clone));
+
+            if self.notifications_enabled {
+                cmds.push(Command::SendNotification {
+                    title: "PR merged".to_string(),
+                    body: format!("PR #{pr_number} merged: {title}"),
+                    urgent: false,
+                });
+            }
+        }
+
+        cmds
     }
 
     // -----------------------------------------------------------------------

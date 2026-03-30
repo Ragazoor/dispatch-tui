@@ -4236,3 +4236,115 @@ fn summary_row_shows_muted_bell_and_hint_when_disabled() {
     assert!(buffer_contains(&buf, "\u{1F515}")); // 🔕
     assert!(buffer_contains(&buf, "[N]"));
 }
+
+// -----------------------------------------------------------------------
+// PR handler tests
+// -----------------------------------------------------------------------
+
+#[test]
+fn create_pr_task_on_review_enters_confirm_mode() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+    let mut app = App::new(vec![task], Duration::from_secs(300));
+    // Navigate to Review column (index 3)
+    app.update(Message::NavigateColumn(3));
+
+    app.update(Message::CreatePrTask(TaskId(1)));
+    assert!(matches!(app.mode(), InputMode::ConfirmPr(TaskId(1))));
+}
+
+#[test]
+fn create_pr_task_on_non_review_ignored() {
+    let task = make_task(1, TaskStatus::Backlog);
+    let mut app = App::new(vec![task], Duration::from_secs(300));
+    app.update(Message::CreatePrTask(TaskId(1)));
+    assert!(matches!(app.mode(), InputMode::Normal));
+}
+
+#[test]
+fn confirm_pr_emits_create_pr_command() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+    let mut app = App::new(vec![task], Duration::from_secs(300));
+    app.update(Message::NavigateColumn(3));
+    app.update(Message::CreatePrTask(TaskId(1)));
+
+    let cmds = app.update(Message::ConfirmPrStart);
+    assert!(cmds.iter().any(|c| matches!(c, Command::CreatePr { .. })));
+    assert!(matches!(app.mode(), InputMode::Normal));
+}
+
+#[test]
+fn cancel_pr_returns_to_normal() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+    let mut app = App::new(vec![task], Duration::from_secs(300));
+    app.update(Message::NavigateColumn(3));
+    app.update(Message::CreatePrTask(TaskId(1)));
+
+    app.update(Message::CancelPr);
+    assert!(matches!(app.mode(), InputMode::Normal));
+}
+
+#[test]
+fn pr_created_stores_url_and_number() {
+    let task = make_task(1, TaskStatus::Review);
+    let mut app = App::new(vec![task], Duration::from_secs(300));
+
+    let cmds = app.update(Message::PrCreated {
+        id: TaskId(1),
+        pr_url: "https://github.com/org/repo/pull/42".to_string(),
+        pr_number: 42,
+    });
+
+    let task = app.find_task(TaskId(1)).unwrap();
+    assert_eq!(task.pr_url.as_deref(), Some("https://github.com/org/repo/pull/42"));
+    assert_eq!(task.pr_number, Some(42));
+    assert!(cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
+}
+
+#[test]
+fn pr_failed_shows_error() {
+    let task = make_task(1, TaskStatus::Review);
+    let mut app = App::new(vec![task], Duration::from_secs(300));
+
+    app.update(Message::PrFailed {
+        id: TaskId(1),
+        error: "Push failed".to_string(),
+    });
+
+    assert!(app.status_message().unwrap().contains("Push failed"));
+}
+
+#[test]
+fn pr_merged_moves_to_done_and_detaches() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.tmux_window = Some("task-1".to_string());
+    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
+    task.pr_number = Some(42);
+    let mut app = App::new(vec![task], Duration::from_secs(300));
+
+    let cmds = app.update(Message::PrMerged(TaskId(1)));
+
+    let task = app.find_task(TaskId(1)).unwrap();
+    assert_eq!(task.status, TaskStatus::Done);
+    assert!(task.tmux_window.is_none(), "tmux window should be cleared");
+    assert!(task.worktree.is_some(), "worktree should be preserved");
+    assert!(task.pr_url.is_some(), "pr_url should be preserved");
+    assert!(cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
+    assert!(cmds.iter().any(|c| matches!(c, Command::SendNotification { .. })));
+}
+
+#[test]
+fn pr_merged_preserves_worktree() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+    task.pr_number = Some(42);
+    let mut app = App::new(vec![task], Duration::from_secs(300));
+
+    let cmds = app.update(Message::PrMerged(TaskId(1)));
+
+    // Should NOT emit a Cleanup command
+    assert!(!cmds.iter().any(|c| matches!(c, Command::Cleanup { .. })));
+}
