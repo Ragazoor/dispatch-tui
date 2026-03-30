@@ -174,6 +174,82 @@ pub fn epic_status(epic: &Epic, subtask_statuses: &[TaskStatus]) -> TaskStatus {
 }
 
 // ---------------------------------------------------------------------------
+// ReviewDecision — review status for a PR
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReviewDecision {
+    ReviewRequired,
+    ChangesRequested,
+    Approved,
+}
+
+impl ReviewDecision {
+    pub const ALL: [Self; 3] = [
+        Self::ReviewRequired,
+        Self::ChangesRequested,
+        Self::Approved,
+    ];
+
+    pub const COLUMN_COUNT: usize = Self::ALL.len();
+
+    pub fn column_index(self) -> usize {
+        match self {
+            Self::ReviewRequired => 0,
+            Self::ChangesRequested => 1,
+            Self::Approved => 2,
+        }
+    }
+
+    pub fn from_column_index(idx: usize) -> Option<Self> {
+        match idx {
+            0 => Some(Self::ReviewRequired),
+            1 => Some(Self::ChangesRequested),
+            2 => Some(Self::Approved),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ReviewRequired => "Needs Review",
+            Self::ChangesRequested => "Changes Requested",
+            Self::Approved => "Approved",
+        }
+    }
+
+    /// Parse from GitHub GraphQL `reviewDecision` field value.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "REVIEW_REQUIRED" => Some(Self::ReviewRequired),
+            "CHANGES_REQUESTED" => Some(Self::ChangesRequested),
+            "APPROVED" => Some(Self::Approved),
+            _ => None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ReviewPr — a PR the user is expected to review
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct ReviewPr {
+    pub number: i64,
+    pub title: String,
+    pub author: String,
+    pub repo: String,
+    pub url: String,
+    pub is_draft: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub additions: i64,
+    pub deletions: i64,
+    pub review_decision: ReviewDecision,
+    pub labels: Vec<String>,
+}
+
+// ---------------------------------------------------------------------------
 // Task
 // ---------------------------------------------------------------------------
 
@@ -799,6 +875,45 @@ mod tests {
         let epic = make_epic_for_status(false);
         let statuses = [TaskStatus::Review, TaskStatus::Done];
         assert_eq!(epic_status(&epic, &statuses), TaskStatus::Review);
+    }
+
+    // --- ReviewDecision ---
+
+    #[test]
+    fn review_decision_column_count() {
+        assert_eq!(ReviewDecision::COLUMN_COUNT, 3);
+        assert_eq!(ReviewDecision::ALL.len(), 3);
+    }
+
+    #[test]
+    fn review_decision_column_index_roundtrip() {
+        for (i, decision) in ReviewDecision::ALL.iter().enumerate() {
+            assert_eq!(decision.column_index(), i);
+        }
+    }
+
+    #[test]
+    fn review_decision_from_column_index() {
+        assert_eq!(ReviewDecision::from_column_index(0), Some(ReviewDecision::ReviewRequired));
+        assert_eq!(ReviewDecision::from_column_index(1), Some(ReviewDecision::ChangesRequested));
+        assert_eq!(ReviewDecision::from_column_index(2), Some(ReviewDecision::Approved));
+        assert_eq!(ReviewDecision::from_column_index(3), None);
+    }
+
+    #[test]
+    fn review_decision_as_str() {
+        assert_eq!(ReviewDecision::ReviewRequired.as_str(), "Needs Review");
+        assert_eq!(ReviewDecision::ChangesRequested.as_str(), "Changes Requested");
+        assert_eq!(ReviewDecision::Approved.as_str(), "Approved");
+    }
+
+    #[test]
+    fn review_decision_parse() {
+        assert_eq!(ReviewDecision::parse("REVIEW_REQUIRED"), Some(ReviewDecision::ReviewRequired));
+        assert_eq!(ReviewDecision::parse("CHANGES_REQUESTED"), Some(ReviewDecision::ChangesRequested));
+        assert_eq!(ReviewDecision::parse("APPROVED"), Some(ReviewDecision::Approved));
+        assert_eq!(ReviewDecision::parse("bogus"), None);
+        assert_eq!(ReviewDecision::parse(""), None);
     }
 
 }
