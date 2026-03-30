@@ -7,7 +7,6 @@ use chrono::{DateTime, Utc};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskStatus {
     Backlog,
-    Ready,
     Running,
     Review,
     Done,
@@ -17,7 +16,6 @@ pub enum TaskStatus {
 impl TaskStatus {
     pub const ALL: &'static [TaskStatus] = &[
         TaskStatus::Backlog,
-        TaskStatus::Ready,
         TaskStatus::Running,
         TaskStatus::Review,
         TaskStatus::Done,
@@ -28,7 +26,6 @@ impl TaskStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
             TaskStatus::Backlog => "backlog",
-            TaskStatus::Ready => "ready",
             TaskStatus::Running => "running",
             TaskStatus::Review => "review",
             TaskStatus::Done => "done",
@@ -38,8 +35,7 @@ impl TaskStatus {
 
     pub fn parse(s: &str) -> Option<Self> {
         match s {
-            "backlog" => Some(TaskStatus::Backlog),
-            "ready" => Some(TaskStatus::Ready),
+            "backlog" | "ready" => Some(TaskStatus::Backlog),
             "running" => Some(TaskStatus::Running),
             "review" => Some(TaskStatus::Review),
             "done" => Some(TaskStatus::Done),
@@ -51,8 +47,7 @@ impl TaskStatus {
     /// Advance to the next status (wraps at Done -> Done).
     pub fn next(self) -> Self {
         match self {
-            TaskStatus::Backlog => TaskStatus::Ready,
-            TaskStatus::Ready => TaskStatus::Running,
+            TaskStatus::Backlog => TaskStatus::Running,
             TaskStatus::Running => TaskStatus::Review,
             TaskStatus::Review => TaskStatus::Done,
             TaskStatus::Done => TaskStatus::Done,
@@ -64,8 +59,7 @@ impl TaskStatus {
     pub fn prev(self) -> Self {
         match self {
             TaskStatus::Backlog => TaskStatus::Backlog,
-            TaskStatus::Ready => TaskStatus::Backlog,
-            TaskStatus::Running => TaskStatus::Ready,
+            TaskStatus::Running => TaskStatus::Backlog,
             TaskStatus::Review => TaskStatus::Running,
             TaskStatus::Done => TaskStatus::Review,
             TaskStatus::Archived => TaskStatus::Archived,
@@ -76,10 +70,9 @@ impl TaskStatus {
     pub fn column_index(self) -> usize {
         match self {
             TaskStatus::Backlog => 0,
-            TaskStatus::Ready => 1,
-            TaskStatus::Running => 2,
-            TaskStatus::Review => 3,
-            TaskStatus::Done => 4,
+            TaskStatus::Running => 1,
+            TaskStatus::Review => 2,
+            TaskStatus::Done => 3,
             TaskStatus::Archived => 0, // Not displayed in kanban
         }
     }
@@ -88,10 +81,9 @@ impl TaskStatus {
     pub fn from_column_index(idx: usize) -> Option<Self> {
         match idx {
             0 => Some(TaskStatus::Backlog),
-            1 => Some(TaskStatus::Ready),
-            2 => Some(TaskStatus::Running),
-            3 => Some(TaskStatus::Review),
-            4 => Some(TaskStatus::Done),
+            1 => Some(TaskStatus::Running),
+            2 => Some(TaskStatus::Review),
+            3 => Some(TaskStatus::Done),
             _ => None,
         }
     }
@@ -176,11 +168,6 @@ pub fn epic_status(epic: &Epic, subtask_statuses: &[TaskStatus]) -> TaskStatus {
         .any(|s| matches!(s, TaskStatus::Running | TaskStatus::Done));
     if any_active {
         return TaskStatus::Running;
-    }
-
-    let any_ready = subtask_statuses.contains(&TaskStatus::Ready);
-    if any_ready {
-        return TaskStatus::Ready;
     }
 
     TaskStatus::Backlog
@@ -372,9 +359,13 @@ mod tests {
     }
 
     #[test]
+    fn parse_ready_maps_to_backlog() {
+        assert_eq!(TaskStatus::parse("ready"), Some(TaskStatus::Backlog));
+    }
+
+    #[test]
     fn status_next() {
-        assert_eq!(TaskStatus::Backlog.next(), TaskStatus::Ready);
-        assert_eq!(TaskStatus::Ready.next(), TaskStatus::Running);
+        assert_eq!(TaskStatus::Backlog.next(), TaskStatus::Running);
         assert_eq!(TaskStatus::Running.next(), TaskStatus::Review);
         assert_eq!(TaskStatus::Review.next(), TaskStatus::Done);
         assert_eq!(TaskStatus::Done.next(), TaskStatus::Done, "Done.next() should stay Done");
@@ -384,8 +375,7 @@ mod tests {
     fn status_prev() {
         assert_eq!(TaskStatus::Done.prev(), TaskStatus::Review);
         assert_eq!(TaskStatus::Review.prev(), TaskStatus::Running);
-        assert_eq!(TaskStatus::Running.prev(), TaskStatus::Ready);
-        assert_eq!(TaskStatus::Ready.prev(), TaskStatus::Backlog);
+        assert_eq!(TaskStatus::Running.prev(), TaskStatus::Backlog);
         assert_eq!(TaskStatus::Backlog.prev(), TaskStatus::Backlog, "Backlog.prev() should stay Backlog");
     }
 
@@ -400,7 +390,7 @@ mod tests {
 
     #[test]
     fn column_index_out_of_range() {
-        assert!(TaskStatus::from_column_index(5).is_none());
+        assert!(TaskStatus::from_column_index(4).is_none());
         assert!(TaskStatus::from_column_index(999).is_none());
     }
 
@@ -446,7 +436,7 @@ mod tests {
     #[test]
     fn column_count_matches_all_len() {
         assert_eq!(TaskStatus::COLUMN_COUNT, TaskStatus::ALL.len());
-        assert_eq!(TaskStatus::COLUMN_COUNT, 5);
+        assert_eq!(TaskStatus::COLUMN_COUNT, 4);
     }
 
     #[test]
@@ -486,8 +476,8 @@ mod tests {
 
     #[test]
     fn status_archived_has_no_column() {
-        // Archived is not a kanban column — COLUMN_COUNT stays 5
-        assert_eq!(TaskStatus::COLUMN_COUNT, 5);
+        // Archived is not a kanban column — COLUMN_COUNT stays 4
+        assert_eq!(TaskStatus::COLUMN_COUNT, 4);
     }
 
     // --- Staleness ---
@@ -752,23 +742,16 @@ mod tests {
     }
 
     #[test]
-    fn epic_status_some_ready() {
-        let epic = make_epic_for_status(false);
-        let statuses = [TaskStatus::Backlog, TaskStatus::Ready];
-        assert_eq!(epic_status(&epic, &statuses), TaskStatus::Ready);
-    }
-
-    #[test]
     fn epic_status_some_running() {
         let epic = make_epic_for_status(false);
-        let statuses = [TaskStatus::Ready, TaskStatus::Running];
+        let statuses = [TaskStatus::Backlog, TaskStatus::Running];
         assert_eq!(epic_status(&epic, &statuses), TaskStatus::Running);
     }
 
     #[test]
     fn epic_status_some_done_means_running() {
         let epic = make_epic_for_status(false);
-        let statuses = [TaskStatus::Ready, TaskStatus::Done];
+        let statuses = [TaskStatus::Backlog, TaskStatus::Done];
         assert_eq!(epic_status(&epic, &statuses), TaskStatus::Running);
     }
 
