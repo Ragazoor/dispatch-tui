@@ -112,6 +112,11 @@ impl App {
         self.notifications_enabled = enabled;
     }
 
+    pub fn set_repo_filter(&mut self, filter: HashSet<String>) {
+        self.repo_filter = filter;
+        self.clamp_selection();
+    }
+
     /// Set a transient status message with auto-clear timestamp.
     pub(in crate::tui) fn set_status(&mut self, msg: String) {
         self.status_message = Some(msg);

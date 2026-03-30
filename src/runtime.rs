@@ -6,6 +6,7 @@ use crossterm::{
 };
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
+use std::collections::HashSet;
 use std::io;
 use std::path::Path;
 use std::sync::Arc;
@@ -51,6 +52,14 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
         .unwrap_or(None)
         .unwrap_or(true);
     app.set_notifications_enabled(notif_enabled);
+
+    // Load repo filter
+    if let Some(filter_str) = database.get_setting_string("repo_filter").unwrap_or(None) {
+        if !filter_str.is_empty() {
+            let filter: HashSet<String> = filter_str.split('\n').map(|s| s.to_string()).collect();
+            app.set_repo_filter(filter);
+        }
+    }
 
     // 4. Set up terminal
     enable_raw_mode()?;
@@ -437,6 +446,12 @@ impl TuiRuntime {
 
     fn exec_persist_setting(&self, app: &mut App, key: &str, value: bool) {
         if let Err(e) = self.database.set_setting_bool(key, value) {
+            app.update(Message::Error(Self::db_error("persisting setting", e)));
+        }
+    }
+
+    fn exec_persist_string_setting(&self, app: &mut App, key: &str, value: &str) {
+        if let Err(e) = self.database.set_setting_string(key, value) {
             app.update(Message::Error(Self::db_error("persisting setting", e)));
         }
     }
@@ -839,8 +854,8 @@ async fn execute_commands(
                 rt.exec_create_pr(id, repo_path, branch, title, description),
             Command::CheckPrStatus { id, pr_number, repo_path } =>
                 rt.exec_check_pr_status(id, pr_number, repo_path),
-            // String settings — handler added in a later task
-            Command::PersistStringSetting { .. } => {}
+            Command::PersistStringSetting { key, value } =>
+                rt.exec_persist_string_setting(app, &key, &value),
         }
     }
 
@@ -1378,6 +1393,7 @@ mod tests {
         );
     }
 
+<<<<<<< HEAD
     #[tokio::test]
     async fn exec_create_pr_happy_path() {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
@@ -1477,5 +1493,15 @@ mod tests {
         // Should not send any message for open PRs
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn exec_persist_string_setting_writes_to_db() {
+        let (rt, mut app) = test_runtime();
+        rt.exec_persist_string_setting(&mut app, "repo_filter", "/repo1\n/repo2");
+        assert_eq!(
+            rt.database.get_setting_string("repo_filter").unwrap(),
+            Some("/repo1\n/repo2".to_string())
+        );
     }
 }
