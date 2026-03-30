@@ -7,6 +7,7 @@ pub use types::*;
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
+use crate::dispatch;
 use crate::models::{Epic, EpicId, Task, TaskId, TaskStatus, epic_status};
 
 // ---------------------------------------------------------------------------
@@ -273,14 +274,6 @@ impl App {
     /// Remove all in-memory agent tracking state for a task.
     fn clear_agent_tracking(&mut self, id: TaskId) {
         self.agents.clear(id);
-    }
-
-    /// Extract the branch name from a worktree path (its last path component).
-    fn branch_from_worktree(worktree: &str) -> Option<String> {
-        std::path::Path::new(worktree)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .map(|s| s.to_string())
     }
 
     /// Take worktree/tmux fields from a task and build a Cleanup command.
@@ -1383,7 +1376,7 @@ impl App {
     fn handle_start_wrap_up(&mut self, id: TaskId) -> Vec<Command> {
         let branch = match self.find_task(id) {
             Some(t) if t.status == TaskStatus::Review => {
-                match t.worktree.as_deref().and_then(Self::branch_from_worktree) {
+                match t.worktree.as_deref().and_then(|wt| dispatch::branch_from_worktree(wt)) {
                     Some(b) => b,
                     None => return vec![],
                 }
@@ -1412,7 +1405,7 @@ impl App {
                 Some(wt) => wt.clone(),
                 None => return vec![],
             };
-            let branch = match Self::branch_from_worktree(&worktree) {
+            let branch = match dispatch::branch_from_worktree(&worktree) {
                 Some(b) => b,
                 None => return vec![],
             };
@@ -1441,7 +1434,7 @@ impl App {
                 Some(wt) => wt.clone(),
                 None => return vec![],
             };
-            let branch = match Self::branch_from_worktree(&worktree) {
+            let branch = match dispatch::branch_from_worktree(&worktree) {
                 Some(b) => b,
                 None => return vec![],
             };

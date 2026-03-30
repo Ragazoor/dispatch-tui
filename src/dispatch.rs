@@ -550,6 +550,14 @@ pub fn check_pr_status(
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// Extract the branch name from a worktree path (its last path component).
+pub fn branch_from_worktree(worktree: &str) -> Option<String> {
+    std::path::Path::new(worktree)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|s| s.to_string())
+}
+
 /// Expand a leading `~` or `~/` to the user's home directory.
 fn expand_tilde(path: &str) -> String {
     if path == "~" || path.starts_with("~/") {
@@ -1143,5 +1151,23 @@ mod tests {
         let calls = mock.recorded_calls();
         // Should not have a "pull" call
         assert!(!calls.iter().any(|c| c.1.contains(&"pull".to_string())));
+    }
+}
+
+#[cfg(test)]
+mod branch_tests {
+    use super::*;
+
+    #[test]
+    fn branch_from_worktree_extracts_last_component() {
+        assert_eq!(
+            branch_from_worktree("/repo/.worktrees/42-fix-login"),
+            Some("42-fix-login".to_string())
+        );
+    }
+
+    #[test]
+    fn branch_from_worktree_returns_none_for_empty() {
+        assert_eq!(branch_from_worktree(""), None);
     }
 }
