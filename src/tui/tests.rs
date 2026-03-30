@@ -3738,6 +3738,7 @@ fn confirm_finish_clears_conflict_flag() {
 }
 
 #[test]
+#[ignore = "f key now opens repo filter; finish trigger removed in Task 8"]
 fn f_key_on_review_task_starts_finish() {
     let mut app = App::new(vec![{
         let mut t = make_task(1, TaskStatus::Review);
@@ -3751,6 +3752,7 @@ fn f_key_on_review_task_starts_finish() {
 }
 
 #[test]
+#[ignore = "f key now opens repo filter; finish trigger removed in Task 8"]
 fn f_key_on_non_review_task_is_noop() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Backlog),
@@ -3762,6 +3764,7 @@ fn f_key_on_non_review_task_is_noop() {
 }
 
 #[test]
+#[ignore = "f key now opens repo filter; finish trigger removed in Task 8"]
 fn confirm_finish_y_key_emits_command() {
     let mut app = App::new(vec![{
         let mut t = make_task(1, TaskStatus::Review);
@@ -3777,6 +3780,7 @@ fn confirm_finish_y_key_emits_command() {
 }
 
 #[test]
+#[ignore = "f key now opens repo filter; finish trigger removed in Task 8"]
 fn confirm_finish_n_key_cancels() {
     let mut app = App::new(vec![{
         let mut t = make_task(1, TaskStatus::Review);
@@ -4753,4 +4757,64 @@ fn repo_filter_applies_to_archived_tasks() {
     let archived = app.archived_tasks();
     assert_eq!(archived.len(), 1);
     assert_eq!(archived[0].id, TaskId(1));
+}
+
+// --- repo filter keybindings ---
+
+#[test]
+fn f_key_opens_repo_filter() {
+    let mut app = make_app();
+    app.repo_paths = vec!["/repo".to_string()];
+    app.handle_key(make_key(KeyCode::Char('f')));
+    assert_eq!(app.input.mode, InputMode::RepoFilter);
+}
+
+#[test]
+fn repo_filter_number_key_toggles_repo() {
+    let mut app = make_app();
+    app.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+
+    app.handle_key(make_key(KeyCode::Char('1')));
+    assert!(app.repo_filter.contains("/repo-a"));
+
+    app.handle_key(make_key(KeyCode::Char('1')));
+    assert!(!app.repo_filter.contains("/repo-a"));
+}
+
+#[test]
+fn repo_filter_a_key_toggles_all() {
+    let mut app = make_app();
+    app.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+
+    app.handle_key(make_key(KeyCode::Char('a')));
+    assert_eq!(app.repo_filter.len(), 2);
+}
+
+#[test]
+fn repo_filter_enter_closes() {
+    let mut app = make_app();
+    app.input.mode = InputMode::RepoFilter;
+    let cmds = app.handle_key(make_key(KeyCode::Enter));
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(cmds.iter().any(|c| matches!(c, Command::PersistStringSetting { .. })));
+}
+
+#[test]
+fn repo_filter_esc_closes() {
+    let mut app = make_app();
+    app.input.mode = InputMode::RepoFilter;
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn repo_filter_out_of_range_number_ignored() {
+    let mut app = make_app();
+    app.repo_paths = vec!["/repo-a".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+
+    app.handle_key(make_key(KeyCode::Char('5')));
+    assert!(app.repo_filter.is_empty());
 }

@@ -50,14 +50,7 @@ impl App {
             KeyCode::Char('N') => self.update(Message::ToggleNotifications),
             KeyCode::Char('E') => self.update(Message::StartNewEpic),
             KeyCode::Char('d') => self.handle_key_dispatch(),
-            KeyCode::Char('f') => {
-                if let Some(task) = self.selected_task() {
-                    let id = task.id;
-                    self.update(Message::FinishTask(id))
-                } else {
-                    vec![]
-                }
-            }
+            KeyCode::Char('f') => self.update(Message::StartRepoFilter),
             KeyCode::Char('p') => {
                 if let Some(task) = self.selected_task() {
                     let id = task.id;
@@ -504,7 +497,17 @@ impl App {
 
     fn handle_key_repo_filter(&mut self, key: KeyEvent) -> Vec<Command> {
         match key.code {
-            KeyCode::Esc => self.update(Message::CloseRepoFilter),
+            KeyCode::Enter | KeyCode::Esc => self.update(Message::CloseRepoFilter),
+            KeyCode::Char('a') => self.update(Message::ToggleAllRepoFilter),
+            KeyCode::Char(c @ '1'..='9') => {
+                let idx = (c as usize) - ('1' as usize);
+                if idx < self.repo_paths.len() {
+                    let path = self.repo_paths[idx].clone();
+                    self.update(Message::ToggleRepoFilter(path))
+                } else {
+                    vec![]
+                }
+            }
             _ => vec![],
         }
     }
