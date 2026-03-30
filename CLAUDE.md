@@ -53,11 +53,12 @@ src/
 
 ## Kanban Columns
 
-Backlog → Ready → Running → Review → Done
+Backlog → Running → Review → Done
 
-- **Ready** = eligible for dispatch (`d` key)
+- **Backlog** = tasks not yet started. Tasks with a plan show `▸` icon; `d` dispatches an implementation agent. Tasks without a plan get `d` for brainstorm.
 - **Running** = agent dispatched in interactive mode, tmux output shown on card
-- **Dispatch** (`d` on a Ready task): creates a fresh git worktree + tmux window and launches Claude with the task prompt
+- **Dispatch** (`d` on a Backlog task with a plan): creates a fresh git worktree + tmux window and launches Claude with the task prompt
+- **Brainstorm** (`d` on a Backlog task without a plan): creates a worktree and launches Claude in brainstorm mode to explore and plan
 - **Resume** (`d` on a Running task whose window is gone): re-opens a tmux window in the existing worktree and runs `claude --continue`. Closing a tmux window does **not** delete the worktree.
 - Status transitions (running/review) are handled by hooks in `.claude/settings.json` that extract the task ID from the git branch name (`{id}-{slug}` pattern)
 - Press `g` to jump to an agent's tmux window
@@ -165,7 +166,7 @@ Error popup ──any key──▶ dismisses
 - All subprocess calls go through `src/tmux.rs` or `src/dispatch.rs`, injected with a `ProcessRunner` (`src/process.rs`). Use `MockProcessRunner` in tests.
 - Tests use in-memory SQLite databases
 - **App field visibility**: All `App` fields use `pub(in crate::tui)` — accessible from `input.rs`, `ui.rs`, `tests.rs` but not outside the `tui` module. External code uses public accessor methods.
-- **Column count**: `TaskStatus::COLUMN_COUNT` is the canonical source. Never hardcode `5`.
+- **Column count**: `TaskStatus::COLUMN_COUNT` is the canonical source. Never hardcode `4`.
 - **Database abstraction**: `db::TaskStore` trait abstracts persistence. `TuiRuntime` and `McpState` hold `Arc<dyn TaskStore>`. Tests can provide mock implementations.
 - **Task lookup**: Use `App::find_task(id)` / `find_task_mut(id)` instead of inline `.iter().find()`.
 - **Error handling**: Message handlers should return `Vec<Command>` with error messages displayed via the status bar, never panic.
