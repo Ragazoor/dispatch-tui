@@ -49,6 +49,7 @@ entity Task {
     pr_url: String?
     pr_number: Integer?
     needs_input: Boolean
+    sort_order: Integer?
     created_at: Timestamp
     updated_at: Timestamp
 
@@ -79,6 +80,7 @@ entity Epic {
     repo_path: String
     done: Boolean
     plan: String?
+    sort_order: Integer?
     created_at: Timestamp
     updated_at: Timestamp
 
@@ -294,6 +296,50 @@ rule PrMerged {
         -- merge itself is the human confirmation (via GitHub review process).
 }
 
+-- == Wrap Up ==
+
+rule WrapUpRebase {
+    when: WrapUp(task, rebase)
+
+    requires: task.status = review
+    requires: task.worktree != null
+
+    let branch = task.worktree.branch
+
+    ensures: BranchRebased(branch: branch, onto: "main")
+    ensures: task.tmux_window = null
+    ensures: task.status = done
+    ensures: task.updated_at = now
+
+    @guidance
+        -- Runs `git fetch origin && git rebase origin/main` in the
+        -- task's worktree directory, then fast-forwards main to the
+        -- rebased branch. Uses the same finish_task path as
+        -- FinishTaskSuccess. The operation runs in background via
+        -- ProcessRunner; the tmux window is killed on completion.
+        -- Available from both the TUI (W then r) and MCP (wrap_up
+        -- tool with action "rebase").
+}
+
+rule WrapUpPr {
+    when: WrapUp(task, pr)
+
+    requires: task.status = review
+    requires: task.worktree != null
+
+    ensures: task.pr_url != null
+    ensures: task.pr_number != null
+    ensures: task.updated_at = now
+
+    @guidance
+        -- Pushes the branch to origin and creates a GitHub PR using
+        -- `gh pr create`. The task remains in review status and PR
+        -- status polling (PollPrStatus) takes over from there.
+        -- The operation runs in background via ProcessRunner.
+        -- Available from both the TUI (W then p) and MCP (wrap_up
+        -- tool with action "pr").
+}
+
 -- == Finish (Merge) ==
 
 rule FinishTaskSuccess {
@@ -487,10 +533,11 @@ rule RetryFresh {
 -- == MCP Constraints ==
 
 rule UpdateTaskViaMcp {
-    when: McpUpdateTask(task, status?, plan?, title?, description?, repo_path?)
+    when: McpUpdateTask(task, status?, plan?, title?, description?, repo_path?, sort_order?)
 
     requires: status != null or plan != null or title != null
               or description != null or repo_path != null
+              or sort_order != null
 
     -- Cannot set status to done or archived via MCP
     requires: status != done
@@ -506,6 +553,8 @@ rule UpdateTaskViaMcp {
         if description != null: task.description = description
     ensures:
         if repo_path != null: task.repo_path = repo_path
+    ensures:
+        if sort_order != null: task.sort_order = sort_order
     ensures: task.updated_at = now
 }
 
@@ -528,9 +577,10 @@ rule ClaimTaskViaMcp {
 }
 
 rule UpdateEpicViaMcp {
-    when: McpUpdateEpic(epic, title?, description?, done?, plan?)
+    when: McpUpdateEpic(epic, title?, description?, done?, plan?, sort_order?)
 
-    requires: title != null or description != null or done != null or plan != null
+    requires: title != null or description != null or done != null
+              or plan != null or sort_order != null
 
     ensures:
         if title != null: epic.title = title
@@ -540,19 +590,22 @@ rule UpdateEpicViaMcp {
         if done != null: epic.done = done
     ensures:
         if plan != null: epic.plan = plan
+    ensures:
+        if sort_order != null: epic.sort_order = sort_order
     ensures: epic.updated_at = now
 }
 
 -- == Epics ==
 
 rule CreateEpic {
-    when: CreateEpic(title, description, repo_path)
+    when: CreateEpic(title, description, repo_path, sort_order?)
 
     ensures: Epic.created(
         title: title,
         description: description,
         repo_path: repo_path,
         done: false,
+        sort_order: sort_order,
         created_at: now,
         updated_at: now
     )
@@ -594,11 +647,13 @@ rule DispatchEpicSubtask {
     requires: epic.derived_status = backlog
     requires: epic.has_plan
 
-    -- Dispatches the next backlog subtask of this epic.
+    -- Dispatches the next backlog subtask of this epic, ordered by
+    -- sort_order ascending (nulls last, tie-broken by id ascending).
     -- If the subtask has a plan, it is dispatched for implementation.
     -- If not, it is dispatched for brainstorming.
     ensures:
-        let next = epic.active_subtasks where status = backlog | first
+        let candidates = epic.active_subtasks where status = backlog
+        let next = sort_by_order(candidates).first
         if next != null:
             if next.has_plan:
                 AgentLaunched(task: next, mode: implementation)
@@ -677,7 +732,8 @@ rule DeleteEpic {
     -- the ConfirmDone rule requiring review status.
     -- Exception: PrMerged transitions are automatic because the PR
     -- merge on GitHub constitutes human confirmation via the code
-    -- review process.
+    -- review process. WrapUpRebase is human-initiated (TUI W+r or
+    -- MCP wrap_up tool) and transitions directly to done.
 
 @invariant EpicDerivedStatus
     -- Epic kanban status is derived from subtask statuses, never stored.
