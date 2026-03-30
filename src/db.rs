@@ -157,6 +157,10 @@ pub trait TaskStore: Send + Sync {
     fn delete_epic(&self, id: EpicId) -> Result<()>;
     fn set_task_epic_id(&self, task_id: TaskId, epic_id: Option<EpicId>) -> Result<()>;
     fn list_tasks_for_epic(&self, epic_id: EpicId) -> Result<Vec<Task>>;
+
+    // Settings
+    fn get_setting_bool(&self, key: &str) -> Result<Option<bool>>;
+    fn set_setting_bool(&self, key: &str, value: bool) -> Result<()>;
 }
 
 // ---------------------------------------------------------------------------
@@ -295,6 +299,18 @@ impl Database {
             .context("Failed to migrate epics (drop plan column)")?;
             conn.pragma_update(None, "user_version", 4i64)
                 .context("Failed to update schema version to 4")?;
+        }
+
+        if current_version < 5 {
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS settings (
+                    key   TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                )",
+            )
+            .context("Failed to create settings table")?;
+            conn.pragma_update(None, "user_version", 5i64)
+                .context("Failed to update schema version to 5")?;
         }
 
         Ok(())
@@ -637,6 +653,30 @@ impl TaskStore for Database {
             .context("Failed to collect tasks for epic")?;
         Ok(tasks)
     }
+
+    fn get_setting_bool(&self, key: &str) -> Result<Option<bool>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            params![key],
+            |row| {
+                let v: String = row.get(0)?;
+                Ok(v == "1")
+            },
+        )
+        .optional()
+        .context("Failed to get setting")
+    }
+
+    fn set_setting_bool(&self, key: &str, value: bool) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = ?2",
+            params![key, if value { "1" } else { "0" }],
+        )?;
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -804,11 +844,27 @@ mod tests {
     }
 
     #[test]
+    fn get_setting_bool_returns_none_when_absent() {
+        let db = Database::open_in_memory().unwrap();
+        assert_eq!(db.get_setting_bool("notifications_enabled").unwrap(), None);
+    }
+
+    #[test]
+    fn set_and_get_setting_bool_roundtrips() {
+        let db = Database::open_in_memory().unwrap();
+        db.set_setting_bool("notifications_enabled", true).unwrap();
+        assert_eq!(db.get_setting_bool("notifications_enabled").unwrap(), Some(true));
+
+        db.set_setting_bool("notifications_enabled", false).unwrap();
+        assert_eq!(db.get_setting_bool("notifications_enabled").unwrap(), Some(false));
+    }
+
+    #[test]
     fn fresh_db_has_latest_schema_version() {
         let db = in_memory_db();
         let conn = db.conn.lock().unwrap();
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 4, "fresh DB should be at schema version 4");
+        assert_eq!(version, 5, "fresh DB should be at schema version 5");
     }
 
     #[test]
@@ -859,7 +915,7 @@ mod tests {
 
         // Version should be latest
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
 
         // Verify Migration 1 added the plan column
         let has_plan: bool = conn
