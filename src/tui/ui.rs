@@ -868,6 +868,7 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
         Line::from(Span::styled("  General", header)),
         Line::from(vec![
             Span::styled("  ?", key), Span::styled(" this help  ", desc),
+            Span::styled("N", key), Span::styled(" notify on/off  ", desc),
             Span::styled("q", key), Span::styled(" quit", desc),
         ]),
         Line::from(""),
