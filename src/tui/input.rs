@@ -237,10 +237,12 @@ impl App {
                 if count > 0 && self.archive.selected_row < count - 1 {
                     self.archive.selected_row += 1;
                 }
+                *self.archive.list_state.selected_mut() = Some(self.archive.selected_row);
                 vec![]
             }
             KeyCode::Char('k') | KeyCode::Up => {
                 self.archive.selected_row = self.archive.selected_row.saturating_sub(1);
+                *self.archive.list_state.selected_mut() = Some(self.archive.selected_row);
                 vec![]
             }
             KeyCode::Char('H') | KeyCode::Esc => self.update(Message::ToggleArchive),

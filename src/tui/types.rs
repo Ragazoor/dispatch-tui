@@ -290,6 +290,7 @@ impl Default for InputState {
 pub struct ArchiveState {
     pub visible: bool,
     pub selected_row: usize,
+    pub list_state: ListState,
 }
 
 // ---------------------------------------------------------------------------

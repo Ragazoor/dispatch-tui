@@ -670,6 +670,7 @@ impl App {
         if self.archive.selected_row >= archive_count && archive_count > 0 {
             self.archive.selected_row = archive_count - 1;
         }
+        *self.archive.list_state.selected_mut() = Some(self.archive.selected_row);
         let mut cmds = Vec::new();
         if let Some(c) = cleanup {
             cmds.push(c);
@@ -1028,6 +1029,7 @@ impl App {
         self.archive.visible = !self.archive.visible;
         if self.archive.visible {
             self.archive.selected_row = 0;
+            *self.archive.list_state.selected_mut() = Some(0);
         }
         vec![]
     }

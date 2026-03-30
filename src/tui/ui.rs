@@ -525,7 +525,7 @@ fn render_epic_banner(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(paragraph, area);
 }
 
-fn render_archive_overlay(frame: &mut Frame, app: &App, area: Rect, now: DateTime<Utc>) {
+fn render_archive_overlay(frame: &mut Frame, app: &mut App, area: Rect, now: DateTime<Utc>) {
     if !app.show_archived() {
         return;
     }
@@ -572,7 +572,7 @@ fn render_archive_overlay(frame: &mut Frame, app: &App, area: Rect, now: DateTim
         .collect();
 
     let list = List::new(items).block(block);
-    frame.render_widget(list, overlay_area);
+    frame.render_stateful_widget(list, overlay_area, &mut app.archive.list_state);
 }
 
 fn format_tokens(n: i64) -> String {
