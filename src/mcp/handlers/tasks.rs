@@ -415,12 +415,12 @@ pub(super) fn handle_wrap_up(state: &McpState, id: Option<Value>, args: Value) -
         Err(e) => return JsonRpcResponse::err(id, -32603, format!("Database error: {e}")),
     };
 
-    if task.status != TaskStatus::Review {
+    if task.status != TaskStatus::Review && task.status != TaskStatus::Running {
         return JsonRpcResponse::err(
             id,
             -32602,
             format!(
-                "Task {} is '{}', not 'review'. Only review-status tasks can be wrapped up.",
+                "Task {} is '{}', not 'review' or 'running'. Only review/running tasks can be wrapped up.",
                 parsed.task_id,
                 task.status.as_str()
             ),

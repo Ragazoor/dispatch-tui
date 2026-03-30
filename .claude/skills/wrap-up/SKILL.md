@@ -21,26 +21,16 @@ Extract the leading integer from the `{id}-{slug}` pattern (e.g. `42-fix-login-b
 If the branch does not match the `{id}-{slug}` pattern, stop and tell the user:
 > "This branch doesn't follow the dispatch naming convention (`{id}-{slug}`). Cannot determine task ID."
 
-## Step 2: Verify working tree is clean
+## Step 2: Commit uncommitted changes
 
 Run:
 ```bash
 git status --porcelain
 ```
 
-If the output is non-empty (untracked files, uncommitted changes, or staged but uncommitted work), stop and tell the user:
-> "There are uncommitted changes in the working tree. Please commit or stash all work before wrapping up."
+If there are modified or untracked files, commit them before proceeding. Use a `/commit` skill if available, otherwise create a commit directly.
 
-Show the `git status` output so they can see what needs attention.
-
-## Step 3: Verify task status via MCP
-
-Call the `dispatch` MCP tool `get_task` with `task_id` set to the integer from Step 1.
-
-If the task is not in `review` status, stop and tell the user:
-> "Task #{id} is in status '{status}', not 'review'. Move the task to review before wrapping up."
-
-## Step 4: Ask the user to choose
+## Step 3: Ask the user to choose
 
 Present:
 
@@ -51,7 +41,7 @@ Present:
 
 Wait for the user's response. If they cancel or say no, exit without calling any tool.
 
-## Step 5: Execute the chosen action
+## Step 4: Execute the chosen action
 
 ### If rebase:
 

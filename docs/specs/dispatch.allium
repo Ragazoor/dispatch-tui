@@ -301,7 +301,7 @@ rule PrMerged {
 rule WrapUpRebase {
     when: WrapUp(task, rebase)
 
-    requires: task.status = review
+    requires: task.status in [review, running]
     requires: task.worktree != null
 
     let branch = task.worktree.branch
@@ -324,7 +324,7 @@ rule WrapUpRebase {
 rule WrapUpPr {
     when: WrapUp(task, pr)
 
-    requires: task.status = review
+    requires: task.status in [review, running]
     requires: task.worktree != null
 
     ensures: task.pr_url != null
@@ -781,6 +781,9 @@ rule DeleteEpic {
     -- must not trigger automatic status transitions. They are management
     -- operations, not implementation work. The PreToolUse hook filters
     -- them out to prevent clobbering review status during wrap-up.
+    -- However, non-MCP tools (Bash, Read, etc.) still fire PreToolUse
+    -- and can set a review task to running. The wrap_up MCP handler
+    -- therefore accepts both review and running status.
 
 @invariant EpicDerivedStatus
     -- Epic kanban status is derived from subtask statuses, never stored.
