@@ -580,8 +580,8 @@ impl App {
     fn handle_refresh_tasks(&mut self, new_tasks: Vec<Task>) -> Vec<Command> {
         let mut cmds = Vec::new();
 
-        if self.notifications_enabled {
-            for new_task in &new_tasks {
+        for new_task in &new_tasks {
+            if self.notifications_enabled {
                 // Extract old state before any mutable borrows
                 let old_task = self.find_task(new_task.id);
                 let was_needs_input = old_task.is_some_and(|t| t.needs_input);
@@ -610,14 +610,16 @@ impl App {
                         urgent: false,
                     });
                 }
+            }
 
-                // Clear notified state when task leaves the triggering state
-                if new_task.status != TaskStatus::Review {
-                    self.agents.notified_review.remove(&new_task.id);
-                }
-                if !new_task.needs_input {
-                    self.agents.notified_needs_input.remove(&new_task.id);
-                }
+            // Always clear notified state when task leaves the triggering state,
+            // even when notifications are disabled. This prevents stale entries from
+            // suppressing notifications after re-enabling.
+            if new_task.status != TaskStatus::Review {
+                self.agents.notified_review.remove(&new_task.id);
+            }
+            if !new_task.needs_input {
+                self.agents.notified_needs_input.remove(&new_task.id);
             }
         }
 

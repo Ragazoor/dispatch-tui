@@ -435,9 +435,9 @@ impl TuiRuntime {
         }
     }
 
-    fn exec_persist_setting(&self, key: &str, value: bool) {
+    fn exec_persist_setting(&self, app: &mut App, key: &str, value: bool) {
         if let Err(e) = self.database.set_setting_bool(key, value) {
-            tracing::warn!("Failed to persist setting {key}: {e}");
+            app.update(Message::Error(Self::db_error("persisting setting", e)));
         }
     }
 
@@ -779,7 +779,7 @@ async fn execute_commands(
             Command::SendNotification { title, body, urgent } =>
                 rt.exec_send_notification(&title, &body, urgent),
             Command::PersistSetting { key, value } =>
-                rt.exec_persist_setting(&key, value),
+                rt.exec_persist_setting(app, &key, value),
         }
     }
 
@@ -1307,8 +1307,8 @@ mod tests {
 
     #[test]
     fn exec_persist_setting_writes_to_db() {
-        let (rt, _app) = test_runtime();
-        rt.exec_persist_setting("notifications_enabled", true);
+        let (rt, mut app) = test_runtime();
+        rt.exec_persist_setting(&mut app, "notifications_enabled", true);
         assert_eq!(
             rt.database.get_setting_bool("notifications_enabled").unwrap(),
             Some(true)

@@ -4142,6 +4142,35 @@ fn refresh_tasks_clears_notified_when_task_leaves_review() {
 }
 
 #[test]
+fn refresh_tasks_clears_notified_state_even_when_disabled() {
+    let mut app = make_app();
+
+    // Task transitions to review while notifications enabled — gets notified
+    let mut updated = app.tasks().to_vec();
+    updated[3].status = TaskStatus::Review;
+    let cmds = app.update(Message::RefreshTasks(updated));
+    assert_eq!(cmds.iter().filter(|c| matches!(c, Command::SendNotification { .. })).count(), 1);
+
+    // Disable notifications
+    app.update(Message::ToggleNotifications);
+
+    // Task leaves review while disabled
+    let mut updated2 = app.tasks().to_vec();
+    updated2[3].status = TaskStatus::Done;
+    app.update(Message::RefreshTasks(updated2));
+
+    // Re-enable notifications
+    app.update(Message::ToggleNotifications);
+
+    // Task returns to review — should re-notify because notified state was cleared
+    let mut updated3 = app.tasks().to_vec();
+    updated3[3].status = TaskStatus::Review;
+    let cmds = app.update(Message::RefreshTasks(updated3));
+    let notif_cmds: Vec<_> = cmds.iter().filter(|c| matches!(c, Command::SendNotification { .. })).collect();
+    assert_eq!(notif_cmds.len(), 1, "Should re-notify after notified state was cleared while disabled");
+}
+
+#[test]
 fn summary_row_shows_bell_when_notifications_enabled() {
     let mut app = make_app(); // notifications_enabled defaults to true
     let buf = render_to_buffer(&mut app, 100, 20);
