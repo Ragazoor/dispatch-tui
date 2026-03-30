@@ -205,6 +205,9 @@ pub(super) fn handle_get_task(state: &McpState, id: Option<Value>, args: Value) 
             if task.needs_input {
                 text.push_str("\nNeeds input: yes");
             }
+            if let Some(ref plan) = task.plan {
+                text.push_str(&format!("\nPlan: {plan}"));
+            }
             JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
         }
         Ok(None) => JsonRpcResponse::err(id, -32602, format!("Task {} not found", parsed.task_id)),
@@ -282,9 +285,10 @@ pub(super) fn handle_list_tasks(state: &McpState, id: Option<Value>, args: Value
             } else {
                 t.description.clone()
             };
+            let plan_indicator = if t.plan.is_some() { " [plan]" } else { "" };
             format!(
-                "- [{}] {} ({}): {}",
-                t.id, t.title, t.status.as_str(), desc_preview
+                "- [{}] {} ({}){}: {}",
+                t.id, t.title, t.status.as_str(), plan_indicator, desc_preview
             )
         })
         .collect();
