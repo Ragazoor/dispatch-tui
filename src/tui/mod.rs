@@ -802,7 +802,7 @@ impl App {
         for id in ids {
             cmds.extend(self.handle_move_task(id, direction.clone()));
         }
-        // Selection persists so user can press m repeatedly
+        self.selected_tasks.clear();
         cmds
     }
 
