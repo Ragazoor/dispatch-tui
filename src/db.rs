@@ -397,7 +397,7 @@ impl Database {
         if current_version < 10 {
             conn.execute_batch(
                 "CREATE TABLE IF NOT EXISTS task_usage (
-                    task_id            INTEGER PRIMARY KEY REFERENCES tasks(id),
+                    task_id            INTEGER PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
                     cost_usd           REAL    NOT NULL DEFAULT 0.0,
                     input_tokens       INTEGER NOT NULL DEFAULT 0,
                     output_tokens      INTEGER NOT NULL DEFAULT 0,
@@ -872,8 +872,8 @@ impl TaskStore for Database {
             let (task_id, cost_usd, input, output, cr, cw, updated_at_str) =
                 row.context("Failed to read usage row")?;
             let updated_at = NaiveDateTime::parse_from_str(&updated_at_str, "%Y-%m-%d %H:%M:%S")
-                .map(|ndt| Utc.from_utc_datetime(&ndt))
-                .unwrap_or_else(|_| Utc::now());
+                .with_context(|| format!("Invalid updated_at in task_usage: {updated_at_str:?}"))?
+                .and_utc();
             out.push(TaskUsage {
                 task_id: TaskId(task_id),
                 cost_usd,
