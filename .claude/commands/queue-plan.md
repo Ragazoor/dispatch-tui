@@ -1,9 +1,9 @@
 ---
-description: Queue a plan file as a Ready task in the task orchestrator kanban board
+description: Queue a plan file as a Ready task in the Dispatch kanban board
 allowed-tools: Bash, Glob, Read
 ---
 
-Queue a plan as a task in the task orchestrator.
+Queue a plan as a task in Dispatch.
 
 ## Instructions
 
@@ -14,7 +14,7 @@ Queue a plan as a task in the task orchestrator.
 
 2. **Run the CLI to create the task:**
    ```
-   task-orchestrator create --from-plan <absolute-path> --repo-path <current-working-directory>
+   dispatch create --from-plan <absolute-path> --repo-path <current-working-directory>
    ```
 
 3. **Report the result to the user.** Show the task ID and title from the CLI output.

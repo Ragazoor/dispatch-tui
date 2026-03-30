@@ -1,11 +1,11 @@
 ---
 name: brainstorm-features
-description: This skill should be used when the user asks to "brainstorm features", "brainstorm new features", "generate feature ideas", "what features should we add", "suggest improvements", "what should we build next", "feature backlog ideas", "ideate on features", or wants to explore UX, DevX, or UI improvements for the task orchestrator TUI.
+description: This skill should be used when the user asks to "brainstorm features", "brainstorm new features", "generate feature ideas", "what features should we add", "suggest improvements", "what should we build next", "feature backlog ideas", "ideate on features", or wants to explore UX, DevX, or UI improvements for the Dispatch TUI.
 ---
 
 # Brainstorm Features
 
-Generate feature ideas for the task orchestrator TUI by exploring the codebase from three perspectives — UX, DevX, and UI — then iterate on user-selected favorites and create backlog tasks.
+Generate feature ideas for the Dispatch TUI by exploring the codebase from three perspectives — UX, DevX, and UI — then iterate on user-selected favorites and create backlog tasks.
 
 ## Workflow
 
@@ -34,7 +34,7 @@ Use the Agent tool to spawn 3 agents in a single message (parallel execution). E
 
 #### UX Agent
 ```
-Brainstorm UX feature ideas for the task orchestrator TUI.
+Brainstorm UX feature ideas for the Dispatch TUI.
 
 Read CLAUDE.md and TODOS.md for project context, then explore these files:
 - src/tui/input.rs (keyboard handling, keybindings)
@@ -55,7 +55,7 @@ Research only — do not write code or modify files.
 
 #### DevX Agent
 ```
-Brainstorm DevX feature ideas for the task orchestrator TUI.
+Brainstorm DevX feature ideas for the Dispatch TUI.
 
 Read CLAUDE.md and TODOS.md for project context, then explore these files:
 - src/dispatch.rs (agent dispatch, worktree creation, tmux)
@@ -78,7 +78,7 @@ Research only — do not write code or modify files.
 
 #### UI Agent
 ```
-Brainstorm UI feature ideas for the task orchestrator TUI.
+Brainstorm UI feature ideas for the Dispatch TUI.
 
 Read CLAUDE.md and TODOS.md for project context, then explore these files:
 - src/tui/ui.rs (Ratatui rendering, columns, detail panel, status bar)
@@ -111,7 +111,7 @@ For each idea the user selected, write a concise task description (title + 2-3 s
 For each approved idea, create a task in the backlog:
 
 **Primary — MCP `create_task`:**
-Use the `task-orchestrator` MCP server tool `create_task` with:
+Use the `dispatch` MCP server tool `create_task` with:
 - `title`: the feature title
 - `description`: the refined description from Step 4
 - `repo_path`: the current working directory (resolve to the main repo root, not a worktree)
@@ -119,7 +119,7 @@ Use the `task-orchestrator` MCP server tool `create_task` with:
 **Fallback — CLI:**
 If MCP is unavailable, run:
 ```bash
-task-orchestrator create "<title>" "<description>" --repo-path <repo-root>
+dispatch create "<title>" "<description>" --repo-path <repo-root>
 ```
 
 Report the created task IDs to the user.

@@ -1,4 +1,4 @@
-# Task Orchestrator TUI — Project Context
+# Dispatch — Project Context
 
 This reference provides pointers to project files and stable domain context for brainstorming features.
 
@@ -56,6 +56,6 @@ Runs on `localhost:3142` alongside the TUI. Tools: `update_task`, `add_note`, `g
 ### Task Creation
 Tasks can be created via:
 1. TUI inline form (`n` key)
-2. CLI: `task-orchestrator create "<title>" "<description>" --repo-path <path>`
-3. CLI from plan: `task-orchestrator create --from-plan <path> --repo-path <path>`
+2. CLI: `dispatch create "<title>" "<description>" --repo-path <path>`
+3. CLI from plan: `dispatch create --from-plan <path> --repo-path <path>`
 4. MCP: `create_task` tool with title, description, repo_path fields
