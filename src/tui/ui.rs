@@ -7,6 +7,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
 
+use crate::dispatch;
 use crate::models::{Epic, ReviewDecision, ReviewPr, Task, TaskStatus, TaskUsage, Staleness, format_age};
 use super::{App, ColumnItem, InputMode, ViewMode};
 
@@ -65,6 +66,15 @@ fn status_icon(status: TaskStatus) -> &'static str {
         TaskStatus::Review => "◎",
         TaskStatus::Done => "✓",
         TaskStatus::Archived => "◦",
+    }
+}
+
+fn truncate_for_detail(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let truncated: String = s.chars().take(max.saturating_sub(3)).collect();
+        format!("{truncated}...")
     }
 }
 
@@ -658,6 +668,7 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect, _now: DateTime<Utc>) 
         }
         lines
     } else if let Some(ColumnItem::Epic(epic)) = app.selected_column_item() {
+        let epic_id = epic.id;
         let line1 = Line::from(vec![
             Span::styled(
                 epic.title.clone(),
@@ -679,6 +690,53 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect, _now: DateTime<Utc>) 
                 Style::default().fg(MUTED),
             )));
         }
+
+        // Subtask status list
+        let mut subtasks: Vec<&Task> = app.tasks()
+            .iter()
+            .filter(|t| t.epic_id == Some(epic_id) && t.status != TaskStatus::Archived)
+            .collect();
+        subtasks.sort_by_key(|t| (t.status.column_index(), t.sort_order.unwrap_or(i64::from(t.id.0))));
+
+        if !subtasks.is_empty() {
+            lines.push(Line::from(""));
+            for task in &subtasks {
+                let icon = status_icon(task.status);
+                let icon_color = column_color(task.status);
+                let mut spans = vec![
+                    Span::styled(
+                        format!("  {icon} "),
+                        Style::default().fg(icon_color),
+                    ),
+                    Span::styled(
+                        truncate_for_detail(&task.title, 40),
+                        Style::default().fg(Color::Rgb(180, 184, 200)),
+                    ),
+                ];
+                if let Some(wt) = &task.worktree {
+                    if let Some(branch) = dispatch::branch_from_worktree(wt) {
+                        spans.push(Span::styled(
+                            format!(" ({branch})"),
+                            Style::default().fg(Color::Rgb(86, 95, 137)),
+                        ));
+                    }
+                }
+                if app.rebase_conflict_tasks().contains(&task.id) {
+                    spans.push(Span::styled(
+                        " \u{26a0} conflict",
+                        Style::default().fg(Color::Red),
+                    ));
+                }
+                if let Some(pr_url) = &task.pr_url {
+                    spans.push(Span::styled(
+                        format!(" \u{00b7} PR: {}", truncate_for_detail(pr_url, 30)),
+                        Style::default().fg(Color::Cyan),
+                    ));
+                }
+                lines.push(Line::from(spans));
+            }
+        }
+
         lines
     } else {
         vec![Line::from(Span::styled(
