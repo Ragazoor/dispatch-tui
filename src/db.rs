@@ -200,6 +200,19 @@ pub trait TaskStore: Send + Sync {
     fn set_setting_bool(&self, key: &str, value: bool) -> Result<()>;
     fn get_setting_string(&self, key: &str) -> Result<Option<String>>;
     fn set_setting_string(&self, key: &str, value: &str) -> Result<()>;
+
+    // Usage tracking
+    fn report_usage(
+        &self,
+        task_id: TaskId,
+        cost_usd: f64,
+        input: i64,
+        output: i64,
+        cache_read: i64,
+        cache_write: i64,
+    ) -> Result<()>;
+
+    fn get_all_usage(&self) -> Result<Vec<crate::models::TaskUsage>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -379,6 +392,23 @@ impl Database {
             let _ = conn.execute_batch("ALTER TABLE epics ADD COLUMN sort_order INTEGER");
             conn.pragma_update(None, "user_version", 9i64)
                 .context("Failed to update schema version to 9")?;
+        }
+
+        if current_version < 10 {
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS task_usage (
+                    task_id            INTEGER PRIMARY KEY REFERENCES tasks(id),
+                    cost_usd           REAL    NOT NULL DEFAULT 0.0,
+                    input_tokens       INTEGER NOT NULL DEFAULT 0,
+                    output_tokens      INTEGER NOT NULL DEFAULT 0,
+                    cache_read_tokens  INTEGER NOT NULL DEFAULT 0,
+                    cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+                    updated_at         TEXT    NOT NULL DEFAULT (datetime('now'))
+                )",
+            )
+            .context("Failed to create task_usage table")?;
+            conn.pragma_update(None, "user_version", 10i64)
+                .context("Failed to update schema version to 10")?;
         }
 
         Ok(())
@@ -786,6 +816,76 @@ impl TaskStore for Database {
         )?;
         Ok(())
     }
+
+    fn report_usage(
+        &self,
+        task_id: TaskId,
+        cost_usd: f64,
+        input: i64,
+        output: i64,
+        cache_read: i64,
+        cache_write: i64,
+    ) -> Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "INSERT INTO task_usage
+                 (task_id, cost_usd, input_tokens, output_tokens,
+                  cache_read_tokens, cache_write_tokens, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))
+             ON CONFLICT(task_id) DO UPDATE SET
+                 cost_usd           = cost_usd           + excluded.cost_usd,
+                 input_tokens       = input_tokens       + excluded.input_tokens,
+                 output_tokens      = output_tokens      + excluded.output_tokens,
+                 cache_read_tokens  = cache_read_tokens  + excluded.cache_read_tokens,
+                 cache_write_tokens = cache_write_tokens + excluded.cache_write_tokens,
+                 updated_at         = excluded.updated_at",
+            params![task_id.0, cost_usd, input, output, cache_read, cache_write],
+        )
+        .context("Failed to upsert task_usage")?;
+        Ok(())
+    }
+
+    fn get_all_usage(&self) -> Result<Vec<crate::models::TaskUsage>> {
+        use crate::models::TaskUsage;
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT task_id, cost_usd, input_tokens, output_tokens,
+                    cache_read_tokens, cache_write_tokens, updated_at
+             FROM task_usage",
+        )
+        .context("Failed to prepare get_all_usage")?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, f64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, String>(6)?,
+                ))
+            })
+            .context("Failed to query task_usage")?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (task_id, cost_usd, input, output, cr, cw, updated_at_str) =
+                row.context("Failed to read usage row")?;
+            let updated_at = NaiveDateTime::parse_from_str(&updated_at_str, "%Y-%m-%d %H:%M:%S")
+                .map(|ndt| Utc.from_utc_datetime(&ndt))
+                .unwrap_or_else(|_| Utc::now());
+            out.push(TaskUsage {
+                task_id: TaskId(task_id),
+                cost_usd,
+                input_tokens: input,
+                output_tokens: output,
+                cache_read_tokens: cr,
+                cache_write_tokens: cw,
+                updated_at,
+            });
+        }
+        Ok(out)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1002,7 +1102,7 @@ mod tests {
         let db = in_memory_db();
         let conn = db.conn.lock().unwrap();
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 9, "fresh DB should be at schema version 9");
+        assert_eq!(version, 10, "fresh DB should be at schema version 10");
     }
 
     #[test]
@@ -1053,7 +1153,7 @@ mod tests {
 
         // Version should be latest
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 9);
+        assert_eq!(version, 10);
 
         // Verify Migration 1 added the plan column
         let has_plan: bool = conn
@@ -1116,7 +1216,7 @@ mod tests {
         assert_eq!(status, "backlog");
 
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 9);
+        assert_eq!(version, 10);
     }
 
     #[test]
@@ -1520,5 +1620,42 @@ mod tests {
         db.patch_task(id, &TaskPatch::new().sort_order(None)).unwrap();
         let task = db.get_task(id).unwrap().unwrap();
         assert_eq!(task.sort_order, None);
+    }
+
+    #[test]
+    fn report_usage_first_insert() {
+        let db = Database::open_in_memory().unwrap();
+        let id = db.create_task("T", "D", "/r", None, TaskStatus::Backlog).unwrap();
+        db.report_usage(id, 0.42, 10_000, 2_000, 0, 0).unwrap();
+        let all = db.get_all_usage().unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].task_id, id);
+        assert!((all[0].cost_usd - 0.42).abs() < 1e-9);
+        assert_eq!(all[0].input_tokens, 10_000);
+        assert_eq!(all[0].output_tokens, 2_000);
+        assert_eq!(all[0].cache_read_tokens, 0);
+        assert_eq!(all[0].cache_write_tokens, 0);
+    }
+
+    #[test]
+    fn report_usage_accumulates() {
+        let db = Database::open_in_memory().unwrap();
+        let id = db.create_task("T", "D", "/r", None, TaskStatus::Backlog).unwrap();
+        db.report_usage(id, 0.10, 1_000, 500, 100, 50).unwrap();
+        db.report_usage(id, 0.05, 500, 250, 50, 25).unwrap();
+        let all = db.get_all_usage().unwrap();
+        assert_eq!(all.len(), 1);
+        let u = &all[0];
+        assert!((u.cost_usd - 0.15).abs() < 1e-9);
+        assert_eq!(u.input_tokens, 1_500);
+        assert_eq!(u.output_tokens, 750);
+        assert_eq!(u.cache_read_tokens, 150);
+        assert_eq!(u.cache_write_tokens, 75);
+    }
+
+    #[test]
+    fn get_all_usage_empty() {
+        let db = Database::open_in_memory().unwrap();
+        assert!(db.get_all_usage().unwrap().is_empty());
     }
 }

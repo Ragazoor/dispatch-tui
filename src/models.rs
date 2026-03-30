@@ -298,6 +298,21 @@ pub struct ResumeResult {
 }
 
 // ---------------------------------------------------------------------------
+// TaskUsage
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct TaskUsage {
+    pub task_id: TaskId,
+    pub cost_usd: f64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+    pub updated_at: DateTime<Utc>,
+}
+
+// ---------------------------------------------------------------------------
 // slugify
 // ---------------------------------------------------------------------------
 
