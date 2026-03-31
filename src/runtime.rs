@@ -1188,14 +1188,12 @@ mod tests {
         rt.exec_capture_tmux(TaskId(1), "test-window".to_string());
 
         let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
-        match msg {
-            Message::TmuxOutput { id, output, activity_ts } => {
-                assert_eq!(id, TaskId(1));
-                assert!(output.contains("Hello from tmux"));
-                assert_eq!(activity_ts, 1711700000);
-            }
-            other => panic!("Expected TmuxOutput, got: {other:?}"),
-        }
+        let Message::TmuxOutput { id, output, activity_ts } = msg else {
+            panic!("Expected TmuxOutput, got: {msg:?}");
+        };
+        assert_eq!(id, TaskId(1));
+        assert!(output.contains("Hello from tmux"));
+        assert_eq!(activity_ts, 1711700000);
     }
 
     #[tokio::test]
@@ -1357,17 +1355,11 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        match msg {
-            Message::FinishFailed {
-                id: tid,
-                is_conflict,
-                ..
-            } => {
-                assert_eq!(tid, id);
-                assert!(is_conflict, "Expected is_conflict=true");
-            }
-            other => panic!("Expected FinishFailed, got: {other:?}"),
-        }
+        let Message::FinishFailed { id: tid, is_conflict, .. } = msg else {
+            panic!("Expected FinishFailed, got: {msg:?}");
+        };
+        assert_eq!(tid, id);
+        assert!(is_conflict, "Expected is_conflict=true");
     }
 
     #[tokio::test]
@@ -1430,17 +1422,11 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        match msg {
-            Message::FinishFailed {
-                id: tid,
-                is_conflict,
-                ..
-            } => {
-                assert_eq!(tid, id);
-                assert!(!is_conflict, "Expected is_conflict=false for not-on-main");
-            }
-            other => panic!("Expected FinishFailed, got: {other:?}"),
-        }
+        let Message::FinishFailed { id: tid, is_conflict, .. } = msg else {
+            panic!("Expected FinishFailed, got: {msg:?}");
+        };
+        assert_eq!(tid, id);
+        assert!(!is_conflict, "Expected is_conflict=false for not-on-main");
     }
 
     #[test]
