@@ -48,7 +48,7 @@ pub(super) struct UpdateEpicArgs {
 // ---------------------------------------------------------------------------
 
 pub(super) fn handle_create_epic(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {
-    let parsed = match parse_args::<CreateEpicArgs>(id.clone(), args) {
+    let parsed = match parse_args::<CreateEpicArgs>(&id, args) {
         Ok(a) => a,
         Err(resp) => return resp,
     };
@@ -70,7 +70,7 @@ pub(super) fn handle_create_epic(state: &McpState, id: Option<Value>, args: Valu
 }
 
 pub(super) fn handle_get_epic(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {
-    let parsed = match parse_args::<GetEpicArgs>(id.clone(), args) {
+    let parsed = match parse_args::<GetEpicArgs>(&id, args) {
         Ok(a) => a,
         Err(resp) => return resp,
     };
@@ -130,7 +130,7 @@ pub(super) fn handle_list_epics(state: &McpState, id: Option<Value>, _args: Valu
 }
 
 pub(super) fn handle_update_epic(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {
-    let parsed = match parse_args::<UpdateEpicArgs>(id.clone(), args) {
+    let parsed = match parse_args::<UpdateEpicArgs>(&id, args) {
         Ok(a) => a,
         Err(resp) => return resp,
     };

@@ -162,7 +162,7 @@ fn format_task_line(t: &Task) -> String {
 // ---------------------------------------------------------------------------
 
 pub(super) fn handle_update_task(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {
-    let parsed = match parse_args::<UpdateTaskArgs>(id.clone(), args) {
+    let parsed = match parse_args::<UpdateTaskArgs>(&id, args) {
         Ok(a) => a,
         Err(resp) => return resp,
     };
@@ -259,7 +259,7 @@ pub(super) fn handle_update_task(state: &McpState, id: Option<Value>, args: Valu
 }
 
 pub(super) fn handle_create_task(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {
-    let parsed = match parse_args::<CreateTaskWithEpicArgs>(id.clone(), args) {
+    let parsed = match parse_args::<CreateTaskWithEpicArgs>(&id, args) {
         Ok(a) => a,
         Err(resp) => return resp,
     };
@@ -303,7 +303,7 @@ pub(super) fn handle_create_task(state: &McpState, id: Option<Value>, args: Valu
 }
 
 pub(super) fn handle_get_task(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {
-    let parsed = match parse_args::<GetTaskArgs>(id.clone(), args) {
+    let parsed = match parse_args::<GetTaskArgs>(&id, args) {
         Ok(a) => a,
         Err(resp) => return resp,
     };
@@ -319,7 +319,7 @@ pub(super) fn handle_get_task(state: &McpState, id: Option<Value>, args: Value) 
 }
 
 pub(super) fn handle_list_tasks(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {
-    let parsed = match parse_args::<ListTasksArgs>(id.clone(), args) {
+    let parsed = match parse_args::<ListTasksArgs>(&id, args) {
         Ok(a) => a,
         Err(resp) => return resp,
     };
@@ -385,7 +385,7 @@ pub(super) fn handle_list_tasks(state: &McpState, id: Option<Value>, args: Value
 }
 
 pub(super) fn handle_claim_task(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {
-    let parsed = match parse_args::<ClaimTaskArgs>(id.clone(), args) {
+    let parsed = match parse_args::<ClaimTaskArgs>(&id, args) {
         Ok(a) => a,
         Err(resp) => return resp,
     };
@@ -448,7 +448,7 @@ pub(super) fn handle_claim_task(state: &McpState, id: Option<Value>, args: Value
 }
 
 pub(super) async fn handle_wrap_up(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {
-    let parsed = match parse_args::<WrapUpArgs>(id.clone(), args) {
+    let parsed = match parse_args::<WrapUpArgs>(&id, args) {
         Ok(a) => a,
         Err(resp) => return resp,
     };
@@ -695,7 +695,7 @@ fn auto_dispatch_next(
 }
 
 pub(super) fn handle_report_usage(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {
-    let parsed = match parse_args::<ReportUsageArgs>(id.clone(), args) {
+    let parsed = match parse_args::<ReportUsageArgs>(&id, args) {
         Ok(a) => a,
         Err(resp) => return resp,
     };

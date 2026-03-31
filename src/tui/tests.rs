@@ -5733,3 +5733,463 @@ fn epic_wrap_up_pr_mode_advances_on_pr_created() {
     assert_eq!(queue.current, Some(TaskId(1)));
     assert!(cmds.iter().any(|c| matches!(c, Command::CreatePr { id, .. } if *id == TaskId(1))));
 }
+
+// =====================================================================
+// Input handler tests (tui/input.rs)
+// =====================================================================
+
+#[test]
+fn handle_key_dismisses_error_popup() {
+    let mut app = make_app();
+    app.error_popup = Some("something went wrong".to_string());
+    let cmds = app.handle_key(make_key(KeyCode::Char('q')));
+    assert!(app.error_popup.is_none());
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn handle_key_normal_navigation() {
+    let mut app = make_app();
+    // Start at column 0, row 0
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 0);
+
+    // 'l' moves right
+    app.handle_key(make_key(KeyCode::Char('l')));
+    assert_eq!(app.selection().column(), 1);
+
+    // 'h' moves left
+    app.handle_key(make_key(KeyCode::Char('h')));
+    assert_eq!(app.selection().column(), 0);
+
+    // 'j' moves down
+    app.handle_key(make_key(KeyCode::Char('j')));
+    assert_eq!(app.selection().row(0), 1);
+
+    // 'k' moves up
+    app.handle_key(make_key(KeyCode::Char('k')));
+    assert_eq!(app.selection().row(0), 0);
+}
+
+#[test]
+fn handle_key_normal_quit() {
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Char('q')));
+    assert!(app.should_quit);
+}
+
+#[test]
+fn handle_key_normal_new_task() {
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Char('n')));
+    assert_eq!(*app.mode(), InputMode::InputTitle);
+}
+
+#[test]
+fn handle_key_normal_new_epic() {
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Char('E')));
+    assert_eq!(*app.mode(), InputMode::InputEpicTitle);
+}
+
+#[test]
+fn handle_key_normal_toggle_help() {
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Char('?')));
+    assert_eq!(*app.mode(), InputMode::Help);
+}
+
+#[test]
+fn handle_key_help_dismiss() {
+    let mut app = make_app();
+    app.input.mode = InputMode::Help;
+
+    // '?' toggles help off
+    app.handle_key(make_key(KeyCode::Char('?')));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
+fn handle_key_help_esc_dismiss() {
+    let mut app = make_app();
+    app.input.mode = InputMode::Help;
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
+fn handle_key_text_input_char_and_backspace() {
+    let mut app = make_app();
+    // Enter title input mode
+    app.handle_key(make_key(KeyCode::Char('n')));
+    assert_eq!(*app.mode(), InputMode::InputTitle);
+
+    // Type characters
+    app.handle_key(make_key(KeyCode::Char('H')));
+    app.handle_key(make_key(KeyCode::Char('i')));
+    assert_eq!(app.input.buffer, "Hi");
+
+    // Backspace removes last char
+    app.handle_key(make_key(KeyCode::Backspace));
+    assert_eq!(app.input.buffer, "H");
+}
+
+#[test]
+fn handle_key_text_input_esc_cancels() {
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Char('n')));
+    assert_eq!(*app.mode(), InputMode::InputTitle);
+
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
+fn handle_key_text_input_enter_advances_to_description() {
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Char('n')));
+    app.handle_key(make_key(KeyCode::Char('T')));
+    app.handle_key(make_key(KeyCode::Enter));
+    assert_eq!(*app.mode(), InputMode::InputDescription);
+}
+
+#[test]
+fn handle_key_confirm_archive_yes() {
+    let mut app = make_app();
+    // Select task 1 (backlog)
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 0);
+    app.input.mode = InputMode::ConfirmArchive;
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+    assert_eq!(*app.mode(), InputMode::Normal);
+    assert!(cmds.iter().any(|c| matches!(c, Command::PersistTask(t) if t.status == TaskStatus::Archived)));
+}
+
+#[test]
+fn handle_key_confirm_archive_cancel() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmArchive;
+
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
+fn handle_key_confirm_retry_resume() {
+    let mut app = make_app();
+    let mut task = make_task(10, TaskStatus::Running);
+    task.worktree = Some("/repo/.worktrees/10-test".to_string());
+    task.tmux_window = Some("main:10-test".to_string());
+    app.tasks.push(task);
+    app.input.mode = InputMode::ConfirmRetry(TaskId(10));
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
+    // Should produce KillTmuxWindow + Resume
+    assert!(cmds.iter().any(|c| matches!(c, Command::KillTmuxWindow { .. })));
+    assert!(cmds.iter().any(|c| matches!(c, Command::Resume { .. })));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
+fn handle_key_confirm_retry_fresh() {
+    let mut app = make_app();
+    let mut task = make_task(10, TaskStatus::Running);
+    task.worktree = Some("/repo/.worktrees/10-test".to_string());
+    task.tmux_window = Some("main:10-test".to_string());
+    app.tasks.push(task);
+    app.input.mode = InputMode::ConfirmRetry(TaskId(10));
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('f')));
+    // Should produce Cleanup + Dispatch
+    assert!(cmds.iter().any(|c| matches!(c, Command::Cleanup { .. })));
+    assert!(cmds.iter().any(|c| matches!(c, Command::Dispatch { .. })));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
+fn handle_key_confirm_retry_esc_cancels() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmRetry(TaskId(10));
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
+fn handle_key_quick_dispatch_digit_selects() {
+    let mut app = make_app();
+    app.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
+    app.input.mode = InputMode::QuickDispatch;
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('1')));
+    // Should produce a QuickDispatch command
+    assert!(cmds.iter().any(|c| matches!(c, Command::QuickDispatch { .. })));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
+fn handle_key_quick_dispatch_esc_cancels() {
+    let mut app = make_app();
+    app.input.mode = InputMode::QuickDispatch;
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
+fn handle_key_confirm_done_yes() {
+    let mut app = make_app();
+    // Move task 3 (Running) to Review so ConfirmDone makes sense
+    let task_3 = app.tasks.iter_mut().find(|t| t.id == TaskId(3)).unwrap();
+    task_3.status = TaskStatus::Review;
+    app.input.mode = InputMode::ConfirmDone(TaskId(3));
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+    assert_eq!(*app.mode(), InputMode::Normal);
+    assert!(cmds.iter().any(|c| matches!(c, Command::PersistTask(t) if t.id == TaskId(3) && t.status == TaskStatus::Done)));
+}
+
+#[test]
+fn handle_key_confirm_done_cancel() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmDone(TaskId(3));
+    app.handle_key(make_key(KeyCode::Char('n')));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
+fn handle_key_confirm_wrap_up_rebase() {
+    let mut app = make_app();
+    let mut task = make_task(10, TaskStatus::Review);
+    task.worktree = Some("/repo/.worktrees/10-test".to_string());
+    task.tmux_window = Some("main:10-test".to_string());
+    app.tasks.push(task);
+    app.input.mode = InputMode::ConfirmWrapUp(TaskId(10));
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
+    assert!(cmds.iter().any(|c| matches!(c, Command::Finish { id, .. } if *id == TaskId(10))));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
+fn handle_key_confirm_wrap_up_pr() {
+    let mut app = make_app();
+    let mut task = make_task(10, TaskStatus::Review);
+    task.worktree = Some("/repo/.worktrees/10-test".to_string());
+    task.tmux_window = Some("main:10-test".to_string());
+    app.tasks.push(task);
+    app.input.mode = InputMode::ConfirmWrapUp(TaskId(10));
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('p')));
+    assert!(cmds.iter().any(|c| matches!(c, Command::CreatePr { id, .. } if *id == TaskId(10))));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
+fn handle_key_confirm_wrap_up_esc_cancels() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmWrapUp(TaskId(10));
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
+fn handle_key_tag_selects_bug() {
+    let mut app = make_app();
+    // Start new task flow and get to tag input
+    app.input.mode = InputMode::InputTag;
+    app.input.task_draft = Some(TaskDraft {
+        title: "Test".to_string(),
+        description: "desc".to_string(),
+        repo_path: "/repo".to_string(),
+        tag: None,
+    });
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('b')));
+    // Tag submitted should produce InsertTask
+    assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask { .. })));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
+fn handle_key_tag_skip_with_enter() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputTag;
+    app.input.task_draft = Some(TaskDraft {
+        title: "Test".to_string(),
+        description: "desc".to_string(),
+        repo_path: "/repo".to_string(),
+        tag: None,
+    });
+
+    let cmds = app.handle_key(make_key(KeyCode::Enter));
+    assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask { .. })));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
+fn handle_key_tag_esc_cancels() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputTag;
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
+fn handle_key_repo_filter_toggle() {
+    let mut app = make_app();
+    app.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+
+    app.handle_key(make_key(KeyCode::Char('1')));
+    assert!(app.repo_filter.contains("/repo"));
+}
+
+#[test]
+fn handle_key_repo_filter_close_enter() {
+    let mut app = make_app();
+    app.input.mode = InputMode::RepoFilter;
+    app.handle_key(make_key(KeyCode::Enter));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
+fn handle_key_repo_filter_close_esc() {
+    let mut app = make_app();
+    app.input.mode = InputMode::RepoFilter;
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
+fn handle_key_normal_dispatch_backlog_task() {
+    let mut app = make_app();
+    // Select task 1 (backlog)
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 0);
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
+    assert!(cmds.iter().any(|c| matches!(c, Command::Dispatch { .. })));
+}
+
+#[test]
+fn handle_key_normal_dispatch_running_task_with_window_shows_info() {
+    let mut app = make_app();
+    // Select running task (column 1)
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
+    // Give running task a window
+    let task_3 = app.tasks.iter_mut().find(|t| t.id == TaskId(3)).unwrap();
+    task_3.tmux_window = Some("main:task-3".to_string());
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
+    // Should just show status info, no dispatch
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn handle_key_normal_toggle_archive() {
+    let mut app = make_app();
+    assert!(!app.archive.visible);
+    app.handle_key(make_key(KeyCode::Char('H')));
+    assert!(app.archive.visible);
+}
+
+#[test]
+fn handle_key_normal_enter_toggles_detail() {
+    let mut app = make_app();
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 0);
+    assert!(!app.detail_visible);
+    app.handle_key(make_key(KeyCode::Enter));
+    assert!(app.detail_visible);
+    app.handle_key(make_key(KeyCode::Enter));
+    assert!(!app.detail_visible);
+}
+
+#[test]
+fn handle_key_normal_jump_to_tmux() {
+    let mut app = make_app();
+    // Give task 3 (running) a tmux window
+    let task = app.tasks.iter_mut().find(|t| t.id == TaskId(3)).unwrap();
+    task.tmux_window = Some("main:task-3".to_string());
+    // Select running column
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
+    assert!(cmds.iter().any(|c| matches!(c, Command::JumpToTmux { window } if window == "main:task-3")));
+}
+
+#[test]
+fn handle_key_normal_tab_switches_to_review_board() {
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Tab));
+    assert!(matches!(app.view_mode, ViewMode::ReviewBoard { .. }));
+}
+
+#[test]
+fn handle_key_review_board_tab_switches_back() {
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Tab)); // to review board
+    assert!(matches!(app.view_mode, ViewMode::ReviewBoard { .. }));
+    app.handle_key(make_key(KeyCode::Tab)); // back to task board
+    assert!(matches!(app.view_mode, ViewMode::Board(_)));
+}
+
+#[test]
+fn handle_key_epic_text_input_char_and_enter() {
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Char('E'))); // start epic creation
+    assert_eq!(*app.mode(), InputMode::InputEpicTitle);
+
+    app.handle_key(make_key(KeyCode::Char('X')));
+    assert_eq!(app.input.buffer, "X");
+
+    app.handle_key(make_key(KeyCode::Enter));
+    assert_eq!(*app.mode(), InputMode::InputEpicDescription);
+}
+
+#[test]
+fn handle_key_epic_text_input_esc_cancels() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputEpicTitle;
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
+fn handle_key_input_preset_name_enter_saves() {
+    let mut app = make_app();
+    app.repo_paths = vec!["/repo".to_string()];
+    app.input.mode = InputMode::InputPresetName;
+    app.input.buffer = "my-preset".to_string();
+
+    let cmds = app.handle_key(make_key(KeyCode::Enter));
+    assert!(cmds.iter().any(|c| matches!(c, Command::PersistFilterPreset { .. })));
+}
+
+#[test]
+fn handle_key_input_preset_name_esc_cancels() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputPresetName;
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(*app.mode(), InputMode::RepoFilter);
+}
+
+#[test]
+fn handle_key_confirm_delete_preset_selects() {
+    let mut app = make_app();
+    app.filter_presets = vec![("preset-a".to_string(), std::collections::HashSet::new())];
+    app.input.mode = InputMode::ConfirmDeletePreset;
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('A')));
+    assert!(cmds.iter().any(|c| matches!(c, Command::DeleteFilterPreset(_))));
+}
+
+#[test]
+fn handle_key_confirm_delete_preset_esc_cancels() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmDeletePreset;
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(*app.mode(), InputMode::RepoFilter);
+}

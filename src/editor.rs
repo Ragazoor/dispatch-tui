@@ -22,6 +22,36 @@ pub struct EpicEditorFields {
     pub repo_path: String,
 }
 
+/// Parse `--- SECTION ---` delimited text into a map of section name → content.
+fn parse_sections(input: &str) -> std::collections::HashMap<&str, String> {
+    let mut sections = std::collections::HashMap::new();
+    let mut current_section: Option<&str> = None;
+    let mut current_buf = String::new();
+
+    for line in input.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("--- ") && trimmed.ends_with(" ---") {
+            if let Some(name) = current_section {
+                sections.insert(name, current_buf.trim().to_string());
+            }
+            let section = trimmed.trim_start_matches("--- ").trim_end_matches(" ---");
+            current_section = Some(section);
+            current_buf = String::new();
+            continue;
+        }
+        if current_section.is_some() {
+            if !current_buf.is_empty() {
+                current_buf.push('\n');
+            }
+            current_buf.push_str(line);
+        }
+    }
+    if let Some(name) = current_section {
+        sections.insert(name, current_buf.trim().to_string());
+    }
+    sections
+}
+
 pub fn format_epic_for_editor(epic: &Epic) -> String {
     format!(
         "--- TITLE ---\n{}\n--- DESCRIPTION ---\n{}\n--- REPO_PATH ---\n{}\n",
@@ -30,34 +60,11 @@ pub fn format_epic_for_editor(epic: &Epic) -> String {
 }
 
 pub fn parse_epic_editor_output(input: &str) -> EpicEditorFields {
-    let mut current_section: Option<&str> = None;
-    let mut title = String::new();
-    let mut description = String::new();
-    let mut repo_path = String::new();
-
-    for line in input.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("--- ") && trimmed.ends_with(" ---") {
-            let section = trimmed.trim_start_matches("--- ").trim_end_matches(" ---");
-            current_section = Some(section);
-            continue;
-        }
-        let target = match current_section {
-            Some("TITLE") => &mut title,
-            Some("DESCRIPTION") => &mut description,
-            Some("REPO_PATH") => &mut repo_path,
-            _ => continue,
-        };
-        if !target.is_empty() {
-            target.push('\n');
-        }
-        target.push_str(line);
-    }
-
+    let mut s = parse_sections(input);
     EpicEditorFields {
-        title: title.trim().to_string(),
-        description: description.trim().to_string(),
-        repo_path: repo_path.trim().to_string(),
+        title: s.remove("TITLE").unwrap_or_default(),
+        description: s.remove("DESCRIPTION").unwrap_or_default(),
+        repo_path: s.remove("REPO_PATH").unwrap_or_default(),
     }
 }
 
@@ -71,43 +78,14 @@ pub fn format_editor_content(task: &Task) -> String {
 }
 
 pub fn parse_editor_content(input: &str) -> EditorFields {
-    let mut current_section: Option<&str> = None;
-    let mut title = String::new();
-    let mut description = String::new();
-    let mut repo_path = String::new();
-    let mut status = String::new();
-    let mut plan = String::new();
-    let mut tag = String::new();
-
-    for line in input.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("--- ") && trimmed.ends_with(" ---") {
-            let section = trimmed.trim_start_matches("--- ").trim_end_matches(" ---");
-            current_section = Some(section);
-            continue;
-        }
-        let target = match current_section {
-            Some("TITLE") => &mut title,
-            Some("DESCRIPTION") => &mut description,
-            Some("REPO_PATH") => &mut repo_path,
-            Some("STATUS") => &mut status,
-            Some("PLAN") => &mut plan,
-            Some("TAG") => &mut tag,
-            _ => continue,
-        };
-        if !target.is_empty() {
-            target.push('\n');
-        }
-        target.push_str(line);
-    }
-
+    let mut s = parse_sections(input);
     EditorFields {
-        title: title.trim().to_string(),
-        description: description.trim().to_string(),
-        repo_path: repo_path.trim().to_string(),
-        status: status.trim().to_string(),
-        plan: plan.trim().to_string(),
-        tag: tag.trim().to_string(),
+        title: s.remove("TITLE").unwrap_or_default(),
+        description: s.remove("DESCRIPTION").unwrap_or_default(),
+        repo_path: s.remove("REPO_PATH").unwrap_or_default(),
+        status: s.remove("STATUS").unwrap_or_default(),
+        plan: s.remove("PLAN").unwrap_or_default(),
+        tag: s.remove("TAG").unwrap_or_default(),
     }
 }
 

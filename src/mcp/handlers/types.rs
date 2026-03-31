@@ -113,9 +113,9 @@ where
 // ---------------------------------------------------------------------------
 
 pub(super) fn parse_args<T: serde::de::DeserializeOwned>(
-    id: Option<Value>,
+    id: &Option<Value>,
     args: Value,
 ) -> Result<T, JsonRpcResponse> {
     serde_json::from_value(args)
-        .map_err(|e| JsonRpcResponse::err(id, -32602, format!("Invalid arguments: {e}")))
+        .map_err(|e| JsonRpcResponse::err(id.clone(), -32602, format!("Invalid arguments: {e}")))
 }
