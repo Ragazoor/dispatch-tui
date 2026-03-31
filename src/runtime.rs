@@ -98,6 +98,13 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
+    // Set up tmux keybinding: Prefix+g → jump back to this window.
+    // Best-effort: failures don't prevent the TUI from starting.
+    let tmux_runner = runner.clone();
+    let original_window_name = tmux::current_window_name(&*tmux_runner).ok();
+    let _ = tmux::rename_window("", "dispatch", &*tmux_runner);
+    let _ = tmux::bind_key("g", "select-window -t dispatch", &*tmux_runner);
+
     // 5. Create two channels:
     //    - key_rx: raw crossterm KeyEvents from the blocking poll thread
     //    - msg_rx: higher-level Messages (e.g. from dispatch results in Phase 3)
@@ -148,6 +155,12 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
         &runtime,
     )
     .await;
+
+    // Tear down tmux keybinding and restore the original window name.
+    let _ = tmux::unbind_key("g", &*tmux_runner);
+    if let Some(ref name) = original_window_name {
+        let _ = tmux::rename_window("dispatch", name, &*tmux_runner);
+    }
 
     // 8. Cleanup terminal
     disable_raw_mode()?;
