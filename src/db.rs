@@ -214,6 +214,14 @@ pub trait TaskStore: Send + Sync {
     // Review PRs
     fn save_review_prs(&self, prs: &[crate::models::ReviewPr]) -> Result<()>;
     fn load_review_prs(&self) -> Result<Vec<crate::models::ReviewPr>>;
+    /// Patch agent fields on a review PR row (identified by URL).
+    /// Uses double-Option: `None` = leave unchanged, `Some(None)` = set NULL, `Some(Some(s))` = set value.
+    fn patch_review_pr(
+        &self,
+        url: &str,
+        review_notes: Option<Option<&str>>,
+        tmux_window: Option<Option<&str>>,
+    ) -> Result<()>;
 }
 
 // ---------------------------------------------------------------------------
@@ -461,6 +469,16 @@ impl Database {
             .context("Failed to create review_prs table")?;
             conn.pragma_update(None, "user_version", 14i64)
                 .context("Failed to update schema version to 14")?;
+        }
+
+        if current_version < 15 {
+            conn.execute_batch(
+                "ALTER TABLE review_prs ADD COLUMN tmux_window TEXT;
+                 ALTER TABLE review_prs ADD COLUMN review_notes TEXT;",
+            )
+            .context("Failed to add agent columns to review_prs")?;
+            conn.pragma_update(None, "user_version", 15i64)
+                .context("Failed to update schema version to 15")?;
         }
 
         Ok(())
@@ -954,12 +972,25 @@ impl TaskStore for Database {
     fn save_review_prs(&self, prs: &[ReviewPr]) -> Result<()> {
         let conn = self.conn()?;
         let tx = conn.unchecked_transaction()?;
-        tx.execute("DELETE FROM review_prs", [])?;
         {
             let mut stmt = tx.prepare(
                 "INSERT INTO review_prs (repo, number, title, author, url, is_draft,
-                 created_at, updated_at, additions, deletions, review_decision, labels)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                 created_at, updated_at, additions, deletions, review_decision, labels,
+                 tmux_window, review_notes)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                 ON CONFLICT(repo, number) DO UPDATE SET
+                   title           = excluded.title,
+                   author          = excluded.author,
+                   url             = excluded.url,
+                   is_draft        = excluded.is_draft,
+                   created_at      = excluded.created_at,
+                   updated_at      = excluded.updated_at,
+                   additions       = excluded.additions,
+                   deletions       = excluded.deletions,
+                   review_decision = excluded.review_decision,
+                   labels          = excluded.labels,
+                   tmux_window     = COALESCE(review_prs.tmux_window, excluded.tmux_window),
+                   review_notes    = COALESCE(review_prs.review_notes, excluded.review_notes)",
             )?;
             for pr in prs {
                 let labels_json =
@@ -977,6 +1008,8 @@ impl TaskStore for Database {
                     pr.deletions,
                     pr.review_decision.as_db_str(),
                     labels_json,
+                    pr.tmux_window,
+                    pr.review_notes,
                 ])?;
             }
         }
@@ -989,7 +1022,7 @@ impl TaskStore for Database {
         let mut stmt = conn.prepare(
             "SELECT repo, number, title, author, url, is_draft,
                     created_at, updated_at, additions, deletions,
-                    review_decision, labels
+                    review_decision, labels, tmux_window, review_notes
              FROM review_prs",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -1005,6 +1038,8 @@ impl TaskStore for Database {
             let deletions: i64 = row.get(9)?;
             let decision_str: String = row.get(10)?;
             let labels_json: String = row.get(11)?;
+            let tmux_window: Option<String> = row.get(12)?;
+            let review_notes: Option<String> = row.get(13)?;
             Ok((
                 repo,
                 number,
@@ -1018,6 +1053,8 @@ impl TaskStore for Database {
                 deletions,
                 decision_str,
                 labels_json,
+                tmux_window,
+                review_notes,
             ))
         })?;
 
@@ -1036,6 +1073,8 @@ impl TaskStore for Database {
                 deletions,
                 decision_str,
                 labels_json,
+                tmux_window,
+                review_notes,
             ) = row?;
 
             let created_at = DateTime::parse_from_rfc3339(&created_at_str)
@@ -1061,11 +1100,47 @@ impl TaskStore for Database {
                 deletions,
                 review_decision,
                 labels,
-                tmux_window: None,
-                review_notes: None,
+                tmux_window,
+                review_notes,
             });
         }
         Ok(prs)
+    }
+
+    fn patch_review_pr(
+        &self,
+        url: &str,
+        review_notes: Option<Option<&str>>,
+        tmux_window: Option<Option<&str>>,
+    ) -> Result<()> {
+        if review_notes.is_none() && tmux_window.is_none() {
+            return Ok(());
+        }
+        let conn = self.conn()?;
+        let mut parts = Vec::new();
+        if review_notes.is_some() {
+            parts.push("review_notes = ?");
+        }
+        if tmux_window.is_some() {
+            parts.push("tmux_window = ?");
+        }
+        let sql = format!("UPDATE review_prs SET {} WHERE url = ?", parts.join(", "));
+        let mut stmt = conn.prepare(&sql)?;
+
+        // Build params dynamically
+        match (review_notes, tmux_window) {
+            (Some(notes), Some(window)) => {
+                stmt.execute(rusqlite::params![notes, window, url])?;
+            }
+            (Some(notes), None) => {
+                stmt.execute(rusqlite::params![notes, url])?;
+            }
+            (None, Some(window)) => {
+                stmt.execute(rusqlite::params![window, url])?;
+            }
+            (None, None) => unreachable!(),
+        }
+        Ok(())
     }
 }
 
@@ -1283,7 +1358,7 @@ mod tests {
         let db = in_memory_db();
         let conn = db.conn.lock().unwrap();
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 14, "fresh DB should be at schema version 14");
+        assert_eq!(version, 15, "fresh DB should be at schema version 15");
     }
 
     #[test]
@@ -1334,7 +1409,7 @@ mod tests {
 
         // Version should be latest
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 14);
+        assert_eq!(version, 15);
 
         // Verify Migration 1 added the plan column
         let has_plan: bool = conn
@@ -1397,7 +1472,7 @@ mod tests {
         assert_eq!(status, "backlog");
 
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 14);
+        assert_eq!(version, 15);
     }
 
     #[test]
@@ -1950,7 +2025,7 @@ mod tests {
     }
 
     #[test]
-    fn save_review_prs_replaces_all() {
+    fn save_review_prs_upserts() {
         use crate::models::{ReviewDecision, ReviewPr};
         use chrono::Utc;
 
@@ -1975,7 +2050,7 @@ mod tests {
         db.save_review_prs(&[pr1]).unwrap();
         assert_eq!(db.load_review_prs().unwrap().len(), 1);
 
-        // Save new set — old ones should be gone
+        // Save new set — upsert keeps existing rows and adds new ones
         let pr2 = ReviewPr {
             number: 2,
             title: "New PR".to_string(),
@@ -1995,8 +2070,123 @@ mod tests {
         db.save_review_prs(&[pr2]).unwrap();
 
         let loaded = db.load_review_prs().unwrap();
+        assert_eq!(loaded.len(), 2);
+        assert!(loaded.iter().any(|p| p.number == 1));
+        assert!(loaded.iter().any(|p| p.number == 2 && p.repo == "acme/other"));
+    }
+
+    #[test]
+    fn save_review_prs_preserves_agent_fields_on_upsert() {
+        use crate::models::{ReviewDecision, ReviewPr};
+        use chrono::Utc;
+
+        let db = Database::open_in_memory().unwrap();
+
+        let pr = ReviewPr {
+            number: 1,
+            title: "Original".to_string(),
+            author: "alice".to_string(),
+            repo: "acme/app".to_string(),
+            url: "https://github.com/acme/app/pull/1".to_string(),
+            is_draft: false,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            additions: 10,
+            deletions: 2,
+            review_decision: ReviewDecision::ReviewRequired,
+            labels: vec![],
+            tmux_window: Some("review-app-1".to_string()),
+            review_notes: Some("Looks good".to_string()),
+        };
+        db.save_review_prs(&[pr]).unwrap();
+
+        // Simulate a GitHub refresh: same PR, no agent fields
+        let refreshed = ReviewPr {
+            number: 1,
+            title: "Updated title".to_string(),
+            author: "alice".to_string(),
+            repo: "acme/app".to_string(),
+            url: "https://github.com/acme/app/pull/1".to_string(),
+            is_draft: false,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            additions: 10,
+            deletions: 2,
+            review_decision: ReviewDecision::ReviewRequired,
+            labels: vec![],
+            tmux_window: None,
+            review_notes: None,
+        };
+        db.save_review_prs(&[refreshed]).unwrap();
+
+        let loaded = db.load_review_prs().unwrap();
         assert_eq!(loaded.len(), 1);
-        assert_eq!(loaded[0].number, 2);
-        assert_eq!(loaded[0].repo, "acme/other");
+        assert_eq!(loaded[0].title, "Updated title"); // GitHub data updated
+        assert_eq!(loaded[0].tmux_window.as_deref(), Some("review-app-1")); // agent field preserved
+        assert_eq!(loaded[0].review_notes.as_deref(), Some("Looks good")); // notes preserved
+    }
+
+    #[test]
+    fn patch_review_pr_saves_notes_and_clears_window() {
+        use crate::models::{ReviewDecision, ReviewPr};
+        use chrono::Utc;
+
+        let db = Database::open_in_memory().unwrap();
+
+        let pr = ReviewPr {
+            number: 42,
+            title: "T".to_string(),
+            author: "bob".to_string(),
+            repo: "acme/app".to_string(),
+            url: "https://github.com/acme/app/pull/42".to_string(),
+            is_draft: false,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            additions: 5,
+            deletions: 1,
+            review_decision: ReviewDecision::ReviewRequired,
+            labels: vec![],
+            tmux_window: Some("review-app-42".to_string()),
+            review_notes: None,
+        };
+        db.save_review_prs(&[pr]).unwrap();
+
+        db.patch_review_pr("https://github.com/acme/app/pull/42", Some(Some("Great PR")), Some(None::<&str>)).unwrap();
+
+        let loaded = db.load_review_prs().unwrap();
+        assert_eq!(loaded[0].review_notes.as_deref(), Some("Great PR"));
+        assert_eq!(loaded[0].tmux_window, None);
+    }
+
+    #[test]
+    fn patch_review_pr_sets_tmux_window() {
+        use crate::models::{ReviewDecision, ReviewPr};
+        use chrono::Utc;
+
+        let db = Database::open_in_memory().unwrap();
+
+        let pr = ReviewPr {
+            number: 7,
+            title: "T".to_string(),
+            author: "carol".to_string(),
+            repo: "acme/app".to_string(),
+            url: "https://github.com/acme/app/pull/7".to_string(),
+            is_draft: false,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            additions: 0,
+            deletions: 0,
+            review_decision: ReviewDecision::ReviewRequired,
+            labels: vec![],
+            tmux_window: None,
+            review_notes: None,
+        };
+        db.save_review_prs(&[pr]).unwrap();
+
+        db.patch_review_pr("https://github.com/acme/app/pull/7", None::<Option<&str>>, Some(Some("review-app-7"))).unwrap();
+
+        let loaded = db.load_review_prs().unwrap();
+        assert_eq!(loaded[0].tmux_window.as_deref(), Some("review-app-7"));
+        assert_eq!(loaded[0].review_notes, None);
     }
 }
