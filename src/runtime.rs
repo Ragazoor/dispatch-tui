@@ -828,10 +828,7 @@ impl TuiRuntime {
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
         tokio::task::spawn_blocking(move || {
-            match crate::github::fetch_review_prs(
-                &*runner,
-                crate::github::DEFAULT_EXCLUDED_AUTHORS,
-            ) {
+            match crate::github::fetch_review_prs(&*runner) {
                 Ok(prs) => {
                     let _ = tx.send(Message::ReviewPrsLoaded(prs));
                 }

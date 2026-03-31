@@ -2,13 +2,6 @@ use crate::models::{ReviewDecision, ReviewPr};
 use crate::process::ProcessRunner;
 use chrono::{DateTime, Utc};
 
-/// Default authors to exclude (dependency bots).
-pub const DEFAULT_EXCLUDED_AUTHORS: &[&str] = &[
-    "dependabot[bot]",
-    "scala-steward",
-    "renovate[bot]",
-];
-
 /// Determine the effective review decision for a PR node.
 ///
 /// Uses the overall `reviewDecision` for APPROVED and CHANGES_REQUESTED.
@@ -141,22 +134,13 @@ fn parse_review_prs(json: &str) -> Result<Vec<ReviewPr>, String> {
     Ok(prs)
 }
 
-/// Filter out PRs authored by excluded bot accounts.
-fn filter_bots(prs: Vec<ReviewPr>, excluded: &[&str]) -> Vec<ReviewPr> {
-    prs.into_iter()
-        .filter(|pr| !excluded.iter().any(|bot| pr.author == *bot))
-        .collect()
-}
-
 /// Fetch open PRs where the current user is a requested reviewer.
 /// Uses `gh api graphql` via the provided ProcessRunner.
-pub fn fetch_review_prs(
-    runner: &dyn ProcessRunner,
-    excluded_authors: &[&str],
-) -> Result<Vec<ReviewPr>, String> {
+/// Bot authors (dependabot, renovate) are excluded server-side in the search query.
+pub fn fetch_review_prs(runner: &dyn ProcessRunner) -> Result<Vec<ReviewPr>, String> {
     let query = r#"{
   viewer { login }
-  search(query: "is:pr is:open review-requested:@me -is:draft", type: ISSUE, first: 100) {
+  search(query: "is:pr is:open review-requested:@me -is:draft -author:app/dependabot -author:app/renovate", type: ISSUE, first: 100) {
     nodes {
       ... on PullRequest {
         number
@@ -189,8 +173,7 @@ pub fn fetch_review_prs(
     }
 
     let json = String::from_utf8_lossy(&output.stdout);
-    let prs = parse_review_prs(&json)?;
-    Ok(filter_bots(prs, excluded_authors))
+    parse_review_prs(&json)
 }
 
 #[cfg(test)]
@@ -317,30 +300,12 @@ mod tests {
     }
 
     #[test]
-    fn filter_bots_removes_excluded_authors() {
-        let prs = parse_review_prs(SAMPLE_RESPONSE).unwrap();
-        // Draft already filtered, leaves alice + bob; bot filter is N/A here
-        let filtered = filter_bots(prs, DEFAULT_EXCLUDED_AUTHORS);
-        assert_eq!(filtered.len(), 2);
-        assert_eq!(filtered[0].author, "alice");
-        assert_eq!(filtered[1].author, "bob");
-    }
-
-    #[test]
-    fn filter_bots_empty_exclude_list_keeps_all() {
-        let prs = parse_review_prs(SAMPLE_RESPONSE).unwrap();
-        // Draft filtered out in parse, leaves 2
-        let filtered = filter_bots(prs, &[]);
-        assert_eq!(filtered.len(), 2);
-    }
-
-    #[test]
     fn fetch_review_prs_calls_gh_and_parses() {
         let runner = MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(SAMPLE_RESPONSE.as_bytes()),
         ]);
-        let prs = fetch_review_prs(&runner, DEFAULT_EXCLUDED_AUTHORS).unwrap();
-        assert_eq!(prs.len(), 2); // draft + bot filtered out
+        let prs = fetch_review_prs(&runner).unwrap();
+        assert_eq!(prs.len(), 2); // draft filtered out
 
         let calls = runner.recorded_calls();
         assert_eq!(calls.len(), 1);
@@ -353,20 +318,22 @@ mod tests {
         let runner = MockProcessRunner::new(vec![
             MockProcessRunner::fail("gh: not authenticated"),
         ]);
-        let result = fetch_review_prs(&runner, DEFAULT_EXCLUDED_AUTHORS);
+        let result = fetch_review_prs(&runner);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not authenticated"));
     }
 
     #[test]
-    fn fetch_review_prs_query_excludes_drafts() {
+    fn fetch_review_prs_query_excludes_drafts_and_bots() {
         let runner = MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(SAMPLE_RESPONSE.as_bytes()),
         ]);
-        let _ = fetch_review_prs(&runner, DEFAULT_EXCLUDED_AUTHORS);
+        let _ = fetch_review_prs(&runner);
         let calls = runner.recorded_calls();
         let query_arg = calls[0].1.iter().find(|a| a.contains("query=")).unwrap();
         assert!(query_arg.contains("-is:draft"));
+        assert!(query_arg.contains("-author:app/dependabot"));
+        assert!(query_arg.contains("-author:app/renovate"));
     }
 
     // -----------------------------------------------------------------------

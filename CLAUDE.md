@@ -67,7 +67,7 @@ Backlog → Running → Review → Done
 
 ## Review Board
 
-Press `Tab` to switch to the Review Board, which shows GitHub PRs where you are a requested reviewer (excluding bot PRs like Dependabot/Scala Steward). Data is fetched via `gh api graphql` and refreshed every 60 seconds.
+Press `Tab` to switch to the Review Board, which shows GitHub PRs where you are a requested reviewer (excluding Dependabot and Renovate PRs via the GraphQL search query). Data is fetched via `gh api graphql` and refreshed every 60 seconds.
 
 Three columns: **Needs Review** → **Changes Requested** → **Approved**
 
