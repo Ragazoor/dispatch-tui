@@ -1104,10 +1104,10 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::fail("not a git repo"), // detect_default_branch (fallback to "main")
             // git worktree add is skipped (dir pre-created above)
             MockProcessRunner::ok(),  // tmux new-window
             MockProcessRunner::ok(),  // tmux set-hook (after-split-window)
-            MockProcessRunner::fail("not a git repo"), // rebase_preamble: detect_default_branch
             MockProcessRunner::ok(),  // tmux send-keys -l
             MockProcessRunner::ok(),  // tmux send-keys Enter
         ]));
