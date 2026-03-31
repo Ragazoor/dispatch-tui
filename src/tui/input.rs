@@ -230,6 +230,22 @@ impl App {
 
             KeyCode::Char('?') => self.update(Message::ToggleHelp),
 
+            KeyCode::Char('T') => {
+                if !self.selected_tasks.is_empty() {
+                    let ids: Vec<_> = self.selected_tasks.iter().copied().collect();
+                    self.update(Message::BatchDetachTmux(ids))
+                } else if let Some(task) = self.selected_task() {
+                    if task.status == TaskStatus::Review && task.tmux_window.is_some() {
+                        let id = task.id;
+                        self.update(Message::DetachTmux(id))
+                    } else {
+                        vec![]
+                    }
+                } else {
+                    vec![]
+                }
+            }
+
             KeyCode::Esc => {
                 if matches!(self.view_mode, ViewMode::Epic { .. }) {
                     self.update(Message::ExitEpic)
