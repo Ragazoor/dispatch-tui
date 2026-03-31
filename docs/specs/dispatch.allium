@@ -47,7 +47,7 @@ entity Task {
     plan: String?
     epic: Epic?
     pr_url: String?
-    pr_number: Integer?
+    tag: String?
     needs_input: Boolean
     sort_order: Integer?
     created_at: Timestamp
@@ -70,6 +70,8 @@ entity Task {
 
     -- Derived
     has_plan: plan != null
+    is_epic: tag = "epic"
+    pr_number: derived from pr_url     -- extracted at runtime from the URL, not persisted
     is_stale: Boolean                  -- computed from agent output monitoring
     is_crashed: Boolean                -- computed from tmux window liveness
 }
@@ -92,6 +94,13 @@ entity Epic {
 
     -- Derived kanban status (not persisted)
     derived_status: derive_epic_status(this)
+}
+
+entity TaskUsage {
+    task: Task
+    input_tokens: Integer
+    output_tokens: Integer
+    reported_at: Timestamp
 }
 
 ------------------------------------------------------------
@@ -131,7 +140,7 @@ rule CreateTask {
 }
 
 rule CreateQuickTask {
-    when: QuickDispatch(repo_path)
+    when: QuickDispatch(repo_path, epic?)
 
     ensures:
         let task = Task.created(
@@ -139,6 +148,7 @@ rule CreateQuickTask {
             description: "",
             repo_path: repo_path,
             status: backlog,
+            epic: epic,
             needs_input: false,
             created_at: now,
             updated_at: now
@@ -152,8 +162,9 @@ rule DispatchTask {
     when: DispatchTask(task)
 
     requires: task.status = backlog
-    requires: task.has_plan = true
 
+    -- Dispatches in standard mode. Used when the task has a plan,
+    -- or when the task has no plan and tag is not "epic" or "feature".
     ensures: task.status = running
     ensures: task.worktree = Worktree.created(
         path: task.repo_path + "/.worktrees/" + task.id + "-" + slugify(task.title),
@@ -168,6 +179,7 @@ rule BrainstormTask {
 
     requires: task.status = backlog
     requires: task.has_plan = false
+    requires: task.tag = "epic"
 
     ensures: task.status = running
     ensures: task.worktree = Worktree.created(
@@ -176,6 +188,22 @@ rule BrainstormTask {
     )
     ensures: task.tmux_window = TmuxWindow.created(name: "task-" + task.id)
     ensures: AgentLaunched(task: task, mode: brainstorm)
+}
+
+rule PlanTask {
+    when: PlanTask(task)
+
+    requires: task.status = backlog
+    requires: task.has_plan = false
+    requires: task.tag = "feature"
+
+    ensures: task.status = running
+    ensures: task.worktree = Worktree.created(
+        path: task.repo_path + "/.worktrees/" + task.id + "-" + slugify(task.title),
+        branch: task.id + "-" + slugify(task.title)
+    )
+    ensures: task.tmux_window = TmuxWindow.created(name: "task-" + task.id)
+    ensures: AgentLaunched(task: task, mode: plan)
 }
 
 rule ResumeTask {
@@ -257,23 +285,23 @@ rule CreatePr {
     requires: task.worktree != null
 
     ensures: task.pr_url != null
-    ensures: task.pr_number != null
     ensures: task.updated_at = now
 
     @guidance
         -- Pushes the branch to origin and creates a GitHub PR using
-        -- `gh pr create`. The task remains in review.
+        -- `gh pr create`. The task remains in review. pr_number is
+        -- derived from pr_url at runtime.
 }
 
 rule PollPrStatus {
     when: Tick
 
-    for task in Tasks where status = review and pr_number != null:
+    for task in Tasks where status = review and pr_url != null:
 
         ensures: PrMerged(task: task)
 
     @guidance
-        -- Runs during each tick for review tasks with a pr_number.
+        -- Runs during each tick for review tasks with a pr_url.
         -- Polls GitHub every pr_poll_interval (30s) via `gh pr view`
         -- to check merge status. Fires PrMerged when the PR is merged.
 }
@@ -319,6 +347,8 @@ rule WrapUpRebase {
         -- ProcessRunner; the tmux window is killed on completion.
         -- Available from both the TUI (W then r) and MCP (wrap_up
         -- tool with action "rebase").
+        -- When the task belongs to an epic, the next backlog subtask
+        -- is automatically dispatched after wrap-up completes.
 }
 
 rule WrapUpPr {
@@ -328,16 +358,17 @@ rule WrapUpPr {
     requires: task.worktree != null
 
     ensures: task.pr_url != null
-    ensures: task.pr_number != null
     ensures: task.updated_at = now
 
     @guidance
         -- Pushes the branch to origin and creates a GitHub PR using
         -- `gh pr create`. The task remains in review status and PR
         -- status polling (PollPrStatus) takes over from there.
-        -- The operation runs in background via ProcessRunner.
-        -- Available from both the TUI (W then p) and MCP (wrap_up
-        -- tool with action "pr").
+        -- pr_number is derived from pr_url at runtime. The operation
+        -- runs in background via ProcessRunner. Available from both
+        -- the TUI (W then p) and MCP (wrap_up tool with action "pr").
+        -- When the task belongs to an epic, the next backlog subtask
+        -- is automatically dispatched after wrap-up completes.
 }
 
 -- == Finish (Merge) ==
@@ -409,19 +440,17 @@ rule ArchiveTask {
 rule DeleteTask {
     when: DeleteTask(task)
 
-    requires: task.status = archived
-
     ensures:
         if task.worktree != null:
             not exists task.worktree
     ensures: not exists task
 
     @guidance
-        -- Permanent removal. Only accessible from the archive view.
-        -- Worktree and branch are cleaned up best-effort.
-        -- The archived-status precondition is enforced by the TUI input
-        -- layer (archive view only shows archived tasks), not by the
-        -- handler itself.
+        -- Permanent removal. The handler accepts any task regardless
+        -- of status. In the interactive TUI, the archive view restricts
+        -- visibility to archived tasks, but handle_delete_epic calls
+        -- this unconditionally for subtask cleanup. Worktree and branch
+        -- are cleaned up best-effort.
 }
 
 -- == Agent Health ==
@@ -533,11 +562,12 @@ rule RetryFresh {
 -- == MCP Constraints ==
 
 rule UpdateTaskViaMcp {
-    when: McpUpdateTask(task, status?, plan?, title?, description?, repo_path?, sort_order?)
+    when: McpUpdateTask(task, status?, plan?, title?, description?, repo_path?, sort_order?, pr_url?, tag?)
 
     requires: status != null or plan != null or title != null
               or description != null or repo_path != null
-              or sort_order != null
+              or sort_order != null or pr_url != null
+              or tag != null
 
     -- Cannot set status to done or archived via MCP
     requires: status != done
@@ -555,6 +585,10 @@ rule UpdateTaskViaMcp {
         if repo_path != null: task.repo_path = repo_path
     ensures:
         if sort_order != null: task.sort_order = sort_order
+    ensures:
+        if pr_url != null: task.pr_url = pr_url
+    ensures:
+        if tag != null: task.tag = tag
     ensures: task.updated_at = now
 }
 
@@ -593,6 +627,17 @@ rule UpdateEpicViaMcp {
     ensures:
         if sort_order != null: epic.sort_order = sort_order
     ensures: epic.updated_at = now
+}
+
+rule ReportUsageViaMcp {
+    when: McpReportUsage(task, input_tokens, output_tokens)
+
+    ensures: TaskUsage.created(
+        task: task,
+        input_tokens: input_tokens,
+        output_tokens: output_tokens,
+        reported_at: now
+    )
 }
 
 -- == Hook-Based Status Transitions ==
@@ -690,16 +735,23 @@ rule DispatchEpicSubtask {
 
     -- Dispatches the next backlog subtask of this epic, ordered by
     -- sort_order ascending (nulls last, tie-broken by id ascending).
-    -- If the subtask has a plan, it is dispatched for implementation.
-    -- If not, it is dispatched for brainstorming.
+    -- Routing is based on the subtask's plan and tag:
+    --   has_plan        → implementation mode
+    --   tag = "epic"    → brainstorm mode
+    --   tag = "feature" → plan mode
+    --   other           → standard mode (dispatch without plan)
     ensures:
         let candidates = epic.active_subtasks where status = backlog
         let next = sort_by_order(candidates).first
         if next != null:
             if next.has_plan:
                 AgentLaunched(task: next, mode: implementation)
-            else:
+            else if next.tag = "epic":
                 AgentLaunched(task: next, mode: brainstorm)
+            else if next.tag = "feature":
+                AgentLaunched(task: next, mode: plan)
+            else:
+                AgentLaunched(task: next, mode: standard)
 
     @guidance
         -- When no backlog subtasks remain, the TUI shows a status
