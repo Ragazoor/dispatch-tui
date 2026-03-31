@@ -1497,6 +1497,7 @@ impl App {
 
         let mut cmds = if let Some(task) = self.find_task_mut(id) {
             task.pr_url = Some(pr_url.clone());
+            task.status = TaskStatus::Review;
             let task_clone = task.clone();
             if !in_queue {
                 let pr_num = crate::models::pr_number_from_url(&pr_url);
