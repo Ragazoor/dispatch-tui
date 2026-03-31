@@ -1757,7 +1757,11 @@ impl App {
     // -----------------------------------------------------------------------
 
     fn handle_switch_to_review_board(&mut self) -> Vec<Command> {
-        let saved_board = self.selection().clone();
+        let saved_board = match &self.view_mode {
+            ViewMode::Board(sel) => sel.clone(),
+            ViewMode::Epic { saved_board, .. } => saved_board.clone(),
+            ViewMode::ReviewBoard { saved_board, .. } => saved_board.clone(),
+        };
         self.view_mode = ViewMode::ReviewBoard {
             selection: ReviewBoardSelection::new(),
             saved_board,
