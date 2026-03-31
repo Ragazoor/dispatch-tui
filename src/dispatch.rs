@@ -391,11 +391,99 @@ pub fn resume_agent(task_id: TaskId, worktree_path: &WorktreePath, runner: &dyn 
 }
 
 // ---------------------------------------------------------------------------
+// review agent dispatch and resume
+// ---------------------------------------------------------------------------
+
+pub fn dispatch_review_agent(
+    pr: &crate::models::ReviewPr,
+    dispatch_repo: &str,
+    runner: &dyn ProcessRunner,
+) -> Result<DispatchResult> {
+    let repo_short = pr.repo.split('/').next_back().unwrap_or(&pr.repo);
+    let worktree_name = format!("review-{repo_short}-{}", pr.number);
+    let worktree_path = format!("{dispatch_repo}/.worktrees/{worktree_name}");
+    let tmux_window = build_review_tmux_window_name(&pr.repo, pr.number);
+
+    tracing::info!(pr_url = %pr.url, %worktree_path, "dispatching review agent");
+
+    fs::create_dir_all(format!("{dispatch_repo}/.worktrees"))
+        .context("failed to create .worktrees directory")?;
+
+    if !std::path::Path::new(&worktree_path).exists() {
+        let output = runner
+            .run("git", &["-C", dispatch_repo, "worktree", "add", "--detach", &worktree_path])
+            .context("failed to run git worktree add")?;
+        anyhow::ensure!(
+            output.status.success(),
+            "git worktree add failed: {}",
+            stderr_str(&output)
+        );
+    }
+
+    tmux::new_window(&tmux_window, &worktree_path, runner)
+        .context("failed to create tmux window for review")?;
+
+    tmux::set_after_split_hook(&tmux_window, &worktree_path, runner)
+        .context("failed to set tmux split hook")?;
+
+    let prompt = build_review_prompt(pr, 0);
+    tmux::send_keys(&tmux_window, &format!("claude \"{prompt}\""), runner)
+        .context("failed to send keys to review tmux window")?;
+
+    Ok(DispatchResult {
+        worktree_path,
+        tmux_window,
+    })
+}
+
+pub fn resume_review_agent(
+    repo: &str,
+    number: i64,
+    worktree_path: &str,
+    runner: &dyn ProcessRunner,
+) -> Result<ResumeResult> {
+    let tmux_window = build_review_tmux_window_name(repo, number);
+
+    tmux::new_window(&tmux_window, worktree_path, runner)
+        .context("failed to create tmux window for review resume")?;
+
+    tmux::set_after_split_hook(&tmux_window, worktree_path, runner)
+        .context("failed to set tmux split hook")?;
+
+    tmux::send_keys(&tmux_window, "claude --continue", runner)
+        .context("failed to send resume keys")?;
+
+    tracing::info!(%repo, number, %tmux_window, "review agent resumed");
+
+    Ok(ResumeResult { tmux_window })
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 fn build_tmux_window_name(task_id: TaskId) -> TmuxWindow {
     TmuxWindow(format!("task-{task_id}"))
+}
+
+fn build_review_tmux_window_name(repo: &str, number: i64) -> String {
+    let repo_short = repo.split('/').next_back().unwrap_or(repo);
+    format!("review-{repo_short}-{number}")
+}
+
+fn build_review_prompt(pr: &crate::models::ReviewPr, _mcp_port: u16) -> String {
+    format!(
+        "You are reviewing PR {repo}#{number}: {title}\n\
+         URL: {url}\n\n\
+         Run /code-review {url}\n\n\
+         When done, call the complete_review tool via the dispatch MCP server with:\n\
+         - url: \"{url}\"\n\
+         - notes: your review summary",
+        repo = pr.repo,
+        number = pr.number,
+        title = pr.title,
+        url = pr.url,
+    )
 }
 
 fn build_prompt(task_id: TaskId, title: &str, description: &str, plan: Option<&str>) -> String {
@@ -1473,6 +1561,69 @@ mod tests {
         let calls = mock.recorded_calls();
         // Should not have a "pull" call
         assert!(!calls.iter().any(|c| c.1.contains(&"pull".to_string())));
+    }
+
+    #[test]
+    fn dispatch_review_agent_creates_window_and_sends_prompt() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo_path = dir.path().to_str().unwrap();
+
+        // Create .worktrees directory
+        std::fs::create_dir_all(format!("{}/.worktrees", repo_path)).unwrap();
+
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(),                          // git worktree add
+            MockProcessRunner::ok(),                          // tmux new-window
+            MockProcessRunner::ok(),                          // tmux set-hook
+            MockProcessRunner::ok(),                          // tmux send-keys -l (prompt)
+            MockProcessRunner::ok(),                          // tmux send-keys Enter
+        ]);
+
+        use crate::models::{ReviewDecision, ReviewPr};
+        let pr = ReviewPr {
+            number: 42,
+            title: "Fix auth".to_string(),
+            author: "alice".to_string(),
+            repo: "acme/app".to_string(),
+            url: "https://github.com/acme/app/pull/42".to_string(),
+            is_draft: false,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            additions: 10,
+            deletions: 3,
+            review_decision: ReviewDecision::ReviewRequired,
+            labels: vec![],
+            tmux_window: None,
+            review_notes: None,
+        };
+
+        let result = dispatch_review_agent(&pr, repo_path, &mock).unwrap();
+        assert!(result.tmux_window.contains("review-app-42"));
+        assert!(result.worktree_path.contains("review-app-42"));
+
+        let calls = mock.recorded_calls();
+        // Verify prompt contains the PR URL and complete_review instruction
+        let prompt_call = calls.iter().find(|(p, a)| *p == "tmux" && a.iter().any(|s| s.contains("complete_review"))).unwrap();
+        assert!(prompt_call.1.iter().any(|s| s.contains("https://github.com/acme/app/pull/42")));
+    }
+
+    #[test]
+    fn resume_review_agent_opens_window_with_continue() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let worktree_path = dir.path().to_str().unwrap();
+
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux set-hook
+            MockProcessRunner::ok(), // tmux send-keys -l
+            MockProcessRunner::ok(), // tmux send-keys Enter
+        ]);
+
+        let result = resume_review_agent("acme/app", 42, worktree_path, &mock).unwrap();
+        assert_eq!(result.tmux_window, "review-app-42");
+
+        let calls = mock.recorded_calls();
+        assert!(calls.iter().any(|(p, a)| *p == "tmux" && a.iter().any(|s| s.contains("--continue"))));
     }
 }
 
