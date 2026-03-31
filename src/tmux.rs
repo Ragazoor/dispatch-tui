@@ -346,6 +346,16 @@ mod tests {
     }
 
     #[test]
+    fn current_window_name_issues_correct_tmux_args() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"dispatch\n")]);
+        current_window_name(&mock).unwrap();
+        let calls = mock.recorded_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "tmux");
+        assert_eq!(calls[0].1, vec!["display-message", "-p", "#W"]);
+    }
+
+    #[test]
     fn current_window_name_fails_on_nonzero_exit() {
         let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no session")]);
         assert!(current_window_name(&mock).is_err());
