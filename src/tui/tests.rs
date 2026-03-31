@@ -162,10 +162,9 @@ fn tick_produces_capture_for_running_tasks_with_window() {
     task4.tmux_window = Some("main:task-4".to_string());
     let mut app = App::new(vec![task4], Duration::from_secs(300));
     let cmds = app.update(Message::Tick);
-    // Should have CaptureTmux + RefreshFromDb
-    assert_eq!(cmds.len(), 2);
-    assert!(matches!(&cmds[0], Command::CaptureTmux { id: TaskId(4), window } if window == "main:task-4"));
-    assert!(matches!(&cmds[1], Command::RefreshFromDb));
+    // Should include CaptureTmux and RefreshFromDb (and FetchReviewPrs since data is stale)
+    assert!(cmds.iter().any(|c| matches!(c, Command::CaptureTmux { id: TaskId(4), window } if window == "main:task-4")));
+    assert!(cmds.iter().any(|c| matches!(c, Command::RefreshFromDb)));
 }
 
 #[test]
@@ -5292,6 +5291,19 @@ fn review_board_renders_empty_state() {
 
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(buffer_contains(&buf, "No PRs awaiting your review"));
+}
+
+#[test]
+fn tick_fetches_review_prs_from_any_tab() {
+    let mut app = make_app();
+    // App starts in Board mode (not ReviewBoard)
+    assert!(matches!(app.view_mode(), ViewMode::Board(_)));
+    // last_review_fetch is None, so tick should trigger fetch
+    let cmds = app.update(Message::Tick);
+    assert!(
+        cmds.iter().any(|c| matches!(c, Command::FetchReviewPrs)),
+        "Expected FetchReviewPrs from tick in Board mode, got: {cmds:?}"
+    );
 }
 
 #[test]

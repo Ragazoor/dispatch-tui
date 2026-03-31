@@ -870,15 +870,13 @@ impl App {
             cmds.push(Command::CheckPrStatus { id, pr_url });
         }
 
-        // Refresh review board data if in review mode and stale (> 60s)
-        if matches!(self.view_mode, ViewMode::ReviewBoard { .. }) {
-            let needs_fetch = self.last_review_fetch
-                .map(|t| t.elapsed() > Duration::from_secs(60))
-                .unwrap_or(true);
-            if needs_fetch && !self.review_board_loading {
-                self.review_board_loading = true;
-                cmds.push(Command::FetchReviewPrs);
-            }
+        // Refresh review board data if stale (> 60s), regardless of active tab
+        let needs_fetch = self.last_review_fetch
+            .map(|t| t.elapsed() > Duration::from_secs(60))
+            .unwrap_or(true);
+        if needs_fetch && !self.review_board_loading {
+            self.review_board_loading = true;
+            cmds.push(Command::FetchReviewPrs);
         }
 
         cmds.push(Command::RefreshFromDb);
@@ -1755,26 +1753,18 @@ impl App {
     // -----------------------------------------------------------------------
 
     fn handle_switch_to_review_board(&mut self) -> Vec<Command> {
-        if matches!(self.view_mode, ViewMode::ReviewBoard { .. }) {
-            return vec![];
-        }
-        let saved_board = match &self.view_mode {
-            ViewMode::Board(sel) => sel.clone(),
-            ViewMode::Epic { saved_board, .. } => saved_board.clone(),
-            ViewMode::ReviewBoard { saved_board, .. } => saved_board.clone(),
-        };
+        let saved_board = self.selection().clone();
         self.view_mode = ViewMode::ReviewBoard {
             selection: ReviewBoardSelection::new(),
             saved_board,
         };
-        self.review_board_loading = true;
         let needs_fetch = self.last_review_fetch
             .map(|t| t.elapsed() > Duration::from_secs(60))
             .unwrap_or(true);
-        if needs_fetch {
+        if needs_fetch && !self.review_board_loading {
+            self.review_board_loading = true;
             vec![Command::FetchReviewPrs]
         } else {
-            self.review_board_loading = false;
             vec![]
         }
     }
