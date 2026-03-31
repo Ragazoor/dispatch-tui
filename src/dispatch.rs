@@ -45,7 +45,7 @@ fn provision_worktree(
         anyhow::ensure!(
             output.status.success(),
             "git worktree add failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
+            stderr_str(&output)
         );
     }
 
@@ -185,10 +185,9 @@ pub fn cleanup_task(
         .run("git", &["worktree", "remove", "--force", worktree_path])
         .context("failed to run git worktree remove")?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
         anyhow::bail!(
             "git worktree remove failed for path {worktree_path}: {}",
-            stderr.trim()
+            stderr_str(&output)
         );
     }
 
@@ -215,7 +214,7 @@ fn detect_default_branch(repo_path: &str, runner: &dyn ProcessRunner) -> String 
         &["-C", repo_path, "symbolic-ref", "refs/remotes/origin/HEAD"],
     ) {
         if output.status.success() {
-            let refname = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let refname = stdout_str(&output);
             // e.g. "refs/remotes/origin/master" → "master"
             if let Some(branch) = refname.rsplit('/').next() {
                 if !branch.is_empty() {
@@ -267,7 +266,7 @@ pub fn finish_task(
     let output = runner
         .run("git", &["-C", repo_path, "rev-parse", "--abbrev-ref", "HEAD"])
         .map_err(|e| FinishError::Other(format!("Failed to check current branch: {e}")))?;
-    let current_branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let current_branch = stdout_str(&output);
     if current_branch != default_branch {
         return Err(FinishError::NotOnDefaultBranch {
             current: current_branch,
@@ -289,10 +288,9 @@ pub fn finish_task(
             )
             .map_err(|e| FinishError::Other(format!("Failed to pull: {e}")))?;
         if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(FinishError::Other(format!(
                 "Failed to pull {default_branch}: {}",
-                stderr.trim()
+                stderr_str(&output)
             )));
         }
     }
@@ -302,8 +300,8 @@ pub fn finish_task(
         .run("git", &["-C", worktree, "rebase", &default_branch])
         .map_err(|e| FinishError::Other(format!("Failed to run git rebase: {e}")))?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = stderr_str(&output);
+        let stdout = stdout_str(&output);
         let is_conflict = stderr.contains("CONFLICT")
             || stdout.contains("CONFLICT")
             || stderr.contains("could not apply")
@@ -316,7 +314,7 @@ pub fn finish_task(
         }
         return Err(FinishError::Other(format!(
             "Rebase failed: {}",
-            stderr.trim()
+            stderr
         )));
     }
 
@@ -325,10 +323,9 @@ pub fn finish_task(
         .run("git", &["-C", repo_path, "merge", "--ff-only", branch])
         .map_err(|e| FinishError::Other(format!("Failed to fast-forward {default_branch}: {e}")))?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(FinishError::Other(format!(
             "Fast-forward failed after rebase: {}",
-            stderr.trim()
+            stderr_str(&output)
         )));
     }
 
@@ -563,15 +560,14 @@ pub fn create_pr(
         .run("git", &["-C", repo_path, "push", "-u", "origin", branch])
         .map_err(|e| PrError::PushFailed(format!("Failed to run git push: {e}")))?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(PrError::PushFailed(stderr.trim().to_string()));
+        return Err(PrError::PushFailed(stderr_str(&output)));
     }
 
     // 2. Get the repo slug from git remote
     let remote_output = runner
         .run("git", &["-C", repo_path, "remote", "get-url", "origin"])
         .map_err(|e| PrError::Other(format!("Failed to get remote URL: {e}")))?;
-    let remote_url = String::from_utf8_lossy(&remote_output.stdout).trim().to_string();
+    let remote_url = stdout_str(&remote_output);
     let repo_slug = parse_repo_slug(&remote_url)
         .ok_or_else(|| PrError::Other(format!("Could not parse repo slug from: {remote_url}")))?;
 
@@ -588,12 +584,11 @@ pub fn create_pr(
         ])
         .map_err(|e| PrError::Other(format!("Failed to run gh: {e}")))?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(PrError::CreateFailed(stderr.trim().to_string()));
+        return Err(PrError::CreateFailed(stderr_str(&output)));
     }
 
     // 4. Parse the PR URL from stdout
-    let pr_url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let pr_url = stdout_str(&output);
     Ok(PrResult { pr_url })
 }
 
@@ -610,11 +605,10 @@ pub fn check_pr_status(
         ])
         .context("Failed to run gh pr view")?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("gh pr view failed: {}", stderr.trim());
+        anyhow::bail!("gh pr view failed: {}", stderr_str(&output));
     }
 
-    let state = String::from_utf8_lossy(&output.stdout).trim().to_uppercase();
+    let state = stdout_str(&output).to_uppercase();
     match state.as_str() {
         "MERGED" => Ok(PrState::Merged),
         "CLOSED" => Ok(PrState::Closed),
@@ -632,6 +626,16 @@ pub fn branch_from_worktree(worktree: &str) -> Option<String> {
         .file_name()
         .and_then(|n| n.to_str())
         .map(|s| s.to_string())
+}
+
+/// Extract stderr from a process `Output` as a trimmed `String`.
+fn stderr_str(output: &std::process::Output) -> String {
+    String::from_utf8_lossy(&output.stderr).trim().to_string()
+}
+
+/// Extract stdout from a process `Output` as a trimmed `String`.
+fn stdout_str(output: &std::process::Output) -> String {
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
 /// Expand a leading `~` or `~/` to the user's home directory.
