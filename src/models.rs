@@ -444,6 +444,19 @@ pub fn format_detail_age(updated_at: DateTime<Utc>, now: DateTime<Utc>) -> Strin
 }
 
 // ---------------------------------------------------------------------------
+// pr_number_from_url
+// ---------------------------------------------------------------------------
+
+/// Extract the PR number from a GitHub PR URL.
+/// Handles trailing slashes and query parameters.
+pub fn pr_number_from_url(url: &str) -> Option<i64> {
+    url.split('?')
+        .next()
+        .and_then(|u| u.trim_end_matches('/').rsplit('/').next())
+        .and_then(|s| s.parse::<i64>().ok())
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -947,6 +960,33 @@ mod tests {
         assert_eq!(ReviewDecision::parse("APPROVED"), Some(ReviewDecision::Approved));
         assert_eq!(ReviewDecision::parse("bogus"), None);
         assert_eq!(ReviewDecision::parse(""), None);
+    }
+
+    // --- pr_number_from_url ---
+
+    #[test]
+    fn pr_number_from_standard_url() {
+        assert_eq!(pr_number_from_url("https://github.com/org/repo/pull/42"), Some(42));
+    }
+
+    #[test]
+    fn pr_number_from_url_with_trailing_slash() {
+        assert_eq!(pr_number_from_url("https://github.com/org/repo/pull/42/"), Some(42));
+    }
+
+    #[test]
+    fn pr_number_from_url_with_query_params() {
+        assert_eq!(pr_number_from_url("https://github.com/org/repo/pull/42?diff=split"), Some(42));
+    }
+
+    #[test]
+    fn pr_number_from_url_no_number() {
+        assert_eq!(pr_number_from_url("https://github.com/org/repo"), None);
+    }
+
+    #[test]
+    fn pr_number_from_empty_url() {
+        assert_eq!(pr_number_from_url(""), None);
     }
 
 }
