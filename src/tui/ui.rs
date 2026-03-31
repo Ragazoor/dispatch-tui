@@ -1134,6 +1134,10 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled("(task: rebase/PR, epic: batch)", note),
         ]),
         Line::from(vec![
+            Span::styled("  T", key), Span::styled(" detach tmux panel  ", desc),
+            Span::styled("(Review tasks, supports batch)", note),
+        ]),
+        Line::from(vec![
             Span::styled("  J/K", key), Span::styled(" reorder item up/down in column", desc),
         ]),
         Line::from(""),
@@ -1486,6 +1490,7 @@ pub(in crate::tui) fn action_hints(task: Option<&Task>, key_color: Color) -> Vec
                 }
                 if task.tmux_window.is_some() {
                     push_hint("g", "session");
+                    push_hint("T", "detach");
                 } else if task.worktree.is_some() {
                     push_hint("d", "resume");
                 }
