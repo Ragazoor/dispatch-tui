@@ -651,6 +651,7 @@ fn expand_tilde(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::DEFAULT_PORT;
     use crate::process::{MockProcessRunner, exit_fail};
     use crate::models::{EpicId, Task, TaskId, TaskStatus};
     use chrono::Utc;
@@ -729,7 +730,7 @@ mod tests {
 
     #[test]
     fn build_quick_dispatch_prompt_contains_rename_instruction() {
-        let prompt = build_quick_dispatch_prompt(TaskId(42), "Quick task", "", 3142);
+        let prompt = build_quick_dispatch_prompt(TaskId(42), "Quick task", "", DEFAULT_PORT);
         assert!(prompt.contains("42"));
         assert!(prompt.contains("Quick task"));
         assert!(prompt.contains("update_task"));
@@ -739,8 +740,8 @@ mod tests {
 
     #[test]
     fn build_quick_dispatch_prompt_mentions_mcp() {
-        let prompt = build_quick_dispatch_prompt(TaskId(1), "Quick task", "", 3142);
-        assert!(prompt.contains("3142"));
+        let prompt = build_quick_dispatch_prompt(TaskId(1), "Quick task", "", DEFAULT_PORT);
+        assert!(prompt.contains(&DEFAULT_PORT.to_string()));
         assert!(prompt.contains("update_task"));
         assert!(!prompt.contains("add_note"));
     }
@@ -748,7 +749,7 @@ mod tests {
     #[test]
     fn build_quick_dispatch_prompt_differs_from_regular() {
         let regular = build_prompt(TaskId(1), "Task", "Desc", None);
-        let quick = build_quick_dispatch_prompt(TaskId(1), "Task", "Desc", 3142);
+        let quick = build_quick_dispatch_prompt(TaskId(1), "Task", "Desc", DEFAULT_PORT);
         assert!(quick.contains("placeholder"));
         assert!(!regular.contains("placeholder"));
     }
@@ -764,30 +765,30 @@ mod tests {
 
     #[test]
     fn build_brainstorm_prompt_contains_task_info() {
-        let prompt = build_brainstorm_prompt(TaskId(7), "Design auth", "Rework the auth flow", 3142);
+        let prompt = build_brainstorm_prompt(TaskId(7), "Design auth", "Rework the auth flow", DEFAULT_PORT);
         assert!(prompt.contains("7"));
         assert!(prompt.contains("Design auth"));
         assert!(prompt.contains("Rework the auth flow"));
-        assert!(prompt.contains("3142"));
+        assert!(prompt.contains(&DEFAULT_PORT.to_string()));
         assert!(prompt.contains("brainstorm"));
         assert!(prompt.contains("update_task"));
     }
 
     #[test]
     fn build_plan_prompt_contains_task_info() {
-        let prompt = build_plan_prompt(TaskId(8), "Add feature", "Small improvement", 3142);
+        let prompt = build_plan_prompt(TaskId(8), "Add feature", "Small improvement", DEFAULT_PORT);
         assert!(prompt.contains("8"));
         assert!(prompt.contains("Add feature"));
         assert!(prompt.contains("Small improvement"));
-        assert!(prompt.contains("3142"));
+        assert!(prompt.contains(&DEFAULT_PORT.to_string()));
         assert!(prompt.contains("/plan"));
         assert!(prompt.contains("update_task"));
     }
 
     #[test]
     fn build_plan_prompt_differs_from_brainstorm() {
-        let plan = build_plan_prompt(TaskId(1), "T", "D", 3142);
-        let brainstorm = build_brainstorm_prompt(TaskId(1), "T", "D", 3142);
+        let plan = build_plan_prompt(TaskId(1), "T", "D", DEFAULT_PORT);
+        let brainstorm = build_brainstorm_prompt(TaskId(1), "T", "D", DEFAULT_PORT);
         assert_ne!(plan, brainstorm);
         assert!(plan.contains("planning"));
         assert!(brainstorm.contains("brainstorm"));
@@ -1043,7 +1044,7 @@ mod tests {
         ]);
 
         let task = make_task(&repo_path);
-        brainstorm_agent(&task, 3142, &mock).unwrap();
+        brainstorm_agent(&task, DEFAULT_PORT, &mock).unwrap();
 
         let calls = mock.recorded_calls();
         assert!(calls.iter().all(|(prog, args)| !(prog == "git" && args.iter().any(|a| a == "worktree"))), "git worktree add should be skipped for existing worktree");
@@ -1067,7 +1068,7 @@ mod tests {
         ]);
 
         let task = make_task(&repo_path);
-        brainstorm_agent(&task, 3142, &mock).unwrap();
+        brainstorm_agent(&task, DEFAULT_PORT, &mock).unwrap();
 
         // Verify the prompt file was written with brainstorm content
         let prompt_file = worktree_dir.join(".claude-prompt");
@@ -1093,7 +1094,7 @@ mod tests {
         ]);
 
         let task = make_task(&repo_path);
-        quick_dispatch_agent(&task, 3142, &mock).unwrap();
+        quick_dispatch_agent(&task, DEFAULT_PORT, &mock).unwrap();
 
         let calls = mock.recorded_calls();
         assert!(calls.iter().all(|(prog, args)| !(prog == "git" && args.iter().any(|a| a == "worktree"))), "git worktree add should be skipped for existing worktree");
@@ -1117,7 +1118,7 @@ mod tests {
         ]);
 
         let task = make_task(&repo_path);
-        quick_dispatch_agent(&task, 3142, &mock).unwrap();
+        quick_dispatch_agent(&task, DEFAULT_PORT, &mock).unwrap();
 
         let prompt_file = worktree_dir.join(".claude-prompt");
         let prompt = std::fs::read_to_string(prompt_file).unwrap();
@@ -1129,12 +1130,12 @@ mod tests {
 
     #[test]
     fn epic_planning_prompt_contains_epic_context() {
-        let prompt = build_epic_planning_prompt(EpicId(42), "Redesign auth", "Rework the login flow", 3142);
+        let prompt = build_epic_planning_prompt(EpicId(42), "Redesign auth", "Rework the login flow", DEFAULT_PORT);
         assert!(prompt.contains("42"));
         assert!(prompt.contains("Redesign auth"));
         assert!(prompt.contains("Rework the login flow"));
         assert!(prompt.contains("Do NOT start implementing"));
-        assert!(prompt.contains("3142"));
+        assert!(prompt.contains(&DEFAULT_PORT.to_string()));
     }
 
     #[test]

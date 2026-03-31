@@ -979,6 +979,7 @@ async fn execute_commands(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::DEFAULT_PORT;
     use crate::db::Database;
     use crate::process::MockProcessRunner;
 
@@ -997,7 +998,7 @@ mod tests {
         let rt = TuiRuntime {
             database: db.clone(),
             msg_tx: tx,
-            port: 3142,
+            port: DEFAULT_PORT,
             input_paused: Arc::new(AtomicBool::new(false)),
             runner,
         };
@@ -1094,7 +1095,7 @@ mod tests {
         let rt = TuiRuntime {
             database: db.clone(),
             msg_tx: tx,
-            port: 3142,
+            port: DEFAULT_PORT,
             input_paused: Arc::new(AtomicBool::new(false)),
             runner: mock.clone(),
         };
@@ -1130,7 +1131,7 @@ mod tests {
         let rt = TuiRuntime {
             database: db.clone(),
             msg_tx: tx,
-            port: 3142,
+            port: DEFAULT_PORT,
             input_paused: Arc::new(AtomicBool::new(false)),
             runner: mock,
         };
@@ -1152,7 +1153,7 @@ mod tests {
         let rt = TuiRuntime {
             database: db.clone(),
             msg_tx: tx,
-            port: 3142,
+            port: DEFAULT_PORT,
             input_paused: Arc::new(AtomicBool::new(false)),
             runner: mock,
         };
@@ -1179,7 +1180,7 @@ mod tests {
         let rt = TuiRuntime {
             database: db.clone(),
             msg_tx: tx,
-            port: 3142,
+            port: DEFAULT_PORT,
             input_paused: Arc::new(AtomicBool::new(false)),
             runner: mock,
         };
@@ -1208,7 +1209,7 @@ mod tests {
         let rt = TuiRuntime {
             database: db.clone(),
             msg_tx: tx,
-            port: 3142,
+            port: DEFAULT_PORT,
             input_paused: Arc::new(AtomicBool::new(false)),
             runner: mock,
         };
@@ -1229,7 +1230,7 @@ mod tests {
         let rt = TuiRuntime {
             database: db.clone(),
             msg_tx: tx,
-            port: 3142,
+            port: DEFAULT_PORT,
             input_paused: Arc::new(AtomicBool::new(false)),
             runner: mock.clone(),
         };
@@ -1285,7 +1286,7 @@ mod tests {
         let rt = TuiRuntime {
             database: db.clone(),
             msg_tx: tx,
-            port: 3142,
+            port: DEFAULT_PORT,
             input_paused: Arc::new(AtomicBool::new(false)),
             runner: mock,
         };
@@ -1334,7 +1335,7 @@ mod tests {
         let rt = TuiRuntime {
             database: db.clone(),
             msg_tx: tx,
-            port: 3142,
+            port: DEFAULT_PORT,
             input_paused: Arc::new(AtomicBool::new(false)),
             runner: mock,
         };
@@ -1407,7 +1408,7 @@ mod tests {
         let rt = TuiRuntime {
             database: db.clone(),
             msg_tx: tx,
-            port: 3142,
+            port: DEFAULT_PORT,
             input_paused: Arc::new(AtomicBool::new(false)),
             runner: mock,
         };
@@ -1452,7 +1453,7 @@ mod tests {
         let rt = TuiRuntime {
             database: db,
             msg_tx: tx,
-            port: 3142,
+            port: DEFAULT_PORT,
             input_paused: Arc::new(AtomicBool::new(false)),
             runner: mock.clone(),
         };
@@ -1474,7 +1475,7 @@ mod tests {
         let rt = TuiRuntime {
             database: db,
             msg_tx: tx,
-            port: 3142,
+            port: DEFAULT_PORT,
             input_paused: Arc::new(AtomicBool::new(false)),
             runner: mock.clone(),
         };
@@ -1493,7 +1494,7 @@ mod tests {
         let rt = TuiRuntime {
             database: db,
             msg_tx: tx,
-            port: 3142,
+            port: DEFAULT_PORT,
             input_paused: Arc::new(AtomicBool::new(false)),
             runner: mock.clone(),
         };
@@ -1524,7 +1525,7 @@ mod tests {
         let rt = TuiRuntime {
             database: db,
             msg_tx: tx,
-            port: 3142,
+            port: DEFAULT_PORT,
             input_paused: Arc::new(AtomicBool::new(false)),
             runner: mock,
         };
@@ -1552,7 +1553,7 @@ mod tests {
         let rt = TuiRuntime {
             database: db,
             msg_tx: tx,
-            port: 3142,
+            port: DEFAULT_PORT,
             input_paused: Arc::new(AtomicBool::new(false)),
             runner: mock,
         };
@@ -1579,7 +1580,7 @@ mod tests {
         let rt = TuiRuntime {
             database: db,
             msg_tx: tx,
-            port: 3142,
+            port: DEFAULT_PORT,
             input_paused: Arc::new(AtomicBool::new(false)),
             runner: mock,
         };
@@ -1600,7 +1601,7 @@ mod tests {
         let rt = TuiRuntime {
             database: db,
             msg_tx: tx,
-            port: 3142,
+            port: DEFAULT_PORT,
             input_paused: Arc::new(AtomicBool::new(false)),
             runner: mock,
         };

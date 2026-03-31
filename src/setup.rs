@@ -226,6 +226,7 @@ pub fn run_setup(port: u16) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::DEFAULT_PORT;
     use serde_json::json;
 
     // -- MCP config merging --
@@ -233,12 +234,12 @@ mod tests {
     #[test]
     fn merge_mcp_config_into_empty() {
         let existing = None;
-        let result = merge_mcp_config(existing, 3142);
+        let result = merge_mcp_config(existing, DEFAULT_PORT);
         let expected = json!({
             "mcpServers": {
                 "dispatch": {
                     "type": "http",
-                    "url": "http://localhost:3142/mcp"
+                    "url": format!("http://localhost:{DEFAULT_PORT}/mcp")
                 }
             }
         });
@@ -256,12 +257,12 @@ mod tests {
                 }
             }
         }));
-        let result = merge_mcp_config(existing, 3142);
+        let result = merge_mcp_config(existing, DEFAULT_PORT);
         assert!(result.changed);
         assert!(result.value["mcpServers"]["github"].is_object());
         assert_eq!(
             result.value["mcpServers"]["dispatch"]["url"],
-            "http://localhost:3142/mcp"
+            format!("http://localhost:{DEFAULT_PORT}/mcp")
         );
     }
 
@@ -271,11 +272,11 @@ mod tests {
             "mcpServers": {
                 "dispatch": {
                     "type": "http",
-                    "url": "http://localhost:3142/mcp"
+                    "url": format!("http://localhost:{DEFAULT_PORT}/mcp")
                 }
             }
         }));
-        let result = merge_mcp_config(existing, 3142);
+        let result = merge_mcp_config(existing, DEFAULT_PORT);
         assert!(!result.changed);
     }
 

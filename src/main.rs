@@ -25,7 +25,7 @@ enum Commands {
     /// Launch the TUI interface
     Tui {
         /// MCP server port
-        #[arg(long, env = "DISPATCH_PORT", default_value = "3142")]
+        #[arg(long, env = "DISPATCH_PORT", default_value_t = dispatch_agent::DEFAULT_PORT)]
         port: u16,
         /// Seconds of unchanged tmux output before marking agent stale
         #[arg(long, env = "DISPATCH_INACTIVITY_TIMEOUT", default_value = "180")]
@@ -82,7 +82,7 @@ enum Commands {
     /// Configure Claude Code to allow agents to use the MCP server
     Setup {
         /// MCP server port
-        #[arg(long, env = "DISPATCH_PORT", default_value = "3142")]
+        #[arg(long, env = "DISPATCH_PORT", default_value_t = dispatch_agent::DEFAULT_PORT)]
         port: u16,
     },
 }
