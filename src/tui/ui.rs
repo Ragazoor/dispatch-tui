@@ -7,7 +7,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
 
-use super::{App, ColumnItem, InputMode, ViewMode};
+use super::{App, ColumnItem, InputMode, ReviewBoardMode, ViewMode};
 use crate::dispatch;
 use crate::models::{
     epic_substatus, format_age, CiStatus, Epic, ReviewDecision, ReviewPr, Staleness, SubStatus,
@@ -228,22 +228,40 @@ fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
                 spans.push(Span::styled(" Reviews ", inactive_style));
             }
         }
-        ViewMode::ReviewBoard { .. } => {
+        ViewMode::ReviewBoard { mode, .. } => {
             spans.push(Span::styled(" Tasks ", inactive_style));
             spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
+            let (reviewer_style, author_style) = match mode {
+                ReviewBoardMode::Reviewer => (active_style, inactive_style),
+                ReviewBoardMode::Author => (inactive_style, active_style),
+            };
             let review_count = app.review_prs().len();
             if review_count > 0 {
                 spans.push(Span::styled(
                     format!(" \u{25b8} Reviews ({review_count}) "),
-                    active_style,
+                    reviewer_style,
                 ));
             } else {
-                spans.push(Span::styled(" \u{25b8} Reviews ", active_style));
+                spans.push(Span::styled(" \u{25b8} Reviews ", reviewer_style));
+            }
+            spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
+            let my_count = app.my_prs().len();
+            if my_count > 0 {
+                spans.push(Span::styled(
+                    format!(" My PRs ({my_count}) "),
+                    author_style,
+                ));
+            } else {
+                spans.push(Span::styled(" My PRs ", author_style));
             }
         }
     }
 
-    spans.push(Span::styled("  [Tab]", hint_style.add_modifier(Modifier::BOLD)));
+    let hint = match app.view_mode() {
+        ViewMode::ReviewBoard { .. } => "  [Tab] back  [S-Tab] toggle",
+        _ => "  [Tab]",
+    };
+    spans.push(Span::styled(hint, hint_style.add_modifier(Modifier::BOLD)));
 
     let line = Line::from(spans);
     let paragraph = Paragraph::new(line);
@@ -1981,14 +1999,22 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
     render_tab_bar(frame, app, chunks[0]);
     render_review_summary_row(frame, app, chunks[1]);
 
-    let filtered = app.filtered_review_prs();
+    let filtered = app.active_review_prs();
     if filtered.is_empty() {
-        let msg = if app.review_board_loading() {
-            "Fetching reviews..."
-        } else if app.review_prs().is_empty() {
-            "No PRs awaiting your review"
+        let is_loading = match app.view_mode() {
+            ViewMode::ReviewBoard { mode: ReviewBoardMode::Author, .. } => app.my_prs_loading(),
+            _ => app.review_board_loading(),
+        };
+        let is_empty = match app.view_mode() {
+            ViewMode::ReviewBoard { mode: ReviewBoardMode::Author, .. } => app.my_prs().is_empty(),
+            _ => app.review_prs().is_empty(),
+        };
+        let msg = if is_loading {
+            "Loading..."
+        } else if is_empty {
+            "No PRs found. Press r to refresh."
         } else {
-            "No PRs match filter"
+            "All PRs filtered out."
         };
         let p = Paragraph::new(msg)
             .alignment(Alignment::Center)
@@ -2105,7 +2131,7 @@ fn render_review_detail(frame: &mut Frame, app: &App, area: Rect) {
 fn render_review_summary_row(frame: &mut Frame, app: &App, area: Rect) {
     let sel = app.review_selection();
     let selected_col = sel.map(|s| s.column()).unwrap_or(0);
-    let filtered = app.filtered_review_prs();
+    let filtered = app.active_review_prs();
 
     let segments = Layout::default()
         .direction(Direction::Horizontal)
@@ -2137,7 +2163,6 @@ fn render_review_summary_row(frame: &mut Frame, app: &App, area: Rect) {
 
 fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
     let sel_col = app.review_selection().map(|s| s.column()).unwrap_or(0);
-    let filter = app.review_repo_filter().clone();
 
     let col_areas = Layout::default()
         .direction(Direction::Horizontal)
@@ -2148,12 +2173,7 @@ fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
 
     for (i, decision) in ReviewDecision::ALL.iter().enumerate() {
         let is_focused = i == sel_col;
-        let prs: Vec<&ReviewPr> = app
-            .review_prs()
-            .iter()
-            .filter(|pr| filter.is_empty() || filter.contains(&pr.repo))
-            .filter(|pr| pr.review_decision == *decision)
-            .collect();
+        let prs: Vec<&ReviewPr> = app.active_prs_by_decision(*decision);
 
         let selected_row = app.review_selection().map(|s| s.row(i)).unwrap_or(0);
         let items: Vec<ListItem> = prs.iter().enumerate().map(|(row, pr)| {

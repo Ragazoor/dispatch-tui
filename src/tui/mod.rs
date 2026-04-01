@@ -2049,8 +2049,8 @@ impl App {
         };
         self.clamp_review_selection();
         let mut cmds = vec![];
-        match &self.view_mode {
-            ViewMode::ReviewBoard { mode, .. } => match mode {
+        if let ViewMode::ReviewBoard { mode, .. } = &self.view_mode {
+            match mode {
                 ReviewBoardMode::Author => {
                     let needs_fetch = self
                         .last_my_prs_fetch
@@ -2071,8 +2071,7 @@ impl App {
                         cmds.push(Command::FetchReviewPrs);
                     }
                 }
-            },
-            _ => {}
+            }
         }
         cmds
     }
@@ -2088,7 +2087,7 @@ impl App {
     }
 
     fn clamp_review_selection(&mut self) {
-        let filtered = self.filtered_review_prs();
+        let filtered = self.active_review_prs();
         let counts: [usize; ReviewDecision::COLUMN_COUNT] = std::array::from_fn(|col| {
             filtered
                 .iter()
@@ -2183,13 +2182,35 @@ impl App {
             .collect()
     }
 
+    /// Return the PR list appropriate for the current review board mode.
+    /// In Reviewer mode, returns filtered review PRs.
+    /// In Author mode, returns filtered my PRs.
+    /// Outside ReviewBoard, returns filtered review PRs as default.
+    pub fn active_review_prs(&self) -> Vec<&crate::models::ReviewPr> {
+        match &self.view_mode {
+            ViewMode::ReviewBoard { mode: ReviewBoardMode::Author, .. } => self.filtered_my_prs(),
+            _ => self.filtered_review_prs(),
+        }
+    }
+
+    /// Get PRs for a specific review decision column using the active PR list.
+    pub fn active_prs_by_decision(
+        &self,
+        decision: crate::models::ReviewDecision,
+    ) -> Vec<&crate::models::ReviewPr> {
+        self.active_review_prs()
+            .into_iter()
+            .filter(|pr| pr.review_decision == decision)
+            .collect()
+    }
+
     /// Get the currently selected ReviewPr, if in review board mode.
     pub fn selected_review_pr(&self) -> Option<&crate::models::ReviewPr> {
         let sel = self.review_selection()?;
         let col = sel.column();
         let row = sel.row(col);
         let decision = crate::models::ReviewDecision::from_column_index(col)?;
-        self.filtered_review_prs()
+        self.active_review_prs()
             .into_iter()
             .filter(|pr| pr.review_decision == decision)
             .nth(row)
@@ -2200,7 +2221,7 @@ impl App {
             Some(sel) => {
                 let col = sel.selected_column;
                 let count = self
-                    .filtered_review_prs()
+                    .active_review_prs()
                     .iter()
                     .filter(|pr| pr.review_decision.column_index() == col)
                     .count();

@@ -5423,8 +5423,14 @@ fn review_board_renders_loading_state() {
     assert!(app.review_board_loading());
 
     let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(buffer_contains(&buf, "Fetching reviews..."), "Should show loading text while fetching");
-    assert!(!buffer_contains(&buf, "No PRs awaiting your review"), "Should not show empty-state text while loading");
+    assert!(
+        buffer_contains(&buf, "Loading..."),
+        "Should show loading text while fetching"
+    );
+    assert!(
+        !buffer_contains(&buf, "No PRs found"),
+        "Should not show empty-state text while loading"
+    );
 }
 
 #[test]
@@ -5435,8 +5441,14 @@ fn review_board_renders_empty_state_after_fetch() {
     assert!(!app.review_board_loading());
 
     let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(buffer_contains(&buf, "No PRs awaiting your review"), "Should show empty state after fetch with no results");
-    assert!(!buffer_contains(&buf, "Fetching reviews..."), "Should not show loading text after fetch completes");
+    assert!(
+        buffer_contains(&buf, "No PRs found"),
+        "Should show empty state after fetch with no results"
+    );
+    assert!(
+        !buffer_contains(&buf, "Loading..."),
+        "Should not show loading text after fetch completes"
+    );
 }
 
 #[test]
@@ -7375,4 +7387,25 @@ fn toggle_review_board_mode_outside_review_board_is_noop() {
     let cmds = app.update(Message::ToggleReviewBoardMode);
     assert!(cmds.is_empty());
     assert!(matches!(app.view_mode(), ViewMode::Board(_)));
+}
+
+#[test]
+fn active_review_prs_returns_reviewer_prs_in_reviewer_mode() {
+    let mut app = make_app();
+    app.review_prs = vec![make_review_pr(1, "alice", ReviewDecision::ReviewRequired)];
+    app.my_prs = vec![make_review_pr(2, "me", ReviewDecision::Approved)];
+    app.update(Message::SwitchToReviewBoard);
+    assert_eq!(app.active_review_prs().len(), 1);
+    assert_eq!(app.active_review_prs()[0].number, 1);
+}
+
+#[test]
+fn active_review_prs_returns_my_prs_in_author_mode() {
+    let mut app = make_app();
+    app.review_prs = vec![make_review_pr(1, "alice", ReviewDecision::ReviewRequired)];
+    app.my_prs = vec![make_review_pr(2, "me", ReviewDecision::Approved)];
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::ToggleReviewBoardMode);
+    assert_eq!(app.active_review_prs().len(), 1);
+    assert_eq!(app.active_review_prs()[0].number, 2);
 }
