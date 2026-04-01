@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use crate::dispatch;
 use crate::models::{
     self, epic_status, Epic, EpicId, ReviewDecision, SubStatus, Task, TaskId, TaskStatus,
-    TaskUsage, VisualColumn,
+    TaskUsage,
 };
 
 // ---------------------------------------------------------------------------
@@ -314,43 +314,6 @@ impl App {
             ColumnItem::Epic(e) => (9u8, e.sort_order.unwrap_or(e.id.0), e.id.0),
         });
 
-        items
-    }
-
-    /// Build a list of items (tasks + epics) for a visual column.
-    /// Tasks are filtered by parent_status and sub_status matching the visual column.
-    /// Epics appear in the first visual column of their parent status group.
-    pub fn column_items_for_visual_column(&self, vcol_idx: usize) -> Vec<ColumnItem<'_>> {
-        let vcol = &VisualColumn::ALL[vcol_idx];
-        let tasks: Vec<&Task> = self
-            .tasks_for_current_view()
-            .into_iter()
-            .filter(|t| t.status == vcol.parent_status && vcol.contains(t.sub_status))
-            .collect();
-
-        let mut items: Vec<ColumnItem<'_>> = tasks.into_iter().map(ColumnItem::Task).collect();
-
-        // Include epics in board view — place them in the first visual column of their parent status
-        if matches!(self.view_mode, ViewMode::Board(_))
-            && vcol_idx == VisualColumn::parent_group_start(vcol.parent_status)
-        {
-            for epic in &self.epics {
-                if !self.repo_filter.is_empty() && !self.repo_filter.contains(&epic.repo_path) {
-                    continue;
-                }
-                if epic_status(epic, &self.subtask_statuses(epic.id)) == vcol.parent_status {
-                    items.push(ColumnItem::Epic(epic));
-                }
-            }
-        }
-
-        items.sort_by_key(|item| {
-            let (sort_order, id) = match item {
-                ColumnItem::Task(t) => (t.sort_order, t.id.0),
-                ColumnItem::Epic(e) => (e.sort_order, e.id.0),
-            };
-            (sort_order.unwrap_or(i64::MAX), id)
-        });
         items
     }
 
