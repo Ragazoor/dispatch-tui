@@ -614,6 +614,37 @@ impl Database {
                 .context("Failed to update schema version to 17")?;
         }
 
+        if current_version < 18 {
+            // Migration 18: expand ~/... to $HOME/... in all repo_path columns.
+            // This prevents filter mismatches between tilde and absolute forms.
+            if let Some(home) = std::env::var_os("HOME") {
+                let home = home.to_string_lossy();
+                let prefix = format!("{home}/");
+                conn.execute(
+                    "UPDATE tasks SET repo_path = ?1 || substr(repo_path, 3) WHERE repo_path LIKE '~/%'",
+                    params![prefix],
+                ).context("Failed to expand ~ in tasks.repo_path")?;
+                conn.execute(
+                    "UPDATE epics SET repo_path = ?1 || substr(repo_path, 3) WHERE repo_path LIKE '~/%'",
+                    params![prefix],
+                ).context("Failed to expand ~ in epics.repo_path")?;
+                conn.execute(
+                    "UPDATE repo_paths SET path = ?1 || substr(path, 3) WHERE path LIKE '~/%'",
+                    params![prefix],
+                ).context("Failed to expand ~ in repo_paths.path")?;
+                conn.execute(
+                    "UPDATE filter_presets SET repo_paths = replace(repo_paths, '~/', ?1) WHERE repo_paths LIKE '%~/%'",
+                    params![prefix],
+                ).context("Failed to expand ~ in filter_presets.repo_paths")?;
+                conn.execute(
+                    "UPDATE settings SET value = replace(value, '~/', ?1) WHERE key = 'repo_filter' AND value LIKE '%~/%'",
+                    params![prefix],
+                ).context("Failed to expand ~ in settings.repo_filter")?;
+            }
+            conn.pragma_update(None, "user_version", 18i64)
+                .context("Failed to update schema version to 18")?;
+        }
+
         Ok(())
     }
 
@@ -1446,7 +1477,7 @@ mod tests {
         let db = in_memory_db();
         let conn = db.conn.lock().unwrap();
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 17, "fresh DB should be at schema version 17");
+        assert_eq!(version, 18, "fresh DB should be at schema version 18");
     }
 
     #[test]
@@ -1497,7 +1528,7 @@ mod tests {
 
         // Version should be latest
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 17);
+        assert_eq!(version, 18);
 
         // Verify Migration 1 added the plan column
         let has_plan: bool = conn
@@ -1560,7 +1591,7 @@ mod tests {
         assert_eq!(status, "backlog");
 
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 17);
+        assert_eq!(version, 18);
     }
 
     #[test]
@@ -2286,7 +2317,7 @@ mod tests {
         Database::init_schema(&conn).unwrap();
 
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 17);
+        assert_eq!(version, 18);
 
         // Verify needs_input=1 became sub_status='needs_input'
         let ss: String = conn.query_row(
@@ -2360,7 +2391,7 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         let conn = db.conn.lock().unwrap();
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 17, "fresh DB should be at schema version 17");
+        assert_eq!(version, 18, "fresh DB should be at schema version 18");
     }
 
     #[test]
@@ -2476,7 +2507,7 @@ mod tests {
         Database::init_schema(&conn).unwrap();
 
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 17);
+        assert_eq!(version, 18);
 
         // (review, needs_input) must be converted to (review, awaiting_review)
         let ss: String = conn.query_row(
@@ -2491,5 +2522,61 @@ mod tests {
             [], |row| row.get(0),
         ).unwrap();
         assert_eq!(ss2, "awaiting_review");
+    }
+
+    #[test]
+    fn migration_18_expands_tilde_in_repo_paths() {
+        let db = in_memory_db();
+        let home = std::env::var("HOME").unwrap();
+
+        // Insert rows with tilde paths
+        db.create_task("T1", "d", "~/myrepo", None, TaskStatus::Backlog).unwrap();
+        db.create_task("T2", "d", "/absolute/repo", None, TaskStatus::Backlog).unwrap();
+        db.create_epic("E1", "d", "~/myrepo").unwrap();
+        db.save_repo_path("~/myrepo").unwrap();
+        db.save_repo_path("/absolute/repo").unwrap();
+        db.set_setting_string("repo_filter", "~/myrepo\n/absolute/repo").unwrap();
+        db.save_filter_preset("test", "~/myrepo\n/absolute/repo").unwrap();
+
+        // Manually revert to version 17 so migration 18 runs
+        {
+            let conn = db.conn().unwrap();
+            conn.pragma_update(None, "user_version", 17i64).unwrap();
+            // Revert the expanded paths back to tilde form for the test
+            conn.execute("UPDATE tasks SET repo_path = '~/myrepo' WHERE repo_path LIKE '%/myrepo'", []).unwrap();
+            conn.execute("UPDATE epics SET repo_path = '~/myrepo' WHERE repo_path LIKE '%/myrepo'", []).unwrap();
+            conn.execute("UPDATE repo_paths SET path = '~/myrepo' WHERE path LIKE '%/myrepo'", []).unwrap();
+        }
+
+        // Re-run migrations
+        {
+            let conn = db.conn().unwrap();
+            Database::init_schema(&conn).unwrap();
+        }
+
+        // Verify tilde paths were expanded
+        let tasks = db.list_all().unwrap();
+        let t1 = tasks.iter().find(|t| t.title == "T1").unwrap();
+        assert_eq!(t1.repo_path, format!("{home}/myrepo"));
+        let t2 = tasks.iter().find(|t| t.title == "T2").unwrap();
+        assert_eq!(t2.repo_path, "/absolute/repo");
+
+        let epics = db.list_epics().unwrap();
+        let e1 = epics.iter().find(|e| e.title == "E1").unwrap();
+        assert_eq!(e1.repo_path, format!("{home}/myrepo"));
+
+        let paths = db.list_repo_paths().unwrap();
+        assert!(paths.contains(&format!("{home}/myrepo")));
+        assert!(paths.contains(&"/absolute/repo".to_string()));
+        assert!(!paths.iter().any(|p| p.starts_with("~/")));
+
+        let filter = db.get_setting_string("repo_filter").unwrap().unwrap();
+        assert!(!filter.contains("~/"));
+        assert!(filter.contains(&format!("{home}/myrepo")));
+
+        let presets = db.list_filter_presets().unwrap();
+        let (_, preset_paths) = presets.iter().find(|(n, _)| n == "test").unwrap();
+        assert!(!preset_paths.contains("~/"));
+        assert!(preset_paths.contains(&format!("{home}/myrepo")));
     }
 }
