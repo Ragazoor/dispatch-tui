@@ -1662,6 +1662,9 @@ pub(in crate::tui) fn action_hints(task: Option<&Task>, key_color: Color) -> Vec
             }
             TaskStatus::Archived => {}
         }
+        if task.pr_url.is_some() {
+            push_hint("p", "open PR");
+        }
     }
 
     push_hint("^g", "back");
