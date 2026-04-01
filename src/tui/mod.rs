@@ -551,9 +551,7 @@ impl App {
             Message::MyPrsLoaded(prs) => self.handle_my_prs_loaded(prs),
             Message::MyPrsFetchFailed(err) => self.handle_my_prs_fetch_failed(err),
             Message::ToggleReviewDetail => self.handle_toggle_review_detail(),
-            Message::DispatchReviewAgent { repo, number, title, body, head_ref } => {
-                self.handle_dispatch_review_agent(repo, number, title, body, head_ref)
-            }
+            Message::DispatchReviewAgent(req) => self.handle_dispatch_review_agent(req),
             Message::ReviewAgentDispatched { repo, number, tmux_window: _ } => {
                 let repo_short = repo.split('/').next_back().unwrap_or(&repo);
                 self.set_status(format!("Review agent dispatched for {repo_short}#{number}"));
@@ -2195,11 +2193,7 @@ impl App {
 
     fn handle_dispatch_review_agent(
         &mut self,
-        repo: String,
-        number: i64,
-        title: String,
-        body: String,
-        head_ref: String,
+        req: ReviewAgentRequest,
     ) -> Vec<Command> {
         // Find a local repo path from existing tasks
         let repo_path = self.tasks.iter()
@@ -2208,24 +2202,21 @@ impl App {
                     .file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or("");
-                let repo_short = repo.split('/').next_back().unwrap_or(&repo);
+                let repo_short = req.repo.split('/').next_back().unwrap_or(&req.repo);
                 dir_name == repo_short
             })
             .map(|t| t.repo_path.clone());
 
         let Some(repo_path) = repo_path else {
-            self.set_status(format!("No local repo found for {repo}"));
+            self.set_status(format!("No local repo found for {}", req.repo));
             return vec![];
         };
 
-        self.set_status(format!("Dispatching review agent for #{number}..."));
-        vec![Command::DispatchReviewAgent {
+        self.set_status(format!("Dispatching review agent for #{}...", req.number));
+        vec![Command::DispatchReviewAgent(ReviewAgentRequest {
             repo: repo_path,
-            number,
-            title,
-            body,
-            head_ref,
-        }]
+            ..req
+        })]
     }
 
     /// Return review PRs filtered by the review repo filter.

@@ -23,7 +23,7 @@ const TICK_INTERVAL: Duration = Duration::from_secs(2);
 use crate::db::{EpicPatch, TaskStore};
 use crate::editor::{format_editor_content, parse_editor_content, format_epic_for_editor, parse_epic_editor_output};
 use crate::process::{ProcessRunner, RealProcessRunner};
-use crate::tui::{self, App, Command, Message};
+use crate::tui::{self, App, Command, Message, ReviewAgentRequest};
 use crate::models::TaskId;
 use crate::{db, dispatch, models, mcp, tmux};
 
@@ -959,24 +959,17 @@ impl TuiRuntime {
         });
     }
 
-    fn exec_dispatch_review_agent(
-        &self,
-        repo_path: String,
-        number: i64,
-        title: String,
-        body: String,
-        head_ref: String,
-    ) {
+    fn exec_dispatch_review_agent(&self, req: ReviewAgentRequest) {
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
         tokio::task::spawn_blocking(move || {
             match crate::dispatch::dispatch_review_agent(
-                &repo_path, number, &title, &body, &head_ref, &*runner,
+                &req.repo, req.number, &req.title, &req.body, &req.head_ref, &*runner,
             ) {
                 Ok(result) => {
                     let _ = tx.send(Message::ReviewAgentDispatched {
-                        repo: repo_path,
-                        number,
+                        repo: req.repo,
+                        number: req.number,
                         tmux_window: result.tmux_window,
                     });
                 }
@@ -1107,8 +1100,8 @@ async fn execute_commands(
             Command::PatchSubStatus { id, sub_status } => {
                 rt.exec_patch_sub_status(app, id, sub_status)
             }
-            Command::DispatchReviewAgent { repo, number, title, body, head_ref } => {
-                rt.exec_dispatch_review_agent(repo, number, title, body, head_ref)
+            Command::DispatchReviewAgent(req) => {
+                rt.exec_dispatch_review_agent(req)
             }
         }
     }

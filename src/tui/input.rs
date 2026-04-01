@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
-use super::{App, ColumnItem, Command, InputMode, Message, MoveDirection, ViewMode};
+use super::{App, ColumnItem, Command, InputMode, Message, MoveDirection, ReviewAgentRequest, ViewMode};
 use crate::models::{DispatchMode, ReviewDecision, SubStatus, TaskId, TaskStatus};
 
 impl App {
@@ -750,13 +750,13 @@ impl App {
 
             KeyCode::Char('d') => {
                 if let Some(pr) = self.selected_review_pr() {
-                    self.update(Message::DispatchReviewAgent {
+                    self.update(Message::DispatchReviewAgent(ReviewAgentRequest {
                         repo: pr.repo.clone(),
                         number: pr.number,
                         title: pr.title.clone(),
                         body: pr.body.clone(),
                         head_ref: pr.head_ref.clone(),
-                    })
+                    }))
                 } else {
                     vec![]
                 }

@@ -26,6 +26,19 @@ pub enum ReviewBoardMode {
 }
 
 // ---------------------------------------------------------------------------
+// ReviewAgentRequest
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct ReviewAgentRequest {
+    pub repo: String,
+    pub number: i64,
+    pub title: String,
+    pub body: String,
+    pub head_ref: String,
+}
+
+// ---------------------------------------------------------------------------
 // Message
 // ---------------------------------------------------------------------------
 
@@ -129,7 +142,7 @@ pub enum Message {
     },
     ToggleReviewDetail,
     RefreshReviewPrs,
-    DispatchReviewAgent { repo: String, number: i64, title: String, body: String, head_ref: String },
+    DispatchReviewAgent(ReviewAgentRequest),
     ReviewAgentDispatched { repo: String, number: i64, tmux_window: String },
     ReviewAgentFailed { error: String },
     // Repo filter
@@ -230,13 +243,7 @@ pub enum Command {
         id: TaskId,
         sub_status: SubStatus,
     },
-    DispatchReviewAgent {
-        repo: String,
-        number: i64,
-        title: String,
-        body: String,
-        head_ref: String,
-    },
+    DispatchReviewAgent(ReviewAgentRequest),
 }
 
 // ---------------------------------------------------------------------------
