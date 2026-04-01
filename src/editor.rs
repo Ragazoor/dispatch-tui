@@ -101,7 +101,7 @@ mod tests {
             title: title.to_string(),
             description: description.to_string(),
             repo_path: repo_path.to_string(),
-            done: false,
+            status: TaskStatus::Backlog,
             plan: None,
             sort_order: None,
             created_at: Utc::now(),

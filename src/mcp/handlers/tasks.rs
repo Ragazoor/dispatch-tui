@@ -299,6 +299,15 @@ pub(super) fn handle_update_task(
         return JsonRpcResponse::err(id, -32603, format!("Database error: {e}"));
     }
 
+    // Recalculate parent epic status if subtask status changed
+    if parsed.status.is_some() {
+        if let Ok(Some(task)) = state.db.get_task(TaskId(parsed.task_id)) {
+            if let Some(epic_id) = task.epic_id {
+                let _ = state.db.recalculate_epic_status(epic_id);
+            }
+        }
+    }
+
     state.notify();
 
     let mut updated = Vec::new();
@@ -642,7 +651,6 @@ pub(super) async fn handle_wrap_up(
     match parsed.action.as_str() {
         "rebase" => {
             let db = state.db.clone();
-            let branch_clone = branch.clone();
             let rebase_runner = runner.clone();
             let rebase_result = match tokio::task::spawn_blocking(move || {
                 tracing::info!(task_id = task_id.0, %branch, "MCP wrap_up rebase starting");
@@ -669,13 +677,16 @@ pub(super) async fn handle_wrap_up(
                             "MCP wrap_up: failed to set task to done: {e}"
                         );
                     }
+                    if let Some(epic_id) = task.epic_id {
+                        let _ = db.recalculate_epic_status(epic_id);
+                    }
                     // Fire-and-forget: kill tmux, auto-dispatch, notify
                     let ad_runner = state.runner.clone();
                     tokio::task::spawn_blocking(move || {
                         if let Some(window) = &tmux_window {
                             let _ = crate::tmux::kill_window(window, &*ad_runner);
                         }
-                        auto_dispatch_next(next_epic_task, &branch_clone, &*db, &*ad_runner);
+                        auto_dispatch_next(next_epic_task, &*db, &*ad_runner);
                         if let Some(tx) = notify_tx {
                             let _ = tx.send(());
                         }
@@ -696,7 +707,6 @@ pub(super) async fn handle_wrap_up(
         "pr" => {
             let db = state.db.clone();
             let pr_runner = runner.clone();
-            let branch_clone = branch.clone();
             let title = task.title.clone();
             let description = task.description.clone();
             let pr_result = match tokio::task::spawn_blocking(move || {
@@ -720,6 +730,9 @@ pub(super) async fn handle_wrap_up(
                             "MCP wrap_up: failed to save PR fields: {e}"
                         );
                     }
+                    if let Some(epic_id) = task.epic_id {
+                        let _ = db.recalculate_epic_status(epic_id);
+                    }
                     // Save before closure moves result
                     let pr_url = result.pr_url.clone();
                     // Fire-and-forget: inject code review, auto-dispatch, notify
@@ -735,7 +748,7 @@ pub(super) async fn handle_wrap_up(
                                 );
                             }
                         }
-                        auto_dispatch_next(next_epic_task, &branch_clone, &*db, &*ad_runner);
+                        auto_dispatch_next(next_epic_task, &*db, &*ad_runner);
                         if let Some(tx) = notify_tx {
                             let _ = tx.send(());
                         }
@@ -757,11 +770,10 @@ pub(super) async fn handle_wrap_up(
     }
 }
 
-/// Auto-dispatch the next epic subtask, chaining off the given branch.
+/// Auto-dispatch the next epic subtask from main.
 /// Called inside `spawn_blocking` after the rebase/PR work completes.
 fn auto_dispatch_next(
     next_task: Option<Task>,
-    base_branch: &str,
     db: &dyn db::TaskStore,
     runner: &dyn crate::process::ProcessRunner,
 ) {
@@ -770,18 +782,17 @@ fn auto_dispatch_next(
 
     tracing::info!(
         next_task_id = next_id.0,
-        %base_branch,
         has_plan = next_task.plan.is_some(),
         "auto-dispatching next epic subtask"
     );
 
     let result = if next_task.plan.is_some() {
-        dispatch::dispatch_chained_agent(&next_task, base_branch, runner)
+        dispatch::dispatch_chained_agent(&next_task, runner)
     } else {
         match next_task.tag.as_deref() {
-            Some("epic") => dispatch::brainstorm_chained_agent(&next_task, base_branch, runner),
-            Some("feature") => dispatch::plan_chained_agent(&next_task, base_branch, runner),
-            _ => dispatch::dispatch_chained_agent(&next_task, base_branch, runner),
+            Some("epic") => dispatch::brainstorm_chained_agent(&next_task, runner),
+            Some("feature") => dispatch::plan_chained_agent(&next_task, runner),
+            _ => dispatch::dispatch_chained_agent(&next_task, runner),
         }
     };
 
@@ -796,6 +807,9 @@ fn auto_dispatch_next(
                     task_id = next_id.0,
                     "auto-dispatch: failed to update task: {e}"
                 );
+            }
+            if let Some(epic_id) = next_task.epic_id {
+                let _ = db.recalculate_epic_status(epic_id);
             }
         }
         Err(e) => {

@@ -9,8 +9,8 @@ use std::time::{Duration, Instant};
 
 use crate::dispatch;
 use crate::models::{
-    self, epic_status, Epic, EpicId, ReviewDecision, SubStatus, Task, TaskId, TaskStatus,
-    TaskUsage, DEFAULT_QUICK_TASK_TITLE,
+    epic_status, epic_substatus, Epic, EpicId, ReviewDecision, SubStatus, Task, TaskId,
+    TaskStatus, TaskUsage, VisualColumn, DEFAULT_QUICK_TASK_TITLE,
 };
 
 // ---------------------------------------------------------------------------
@@ -107,77 +107,29 @@ impl App {
     }
 
     // Read-only accessors for code outside the tui module
-    pub fn tasks(&self) -> &[Task] {
-        &self.tasks
-    }
-    pub fn should_quit(&self) -> bool {
-        self.should_quit
-    }
-    pub fn selected_column(&self) -> usize {
-        self.selection().column()
-    }
-    pub fn selected_row(&self) -> &[usize; TaskStatus::COLUMN_COUNT] {
-        &self.selection().selected_row
-    }
-    pub fn view_mode(&self) -> &ViewMode {
-        &self.view_mode
-    }
-    pub fn epics(&self) -> &[Epic] {
-        &self.epics
-    }
-    pub fn mode(&self) -> &InputMode {
-        &self.input.mode
-    }
-    pub fn input_buffer(&self) -> &str {
-        &self.input.buffer
-    }
-    pub fn detail_visible(&self) -> bool {
-        self.detail_visible
-    }
-    pub fn tmux_outputs(&self) -> &std::collections::HashMap<TaskId, String> {
-        &self.agents.tmux_outputs
-    }
-    pub fn status_message(&self) -> Option<&str> {
-        self.status_message.as_deref()
-    }
-    pub fn error_popup(&self) -> Option<&str> {
-        self.error_popup.as_deref()
-    }
-    pub fn repo_paths(&self) -> &[String] {
-        &self.repo_paths
-    }
-    pub fn task_draft(&self) -> Option<&TaskDraft> {
-        self.input.task_draft.as_ref()
-    }
-    pub fn is_stale(&self, id: TaskId) -> bool {
-        self.find_task(id)
-            .is_some_and(|t| t.sub_status == SubStatus::Stale)
-    }
-    pub fn is_crashed(&self, id: TaskId) -> bool {
-        self.find_task(id)
-            .is_some_and(|t| t.sub_status == SubStatus::Crashed)
-    }
-    pub fn inactivity_timeout(&self) -> Duration {
-        self.agents.inactivity_timeout
-    }
-    pub fn show_archived(&self) -> bool {
-        self.archive.visible
-    }
-    pub fn selected_archive_row(&self) -> usize {
-        self.archive.selected_row
-    }
-    pub fn selected_tasks(&self) -> &HashSet<TaskId> {
-        &self.selected_tasks
-    }
-    pub fn selected_epics(&self) -> &HashSet<EpicId> {
-        &self.selected_epics
-    }
-    pub fn on_select_all(&self) -> bool {
-        self.selection().on_select_all
-    }
-    pub fn has_selection(&self) -> bool {
-        !self.selected_tasks.is_empty() || !self.selected_epics.is_empty()
-    }
+    pub fn tasks(&self) -> &[Task] { &self.tasks }
+    pub fn should_quit(&self) -> bool { self.should_quit }
+    pub fn selected_column(&self) -> usize { self.selection().column() }
+    pub fn selected_row(&self) -> &[usize; TaskStatus::COLUMN_COUNT] { &self.selection().selected_row }
+    pub fn view_mode(&self) -> &ViewMode { &self.view_mode }
+    pub fn epics(&self) -> &[Epic] { &self.epics }
+    pub fn mode(&self) -> &InputMode { &self.input.mode }
+    pub fn input_buffer(&self) -> &str { &self.input.buffer }
+    pub fn detail_visible(&self) -> bool { self.detail_visible }
+    pub fn tmux_outputs(&self) -> &std::collections::HashMap<TaskId, String> { &self.agents.tmux_outputs }
+    pub fn status_message(&self) -> Option<&str> { self.status_message.as_deref() }
+    pub fn error_popup(&self) -> Option<&str> { self.error_popup.as_deref() }
+    pub fn repo_paths(&self) -> &[String] { &self.repo_paths }
+    pub fn task_draft(&self) -> Option<&TaskDraft> { self.input.task_draft.as_ref() }
+    pub fn is_stale(&self, id: TaskId) -> bool { self.find_task(id).is_some_and(|t| t.sub_status == SubStatus::Stale) }
+    pub fn is_crashed(&self, id: TaskId) -> bool { self.find_task(id).is_some_and(|t| t.sub_status == SubStatus::Crashed) }
+    pub fn inactivity_timeout(&self) -> Duration { self.agents.inactivity_timeout }
+    pub fn show_archived(&self) -> bool { self.archive.visible }
+    pub fn selected_archive_row(&self) -> usize { self.archive.selected_row }
+    pub fn selected_tasks(&self) -> &HashSet<TaskId> { &self.selected_tasks }
+    pub fn selected_epics(&self) -> &HashSet<EpicId> { &self.selected_epics }
+    pub fn on_select_all(&self) -> bool { self.selection().on_select_all }
+    pub fn has_selection(&self) -> bool { !self.selected_tasks.is_empty() || !self.selected_epics.is_empty() }
 
     pub fn merge_queue(&self) -> Option<&MergeQueue> {
         self.merge_queue.as_ref()
@@ -251,21 +203,16 @@ impl App {
     /// Board view: standalone tasks only (epic_id is None).
     /// Epic view: only subtasks of the active epic.
     pub fn tasks_for_current_view(&self) -> Vec<&Task> {
-        let repo_match =
-            |t: &&Task| self.repo_filter.is_empty() || self.repo_filter.contains(&t.repo_path);
+        let repo_match = |t: &&Task| {
+            self.repo_filter.is_empty() || self.repo_filter.contains(&t.repo_path)
+        };
         match &self.view_mode {
-            ViewMode::Board(_) => self
-                .tasks
-                .iter()
-                .filter(|t| t.epic_id.is_none() && t.status != TaskStatus::Archived)
-                .filter(repo_match)
-                .collect(),
-            ViewMode::Epic { epic_id, .. } => self
-                .tasks
-                .iter()
-                .filter(|t| t.epic_id == Some(*epic_id) && t.status != TaskStatus::Archived)
-                .filter(repo_match)
-                .collect(),
+            ViewMode::Board(_) => {
+                self.tasks.iter().filter(|t| t.epic_id.is_none() && t.status != TaskStatus::Archived).filter(repo_match).collect()
+            }
+            ViewMode::Epic { epic_id, .. } => {
+                self.tasks.iter().filter(|t| t.epic_id == Some(*epic_id) && t.status != TaskStatus::Archived).filter(repo_match).collect()
+            }
             ViewMode::ReviewBoard { .. } => vec![],
         }
     }
@@ -280,8 +227,7 @@ impl App {
 
     /// Return all archived tasks, ordered as they appear in self.tasks.
     pub fn archived_tasks(&self) -> Vec<&Task> {
-        self.tasks
-            .iter()
+        self.tasks.iter()
             .filter(|t| t.status == TaskStatus::Archived)
             .filter(|t| self.repo_filter.is_empty() || self.repo_filter.contains(&t.repo_path))
             .collect()
@@ -299,21 +245,65 @@ impl App {
                 if !self.repo_filter.is_empty() && !self.repo_filter.contains(&epic.repo_path) {
                     continue;
                 }
-                if epic_status(epic, &self.subtask_statuses(epic.id)) == status {
+                if epic_status(epic) == status {
                     items.push(ColumnItem::Epic(epic));
                 }
             }
         }
 
-        items.sort_by_key(|item| match item {
-            ColumnItem::Task(t) => (
-                t.sub_status.column_priority(),
-                t.sort_order.unwrap_or(t.id.0),
-                t.id.0,
-            ),
-            ColumnItem::Epic(e) => (9u8, e.sort_order.unwrap_or(e.id.0), e.id.0),
+        items.sort_by_key(|item| {
+            match item {
+                ColumnItem::Task(t) => {
+                    (t.sub_status.column_priority(), t.sort_order.unwrap_or(t.id.0), t.id.0)
+                }
+                ColumnItem::Epic(e) => {
+                    let subtasks: Vec<Task> = self.tasks.iter()
+                        .filter(|t| t.epic_id == Some(e.id) && t.status != TaskStatus::Archived)
+                        .cloned()
+                        .collect();
+                    let active_merge = self.merge_queue.as_ref().map(|q| q.epic_id);
+                    let substatus = epic_substatus(e, &subtasks, active_merge);
+                    (substatus.column_priority(), e.sort_order.unwrap_or(e.id.0), e.id.0)
+                }
+            }
         });
 
+        items
+    }
+
+    /// Build a list of items (tasks + epics) for a visual column.
+    /// Tasks are filtered by parent_status and sub_status matching the visual column.
+    /// Epics appear in the first visual column of their parent status group.
+    pub fn column_items_for_visual_column(&self, vcol_idx: usize) -> Vec<ColumnItem<'_>> {
+        let vcol = &VisualColumn::ALL[vcol_idx];
+        let tasks: Vec<&Task> = self.tasks_for_current_view()
+            .into_iter()
+            .filter(|t| t.status == vcol.parent_status && vcol.contains(t.sub_status))
+            .collect();
+
+        let mut items: Vec<ColumnItem<'_>> = tasks.into_iter().map(ColumnItem::Task).collect();
+
+        // Include epics in board view — place them in the first visual column of their parent status
+        if matches!(self.view_mode, ViewMode::Board(_))
+            && vcol_idx == VisualColumn::parent_group_start(vcol.parent_status)
+        {
+            for epic in &self.epics {
+                if !self.repo_filter.is_empty() && !self.repo_filter.contains(&epic.repo_path) {
+                    continue;
+                }
+                if epic_status(epic) == vcol.parent_status {
+                    items.push(ColumnItem::Epic(epic));
+                }
+            }
+        }
+
+        items.sort_by_key(|item| {
+            let (sort_order, id) = match item {
+                ColumnItem::Task(t) => (t.sort_order, t.id.0),
+                ColumnItem::Epic(e) => (e.sort_order, e.id.0),
+            };
+            (sort_order.unwrap_or(i64::MAX), id)
+        });
         items
     }
 
@@ -393,9 +383,7 @@ impl App {
     /// Take the tmux_window from a task and build a KillTmuxWindow command.
     /// Leaves the worktree intact so the task can be resumed later.
     fn take_detach(task: &mut Task) -> Option<Command> {
-        task.tmux_window
-            .take()
-            .map(|window| Command::KillTmuxWindow { window })
+        task.tmux_window.take().map(|window| Command::KillTmuxWindow { window })
     }
 
     /// Process a message and return a list of side-effect commands.
@@ -410,30 +398,21 @@ impl App {
             Message::DispatchTask(id) => self.handle_dispatch_task(id),
             Message::BrainstormTask(id) => self.handle_brainstorm_task(id),
             Message::PlanTask(id) => self.handle_plan_task(id),
-            Message::Dispatched {
-                id,
-                worktree,
-                tmux_window,
-                switch_focus,
-            } => self.handle_dispatched(id, worktree, tmux_window, switch_focus),
+            Message::Dispatched { id, worktree, tmux_window, switch_focus } =>
+                self.handle_dispatched(id, worktree, tmux_window, switch_focus),
             Message::TaskCreated { task } => self.handle_task_created(task),
             Message::DeleteTask(id) => self.handle_delete_task(id),
             Message::ToggleDetail => self.handle_toggle_detail(),
-            Message::TmuxOutput {
-                id,
-                output,
-                activity_ts,
-            } => self.handle_tmux_output(id, output, activity_ts),
+            Message::TmuxOutput { id, output, activity_ts } => self.handle_tmux_output(id, output, activity_ts),
             Message::WindowGone(id) => self.handle_window_gone(id),
             Message::RefreshTasks(tasks) => self.handle_refresh_tasks(tasks),
             Message::ResumeTask(id) => self.handle_resume_task(id),
             Message::Resumed { id, tmux_window } => self.handle_resumed(id, tmux_window),
             Message::Error(msg) => self.handle_error(msg),
-            Message::TaskEdited(edit) => self.handle_task_edited(edit),
+            Message::TaskEdited(edit) =>
+                self.handle_task_edited(edit),
             Message::RepoPathsUpdated(paths) => self.handle_repo_paths_updated(paths),
-            Message::QuickDispatch { repo_path, epic_id } => {
-                self.handle_quick_dispatch(repo_path, epic_id)
-            }
+            Message::QuickDispatch { repo_path, epic_id } => self.handle_quick_dispatch(repo_path, epic_id),
             Message::StaleAgent(id) => self.handle_stale_agent(id),
             Message::AgentCrashed(id) => self.handle_agent_crashed(id),
             Message::KillAndRetry(id) => self.handle_kill_and_retry(id),
@@ -445,9 +424,7 @@ impl App {
             Message::ToggleSelectEpic(id) => self.handle_toggle_select_epic(id),
             Message::ClearSelection => self.handle_clear_selection(),
             Message::SelectAllColumn => self.handle_select_all_column(),
-            Message::BatchMoveTasks { ids, direction } => {
-                self.handle_batch_move_tasks(ids, direction)
-            }
+            Message::BatchMoveTasks { ids, direction } => self.handle_batch_move_tasks(ids, direction),
             Message::BatchArchiveTasks(ids) => self.handle_batch_archive_tasks(ids),
             Message::BatchArchiveEpics(ids) => self.handle_batch_archive_epics(ids),
             Message::DismissError => self.handle_dismiss_error(),
@@ -469,11 +446,8 @@ impl App {
             Message::ToggleHelp => self.handle_toggle_help(),
             // Finish (rebase + cleanup)
             Message::FinishComplete(id) => self.handle_finish_complete(id),
-            Message::FinishFailed {
-                id,
-                error,
-                is_conflict,
-            } => self.handle_finish_failed(id, error, is_conflict),
+            Message::FinishFailed { id, error, is_conflict } =>
+                self.handle_finish_failed(id, error, is_conflict),
             // Done confirmation (no cleanup, just status change)
             Message::ConfirmDone => self.handle_confirm_done(),
             Message::CancelDone => self.handle_cancel_done(),
@@ -489,10 +463,7 @@ impl App {
             Message::EpicEdited(epic) => self.handle_epic_edited(epic),
             Message::DeleteEpic(id) => self.handle_delete_epic(id),
             Message::ConfirmDeleteEpic => self.handle_confirm_delete_epic(),
-            Message::MarkEpicDone(id) => self.handle_mark_epic_done(id),
-            Message::MarkEpicUndone(id) => self.handle_mark_epic_undone(id),
-            Message::ConfirmEpicDone => self.handle_confirm_epic_done(),
-            Message::CancelEpicDone => self.handle_cancel_epic_done(),
+            Message::MoveEpicStatus(id, dir) => self.handle_move_epic_status(id, dir),
             Message::ArchiveEpic(id) => self.handle_archive_epic(id),
             Message::ConfirmArchiveEpic => self.handle_confirm_archive_epic(),
             Message::StartNewEpic => self.handle_start_new_epic(),
@@ -503,10 +474,7 @@ impl App {
             Message::PrCreated { id, pr_url } => self.handle_pr_created(id, pr_url),
             Message::PrFailed { id, error } => self.handle_pr_failed(id, error),
             Message::PrMerged(id) => self.handle_pr_merged(id),
-            Message::PrReviewState {
-                id,
-                review_decision,
-            } => self.handle_pr_review_state(id, review_decision),
+            Message::PrReviewState { id, review_decision } => self.handle_pr_review_state(id, review_decision),
             // Repo filter
             Message::StartRepoFilter => self.handle_start_repo_filter(),
             Message::CloseRepoFilter => self.handle_close_repo_filter(),
@@ -572,8 +540,7 @@ impl App {
     // -----------------------------------------------------------------------
 
     fn handle_detach_tmux(&mut self, ids: Vec<TaskId>) -> Vec<Command> {
-        let detachable: Vec<TaskId> = ids
-            .iter()
+        let detachable: Vec<TaskId> = ids.iter()
             .filter(|&&id| {
                 self.find_task(id)
                     .is_some_and(|t| t.status == TaskStatus::Review && t.tmux_window.is_some())
@@ -697,11 +664,7 @@ impl App {
 
         // Swap effective values; offset if equal
         let (new_a, new_b) = if a_eff == b_eff {
-            if direction > 0 {
-                (a_eff + 1, b_eff)
-            } else {
-                (a_eff - 1, b_eff)
-            }
+            if direction > 0 { (a_eff + 1, b_eff) } else { (a_eff - 1, b_eff) }
         } else {
             (b_eff, a_eff)
         };
@@ -720,11 +683,7 @@ impl App {
         if let Some(eid) = a_epic_id {
             if let Some(e) = self.epics.iter_mut().find(|e2| e2.id == eid) {
                 e.sort_order = Some(new_a);
-                cmds.push(Command::PersistEpic {
-                    id: eid,
-                    done: None,
-                    sort_order: Some(new_a),
-                });
+                cmds.push(Command::PersistEpic { id: eid, status: None, sort_order: Some(new_a) });
             }
         }
         if let Some(tid) = b_task_id {
@@ -736,11 +695,7 @@ impl App {
         if let Some(eid) = b_epic_id {
             if let Some(e) = self.epics.iter_mut().find(|e2| e2.id == eid) {
                 e.sort_order = Some(new_b);
-                cmds.push(Command::PersistEpic {
-                    id: eid,
-                    done: None,
-                    sort_order: Some(new_b),
-                });
+                cmds.push(Command::PersistEpic { id: eid, status: None, sort_order: Some(new_b) });
             }
         }
 
@@ -835,11 +790,7 @@ impl App {
 
     fn handle_toggle_notifications(&mut self) -> Vec<Command> {
         self.notifications_enabled = !self.notifications_enabled;
-        let label = if self.notifications_enabled {
-            "Notifications enabled"
-        } else {
-            "Notifications disabled"
-        };
+        let label = if self.notifications_enabled { "Notifications enabled" } else { "Notifications disabled" };
         self.set_status(label.to_string());
         vec![Command::PersistSetting {
             key: "notifications_enabled".to_string(),
@@ -874,13 +825,7 @@ impl App {
         vec![]
     }
 
-    fn handle_dispatched(
-        &mut self,
-        id: TaskId,
-        worktree: String,
-        tmux_window: String,
-        switch_focus: bool,
-    ) -> Vec<Command> {
+    fn handle_dispatched(&mut self, id: TaskId, worktree: String, tmux_window: String, switch_focus: bool) -> Vec<Command> {
         if let Some(task) = self.find_task_mut(id) {
             task.worktree = Some(worktree);
             task.tmux_window = Some(tmux_window.clone());
@@ -891,9 +836,7 @@ impl App {
             self.clamp_selection();
             let mut cmds = vec![Command::PersistTask(task_clone)];
             if switch_focus {
-                cmds.push(Command::JumpToTmux {
-                    window: tmux_window,
-                });
+                cmds.push(Command::JumpToTmux { window: tmux_window });
             }
             cmds
         } else {
@@ -937,16 +880,13 @@ impl App {
 
     fn handle_tmux_output(&mut self, id: TaskId, output: String, activity_ts: u64) -> Vec<Command> {
         let mut cmds = Vec::new();
-        let activity_changed = self
-            .agents
-            .last_activity
+        let activity_changed = self.agents.last_activity
             .get(&id)
             .is_none_or(|&prev| prev != activity_ts);
         if activity_changed {
             self.agents.last_output_change.insert(id, Instant::now());
             // Recovery: reset stale/crashed sub_status when activity resumes
-            let needs_recovery = self
-                .find_task(id)
+            let needs_recovery = self.find_task(id)
                 .is_some_and(|t| matches!(t.sub_status, SubStatus::Stale | SubStatus::Crashed));
             if needs_recovery {
                 if let Some(task) = self.find_task_mut(id) {
@@ -986,8 +926,7 @@ impl App {
             if self.notifications_enabled {
                 // Extract old state before any mutable borrows
                 let old_task = self.find_task(new_task.id);
-                let was_needs_input =
-                    old_task.is_some_and(|t| t.sub_status == SubStatus::NeedsInput);
+                let was_needs_input = old_task.is_some_and(|t| t.sub_status == SubStatus::NeedsInput);
                 let was_review = old_task.is_some_and(|t| t.status == TaskStatus::Review);
 
                 // Detect NeedsInput transition (running tasks only)
@@ -1005,8 +944,7 @@ impl App {
                 }
 
                 // Detect review transition
-                if new_task.status == TaskStatus::Review
-                    && !was_review
+                if new_task.status == TaskStatus::Review && !was_review
                     && !self.agents.notified_review.contains(&new_task.id)
                 {
                     self.agents.notified_review.insert(new_task.id);
@@ -1053,9 +991,10 @@ impl App {
             .iter()
             .filter(|t| t.tmux_window.is_some())
             .filter_map(|t| {
-                t.tmux_window
-                    .clone()
-                    .map(|window| Command::CaptureTmux { id: t.id, window })
+                t.tmux_window.clone().map(|window| Command::CaptureTmux {
+                    id: t.id,
+                    window,
+                })
             })
             .collect();
 
@@ -1067,8 +1006,7 @@ impl App {
             .filter(|t| t.status == TaskStatus::Running && t.tmux_window.is_some())
             .filter(|t| t.sub_status != SubStatus::Stale && t.sub_status != SubStatus::Crashed)
             .filter(|t| {
-                self.agents
-                    .last_output_change
+                self.agents.last_output_change
                     .get(&t.id)
                     .is_some_and(|instant| instant.elapsed() > timeout)
             })
@@ -1132,9 +1070,7 @@ impl App {
         if let Some(task) = self.find_task_mut(id) {
             task.sub_status = SubStatus::Stale;
         }
-        let elapsed = self
-            .agents
-            .last_output_change
+        let elapsed = self.agents.last_output_change
             .get(&id)
             .map(|t| t.elapsed().as_secs() / 60)
             .unwrap_or(0);
@@ -1159,10 +1095,7 @@ impl App {
 
     fn handle_agent_crashed(&mut self, id: TaskId) -> Vec<Command> {
         // Only applies to Running tasks
-        if !self
-            .find_task(id)
-            .is_some_and(|t| t.status == TaskStatus::Running)
-        {
+        if !self.find_task(id).is_some_and(|t| t.status == TaskStatus::Running) {
             return vec![];
         }
 
@@ -1174,7 +1107,9 @@ impl App {
         if let Some(task) = self.find_task(id) {
             cmds.push(Command::PersistTask(task.clone()));
         }
-        self.set_status(format!("Task {id} agent crashed - press d to retry",));
+        self.set_status(format!(
+            "Task {id} agent crashed - press d to retry",
+        ));
 
         if self.notifications_enabled {
             if let Some(task) = self.find_task(id) {
@@ -1241,11 +1176,7 @@ impl App {
         vec![]
     }
 
-    fn handle_quick_dispatch(
-        &mut self,
-        repo_path: String,
-        epic_id: Option<EpicId>,
-    ) -> Vec<Command> {
+    fn handle_quick_dispatch(&mut self, repo_path: String, epic_id: Option<EpicId>) -> Vec<Command> {
         vec![Command::QuickDispatch {
             draft: TaskDraft {
                 title: DEFAULT_QUICK_TASK_TITLE.to_string(),
@@ -1259,17 +1190,13 @@ impl App {
 
     fn handle_kill_and_retry(&mut self, id: TaskId) -> Vec<Command> {
         self.input.mode = InputMode::ConfirmRetry(id);
-        let label = if self
-            .find_task(id)
-            .is_some_and(|t| t.sub_status == SubStatus::Crashed)
-        {
+        let label = if self.find_task(id).is_some_and(|t| t.sub_status == SubStatus::Crashed) {
             "crashed"
         } else {
             "stale"
         };
         self.set_status(format!(
-            "Agent {} - [r] Resume  [f] Fresh start  [Esc] Cancel",
-            label
+            "Agent {} - [r] Resume  [f] Fresh start  [Esc] Cancel", label
         ));
         vec![]
     }
@@ -1432,20 +1359,11 @@ impl App {
         cmds
     }
 
-    fn handle_batch_move_tasks(
-        &mut self,
-        ids: Vec<TaskId>,
-        direction: MoveDirection,
-    ) -> Vec<Command> {
+    fn handle_batch_move_tasks(&mut self, ids: Vec<TaskId>, direction: MoveDirection) -> Vec<Command> {
         if matches!(direction, MoveDirection::Forward) {
-            let review_ids: Vec<TaskId> = ids
-                .iter()
-                .copied()
-                .filter(|id| {
-                    self.find_task(*id)
-                        .is_some_and(|t| t.status == TaskStatus::Review)
-                })
-                .collect();
+            let review_ids: Vec<TaskId> = ids.iter().copied().filter(|id| {
+                self.find_task(*id).is_some_and(|t| t.status == TaskStatus::Review)
+            }).collect();
 
             if !review_ids.is_empty() {
                 // Move non-Review tasks immediately
@@ -1510,11 +1428,7 @@ impl App {
         if let Some(task) = self.selected_task() {
             let title = truncate_title(&task.title, 30);
             let status = task.status.as_str();
-            let warning = if task.worktree.is_some() {
-                " (has worktree)"
-            } else {
-                ""
-            };
+            let warning = if task.worktree.is_some() { " (has worktree)" } else { "" };
             self.input.mode = InputMode::ConfirmDelete;
             self.set_status(format!("Delete {title} [{status}]{warning}? (y/n)"));
         }
@@ -1657,7 +1571,6 @@ impl App {
     }
 
     fn finish_task_creation(&mut self, repo_path: String) -> Vec<Command> {
-        let repo_path = models::expand_tilde(&repo_path);
         let mut draft = self.input.task_draft.take().unwrap_or_default();
         draft.repo_path = repo_path.clone();
         self.input.mode = InputMode::Normal;
@@ -1677,10 +1590,7 @@ impl App {
     // -----------------------------------------------------------------------
 
     fn handle_finish_complete(&mut self, id: TaskId) -> Vec<Command> {
-        let in_queue = self
-            .merge_queue
-            .as_ref()
-            .is_some_and(|q| q.current == Some(id));
+        let in_queue = self.merge_queue.as_ref().is_some_and(|q| q.current == Some(id));
 
         let mut cmds = if let Some(task) = self.find_task_mut(id) {
             task.tmux_window = None;
@@ -1708,22 +1618,14 @@ impl App {
         cmds
     }
 
-    fn handle_finish_failed(
-        &mut self,
-        id: TaskId,
-        error: String,
-        is_conflict: bool,
-    ) -> Vec<Command> {
+    fn handle_finish_failed(&mut self, id: TaskId, error: String, is_conflict: bool) -> Vec<Command> {
         let mut cmds = Vec::new();
 
         if is_conflict {
             if let Some(task) = self.find_task_mut(id) {
                 task.sub_status = SubStatus::Conflict;
             }
-            cmds.push(Command::PatchSubStatus {
-                id,
-                sub_status: SubStatus::Conflict,
-            });
+            cmds.push(Command::PatchSubStatus { id, sub_status: SubStatus::Conflict });
         }
 
         if let Some(q) = &mut self.merge_queue {
@@ -1748,10 +1650,7 @@ impl App {
     // -----------------------------------------------------------------------
 
     fn handle_pr_created(&mut self, id: TaskId, pr_url: String) -> Vec<Command> {
-        let in_queue = self
-            .merge_queue
-            .as_ref()
-            .is_some_and(|q| q.current == Some(id));
+        let in_queue = self.merge_queue.as_ref().is_some_and(|q| q.current == Some(id));
 
         let mut cmds = if let Some(task) = self.find_task_mut(id) {
             task.pr_url = Some(pr_url.clone());
@@ -1805,9 +1704,7 @@ impl App {
                 return cmds;
             }
 
-            let pr_label = task
-                .pr_url
-                .as_deref()
+            let pr_label = task.pr_url.as_deref()
                 .and_then(crate::models::pr_number_from_url)
                 .map_or("PR".to_string(), |n| format!("PR #{n}"));
             let title = task.title.clone();
@@ -1822,9 +1719,7 @@ impl App {
 
             self.clear_agent_tracking(id);
             self.clamp_selection();
-            self.set_status(format!(
-                "{pr_label} merged \u{2014} task #{id} moved to Done"
-            ));
+            self.set_status(format!("{pr_label} merged \u{2014} task #{id} moved to Done"));
 
             cmds.push(Command::PersistTask(task_clone));
 
@@ -1840,11 +1735,7 @@ impl App {
         cmds
     }
 
-    fn handle_pr_review_state(
-        &mut self,
-        id: TaskId,
-        review_decision: Option<dispatch::PrReviewDecision>,
-    ) -> Vec<Command> {
+    fn handle_pr_review_state(&mut self, id: TaskId, review_decision: Option<dispatch::PrReviewDecision>) -> Vec<Command> {
         if let Some(task) = self.find_task_mut(id) {
             if task.status != TaskStatus::Review {
                 return vec![];
@@ -1870,11 +1761,7 @@ impl App {
     fn handle_start_wrap_up(&mut self, id: TaskId) -> Vec<Command> {
         let branch = match self.find_task(id) {
             Some(t) if dispatch::is_wrappable(t) => {
-                match t
-                    .worktree
-                    .as_deref()
-                    .and_then(dispatch::branch_from_worktree)
-                {
+                match t.worktree.as_deref().and_then(dispatch::branch_from_worktree) {
                     Some(b) => b,
                     None => return vec![],
                 }
@@ -1884,8 +1771,7 @@ impl App {
 
         self.input.mode = InputMode::ConfirmWrapUp(id);
         self.set_status(format!(
-            "Wrap up {}: (r) rebase onto main  (p) create PR  (Esc) cancel",
-            branch
+            "Wrap up {}: (r) rebase onto main  (p) create PR  (Esc) cancel", branch
         ));
         vec![]
     }
@@ -1965,11 +1851,11 @@ impl App {
     // -----------------------------------------------------------------------
 
     fn handle_start_epic_wrap_up(&mut self, epic_id: EpicId) -> Vec<Command> {
-        let review_count = self
-            .tasks
-            .iter()
+        let review_count = self.tasks.iter()
             .filter(|t| {
-                t.epic_id == Some(epic_id) && t.status == TaskStatus::Review && t.worktree.is_some()
+                t.epic_id == Some(epic_id)
+                    && t.status == TaskStatus::Review
+                    && t.worktree.is_some()
             })
             .count();
 
@@ -1995,11 +1881,11 @@ impl App {
         };
         self.input.mode = InputMode::Normal;
 
-        let mut review_tasks: Vec<&Task> = self
-            .tasks
-            .iter()
+        let mut review_tasks: Vec<&Task> = self.tasks.iter()
             .filter(|t| {
-                t.epic_id == Some(epic_id) && t.status == TaskStatus::Review && t.worktree.is_some()
+                t.epic_id == Some(epic_id)
+                    && t.status == TaskStatus::Review
+                    && t.worktree.is_some()
             })
             .collect();
         review_tasks.sort_by_key(|t| t.sort_order.unwrap_or(t.id.0));
@@ -2271,8 +2157,7 @@ impl App {
         let Some(epic) = self.epics.iter().find(|e| e.id == id) else {
             return vec![];
         };
-        let subtask_statuses = self.subtask_statuses(id);
-        let status = crate::models::epic_status(epic, &subtask_statuses);
+        let status = crate::models::epic_status(epic);
 
         if status != TaskStatus::Backlog {
             self.set_status("No backlog tasks in epic".to_string());
@@ -2290,21 +2175,15 @@ impl App {
 
             match backlog_subtasks.first() {
                 Some(task) if task.plan.is_some() => {
-                    vec![Command::Dispatch {
-                        task: (*task).clone(),
-                    }]
+                    vec![Command::Dispatch { task: (*task).clone() }]
                 }
-                Some(task) => match task.tag.as_deref() {
-                    Some("epic") => vec![Command::Brainstorm {
-                        task: (*task).clone(),
-                    }],
-                    Some("feature") => vec![Command::Plan {
-                        task: (*task).clone(),
-                    }],
-                    _ => vec![Command::Dispatch {
-                        task: (*task).clone(),
-                    }],
-                },
+                Some(task) => {
+                    match task.tag.as_deref() {
+                        Some("epic") => vec![Command::Brainstorm { task: (*task).clone() }],
+                        Some("feature") => vec![Command::Plan { task: (*task).clone() }],
+                        _ => vec![Command::Dispatch { task: (*task).clone() }],
+                    }
+                }
                 None => {
                     vec![Command::DispatchEpic { epic: epic.clone() }]
                 }
@@ -2376,8 +2255,7 @@ impl App {
     fn handle_delete_epic(&mut self, id: EpicId) -> Vec<Command> {
         let mut cmds = Vec::new();
         // Clean up worktrees/tmux for subtasks before deleting
-        let subtask_ids: Vec<TaskId> = self
-            .tasks
+        let subtask_ids: Vec<TaskId> = self.tasks
             .iter()
             .filter(|t| t.epic_id == Some(id))
             .map(|t| t.id)
@@ -2411,48 +2289,37 @@ impl App {
         vec![]
     }
 
-    fn handle_mark_epic_done(&mut self, id: EpicId) -> Vec<Command> {
-        if let Some(epic) = self.epics.iter_mut().find(|e| e.id == id) {
-            epic.done = true;
-        }
-        vec![Command::PersistEpic {
-            id,
-            done: Some(true),
-            sort_order: None,
-        }]
-    }
-
-    fn handle_mark_epic_undone(&mut self, id: EpicId) -> Vec<Command> {
-        if let Some(epic) = self.epics.iter_mut().find(|e| e.id == id) {
-            epic.done = false;
-        }
-        vec![Command::PersistEpic {
-            id,
-            done: Some(false),
-            sort_order: None,
-        }]
-    }
-
-    fn handle_confirm_epic_done(&mut self) -> Vec<Command> {
-        let id = match self.input.mode {
-            InputMode::ConfirmEpicDone(id) => id,
-            _ => return vec![],
+    fn handle_move_epic_status(&mut self, id: EpicId, direction: MoveDirection) -> Vec<Command> {
+        let Some(epic) = self.epics.iter_mut().find(|e| e.id == id) else {
+            return vec![];
         };
-        self.input.mode = InputMode::Normal;
-        self.clear_status();
-        self.handle_mark_epic_done(id)
-    }
+        let new_status = match direction {
+            MoveDirection::Forward => epic.status.next(),
+            MoveDirection::Backward => epic.status.prev(),
+        };
+        if new_status == epic.status {
+            return vec![];
+        }
+        epic.status = new_status;
+        let mut cmds = vec![Command::PersistEpic { id, status: Some(new_status), sort_order: None }];
 
-    fn handle_cancel_epic_done(&mut self) -> Vec<Command> {
-        self.input.mode = InputMode::Normal;
-        self.clear_status();
-        vec![]
+        // Moving to Done cleans up all subtask tmux windows
+        if new_status == TaskStatus::Done {
+            let windows: Vec<String> = self.tasks.iter()
+                .filter(|t| t.epic_id == Some(id) && t.tmux_window.is_some())
+                .filter_map(|t| t.tmux_window.clone())
+                .collect();
+            for window in windows {
+                cmds.push(Command::KillTmuxWindow { window });
+            }
+        }
+        self.clamp_selection();
+        cmds
     }
 
     fn handle_archive_epic(&mut self, id: EpicId) -> Vec<Command> {
         let mut cmds = Vec::new();
-        let subtask_ids: Vec<TaskId> = self
-            .tasks
+        let subtask_ids: Vec<TaskId> = self.tasks
             .iter()
             .filter(|t| t.epic_id == Some(id) && t.status != TaskStatus::Archived)
             .map(|t| t.id)
@@ -2472,20 +2339,14 @@ impl App {
     fn handle_confirm_archive_epic(&mut self) -> Vec<Command> {
         if let Some(ColumnItem::Epic(epic)) = self.selected_column_item() {
             let id = epic.id;
-            let not_done_count = self
-                .subtask_statuses(id)
+            let not_done_count = self.subtask_statuses(id)
                 .iter()
                 .filter(|s| **s != TaskStatus::Done)
                 .count();
             if not_done_count > 0 {
-                let noun = if not_done_count == 1 {
-                    "subtask"
-                } else {
-                    "subtasks"
-                };
+                let noun = if not_done_count == 1 { "subtask" } else { "subtasks" };
                 self.set_status(format!(
-                    "Cannot archive epic: {} {} not done",
-                    not_done_count, noun
+                    "Cannot archive epic: {} {} not done", not_done_count, noun
                 ));
                 return vec![];
             }
@@ -2557,8 +2418,8 @@ impl App {
         if count == 0 {
             return vec![];
         }
-        self.input.repo_cursor =
-            (self.input.repo_cursor as isize + delta).rem_euclid(count as isize) as usize;
+        self.input.repo_cursor = (self.input.repo_cursor as isize + delta)
+            .rem_euclid(count as isize) as usize;
         vec![]
     }
 
@@ -2661,11 +2522,7 @@ impl App {
         if let Some((_, repos)) = self.filter_presets.iter().find(|(n, _)| *n == name) {
             // Intersect with known repo_paths to skip stale entries
             let known: HashSet<&String> = self.repo_paths.iter().collect();
-            self.repo_filter = repos
-                .iter()
-                .filter(|p| known.contains(p))
-                .cloned()
-                .collect();
+            self.repo_filter = repos.iter().filter(|p| known.contains(p)).cloned().collect();
             self.clamp_selection();
             self.set_status(format!("Loaded preset \"{name}\""));
         }
@@ -2693,21 +2550,20 @@ impl App {
         vec![]
     }
 
-    fn handle_filter_presets_loaded(
-        &mut self,
-        presets: Vec<(String, HashSet<String>)>,
-    ) -> Vec<Command> {
+    fn handle_filter_presets_loaded(&mut self, presets: Vec<(String, HashSet<String>)>) -> Vec<Command> {
         self.filter_presets = presets;
         vec![]
     }
 
     fn finish_epic_creation(&mut self, repo_path: String) -> Vec<Command> {
-        let repo_path = models::expand_tilde(&repo_path);
         let mut draft = self.input.epic_draft.take().unwrap_or_default();
         draft.repo_path = repo_path.clone();
         self.input.mode = InputMode::Normal;
         self.clear_status();
-        vec![Command::InsertEpic(draft), Command::SaveRepoPath(repo_path)]
+        vec![
+            Command::InsertEpic(draft),
+            Command::SaveRepoPath(repo_path),
+        ]
     }
 }
 

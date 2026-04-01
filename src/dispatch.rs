@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use std::fs;
 
-use crate::models::{slugify, DispatchResult, EpicId, ResumeResult, Task, TaskId, TaskStatus};
+use crate::models::{DispatchResult, EpicId, ResumeResult, Task, TaskId, TaskStatus, slugify};
 use crate::process::ProcessRunner;
 use crate::tmux;
 
@@ -35,15 +35,7 @@ fn provision_worktree(
     if std::path::Path::new(&worktree_path).exists() {
         tracing::info!(task_id = task.id.0, %worktree_path, "worktree already exists, reusing");
     } else {
-        let mut args = vec![
-            "-C",
-            &repo_path,
-            "worktree",
-            "add",
-            &*worktree_path,
-            "-B",
-            &*worktree_name,
-        ];
+        let mut args = vec!["-C", &repo_path, "worktree", "add", &*worktree_path, "-B", &*worktree_name];
         if let Some(base) = base_branch {
             args.push(base);
         }
@@ -62,12 +54,10 @@ fn provision_worktree(
 
     tmux::set_window_dispatch_dir(&tmux_window, &worktree_path, runner)
         .context("failed to set tmux window dispatch dir")?;
-    tmux::ensure_split_hook(runner).context("failed to ensure tmux split hook")?;
+    tmux::ensure_split_hook(runner)
+        .context("failed to ensure tmux split hook")?;
 
-    Ok(ProvisionResult {
-        worktree_path,
-        tmux_window,
-    })
+    Ok(ProvisionResult { worktree_path, tmux_window })
 }
 
 fn rebase_preamble(target: &str) -> String {
@@ -139,12 +129,7 @@ fn dispatch_with_prompt(
 }
 
 pub fn dispatch_agent(task: &Task, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
-    let prompt = build_prompt(
-        task.id,
-        &task.title,
-        &task.description,
-        task.plan.as_deref(),
-    );
+    let prompt = build_prompt(task.id, &task.title, &task.description, task.plan.as_deref());
     dispatch_with_prompt(task, &prompt, ClaudeMode::AcceptEdits, runner, None)
 }
 
@@ -163,56 +148,27 @@ pub fn quick_dispatch_agent(task: &Task, runner: &dyn ProcessRunner) -> Result<D
     dispatch_with_prompt(task, &prompt, ClaudeMode::AcceptEdits, runner, None)
 }
 
-pub fn epic_planning_agent(
-    task: &Task,
-    epic_id: EpicId,
-    epic_title: &str,
-    epic_description: &str,
-    runner: &dyn ProcessRunner,
-) -> Result<DispatchResult> {
+pub fn epic_planning_agent(task: &Task, epic_id: EpicId, epic_title: &str, epic_description: &str, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
     let prompt = build_epic_planning_prompt(epic_id, epic_title, epic_description);
     dispatch_with_prompt(task, &prompt, ClaudeMode::Plan, runner, None)
 }
 
-/// Dispatch a task that chains off a previous task's branch (epic auto-dispatch).
-pub fn dispatch_chained_agent(
-    task: &Task,
-    base_branch: &str,
-    runner: &dyn ProcessRunner,
-) -> Result<DispatchResult> {
-    let prompt = build_prompt(
-        task.id,
-        &task.title,
-        &task.description,
-        task.plan.as_deref(),
-    );
-    dispatch_with_prompt(
-        task,
-        &prompt,
-        ClaudeMode::AcceptEdits,
-        runner,
-        Some(base_branch),
-    )
+/// Dispatch a task from main (epic auto-dispatch).
+pub fn dispatch_chained_agent(task: &Task, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
+    let prompt = build_prompt(task.id, &task.title, &task.description, task.plan.as_deref());
+    dispatch_with_prompt(task, &prompt, ClaudeMode::AcceptEdits, runner, None)
 }
 
-/// Plan a task that chains off a previous task's branch (epic auto-dispatch).
-pub fn plan_chained_agent(
-    task: &Task,
-    base_branch: &str,
-    runner: &dyn ProcessRunner,
-) -> Result<DispatchResult> {
+/// Plan a task from main (epic auto-dispatch).
+pub fn plan_chained_agent(task: &Task, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
     let prompt = build_plan_prompt(task.id, &task.title, &task.description);
-    dispatch_with_prompt(task, &prompt, ClaudeMode::Plan, runner, Some(base_branch))
+    dispatch_with_prompt(task, &prompt, ClaudeMode::Plan, runner, None)
 }
 
-/// Brainstorm a task that chains off a previous task's branch (epic auto-dispatch).
-pub fn brainstorm_chained_agent(
-    task: &Task,
-    base_branch: &str,
-    runner: &dyn ProcessRunner,
-) -> Result<DispatchResult> {
+/// Brainstorm a task from main (epic auto-dispatch).
+pub fn brainstorm_chained_agent(task: &Task, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
     let prompt = build_brainstorm_prompt(task.id, &task.title, &task.description);
-    dispatch_with_prompt(task, &prompt, ClaudeMode::Plan, runner, Some(base_branch))
+    dispatch_with_prompt(task, &prompt, ClaudeMode::Plan, runner, None)
 }
 
 // ---------------------------------------------------------------------------
@@ -246,10 +202,7 @@ pub fn cleanup_task(
 
     let repo = expand_tilde(repo_path);
     let output = runner
-        .run(
-            "git",
-            &["-C", &repo, "worktree", "remove", "--force", worktree_path],
-        )
+        .run("git", &["-C", &repo, "worktree", "remove", "--force", worktree_path])
         .context("failed to run git worktree remove")?;
     if !output.status.success() {
         let stderr = stderr_str(&output);
@@ -337,10 +290,7 @@ pub fn finish_task(
 
     // 1. Verify we're on the default branch
     let output = runner
-        .run(
-            "git",
-            &["-C", repo_path, "rev-parse", "--abbrev-ref", "HEAD"],
-        )
+        .run("git", &["-C", repo_path, "rev-parse", "--abbrev-ref", "HEAD"])
         .map_err(|e| FinishError::Other(format!("Failed to check current branch: {e}")))?;
     let current_branch = stdout_str(&output);
     if current_branch != default_branch {
@@ -358,7 +308,10 @@ pub fn finish_task(
 
     if has_remote {
         let output = runner
-            .run("git", &["-C", repo_path, "pull", "origin", &default_branch])
+            .run(
+                "git",
+                &["-C", repo_path, "pull", "origin", &default_branch],
+            )
             .map_err(|e| FinishError::Other(format!("Failed to pull: {e}")))?;
         if !output.status.success() {
             return Err(FinishError::Other(format!(
@@ -385,7 +338,10 @@ pub fn finish_task(
         if is_conflict {
             return Err(FinishError::RebaseConflict(branch.to_string()));
         }
-        return Err(FinishError::Other(format!("Rebase failed: {}", stderr)));
+        return Err(FinishError::Other(format!(
+            "Rebase failed: {}",
+            stderr
+        )));
     }
 
     // 4. Fast-forward default branch to the rebased branch
@@ -425,11 +381,7 @@ pub fn finish_task(
 ///
 /// This function is **synchronous** and should be called via
 /// `tokio::task::spawn_blocking` from async contexts.
-pub fn resume_agent(
-    task_id: TaskId,
-    worktree_path: &str,
-    runner: &dyn ProcessRunner,
-) -> Result<ResumeResult> {
+pub fn resume_agent(task_id: TaskId, worktree_path: &str, runner: &dyn ProcessRunner) -> Result<ResumeResult> {
     let tmux_window = build_tmux_window_name(task_id);
 
     tmux::new_window(&tmux_window, worktree_path, runner)
@@ -437,7 +389,8 @@ pub fn resume_agent(
 
     tmux::set_window_dispatch_dir(&tmux_window, worktree_path, runner)
         .context("failed to set tmux window dispatch dir")?;
-    tmux::ensure_split_hook(runner).context("failed to ensure tmux split hook")?;
+    tmux::ensure_split_hook(runner)
+        .context("failed to ensure tmux split hook")?;
 
     tmux::send_keys(&tmux_window, "claude --continue", runner)
         .context("failed to send resume keys to tmux window")?;
@@ -677,24 +630,15 @@ pub fn create_pr(
 
     // 3. Create the PR
     let output = runner
-        .run(
-            "gh",
-            &[
-                "pr",
-                "create",
-                "--draft",
-                "--title",
-                title,
-                "--body",
-                description,
-                "--head",
-                branch,
-                "--base",
-                &default_branch,
-                "--repo",
-                &repo_slug,
-            ],
-        )
+        .run("gh", &[
+            "pr", "create",
+            "--draft",
+            "--title", title,
+            "--body", description,
+            "--head", branch,
+            "--base", &default_branch,
+            "--repo", &repo_slug,
+        ])
         .map_err(|e| PrError::Other(format!("Failed to run gh: {e}")))?;
     if !output.status.success() {
         return Err(PrError::CreateFailed(stderr_str(&output)));
@@ -706,20 +650,16 @@ pub fn create_pr(
 }
 
 /// Check the current status of a PR using `gh pr view`.
-pub fn check_pr_status(pr_url: &str, runner: &dyn ProcessRunner) -> Result<PrStatus> {
+pub fn check_pr_status(
+    pr_url: &str,
+    runner: &dyn ProcessRunner,
+) -> Result<PrStatus> {
     let output = runner
-        .run(
-            "gh",
-            &[
-                "pr",
-                "view",
-                pr_url,
-                "--json",
-                "state,reviewDecision",
-                "-q",
-                r#"[.state, .reviewDecision] | join("\n")"#,
-            ],
-        )
+        .run("gh", &[
+            "pr", "view", pr_url,
+            "--json", "state,reviewDecision",
+            "-q", r#"[.state, .reviewDecision] | join("\n")"#,
+        ])
         .context("Failed to run gh pr view")?;
     if !output.status.success() {
         anyhow::bail!("gh pr view failed: {}", stderr_str(&output));
@@ -743,10 +683,7 @@ pub fn check_pr_status(pr_url: &str, runner: &dyn ProcessRunner) -> Result<PrSta
         _ => None,
     };
 
-    Ok(PrStatus {
-        state,
-        review_decision,
-    })
+    Ok(PrStatus { state, review_decision })
 }
 
 // ---------------------------------------------------------------------------
@@ -879,8 +816,8 @@ fn expand_tilde(path: &str) -> String {
 mod tests {
     use super::*;
 
+    use crate::process::{MockProcessRunner, exit_fail};
     use crate::models::{EpicId, Task, TaskId, TaskStatus};
-    use crate::process::{exit_fail, MockProcessRunner};
     use chrono::Utc;
     use std::process::Output;
 
@@ -923,32 +860,20 @@ mod tests {
     #[test]
     fn build_prompt_mentions_wrap_up_skill() {
         let prompt = build_prompt(TaskId(7), "Title", "Desc", None);
-        assert!(
-            prompt.contains("/wrap-up"),
-            "prompt should tell agent to use /wrap-up skill"
-        );
-        assert!(
-            prompt.contains("rebase") || prompt.contains("PR"),
-            "prompt should mention rebase/PR choice"
-        );
+        assert!(prompt.contains("/wrap-up"), "prompt should tell agent to use /wrap-up skill");
+        assert!(prompt.contains("rebase") || prompt.contains("PR"), "prompt should mention rebase/PR choice");
     }
 
     #[test]
     fn build_prompt_mentions_mcp_tools() {
         let prompt = build_prompt(TaskId(1), "Task", "Desc", None);
-        assert!(
-            prompt.contains("dispatch MCP tools"),
-            "standard dispatch prompt should mention MCP tools"
-        );
+        assert!(prompt.contains("dispatch MCP tools"), "standard dispatch prompt should mention MCP tools");
     }
 
     #[test]
     fn expand_tilde_with_path() {
         let home = std::env::var("HOME").unwrap();
-        assert_eq!(
-            expand_tilde("~/projects/foo"),
-            format!("{home}/projects/foo")
-        );
+        assert_eq!(expand_tilde("~/projects/foo"), format!("{home}/projects/foo"));
     }
 
     #[test]
@@ -1020,10 +945,7 @@ mod tests {
         assert!(prompt.contains("7"));
         assert!(prompt.contains("Design auth"));
         assert!(prompt.contains("Rework the auth flow"));
-        assert!(
-            prompt.contains("clarifying questions"),
-            "brainstorm prompt should ask for clarifying questions"
-        );
+        assert!(prompt.contains("clarifying questions"), "brainstorm prompt should ask for clarifying questions");
         assert!(prompt.contains("brainstorm"));
         assert!(prompt.contains("update_task"));
     }
@@ -1072,12 +994,7 @@ mod tests {
         dispatch_agent(&task, &mock).unwrap();
 
         let calls = mock.recorded_calls();
-        assert!(
-            calls
-                .iter()
-                .all(|(prog, args)| !(prog == "git" && args.iter().any(|a| a == "worktree"))),
-            "git worktree add should be skipped for existing worktree"
-        );
+        assert!(calls.iter().all(|(prog, args)| !(prog == "git" && args.iter().any(|a| a == "worktree"))), "git worktree add should be skipped for existing worktree");
         assert_eq!(calls[1].0, "tmux");
         assert_eq!(calls[1].1[0], "new-window");
         assert_eq!(calls[2].0, "tmux");
@@ -1095,11 +1012,11 @@ mod tests {
 
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::fail("not a git repo"), // detect_default_branch (fallback to "main")
-            MockProcessRunner::ok(),                   // tmux new-window
-            MockProcessRunner::ok(),                   // tmux set-option @dispatch_dir
-            MockProcessRunner::ok(),                   // tmux set-hook (after-split-window)
-            MockProcessRunner::ok(),                   // tmux send-keys -l (the claude command)
-            MockProcessRunner::ok(),                   // tmux send-keys Enter
+            MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+            MockProcessRunner::ok(), // tmux set-hook (after-split-window)
+            MockProcessRunner::ok(), // tmux send-keys -l (the claude command)
+            MockProcessRunner::ok(), // tmux send-keys Enter
         ]);
 
         let task = make_task(&repo_path);
@@ -1112,10 +1029,7 @@ mod tests {
             "send-keys should include claude"
         );
         assert!(
-            calls[4]
-                .1
-                .iter()
-                .any(|a| a.contains("--permission-mode acceptEdits")),
+            calls[4].1.iter().any(|a| a.contains("--permission-mode acceptEdits")),
             "dispatch_agent send-keys should use acceptEdits mode"
         );
     }
@@ -1218,10 +1132,7 @@ mod tests {
         let result = provision_worktree(&task, &mock, None).unwrap();
 
         let calls = mock.recorded_calls();
-        assert!(
-            calls.iter().all(|(prog, _)| prog != "git"),
-            "git should be skipped"
-        );
+        assert!(calls.iter().all(|(prog, _)| prog != "git"), "git should be skipped");
         assert_eq!(calls[0].0, "tmux");
         assert_eq!(calls[0].1[0], "new-window");
         assert_eq!(result.worktree_path, worktree_dir.to_str().unwrap());
@@ -1246,11 +1157,8 @@ mod tests {
         assert_eq!(calls[0].0, "git");
         // The base branch should be the last arg to git worktree add
         let git_args = &calls[0].1;
-        assert_eq!(
-            git_args.last().unwrap(),
-            "99-prev-task",
-            "base branch should be last git arg, got: {git_args:?}"
-        );
+        assert_eq!(git_args.last().unwrap(), "99-prev-task",
+            "base branch should be last git arg, got: {git_args:?}");
 
         let expected_path = format!("{repo_path}/.worktrees/42-fix-bug");
         assert_eq!(result.worktree_path, expected_path);
@@ -1259,27 +1167,15 @@ mod tests {
     #[test]
     fn rebase_preamble_with_base_branch() {
         let preamble = rebase_preamble("99-prev-task");
-        assert!(
-            preamble.contains("99-prev-task"),
-            "should reference the base branch"
-        );
-        assert!(
-            !preamble.contains("origin/main"),
-            "should not reference origin/main"
-        );
+        assert!(preamble.contains("99-prev-task"), "should reference the base branch");
+        assert!(!preamble.contains("origin/main"), "should not reference origin/main");
     }
 
     #[test]
     fn rebase_preamble_uses_given_target() {
         let preamble = rebase_preamble("origin/develop");
-        assert!(
-            preamble.contains("origin/develop"),
-            "should use given target, got: {preamble}"
-        );
-        assert!(
-            !preamble.contains("origin/main"),
-            "should not contain origin/main"
-        );
+        assert!(preamble.contains("origin/develop"), "should use given target, got: {preamble}");
+        assert!(!preamble.contains("origin/main"), "should not contain origin/main");
     }
 
     #[test]
@@ -1303,10 +1199,7 @@ mod tests {
         assert_eq!(calls[0].1[0], "new-window");
         assert_eq!(calls[1].1[0], "set-option");
         assert_eq!(calls[2].1[0], "set-hook");
-        assert!(
-            calls.iter().all(|(prog, _)| prog != "git"),
-            "resume should make no git calls"
-        );
+        assert!(calls.iter().all(|(prog, _)| prog != "git"), "resume should make no git calls");
         assert!(calls[3].1.iter().any(|a| a.contains("--continue")));
     }
 
@@ -1320,13 +1213,7 @@ mod tests {
             MockProcessRunner::ok(), // git branch -D (best-effort)
         ]);
 
-        cleanup_task(
-            "/repo",
-            "/repo/.worktrees/42-fix-bug",
-            Some("task-42"),
-            &mock,
-        )
-        .unwrap();
+        cleanup_task("/repo", "/repo/.worktrees/42-fix-bug", Some("task-42"), &mock).unwrap();
 
         let calls = mock.recorded_calls();
         assert_eq!(calls[0].0, "tmux");
@@ -1376,14 +1263,8 @@ mod tests {
         // Verify the prompt uses the detected branch
         let prompt_file = worktree_dir.join(".claude-prompt");
         let prompt = std::fs::read_to_string(prompt_file).unwrap();
-        assert!(
-            prompt.contains("origin/master"),
-            "prompt should reference origin/master, got: {prompt}"
-        );
-        assert!(
-            !prompt.contains("origin/main"),
-            "prompt should not reference origin/main"
-        );
+        assert!(prompt.contains("origin/master"), "prompt should reference origin/master, got: {prompt}");
+        assert!(!prompt.contains("origin/main"), "prompt should not reference origin/main");
     }
 
     #[test]
@@ -1400,11 +1281,7 @@ mod tests {
         let result = dispatch_agent(&task, &mock);
         assert!(result.is_err());
         let calls = mock.recorded_calls();
-        assert_eq!(
-            calls.len(),
-            2,
-            "detect_default_branch and git worktree add should have been called"
-        );
+        assert_eq!(calls.len(), 2, "detect_default_branch and git worktree add should have been called");
     }
 
     #[test]
@@ -1428,12 +1305,7 @@ mod tests {
         brainstorm_agent(&task, &mock).unwrap();
 
         let calls = mock.recorded_calls();
-        assert!(
-            calls
-                .iter()
-                .all(|(prog, args)| !(prog == "git" && args.iter().any(|a| a == "worktree"))),
-            "git worktree add should be skipped for existing worktree"
-        );
+        assert!(calls.iter().all(|(prog, args)| !(prog == "git" && args.iter().any(|a| a == "worktree"))), "git worktree add should be skipped for existing worktree");
         assert_eq!(calls[1].0, "tmux");
         assert_eq!(calls[1].1[0], "new-window");
     }
@@ -1447,11 +1319,11 @@ mod tests {
 
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::fail("not a git repo"), // detect_default_branch (fallback to "main")
-            MockProcessRunner::ok(),                   // tmux new-window
-            MockProcessRunner::ok(),                   // tmux set-option @dispatch_dir
-            MockProcessRunner::ok(),                   // tmux set-hook (after-split-window)
-            MockProcessRunner::ok(),                   // tmux send-keys -l
-            MockProcessRunner::ok(),                   // tmux send-keys Enter
+            MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+            MockProcessRunner::ok(), // tmux set-hook (after-split-window)
+            MockProcessRunner::ok(), // tmux send-keys -l
+            MockProcessRunner::ok(), // tmux send-keys Enter
         ]);
 
         let task = make_task(&repo_path);
@@ -1460,14 +1332,8 @@ mod tests {
         // Verify the prompt file was written with brainstorm content
         let prompt_file = worktree_dir.join(".claude-prompt");
         let prompt = std::fs::read_to_string(prompt_file).unwrap();
-        assert!(
-            prompt.contains("brainstorm"),
-            "prompt should mention brainstorming"
-        );
-        assert!(
-            prompt.contains("implementation plan"),
-            "prompt should mention planning"
-        );
+        assert!(prompt.contains("brainstorm"), "prompt should mention brainstorming");
+        assert!(prompt.contains("implementation plan"), "prompt should mention planning");
     }
 
     #[test]
@@ -1491,12 +1357,7 @@ mod tests {
         quick_dispatch_agent(&task, &mock).unwrap();
 
         let calls = mock.recorded_calls();
-        assert!(
-            calls
-                .iter()
-                .all(|(prog, args)| !(prog == "git" && args.iter().any(|a| a == "worktree"))),
-            "git worktree add should be skipped for existing worktree"
-        );
+        assert!(calls.iter().all(|(prog, args)| !(prog == "git" && args.iter().any(|a| a == "worktree"))), "git worktree add should be skipped for existing worktree");
         assert_eq!(calls[1].0, "tmux");
         assert_eq!(calls[1].1[0], "new-window");
     }
@@ -1510,11 +1371,11 @@ mod tests {
 
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::fail("not a git repo"), // detect_default_branch (fallback to "main")
-            MockProcessRunner::ok(),                   // tmux new-window
-            MockProcessRunner::ok(),                   // tmux set-option @dispatch_dir
-            MockProcessRunner::ok(),                   // tmux set-hook (after-split-window)
-            MockProcessRunner::ok(),                   // tmux send-keys -l
-            MockProcessRunner::ok(),                   // tmux send-keys Enter
+            MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+            MockProcessRunner::ok(), // tmux set-hook (after-split-window)
+            MockProcessRunner::ok(), // tmux send-keys -l
+            MockProcessRunner::ok(), // tmux send-keys Enter
         ]);
 
         let task = make_task(&repo_path);
@@ -1522,79 +1383,44 @@ mod tests {
 
         let prompt_file = worktree_dir.join(".claude-prompt");
         let prompt = std::fs::read_to_string(prompt_file).unwrap();
-        assert!(
-            prompt.contains("placeholder"),
-            "prompt should mention placeholder title"
-        );
-        assert!(
-            prompt.contains("update_task"),
-            "prompt should mention update_task for rename"
-        );
+        assert!(prompt.contains("placeholder"), "prompt should mention placeholder title");
+        assert!(prompt.contains("update_task"), "prompt should mention update_task for rename");
     }
 
     // --- finish_task tests ---
 
     #[test]
     fn epic_planning_prompt_contains_epic_context() {
-        let prompt =
-            build_epic_planning_prompt(EpicId(42), "Redesign auth", "Rework the login flow");
+        let prompt = build_epic_planning_prompt(EpicId(42), "Redesign auth", "Rework the login flow");
         assert!(prompt.contains("42"));
         assert!(prompt.contains("Redesign auth"));
         assert!(prompt.contains("Rework the login flow"));
         assert!(prompt.contains("Do NOT start implementing"));
         // Work package instructions
-        assert!(
-            prompt.contains("create_task"),
-            "prompt should instruct using create_task"
-        );
-        assert!(
-            prompt.contains("sort_order"),
-            "prompt should explain sort_order for ordering"
-        );
-        assert!(
-            prompt.contains("update_epic"),
-            "prompt should instruct attaching plan to epic"
-        );
-        assert!(
-            prompt.contains("repo_path"),
-            "prompt should explain repo_path for parallelization"
-        );
-        assert!(
-            prompt.contains("epic_id=42"),
-            "update_epic call should include the resolved epic id"
-        );
-        assert!(
-            prompt.contains("/brainstorm"),
-            "prompt should direct agent to use the brainstorm skill"
-        );
-        assert!(
-            prompt.contains("work package"),
-            "prompt should use 'work package' terminology"
-        );
+        assert!(prompt.contains("create_task"), "prompt should instruct using create_task");
+        assert!(prompt.contains("sort_order"), "prompt should explain sort_order for ordering");
+        assert!(prompt.contains("update_epic"), "prompt should instruct attaching plan to epic");
+        assert!(prompt.contains("repo_path"), "prompt should explain repo_path for parallelization");
+        assert!(prompt.contains("epic_id=42"), "update_epic call should include the resolved epic id");
+        assert!(prompt.contains("/brainstorm"), "prompt should direct agent to use the brainstorm skill");
+        assert!(prompt.contains("work package"), "prompt should use 'work package' terminology");
     }
 
     #[test]
     fn finish_task_happy_path() {
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // symbolic-ref (detect default branch)
-            MockProcessRunner::ok_with_stdout(b"main\n"),                     // rev-parse HEAD
+            MockProcessRunner::ok_with_stdout(b"main\n"),       // rev-parse HEAD
             MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // remote get-url origin
-            MockProcessRunner::ok(), // git pull origin main
-            MockProcessRunner::ok(), // git rebase main (from worktree)
-            MockProcessRunner::ok(), // git merge --ff-only (fast-forward main)
+            MockProcessRunner::ok(),                             // git pull origin main
+            MockProcessRunner::ok(),                             // git rebase main (from worktree)
+            MockProcessRunner::ok(),                             // git merge --ff-only (fast-forward main)
             // Only tmux kill (worktree preserved for archival):
-            MockProcessRunner::ok_with_stdout(b"task-42\n"), // tmux list-windows (has_window)
-            MockProcessRunner::ok(),                         // tmux kill-window
+            MockProcessRunner::ok_with_stdout(b"task-42\n"),     // tmux list-windows (has_window)
+            MockProcessRunner::ok(),                             // tmux kill-window
         ]);
 
-        finish_task(
-            "/repo",
-            "/repo/.worktrees/42-fix-bug",
-            "42-fix-bug",
-            Some("task-42"),
-            &mock,
-        )
-        .unwrap();
+        finish_task("/repo", "/repo/.worktrees/42-fix-bug", "42-fix-bug", Some("task-42"), &mock).unwrap();
 
         let calls = mock.recorded_calls();
         assert!(calls.iter().any(|c| c.1.contains(&"rebase".to_string())));
@@ -1607,34 +1433,21 @@ mod tests {
     fn finish_task_with_master_default_branch() {
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/master\n"), // symbolic-ref → master
-            MockProcessRunner::ok_with_stdout(b"master\n"),                     // rev-parse HEAD
+            MockProcessRunner::ok_with_stdout(b"master\n"),      // rev-parse HEAD
             MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // remote get-url origin
-            MockProcessRunner::ok(), // git pull origin master
-            MockProcessRunner::ok(), // git rebase master (from worktree)
-            MockProcessRunner::ok(), // git merge --ff-only
+            MockProcessRunner::ok(),                              // git pull origin master
+            MockProcessRunner::ok(),                              // git rebase master (from worktree)
+            MockProcessRunner::ok(),                              // git merge --ff-only
         ]);
 
-        finish_task(
-            "/repo",
-            "/repo/.worktrees/42-fix-bug",
-            "42-fix-bug",
-            None,
-            &mock,
-        )
-        .unwrap();
+        finish_task("/repo", "/repo/.worktrees/42-fix-bug", "42-fix-bug", None, &mock).unwrap();
 
         let calls = mock.recorded_calls();
         // pull should reference "master" not "main"
-        let pull_call = calls
-            .iter()
-            .find(|c| c.1.contains(&"pull".to_string()))
-            .unwrap();
+        let pull_call = calls.iter().find(|c| c.1.contains(&"pull".to_string())).unwrap();
         assert!(pull_call.1.contains(&"master".to_string()));
         // rebase should reference "master"
-        let rebase_call = calls
-            .iter()
-            .find(|c| c.1.contains(&"rebase".to_string()))
-            .unwrap();
+        let rebase_call = calls.iter().find(|c| c.1.contains(&"rebase".to_string())).unwrap();
         assert!(rebase_call.1.contains(&"master".to_string()));
     }
 
@@ -1642,16 +1455,10 @@ mod tests {
     fn finish_task_not_on_default_branch() {
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // symbolic-ref
-            MockProcessRunner::ok_with_stdout(b"feature-branch\n"),           // rev-parse HEAD
+            MockProcessRunner::ok_with_stdout(b"feature-branch\n"),            // rev-parse HEAD
         ]);
 
-        let result = finish_task(
-            "/repo",
-            "/repo/.worktrees/42-fix-bug",
-            "42-fix-bug",
-            None,
-            &mock,
-        );
+        let result = finish_task("/repo", "/repo/.worktrees/42-fix-bug", "42-fix-bug", None, &mock);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(matches!(err, FinishError::NotOnDefaultBranch { .. }));
@@ -1672,17 +1479,8 @@ mod tests {
             MockProcessRunner::ok(),                             // git rebase --abort
         ]);
 
-        let result = finish_task(
-            "/repo",
-            "/repo/.worktrees/42-fix-bug",
-            "42-fix-bug",
-            None,
-            &mock,
-        );
-        assert!(matches!(
-            result.unwrap_err(),
-            FinishError::RebaseConflict(_)
-        ));
+        let result = finish_task("/repo", "/repo/.worktrees/42-fix-bug", "42-fix-bug", None, &mock);
+        assert!(matches!(result.unwrap_err(), FinishError::RebaseConflict(_)));
         let calls = mock.recorded_calls();
         assert!(calls.last().unwrap().1.contains(&"--abort".to_string()));
     }
@@ -1693,16 +1491,10 @@ mod tests {
             MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // symbolic-ref
             MockProcessRunner::ok_with_stdout(b"main\n"),
             MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // remote get-url origin
-            MockProcessRunner::fail("fatal: unable to access remote"),           // git pull fails
+            MockProcessRunner::fail("fatal: unable to access remote"),            // git pull fails
         ]);
 
-        let result = finish_task(
-            "/repo",
-            "/repo/.worktrees/42-fix-bug",
-            "42-fix-bug",
-            None,
-            &mock,
-        );
+        let result = finish_task("/repo", "/repo/.worktrees/42-fix-bug", "42-fix-bug", None, &mock);
         assert!(matches!(result.unwrap_err(), FinishError::Other(_)));
     }
 
@@ -1712,9 +1504,9 @@ mod tests {
     fn create_pr_happy_path() {
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // symbolic-ref
-            MockProcessRunner::ok(),                                          // git push
-            MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // git remote get-url origin
-            MockProcessRunner::ok_with_stdout(b"https://github.com/org/repo/pull/42\n"), // gh pr create
+            MockProcessRunner::ok(),  // git push
+            MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"),  // git remote get-url origin
+            MockProcessRunner::ok_with_stdout(b"https://github.com/org/repo/pull/42\n"),  // gh pr create
         ]);
 
         let result = create_pr("/repo", "42-fix-bug", "Fix bug", "A nasty crash", &mock).unwrap();
@@ -1736,9 +1528,9 @@ mod tests {
     fn create_pr_with_master_base() {
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/master\n"), // symbolic-ref → master
-            MockProcessRunner::ok(),                                            // git push
-            MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // git remote get-url origin
-            MockProcessRunner::ok_with_stdout(b"https://github.com/org/repo/pull/42\n"), // gh pr create
+            MockProcessRunner::ok(),  // git push
+            MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"),  // git remote get-url origin
+            MockProcessRunner::ok_with_stdout(b"https://github.com/org/repo/pull/42\n"),  // gh pr create
         ]);
 
         create_pr("/repo", "42-fix-bug", "Fix bug", "desc", &mock).unwrap();
@@ -1763,9 +1555,9 @@ mod tests {
     fn create_pr_gh_create_fails() {
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // symbolic-ref
-            MockProcessRunner::ok(),                                          // git push succeeds
-            MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // git remote get-url
-            MockProcessRunner::fail("error: pull request already exists"),       // gh pr create
+            MockProcessRunner::ok(),  // git push succeeds
+            MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"),  // git remote get-url
+            MockProcessRunner::fail("error: pull request already exists"),  // gh pr create
         ]);
 
         let result = create_pr("/repo", "42-fix-bug", "Fix bug", "desc", &mock);
@@ -1776,20 +1568,19 @@ mod tests {
 
     #[test]
     fn check_pr_status_open() {
-        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(
-            b"OPEN\nREVIEW_REQUIRED\n",
-        )]);
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"OPEN\nREVIEW_REQUIRED\n"),
+        ]);
         let result = check_pr_status("https://github.com/org/repo/pull/42", &mock).unwrap();
         assert_eq!(result.state, PrState::Open);
-        assert_eq!(
-            result.review_decision,
-            Some(PrReviewDecision::ReviewRequired)
-        );
+        assert_eq!(result.review_decision, Some(PrReviewDecision::ReviewRequired));
     }
 
     #[test]
     fn check_pr_status_merged() {
-        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"MERGED\n")]);
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"MERGED\n"),
+        ]);
         let result = check_pr_status("https://github.com/org/repo/pull/42", &mock).unwrap();
         assert_eq!(result.state, PrState::Merged);
         assert_eq!(result.review_decision, None);
@@ -1797,7 +1588,9 @@ mod tests {
 
     #[test]
     fn check_pr_status_closed() {
-        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"CLOSED\n")]);
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"CLOSED\n"),
+        ]);
         let result = check_pr_status("https://github.com/org/repo/pull/42", &mock).unwrap();
         assert_eq!(result.state, PrState::Closed);
         assert_eq!(result.review_decision, None);
@@ -1805,8 +1598,9 @@ mod tests {
 
     #[test]
     fn check_pr_status_open_approved() {
-        let mock =
-            MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"OPEN\nAPPROVED\n")]);
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"OPEN\nAPPROVED\n"),
+        ]);
         let result = check_pr_status("https://github.com/org/repo/pull/42", &mock).unwrap();
         assert_eq!(result.state, PrState::Open);
         assert_eq!(result.review_decision, Some(PrReviewDecision::Approved));
@@ -1814,15 +1608,12 @@ mod tests {
 
     #[test]
     fn check_pr_status_open_changes_requested() {
-        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(
-            b"OPEN\nCHANGES_REQUESTED\n",
-        )]);
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"OPEN\nCHANGES_REQUESTED\n"),
+        ]);
         let result = check_pr_status("https://github.com/org/repo/pull/42", &mock).unwrap();
         assert_eq!(result.state, PrState::Open);
-        assert_eq!(
-            result.review_decision,
-            Some(PrReviewDecision::ChangesRequested)
-        );
+        assert_eq!(result.review_decision, Some(PrReviewDecision::ChangesRequested));
     }
 
     // --- parse_repo_slug tests ---
@@ -1854,22 +1645,15 @@ mod tests {
     #[test]
     fn finish_task_no_remote_skips_pull() {
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::fail(""), // symbolic-ref (no remote → fallback to "main")
-            MockProcessRunner::ok_with_stdout(b"main\n"), // rev-parse HEAD
-            MockProcessRunner::fail(""), // remote get-url (no remote)
-            MockProcessRunner::ok(),     // git rebase main (from worktree)
-            MockProcessRunner::ok(),     // git merge --ff-only (fast-forward)
-                                         // No tmux window, no cleanup
+            MockProcessRunner::fail(""),                         // symbolic-ref (no remote → fallback to "main")
+            MockProcessRunner::ok_with_stdout(b"main\n"),       // rev-parse HEAD
+            MockProcessRunner::fail(""),                         // remote get-url (no remote)
+            MockProcessRunner::ok(),                             // git rebase main (from worktree)
+            MockProcessRunner::ok(),                             // git merge --ff-only (fast-forward)
+            // No tmux window, no cleanup
         ]);
 
-        finish_task(
-            "/repo",
-            "/repo/.worktrees/42-fix-bug",
-            "42-fix-bug",
-            None,
-            &mock,
-        )
-        .unwrap();
+        finish_task("/repo", "/repo/.worktrees/42-fix-bug", "42-fix-bug", None, &mock).unwrap();
         let calls = mock.recorded_calls();
         // Should not have a "pull" call
         assert!(!calls.iter().any(|c| c.1.contains(&"pull".to_string())));

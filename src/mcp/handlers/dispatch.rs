@@ -192,14 +192,14 @@ pub(super) fn tool_definitions() -> Value {
             },
             {
                 "name": "update_epic",
-                "description": "Update an epic's title, description, done status, plan, sort order, or repo path.",
+                "description": "Update an epic's title, description, status, plan, sort order, or repo path.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "epic_id": { "type": "integer", "description": "The epic ID" },
                         "title": { "type": "string", "description": "New title" },
                         "description": { "type": "string", "description": "New description" },
-                        "done": { "type": "boolean", "description": "Mark epic as done" },
+                        "status": { "type": "string", "description": "New status: backlog, running, review, or done", "enum": ["backlog", "running", "review", "done"] },
                         "plan": { "type": "string", "description": "Path to the plan file" },
                         "sort_order": { "type": "integer", "description": "Display order within column (lower values appear first)" },
                         "repo_path": { "type": "string", "description": "Repository path for the epic" }

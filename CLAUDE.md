@@ -35,7 +35,7 @@ Tick timer ───────┘                                             
 src/
 ├── main.rs          # Entry point, CLI argument parsing
 ├── lib.rs           # Public module declarations, DEFAULT_PORT constant
-├── models.rs        # Task, TaskStatus, Epic, slugify, COLUMN_COUNT
+├── models.rs        # Task, TaskStatus, Epic, EpicSubstatus, slugify, COLUMN_COUNT
 ├── db.rs            # TaskStore trait + SQLite Database impl (Mutex<Connection>)
 ├── dispatch.rs      # Agent dispatch: worktree creation, tmux window, MCP config, prompt
 ├── tmux.rs          # tmux subprocess wrappers (new-window, send-keys, capture-pane, has-window)
@@ -71,10 +71,12 @@ Backlog → Running → Review → Done
 - **Dispatch** (`d` on a Backlog task with a plan): creates a fresh git worktree + tmux window and launches Claude with the task prompt
 - **Brainstorm** (`d` on a Backlog task without a plan): creates a worktree and launches Claude in brainstorm mode to explore and plan
 - **Resume** (`d` on a Running task whose window is gone): re-opens a tmux window in the existing worktree and runs `claude --continue`. Closing a tmux window does **not** delete the worktree.
-- **Epic dispatch** (`d` on an epic): dispatches the next backlog subtask by `sort_order`. If the epic has no subtasks, falls back to creating a planning subtask.
+- **Epic dispatch** (`d` on an epic): dispatches the next backlog subtask by `sort_order`. Each subtask branches from main independently. If the epic has no subtasks, falls back to creating a planning subtask.
+- **Epic status**: Epics have an explicit `status: TaskStatus` field stored in DB. Status auto-advances forward (Backlog→Running→Review→Done) when subtask statuses change via `recalculate_epic_status()`. Manual transitions with `m`/`M` are free-form. Moving an epic to Done kills all subtask tmux windows.
+- **Epic substatus**: Derived at render time via `epic_substatus()` — not stored. Shows qualitative state within a column (e.g., `dispatching`, `blocked`, `in review`). Epic cards display a two-tone progress bar (`█▒░`) and substatus label.
 - **Reorder** (`J`/`K`): moves the selected item up or down within its column. In the main view this is cosmetic; in the epic view it determines dispatch order via `sort_order`.
 - Status transitions (running/review) are handled by hooks in `.claude/settings.json` that extract the task ID from the git branch name (`{id}-{slug}` pattern)
-- Press `g` to jump to an agent's tmux window
+- Press `g` to jump to an agent's tmux window; on an epic, jumps to the active subtask's window or enters epic view if none
 
 ## Review Board
 
@@ -185,6 +187,8 @@ Normal ──W──▶ ConfirmWrapUp(id) ──r──▶ Normal (rebase)
                                 ──p──▶ Normal (PR)
                                 ──Esc──▶ Normal
 Normal ──d (stale/crashed)──▶ ConfirmRetry(id) ──r/f──▶ Normal
+Normal ──m/M on epic──▶ MoveEpicStatus (stays Normal, no confirmation)
+Normal ──g on epic──▶ JumpToTmux or EnterEpic (fallback)
 Normal ──J/K──▶ reorder item up/down (stays Normal)
 Normal ──?──▶ Help ──?/Esc──▶ Normal
 Normal (in epic view) ──q──▶ ExitEpic (q quits only from board view)
