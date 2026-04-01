@@ -6,6 +6,8 @@ use super::*;
 use crate::dispatch;
 use crate::models::{Epic, EpicId, SubStatus, TaskId, TaskStatus, DEFAULT_QUICK_TASK_TITLE};
 
+const TEST_TIMEOUT: Duration = Duration::from_secs(300);
+
 /// Check whether a rendered buffer contains the given text anywhere.
 fn buffer_contains(buf: &Buffer, text: &str) -> bool {
     let area = buf.area();
@@ -60,7 +62,7 @@ fn make_app() -> App {
         make_task(2, TaskStatus::Backlog),
         make_task(3, TaskStatus::Running),
         make_task(4, TaskStatus::Done),
-    ], Duration::from_secs(300))
+    ], TEST_TIMEOUT)
 }
 
 #[test]
@@ -181,7 +183,7 @@ fn navigate_row_clamps() {
 fn tick_produces_capture_for_running_tasks_with_window() {
     let mut task4 = make_task(4, TaskStatus::Running);
     task4.tmux_window = Some("main:task-4".to_string());
-    let mut app = App::new(vec![task4], Duration::from_secs(300));
+    let mut app = App::new(vec![task4], TEST_TIMEOUT);
     let cmds = app.update(Message::Tick);
     // Should have CaptureTmux + FetchReviewPrs + RefreshFromDb
     assert_eq!(cmds.len(), 3);
@@ -194,7 +196,7 @@ fn tick_produces_capture_for_running_tasks_with_window() {
 fn tick_captures_review_task_with_live_window() {
     let mut task = make_task(5, TaskStatus::Review);
     task.tmux_window = Some("task-5".to_string());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
 
     let cmds = app.update(Message::Tick);
 
@@ -221,7 +223,7 @@ fn task_created_adds_to_list() {
         created_at: now,
         updated_at: now,
     };
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     let cmds = app.update(Message::TaskCreated { task });
     assert_eq!(app.tasks.len(), 1);
     assert_eq!(app.tasks[0].id, TaskId(42));
@@ -251,7 +253,7 @@ fn delete_task_without_worktree_no_cleanup() {
 
 #[test]
 fn error_sets_error_popup() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.update(Message::Error("Something went wrong".to_string()));
     assert_eq!(app.error_popup.as_deref(), Some("Something went wrong"));
 }
@@ -261,7 +263,7 @@ fn dispatch_from_running_is_noop() {
     let mut task = make_task(4, TaskStatus::Running);
     task.worktree = Some("/repo/.worktrees/4-task-4".to_string());
     task.tmux_window = Some("task-4".to_string());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     let cmds = app.update(Message::DispatchTask(TaskId(4)));
     assert!(cmds.is_empty());
 }
@@ -271,7 +273,7 @@ fn dispatch_from_review_is_noop() {
     let mut task = make_task(5, TaskStatus::Review);
     task.worktree = Some("/repo/.worktrees/5-task-5".to_string());
     task.tmux_window = Some("task-5".to_string());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     let cmds = app.update(Message::DispatchTask(TaskId(5)));
     assert!(cmds.is_empty());
 }
@@ -281,7 +283,7 @@ fn move_backward_from_running_detaches_but_keeps_worktree() {
     let mut task = make_task(4, TaskStatus::Running);
     task.worktree = Some("/repo/.worktrees/4-task-4".to_string());
     task.tmux_window = Some("task-4".to_string());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
 
     let cmds = app.update(Message::MoveTask {
         id: TaskId(4),
@@ -303,7 +305,7 @@ fn move_backward_from_running_detaches_but_keeps_worktree() {
 #[test]
 fn move_backward_from_running_without_dispatch_fields() {
     let task = make_task(3, TaskStatus::Running);
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     let cmds = app.update(Message::MoveTask {
         id: TaskId(3),
         direction: MoveDirection::Backward,
@@ -314,7 +316,7 @@ fn move_backward_from_running_without_dispatch_fields() {
 
 #[test]
 fn repo_path_empty_uses_saved_path() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.repo_paths = vec!["/saved/repo".to_string()];
 
     app.input.mode = InputMode::InputRepoPath;
@@ -329,7 +331,7 @@ fn repo_path_empty_uses_saved_path() {
 #[test]
 fn repo_path_empty_no_saved_stays_in_mode() {
 
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.repo_paths = vec![]; // no saved paths
 
     app.input.mode = InputMode::InputRepoPath;
@@ -347,7 +349,7 @@ fn repo_path_empty_no_saved_stays_in_mode() {
 
 #[test]
 fn repo_path_nonempty_used_as_is() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.repo_paths = vec!["/saved/repo".to_string()];
 
     app.input.mode = InputMode::InputRepoPath;
@@ -362,7 +364,7 @@ fn repo_path_nonempty_used_as_is() {
 
 #[test]
 fn task_edited_updates_fields() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
     app.update(Message::TaskEdited(TaskEdit {
         id: TaskId(1),
         title: "New".into(),
@@ -381,7 +383,7 @@ fn task_edited_updates_fields() {
 
 #[test]
 fn repo_paths_updated_replaces_paths() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.update(Message::RepoPathsUpdated(vec!["/a".into(), "/b".into()]));
     assert_eq!(app.repo_paths, vec!["/a", "/b"]);
 }
@@ -391,7 +393,7 @@ fn move_forward_to_done_enters_confirm_mode() {
     let mut task = make_task(5, TaskStatus::Review);
     task.worktree = Some("/repo/.worktrees/5-task-5".to_string());
     task.tmux_window = None; // session closed, but worktree remains
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
 
     let cmds = app.update(Message::MoveTask {
         id: TaskId(5),
@@ -412,7 +414,7 @@ fn move_forward_to_done_with_live_window_enters_confirm_mode() {
     let mut task = make_task(5, TaskStatus::Review);
     task.worktree = Some("/repo/.worktrees/5-task-5".to_string());
     task.tmux_window = Some("task-5".to_string());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
 
     let cmds = app.update(Message::MoveTask {
         id: TaskId(5),
@@ -428,7 +430,7 @@ fn move_forward_to_done_with_live_window_enters_confirm_mode() {
 fn d_key_on_backlog_with_plan_dispatches() {
     let mut task = make_task(3, TaskStatus::Backlog);
     task.plan = Some("plan.md".into());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     app.selection_mut().set_column(0); // Backlog column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(matches!(&cmds[0], Command::Dispatch { .. }));
@@ -440,7 +442,7 @@ fn d_key_on_running_with_window_shows_warning() {
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some("task-4".to_string());
     task.worktree = Some("/repo/.worktrees/4-task-4".to_string());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     app.selection_mut().set_column(1); // Running column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
@@ -453,7 +455,7 @@ fn d_key_on_running_no_window_resumes() {
     let mut task = make_task(4, TaskStatus::Running);
     task.worktree = Some("/repo/.worktrees/4-task-4".to_string());
     task.tmux_window = None;
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     app.selection_mut().set_column(1); // Running column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(matches!(&cmds[0], Command::Resume { .. }));
@@ -463,7 +465,7 @@ fn d_key_on_running_no_window_resumes() {
 fn d_key_on_backlog_brainstorms() {
     let mut task = make_task(1, TaskStatus::Backlog);
     task.tag = Some("epic".to_string()); // tag=epic triggers brainstorm
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     app.selection_mut().set_column(0); // Backlog column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert_eq!(cmds.len(), 1);
@@ -473,7 +475,7 @@ fn d_key_on_backlog_brainstorms() {
 #[test]
 fn d_key_on_done_shows_warning() {
 
-    let mut app = App::new(vec![make_task(1, TaskStatus::Done)], Duration::from_secs(300));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Done)], TEST_TIMEOUT);
     app.selection_mut().set_column(3); // Done column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
@@ -486,7 +488,7 @@ fn d_key_on_running_no_worktree_no_window_shows_warning() {
     let mut task = make_task(4, TaskStatus::Running);
     task.worktree = None;
     task.tmux_window = None;
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     app.selection_mut().set_column(1); // Running column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
@@ -502,7 +504,7 @@ fn g_key_with_live_window_jumps() {
 
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some("task-4".to_string());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     app.selection_mut().set_column(1); // Running column
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert!(matches!(&cmds[0], Command::JumpToTmux { window } if window == "task-4"));
@@ -529,7 +531,7 @@ fn brainstorm_only_backlog_tasks() {
 #[test]
 fn g_key_without_window_shows_message() {
 
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
     app.selection_mut().set_column(0);
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert!(cmds.is_empty());
@@ -551,7 +553,7 @@ fn n_key_enters_title_mode() {
 
 #[test]
 fn typing_appends_to_input_buffer() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputTitle;
     app.handle_key(make_key(KeyCode::Char('H')));
     app.handle_key(make_key(KeyCode::Char('i')));
@@ -560,7 +562,7 @@ fn typing_appends_to_input_buffer() {
 
 #[test]
 fn backspace_pops_from_input_buffer() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputTitle;
     app.input.buffer = "abc".to_string();
     app.handle_key(make_key(KeyCode::Backspace));
@@ -569,7 +571,7 @@ fn backspace_pops_from_input_buffer() {
 
 #[test]
 fn backspace_on_empty_buffer_is_noop() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputTitle;
     app.input.buffer.clear();
     app.handle_key(make_key(KeyCode::Backspace));
@@ -579,7 +581,7 @@ fn backspace_on_empty_buffer_is_noop() {
 
 #[test]
 fn enter_with_title_advances_to_tag() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputTitle;
     app.input.buffer = "My Task".to_string();
     app.handle_key(make_key(KeyCode::Enter));
@@ -591,7 +593,7 @@ fn enter_with_title_advances_to_tag() {
 
 #[test]
 fn enter_with_empty_title_cancels() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputTitle;
     app.input.buffer.clear();
     app.handle_key(make_key(KeyCode::Enter));
@@ -602,7 +604,7 @@ fn enter_with_empty_title_cancels() {
 
 #[test]
 fn enter_with_whitespace_only_title_cancels() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputTitle;
     app.input.buffer = "   ".to_string();
     app.handle_key(make_key(KeyCode::Enter));
@@ -612,7 +614,7 @@ fn enter_with_whitespace_only_title_cancels() {
 
 #[test]
 fn enter_in_description_advances_to_repo_path() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputDescription;
     app.input.task_draft = Some(TaskDraft { title: "T".to_string(), description: String::new(), ..Default::default() });
     app.input.buffer = "some desc".to_string();
@@ -625,7 +627,7 @@ fn enter_in_description_advances_to_repo_path() {
 
 #[test]
 fn number_key_in_repo_path_selects_saved_path() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputRepoPath;
     app.input.task_draft = Some(TaskDraft { title: "T".to_string(), description: "d".to_string(), ..Default::default() });
     app.input.buffer.clear();
@@ -637,7 +639,7 @@ fn number_key_in_repo_path_selects_saved_path() {
 
 #[test]
 fn number_key_out_of_range_appends_to_buffer() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputRepoPath;
     app.input.task_draft = Some(TaskDraft { title: "T".to_string(), description: String::new(), ..Default::default() });
     app.input.buffer.clear();
@@ -649,7 +651,7 @@ fn number_key_out_of_range_appends_to_buffer() {
 
 #[test]
 fn number_key_with_nonempty_buffer_appends() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputRepoPath;
     app.input.task_draft = Some(TaskDraft { title: "T".to_string(), description: String::new(), ..Default::default() });
     app.input.buffer = "/my".to_string();
@@ -660,7 +662,7 @@ fn number_key_with_nonempty_buffer_appends() {
 
 #[test]
 fn zero_key_in_repo_path_appends_to_buffer() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputRepoPath;
     app.input.task_draft = Some(TaskDraft { title: "T".to_string(), description: String::new(), ..Default::default() });
     app.input.buffer.clear();
@@ -671,7 +673,7 @@ fn zero_key_in_repo_path_appends_to_buffer() {
 
 #[test]
 fn escape_from_title_mode_cancels() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputTitle;
     app.input.buffer = "partial".to_string();
     app.handle_key(make_key(KeyCode::Esc));
@@ -683,7 +685,7 @@ fn escape_from_title_mode_cancels() {
 
 #[test]
 fn escape_from_description_mode_cancels() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputDescription;
     app.input.task_draft = Some(TaskDraft { title: "T".to_string(), description: String::new(), ..Default::default() });
     app.input.buffer = "partial".to_string();
@@ -696,7 +698,7 @@ fn escape_from_description_mode_cancels() {
 
 #[test]
 fn escape_from_repo_path_mode_cancels() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputRepoPath;
     app.input.task_draft = Some(TaskDraft { title: "T".to_string(), description: String::new(), ..Default::default() });
     app.input.buffer = "/partial".to_string();
@@ -815,7 +817,7 @@ fn shift_h_toggles_archive() {
 
 #[test]
 fn any_key_clears_error_popup() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.error_popup = Some("boom".to_string());
     let cmds = app.handle_key(make_key(KeyCode::Char('a')));
     assert!(app.error_popup.is_none());
@@ -830,7 +832,7 @@ fn make_shift_key(code: KeyCode) -> KeyEvent {
 
 #[test]
 fn shift_d_with_one_repo_emits_quick_dispatch() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
     app.repo_paths = vec!["/repo".to_string()];
     let cmds = app.handle_key(make_shift_key(KeyCode::Char('D')));
     assert_eq!(cmds.len(), 1);
@@ -840,7 +842,7 @@ fn shift_d_with_one_repo_emits_quick_dispatch() {
 
 #[test]
 fn shift_d_with_no_repos_shows_error() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
     app.repo_paths = vec![];
     let cmds = app.handle_key(make_shift_key(KeyCode::Char('D')));
     assert!(cmds.is_empty());
@@ -850,7 +852,7 @@ fn shift_d_with_no_repos_shows_error() {
 
 #[test]
 fn shift_d_with_multiple_repos_enters_quick_dispatch_mode() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
     app.repo_paths = vec!["/repo1".to_string(), "/repo2".to_string()];
     let cmds = app.handle_key(make_shift_key(KeyCode::Char('D')));
     assert!(cmds.is_empty());
@@ -859,7 +861,7 @@ fn shift_d_with_multiple_repos_enters_quick_dispatch_mode() {
 
 #[test]
 fn quick_dispatch_mode_number_selects_repo() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
     app.repo_paths = vec!["/repo1".to_string(), "/repo2".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     let cmds = app.handle_key(make_key(KeyCode::Char('2')));
@@ -870,7 +872,7 @@ fn quick_dispatch_mode_number_selects_repo() {
 
 #[test]
 fn quick_dispatch_mode_esc_cancels() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
     app.repo_paths = vec!["/repo1".to_string(), "/repo2".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     let cmds = app.handle_key(make_key(KeyCode::Esc));
@@ -880,7 +882,7 @@ fn quick_dispatch_mode_esc_cancels() {
 
 #[test]
 fn quick_dispatch_mode_invalid_number_is_noop() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
     app.repo_paths = vec!["/repo1".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     let cmds = app.handle_key(make_key(KeyCode::Char('3')));
@@ -890,7 +892,7 @@ fn quick_dispatch_mode_invalid_number_is_noop() {
 
 #[test]
 fn quick_dispatch_message_emits_command() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     let cmds = app.update(Message::QuickDispatch { repo_path: "/my/repo".to_string(), epic_id: None });
     assert_eq!(cmds.len(), 1);
     assert!(
@@ -901,7 +903,7 @@ fn quick_dispatch_message_emits_command() {
 
 #[test]
 fn shift_d_in_epic_view_quick_dispatches_subtask() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.repo_path = "/epic/repo".to_string();
     app.epics = vec![epic];
@@ -931,7 +933,7 @@ fn error_popup_blocks_normal_key_handling() {
 
 #[test]
 fn toggle_detail_flips_visibility() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     assert!(!app.detail_visible);
     app.update(Message::ToggleDetail);
     assert!(app.detail_visible);
@@ -943,7 +945,7 @@ fn toggle_detail_flips_visibility() {
 fn stale_agent_detected_after_timeout() {
     let mut app = App::new(vec![
         make_task(4, TaskStatus::Running),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.tasks[0].tmux_window = Some("task-4".to_string());
     app.agents.last_output_change.insert(TaskId(4), Instant::now() - Duration::from_secs(301));
 
@@ -957,7 +959,7 @@ fn stale_agent_detected_after_timeout() {
 fn window_gone_on_running_task_marks_crashed() {
     let mut app = App::new(vec![
         make_task(4, TaskStatus::Running),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.tasks[0].tmux_window = Some("task-4".to_string());
 
     let cmds = app.update(Message::WindowGone(TaskId(4)));
@@ -972,7 +974,7 @@ fn window_gone_on_running_task_marks_crashed() {
 fn window_gone_on_review_task_clears_window() {
     let mut app = App::new(vec![
         make_task(4, TaskStatus::Review),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.tasks[0].tmux_window = Some("task-4".to_string());
 
     let cmds = app.update(Message::WindowGone(TaskId(4)));
@@ -985,7 +987,7 @@ fn window_gone_on_review_task_clears_window() {
 fn tmux_output_change_resets_staleness_timer() {
     let mut app = App::new(vec![
         make_task(4, TaskStatus::Running),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.tasks[0].tmux_window = Some("task-4".to_string());
     app.agents.last_output_change.insert(TaskId(4), Instant::now() - Duration::from_secs(301));
     app.agents.last_activity.insert(TaskId(4), 1000);
@@ -999,7 +1001,7 @@ fn tmux_output_change_resets_staleness_timer() {
 fn tmux_output_same_activity_does_not_reset_timer() {
     let mut app = App::new(vec![
         make_task(4, TaskStatus::Running),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.tasks[0].tmux_window = Some("task-4".to_string());
     let old_instant = Instant::now() - Duration::from_secs(200);
     app.agents.last_output_change.insert(TaskId(4), old_instant);
@@ -1014,7 +1016,7 @@ fn tmux_output_same_activity_does_not_reset_timer() {
 fn activity_ts_change_with_same_output_resets_timer() {
     let mut app = App::new(vec![
         make_task(4, TaskStatus::Running),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.tasks[0].tmux_window = Some("task-4".to_string());
     app.agents.last_output_change.insert(TaskId(4), Instant::now() - Duration::from_secs(301));
     app.agents.last_activity.insert(TaskId(4), 1000);
@@ -1030,7 +1032,7 @@ fn activity_ts_change_with_same_output_resets_timer() {
 fn activity_ts_same_with_different_output_no_reset() {
     let mut app = App::new(vec![
         make_task(4, TaskStatus::Running),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.tasks[0].tmux_window = Some("task-4".to_string());
     let old_instant = Instant::now() - Duration::from_secs(200);
     app.agents.last_output_change.insert(TaskId(4), old_instant);
@@ -1047,7 +1049,7 @@ fn activity_ts_same_with_different_output_no_reset() {
 
 #[test]
 fn enter_key_toggles_detail() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     assert!(!app.detail_visible);
     app.handle_key(make_key(KeyCode::Enter));
     assert!(app.detail_visible);
@@ -1059,7 +1061,7 @@ fn enter_key_toggles_detail() {
 fn dispatched_sets_fields_and_transitions_to_running() {
     let mut task = make_task(3, TaskStatus::Backlog);
     task.plan = Some("plan.md".into());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     let cmds = app.update(Message::Dispatched {
         id: TaskId(3),
         worktree: "/wt".to_string(),
@@ -1078,7 +1080,7 @@ fn dispatched_sets_fields_and_transitions_to_running() {
 fn dispatched_with_switch_focus_emits_jump() {
     let mut task = make_task(3, TaskStatus::Backlog);
     task.plan = Some("plan.md".into());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     let cmds = app.update(Message::Dispatched {
         id: TaskId(3),
         worktree: "/wt".to_string(),
@@ -1092,7 +1094,7 @@ fn dispatched_with_switch_focus_emits_jump() {
 
 #[test]
 fn dispatched_unknown_id_is_noop() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
     let cmds = app.update(Message::Dispatched {
         id: TaskId(999),
         worktree: "/wt".to_string(),
@@ -1107,7 +1109,7 @@ fn dispatched_unknown_id_is_noop() {
 fn resumed_sets_tmux_window() {
     let mut task = make_task(4, TaskStatus::Running);
     task.worktree = Some("/wt".to_string());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     let cmds = app.update(Message::Resumed {
         id: TaskId(4),
         tmux_window: "win-4".to_string(),
@@ -1119,7 +1121,7 @@ fn resumed_sets_tmux_window() {
 
 #[test]
 fn resumed_unknown_id_is_noop() {
-    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], Duration::from_secs(300));
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], TEST_TIMEOUT);
     let cmds = app.update(Message::Resumed {
         id: TaskId(999),
         tmux_window: "win".to_string(),
@@ -1132,7 +1134,7 @@ fn resumed_sets_status_to_running() {
     let mut task = make_task(4, TaskStatus::Review);
     task.worktree = Some("/repo/.worktrees/4-task-4".to_string());
     task.tmux_window = None;
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
 
     let cmds = app.update(Message::Resumed {
         id: TaskId(4),
@@ -1148,7 +1150,7 @@ fn resumed_sets_status_to_running() {
 
 #[test]
 fn tmux_output_stores_in_map() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Running)], Duration::from_secs(300));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Running)], TEST_TIMEOUT);
     let cmds = app.update(Message::TmuxOutput {
         id: TaskId(1),
         output: "hello".to_string(),
@@ -1160,7 +1162,7 @@ fn tmux_output_stores_in_map() {
 
 #[test]
 fn tmux_output_overwrites_previous() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Running)], Duration::from_secs(300));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Running)], TEST_TIMEOUT);
     app.update(Message::TmuxOutput { id: TaskId(1), output: "first".to_string(), activity_ts: 1000 });
     app.update(Message::TmuxOutput { id: TaskId(1), output: "second".to_string(), activity_ts: 1001 });
     assert_eq!(app.agents.tmux_outputs.get(&TaskId(1)).unwrap(), "second");
@@ -1193,7 +1195,7 @@ fn d_key_on_review_with_window_shows_warning() {
     let mut task = make_task(5, TaskStatus::Review);
     task.tmux_window = Some("task-5".to_string());
     task.worktree = Some("/repo/.worktrees/5-task-5".to_string());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     app.selection_mut().set_column(2); // Review column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
@@ -1205,7 +1207,7 @@ fn d_key_on_review_no_window_with_worktree_resumes() {
     let mut task = make_task(5, TaskStatus::Review);
     task.worktree = Some("/repo/.worktrees/5-task-5".to_string());
     task.tmux_window = None;
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     app.selection_mut().set_column(2); // Review column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(matches!(&cmds[0], Command::Resume { .. }));
@@ -1216,7 +1218,7 @@ fn d_key_on_review_no_worktree_no_window_shows_warning() {
     let mut task = make_task(5, TaskStatus::Review);
     task.worktree = None;
     task.tmux_window = None;
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     app.selection_mut().set_column(2); // Review column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
@@ -1227,7 +1229,7 @@ fn d_key_on_review_no_worktree_no_window_shows_warning() {
 
 #[test]
 fn d_key_on_empty_column_is_noop() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.selection_mut().set_column(0);
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
@@ -1235,7 +1237,7 @@ fn d_key_on_empty_column_is_noop() {
 
 #[test]
 fn g_key_on_empty_column_is_noop() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.selection_mut().set_column(0);
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert!(cmds.is_empty());
@@ -1243,7 +1245,7 @@ fn g_key_on_empty_column_is_noop() {
 
 #[test]
 fn m_key_on_empty_column_is_noop() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.selection_mut().set_column(0);
     let cmds = app.handle_key(make_key(KeyCode::Char('m')));
     assert!(cmds.is_empty());
@@ -1251,7 +1253,7 @@ fn m_key_on_empty_column_is_noop() {
 
 #[test]
 fn shift_m_key_on_empty_column_is_noop() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.selection_mut().set_column(0);
     let cmds = app.handle_key(make_key(KeyCode::Char('M')));
     assert!(cmds.is_empty());
@@ -1259,7 +1261,7 @@ fn shift_m_key_on_empty_column_is_noop() {
 
 #[test]
 fn e_key_on_empty_column_is_noop() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.selection_mut().set_column(0);
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
     assert!(cmds.is_empty());
@@ -1415,7 +1417,7 @@ fn epic_action_hints_done() {
 
 #[test]
 fn e_key_emits_edit_task_in_editor() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
     app.selection_mut().set_column(0);
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
     assert_eq!(cmds.len(), 1);
@@ -1424,7 +1426,7 @@ fn e_key_emits_edit_task_in_editor() {
 
 #[test]
 fn new_app_has_empty_agent_tracking() {
-    let app = App::new(vec![], Duration::from_secs(300));
+    let app = App::new(vec![], TEST_TIMEOUT);
     // stale/crashed state is now on the task's sub_status field, not in AgentTracking
     assert!(app.agents.last_activity.is_empty());
 }
@@ -1433,7 +1435,7 @@ fn new_app_has_empty_agent_tracking() {
 fn kill_and_retry_enters_confirm_mode() {
     let mut app = App::new(vec![
         make_task(4, TaskStatus::Running),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.tasks[0].tmux_window = Some("task-4".to_string());
     app.tasks[0].sub_status = SubStatus::Stale;
 
@@ -1445,7 +1447,7 @@ fn kill_and_retry_enters_confirm_mode() {
 fn retry_resume_emits_kill_and_resume() {
     let mut app = App::new(vec![
         make_task(4, TaskStatus::Running),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.tasks[0].tmux_window = Some("task-4".to_string());
     app.tasks[0].worktree = Some("/repo/.worktrees/4-task-4".to_string());
     app.tasks[0].sub_status = SubStatus::Stale;
@@ -1465,7 +1467,7 @@ fn retry_resume_emits_kill_and_resume() {
 fn retry_fresh_emits_cleanup_and_dispatch() {
     let mut app = App::new(vec![
         make_task(4, TaskStatus::Running),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.tasks[0].tmux_window = Some("task-4".to_string());
     app.tasks[0].worktree = Some("/repo/.worktrees/4-task-4".to_string());
     app.tasks[0].sub_status = SubStatus::Stale;
@@ -1484,7 +1486,7 @@ fn retry_fresh_emits_cleanup_and_dispatch() {
 fn d_key_on_stale_running_task_enters_retry_mode() {
     let mut app = App::new(vec![
         make_task(4, TaskStatus::Running),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.tasks[0].tmux_window = Some("task-4".to_string());
     app.tasks[0].sub_status = SubStatus::Stale;
     // Navigate to Running column (index 1)
@@ -1499,7 +1501,7 @@ fn d_key_on_stale_running_task_enters_retry_mode() {
 fn d_key_on_crashed_running_task_enters_retry_mode() {
     let mut app = App::new(vec![
         make_task(4, TaskStatus::Running),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.tasks[0].tmux_window = Some("task-4".to_string());
     app.tasks[0].sub_status = SubStatus::Crashed;
     // Navigate to Running column (index 1)
@@ -1514,7 +1516,7 @@ fn d_key_on_crashed_running_task_enters_retry_mode() {
 fn confirm_retry_r_key_emits_resume() {
     let mut app = App::new(vec![
         make_task(4, TaskStatus::Running),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.tasks[0].tmux_window = Some("task-4".to_string());
     app.tasks[0].worktree = Some("/repo/.worktrees/4-task-4".to_string());
     app.input.mode = InputMode::ConfirmRetry(TaskId(4));
@@ -1528,7 +1530,7 @@ fn confirm_retry_r_key_emits_resume() {
 fn confirm_retry_f_key_emits_fresh() {
     let mut app = App::new(vec![
         make_task(4, TaskStatus::Running),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.tasks[0].tmux_window = Some("task-4".to_string());
     app.tasks[0].worktree = Some("/repo/.worktrees/4-task-4".to_string());
     app.input.mode = InputMode::ConfirmRetry(TaskId(4));
@@ -1542,7 +1544,7 @@ fn confirm_retry_f_key_emits_fresh() {
 fn confirm_retry_esc_returns_to_normal() {
     let mut app = App::new(vec![
         make_task(4, TaskStatus::Running),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.input.mode = InputMode::ConfirmRetry(TaskId(4));
 
     let cmds = app.handle_key(make_key(KeyCode::Esc));
@@ -1554,7 +1556,7 @@ fn confirm_retry_esc_returns_to_normal() {
 
 #[test]
 fn dismiss_error_clears_popup() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.error_popup = Some("boom".to_string());
     app.update(Message::DismissError);
     assert!(app.error_popup.is_none());
@@ -1572,7 +1574,7 @@ fn start_new_task_enters_title_mode() {
 
 #[test]
 fn cancel_input_returns_to_normal() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputTitle;
     app.input.buffer = "partial".to_string();
     app.input.task_draft = Some(TaskDraft::default());
@@ -1586,7 +1588,7 @@ fn cancel_input_returns_to_normal() {
 
 #[test]
 fn submit_title_with_text_advances_to_tag() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputTitle;
     app.update(Message::SubmitTitle("My Task".to_string()));
     assert_eq!(app.input.mode, InputMode::InputTag);
@@ -1596,7 +1598,7 @@ fn submit_title_with_text_advances_to_tag() {
 
 #[test]
 fn submit_empty_title_cancels() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputTitle;
     app.update(Message::SubmitTitle(String::new()));
     assert_eq!(app.input.mode, InputMode::Normal);
@@ -1605,7 +1607,7 @@ fn submit_empty_title_cancels() {
 
 #[test]
 fn submit_tag_advances_to_description() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputTag;
     app.input.task_draft = Some(TaskDraft { title: "T".to_string(), ..Default::default() });
     let cmds = app.update(Message::SubmitTag(Some("bug".to_string())));
@@ -1617,7 +1619,7 @@ fn submit_tag_advances_to_description() {
 
 #[test]
 fn submit_description_advances_to_repo_path() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputDescription;
     app.input.task_draft = Some(TaskDraft { title: "T".to_string(), ..Default::default() });
     app.update(Message::SubmitDescription("my desc".to_string()));
@@ -1627,7 +1629,7 @@ fn submit_description_advances_to_repo_path() {
 
 #[test]
 fn submit_repo_path_creates_task() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputRepoPath;
     app.input.task_draft = Some(TaskDraft { title: "T".to_string(), description: "D".to_string(), tag: Some("bug".to_string()), ..Default::default() });
     let cmds = app.update(Message::SubmitRepoPath("/my/repo".to_string()));
@@ -1637,7 +1639,7 @@ fn submit_repo_path_creates_task() {
 
 #[test]
 fn input_char_appends_to_buffer() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputTitle;
     app.update(Message::InputChar('H'));
     app.update(Message::InputChar('i'));
@@ -1693,7 +1695,7 @@ fn close_repo_filter_returns_to_normal() {
 
 #[test]
 fn input_backspace_removes_last_char() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.buffer = "abc".to_string();
     app.update(Message::InputBackspace);
     assert_eq!(app.input.buffer, "ab");
@@ -1713,7 +1715,7 @@ fn confirm_delete_start_enters_mode() {
 
 #[test]
 fn cancel_delete_returns_to_normal() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::ConfirmDelete;
     app.status_message = Some("Delete \"Task 1\" [backlog]? (y/n)".to_string());
     app.update(Message::CancelDelete);
@@ -1723,14 +1725,14 @@ fn cancel_delete_returns_to_normal() {
 
 #[test]
 fn status_info_sets_message() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.update(Message::StatusInfo("hello".to_string()));
     assert_eq!(app.status_message.as_deref(), Some("hello"));
 }
 
 #[test]
 fn start_quick_dispatch_selection_enters_mode() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.update(Message::StartQuickDispatchSelection);
     assert_eq!(app.input.mode, InputMode::QuickDispatch);
     assert!(app.status_message.is_some());
@@ -1738,7 +1740,7 @@ fn start_quick_dispatch_selection_enters_mode() {
 
 #[test]
 fn select_quick_dispatch_repo_dispatches() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.repo_paths = vec!["/repo1".to_string(), "/repo2".to_string()];
     let cmds = app.update(Message::SelectQuickDispatchRepo(1));
     assert_eq!(app.input.mode, InputMode::Normal);
@@ -1747,7 +1749,7 @@ fn select_quick_dispatch_repo_dispatches() {
 
 #[test]
 fn select_quick_dispatch_repo_out_of_range_is_noop() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.repo_paths = vec!["/repo1".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     let cmds = app.update(Message::SelectQuickDispatchRepo(5));
@@ -1757,7 +1759,7 @@ fn select_quick_dispatch_repo_out_of_range_is_noop() {
 
 #[test]
 fn cancel_retry_returns_to_normal() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::ConfirmRetry(TaskId(4));
     app.status_message = Some("Agent stale".to_string());
     app.update(Message::CancelRetry);
@@ -1771,7 +1773,7 @@ fn cancel_retry_returns_to_normal() {
 fn archive_task_sets_status_and_emits_persist() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Done),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     let cmds = app.update(Message::ArchiveTask(TaskId(1)));
     let task = app.tasks.iter().find(|t| t.id == TaskId(1)).unwrap();
     assert_eq!(task.status, TaskStatus::Archived);
@@ -1783,7 +1785,7 @@ fn archive_task_with_worktree_emits_cleanup() {
     let mut task = make_task(1, TaskStatus::Running);
     task.worktree = Some("/wt/1-test".to_string());
     task.tmux_window = Some("dev:1-test".to_string());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
 
     let cmds = app.update(Message::ArchiveTask(TaskId(1)));
 
@@ -1799,7 +1801,7 @@ fn archive_task_with_worktree_emits_cleanup() {
 fn archive_task_without_worktree_no_cleanup() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Backlog),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     let cmds = app.update(Message::ArchiveTask(TaskId(1)));
     assert!(!cmds.iter().any(|c| matches!(c, Command::Cleanup { .. })));
     assert!(cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
@@ -1810,7 +1812,7 @@ fn archive_clears_agent_tracking() {
     let mut task = make_task(1, TaskStatus::Running);
     task.tmux_window = Some("dev:1-test".to_string());
     task.sub_status = SubStatus::Stale;
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     app.agents.tmux_outputs.insert(TaskId(1), "output".to_string());
     app.agents.last_activity.insert(TaskId(1), 1000);
 
@@ -1829,7 +1831,7 @@ fn archive_panel_j_k_navigation() {
         make_task(1, TaskStatus::Archived),
         make_task(2, TaskStatus::Archived),
         make_task(3, TaskStatus::Archived),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.archive.visible = true;
     assert_eq!(app.archive.selected_row, 0);
 
@@ -1851,7 +1853,7 @@ fn archive_panel_j_k_navigation() {
 fn archive_panel_h_closes() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Archived),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.archive.visible = true;
 
     app.handle_key(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::SHIFT));
@@ -1862,7 +1864,7 @@ fn archive_panel_h_closes() {
 fn archive_panel_x_enters_confirm_delete() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Archived),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.archive.visible = true;
 
     app.handle_key(make_key(KeyCode::Char('x')));
@@ -1877,7 +1879,7 @@ fn archive_panel_x_enters_confirm_delete() {
 fn archive_panel_confirm_delete_removes_task() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Archived),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.archive.visible = true;
 
     app.handle_key(make_key(KeyCode::Char('x')));
@@ -1891,7 +1893,7 @@ fn archived_tasks_not_in_kanban_columns() {
     let app = App::new(vec![
         make_task(1, TaskStatus::Backlog),
         make_task(2, TaskStatus::Archived),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
 
     for &status in TaskStatus::ALL {
         let tasks = app.tasks_by_status(status);
@@ -1914,7 +1916,7 @@ fn full_archive_flow() {
     let mut task = make_task(1, TaskStatus::Running);
     task.worktree = Some("/wt/1-test".to_string());
     task.tmux_window = Some("dev:1-test".to_string());
-    let mut app = App::new(vec![task, make_task(2, TaskStatus::Backlog)], Duration::from_secs(300));
+    let mut app = App::new(vec![task, make_task(2, TaskStatus::Backlog)], TEST_TIMEOUT);
 
     // Navigate to Running column (column 1)
     app.handle_key(make_key(KeyCode::Right));
@@ -2046,7 +2048,7 @@ fn batch_move_backward() {
         make_task(1, TaskStatus::Done),
         make_task(2, TaskStatus::Done),
         make_task(3, TaskStatus::Done),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
 
     app.update(Message::ToggleSelect(TaskId(1)));
     app.update(Message::ToggleSelect(TaskId(2)));
@@ -2065,7 +2067,7 @@ fn batch_archive_archives_all_and_clears_selection() {
         make_task(1, TaskStatus::Done),
         make_task(2, TaskStatus::Done),
         make_task(3, TaskStatus::Backlog),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
 
     app.update(Message::ToggleSelect(TaskId(1)));
     app.update(Message::ToggleSelect(TaskId(2)));
@@ -2098,7 +2100,7 @@ fn confirm_archive_with_selection_dispatches_batch() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Done),
         make_task(2, TaskStatus::Done),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
 
     app.update(Message::ToggleSelect(TaskId(1)));
     app.update(Message::ToggleSelect(TaskId(2)));
@@ -2141,7 +2143,7 @@ fn refresh_tasks_prunes_stale_selections() {
 
 #[test]
 fn render_empty_board_shows_all_column_headers() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     let buf = render_to_buffer(&mut app, 100, 20);
     assert!(buffer_contains(&buf, "backlog"));
     assert!(buffer_contains(&buf, "running"));
@@ -2156,7 +2158,7 @@ fn render_shows_task_titles_in_columns() {
         make_task(2, TaskStatus::Running),
         make_task(3, TaskStatus::Review),
     ];
-    let mut app = App::new(tasks, Duration::from_secs(300));
+    let mut app = App::new(tasks, TEST_TIMEOUT);
     let buf = render_to_buffer(&mut app, 120, 20);
     assert!(buffer_contains(&buf, "Task 1"));
     assert!(buffer_contains(&buf, "Task 2"));
@@ -2165,7 +2167,7 @@ fn render_shows_task_titles_in_columns() {
 
 #[test]
 fn render_error_popup_shows_message() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.update(Message::Error("Something went wrong".to_string()));
     let buf = render_to_buffer(&mut app, 100, 20);
     assert!(buffer_contains(&buf, "Something went wrong"));
@@ -2173,7 +2175,7 @@ fn render_error_popup_shows_message() {
 
 #[test]
 fn render_status_bar_shows_keybindings() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     let buf = render_to_buffer(&mut app, 100, 20);
     assert!(buffer_contains(&buf, "uit"));
 }
@@ -2183,7 +2185,7 @@ fn render_crashed_task_shows_label() {
     let mut task = make_task(1, TaskStatus::Running);
     task.tmux_window = Some("win-1".to_string());
     task.sub_status = SubStatus::Crashed;
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     let buf = render_to_buffer(&mut app, 120, 20);
     assert!(buffer_contains(&buf, "crashed"));
 }
@@ -2193,7 +2195,7 @@ fn render_stale_task_shows_label() {
     let mut task = make_task(1, TaskStatus::Running);
     task.tmux_window = Some("win-1".to_string());
     task.sub_status = SubStatus::Stale;
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     let buf = render_to_buffer(&mut app, 120, 20);
     assert!(buffer_contains(&buf, "stale"));
 }
@@ -2207,7 +2209,7 @@ fn running_card_with_worktree_no_window_shows_detached() {
     let mut task = make_task(1, TaskStatus::Running);
     task.worktree = Some("/repo/.worktrees/1-fix".to_string());
     task.tmux_window = None;
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     let buf = render_to_buffer(&mut app, 120, 20);
     assert!(buffer_contains(&buf, "○ detached"), "expected '○ detached'");
 }
@@ -2217,7 +2219,7 @@ fn running_card_with_window_shows_running_not_detached() {
     let mut task = make_task(1, TaskStatus::Running);
     task.worktree = Some("/repo/.worktrees/1-fix".to_string());
     task.tmux_window = Some("1-fix".to_string());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     let buf = render_to_buffer(&mut app, 120, 20);
     assert!(buffer_contains(&buf, "◉ running"), "expected '◉ running'");
     assert!(!buffer_contains(&buf, "detached"), "should not show detached");
@@ -2230,7 +2232,7 @@ fn crashed_card_with_no_window_shows_detached_not_crashed() {
     task.sub_status = SubStatus::Crashed;
     task.worktree = Some("/repo/.worktrees/1-fix".to_string());
     task.tmux_window = None;
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     let buf = render_to_buffer(&mut app, 120, 20);
     assert!(buffer_contains(&buf, "○ detached"), "expected '○ detached'");
     assert!(!buffer_contains(&buf, "\u{26a0} crashed"), "should not show ⚠ crashed");
@@ -2243,7 +2245,7 @@ fn review_card_with_pr_detached_shows_circle_prefix() {
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
     task.worktree = Some("/repo/.worktrees/1-fix".to_string());
     task.tmux_window = None;
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     let buf = render_to_buffer(&mut app, 120, 20);
     assert!(buffer_contains(&buf, "○ PR #42"), "expected '○ PR #42'");
 }
@@ -2255,7 +2257,7 @@ fn review_card_with_pr_not_detached_shows_no_prefix() {
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
     task.worktree = Some("/repo/.worktrees/1-fix".to_string());
     task.tmux_window = Some("1-fix".to_string());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     let buf = render_to_buffer(&mut app, 120, 20);
     assert!(buffer_contains(&buf, "PR #42"), "expected 'PR #42'");
     assert!(!buffer_contains(&buf, "○ PR"), "should not show circle prefix");
@@ -2263,14 +2265,14 @@ fn review_card_with_pr_not_detached_shows_no_prefix() {
 
 #[test]
 fn render_does_not_panic_on_small_terminal() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
     // Very small terminal — should not panic
     let _ = render_to_buffer(&mut app, 20, 5);
 }
 
 #[test]
 fn render_input_mode_shows_prompt() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.update(Message::StartNewTask);
     let buf = render_to_buffer(&mut app, 100, 20);
     assert!(buffer_contains(&buf, "Title"));
@@ -2289,7 +2291,7 @@ fn truncate_respects_max_length() {
 
 #[test]
 fn render_v2_task_card_shows_stripe() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
     let buf = render_to_buffer(&mut app, 120, 20);
     // Cursor card uses thicker stripe ▌ (U+258C), non-cursor uses ▎ (U+258E)
     assert!(
@@ -2300,7 +2302,7 @@ fn render_v2_task_card_shows_stripe() {
 
 #[test]
 fn render_v2_backlog_task_shows_status_icon() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
     let buf = render_to_buffer(&mut app, 120, 20);
     assert!(buffer_contains(&buf, "\u{25e6}"), "backlog task should show \u{25e6} icon");
 }
@@ -2309,14 +2311,14 @@ fn render_v2_backlog_task_shows_status_icon() {
 fn render_v2_running_task_shows_status_icon() {
     let mut task = make_task(1, TaskStatus::Running);
     task.tmux_window = Some("win-1".to_string());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     let buf = render_to_buffer(&mut app, 120, 20);
     assert!(buffer_contains(&buf, "\u{25c9}"), "running task should show \u{25c9} icon");
 }
 
 #[test]
 fn render_v2_focused_column_shows_arrow() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     let buf = render_to_buffer(&mut app, 120, 20);
     // Default focus is on first column (Backlog), should show \u{25b8}
     assert!(buffer_contains(&buf, "\u{25b8}"), "focused column should show \u{25b8} indicator");
@@ -2324,7 +2326,7 @@ fn render_v2_focused_column_shows_arrow() {
 
 #[test]
 fn render_v2_unfocused_columns_show_dot() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     let buf = render_to_buffer(&mut app, 120, 20);
     // Unfocused columns should show \u{25e6}
     assert!(buffer_contains(&buf, "\u{25e6}"), "unfocused columns should show \u{25e6} indicator");
@@ -2332,7 +2334,7 @@ fn render_v2_unfocused_columns_show_dot() {
 
 #[test]
 fn render_v2_detail_panel_shows_inline_metadata() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
     app.update(Message::ToggleDetail);
     let buf = render_to_buffer(&mut app, 120, 20);
     // The compact detail panel shows "title \u{00b7} #id \u{00b7} status \u{00b7} repo" on one line
@@ -2343,7 +2345,7 @@ fn render_v2_detail_panel_shows_inline_metadata() {
 
 #[test]
 fn render_v2_status_bar_no_brackets() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
     let buf = render_to_buffer(&mut app, 120, 20);
     let content: String = buf.content().iter().map(|cell| cell.symbol()).collect();
     // Old format had [n], [q] etc. New format should NOT have brackets
@@ -2356,7 +2358,7 @@ fn render_v2_status_bar_no_brackets() {
 
 #[test]
 fn render_v2_done_task_shows_checkmark() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Done)], Duration::from_secs(300));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Done)], TEST_TIMEOUT);
     // Navigate to Done column (index 3)
     for _ in 0..3 {
         app.update(Message::NavigateColumn(1));
@@ -2371,7 +2373,7 @@ fn render_v2_done_task_shows_checkmark() {
 
 #[test]
 fn render_columns_appear_left_to_right() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     let buf = render_to_buffer(&mut app, 120, 30);
 
     // Find the leftmost x-position where each header appears
@@ -2418,7 +2420,7 @@ fn render_columns_fill_terminal_width() {
     // A previous bug reserved a 34-char right sidebar in the column content area.
     let mut app = App::new(
         vec![make_task(1, TaskStatus::Done)],
-        Duration::from_secs(300),
+        TEST_TIMEOUT,
     );
     let width: u16 = 120;
     let buf = render_to_buffer(&mut app, width, 20);
@@ -2458,7 +2460,7 @@ fn render_columns_fill_terminal_width() {
 
 #[test]
 fn render_help_overlay_shows_keybindings_help() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.update(Message::ToggleHelp);
     let buf = render_to_buffer(&mut app, 100, 30);
     assert!(buffer_contains(&buf, "Navigation"), "help overlay should show Navigation section");
@@ -2467,7 +2469,7 @@ fn render_help_overlay_shows_keybindings_help() {
 
 #[test]
 fn render_help_overlay_in_review_board_shows_review_shortcuts() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.update(Message::SwitchToReviewBoard);
     app.update(Message::ToggleHelp);
     let buf = render_to_buffer(&mut app, 100, 30);
@@ -2493,7 +2495,7 @@ fn render_help_overlay_in_review_board_shows_review_shortcuts() {
 fn render_1x1_terminal_does_not_panic() {
     let mut app = App::new(
         vec![make_task(1, TaskStatus::Running)],
-        Duration::from_secs(300),
+        TEST_TIMEOUT,
     );
     let _ = render_to_buffer(&mut app, 1, 1);
 }
@@ -2503,7 +2505,7 @@ fn render_archive_overlay_shows_archived_tasks() {
     let mut task = make_task(1, TaskStatus::Backlog);
     task.status = TaskStatus::Archived;
     task.title = "Archived Item".to_string();
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     app.update(Message::ToggleArchive);
     let buf = render_to_buffer(&mut app, 100, 30);
     assert!(buffer_contains(&buf, "Archived Item"), "archive overlay should show archived task title");
@@ -2516,7 +2518,7 @@ fn render_archive_overlay_shows_archived_tasks() {
 #[test]
 fn stress_large_task_list_navigation() {
     let tasks: Vec<_> = (1..=1000).map(|i| make_task(i, TaskStatus::Backlog)).collect();
-    let mut app = App::new(tasks, Duration::from_secs(300));
+    let mut app = App::new(tasks, TEST_TIMEOUT);
 
     assert_eq!(app.tasks().len(), 1000);
 
@@ -2545,7 +2547,7 @@ fn stress_large_task_list_rendering() {
             _ => TaskStatus::Done,
         };
     }
-    let mut app = App::new(tasks, Duration::from_secs(300));
+    let mut app = App::new(tasks, TEST_TIMEOUT);
 
     // Render at various sizes — must not panic
     for width in [40, 80, 120, 200] {
@@ -2558,7 +2560,7 @@ fn stress_large_task_list_rendering() {
 #[test]
 fn stress_rapid_status_transitions() {
     let tasks = vec![make_task(1, TaskStatus::Backlog)];
-    let mut app = App::new(tasks, Duration::from_secs(300));
+    let mut app = App::new(tasks, TEST_TIMEOUT);
 
     // Rapidly move task through all statuses and back.
     // Moving forward will stop at Review because Done requires confirmation.
@@ -2604,7 +2606,7 @@ fn stress_db_with_many_tasks() {
     assert_eq!(tasks.len(), 500);
 
     // Create app from DB tasks and verify navigation works
-    let mut app = App::new(tasks, Duration::from_secs(300));
+    let mut app = App::new(tasks, TEST_TIMEOUT);
     for _ in 0..499 {
         app.update(Message::NavigateRow(1));
     }
@@ -2632,7 +2634,7 @@ fn make_epic(id: i64) -> Epic {
 
 #[test]
 fn tasks_for_current_view_board_excludes_epic_tasks() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     let standalone = make_task(1, TaskStatus::Backlog);
     let mut subtask = make_task(2, TaskStatus::Backlog);
     subtask.epic_id = Some(EpicId(10));
@@ -2645,7 +2647,7 @@ fn tasks_for_current_view_board_excludes_epic_tasks() {
 
 #[test]
 fn tasks_for_current_view_epic_shows_only_subtasks() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     let standalone = make_task(1, TaskStatus::Backlog);
     let mut subtask = make_task(2, TaskStatus::Running);
     subtask.epic_id = Some(EpicId(10));
@@ -2666,7 +2668,7 @@ fn tasks_for_current_view_epic_shows_only_subtasks() {
 
 #[test]
 fn enter_on_epic_toggles_detail() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
     // Epic is at row 0 in Backlog column (no standalone tasks)
     app.selection_mut().set_column(0);
@@ -2680,7 +2682,7 @@ fn enter_on_epic_toggles_detail() {
 
 #[test]
 fn e_on_epic_enters_epic_view() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
     app.selection_mut().set_column(0);
     app.selection_mut().set_row(0, 0);
@@ -2710,7 +2712,7 @@ fn e_on_task_still_edits() {
 
 #[test]
 fn enter_epic_switches_to_epic_view() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
     app.selection_mut().set_column(2);
 
@@ -2727,7 +2729,7 @@ fn enter_epic_switches_to_epic_view() {
 
 #[test]
 fn exit_epic_restores_board_selection() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.selection_mut().set_column(3);
 
     app.update(Message::EnterEpic(EpicId(10)));
@@ -2745,7 +2747,7 @@ fn exit_epic_restores_board_selection() {
 
 #[test]
 fn exit_epic_when_on_board_is_noop() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.update(Message::ExitEpic);
     assert!(matches!(app.view_mode, ViewMode::Board(_)));
 }
@@ -2756,7 +2758,7 @@ fn exit_epic_when_on_board_is_noop() {
 fn column_items_board_view_includes_epics() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Backlog),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)]; // epic with no subtasks = Backlog
 
     let items = app.column_items_for_status(TaskStatus::Backlog);
@@ -2768,7 +2770,7 @@ fn column_items_board_view_includes_epics() {
 
 #[test]
 fn column_items_epic_view_no_epics() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.view_mode = ViewMode::Epic {
         epic_id: EpicId(10),
         selection: BoardSelection::new(),
@@ -2784,7 +2786,7 @@ fn column_items_epic_view_no_epics() {
 fn selected_column_item_returns_epic() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Backlog),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
 
     // Epic at row 0 (Unplanned priority 0), Task at row 1 (SubStatus::None priority 5)
@@ -2808,7 +2810,7 @@ fn start_new_epic_sets_input_mode() {
 
 #[test]
 fn epic_created_adds_to_state() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     let epic = make_epic(1);
     app.update(Message::EpicCreated(epic));
     assert_eq!(app.epics().len(), 1);
@@ -2816,7 +2818,7 @@ fn epic_created_adds_to_state() {
 
 #[test]
 fn delete_epic_removes_from_state_and_tasks() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
     let mut subtask = make_task(1, TaskStatus::Backlog);
     subtask.epic_id = Some(EpicId(10));
@@ -2831,7 +2833,7 @@ fn delete_epic_removes_from_state_and_tasks() {
 
 #[test]
 fn move_epic_status_forward() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)]; // starts as Backlog
     let cmds = app.update(Message::MoveEpicStatus(EpicId(10), MoveDirection::Forward));
     assert_eq!(app.epics[0].status, TaskStatus::Running);
@@ -2840,7 +2842,7 @@ fn move_epic_status_forward() {
 
 #[test]
 fn move_epic_status_backward() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Done;
     app.epics = vec![epic];
@@ -2857,7 +2859,7 @@ fn move_epic_status_backward() {
 fn make_app_with_epic_selected() -> App {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Backlog),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
     // Epic at row 0 (Unplanned priority 0), Task at row 1 (SubStatus::None priority 5)
     app.selection_mut().set_column(0);
@@ -2890,7 +2892,7 @@ fn shift_m_on_done_epic_moves_to_review() {
             t.epic_id = Some(EpicId(10));
             t
         },
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Done;
     app.epics = vec![epic];
@@ -2920,7 +2922,7 @@ fn shift_v_key_on_task_is_noop() {
 
 #[test]
 fn shift_v_key_on_empty_column_is_noop() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.selection_mut().set_column(0);
     let cmds = app.handle_key(make_key(KeyCode::Char('V')));
     assert!(cmds.is_empty());
@@ -2948,7 +2950,7 @@ fn x_key_on_epic_with_non_done_subtasks_rejects_archive() {
             t.epic_id = Some(EpicId(10));
             t
         },
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
     app.epics = vec![epic];
@@ -2981,7 +2983,7 @@ fn x_key_on_epic_with_mixed_subtasks_rejects_archive_with_count() {
             t.epic_id = Some(EpicId(10));
             t
         },
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
     app.epics = vec![epic];
@@ -3002,7 +3004,7 @@ fn x_key_on_epic_with_all_done_subtasks_allows_archive() {
             t.epic_id = Some(EpicId(10));
             t
         },
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Done;
     app.epics = vec![epic];
@@ -3017,7 +3019,7 @@ fn x_key_on_epic_with_all_done_subtasks_allows_archive() {
 
 #[test]
 fn confirm_archive_epic_no_subtasks_allows_archive() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
     // No subtasks → derived status Backlog (col 0). Epic is only item → row 0.
     app.selection_mut().set_column(0);
@@ -3038,7 +3040,7 @@ fn enter_key_on_epic_enters_epic_view() {
 
 #[test]
 fn e_key_in_epic_view_edits_epic() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
     app.view_mode = ViewMode::Epic {
         epic_id: EpicId(10),
@@ -3052,7 +3054,7 @@ fn e_key_in_epic_view_edits_epic() {
 
 #[test]
 fn e_key_on_task_in_epic_view_edits_task_not_epic() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
     let mut subtask = make_task(1, TaskStatus::Backlog);
     subtask.epic_id = Some(EpicId(10));
@@ -3074,7 +3076,7 @@ fn e_key_on_task_in_epic_view_edits_task_not_epic() {
 
 #[test]
 fn esc_in_epic_view_exits_to_board() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.view_mode = ViewMode::Epic {
         epic_id: EpicId(10),
         selection: BoardSelection::new(),
@@ -3094,7 +3096,7 @@ fn d_key_on_backlog_epic_dispatches_epic() {
 
 #[test]
 fn d_key_in_epic_view_with_no_subtasks_dispatches_epic() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     let epic = make_epic(10);
     app.epics = vec![epic];
     app.update(Message::EnterEpic(EpicId(10)));
@@ -3123,7 +3125,7 @@ fn dispatch_epic_on_non_backlog_shows_status() {
             t.epic_id = Some(EpicId(10));
             t
         },
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
     app.epics = vec![epic];
@@ -3136,7 +3138,7 @@ fn dispatch_epic_on_non_backlog_shows_status() {
 
 #[test]
 fn dispatch_epic_with_plan_dispatches_next_backlog_subtask() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.plan = Some("docs/plan.md".to_string());
     app.epics = vec![epic];
@@ -3162,7 +3164,7 @@ fn dispatch_epic_with_plan_dispatches_next_backlog_subtask() {
 
 #[test]
 fn dispatch_epic_with_plan_brainstorms_subtask_without_plan() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.plan = Some("docs/plan.md".to_string());
     app.epics = vec![epic];
@@ -3183,7 +3185,7 @@ fn dispatch_epic_with_plan_brainstorms_subtask_without_plan() {
 
 #[test]
 fn dispatch_epic_with_plan_no_backlog_subtasks_falls_back_to_planning() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.plan = Some("docs/plan.md".to_string());
     app.epics = vec![epic];
@@ -3245,7 +3247,7 @@ fn up_arrow_navigates_row() {
 
 #[test]
 fn epic_title_esc_cancels() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputEpicTitle;
     app.input.buffer = "partial".to_string();
     app.handle_key(make_key(KeyCode::Esc));
@@ -3255,7 +3257,7 @@ fn epic_title_esc_cancels() {
 
 #[test]
 fn epic_title_enter_with_text_advances_to_description() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputEpicTitle;
     app.input.buffer = "My Epic".to_string();
     app.handle_key(make_key(KeyCode::Enter));
@@ -3266,7 +3268,7 @@ fn epic_title_enter_with_text_advances_to_description() {
 
 #[test]
 fn epic_title_enter_empty_cancels() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputEpicTitle;
     app.input.buffer.clear();
     app.handle_key(make_key(KeyCode::Enter));
@@ -3275,7 +3277,7 @@ fn epic_title_enter_empty_cancels() {
 
 #[test]
 fn epic_description_enter_advances_to_repo_path() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputEpicDescription;
     app.input.epic_draft = Some(EpicDraft { title: "E".to_string(), ..Default::default() });
     app.input.buffer = "epic desc".to_string();
@@ -3287,7 +3289,7 @@ fn epic_description_enter_advances_to_repo_path() {
 
 #[test]
 fn epic_repo_path_enter_with_text_completes() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputEpicRepoPath;
     app.input.epic_draft = Some(EpicDraft { title: "E".to_string(), description: "D".to_string(), ..Default::default() });
     app.input.buffer = "/my/repo".to_string();
@@ -3298,7 +3300,7 @@ fn epic_repo_path_enter_with_text_completes() {
 
 #[test]
 fn epic_repo_path_enter_empty_uses_saved_path() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.repo_paths = vec!["/saved".to_string()];
     app.input.mode = InputMode::InputEpicRepoPath;
     app.input.epic_draft = Some(EpicDraft { title: "E".to_string(), description: "D".to_string(), ..Default::default() });
@@ -3310,7 +3312,7 @@ fn epic_repo_path_enter_empty_uses_saved_path() {
 
 #[test]
 fn epic_repo_path_enter_empty_no_saved_stays() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.repo_paths = vec![];
     app.input.mode = InputMode::InputEpicRepoPath;
     app.input.epic_draft = Some(EpicDraft { title: "E".to_string(), description: "D".to_string(), ..Default::default() });
@@ -3322,7 +3324,7 @@ fn epic_repo_path_enter_empty_no_saved_stays() {
 
 #[test]
 fn epic_text_input_char_appends() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputEpicTitle;
     app.handle_key(make_key(KeyCode::Char('A')));
     app.handle_key(make_key(KeyCode::Char('b')));
@@ -3331,7 +3333,7 @@ fn epic_text_input_char_appends() {
 
 #[test]
 fn epic_text_input_backspace_removes() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputEpicTitle;
     app.input.buffer = "abc".to_string();
     app.handle_key(make_key(KeyCode::Backspace));
@@ -3340,7 +3342,7 @@ fn epic_text_input_backspace_removes() {
 
 #[test]
 fn epic_text_input_unrecognized_key_is_noop() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputEpicTitle;
     app.input.buffer = "x".to_string();
     let cmds = app.handle_key(make_key(KeyCode::Tab));
@@ -3351,7 +3353,7 @@ fn epic_text_input_unrecognized_key_is_noop() {
 
 #[test]
 fn epic_repo_path_digit_quick_selects() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.repo_paths = vec!["/first".to_string(), "/second".to_string()];
     app.input.mode = InputMode::InputEpicRepoPath;
     app.input.epic_draft = Some(EpicDraft { title: "E".to_string(), description: "D".to_string(), ..Default::default() });
@@ -3363,7 +3365,7 @@ fn epic_repo_path_digit_quick_selects() {
 
 #[test]
 fn epic_repo_path_digit_with_nonempty_buffer_appends() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.repo_paths = vec!["/first".to_string()];
     app.input.mode = InputMode::InputEpicRepoPath;
     app.input.epic_draft = Some(EpicDraft { title: "E".to_string(), description: "D".to_string(), ..Default::default() });
@@ -3380,7 +3382,7 @@ fn epic_repo_path_digit_with_nonempty_buffer_appends() {
 fn make_app_confirm_delete_epic() -> App {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Backlog),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
     app.selection_mut().set_column(0);
     app.selection_mut().set_row(0, 0); // cursor on epic (sorts first with Unplanned priority 0)
@@ -3393,7 +3395,7 @@ fn make_app_confirm_delete_epic() -> App {
 fn confirm_delete_epic_enters_mode_with_title() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Backlog),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
     app.selection_mut().set_column(0);
     app.selection_mut().set_row(0, 0); // cursor on epic (sorts first with Unplanned priority 0)
@@ -3436,7 +3438,7 @@ fn confirm_delete_epic_other_key_cancels() {
 
 #[test]
 fn confirm_delete_epic_no_epic_selected_is_noop() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
     app.selection_mut().set_column(0); // cursor on task, not epic
     app.input.mode = InputMode::ConfirmDeleteEpic;
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
@@ -3451,7 +3453,7 @@ fn confirm_delete_epic_no_epic_selected_is_noop() {
 fn make_app_confirm_archive_epic() -> App {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Backlog),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
     app.selection_mut().set_column(0);
     app.selection_mut().set_row(0, 0); // cursor on epic (sorts first with Unplanned priority 0)
@@ -3491,7 +3493,7 @@ fn confirm_archive_epic_other_key_cancels() {
 
 #[test]
 fn confirm_archive_epic_no_epic_selected_is_noop() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
     app.selection_mut().set_column(0);
     app.input.mode = InputMode::ConfirmArchiveEpic;
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
@@ -3505,7 +3507,7 @@ fn confirm_archive_epic_no_epic_selected_is_noop() {
 
 #[test]
 fn g_key_on_epic_jumps_to_review_subtask() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Review;
     app.epics = vec![epic];
@@ -3526,7 +3528,7 @@ fn g_key_on_epic_jumps_to_review_subtask() {
 
 #[test]
 fn g_key_on_epic_no_review_session_enters_epic_view() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Review;
     app.epics = vec![epic];
@@ -3545,7 +3547,7 @@ fn g_key_on_epic_no_review_session_enters_epic_view() {
 
 #[test]
 fn g_key_on_epic_jumps_to_blocked_running_subtask() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
     app.epics = vec![epic];
@@ -3566,7 +3568,7 @@ fn g_key_on_epic_jumps_to_blocked_running_subtask() {
 
 #[test]
 fn g_key_on_epic_jumps_to_stale_running_subtask() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
     app.epics = vec![epic];
@@ -3587,7 +3589,7 @@ fn g_key_on_epic_jumps_to_stale_running_subtask() {
 
 #[test]
 fn g_key_on_epic_no_active_window_enters_epic_view() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     let epic = make_epic(10);
     app.epics = vec![epic];
 
@@ -3601,7 +3603,7 @@ fn g_key_on_epic_no_active_window_enters_epic_view() {
 
 #[test]
 fn g_key_on_epic_with_running_subtask_jumps_to_tmux() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
     app.epics = vec![epic];
@@ -3621,7 +3623,7 @@ fn g_key_on_epic_with_running_subtask_jumps_to_tmux() {
 
 #[test]
 fn g_key_on_epic_prefers_running_over_review() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
     app.epics = vec![epic];
@@ -3646,7 +3648,7 @@ fn g_key_on_epic_prefers_running_over_review() {
 
 #[test]
 fn g_key_on_epic_picks_lowest_sort_order() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
     app.epics = vec![epic];
@@ -3680,7 +3682,7 @@ fn archive_panel_down_arrow_navigates() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Archived),
         make_task(2, TaskStatus::Archived),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.archive.visible = true;
     assert_eq!(app.archive.selected_row, 0);
     app.handle_key(make_key(KeyCode::Down));
@@ -3692,7 +3694,7 @@ fn archive_panel_up_arrow_navigates() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Archived),
         make_task(2, TaskStatus::Archived),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.archive.visible = true;
     app.archive.selected_row = 1;
     app.handle_key(make_key(KeyCode::Up));
@@ -3703,7 +3705,7 @@ fn archive_panel_up_arrow_navigates() {
 fn archive_panel_esc_closes() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Archived),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.archive.visible = true;
     app.handle_key(make_key(KeyCode::Esc));
     assert!(!app.archive.visible);
@@ -3713,7 +3715,7 @@ fn archive_panel_esc_closes() {
 fn archive_panel_e_edits_task() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Archived),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.archive.visible = true;
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
     assert_eq!(cmds.len(), 1);
@@ -3722,7 +3724,7 @@ fn archive_panel_e_edits_task() {
 
 #[test]
 fn archive_panel_e_on_empty_is_noop() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.archive.visible = true;
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
     assert!(cmds.is_empty());
@@ -3730,7 +3732,7 @@ fn archive_panel_e_on_empty_is_noop() {
 
 #[test]
 fn archive_panel_x_on_empty_is_noop() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.archive.visible = true;
     app.handle_key(make_key(KeyCode::Char('x')));
     assert_eq!(app.input.mode, InputMode::Normal); // did not enter ConfirmDelete
@@ -3740,7 +3742,7 @@ fn archive_panel_x_on_empty_is_noop() {
 fn archive_panel_q_quits() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Archived),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.archive.visible = true;
     app.handle_key(make_key(KeyCode::Char('q')));
     assert!(app.should_quit);
@@ -3750,7 +3752,7 @@ fn archive_panel_q_quits() {
 fn archive_panel_unrecognized_key_is_noop() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Archived),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.archive.visible = true;
     let cmds = app.handle_key(make_key(KeyCode::Char('z')));
     assert!(cmds.is_empty());
@@ -3792,7 +3794,7 @@ fn confirm_archive_esc_cancels() {
 
 #[test]
 fn quick_dispatch_zero_is_noop() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.repo_paths = vec!["/repo".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     let cmds = app.handle_key(make_key(KeyCode::Char('0')));
@@ -3802,7 +3804,7 @@ fn quick_dispatch_zero_is_noop() {
 
 #[test]
 fn quick_dispatch_non_digit_is_noop() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.repo_paths = vec!["/repo".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     let cmds = app.handle_key(make_key(KeyCode::Char('a')));
@@ -3816,7 +3818,7 @@ fn quick_dispatch_non_digit_is_noop() {
 
 #[test]
 fn confirm_retry_unrecognized_key_is_noop() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::ConfirmRetry(TaskId(4));
     let cmds = app.handle_key(make_key(KeyCode::Char('x')));
     assert!(cmds.is_empty());
@@ -3833,7 +3835,7 @@ fn normal_mode_unrecognized_key_is_noop() {
 
 #[test]
 fn text_input_unrecognized_key_is_noop() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputTitle;
     app.input.buffer = "x".to_string();
     let cmds = app.handle_key(make_key(KeyCode::Tab));
@@ -3846,7 +3848,7 @@ fn text_input_unrecognized_key_is_noop() {
 fn d_key_on_archived_shows_warning() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Archived),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     // Archived tasks don't appear in columns, but test dispatch routing directly
     app.selection_mut().set_column(0);
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
@@ -3920,7 +3922,7 @@ fn finish_complete_moves_to_done() {
         t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
         t.tmux_window = Some("task-1".to_string());
         t
-    }], Duration::from_secs(300));
+    }], TEST_TIMEOUT);
 
     let cmds = app.update(Message::FinishComplete(TaskId(1)));
     let task = app.tasks().iter().find(|t| t.id == TaskId(1)).unwrap();
@@ -3937,7 +3939,7 @@ fn finish_failed_with_conflict_sets_flag() {
         let mut t = make_task(1, TaskStatus::Review);
         t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
         t
-    }], Duration::from_secs(300));
+    }], TEST_TIMEOUT);
 
     app.update(Message::FinishFailed {
         id: TaskId(1),
@@ -3954,7 +3956,7 @@ fn finish_failed_without_conflict_does_not_set_flag() {
         let mut t = make_task(1, TaskStatus::Review);
         t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
         t
-    }], Duration::from_secs(300));
+    }], TEST_TIMEOUT);
 
     app.update(Message::FinishFailed {
         id: TaskId(1),
@@ -3970,7 +3972,7 @@ fn conflict_flag_clears_on_dispatch() {
         let mut t = make_task(1, TaskStatus::Review);
         t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
         t
-    }], Duration::from_secs(300));
+    }], TEST_TIMEOUT);
 
     app.update(Message::FinishFailed {
         id: TaskId(1),
@@ -3989,7 +3991,7 @@ fn conflict_flag_clears_on_move_backward() {
         let mut t = make_task(1, TaskStatus::Review);
         t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
         t
-    }], Duration::from_secs(300));
+    }], TEST_TIMEOUT);
 
     app.update(Message::FinishFailed {
         id: TaskId(1),
@@ -4032,7 +4034,7 @@ fn truncate_title_multibyte_chars() {
 fn confirm_delete_start_running_with_worktree_shows_warning() {
     let mut task = make_task(4, TaskStatus::Running);
     task.worktree = Some("/wt/4-test".to_string());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     // Task is in Running column (column 1), navigate there
     app.selection_mut().set_column(1);
     app.update(Message::ConfirmDeleteStart);
@@ -4048,7 +4050,7 @@ fn focused_column_has_tinted_background() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Backlog),
         make_task(2, TaskStatus::Running),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     // Use wider terminal so 8 columns have enough room for content.
     // Columns use Ratio constraints (3/18, 2/18, ...) so they aren't equal width.
     let buf = render_to_buffer(&mut app, 240, 30);
@@ -4072,7 +4074,7 @@ fn focused_column_has_tinted_background() {
 fn move_review_to_done_enters_confirm_mode() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Review),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.selection_mut().set_column(2); // Review column
 
     let cmds = app.handle_key(make_key(KeyCode::Char('m')));
@@ -4085,7 +4087,7 @@ fn move_review_to_done_enters_confirm_mode() {
 fn confirm_done_y_moves_task() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Review),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.selection_mut().set_column(2);
 
     app.input.mode = InputMode::ConfirmDone(TaskId(1));
@@ -4100,7 +4102,7 @@ fn confirm_done_y_moves_task() {
 fn confirm_done_n_cancels() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Review),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.selection_mut().set_column(2);
 
     app.input.mode = InputMode::ConfirmDone(TaskId(1));
@@ -4115,7 +4117,7 @@ fn confirm_done_n_cancels() {
 fn move_backlog_to_running_no_confirmation() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Backlog),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.selection_mut().set_column(0); // Backlog column
 
     let cmds = app.handle_key(make_key(KeyCode::Char('m')));
@@ -4132,7 +4134,7 @@ fn confirm_done_kills_tmux_but_preserves_worktree() {
         t.worktree = Some("/repo/.worktrees/1-test".to_string());
         t.tmux_window = Some("task-1".to_string());
         t
-    }], Duration::from_secs(300));
+    }], TEST_TIMEOUT);
     app.selection_mut().set_column(2);
 
     // Enter confirm mode and confirm
@@ -4156,7 +4158,7 @@ fn batch_move_with_review_tasks_enters_confirm_done() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Review),
         make_task(2, TaskStatus::Review),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.selection_mut().set_column(2);
     app.update(Message::ToggleSelect(TaskId(1)));
     app.update(Message::ToggleSelect(TaskId(2)));
@@ -4172,7 +4174,7 @@ fn batch_confirm_done_moves_all_review_tasks() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Review),
         make_task(2, TaskStatus::Review),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.selection_mut().set_column(2);
     app.update(Message::ToggleSelect(TaskId(1)));
     app.update(Message::ToggleSelect(TaskId(2)));
@@ -4197,7 +4199,7 @@ fn batch_move_mixed_statuses_moves_non_review_immediately() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Running),
         make_task(2, TaskStatus::Review),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.update(Message::ToggleSelect(TaskId(1)));
     app.update(Message::ToggleSelect(TaskId(2)));
 
@@ -4452,7 +4454,7 @@ fn column_scrolls_to_keep_cursor_visible() {
     let tasks: Vec<Task> = (1..=20)
         .map(|id| make_task(id, TaskStatus::Backlog))
         .collect();
-    let mut app = App::new(tasks, Duration::from_secs(300));
+    let mut app = App::new(tasks, TEST_TIMEOUT);
 
     // Navigate down to the last task (row 19, past visible area)
     for _ in 0..19 {
@@ -4475,7 +4477,7 @@ fn column_scrolls_back_up_when_cursor_moves_up() {
     let tasks: Vec<Task> = (1..=20)
         .map(|id| make_task(id, TaskStatus::Backlog))
         .collect();
-    let mut app = App::new(tasks, Duration::from_secs(300));
+    let mut app = App::new(tasks, TEST_TIMEOUT);
 
     // Navigate to the bottom
     for _ in 0..19 {
@@ -4704,7 +4706,7 @@ fn summary_row_shows_muted_bell_and_hint_when_disabled() {
 #[test]
 fn pr_created_stores_url() {
     let task = make_task(1, TaskStatus::Review);
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
 
     let cmds = app.update(Message::PrCreated {
         id: TaskId(1),
@@ -4719,7 +4721,7 @@ fn pr_created_stores_url() {
 #[test]
 fn pr_failed_shows_error() {
     let task = make_task(1, TaskStatus::Review);
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
 
     app.update(Message::PrFailed {
         id: TaskId(1),
@@ -4735,7 +4737,7 @@ fn pr_merged_moves_to_done_and_detaches() {
     task.tmux_window = Some("task-1".to_string());
     task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
 
     let cmds = app.update(Message::PrMerged(TaskId(1)));
 
@@ -4753,7 +4755,7 @@ fn pr_merged_preserves_worktree() {
     let mut task = make_task(1, TaskStatus::Review);
     task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
 
     let cmds = app.update(Message::PrMerged(TaskId(1)));
 
@@ -4765,7 +4767,7 @@ fn pr_merged_preserves_worktree() {
 fn card_shows_pr_badge() {
     let mut task = make_task(1, TaskStatus::Review);
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     // Navigate to Review column (index 2)
     for _ in 0..2 {
         app.update(Message::NavigateColumn(1));
@@ -4779,7 +4781,7 @@ fn card_shows_pr_badge() {
 fn card_shows_merged_pr_badge() {
     let mut task = make_task(1, TaskStatus::Done);
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     // Navigate to Done column (visual index 7)
     for _ in 0..7 {
         app.update(Message::NavigateColumn(1));
@@ -4793,7 +4795,7 @@ fn card_shows_merged_pr_badge() {
 fn status_bar_shows_wrap_up_hint_for_review_task() {
     let mut task = make_task(1, TaskStatus::Review);
     task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     // Navigate to Review column (index 2)
     for _ in 0..2 {
         app.update(Message::NavigateColumn(1));
@@ -4807,7 +4809,7 @@ fn status_bar_shows_wrap_up_hint_for_review_task() {
 fn detail_panel_shows_pr_url() {
     let mut task = make_task(1, TaskStatus::Review);
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     // Navigate to Review column (index 2) and open detail panel
     for _ in 0..2 {
         app.update(Message::NavigateColumn(1));
@@ -4823,7 +4825,7 @@ fn detail_panel_shows_pr_url() {
 fn pr_polling_skips_done_tasks() {
     let mut task = make_task(1, TaskStatus::Done);
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
 
     let cmds = app.update(Message::Tick);
     // Should NOT contain any CheckPrStatus command
@@ -4834,7 +4836,7 @@ fn pr_polling_skips_done_tasks() {
 fn pr_polling_emits_check_for_review_tasks() {
     let mut task = make_task(1, TaskStatus::Review);
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
 
     let cmds = app.update(Message::Tick);
     assert!(cmds.iter().any(|c| matches!(c, Command::CheckPrStatus { ref pr_url, .. } if pr_url == "https://github.com/org/repo/pull/42")));
@@ -4852,7 +4854,7 @@ fn repo_filter_empty_shows_all_tasks() {
 
 #[test]
 fn repo_filter_hides_non_matching_tasks() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut t1 = make_task(1, TaskStatus::Backlog);
     t1.repo_path = "/repo-a".to_string();
     let mut t2 = make_task(2, TaskStatus::Backlog);
@@ -4867,7 +4869,7 @@ fn repo_filter_hides_non_matching_tasks() {
 
 #[test]
 fn repo_filter_applies_to_epics_in_column_items() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     let now = chrono::Utc::now();
     app.epics = vec![
         Epic {
@@ -4887,7 +4889,7 @@ fn repo_filter_applies_to_epics_in_column_items() {
 
 #[test]
 fn repo_filter_applies_to_archived_tasks() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut t1 = make_task(1, TaskStatus::Archived);
     t1.repo_path = "/repo-a".to_string();
     let mut t2 = make_task(2, TaskStatus::Archived);
@@ -4962,7 +4964,7 @@ fn repo_filter_out_of_range_number_ignored() {
 
 #[test]
 fn summary_row_shows_filter_indicator() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.repo_paths = vec!["/a".to_string(), "/b".to_string(), "/c".to_string()];
     app.repo_filter.insert("/a".to_string());
     app.repo_filter.insert("/b".to_string());
@@ -4979,7 +4981,7 @@ fn w_key_on_review_task_with_worktree_enters_wrap_up() {
         let mut t = make_task(1, TaskStatus::Review);
         t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
         t
-    }], Duration::from_secs(300));
+    }], TEST_TIMEOUT);
     // Navigate to Review column (index 2)
     app.update(Message::NavigateColumn(2));
 
@@ -4991,7 +4993,7 @@ fn w_key_on_review_task_with_worktree_enters_wrap_up() {
 fn w_key_on_non_review_task_is_noop() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Backlog),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
 
     app.handle_key(make_key(KeyCode::Char('W')));
     assert_eq!(app.input.mode, InputMode::Normal);
@@ -5004,7 +5006,7 @@ fn wrap_up_r_emits_finish_command() {
         t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
         t.tmux_window = Some("task-1".to_string());
         t
-    }], Duration::from_secs(300));
+    }], TEST_TIMEOUT);
     app.update(Message::NavigateColumn(4));
 
     app.update(Message::StartWrapUp(TaskId(1)));
@@ -5020,7 +5022,7 @@ fn wrap_up_p_emits_create_pr_command() {
         t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
         t.tmux_window = Some("task-1".to_string());
         t
-    }], Duration::from_secs(300));
+    }], TEST_TIMEOUT);
     app.update(Message::NavigateColumn(4));
 
     app.update(Message::StartWrapUp(TaskId(1)));
@@ -5035,7 +5037,7 @@ fn wrap_up_esc_cancels() {
         let mut t = make_task(1, TaskStatus::Review);
         t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
         t
-    }], Duration::from_secs(300));
+    }], TEST_TIMEOUT);
     app.update(Message::NavigateColumn(4));
 
     app.update(Message::StartWrapUp(TaskId(1)));
@@ -5050,7 +5052,7 @@ fn wrap_up_rebase_clears_conflict_flag() {
         t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
         t.tmux_window = Some("task-1".to_string());
         t
-    }], Duration::from_secs(300));
+    }], TEST_TIMEOUT);
 
     app.find_task_mut(TaskId(1)).unwrap().sub_status = SubStatus::Conflict;
     app.update(Message::StartWrapUp(TaskId(1)));
@@ -5695,7 +5697,7 @@ fn confirm_delete_preset_out_of_range_ignored() {
 
 #[test]
 fn repo_filter_overlay_shows_presets() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
     let repos: HashSet<String> = ["/repo-a".to_string()].into_iter().collect();
     app.filter_presets = vec![("frontend".to_string(), repos)];
@@ -5708,7 +5710,7 @@ fn repo_filter_overlay_shows_presets() {
 
 #[test]
 fn repo_filter_overlay_shows_name_input() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.repo_paths = vec!["/repo-a".to_string()];
     app.input.mode = InputMode::InputPresetName;
     app.input.buffer = "myfilter".to_string();
@@ -5720,7 +5722,7 @@ fn repo_filter_overlay_shows_name_input() {
 
 #[test]
 fn repo_filter_overlay_shows_delete_help() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.repo_paths = vec!["/repo-a".to_string()];
     let repos: HashSet<String> = ["/repo-a".to_string()].into_iter().collect();
     app.filter_presets = vec![("test".to_string(), repos)];
@@ -5744,7 +5746,7 @@ fn make_review_subtask(id: i64, epic_id: i64, sort_order: i64) -> Task {
 fn w_key_on_epic_starts_epic_wrap_up() {
     let mut app = App::new(vec![
         make_review_subtask(1, 10, 1),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Review;
     app.epics = vec![epic];
@@ -5762,7 +5764,7 @@ fn epic_wrap_up_with_review_tasks_enters_confirm() {
     let mut app = App::new(vec![
         make_review_subtask(1, 10, 1),
         make_review_subtask(2, 10, 2),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
 
     app.update(Message::StartEpicWrapUp(EpicId(10)));
@@ -5774,7 +5776,7 @@ fn epic_wrap_up_with_review_tasks_enters_confirm() {
 fn epic_wrap_up_without_review_tasks_shows_info() {
     let mut task = make_task(1, TaskStatus::Backlog);
     task.epic_id = Some(EpicId(10));
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
 
     app.update(Message::StartEpicWrapUp(EpicId(10)));
@@ -5788,7 +5790,7 @@ fn epic_wrap_up_rebase_creates_queue_and_emits_first_finish() {
     let mut app = App::new(vec![
         make_review_subtask(1, 10, 2),
         make_review_subtask(2, 10, 1),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
     app.input.mode = InputMode::ConfirmEpicWrapUp(EpicId(10));
 
@@ -5808,7 +5810,7 @@ fn epic_wrap_up_finish_complete_advances_queue() {
     let mut app = App::new(vec![
         make_review_subtask(1, 10, 2),
         make_review_subtask(2, 10, 1),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
     app.input.mode = InputMode::ConfirmEpicWrapUp(EpicId(10));
     app.update(Message::EpicWrapUpRebase);
@@ -5827,7 +5829,7 @@ fn epic_wrap_up_all_complete_clears_queue() {
     let mut app = App::new(vec![
         make_review_subtask(1, 10, 2),
         make_review_subtask(2, 10, 1),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
     app.input.mode = InputMode::ConfirmEpicWrapUp(EpicId(10));
     app.update(Message::EpicWrapUpRebase);
@@ -5843,7 +5845,7 @@ fn epic_wrap_up_finish_failed_pauses_queue() {
     let mut app = App::new(vec![
         make_review_subtask(1, 10, 2),
         make_review_subtask(2, 10, 1),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
     app.input.mode = InputMode::ConfirmEpicWrapUp(EpicId(10));
     app.update(Message::EpicWrapUpRebase);
@@ -5863,7 +5865,7 @@ fn epic_wrap_up_finish_failed_pauses_queue() {
 fn epic_wrap_up_cancel_clears_queue() {
     let mut app = App::new(vec![
         make_review_subtask(1, 10, 1),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
     app.merge_queue = Some(MergeQueue {
         epic_id: EpicId(10),
@@ -5884,7 +5886,7 @@ fn epic_wrap_up_pr_mode_advances_on_pr_created() {
     let mut app = App::new(vec![
         make_review_subtask(1, 10, 2),
         make_review_subtask(2, 10, 1),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
     app.input.mode = InputMode::ConfirmEpicWrapUp(EpicId(10));
     app.update(Message::EpicWrapUpPr);
@@ -5908,7 +5910,7 @@ fn epic_wrap_up_pr_mode_advances_on_pr_created() {
 fn stale_detection_sets_substatus_and_persists() {
     let mut app = App::new(vec![
         make_task(3, TaskStatus::Running),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.tasks[0].tmux_window = Some("win-3".to_string());
 
     let cmds = app.update(Message::StaleAgent(TaskId(3)));
@@ -5921,7 +5923,7 @@ fn stale_detection_sets_substatus_and_persists() {
 fn crashed_detection_sets_substatus_and_persists() {
     let mut app = App::new(vec![
         make_task(3, TaskStatus::Running),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.tasks[0].tmux_window = Some("win-3".to_string());
 
     let cmds = app.update(Message::AgentCrashed(TaskId(3)));
@@ -5934,7 +5936,7 @@ fn crashed_detection_sets_substatus_and_persists() {
 fn stale_does_not_overwrite_crashed() {
     let mut app = App::new(vec![
         make_task(3, TaskStatus::Running),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.tasks[0].tmux_window = Some("win-3".to_string());
     app.tasks[0].sub_status = SubStatus::Crashed;
 
@@ -5948,7 +5950,7 @@ fn stale_does_not_overwrite_crashed() {
 fn stale_skips_non_running_task() {
     let mut app = App::new(vec![
         make_task(3, TaskStatus::Backlog),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
 
     let cmds = app.update(Message::StaleAgent(TaskId(3)));
     let task = app.find_task(TaskId(3)).unwrap();
@@ -5960,7 +5962,7 @@ fn stale_skips_non_running_task() {
 fn crashed_skips_non_running_task() {
     let mut app = App::new(vec![
         make_task(3, TaskStatus::Review),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
 
     let cmds = app.update(Message::AgentCrashed(TaskId(3)));
     let task = app.find_task(TaskId(3)).unwrap();
@@ -5972,7 +5974,7 @@ fn crashed_skips_non_running_task() {
 fn recovery_from_stale_resets_substatus_to_active() {
     let mut app = App::new(vec![
         make_task(3, TaskStatus::Running),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.tasks[0].sub_status = SubStatus::Stale;
     app.tasks[0].tmux_window = Some("win-3".to_string());
 
@@ -5986,7 +5988,7 @@ fn recovery_from_stale_resets_substatus_to_active() {
 fn recovery_from_crashed_resets_substatus_to_active() {
     let mut app = App::new(vec![
         make_task(3, TaskStatus::Running),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.tasks[0].sub_status = SubStatus::Crashed;
     app.tasks[0].tmux_window = Some("win-3".to_string());
 
@@ -6000,7 +6002,7 @@ fn recovery_from_crashed_resets_substatus_to_active() {
 fn active_task_output_does_not_emit_persist() {
     let mut app = App::new(vec![
         make_task(3, TaskStatus::Running),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.tasks[0].sub_status = SubStatus::Active;
     app.tasks[0].tmux_window = Some("win-3".to_string());
 
@@ -6015,7 +6017,7 @@ fn active_task_output_does_not_emit_persist() {
 fn stale_notification_sent_when_enabled() {
     let mut app = App::new(vec![
         make_task(3, TaskStatus::Running),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.tasks[0].tmux_window = Some("win-3".to_string());
     app.set_notifications_enabled(true);
 
@@ -6027,7 +6029,7 @@ fn stale_notification_sent_when_enabled() {
 fn stale_notification_not_sent_when_disabled() {
     let mut app = App::new(vec![
         make_task(3, TaskStatus::Running),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.tasks[0].tmux_window = Some("win-3".to_string());
     app.set_notifications_enabled(false);
 
@@ -6039,7 +6041,7 @@ fn stale_notification_not_sent_when_disabled() {
 fn crashed_notification_sent_urgent_when_enabled() {
     let mut app = App::new(vec![
         make_task(3, TaskStatus::Running),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.tasks[0].tmux_window = Some("win-3".to_string());
     app.set_notifications_enabled(true);
 
@@ -6051,7 +6053,7 @@ fn crashed_notification_sent_urgent_when_enabled() {
 fn crashed_notification_not_sent_when_disabled() {
     let mut app = App::new(vec![
         make_task(3, TaskStatus::Running),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.tasks[0].tmux_window = Some("win-3".to_string());
     app.set_notifications_enabled(false);
 
@@ -6063,7 +6065,7 @@ fn crashed_notification_not_sent_when_disabled() {
 fn tick_skips_already_stale_tasks() {
     let mut app = App::new(vec![
         make_task(3, TaskStatus::Running),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.tasks[0].tmux_window = Some("win-3".to_string());
     app.tasks[0].sub_status = SubStatus::Stale;
     app.agents.last_output_change.insert(TaskId(3), Instant::now() - Duration::from_secs(301));
@@ -6078,7 +6080,7 @@ fn tick_skips_already_stale_tasks() {
 fn tick_skips_already_crashed_tasks() {
     let mut app = App::new(vec![
         make_task(3, TaskStatus::Running),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.tasks[0].tmux_window = Some("win-3".to_string());
     app.tasks[0].sub_status = SubStatus::Crashed;
     app.agents.last_output_change.insert(TaskId(3), Instant::now() - Duration::from_secs(301));
@@ -6118,7 +6120,7 @@ fn render_shows_subcolumn_headers() {
             t.sub_status = SubStatus::Stale;
             t
         },
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     let buf = render_to_buffer(&mut app, 160, 30);
     assert!(buffer_contains(&buf, "active"), "section header 'active' not found");
     assert!(buffer_contains(&buf, "stale"), "section header 'stale' not found");
@@ -6138,7 +6140,7 @@ fn render_shows_parent_status_headers() {
 fn render_detail_shows_sub_status() {
     let mut task = make_task(1, TaskStatus::Running);
     task.sub_status = SubStatus::Active;
-    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
     // Navigate to the Active visual column (index 1)
     app.update(Message::NavigateColumn(1));
     // Open the detail panel
@@ -6722,7 +6724,7 @@ fn handle_key_confirm_delete_preset_esc_cancels() {
 
 #[test]
 fn space_toggles_epic_selection() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
     // Epic is at row 0 in Backlog column (no standalone tasks)
     app.selection_mut().set_column(0);
@@ -6734,7 +6736,7 @@ fn space_toggles_epic_selection() {
 
 #[test]
 fn space_on_epic_toggle_off() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
     app.selection_mut().set_column(0);
     app.selection_mut().set_row(0, 0);
@@ -6750,7 +6752,7 @@ fn space_on_epic_toggle_off() {
 
 #[test]
 fn space_on_empty_column_no_epics_is_noop() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     // Navigate to Review column (empty)
     app.update(Message::NavigateColumn(2));
     app.handle_key(make_key(KeyCode::Char(' ')));
@@ -6762,7 +6764,7 @@ fn space_on_empty_column_no_epics_is_noop() {
 fn select_all_column_includes_epics() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Backlog),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
 
     app.update(Message::SelectAllColumn);
@@ -6774,7 +6776,7 @@ fn select_all_column_includes_epics() {
 fn select_all_deselects_all_including_epics() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Backlog),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
 
     // Select all
@@ -6790,7 +6792,7 @@ fn select_all_deselects_all_including_epics() {
 
 #[test]
 fn select_all_column_with_only_epics() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.epics = vec![make_epic(10), make_epic(20)];
 
     app.update(Message::SelectAllColumn);
@@ -6802,7 +6804,7 @@ fn select_all_column_with_only_epics() {
 
 #[test]
 fn esc_clears_epic_selection() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
     app.update(Message::ToggleSelectEpic(EpicId(10)));
     assert_eq!(app.selected_epics.len(), 1);
@@ -6815,7 +6817,7 @@ fn esc_clears_epic_selection() {
 fn esc_clears_mixed_selection() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Backlog),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
     app.update(Message::ToggleSelect(TaskId(1)));
     app.update(Message::ToggleSelectEpic(EpicId(10)));
@@ -6827,7 +6829,7 @@ fn esc_clears_mixed_selection() {
 
 #[test]
 fn batch_archive_selected_epics() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.epics = vec![make_epic(10), make_epic(20)];
 
     let cmds = app.update(Message::BatchArchiveEpics(vec![EpicId(10), EpicId(20)]));
@@ -6837,7 +6839,7 @@ fn batch_archive_selected_epics() {
 
 #[test]
 fn x_key_with_epic_selection_shows_count_in_confirm() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.epics = vec![make_epic(10), make_epic(20)];
     app.update(Message::ToggleSelectEpic(EpicId(10)));
     app.update(Message::ToggleSelectEpic(EpicId(20)));
@@ -6851,7 +6853,7 @@ fn x_key_with_epic_selection_shows_count_in_confirm() {
 fn batch_archive_mixed_tasks_and_epics() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Backlog),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
     app.update(Message::ToggleSelect(TaskId(1)));
     app.update(Message::ToggleSelectEpic(EpicId(10)));
@@ -6871,7 +6873,7 @@ fn batch_archive_mixed_tasks_and_epics() {
 
 #[test]
 fn confirm_archive_y_archives_selected_epics() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
     app.update(Message::ToggleSelectEpic(EpicId(10)));
     app.input.mode = InputMode::ConfirmArchive;
@@ -6883,7 +6885,7 @@ fn confirm_archive_y_archives_selected_epics() {
 
 #[test]
 fn m_on_epic_moves_status_forward() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
     // Cursor on Backlog column, row 0 (the epic)
     app.selection_mut().set_column(0);
@@ -6898,7 +6900,7 @@ fn m_on_epic_moves_status_forward() {
 fn m_with_mixed_selection_moves_tasks_only() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Backlog),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
     app.update(Message::ToggleSelect(TaskId(1)));
     app.update(Message::ToggleSelectEpic(EpicId(10)));
@@ -6913,7 +6915,7 @@ fn m_with_mixed_selection_moves_tasks_only() {
 
 #[test]
 fn render_selected_epic_shows_star_prefix() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
     app.update(Message::ToggleSelectEpic(EpicId(10)));
 
@@ -6924,7 +6926,7 @@ fn render_selected_epic_shows_star_prefix() {
 
 #[test]
 fn render_unselected_epic_no_star() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
 
     let buf = render_to_buffer(&mut app, 120, 30);
@@ -6935,7 +6937,7 @@ fn render_unselected_epic_no_star() {
 
 #[test]
 fn render_batch_hints_with_epic_selection() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
     app.update(Message::ToggleSelectEpic(EpicId(10)));
 
@@ -6948,7 +6950,7 @@ fn render_batch_hints_with_epic_selection() {
 fn render_column_header_checked_with_epics() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Backlog),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
 
     // Select both the task and the epic
@@ -6959,7 +6961,7 @@ fn render_column_header_checked_with_epics() {
 
 #[test]
 fn refresh_epics_prunes_stale_epic_selections() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
     app.update(Message::ToggleSelectEpic(EpicId(10)));
     app.update(Message::ToggleSelectEpic(EpicId(99))); // non-existent
@@ -6972,7 +6974,7 @@ fn refresh_epics_prunes_stale_epic_selections() {
 
 #[test]
 fn detach_tmux_single_sets_confirm_mode() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Review)], Duration::from_secs(300));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Review)], TEST_TIMEOUT);
     app.tasks[0].tmux_window = Some("task-1".to_string());
 
     app.update(Message::DetachTmux(TaskId(1)));
@@ -6986,7 +6988,7 @@ fn detach_tmux_single_sets_confirm_mode() {
 
 #[test]
 fn confirm_detach_tmux_clears_window() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Review)], Duration::from_secs(300));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Review)], TEST_TIMEOUT);
     app.tasks[0].tmux_window = Some("task-1".to_string());
     app.tasks[0].sub_status = SubStatus::Stale;
     app.agents.tmux_outputs.insert(TaskId(1), "some output".to_string());
@@ -7010,7 +7012,7 @@ fn confirm_detach_tmux_clears_window() {
 
 #[test]
 fn detach_tmux_noop_on_task_without_window() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Review)], Duration::from_secs(300));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Review)], TEST_TIMEOUT);
     // tmux_window is None by default from make_task
 
     let cmds = app.update(Message::DetachTmux(TaskId(1)));
@@ -7024,7 +7026,7 @@ fn batch_detach_tmux() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Review),
         make_task(2, TaskStatus::Review),
-    ], Duration::from_secs(300));
+    ], TEST_TIMEOUT);
     app.tasks[0].tmux_window = Some("task-1".to_string());
     app.tasks[1].tmux_window = Some("task-2".to_string());
 
@@ -7049,7 +7051,7 @@ fn batch_detach_tmux() {
 
 #[test]
 fn quick_dispatch_j_moves_cursor_down() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.repo_paths = vec!["/a".to_string(), "/b".to_string(), "/c".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     app.input.repo_cursor = 0;
@@ -7059,7 +7061,7 @@ fn quick_dispatch_j_moves_cursor_down() {
 
 #[test]
 fn move_repo_cursor_down_wraps() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.repo_paths = vec!["/a".to_string(), "/b".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     app.input.repo_cursor = 1; // last
@@ -7069,7 +7071,7 @@ fn move_repo_cursor_down_wraps() {
 
 #[test]
 fn move_repo_cursor_up_wraps() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     app.repo_paths = vec!["/a".to_string(), "/b".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     app.input.repo_cursor = 0; // first
@@ -7079,7 +7081,7 @@ fn move_repo_cursor_up_wraps() {
 
 #[test]
 fn quick_dispatch_enter_selects_cursor_repo() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
     app.repo_paths = vec!["/repo1".to_string(), "/repo2".to_string(), "/repo3".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     app.input.repo_cursor = 2; // third repo
@@ -7106,7 +7108,7 @@ fn review_board_d_dispatches_review_agent() {
 
 #[test]
 fn review_board_d_no_repo_shows_error() {
-    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut app = App::new(vec![], TEST_TIMEOUT);
     let pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
     app.review_prs = vec![pr];
     app.update(Message::SwitchToReviewBoard);
@@ -7210,7 +7212,7 @@ fn review_repo_filter_esc_closes() {
 
 #[test]
 fn repo_cursor_resets_on_quick_dispatch_entry() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
     app.repo_paths = vec!["/a".to_string(), "/b".to_string()];
     app.input.repo_cursor = 1;
     app.update(Message::StartQuickDispatchSelection);
