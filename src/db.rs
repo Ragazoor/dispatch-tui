@@ -1885,7 +1885,7 @@ mod tests {
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 20);
+        assert_eq!(version, 21);
 
         // Verify Migration 1 added the plan column
         let has_plan: bool = conn
@@ -1950,7 +1950,7 @@ mod tests {
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 20);
+        assert_eq!(version, 21);
     }
 
     #[test]
@@ -2726,7 +2726,7 @@ mod tests {
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 20);
+        assert_eq!(version, 21);
 
         // Verify needs_input=1 became sub_status='needs_input'
         let ss: String = conn.query_row(
@@ -2920,7 +2920,7 @@ mod tests {
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 20);
+        assert_eq!(version, 21);
 
         // (review, needs_input) must be converted to (review, awaiting_review)
         let ss: String = conn.query_row(
