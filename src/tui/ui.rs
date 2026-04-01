@@ -415,12 +415,23 @@ fn build_task_list_item<'a>(
                 Style::default().fg(Color::Yellow),
             ),
         ])
+    } else if status == TaskStatus::Running
+        && task.tmux_window.is_none()
+        && task.worktree.is_some()
+    {
+        Line::from(vec![
+            Span::raw("   "),
+            Span::styled(
+                "\u{25cc} detached",
+                Style::default().fg(MUTED_LIGHT),
+            ),
+        ])
     } else if status == TaskStatus::Running {
         Line::from(vec![
             Span::raw("   "),
             Span::styled(
                 format!("{} running", status_icon(status)),
-                Style::default().fg(MUTED),
+                Style::default().fg(CYAN),
             ),
         ])
     } else if let (TaskStatus::Review, Some(pr_url)) = (status, task.pr_url.as_deref()) {
