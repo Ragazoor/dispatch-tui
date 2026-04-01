@@ -1189,6 +1189,7 @@ mod tests {
             MockProcessRunner::fail("not a git repo"), // detect_default_branch (fallback to "main")
             // git worktree add is skipped (dir pre-created above)
             MockProcessRunner::ok(),  // tmux new-window
+            MockProcessRunner::ok(),  // tmux set-option @dispatch_dir
             MockProcessRunner::ok(),  // tmux set-hook (after-split-window)
             MockProcessRunner::ok(),  // tmux send-keys -l
             MockProcessRunner::ok(),  // tmux send-keys Enter

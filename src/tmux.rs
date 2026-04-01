@@ -95,13 +95,13 @@ pub fn select_window(window: &str, runner: &dyn ProcessRunner) -> Result<()> {
     Ok(())
 }
 
-/// Set a per-window hook so that splitting a pane automatically `cd`s the new
-/// pane into the given working directory.
-pub fn set_after_split_hook(window: &str, working_dir: &str, runner: &dyn ProcessRunner) -> Result<()> {
-    let hook_cmd = format!("send-keys 'cd {}' Enter", working_dir);
+/// Store the worktree path as a per-window user option so the session-level
+/// `after-split-window` hook (installed by [`ensure_split_hook`]) can look it
+/// up when a split happens in this window.
+pub fn set_window_dispatch_dir(window: &str, working_dir: &str, runner: &dyn ProcessRunner) -> Result<()> {
     let output = runner.run("tmux", &[
-        "set-hook", "-w", "-t", window,
-        "after-split-window", &hook_cmd,
+        "set-option", "-w", "-t", window,
+        "@dispatch_dir", working_dir,
     ])?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -111,6 +111,26 @@ pub fn set_after_split_hook(window: &str, working_dir: &str, runner: &dyn Proces
                 window
             );
         }
+        bail!("tmux set-option failed with status {}: {}", output.status, stderr.trim());
+    }
+    Ok(())
+}
+
+/// Install a single session-level `after-split-window` hook that reads the
+/// `@dispatch_dir` window option.  If the option is set on the window being
+/// split, the new pane `cd`s into that directory; otherwise nothing happens.
+///
+/// This is idempotent — calling it multiple times replaces the same hook.
+pub fn ensure_split_hook(runner: &dyn ProcessRunner) -> Result<()> {
+    // #{@dispatch_dir} is expanded by tmux at hook-fire time from the window
+    // where the split occurred.  if-shell -F treats a non-empty expansion as
+    // true, so windows without the option are left alone.
+    let hook_cmd = "if-shell -F '#{@dispatch_dir}' \"send-keys 'cd #{@dispatch_dir}' Enter\"";
+    let output = runner.run("tmux", &[
+        "set-hook", "after-split-window", hook_cmd,
+    ])?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
         bail!("tmux set-hook failed with status {}: {}", output.status, stderr.trim());
     }
     Ok(())
@@ -198,14 +218,23 @@ fn window_activity_args(window: &str) -> Vec<String> {
 }
 
 #[cfg(test)]
-fn set_after_split_hook_args(window: &str, working_dir: &str) -> Vec<String> {
+fn set_window_dispatch_dir_args(window: &str, working_dir: &str) -> Vec<String> {
     vec![
-        "set-hook".to_string(),
+        "set-option".to_string(),
         "-w".to_string(),
         "-t".to_string(),
         window.to_string(),
+        "@dispatch_dir".to_string(),
+        working_dir.to_string(),
+    ]
+}
+
+#[cfg(test)]
+fn ensure_split_hook_args() -> Vec<String> {
+    vec![
+        "set-hook".to_string(),
         "after-split-window".to_string(),
-        format!("send-keys 'cd {}' Enter", working_dir),
+        "if-shell -F '#{@dispatch_dir}' \"send-keys 'cd #{@dispatch_dir}' Enter\"".to_string(),
     ]
 }
 
@@ -357,29 +386,66 @@ mod tests {
     }
 
     #[test]
-    fn set_after_split_hook_args_correct() {
-        let args = set_after_split_hook_args("task-42", "/some/path");
+    fn set_window_dispatch_dir_args_correct() {
+        let args = set_window_dispatch_dir_args("task-42", "/some/path");
         assert_eq!(
             args,
             vec![
-                "set-hook", "-w", "-t", "task-42",
-                "after-split-window", "send-keys 'cd /some/path' Enter",
+                "set-option", "-w", "-t", "task-42",
+                "@dispatch_dir", "/some/path",
             ]
         );
     }
 
     #[test]
-    fn set_after_split_hook_issues_correct_tmux_args() {
+    fn set_window_dispatch_dir_issues_correct_tmux_args() {
         let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
-        set_after_split_hook("task-42", "/some/path", &mock).unwrap();
+        set_window_dispatch_dir("task-42", "/some/path", &mock).unwrap();
         let calls = mock.recorded_calls();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].0, "tmux");
         assert_eq!(
             calls[0].1,
             vec![
-                "set-hook", "-w", "-t", "task-42",
-                "after-split-window", "send-keys 'cd /some/path' Enter",
+                "set-option", "-w", "-t", "task-42",
+                "@dispatch_dir", "/some/path",
+            ]
+        );
+    }
+
+    #[test]
+    fn set_window_dispatch_dir_detects_ambiguous_windows() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("ambiguous window: task-42")]);
+        let err = set_window_dispatch_dir("task-42", "/some/path", &mock).unwrap_err();
+        assert!(err.to_string().contains("multiple tmux windows"));
+    }
+
+    #[test]
+    fn ensure_split_hook_args_correct() {
+        let args = ensure_split_hook_args();
+        assert_eq!(
+            args,
+            vec![
+                "set-hook",
+                "after-split-window",
+                "if-shell -F '#{@dispatch_dir}' \"send-keys 'cd #{@dispatch_dir}' Enter\"",
+            ]
+        );
+    }
+
+    #[test]
+    fn ensure_split_hook_issues_correct_tmux_args() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+        ensure_split_hook(&mock).unwrap();
+        let calls = mock.recorded_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "tmux");
+        assert_eq!(
+            calls[0].1,
+            vec![
+                "set-hook",
+                "after-split-window",
+                "if-shell -F '#{@dispatch_dir}' \"send-keys 'cd #{@dispatch_dir}' Enter\"",
             ]
         );
     }

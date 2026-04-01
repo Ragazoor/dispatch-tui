@@ -1672,6 +1672,7 @@ async fn wrap_up_rebase_auto_dispatches_next_epic_task() {
         MockProcessRunner::ok(),                       // git merge --ff-only
         // Auto-dispatch calls for next task (worktree dir pre-created, so git add is skipped)
         MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
         MockProcessRunner::ok(), // tmux set-hook
         MockProcessRunner::ok(), // tmux send-keys -l (literal text)
         MockProcessRunner::ok(), // tmux send-keys Enter
