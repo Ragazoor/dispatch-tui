@@ -5340,6 +5340,7 @@ fn review_board_renders_pr_titles() {
 #[test]
 fn review_board_renders_loading_state() {
     let mut app = make_app();
+    // SwitchToReviewBoard triggers a fetch, so review_board_loading becomes true
     app.update(Message::SwitchToReviewBoard);
     assert!(app.review_board_loading());
 

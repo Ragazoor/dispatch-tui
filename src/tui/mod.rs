@@ -1984,6 +1984,7 @@ impl App {
     }
 
     fn handle_review_prs_fetch_failed(&mut self, error: String) -> Vec<Command> {
+        tracing::warn!(error = %error, "review PR fetch failed");
         self.review_board_loading = false;
         self.last_review_error = Some(error.clone());
         self.set_status(format!("Failed to fetch review PRs: {error}"));

@@ -869,11 +869,14 @@ impl TuiRuntime {
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
         tokio::task::spawn_blocking(move || {
+            tracing::info!("fetching review PRs via gh");
             match crate::github::fetch_review_prs(&*runner) {
                 Ok(prs) => {
+                    tracing::info!(count = prs.len(), "review PRs fetched successfully");
                     let _ = tx.send(Message::ReviewPrsLoaded(prs));
                 }
                 Err(e) => {
+                    tracing::warn!(error = %e, "review PR fetch failed");
                     let _ = tx.send(Message::ReviewPrsFetchFailed(e));
                 }
             }

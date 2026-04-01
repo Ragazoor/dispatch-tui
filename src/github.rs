@@ -71,6 +71,11 @@ fn classify_review_decision(node: &serde_json::Value, viewer_login: &str) -> Rev
 }
 
 /// Parse the JSON response from `gh api graphql` into a list of ReviewPr.
+///
+/// The response is expected to contain two aliased search results:
+/// `data.requestedReview.nodes` and `data.alreadyReviewed.nodes`.
+/// Nodes are deduplicated by URL so PRs appearing in both lists are only
+/// included once.
 fn parse_review_prs(json: &str) -> Result<Vec<ReviewPr>, String> {
     let root: serde_json::Value =
         serde_json::from_str(json).map_err(|e| format!("Failed to parse JSON: {e}"))?;
@@ -80,13 +85,23 @@ fn parse_review_prs(json: &str) -> Result<Vec<ReviewPr>, String> {
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
-    let nodes = root
-        .pointer("/data/search/nodes")
-        .and_then(|v| v.as_array())
-        .ok_or("Missing data.search.nodes in response")?;
+    // Collect unique nodes from both aliased searches, deduplicating by URL.
+    let mut seen_urls = std::collections::HashSet::new();
+    let mut all_nodes: Vec<serde_json::Value> = Vec::new();
+    for alias in &["requestedReview", "alreadyReviewed"] {
+        let path = format!("/data/{alias}/nodes");
+        if let Some(nodes) = root.pointer(&path).and_then(|v| v.as_array()) {
+            for node in nodes {
+                let url = node["url"].as_str().unwrap_or("").to_string();
+                if !url.is_empty() && seen_urls.insert(url) {
+                    all_nodes.push(node.clone());
+                }
+            }
+        }
+    }
 
-    let mut prs = Vec::with_capacity(nodes.len());
-    for node in nodes {
+    let mut prs = Vec::with_capacity(all_nodes.len());
+    for node in &all_nodes {
         // Safety net: skip drafts even if the query filter missed them
         if node["isDraft"].as_bool() == Some(true) {
             continue;
@@ -134,15 +149,8 @@ fn parse_review_prs(json: &str) -> Result<Vec<ReviewPr>, String> {
     Ok(prs)
 }
 
-/// Fetch open PRs where the current user is a requested reviewer.
-/// Uses `gh api graphql` via the provided ProcessRunner.
-/// Bot authors (dependabot, renovate) are excluded server-side in the search query.
-pub fn fetch_review_prs(runner: &dyn ProcessRunner) -> Result<Vec<ReviewPr>, String> {
-    let query = r#"{
-  viewer { login }
-  search(query: "is:pr is:open (review-requested:@me OR reviewed-by:@me) -is:draft -author:app/dependabot -author:app/renovate", type: ISSUE, first: 100) {
-    nodes {
-      ... on PullRequest {
+/// The PR fields fragment used in both search aliases.
+const PR_FIELDS: &str = r#"... on PullRequest {
         number
         title
         url
@@ -158,10 +166,31 @@ pub fn fetch_review_prs(runner: &dyn ProcessRunner) -> Result<Vec<ReviewPr>, Str
         comments(last: 50) { nodes { author { login } createdAt } }
         reviews(last: 20) { nodes { state author { login } submittedAt } }
         commits(last: 1) { nodes { commit { committedDate } } }
-      }
-    }
-  }
-}"#;
+      }"#;
+
+/// Fetch open PRs where the current user is a requested or past reviewer.
+///
+/// Uses two aliased GraphQL searches in one request:
+/// - `requestedReview`: PRs where `review-requested:@me` (pending review)
+/// - `alreadyReviewed`: PRs where `reviewed-by:@me` (already reviewed, may need re-review)
+///
+/// The two result sets are merged and deduplicated by URL client-side.
+/// Uses `gh api graphql` via the provided ProcessRunner.
+/// Bot authors (dependabot, renovate) are excluded server-side.
+pub fn fetch_review_prs(runner: &dyn ProcessRunner) -> Result<Vec<ReviewPr>, String> {
+    let query = format!(r#"{{
+  viewer {{ login }}
+  requestedReview: search(query: "is:pr is:open review-requested:@me -is:draft -author:app/dependabot -author:app/renovate", type: ISSUE, first: 100) {{
+    nodes {{
+      {PR_FIELDS}
+    }}
+  }}
+  alreadyReviewed: search(query: "is:pr is:open reviewed-by:@me -is:draft -author:app/dependabot -author:app/renovate", type: ISSUE, first: 100) {{
+    nodes {{
+      {PR_FIELDS}
+    }}
+  }}
+}}"#);
 
     let output = runner
         .run("gh", &["api", "graphql", "-f", &format!("query={query}")])
@@ -181,10 +210,12 @@ mod tests {
     use super::*;
     use crate::process::MockProcessRunner;
 
+    // PR #42 is in requestedReview (pending review), PR #99 is a draft (filtered),
+    // PR #50 is in alreadyReviewed (already reviewed, approved).
     const SAMPLE_RESPONSE: &str = r#"{
         "data": {
             "viewer": {"login": "me"},
-            "search": {
+            "requestedReview": {
                 "nodes": [
                     {
                         "number": 42,
@@ -219,7 +250,11 @@ mod tests {
                         "comments": {"nodes": []},
                         "reviews": {"nodes": []},
                         "commits": {"nodes": [{"commit": {"committedDate": "2026-03-27T08:00:00Z"}}]}
-                    },
+                    }
+                ]
+            },
+            "alreadyReviewed": {
+                "nodes": [
                     {
                         "number": 50,
                         "title": "Refactor auth module",
@@ -271,7 +306,7 @@ mod tests {
 
     #[test]
     fn parse_review_prs_empty_nodes() {
-        let json = r#"{"data":{"search":{"nodes":[]}}}"#;
+        let json = r#"{"data":{"viewer":{"login":"me"},"requestedReview":{"nodes":[]},"alreadyReviewed":{"nodes":[]}}}"#;
         let prs = parse_review_prs(json).unwrap();
         assert!(prs.is_empty());
     }
@@ -284,8 +319,8 @@ mod tests {
 
     #[test]
     fn parse_review_prs_null_review_decision_defaults_to_review_required() {
-        let json = r#"{"data":{"viewer":{"login":"me"},"search":{"nodes":[{
-            "number": 1, "title": "T", "url": "u", "isDraft": false,
+        let json = r#"{"data":{"viewer":{"login":"me"},"requestedReview":{"nodes":[{
+            "number": 1, "title": "T", "url": "https://github.com/o/r/pull/1", "isDraft": false,
             "createdAt": "2026-03-28T10:00:00Z", "updatedAt": "2026-03-28T10:00:00Z",
             "additions": 0, "deletions": 0,
             "reviewDecision": null,
@@ -294,7 +329,7 @@ mod tests {
             "comments": {"nodes": []},
             "reviews": {"nodes": []},
             "commits": {"nodes": []}
-        }]}}}"#;
+        }]},"alreadyReviewed":{"nodes":[]}}}"#;
         let prs = parse_review_prs(json).unwrap();
         assert_eq!(prs[0].review_decision, ReviewDecision::ReviewRequired);
     }
@@ -324,18 +359,55 @@ mod tests {
     }
 
     #[test]
-    fn fetch_review_prs_query_excludes_drafts_and_bots() {
+    fn fetch_review_prs_query_includes_both_searches() {
         let runner = MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(SAMPLE_RESPONSE.as_bytes()),
         ]);
         let _ = fetch_review_prs(&runner);
         let calls = runner.recorded_calls();
         let query_arg = calls[0].1.iter().find(|a| a.contains("query=")).unwrap();
+        assert!(query_arg.contains("review-requested:@me"), "missing review-requested qualifier");
+        assert!(query_arg.contains("reviewed-by:@me"), "missing reviewed-by qualifier");
         assert!(query_arg.contains("-is:draft"));
         assert!(query_arg.contains("-author:app/dependabot"));
         assert!(query_arg.contains("-author:app/renovate"));
         assert!(query_arg.contains("review-requested:@me"));
         assert!(query_arg.contains("reviewed-by:@me"));
+    }
+
+    #[test]
+    fn parse_review_prs_deduplicates_across_aliases() {
+        // PR #42 appears in both aliases — should only be counted once.
+        let json = r#"{
+            "data": {
+                "viewer": {"login": "me"},
+                "requestedReview": {"nodes": [{
+                    "number": 42, "title": "Fix login flow",
+                    "url": "https://github.com/acme/app/pull/42",
+                    "isDraft": false,
+                    "createdAt": "2026-03-28T10:00:00Z", "updatedAt": "2026-03-28T10:00:00Z",
+                    "additions": 15, "deletions": 3,
+                    "reviewDecision": "REVIEW_REQUIRED",
+                    "author": {"login": "alice"}, "repository": {"nameWithOwner": "acme/app"},
+                    "labels": {"nodes": []}, "comments": {"nodes": []},
+                    "reviews": {"nodes": []}, "commits": {"nodes": []}
+                }]},
+                "alreadyReviewed": {"nodes": [{
+                    "number": 42, "title": "Fix login flow",
+                    "url": "https://github.com/acme/app/pull/42",
+                    "isDraft": false,
+                    "createdAt": "2026-03-28T10:00:00Z", "updatedAt": "2026-03-28T10:00:00Z",
+                    "additions": 15, "deletions": 3,
+                    "reviewDecision": "REVIEW_REQUIRED",
+                    "author": {"login": "alice"}, "repository": {"nameWithOwner": "acme/app"},
+                    "labels": {"nodes": []}, "comments": {"nodes": []},
+                    "reviews": {"nodes": []}, "commits": {"nodes": []}
+                }]}
+            }
+        }"#;
+        let prs = parse_review_prs(json).unwrap();
+        assert_eq!(prs.len(), 1, "duplicate should be deduplicated");
+        assert_eq!(prs[0].number, 42);
     }
 
     // -----------------------------------------------------------------------
@@ -481,8 +553,8 @@ mod tests {
 
     #[test]
     fn classify_draft_filtered_in_parse() {
-        let json = r#"{"data":{"viewer":{"login":"me"},"search":{"nodes":[{
-            "number": 1, "title": "T", "url": "u", "isDraft": true,
+        let json = r#"{"data":{"viewer":{"login":"me"},"requestedReview":{"nodes":[{
+            "number": 1, "title": "T", "url": "https://github.com/o/r/pull/1", "isDraft": true,
             "createdAt": "2026-03-28T10:00:00Z", "updatedAt": "2026-03-28T10:00:00Z",
             "additions": 0, "deletions": 0,
             "reviewDecision": "REVIEW_REQUIRED",
@@ -491,8 +563,24 @@ mod tests {
             "comments": {"nodes": []},
             "reviews": {"nodes": []},
             "commits": {"nodes": []}
-        }]}}}"#;
+        }]},"alreadyReviewed":{"nodes":[]}}}"#;
         let prs = parse_review_prs(json).unwrap();
         assert!(prs.is_empty());
+    }
+
+    /// Integration test: calls the real `gh` CLI to verify fetch works end-to-end.
+    /// Run with: cargo test fetch_review_prs_real -- --ignored
+    #[test]
+    #[ignore]
+    fn fetch_review_prs_real() {
+        let runner = crate::process::RealProcessRunner;
+        let result = fetch_review_prs(&runner);
+        eprintln!("result: {result:?}");
+        assert!(result.is_ok(), "fetch failed: {}", result.unwrap_err());
+        let prs = result.unwrap();
+        eprintln!("fetched {} PRs", prs.len());
+        for pr in &prs {
+            eprintln!("  #{} {} [{:?}]", pr.number, pr.title, pr.review_decision);
+        }
     }
 }
