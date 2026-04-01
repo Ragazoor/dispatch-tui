@@ -1168,6 +1168,13 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled("  Enter", key), Span::styled(" open PR in browser  ", desc),
             Span::styled("Esc", key), Span::styled(" back to task board", desc),
         ]),
+        Line::from(vec![
+            Span::styled("  d", key), Span::styled(" dispatch review agent  ", desc),
+            Span::styled("g", key), Span::styled(" jump to session", desc),
+        ]),
+        Line::from(vec![
+            Span::styled("  e", key), Span::styled(" view review notes  ", desc),
+        ]),
         Line::from(""),
         Line::from(Span::styled("  Press ? or Esc to close", note)),
     ];
