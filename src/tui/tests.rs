@@ -321,11 +321,6 @@ fn repo_path_empty_uses_saved_path() {
     app.input.task_draft = Some(TaskDraft { title: "Test".to_string(), description: "desc".to_string(), ..Default::default() });
     app.input.buffer.clear();
 
-    let key = make_key(KeyCode::Enter);
-    let _cmds = app.handle_key(key);
-    assert_eq!(app.input.mode, InputMode::InputTag);
-
-    // Submit tag (Enter = no tag)
     let cmds = app.handle_key(make_key(KeyCode::Enter));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask { ref draft, .. } if draft.repo_path == "/saved/repo")));
@@ -359,12 +354,7 @@ fn repo_path_nonempty_used_as_is() {
     app.input.task_draft = Some(TaskDraft { title: "Test".to_string(), description: "desc".to_string(), ..Default::default() });
     app.input.buffer = "/custom/path".to_string();
 
-    let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
-    let _cmds = app.handle_key(key);
-    assert_eq!(app.input.mode, InputMode::InputTag);
-
-    // Submit tag (Enter = no tag)
-    let cmds = app.handle_key(make_key(KeyCode::Enter));
+    let cmds = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask { ref draft, .. } if draft.repo_path == "/custom/path")));
     assert_eq!(app.tasks.len(), 0); // task not added until TaskCreated
@@ -588,15 +578,15 @@ fn backspace_on_empty_buffer_is_noop() {
 }
 
 #[test]
-fn enter_with_title_advances_to_description() {
+fn enter_with_title_advances_to_tag() {
     let mut app = App::new(vec![], Duration::from_secs(300));
     app.input.mode = InputMode::InputTitle;
     app.input.buffer = "My Task".to_string();
     app.handle_key(make_key(KeyCode::Enter));
-    assert_eq!(app.input.mode, InputMode::InputDescription);
+    assert_eq!(app.input.mode, InputMode::InputTag);
     assert!(app.input.buffer.is_empty());
     assert_eq!(app.input.task_draft.as_ref().unwrap().title, "My Task");
-    assert_eq!(app.status_message.as_deref(), Some("Enter description: "));
+    assert_eq!(app.status_message.as_deref(), Some("Tag: (b)ug (f)eature (c)hore (e)pic (Enter=none)"));
 }
 
 #[test]
@@ -640,12 +630,7 @@ fn number_key_in_repo_path_selects_saved_path() {
     app.input.task_draft = Some(TaskDraft { title: "T".to_string(), description: "d".to_string(), ..Default::default() });
     app.input.buffer.clear();
     app.repo_paths = vec!["/repo1".to_string(), "/repo2".to_string()];
-    let _cmds = app.handle_key(make_key(KeyCode::Char('2')));
-    assert_eq!(app.input.mode, InputMode::InputTag);
-    assert_eq!(app.input.task_draft.as_ref().unwrap().repo_path, "/repo2");
-
-    // Submit tag (Enter = no tag) to complete task creation
-    let cmds = app.handle_key(make_key(KeyCode::Enter));
+    let cmds = app.handle_key(make_key(KeyCode::Char('2')));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask { ref draft, .. } if draft.repo_path == "/repo2")));
 }
@@ -1598,13 +1583,13 @@ fn cancel_input_returns_to_normal() {
 }
 
 #[test]
-fn submit_title_with_text_advances_to_description() {
+fn submit_title_with_text_advances_to_tag() {
     let mut app = App::new(vec![], Duration::from_secs(300));
     app.input.mode = InputMode::InputTitle;
     app.update(Message::SubmitTitle("My Task".to_string()));
-    assert_eq!(app.input.mode, InputMode::InputDescription);
+    assert_eq!(app.input.mode, InputMode::InputTag);
     assert_eq!(app.input.task_draft.as_ref().unwrap().title, "My Task");
-    assert_eq!(app.status_message.as_deref(), Some("Enter description: "));
+    assert_eq!(app.status_message.as_deref(), Some("Tag: (b)ug (f)eature (c)hore (e)pic (Enter=none)"));
 }
 
 #[test]
@@ -1614,6 +1599,18 @@ fn submit_empty_title_cancels() {
     app.update(Message::SubmitTitle(String::new()));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(app.input.task_draft.is_none());
+}
+
+#[test]
+fn submit_tag_advances_to_description() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.input.mode = InputMode::InputTag;
+    app.input.task_draft = Some(TaskDraft { title: "T".to_string(), ..Default::default() });
+    let cmds = app.update(Message::SubmitTag(Some("bug".to_string())));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::InputDescription);
+    assert_eq!(app.input.task_draft.as_ref().unwrap().tag, Some("bug".to_string()));
+    assert_eq!(app.status_message.as_deref(), Some("Enter description: "));
 }
 
 #[test]
@@ -1630,14 +1627,10 @@ fn submit_description_advances_to_repo_path() {
 fn submit_repo_path_creates_task() {
     let mut app = App::new(vec![], Duration::from_secs(300));
     app.input.mode = InputMode::InputRepoPath;
-    app.input.task_draft = Some(TaskDraft { title: "T".to_string(), description: "D".to_string(), ..Default::default() });
-    let _cmds = app.update(Message::SubmitRepoPath("/my/repo".to_string()));
-    assert_eq!(app.input.mode, InputMode::InputTag);
-
-    // Submit tag (None) to complete task creation
-    let cmds = app.update(Message::SubmitTag(None));
+    app.input.task_draft = Some(TaskDraft { title: "T".to_string(), description: "D".to_string(), tag: Some("bug".to_string()), ..Default::default() });
+    let cmds = app.update(Message::SubmitRepoPath("/my/repo".to_string()));
     assert_eq!(app.input.mode, InputMode::Normal);
-    assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask { ref draft, .. } if draft.repo_path == "/my/repo")));
+    assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask { ref draft, .. } if draft.repo_path == "/my/repo" && draft.tag == Some("bug".to_string()))));
 }
 
 #[test]
@@ -6161,12 +6154,12 @@ fn handle_key_text_input_esc_cancels() {
 }
 
 #[test]
-fn handle_key_text_input_enter_advances_to_description() {
+fn handle_key_text_input_enter_advances_to_tag() {
     let mut app = make_app();
     app.handle_key(make_key(KeyCode::Char('n')));
     app.handle_key(make_key(KeyCode::Char('T')));
     app.handle_key(make_key(KeyCode::Enter));
-    assert_eq!(*app.mode(), InputMode::InputDescription);
+    assert_eq!(*app.mode(), InputMode::InputTag);
 }
 
 #[test]
@@ -6311,19 +6304,17 @@ fn handle_key_confirm_wrap_up_esc_cancels() {
 #[test]
 fn handle_key_tag_selects_bug() {
     let mut app = make_app();
-    // Start new task flow and get to tag input
+    // Tag comes right after title, before description/repo
     app.input.mode = InputMode::InputTag;
     app.input.task_draft = Some(TaskDraft {
         title: "Test".to_string(),
-        description: "desc".to_string(),
-        repo_path: "/repo".to_string(),
-        tag: None,
+        ..Default::default()
     });
 
     let cmds = app.handle_key(make_key(KeyCode::Char('b')));
-    // Tag submitted should produce InsertTask
-    assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask { .. })));
-    assert_eq!(*app.mode(), InputMode::Normal);
+    assert!(cmds.is_empty());
+    assert_eq!(*app.mode(), InputMode::InputDescription);
+    assert_eq!(app.input.task_draft.as_ref().unwrap().tag, Some("bug".to_string()));
 }
 
 #[test]
@@ -6332,14 +6323,13 @@ fn handle_key_tag_skip_with_enter() {
     app.input.mode = InputMode::InputTag;
     app.input.task_draft = Some(TaskDraft {
         title: "Test".to_string(),
-        description: "desc".to_string(),
-        repo_path: "/repo".to_string(),
-        tag: None,
+        ..Default::default()
     });
 
     let cmds = app.handle_key(make_key(KeyCode::Enter));
-    assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask { .. })));
-    assert_eq!(*app.mode(), InputMode::Normal);
+    assert!(cmds.is_empty());
+    assert_eq!(*app.mode(), InputMode::InputDescription);
+    assert_eq!(app.input.task_draft.as_ref().unwrap().tag, None);
 }
 
 #[test]

@@ -169,7 +169,7 @@ Tool definitions in `mcp/handlers/dispatch.rs` (`tool_definitions()`) must be ma
 ## InputMode Transitions
 
 ```
-Normal ──n──▶ InputTitle ──Enter──▶ InputDescription ──Enter──▶ InputRepoPath ──Enter──▶ Normal
+Normal ──n──▶ InputTitle ──Enter──▶ InputTag ──b/f/c/e/Enter──▶ InputDescription ──Enter──▶ InputRepoPath ──Enter──▶ Normal
 Normal ──E──▶ InputEpicTitle ──Enter──▶ InputEpicDescription ──Enter──▶ InputEpicRepoPath ──Enter──▶ Normal
 Normal ──D──▶ QuickDispatch ──1-9──▶ Normal
 Normal ──x──▶ ConfirmArchive ──y──▶ Normal

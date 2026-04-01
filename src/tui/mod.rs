@@ -1401,8 +1401,8 @@ impl App {
                 repo_path: String::new(),
                 tag: None,
             });
-            self.input.mode = InputMode::InputDescription;
-            self.set_status("Enter description: ".to_string());
+            self.input.mode = InputMode::InputTag;
+            self.set_status("Tag: (b)ug (f)eature (c)hore (e)pic (Enter=none)".to_string());
         }
         vec![]
     }
@@ -1429,22 +1429,17 @@ impl App {
         } else {
             value
         };
-        if let Some(ref mut draft) = self.input.task_draft {
-            draft.repo_path = repo_path;
-        }
-        self.input.mode = InputMode::InputTag;
-        self.set_status("Tag: (b)ug (f)eature (c)hore (e)pic (Enter=none)".to_string());
-        vec![]
+        self.finish_task_creation(repo_path)
     }
 
     fn handle_submit_tag(&mut self, tag: Option<String>) -> Vec<Command> {
+        self.input.buffer.clear();
         if let Some(ref mut draft) = self.input.task_draft {
             draft.tag = tag;
         }
-        let repo_path = self.input.task_draft.as_ref()
-            .map(|d| d.repo_path.clone())
-            .unwrap_or_default();
-        self.finish_task_creation(repo_path)
+        self.input.mode = InputMode::InputDescription;
+        self.set_status("Enter description: ".to_string());
+        vec![]
     }
 
     fn handle_input_char(&mut self, c: char) -> Vec<Command> {
@@ -1461,13 +1456,7 @@ impl App {
                 if self.input.mode == InputMode::InputEpicRepoPath {
                     return self.finish_epic_creation(repo_path);
                 }
-                // For tasks, go through the tag selection step
-                if let Some(ref mut draft) = self.input.task_draft {
-                    draft.repo_path = repo_path;
-                }
-                self.input.mode = InputMode::InputTag;
-                self.set_status("Tag: (b)ug (f)eature (c)hore (e)pic (Enter=none)".to_string());
-                return vec![];
+                return self.finish_task_creation(repo_path);
             }
         }
         self.input.buffer.push(c);
