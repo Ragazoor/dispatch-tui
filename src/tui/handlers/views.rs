@@ -38,13 +38,80 @@ impl App {
         vec![]
     }
 
-    pub(in crate::tui) fn handle_review_prs_loaded(&mut self, prs: Vec<ReviewPr>) -> Vec<Command> {
-        let cmds = vec![Command::PersistReviewPrs(prs.clone())];
+    pub(in crate::tui) fn handle_review_prs_loaded(&mut self, mut prs: Vec<ReviewPr>) -> Vec<Command> {
+        // Preserve agent fields from current in-memory state
+        for pr in &mut prs {
+            if let Some(existing) = self.review_prs.iter().find(|p| p.url == pr.url) {
+                if pr.tmux_window.is_none() {
+                    pr.tmux_window = existing.tmux_window.clone();
+                }
+                if pr.review_notes.is_none() {
+                    pr.review_notes = existing.review_notes.clone();
+                }
+            }
+        }
+
+        // Auto-dispatch review agents for unreviewed PRs (up to 3 concurrent)
+        let active_count = prs.iter().filter(|p| p.tmux_window.is_some()).count();
+        let slots = 3usize.saturating_sub(active_count);
+        let mut cmds: Vec<Command> = vec![Command::PersistReviewPrs(prs.clone())];
+
+        let to_dispatch: Vec<_> = prs.iter()
+            .filter(|p| p.tmux_window.is_none() && p.review_notes.is_none())
+            .take(slots)
+            .cloned()
+            .collect();
+
+        let dispatch_count = to_dispatch.len();
+        for pr in to_dispatch {
+            cmds.push(Command::DispatchReviewAgent(pr));
+        }
+
+        if dispatch_count > 0 {
+            self.set_status(format!("Dispatching review agents ({dispatch_count} PRs)"));
+        }
+
         self.review_prs = prs;
         self.review_board_loading = false;
         self.last_review_fetch = Some(Instant::now());
         self.clamp_review_selection();
         cmds
+    }
+
+    pub(in crate::tui) fn handle_review_agent_dispatched(&mut self, url: String, tmux_window: String) -> Vec<Command> {
+        if let Some(pr) = self.review_prs.iter_mut().find(|p| p.url == url) {
+            pr.tmux_window = Some(tmux_window.clone());
+            vec![Command::PatchReviewPr {
+                url,
+                review_notes: None,
+                tmux_window: Some(Some(tmux_window)),
+            }]
+        } else {
+            vec![]
+        }
+    }
+
+    pub(in crate::tui) fn handle_review_agent_resumed(&mut self, url: String, tmux_window: String) -> Vec<Command> {
+        if let Some(pr) = self.review_prs.iter_mut().find(|p| p.url == url) {
+            pr.tmux_window = Some(tmux_window.clone());
+            vec![Command::PatchReviewPr {
+                url,
+                review_notes: None,
+                tmux_window: Some(Some(tmux_window)),
+            }]
+        } else {
+            vec![]
+        }
+    }
+
+    pub(in crate::tui) fn handle_show_review_detail(&mut self) -> Vec<Command> {
+        self.review_detail_visible = true;
+        vec![]
+    }
+
+    pub(in crate::tui) fn handle_close_review_detail(&mut self) -> Vec<Command> {
+        self.review_detail_visible = false;
+        vec![]
     }
 
     pub(in crate::tui) fn clamp_review_selection(&mut self) {

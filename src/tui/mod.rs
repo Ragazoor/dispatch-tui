@@ -37,6 +37,7 @@ pub struct App {
     pub(in crate::tui) review_prs: Vec<crate::models::ReviewPr>,
     pub(in crate::tui) review_board_loading: bool,
     pub(in crate::tui) last_review_fetch: Option<Instant>,
+    pub(in crate::tui) review_detail_visible: bool,
     pub(in crate::tui) usage: HashMap<TaskId, TaskUsage>,
     pub(in crate::tui) merge_queue: Option<MergeQueue>,
 }
@@ -76,6 +77,7 @@ impl App {
             review_prs: Vec::new(),
             review_board_loading: false,
             last_review_fetch: None,
+            review_detail_visible: false,
             usage: HashMap::new(),
             merge_queue: None,
         }
@@ -130,6 +132,7 @@ impl App {
     pub fn filter_presets(&self) -> &[(String, HashSet<String>)] { &self.filter_presets }
     pub fn review_prs(&self) -> &[crate::models::ReviewPr] { &self.review_prs }
     pub fn review_board_loading(&self) -> bool { self.review_board_loading }
+    pub fn review_detail_visible(&self) -> bool { self.review_detail_visible }
 
     /// Get the review board selection state, if currently in review board mode.
     pub fn review_selection(&self) -> Option<&ReviewBoardSelection> {
@@ -444,10 +447,12 @@ impl App {
             Message::CancelPresetInput => self.handle_cancel_preset_input(),
             Message::FilterPresetsLoaded(presets) => self.handle_filter_presets_loaded(presets),
             // Review agent
-            Message::ReviewAgentDispatched { .. } => vec![],
-            Message::ReviewAgentResumed { .. } => vec![],
-            Message::ShowReviewDetail => vec![],
-            Message::CloseReviewDetail => vec![],
+            Message::ReviewAgentDispatched { url, tmux_window } =>
+                self.handle_review_agent_dispatched(url, tmux_window),
+            Message::ReviewAgentResumed { url, tmux_window } =>
+                self.handle_review_agent_resumed(url, tmux_window),
+            Message::ShowReviewDetail => self.handle_show_review_detail(),
+            Message::CloseReviewDetail => self.handle_close_review_detail(),
         }
     }
 

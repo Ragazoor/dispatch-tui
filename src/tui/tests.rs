@@ -6840,4 +6840,80 @@ fn render_epic_wrap_up_shows_subtask_count() {
     app.update(Message::StartEpicWrapUp(EpicId(1)));
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(buffer_contains(&buf, "2") && (buffer_contains(&buf, "review") || buffer_contains(&buf, "task")));
+
+#[test]
+fn review_agent_dispatched_updates_pr_tmux_window() {
+    use crate::models::{ReviewDecision, ReviewPr};
+    use chrono::Utc;
+
+    let mut app = make_app();
+    let pr = ReviewPr {
+        number: 1,
+        title: "T".to_string(),
+        author: "a".to_string(),
+        repo: "acme/app".to_string(),
+        url: "https://github.com/acme/app/pull/1".to_string(),
+        is_draft: false,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        additions: 0,
+        deletions: 0,
+        review_decision: ReviewDecision::ReviewRequired,
+        labels: vec![],
+        tmux_window: None,
+        review_notes: None,
+    };
+    app.update(Message::ReviewPrsLoaded(vec![pr]));
+
+    let cmds = app.update(Message::ReviewAgentDispatched {
+        url: "https://github.com/acme/app/pull/1".to_string(),
+        tmux_window: "review-app-1".to_string(),
+    });
+
+    let pr = &app.review_prs()[0];
+    assert_eq!(pr.tmux_window.as_deref(), Some("review-app-1"));
+    // Should emit PatchReviewPr command
+    assert!(cmds.iter().any(|c| matches!(c, Command::PatchReviewPr { .. })));
+}
+
+#[test]
+fn review_agent_resumed_updates_pr_tmux_window() {
+    use crate::models::{ReviewDecision, ReviewPr};
+    use chrono::Utc;
+
+    let mut app = make_app();
+    let pr = ReviewPr {
+        number: 5,
+        title: "T".to_string(),
+        author: "a".to_string(),
+        repo: "acme/app".to_string(),
+        url: "https://github.com/acme/app/pull/5".to_string(),
+        is_draft: false,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        additions: 0,
+        deletions: 0,
+        review_decision: ReviewDecision::ReviewRequired,
+        labels: vec![],
+        tmux_window: None,
+        review_notes: None,
+    };
+    app.update(Message::ReviewPrsLoaded(vec![pr]));
+
+    app.update(Message::ReviewAgentResumed {
+        url: "https://github.com/acme/app/pull/5".to_string(),
+        tmux_window: "review-app-5".to_string(),
+    });
+
+    assert_eq!(app.review_prs()[0].tmux_window.as_deref(), Some("review-app-5"));
+}
+
+#[test]
+fn show_hide_review_detail() {
+    let mut app = make_app();
+    assert!(!app.review_detail_visible());
+    app.update(Message::ShowReviewDetail);
+    assert!(app.review_detail_visible());
+    app.update(Message::CloseReviewDetail);
+    assert!(!app.review_detail_visible());
 }
