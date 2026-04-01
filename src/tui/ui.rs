@@ -241,8 +241,7 @@ fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    spans.push(Span::styled("  Tab", hint_style.add_modifier(Modifier::BOLD)));
-    spans.push(Span::styled(" switch", hint_style));
+    spans.push(Span::styled("  [Tab]", hint_style.add_modifier(Modifier::BOLD)));
 
     let line = Line::from(spans);
     let paragraph = Paragraph::new(line);
