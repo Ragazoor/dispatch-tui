@@ -1812,4 +1812,145 @@ mod tests {
         assert_eq!(app.review_prs().len(), 1);
         assert_eq!(app.review_prs()[0].number, 42);
     }
+
+    #[tokio::test]
+    async fn exec_quick_dispatch_creates_task_and_dispatches() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().to_str().unwrap();
+        // Pre-create worktree directory so provision_worktree skips git worktree add
+        std::fs::create_dir_all(format!("{repo}/.worktrees/1-my-task")).unwrap();
+
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::fail("not a git repo"), // detect_default_branch (fallback to "main")
+            // provision_worktree: dir exists so git worktree add is skipped
+            MockProcessRunner::ok(),  // tmux new-window
+            MockProcessRunner::ok(),  // tmux set-option @dispatch_dir
+            MockProcessRunner::ok(),  // tmux set-hook (after-split-window)
+            MockProcessRunner::ok(),  // tmux send-keys -l (claude command)
+            MockProcessRunner::ok(),  // tmux send-keys Enter
+        ]));
+        let rt = TuiRuntime {
+            database: db.clone(),
+            msg_tx: tx,
+            input_paused: Arc::new(AtomicBool::new(false)),
+            runner: mock,
+        };
+        let tasks = db.list_all().unwrap();
+        let mut app = App::new(tasks, Duration::from_secs(300));
+
+        rt.exec_quick_dispatch(&mut app, "My Task".into(), "Do stuff".into(), repo.to_string(), None);
+
+        // Task was created in app and DB synchronously
+        assert_eq!(app.tasks().len(), 1);
+        assert_eq!(app.tasks()[0].title, "My Task");
+        assert_eq!(db.list_all().unwrap().len(), 1);
+
+        // Repo path was saved
+        assert!(app.repo_paths().contains(&repo.to_string()));
+
+        // Dispatch message arrives asynchronously
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
+        assert!(matches!(msg, Message::Dispatched { switch_focus: true, .. }), "Expected Dispatched, got: {msg:?}");
+    }
+
+    #[tokio::test]
+    async fn exec_quick_dispatch_sends_error_on_failure() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::fail("not a git repo"), // detect_default_branch
+        ]));
+        let rt = TuiRuntime {
+            database: db.clone(),
+            msg_tx: tx,
+            input_paused: Arc::new(AtomicBool::new(false)),
+            runner: mock,
+        };
+        let tasks = db.list_all().unwrap();
+        let mut app = App::new(tasks, Duration::from_secs(300));
+
+        // /nonexistent won't have .worktrees dir, so provision_worktree fails
+        rt.exec_quick_dispatch(&mut app, "Fail Task".into(), "desc".into(), "/nonexistent".into(), None);
+
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
+        assert!(matches!(msg, Message::Error(_)), "Expected Error, got: {msg:?}");
+    }
+
+    #[tokio::test]
+    async fn exec_resume_sends_resumed_message() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok(),  // tmux new-window
+            MockProcessRunner::ok(),  // tmux set-option @dispatch_dir
+            MockProcessRunner::ok(),  // tmux set-hook (after-split-window)
+            MockProcessRunner::ok(),  // tmux send-keys -l (claude --continue)
+            MockProcessRunner::ok(),  // tmux send-keys Enter
+        ]));
+        let rt = TuiRuntime {
+            database: db.clone(),
+            msg_tx: tx,
+            input_paused: Arc::new(AtomicBool::new(false)),
+            runner: mock,
+        };
+
+        let mut task = db.create_task_returning("Resume Me", "desc", "/repo", None, models::TaskStatus::Running).unwrap();
+        task.worktree = Some("/repo/.worktrees/1-resume-me".into());
+        let id = task.id;
+
+        rt.exec_resume(task);
+
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
+        let Message::Resumed { id: tid, tmux_window } = msg else {
+            panic!("Expected Resumed, got: {msg:?}");
+        };
+        assert_eq!(tid, id);
+        assert_eq!(tmux_window, format!("task-{id}"));
+    }
+
+    #[tokio::test]
+    async fn exec_resume_sends_error_on_failure() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::fail("no tmux session"), // tmux new-window fails
+        ]));
+        let rt = TuiRuntime {
+            database: db.clone(),
+            msg_tx: tx,
+            input_paused: Arc::new(AtomicBool::new(false)),
+            runner: mock,
+        };
+
+        let task = db.create_task_returning("Fail Resume", "desc", "/repo", None, models::TaskStatus::Running).unwrap();
+        rt.exec_resume(task);
+
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
+        assert!(matches!(msg, Message::Error(_)), "Expected Error, got: {msg:?}");
+    }
+
+    #[test]
+    fn exec_patch_sub_status_updates_db() {
+        let (rt, mut app) = test_runtime();
+        rt.exec_insert_task(&mut app, "Test".into(), "Desc".into(), "/repo".into(), None, None);
+        let id = app.tasks()[0].id;
+
+        // Move task to Running first
+        rt.database.patch_task(id, &db::TaskPatch::new().status(models::TaskStatus::Running)).unwrap();
+
+        rt.exec_patch_sub_status(&mut app, id, models::SubStatus::NeedsInput);
+
+        let db_task = rt.database.get_task(id).unwrap().unwrap();
+        assert_eq!(db_task.sub_status, models::SubStatus::NeedsInput);
+        assert!(app.error_popup().is_none());
+    }
+
+    #[test]
+    fn exec_patch_sub_status_shows_error_for_missing_task() {
+        let (rt, mut app) = test_runtime();
+        rt.exec_patch_sub_status(&mut app, TaskId(999), models::SubStatus::Active);
+        assert!(app.error_popup().is_some());
+    }
 }
