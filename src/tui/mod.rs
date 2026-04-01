@@ -36,6 +36,7 @@ pub struct App {
     pub(in crate::tui) review_prs: Vec<crate::models::ReviewPr>,
     pub(in crate::tui) review_board_loading: bool,
     pub(in crate::tui) last_review_fetch: Option<Instant>,
+    pub(in crate::tui) last_review_error: Option<String>,
     pub(in crate::tui) usage: HashMap<TaskId, TaskUsage>,
     pub(in crate::tui) merge_queue: Option<MergeQueue>,
 }
@@ -74,6 +75,7 @@ impl App {
             review_prs: Vec::new(),
             review_board_loading: false,
             last_review_fetch: None,
+            last_review_error: None,
             usage: HashMap::new(),
             merge_queue: None,
         }
@@ -128,6 +130,7 @@ impl App {
     pub fn filter_presets(&self) -> &[(String, HashSet<String>)] { &self.filter_presets }
     pub fn review_prs(&self) -> &[crate::models::ReviewPr] { &self.review_prs }
     pub fn review_board_loading(&self) -> bool { self.review_board_loading }
+    pub fn last_review_error(&self) -> Option<&str> { self.last_review_error.as_deref() }
 
     /// Get the review board selection state, if currently in review board mode.
     pub fn review_selection(&self) -> Option<&ReviewBoardSelection> {
@@ -1958,12 +1961,13 @@ impl App {
         self.review_prs = prs;
         self.review_board_loading = false;
         self.last_review_fetch = Some(Instant::now());
+        self.last_review_error = None;
         self.clamp_review_selection();
         cmds
     }
 
     fn clamp_review_selection(&mut self) {
-        let counts: [usize; 3] = std::array::from_fn(|col| {
+        let counts: [usize; crate::models::ReviewDecision::COLUMN_COUNT] = std::array::from_fn(|col| {
             self.review_prs.iter()
                 .filter(|pr| pr.review_decision.column_index() == col)
                 .count()
@@ -1981,6 +1985,7 @@ impl App {
 
     fn handle_review_prs_fetch_failed(&mut self, error: String) -> Vec<Command> {
         self.review_board_loading = false;
+        self.last_review_error = Some(error.clone());
         self.set_status(format!("Failed to fetch review PRs: {error}"));
         vec![]
     }

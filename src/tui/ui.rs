@@ -1800,7 +1800,12 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
     render_review_summary_row(frame, app, chunks[1]);
 
     if app.review_prs().is_empty() {
-        let p = Paragraph::new("No PRs awaiting your review")
+        let msg = if app.review_board_loading() {
+            "Fetching reviews..."
+        } else {
+            "No PRs awaiting your review"
+        };
+        let p = Paragraph::new(msg)
             .alignment(Alignment::Center)
             .style(Style::default().fg(Color::DarkGray));
         frame.render_widget(p, chunks[2]);
@@ -1808,10 +1813,14 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
         render_review_columns(frame, app, chunks[2]);
     }
 
-    // Status bar
+    // Status bar: transient message takes priority; fall back to persistent error
     if let Some(msg) = app.status_message() {
         let status = Paragraph::new(msg.to_string())
             .style(Style::default().fg(Color::Yellow));
+        frame.render_widget(status, chunks[3]);
+    } else if let Some(err) = app.last_review_error() {
+        let status = Paragraph::new(format!("Error: {err}"))
+            .style(Style::default().fg(Color::Red));
         frame.render_widget(status, chunks[3]);
     }
 }

@@ -5201,6 +5201,7 @@ fn review_prs_fetch_failed_sets_error() {
     app.update(Message::ReviewPrsFetchFailed("auth error".to_string()));
     assert!(!app.review_board_loading());
     assert!(app.status_message().unwrap().contains("auth error"));
+    assert_eq!(app.last_review_error(), Some("auth error"));
 }
 
 #[test]
@@ -5286,12 +5287,47 @@ fn review_board_renders_pr_titles() {
 }
 
 #[test]
-fn review_board_renders_empty_state() {
+fn review_board_renders_loading_state() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
+    assert!(app.review_board_loading());
 
     let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(buffer_contains(&buf, "No PRs awaiting your review"));
+    assert!(buffer_contains(&buf, "Fetching reviews..."), "Should show loading text while fetching");
+    assert!(!buffer_contains(&buf, "No PRs awaiting your review"), "Should not show empty-state text while loading");
+}
+
+#[test]
+fn review_board_renders_empty_state_after_fetch() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::ReviewPrsLoaded(vec![]));
+    assert!(!app.review_board_loading());
+
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(buffer_contains(&buf, "No PRs awaiting your review"), "Should show empty state after fetch with no results");
+    assert!(!buffer_contains(&buf, "Fetching reviews..."), "Should not show loading text after fetch completes");
+}
+
+#[test]
+fn review_board_renders_persistent_error() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::ReviewPrsFetchFailed("not authenticated".to_string()));
+    assert_eq!(app.last_review_error(), Some("not authenticated"));
+
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(buffer_contains(&buf, "not authenticated"), "Should show persistent error text in review board");
+}
+
+#[test]
+fn review_prs_loaded_clears_last_error() {
+    let mut app = make_app();
+    app.update(Message::ReviewPrsFetchFailed("auth error".to_string()));
+    assert!(app.last_review_error().is_some());
+
+    app.update(Message::ReviewPrsLoaded(vec![]));
+    assert!(app.last_review_error().is_none(), "Successful fetch should clear last error");
 }
 
 #[test]
