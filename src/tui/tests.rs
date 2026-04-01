@@ -5445,6 +5445,47 @@ fn review_board_renders_loading_state() {
 }
 
 #[test]
+fn review_tab_shows_loading_indicator_during_refresh() {
+    let mut app = make_app();
+    // Load some PRs first
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::ReviewPrsLoaded(vec![make_review_pr(
+        1,
+        "alice",
+        ReviewDecision::ReviewRequired,
+    )]));
+    assert!(!app.review_board_loading());
+
+    // Trigger a refresh — loading indicator should appear in the tab bar
+    app.update(Message::RefreshReviewPrs);
+    assert!(app.review_board_loading());
+
+    let buf = render_to_buffer(&mut app, 120, 30);
+    // ↻ (U+21BB) is the loading indicator shown in the tab label
+    assert!(
+        buffer_contains(&buf, "\u{21bb}"),
+        "Tab bar should show loading indicator while refreshing"
+    );
+}
+
+#[test]
+fn review_tab_hides_loading_indicator_after_fetch() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::ReviewPrsLoaded(vec![make_review_pr(
+        1,
+        "alice",
+        ReviewDecision::ReviewRequired,
+    )]));
+
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        !buffer_contains(&buf, "\u{21bb}"),
+        "Tab bar should not show loading indicator after fetch completes"
+    );
+}
+
+#[test]
 fn review_board_renders_empty_state_after_fetch() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);

@@ -185,6 +185,34 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     render_repo_filter_overlay(frame, app, area);
 }
 
+fn review_tab_label(app: &App, prefix: &str) -> String {
+    let review_count = app.review_prs().len();
+    let loading = if app.review_board_loading() {
+        " \u{21bb}"
+    } else {
+        ""
+    };
+    if review_count > 0 {
+        format!("{prefix}Reviews ({review_count}){loading} ")
+    } else {
+        format!("{prefix}Reviews{loading} ")
+    }
+}
+
+fn my_prs_tab_label(app: &App, prefix: &str) -> String {
+    let my_count = app.my_prs().len();
+    let loading = if app.my_prs_loading() {
+        " \u{21bb}"
+    } else {
+        ""
+    };
+    if my_count > 0 {
+        format!("{prefix}My PRs ({my_count}){loading} ")
+    } else {
+        format!("{prefix}My PRs{loading} ")
+    }
+}
+
 fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
     let active_style = Style::default().fg(FG).add_modifier(Modifier::BOLD);
     let inactive_style = Style::default().fg(MUTED);
@@ -205,28 +233,18 @@ fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
             spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
             spans.push(Span::styled(" Tasks ", inactive_style));
             spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
-            let review_count = app.review_prs().len();
-            if review_count > 0 {
-                spans.push(Span::styled(
-                    format!(" Reviews ({review_count}) "),
-                    inactive_style,
-                ));
-            } else {
-                spans.push(Span::styled(" Reviews ", inactive_style));
-            }
+            spans.push(Span::styled(
+                review_tab_label(app, " "),
+                inactive_style,
+            ));
         }
         ViewMode::Board(_) => {
             spans.push(Span::styled(" \u{25b8} Tasks ", active_style));
             spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
-            let review_count = app.review_prs().len();
-            if review_count > 0 {
-                spans.push(Span::styled(
-                    format!(" Reviews ({review_count}) ", ),
-                    inactive_style,
-                ));
-            } else {
-                spans.push(Span::styled(" Reviews ", inactive_style));
-            }
+            spans.push(Span::styled(
+                review_tab_label(app, " "),
+                inactive_style,
+            ));
         }
         ViewMode::ReviewBoard { mode, .. } => {
             spans.push(Span::styled(" Tasks ", inactive_style));
@@ -235,25 +253,15 @@ fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
                 ReviewBoardMode::Reviewer => (active_style, inactive_style),
                 ReviewBoardMode::Author => (inactive_style, active_style),
             };
-            let review_count = app.review_prs().len();
-            if review_count > 0 {
-                spans.push(Span::styled(
-                    format!(" \u{25b8} Reviews ({review_count}) "),
-                    reviewer_style,
-                ));
-            } else {
-                spans.push(Span::styled(" \u{25b8} Reviews ", reviewer_style));
-            }
+            spans.push(Span::styled(
+                review_tab_label(app, " \u{25b8} "),
+                reviewer_style,
+            ));
             spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
-            let my_count = app.my_prs().len();
-            if my_count > 0 {
-                spans.push(Span::styled(
-                    format!(" My PRs ({my_count}) "),
-                    author_style,
-                ));
-            } else {
-                spans.push(Span::styled(" My PRs ", author_style));
-            }
+            spans.push(Span::styled(
+                my_prs_tab_label(app, " "),
+                author_style,
+            ));
         }
     }
 
