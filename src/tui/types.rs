@@ -9,7 +9,7 @@ use crate::models::{Epic, EpicId, ReviewDecision, SubStatus, Task, TaskId, TaskS
 // MoveDirection
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MoveDirection {
     Forward,
     Backward,

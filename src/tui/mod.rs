@@ -1407,7 +1407,7 @@ impl App {
                 let mut cmds = Vec::new();
                 for id in &ids {
                     if !review_ids.contains(id) {
-                        cmds.extend(self.handle_move_task(*id, direction.clone()));
+                        cmds.extend(self.handle_move_task(*id, direction));
                     }
                 }
                 // Enter confirmation for Review→Done tasks
@@ -1425,7 +1425,7 @@ impl App {
 
         let mut cmds = Vec::new();
         for id in ids {
-            cmds.extend(self.handle_move_task(id, direction.clone()));
+            cmds.extend(self.handle_move_task(id, direction));
         }
         self.selected_tasks.clear();
         cmds
