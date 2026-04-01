@@ -322,6 +322,7 @@ impl TuiRuntime {
             task.id,
             &db::TaskPatch::new()
                 .status(task.status)
+                .sub_status(task.sub_status)
                 .worktree(task.worktree.as_deref())
                 .tmux_window(task.tmux_window.as_deref())
                 .pr_url(task.pr_url.as_deref())
@@ -1062,11 +1063,35 @@ mod tests {
         rt.exec_insert_task(&mut app, "Test".into(), "Desc".into(), "/repo".into(), None, None);
         let mut task = app.tasks()[0].clone();
         task.status = models::TaskStatus::Running;
+        task.sub_status = models::SubStatus::Active;
         task.worktree = Some("/repo/.worktrees/1-test".into());
         rt.exec_persist_task(&mut app, task);
         let db_task = rt.database.get_task(app.tasks()[0].id).unwrap().unwrap();
         assert_eq!(db_task.status, models::TaskStatus::Running);
         assert_eq!(db_task.worktree.as_deref(), Some("/repo/.worktrees/1-test"));
+    }
+
+    #[test]
+    fn exec_persist_task_preserves_sub_status() {
+        let (rt, mut app) = test_runtime();
+        rt.exec_insert_task(&mut app, "PR Task".into(), "Desc".into(), "/repo".into(), None, None);
+        let id = app.tasks()[0].id;
+        // Put task in Review+Approved state in DB, then sync to app
+        rt.database.patch_task(id, &db::TaskPatch::new()
+            .status(models::TaskStatus::Review)
+            .sub_status(models::SubStatus::Approved)
+            .pr_url(Some("https://github.com/org/repo/pull/42")))
+        .unwrap();
+        rt.exec_refresh_from_db(&mut app);
+        assert_eq!(app.tasks()[0].sub_status, models::SubStatus::Approved);
+
+        // Persist the in-memory task (simulates handle_pr_review_state saving after PR approval)
+        let task = app.tasks()[0].clone();
+        rt.exec_persist_task(&mut app, task);
+
+        // sub_status must survive the round-trip to DB
+        let db_task = rt.database.get_task(id).unwrap().unwrap();
+        assert_eq!(db_task.sub_status, models::SubStatus::Approved);
     }
 
     #[test]
