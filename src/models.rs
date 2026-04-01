@@ -616,7 +616,7 @@ pub struct Task {
     pub epic_id: Option<EpicId>,
     pub sub_status: SubStatus,
     pub pr_url: Option<String>,
-    pub tag: Option<String>,
+    pub tag: Option<TaskTag>,
     pub sort_order: Option<i64>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -642,12 +642,67 @@ impl DispatchMode {
         if task.plan.is_some() {
             DispatchMode::Dispatch
         } else {
-            match task.tag.as_deref() {
-                Some("epic") => DispatchMode::Brainstorm,
-                Some("feature") => DispatchMode::Plan,
+            match task.tag {
+                Some(TaskTag::Epic) => DispatchMode::Brainstorm,
+                Some(TaskTag::Feature) => DispatchMode::Plan,
                 _ => DispatchMode::Dispatch,
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TaskTag
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskTag {
+    Bug,
+    Feature,
+    Chore,
+    Epic,
+}
+
+impl TaskTag {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TaskTag::Bug => "bug",
+            TaskTag::Feature => "feature",
+            TaskTag::Chore => "chore",
+            TaskTag::Epic => "epic",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "bug" => Some(TaskTag::Bug),
+            "feature" => Some(TaskTag::Feature),
+            "chore" => Some(TaskTag::Chore),
+            "epic" => Some(TaskTag::Epic),
+            _ => None,
+        }
+    }
+
+    pub fn short_label(&self) -> &'static str {
+        match self {
+            TaskTag::Bug => "bug",
+            TaskTag::Feature => "feat",
+            TaskTag::Chore => "chore",
+            TaskTag::Epic => "epic",
+        }
+    }
+}
+
+impl std::fmt::Display for TaskTag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for TaskTag {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s).ok_or_else(|| format!("unknown tag: {s}"))
     }
 }
 
@@ -1605,7 +1660,7 @@ mod tests {
 
     // --- DispatchMode ---
 
-    fn make_task_with(plan: Option<&str>, tag: Option<&str>) -> Task {
+    fn make_task_with(plan: Option<&str>, tag: Option<TaskTag>) -> Task {
         let now = chrono::Utc::now();
         Task {
             id: TaskId(1),
@@ -1619,7 +1674,7 @@ mod tests {
             epic_id: None,
             sub_status: SubStatus::None,
             pr_url: None,
-            tag: tag.map(String::from),
+            tag,
             sort_order: None,
             created_at: now,
             updated_at: now,
@@ -1633,11 +1688,11 @@ mod tests {
             DispatchMode::Dispatch
         );
         assert_eq!(
-            DispatchMode::for_task(&make_task_with(Some("a plan"), Some("epic"))),
+            DispatchMode::for_task(&make_task_with(Some("a plan"), Some(TaskTag::Epic))),
             DispatchMode::Dispatch
         );
         assert_eq!(
-            DispatchMode::for_task(&make_task_with(Some("a plan"), Some("feature"))),
+            DispatchMode::for_task(&make_task_with(Some("a plan"), Some(TaskTag::Feature))),
             DispatchMode::Dispatch
         );
     }
@@ -1645,15 +1700,15 @@ mod tests {
     #[test]
     fn dispatch_mode_without_plan_uses_tag() {
         assert_eq!(
-            DispatchMode::for_task(&make_task_with(None, Some("epic"))),
+            DispatchMode::for_task(&make_task_with(None, Some(TaskTag::Epic))),
             DispatchMode::Brainstorm
         );
         assert_eq!(
-            DispatchMode::for_task(&make_task_with(None, Some("feature"))),
+            DispatchMode::for_task(&make_task_with(None, Some(TaskTag::Feature))),
             DispatchMode::Plan
         );
         assert_eq!(
-            DispatchMode::for_task(&make_task_with(None, Some("chore"))),
+            DispatchMode::for_task(&make_task_with(None, Some(TaskTag::Chore))),
             DispatchMode::Dispatch
         );
         assert_eq!(

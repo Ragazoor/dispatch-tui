@@ -259,7 +259,7 @@ impl TuiRuntime {
         title: &str,
         description: &str,
         repo_path: &str,
-        tag: Option<&str>,
+        tag: Option<models::TaskTag>,
         epic_id: Option<models::EpicId>,
     ) -> Option<models::Task> {
         let mut task = match self.database.create_task_returning(
@@ -288,7 +288,7 @@ impl TuiRuntime {
                 app.update(Message::Error(Self::db_error("setting task tag", e)));
                 return None;
             }
-            task.tag = Some(t.to_string());
+            task.tag = Some(t);
         }
         Some(task)
     }
@@ -299,11 +299,11 @@ impl TuiRuntime {
         title: String,
         description: String,
         repo_path: String,
-        tag: Option<String>,
+        tag: Option<models::TaskTag>,
         epic_id: Option<models::EpicId>,
     ) {
         if let Some(task) =
-            self.create_task(app, &title, &description, &repo_path, tag.as_deref(), epic_id)
+            self.create_task(app, &title, &description, &repo_path, tag, epic_id)
         {
             app.update(Message::TaskCreated { task });
         }
@@ -499,7 +499,7 @@ impl TuiRuntime {
         let repo_path = if fields.repo_path.is_empty() { task.repo_path.clone() } else { fields.repo_path };
         let new_status = models::TaskStatus::parse(&fields.status).unwrap_or(task.status);
         let plan = if fields.plan.is_empty() { None } else { Some(fields.plan) };
-        let tag = if fields.tag.is_empty() { None } else { Some(fields.tag) };
+        let tag = if fields.tag.is_empty() { None } else { models::TaskTag::parse(&fields.tag) };
 
         if let Err(e) = self.database.patch_task(
             task_id,
@@ -509,7 +509,7 @@ impl TuiRuntime {
                 .description(&description)
                 .repo_path(&repo_path)
                 .plan(plan.as_deref())
-                .tag(tag.as_deref()),
+                .tag(tag),
         ) {
             app.update(Message::Error(Self::db_error("updating task", e)));
         }

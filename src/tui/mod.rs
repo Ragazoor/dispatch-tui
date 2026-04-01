@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use crate::dispatch;
 use crate::models::{
     epic_status, epic_substatus, DispatchMode, Epic, EpicId, EpicSubstatus, ReviewDecision, SubStatus, Task,
-    TaskId, TaskStatus, TaskUsage, VisualColumn, DEFAULT_QUICK_TASK_TITLE,
+    TaskId, TaskStatus, TaskTag, TaskUsage, VisualColumn, DEFAULT_QUICK_TASK_TITLE,
 };
 
 // ---------------------------------------------------------------------------
@@ -1575,7 +1575,7 @@ impl App {
         self.finish_task_creation(repo_path)
     }
 
-    fn handle_submit_tag(&mut self, tag: Option<String>) -> Vec<Command> {
+    fn handle_submit_tag(&mut self, tag: Option<TaskTag>) -> Vec<Command> {
         self.input.buffer.clear();
         if let Some(ref mut draft) = self.input.task_draft {
             draft.tag = tag;

@@ -70,7 +70,7 @@ pub fn parse_epic_editor_output(input: &str) -> EpicEditorFields {
 
 pub fn format_editor_content(task: &Task) -> String {
     let plan = task.plan.as_deref().unwrap_or("");
-    let tag = task.tag.as_deref().unwrap_or("");
+    let tag = task.tag.map(|t| t.as_str()).unwrap_or("");
     format!(
         "--- TITLE ---\n{}\n--- DESCRIPTION ---\n{}\n--- REPO_PATH ---\n{}\n--- STATUS ---\n{}\n--- PLAN ---\n{}\n--- TAG ---\n{}\n",
         task.title, task.description, task.repo_path, task.status.as_str(), plan, tag

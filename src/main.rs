@@ -244,7 +244,9 @@ async fn main() -> Result<()> {
                 models::TaskStatus::Backlog,
             )?;
             if let Some(ref t) = tag {
-                db.patch_task(id, &db::TaskPatch::new().tag(Some(t)))?;
+                let tag = models::TaskTag::parse(t)
+                    .ok_or_else(|| anyhow::anyhow!("Invalid tag: {t}. Valid values: bug, feature, chore, epic"))?;
+                db.patch_task(id, &db::TaskPatch::new().tag(Some(tag)))?;
             }
             println!("Created task #{}: \"{}\" [backlog]", id, title);
         }

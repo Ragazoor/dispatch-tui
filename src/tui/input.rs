@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
 use super::{App, ColumnItem, Command, InputMode, Message, MoveDirection, ReviewAgentRequest, ViewMode};
-use crate::models::{DispatchMode, ReviewDecision, SubStatus, TaskId, TaskStatus};
+use crate::models::{DispatchMode, ReviewDecision, SubStatus, TaskId, TaskStatus, TaskTag};
 
 impl App {
     /// Translate a terminal key event into zero or more commands, depending on current mode.
@@ -431,10 +431,10 @@ impl App {
 
     fn handle_key_tag(&mut self, key: KeyEvent) -> Vec<Command> {
         match key.code {
-            KeyCode::Char('b') => self.update(Message::SubmitTag(Some("bug".to_string()))),
-            KeyCode::Char('f') => self.update(Message::SubmitTag(Some("feature".to_string()))),
-            KeyCode::Char('c') => self.update(Message::SubmitTag(Some("chore".to_string()))),
-            KeyCode::Char('e') => self.update(Message::SubmitTag(Some("epic".to_string()))),
+            KeyCode::Char('b') => self.update(Message::SubmitTag(Some(TaskTag::Bug))),
+            KeyCode::Char('f') => self.update(Message::SubmitTag(Some(TaskTag::Feature))),
+            KeyCode::Char('c') => self.update(Message::SubmitTag(Some(TaskTag::Chore))),
+            KeyCode::Char('e') => self.update(Message::SubmitTag(Some(TaskTag::Epic))),
             KeyCode::Enter => self.update(Message::SubmitTag(None)),
             KeyCode::Esc => self.update(Message::CancelInput),
             _ => vec![],

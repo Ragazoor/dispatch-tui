@@ -443,12 +443,12 @@ fn classify_card_indicator(
     } else {
         ""
     };
-    let tag_suffix = match task.tag.as_deref() {
-        Some("bug") => " [bug]",
-        Some("feature") => " [feat]",
-        Some("chore") => " [chore]",
-        Some("epic") => " [epic]",
-        _ => "",
+    let tag_suffix = match task.tag {
+        Some(crate::models::TaskTag::Bug) => " [bug]",
+        Some(crate::models::TaskTag::Feature) => " [feat]",
+        Some(crate::models::TaskTag::Chore) => " [chore]",
+        Some(crate::models::TaskTag::Epic) => " [epic]",
+        None => "",
     };
     CardIndicator::Idle {
         status,

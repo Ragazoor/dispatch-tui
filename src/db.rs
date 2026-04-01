@@ -6,7 +6,7 @@ use std::sync::Mutex;
 
 use crate::models::{
     CiStatus, Epic, EpicId, ReviewDecision, ReviewPr, Reviewer, SubStatus, Task, TaskId,
-    TaskStatus, TaskUsage, UsageReport,
+    TaskStatus, TaskTag, TaskUsage, UsageReport,
 };
 
 // ---------------------------------------------------------------------------
@@ -28,7 +28,7 @@ pub struct TaskPatch<'a> {
     pub tmux_window: Option<Option<&'a str>>,
     pub sub_status: Option<SubStatus>,
     pub pr_url: Option<Option<&'a str>>,
-    pub tag: Option<Option<&'a str>>,
+    pub tag: Option<Option<TaskTag>>,
     pub sort_order: Option<Option<i64>>,
 }
 
@@ -82,7 +82,7 @@ impl<'a> TaskPatch<'a> {
         self
     }
 
-    pub fn tag(mut self, tag: Option<&'a str>) -> Self {
+    pub fn tag(mut self, tag: Option<TaskTag>) -> Self {
         self.tag = Some(tag);
         self
     }
@@ -973,7 +973,7 @@ impl TaskStore for Database {
         }
         if let Some(tag) = &patch.tag {
             sets.push("tag = ?");
-            values.push(Box::new(tag.map(|s| s.to_string())));
+            values.push(Box::new(tag.map(|t| t.as_str().to_string())));
         }
         if let Some(so) = patch.sort_order {
             sets.push("sort_order = ?");
@@ -1644,7 +1644,10 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
             .and_then(|s| SubStatus::parse(&s))
             .unwrap_or(SubStatus::None),
         pr_url: row.get::<_, Option<String>>("pr_url").unwrap_or(None),
-        tag: row.get::<_, Option<String>>("tag").unwrap_or(None),
+        tag: row.get::<_, Option<String>>("tag")
+            .unwrap_or(None)
+            .as_deref()
+            .and_then(TaskTag::parse),
         sort_order: row.get::<_, Option<i64>>("sort_order").unwrap_or(None),
         created_at: parse_datetime(&created_str),
         updated_at: parse_datetime(&updated_str),
@@ -2036,16 +2039,16 @@ mod tests {
     fn patch_task_sets_tag() {
         let db = in_memory_db();
         let id = db.create_task("title", "desc", "/repo", None, TaskStatus::Backlog).unwrap();
-        db.patch_task(id, &TaskPatch::new().tag(Some("bug"))).unwrap();
+        db.patch_task(id, &TaskPatch::new().tag(Some(TaskTag::Bug))).unwrap();
         let task = db.get_task(id).unwrap().unwrap();
-        assert_eq!(task.tag.as_deref(), Some("bug"));
+        assert_eq!(task.tag, Some(TaskTag::Bug));
     }
 
     #[test]
     fn patch_task_clears_tag() {
         let db = in_memory_db();
         let id = db.create_task("title", "desc", "/repo", None, TaskStatus::Backlog).unwrap();
-        db.patch_task(id, &TaskPatch::new().tag(Some("feature"))).unwrap();
+        db.patch_task(id, &TaskPatch::new().tag(Some(TaskTag::Feature))).unwrap();
         db.patch_task(id, &TaskPatch::new().tag(None)).unwrap();
         let task = db.get_task(id).unwrap().unwrap();
         assert!(task.tag.is_none());

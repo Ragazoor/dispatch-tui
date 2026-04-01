@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 use crate::db;
 use crate::dispatch;
 use crate::mcp::McpState;
-use crate::models::{DispatchMode, EpicId, SubStatus, Task, TaskId, TaskStatus, UsageReport};
+use crate::models::{DispatchMode, EpicId, SubStatus, Task, TaskId, TaskStatus, TaskTag, UsageReport};
 
 use super::types::{
     deserialize_flexible_i64, deserialize_optional_flexible_i64, parse_args, JsonRpcResponse,
@@ -153,8 +153,8 @@ fn format_task_line(t: &Task) -> String {
         t.description.clone()
     };
     let plan_indicator = if t.plan.is_some() { " [plan]" } else { "" };
-    let tag_indicator = match t.tag.as_deref() {
-        Some(tag) => format!(" [{tag}]"),
+    let tag_indicator = match t.tag {
+        Some(tag) => format!(" [{}]", tag.as_str()),
         None => String::new(),
     };
     let epic_indicator = match t.epic_id {
@@ -255,7 +255,13 @@ pub(super) fn handle_update_task(
         patch = patch.pr_url(Some(url.as_str()));
     }
     if let Some(ref t) = parsed.tag {
-        patch = patch.tag(Some(t.as_str()));
+        match TaskTag::parse(t) {
+            Some(tag) => { patch = patch.tag(Some(tag)); }
+            None => return JsonRpcResponse::err(
+                id, -32602,
+                format!("Invalid tag: {t}. Valid values: bug, feature, chore, epic"),
+            ),
+        }
     }
 
     if let Some(ref ss_str) = parsed.sub_status {
@@ -389,9 +395,17 @@ pub(super) fn handle_create_task(
                     .patch_task(task_id, &db::TaskPatch::new().sort_order(Some(so)));
             }
             if let Some(ref t) = parsed.tag {
-                let _ = state
-                    .db
-                    .patch_task(task_id, &db::TaskPatch::new().tag(Some(t)));
+                match TaskTag::parse(t) {
+                    Some(tag) => {
+                        let _ = state
+                            .db
+                            .patch_task(task_id, &db::TaskPatch::new().tag(Some(tag)));
+                    }
+                    None => return JsonRpcResponse::err(
+                        id, -32602,
+                        format!("Invalid tag: {t}. Valid values: bug, feature, chore, epic"),
+                    ),
+                }
             }
             state.notify();
             JsonRpcResponse::ok(

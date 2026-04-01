@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use ratatui::widgets::ListState;
 
-use crate::models::{Epic, EpicId, ReviewDecision, SubStatus, Task, TaskId, TaskStatus, TaskUsage};
+use crate::models::{Epic, EpicId, ReviewDecision, SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage};
 
 // ---------------------------------------------------------------------------
 // MoveDirection
@@ -90,7 +90,7 @@ pub enum Message {
     SubmitTitle(String),
     SubmitDescription(String),
     SubmitRepoPath(String),
-    SubmitTag(Option<String>),
+    SubmitTag(Option<TaskTag>),
     InputChar(char),
     InputBackspace,
     StartQuickDispatchSelection,
@@ -288,7 +288,7 @@ pub struct TaskDraft {
     pub title: String,
     pub description: String,
     pub repo_path: String,
-    pub tag: Option<String>,
+    pub tag: Option<TaskTag>,
 }
 
 // ---------------------------------------------------------------------------
@@ -380,7 +380,7 @@ pub struct TaskEdit {
     pub repo_path: String,
     pub status: TaskStatus,
     pub plan: Option<String>,
-    pub tag: Option<String>,
+    pub tag: Option<TaskTag>,
 }
 
 // ---------------------------------------------------------------------------

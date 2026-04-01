@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use super::*;
 use crate::dispatch;
-use crate::models::{Epic, EpicId, SubStatus, TaskId, TaskStatus, DEFAULT_QUICK_TASK_TITLE};
+use crate::models::{Epic, EpicId, SubStatus, TaskId, TaskStatus, TaskTag, DEFAULT_QUICK_TASK_TITLE};
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(300);
 
@@ -475,7 +475,7 @@ fn d_key_on_running_no_window_resumes() {
 #[test]
 fn d_key_on_backlog_brainstorms() {
     let mut task = make_task(1, TaskStatus::Backlog);
-    task.tag = Some("epic".to_string()); // tag=epic triggers brainstorm
+    task.tag = Some(TaskTag::Epic); // tag=epic triggers brainstorm
     let mut app = App::new(vec![task], TEST_TIMEOUT);
     app.selection_mut().set_column(0); // Backlog column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
@@ -1621,10 +1621,10 @@ fn submit_tag_advances_to_description() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputTag;
     app.input.task_draft = Some(TaskDraft { title: "T".to_string(), ..Default::default() });
-    let cmds = app.update(Message::SubmitTag(Some("bug".to_string())));
+    let cmds = app.update(Message::SubmitTag(Some(TaskTag::Bug)));
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::InputDescription);
-    assert_eq!(app.input.task_draft.as_ref().unwrap().tag, Some("bug".to_string()));
+    assert_eq!(app.input.task_draft.as_ref().unwrap().tag, Some(TaskTag::Bug));
     assert_eq!(app.status_message.as_deref(), Some("Enter description: "));
 }
 
@@ -1642,10 +1642,10 @@ fn submit_description_advances_to_repo_path() {
 fn submit_repo_path_creates_task() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputRepoPath;
-    app.input.task_draft = Some(TaskDraft { title: "T".to_string(), description: "D".to_string(), tag: Some("bug".to_string()), ..Default::default() });
+    app.input.task_draft = Some(TaskDraft { title: "T".to_string(), description: "D".to_string(), tag: Some(TaskTag::Bug), ..Default::default() });
     let cmds = app.update(Message::SubmitRepoPath("/my/repo".to_string()));
     assert_eq!(app.input.mode, InputMode::Normal);
-    assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask { ref draft, .. } if draft.repo_path == "/my/repo" && draft.tag == Some("bug".to_string()))));
+    assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask { ref draft, .. } if draft.repo_path == "/my/repo" && draft.tag == Some(TaskTag::Bug))));
 }
 
 #[test]
@@ -3183,7 +3183,7 @@ fn dispatch_epic_with_plan_brainstorms_subtask_without_plan() {
     // Subtask without a plan, tagged as "epic" to trigger brainstorm
     let mut task1 = make_task(1, TaskStatus::Backlog);
     task1.epic_id = Some(EpicId(10));
-    task1.tag = Some("epic".to_string());
+    task1.tag = Some(TaskTag::Epic);
     app.tasks = vec![task1];
 
     app.selection_mut().set_column(0);
@@ -6546,7 +6546,7 @@ fn handle_key_tag_selects_bug() {
     let cmds = app.handle_key(make_key(KeyCode::Char('b')));
     assert!(cmds.is_empty());
     assert_eq!(*app.mode(), InputMode::InputDescription);
-    assert_eq!(app.input.task_draft.as_ref().unwrap().tag, Some("bug".to_string()));
+    assert_eq!(app.input.task_draft.as_ref().unwrap().tag, Some(TaskTag::Bug));
 }
 
 #[test]
@@ -7633,7 +7633,7 @@ fn auto_dispatch_epic_respects_tag_routing() {
     task1.epic_id = Some(EpicId(10));
     let mut task2 = make_task(2, TaskStatus::Backlog);
     task2.epic_id = Some(EpicId(10));
-    task2.tag = Some("feature".to_string());
+    task2.tag = Some(TaskTag::Feature);
 
     app.tasks = vec![task1, task2];
 
