@@ -332,6 +332,15 @@ impl TuiRuntime {
         }
     }
 
+    fn exec_patch_sub_status(&self, app: &mut App, id: models::TaskId, sub_status: models::SubStatus) {
+        if let Err(e) = self.database.patch_task(
+            id,
+            &db::TaskPatch::new().sub_status(sub_status),
+        ) {
+            app.update(Message::Error(Self::db_error("patching sub_status", e)));
+        }
+    }
+
     fn exec_delete_task(&self, app: &mut App, id: TaskId) {
         if let Err(e) = self.database.delete_task(id) {
             app.update(Message::Error(Self::db_error("deleting task", e)));
@@ -1002,6 +1011,8 @@ async fn execute_commands(
                 rt.exec_persist_filter_preset(app, &name, &repo_paths),
             Command::DeleteFilterPreset(name) =>
                 rt.exec_delete_filter_preset(app, &name),
+            Command::PatchSubStatus { id, sub_status } =>
+                rt.exec_patch_sub_status(app, id, sub_status),
         }
     }
 

@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use super::*;
 use crate::dispatch;
-use crate::models::{Epic, EpicId, SubStatus, TaskId, TaskStatus, VisualColumn};
+use crate::models::{Epic, EpicId, SubStatus, TaskId, TaskStatus};
 
 /// Check whether a rendered buffer contains the given text anywhere.
 fn buffer_contains(buf: &Buffer, text: &str) -> bool {
@@ -136,9 +136,9 @@ fn navigate_column_clamps() {
     app.update(Message::NavigateColumn(-1));
     assert_eq!(app.selection().column(), 0); // can't go below 0
 
-    app.selection_mut().set_column(VisualColumn::COUNT - 1);
+    app.selection_mut().set_column(TaskStatus::COLUMN_COUNT - 1);
     app.update(Message::NavigateColumn(1));
-    assert_eq!(app.selection().column(), VisualColumn::COUNT - 1); // can't go above max
+    assert_eq!(app.selection().column(), TaskStatus::COLUMN_COUNT - 1); // can't go above max
 }
 
 #[test]
@@ -156,9 +156,9 @@ fn navigate_column_moves_through_visual_columns() {
 #[test]
 fn navigate_column_clamps_at_visual_column_max() {
     let mut app = make_app();
-    app.selection_mut().set_column(VisualColumn::COUNT - 1); // Done column (7)
+    app.selection_mut().set_column(TaskStatus::COLUMN_COUNT - 1); // Done column (3)
     app.update(Message::NavigateColumn(1));
-    assert_eq!(app.selected_column(), VisualColumn::COUNT - 1); // stays at 7
+    assert_eq!(app.selected_column(), TaskStatus::COLUMN_COUNT - 1); // stays at 3
 }
 
 #[test]
@@ -484,7 +484,7 @@ fn d_key_on_backlog_brainstorms() {
 fn d_key_on_done_shows_warning() {
 
     let mut app = App::new(vec![make_task(1, TaskStatus::Done)], Duration::from_secs(300));
-    app.selection_mut().set_column(7); // Done column
+    app.selection_mut().set_column(3); // Done column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
     assert!(app.status_message.is_some());
@@ -1207,7 +1207,7 @@ fn d_key_on_review_with_window_shows_warning() {
     task.tmux_window = Some("task-5".to_string());
     task.worktree = Some("/repo/.worktrees/5-task-5".to_string());
     let mut app = App::new(vec![task], Duration::from_secs(300));
-    app.selection_mut().set_column(4); // Review/PR Created column
+    app.selection_mut().set_column(2); // Review column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
     assert!(app.status_message.as_deref().unwrap().contains("already running"));
@@ -1219,7 +1219,7 @@ fn d_key_on_review_no_window_with_worktree_resumes() {
     task.worktree = Some("/repo/.worktrees/5-task-5".to_string());
     task.tmux_window = None;
     let mut app = App::new(vec![task], Duration::from_secs(300));
-    app.selection_mut().set_column(4); // Review/PR Created column
+    app.selection_mut().set_column(2); // Review column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(matches!(&cmds[0], Command::Resume { .. }));
 }
@@ -1230,7 +1230,7 @@ fn d_key_on_review_no_worktree_no_window_shows_warning() {
     task.worktree = None;
     task.tmux_window = None;
     let mut app = App::new(vec![task], Duration::from_secs(300));
-    app.selection_mut().set_column(4); // Review/PR Created column
+    app.selection_mut().set_column(2); // Review column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
     assert!(app.status_message.as_deref().unwrap().contains("No worktree"));
@@ -1500,9 +1500,9 @@ fn d_key_on_stale_running_task_enters_retry_mode() {
     ], Duration::from_secs(300));
     app.tasks[0].tmux_window = Some("task-4".to_string());
     app.tasks[0].sub_status = SubStatus::Stale;
-    // Navigate to Stale column (visual index 3)
-    app.selection_mut().set_column(3);
-    app.selection_mut().set_row(3, 0);
+    // Navigate to Running column (index 1)
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
 
     app.handle_key(make_key(KeyCode::Char('d')));
     assert!(matches!(app.input.mode, InputMode::ConfirmRetry(TaskId(4))));
@@ -1515,9 +1515,9 @@ fn d_key_on_crashed_running_task_enters_retry_mode() {
     ], Duration::from_secs(300));
     app.tasks[0].tmux_window = Some("task-4".to_string());
     app.tasks[0].sub_status = SubStatus::Crashed;
-    // Navigate to Stale column (visual index 3, contains Stale+Crashed)
-    app.selection_mut().set_column(3);
-    app.selection_mut().set_row(3, 0);
+    // Navigate to Running column (index 1)
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
 
     app.handle_key(make_key(KeyCode::Char('d')));
     assert!(matches!(app.input.mode, InputMode::ConfirmRetry(TaskId(4))));
@@ -2299,8 +2299,8 @@ fn render_v2_status_bar_no_brackets() {
 #[test]
 fn render_v2_done_task_shows_checkmark() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Done)], Duration::from_secs(300));
-    // Navigate to Done column (visual column index 7)
-    for _ in 0..7 {
+    // Navigate to Done column (index 3)
+    for _ in 0..3 {
         app.update(Message::NavigateColumn(1));
     }
     let buf = render_to_buffer(&mut app, 120, 20);
@@ -2804,9 +2804,9 @@ fn make_app_with_review_epic() -> App {
         },
     ], Duration::from_secs(300));
     app.epics = vec![make_epic(10)];
-    // All subtasks Done → epic derived status Review (visual col 4). Epic is only item → row 0.
-    app.selection_mut().set_column(4);
-    app.selection_mut().set_row(4, 0);
+    // All subtasks Done → epic derived status Review (column 2). Epic is only item → row 0.
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
     app
 }
 
@@ -2874,9 +2874,9 @@ fn m_key_on_epic_with_mixed_subtasks_shows_derived() {
         },
     ], Duration::from_secs(300));
     app.epics = vec![make_epic(10)];
-    // Some done + some review → derived status Review (visual col 4)
-    app.selection_mut().set_column(4);
-    app.selection_mut().set_row(4, 0);
+    // Some done + some review → derived status Review (column 2)
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
     let cmds = app.handle_key(make_key(KeyCode::Char('m')));
     assert!(cmds.is_empty());
     assert!(app.status_message.as_deref().unwrap().contains("derived from subtasks"));
@@ -2894,9 +2894,9 @@ fn shift_m_on_done_epic_undoes_done() {
     let mut epic = make_epic(10);
     epic.done = true;
     app.epics = vec![epic];
-    // Done epic → visual col 7
-    app.selection_mut().set_column(7);
-    app.selection_mut().set_row(7, 0);
+    // Done epic → column 3
+    app.selection_mut().set_column(3);
+    app.selection_mut().set_row(3, 0);
     let cmds = app.handle_key(make_key(KeyCode::Char('M')));
     assert!(!app.epics[0].done);
     assert!(cmds.iter().any(|c| matches!(c, Command::PersistEpic { id: EpicId(10), done: Some(false), .. })));
@@ -3019,9 +3019,9 @@ fn x_key_on_epic_with_all_done_subtasks_allows_archive() {
         },
     ], Duration::from_secs(300));
     app.epics = vec![make_epic(10)];
-    // All done → derived status Review (visual col 4). Epic is only item → row 0.
-    app.selection_mut().set_column(4);
-    app.selection_mut().set_row(4, 0);
+    // All done → derived status Review (column 2). Epic is only item → row 0.
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
     let cmds = app.handle_key(make_key(KeyCode::Char('x')));
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::ConfirmArchiveEpic);
@@ -3506,8 +3506,8 @@ fn g_key_on_epic_jumps_to_review_subtask() {
 
     // Epic is in Review column (due to subtask in Review)
     // Place cursor on epic in the Review column (visual col 4)
-    app.selection_mut().set_column(4);
-    app.selection_mut().set_row(4, 0);
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
 
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert!(matches!(&cmds[0], Command::JumpToTmux { window } if window == "win-1"));
@@ -3524,8 +3524,8 @@ fn g_key_on_epic_no_review_session_shows_status() {
     subtask.epic_id = Some(EpicId(10));
     app.tasks = vec![subtask];
 
-    app.selection_mut().set_column(4);
-    app.selection_mut().set_row(4, 0);
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
 
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert!(cmds.is_empty());
@@ -3805,7 +3805,7 @@ fn finish_failed_with_conflict_sets_flag() {
         error: "Rebase conflict".to_string(),
         is_conflict: true,
     });
-    assert!(app.rebase_conflict_tasks().contains(&TaskId(1)));
+    assert!(app.find_task(TaskId(1)).is_some_and(|t| t.sub_status == SubStatus::Conflict));
     assert!(app.status_message.as_ref().unwrap().contains("Rebase conflict"));
 }
 
@@ -3822,7 +3822,7 @@ fn finish_failed_without_conflict_does_not_set_flag() {
         error: "Not on main".to_string(),
         is_conflict: false,
     });
-    assert!(!app.rebase_conflict_tasks().contains(&TaskId(1)));
+    assert!(!app.find_task(TaskId(1)).is_some_and(|t| t.sub_status == SubStatus::Conflict));
 }
 
 #[test]
@@ -3838,10 +3838,10 @@ fn conflict_flag_clears_on_dispatch() {
         error: "conflict".to_string(),
         is_conflict: true,
     });
-    assert!(app.rebase_conflict_tasks().contains(&TaskId(1)));
+    assert!(app.find_task(TaskId(1)).is_some_and(|t| t.sub_status == SubStatus::Conflict));
 
     app.update(Message::Resumed { id: TaskId(1), tmux_window: "task-1".to_string() });
-    assert!(!app.rebase_conflict_tasks().contains(&TaskId(1)));
+    assert!(!app.find_task(TaskId(1)).is_some_and(|t| t.sub_status == SubStatus::Conflict));
 }
 
 #[test]
@@ -3859,7 +3859,7 @@ fn conflict_flag_clears_on_move_backward() {
     });
 
     app.update(Message::MoveTask { id: TaskId(1), direction: MoveDirection::Backward });
-    assert!(!app.rebase_conflict_tasks().contains(&TaskId(1)));
+    assert!(!app.find_task(TaskId(1)).is_some_and(|t| t.sub_status == SubStatus::Conflict));
 }
 
 // --- truncate_title ---
@@ -3934,7 +3934,7 @@ fn move_review_to_done_enters_confirm_mode() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Review),
     ], Duration::from_secs(300));
-    app.selection_mut().set_column(4); // Review/PR Created column
+    app.selection_mut().set_column(2); // Review column
 
     let cmds = app.handle_key(make_key(KeyCode::Char('m')));
     assert!(cmds.is_empty());
@@ -3947,7 +3947,7 @@ fn confirm_done_y_moves_task() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Review),
     ], Duration::from_secs(300));
-    app.selection_mut().set_column(4);
+    app.selection_mut().set_column(2);
 
     app.input.mode = InputMode::ConfirmDone(TaskId(1));
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
@@ -3962,7 +3962,7 @@ fn confirm_done_n_cancels() {
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Review),
     ], Duration::from_secs(300));
-    app.selection_mut().set_column(4);
+    app.selection_mut().set_column(2);
 
     app.input.mode = InputMode::ConfirmDone(TaskId(1));
     let cmds = app.handle_key(make_key(KeyCode::Char('n')));
@@ -3994,7 +3994,7 @@ fn confirm_done_kills_tmux_but_preserves_worktree() {
         t.tmux_window = Some("task-1".to_string());
         t
     }], Duration::from_secs(300));
-    app.selection_mut().set_column(4);
+    app.selection_mut().set_column(2);
 
     // Enter confirm mode and confirm
     app.update(Message::MoveTask { id: TaskId(1), direction: MoveDirection::Forward });
@@ -4018,7 +4018,7 @@ fn batch_move_with_review_tasks_enters_confirm_done() {
         make_task(1, TaskStatus::Review),
         make_task(2, TaskStatus::Review),
     ], Duration::from_secs(300));
-    app.selection_mut().set_column(4);
+    app.selection_mut().set_column(2);
     app.update(Message::ToggleSelect(TaskId(1)));
     app.update(Message::ToggleSelect(TaskId(2)));
 
@@ -4034,7 +4034,7 @@ fn batch_confirm_done_moves_all_review_tasks() {
         make_task(1, TaskStatus::Review),
         make_task(2, TaskStatus::Review),
     ], Duration::from_secs(300));
-    app.selection_mut().set_column(4);
+    app.selection_mut().set_column(2);
     app.update(Message::ToggleSelect(TaskId(1)));
     app.update(Message::ToggleSelect(TaskId(2)));
 
@@ -4581,8 +4581,8 @@ fn card_shows_pr_badge() {
     let mut task = make_task(1, TaskStatus::Review);
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
     let mut app = App::new(vec![task], Duration::from_secs(300));
-    // Navigate to Review/PR Created column (visual index 4)
-    for _ in 0..4 {
+    // Navigate to Review column (index 2)
+    for _ in 0..2 {
         app.update(Message::NavigateColumn(1));
     }
 
@@ -4609,8 +4609,8 @@ fn status_bar_shows_wrap_up_hint_for_review_task() {
     let mut task = make_task(1, TaskStatus::Review);
     task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
     let mut app = App::new(vec![task], Duration::from_secs(300));
-    // Navigate to Review/PR Created column (visual index 4)
-    for _ in 0..4 {
+    // Navigate to Review column (index 2)
+    for _ in 0..2 {
         app.update(Message::NavigateColumn(1));
     }
 
@@ -4623,8 +4623,8 @@ fn detail_panel_shows_pr_url() {
     let mut task = make_task(1, TaskStatus::Review);
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
     let mut app = App::new(vec![task], Duration::from_secs(300));
-    // Navigate to Review/PR Created column (visual index 4) and open detail panel
-    for _ in 0..4 {
+    // Navigate to Review column (index 2) and open detail panel
+    for _ in 0..2 {
         app.update(Message::NavigateColumn(1));
     }
     app.update(Message::ToggleDetail);
@@ -4795,8 +4795,8 @@ fn w_key_on_review_task_with_worktree_enters_wrap_up() {
         t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
         t
     }], Duration::from_secs(300));
-    // Navigate to Review/PR Created column (visual index 4)
-    app.update(Message::NavigateColumn(4));
+    // Navigate to Review column (index 2)
+    app.update(Message::NavigateColumn(2));
 
     app.handle_key(make_key(KeyCode::Char('W')));
     assert!(matches!(app.input.mode, InputMode::ConfirmWrapUp(TaskId(1))));
@@ -4867,10 +4867,10 @@ fn wrap_up_rebase_clears_conflict_flag() {
         t
     }], Duration::from_secs(300));
 
-    app.rebase_conflict_tasks.insert(TaskId(1));
+    app.find_task_mut(TaskId(1)).unwrap().sub_status = SubStatus::Conflict;
     app.update(Message::StartWrapUp(TaskId(1)));
     app.update(Message::WrapUpRebase);
-    assert!(!app.rebase_conflict_tasks.contains(&TaskId(1)));
+    assert!(!app.find_task(TaskId(1)).is_some_and(|t| t.sub_status == SubStatus::Conflict));
 }
 
 #[test]
@@ -5504,9 +5504,9 @@ fn w_key_on_epic_starts_epic_wrap_up() {
         make_review_subtask(1, 10, 1),
     ], Duration::from_secs(300));
     app.epics = vec![make_epic(10)];
-    // Epic is in Review column (visual col 4, first Review visual column)
-    app.selection_mut().set_column(4);
-    app.selection_mut().set_row(4, 0);
+    // Epic is in Review column (column 2)
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
 
     app.handle_key(make_key(KeyCode::Char('W')));
 
@@ -5866,13 +5866,18 @@ fn move_task_backward_resets_substatus() {
 
 #[test]
 fn render_shows_subcolumn_headers() {
-    let mut app = make_app();
+    // make_app() has one Running task (SubStatus::Active) → Running column shows "── active" header
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Running),
+        {
+            let mut t = make_task(2, TaskStatus::Running);
+            t.sub_status = SubStatus::Stale;
+            t
+        },
+    ], Duration::from_secs(300));
     let buf = render_to_buffer(&mut app, 160, 30);
-    assert!(buffer_contains(&buf, "Active"), "sub-column header 'Active' not found");
-    assert!(buffer_contains(&buf, "Blocked"), "sub-column header 'Blocked' not found");
-    assert!(buffer_contains(&buf, "Stale"), "sub-column header 'Stale' not found");
-    assert!(buffer_contains(&buf, "Revise"), "sub-column header 'Revise' not found");
-    assert!(buffer_contains(&buf, "Approved"), "sub-column header 'Approved' not found");
+    assert!(buffer_contains(&buf, "active"), "section header 'active' not found");
+    assert!(buffer_contains(&buf, "stale"), "section header 'stale' not found");
 }
 
 #[test]

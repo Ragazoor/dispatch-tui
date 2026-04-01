@@ -570,6 +570,50 @@ impl Database {
                 .context("Failed to update schema version to 16")?;
         }
 
+        if current_version < 17 {
+            // Migration 17: add 'conflict' as a valid running sub_status.
+            // Rebuild table to update the CHECK constraint.
+            conn.execute_batch(
+                "PRAGMA foreign_keys = OFF;
+                 BEGIN;
+                 CREATE TABLE tasks_new (
+                     id          INTEGER PRIMARY KEY,
+                     title       TEXT NOT NULL,
+                     description TEXT NOT NULL,
+                     repo_path   TEXT NOT NULL,
+                     status      TEXT NOT NULL DEFAULT 'backlog',
+                     worktree    TEXT,
+                     tmux_window TEXT,
+                     plan        TEXT,
+                     epic_id     INTEGER REFERENCES epics(id),
+                     sub_status  TEXT NOT NULL DEFAULT 'none',
+                     pr_url      TEXT,
+                     tag         TEXT,
+                     sort_order  INTEGER,
+                     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                     updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                     CHECK (
+                         (status = 'backlog'  AND sub_status = 'none') OR
+                         (status = 'running'  AND sub_status IN ('active','needs_input','stale','crashed','conflict')) OR
+                         (status = 'review'   AND sub_status IN ('awaiting_review','changes_requested','approved')) OR
+                         (status = 'done'     AND sub_status = 'none') OR
+                         (status = 'archived' AND sub_status = 'none')
+                     )
+                 );
+                 INSERT INTO tasks_new
+                     SELECT id, title, description, repo_path, status, worktree, tmux_window, plan,
+                            epic_id, sub_status, pr_url, tag, sort_order, created_at, updated_at
+                     FROM tasks;
+                 DROP TABLE tasks;
+                 ALTER TABLE tasks_new RENAME TO tasks;
+                 COMMIT;
+                 PRAGMA foreign_keys = ON;"
+            ).context("Failed to rebuild tasks table for migration 17 (add conflict sub_status)")?;
+
+            conn.pragma_update(None, "user_version", 17i64)
+                .context("Failed to update schema version to 17")?;
+        }
+
         Ok(())
     }
 
@@ -1398,7 +1442,7 @@ mod tests {
         let db = in_memory_db();
         let conn = db.conn.lock().unwrap();
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 16, "fresh DB should be at schema version 16");
+        assert_eq!(version, 17, "fresh DB should be at schema version 17");
     }
 
     #[test]
@@ -1449,7 +1493,7 @@ mod tests {
 
         // Version should be latest
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 16);
+        assert_eq!(version, 17);
 
         // Verify Migration 1 added the plan column
         let has_plan: bool = conn
@@ -1512,7 +1556,7 @@ mod tests {
         assert_eq!(status, "backlog");
 
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 16);
+        assert_eq!(version, 17);
     }
 
     #[test]
@@ -2238,7 +2282,7 @@ mod tests {
         Database::init_schema(&conn).unwrap();
 
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 16);
+        assert_eq!(version, 17);
 
         // Verify needs_input=1 became sub_status='needs_input'
         let ss: String = conn.query_row(
@@ -2312,7 +2356,7 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         let conn = db.conn.lock().unwrap();
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 16, "fresh DB should be at schema version 16");
+        assert_eq!(version, 17, "fresh DB should be at schema version 17");
     }
 
     #[test]
@@ -2428,7 +2472,7 @@ mod tests {
         Database::init_schema(&conn).unwrap();
 
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 16);
+        assert_eq!(version, 17);
 
         // (review, needs_input) must be converted to (review, awaiting_review)
         let ss: String = conn.query_row(

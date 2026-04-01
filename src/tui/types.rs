@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use ratatui::widgets::ListState;
 
-use crate::models::{Epic, EpicId, ReviewDecision, Task, TaskId, TaskStatus, TaskUsage, VisualColumn};
+use crate::models::{Epic, EpicId, ReviewDecision, SubStatus, Task, TaskId, TaskStatus, TaskUsage};
 
 // ---------------------------------------------------------------------------
 // MoveDirection
@@ -199,6 +199,7 @@ pub enum Command {
     FetchReviewPrs,
     PersistReviewPrs(Vec<crate::models::ReviewPr>),
     OpenInBrowser { url: String },
+    PatchSubStatus { id: TaskId, sub_status: SubStatus },
 }
 
 // ---------------------------------------------------------------------------
@@ -338,16 +339,16 @@ pub struct TaskEdit {
 #[derive(Debug, Clone)]
 pub struct BoardSelection {
     pub(in crate::tui) selected_column: usize,
-    pub(in crate::tui) selected_row: [usize; VisualColumn::COUNT],
+    pub(in crate::tui) selected_row: [usize; TaskStatus::COLUMN_COUNT],
     pub(in crate::tui) on_select_all: bool,
-    pub(in crate::tui) list_states: [ListState; VisualColumn::COUNT],
+    pub(in crate::tui) list_states: [ListState; TaskStatus::COLUMN_COUNT],
 }
 
 impl BoardSelection {
     pub fn new() -> Self {
         Self {
             selected_column: 0,
-            selected_row: [0; VisualColumn::COUNT],
+            selected_row: [0; TaskStatus::COLUMN_COUNT],
             on_select_all: false,
             list_states: std::array::from_fn(|_| ListState::default()),
         }

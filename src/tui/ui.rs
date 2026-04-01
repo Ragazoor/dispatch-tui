@@ -8,7 +8,7 @@ use ratatui::{
 };
 
 use crate::dispatch;
-use crate::models::{Epic, ReviewDecision, ReviewPr, SubStatus, Task, TaskStatus, TaskUsage, VisualColumn, Staleness, format_age};
+use crate::models::{Epic, ReviewDecision, ReviewPr, SubStatus, Task, TaskStatus, TaskUsage, Staleness, format_age};
 use super::{App, ColumnItem, InputMode, ViewMode};
 
 // ── Tokyo Night palette ─────────────────────────────────────────────
@@ -58,26 +58,6 @@ fn column_bg_color(status: TaskStatus) -> Color {
     }
 }
 
-/// Color for a visual sub-column (8 columns).
-fn visual_column_color(vcol_idx: usize) -> Color {
-    match vcol_idx {
-        0 => MUTED,                          // Backlog
-        1 => YELLOW,                         // Active: standard Running yellow
-        2 => Color::Rgb(224, 160, 120),      // Blocked: yellow-red
-        3 => Color::Rgb(224, 180, 100),      // Stale: yellow-orange
-        4 => PURPLE,                         // PR Created: standard Review purple
-        5 => Color::Rgb(200, 130, 150),      // Revise: purple-red
-        6 => Color::Rgb(140, 190, 160),      // Approved: purple-green
-        7 => GREEN,                          // Done
-        _ => MUTED,
-    }
-}
-
-/// Tinted background for a visual sub-column, inherited from its parent status.
-fn visual_column_bg_color(vcol_idx: usize) -> Color {
-    let parent = VisualColumn::ALL[vcol_idx].parent_status;
-    column_bg_color(parent)
-}
 
 /// Unicode status icon for the metadata line of each card.
 fn status_icon(status: TaskStatus) -> &'static str {
@@ -277,8 +257,7 @@ fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
 
     for (col_idx, &status) in TaskStatus::ALL.iter().enumerate() {
         let count = app.column_items_for_status(status).len();
-        let vcol = &VisualColumn::ALL[app.selected_column()];
-        let is_focused = vcol.parent_status == status;
+        let is_focused = app.selected_column() == col_idx;
         let color = column_color(status);
 
         let (prefix, label_style) = if is_focused {
@@ -364,9 +343,9 @@ fn build_task_list_item<'a>(
     ]);
 
     // Line 2: metadata
-    let is_conflict = app.rebase_conflict_tasks().contains(&task.id);
-    let is_crashed = app.is_crashed(task.id);
-    let is_stale = app.is_stale(task.id);
+    let is_conflict = task.sub_status == SubStatus::Conflict;
+    let is_crashed = task.sub_status == SubStatus::Crashed;
+    let is_stale = task.sub_status == SubStatus::Stale;
 
     let line2 = if is_conflict {
         Line::from(vec![
@@ -465,135 +444,78 @@ fn build_task_list_item<'a>(
     item
 }
 
+/// Non-selectable section header injected between substatus groups.
+fn render_substatus_header(label: &str, col_color: Color) -> ListItem<'static> {
+    ListItem::new(Line::from(Span::styled(
+        format!("  \u{2500}\u{2500} {label} "),
+        Style::default().fg(col_color).add_modifier(Modifier::DIM),
+    )))
+}
+
 fn render_columns(frame: &mut Frame, app: &mut App, area: Rect, now: DateTime<Utc>) {
-    // Split vertically: parent header (1), sub-column label (1), card area (remaining)
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),  // parent status header
-            Constraint::Length(1),  // sub-column label
-            Constraint::Min(1),    // task cards
-        ])
+    let column_areas = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(
+            [Constraint::Ratio(1, TaskStatus::COLUMN_COUNT as u32); TaskStatus::COLUMN_COUNT]
+        )
         .split(area);
 
-    let header_row = rows[0];
-    let label_row = rows[1];
-    let cards_row = rows[2];
+    for (col_idx, &status) in TaskStatus::ALL.iter().enumerate() {
+        let col_area = column_areas[col_idx];
+        let is_focused = app.selected_column() == col_idx;
+        let color = column_color(status);
+        // Only Running and Review benefit from substatus grouping headers.
+        let show_headers = matches!(status, TaskStatus::Running | TaskStatus::Review);
 
-    // 8 visual columns: Backlog=3/18, Active=2/18, Blocked=2/18, Stale=2/18,
-    // PR Created=2/18, Revise=2/18, Approved=2/18, Done=3/18
-    let col_constraints = [
-        Constraint::Ratio(3, 18),  // Backlog
-        Constraint::Ratio(2, 18),  // Active
-        Constraint::Ratio(2, 18),  // Blocked
-        Constraint::Ratio(2, 18),  // Stale
-        Constraint::Ratio(2, 18),  // PR Created
-        Constraint::Ratio(2, 18),  // Revise
-        Constraint::Ratio(2, 18),  // Approved
-        Constraint::Ratio(3, 18),  // Done
-    ];
+        let column_items = app.column_items_for_status(status);
+        let selected_row = app.selected_row()[col_idx];
 
-    let header_areas = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints(col_constraints)
-        .split(header_row);
+        let mut list_items: Vec<ListItem> = Vec::new();
+        let mut list_selection_idx: Option<usize> = None;
+        let mut current_priority: Option<u8> = None;
 
-    let label_areas = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints(col_constraints)
-        .split(label_row);
+        for (item_idx, item) in column_items.iter().enumerate() {
+            if show_headers {
+                let priority = match item {
+                    ColumnItem::Task(t) => t.sub_status.column_priority(),
+                    ColumnItem::Epic(_) => 9,
+                };
+                if Some(priority) != current_priority {
+                    current_priority = Some(priority);
+                    let label = match item {
+                        ColumnItem::Task(t) => t.sub_status.header_label(),
+                        ColumnItem::Epic(_) => "epics",
+                    };
+                    list_items.push(render_substatus_header(label, color));
+                }
+            }
 
-    let card_areas = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints(col_constraints)
-        .split(cards_row);
+            if item_idx == selected_row {
+                list_selection_idx = Some(list_items.len());
+            }
 
-    // ── Parent header row ──
-    // For each parent status, span across its sub-columns and render centered name.
-    for &status in TaskStatus::ALL {
-        let start = VisualColumn::parent_group_start(status);
-        let span_count = VisualColumn::parent_group_span(status);
-        if span_count == 0 { continue; }
-        let end = start + span_count - 1;
-
-        // Compute the combined area from first to last column
-        let x0 = header_areas[start].x;
-        let x1 = header_areas[end].x + header_areas[end].width;
-        let combined = Rect::new(x0, header_row.y, x1.saturating_sub(x0), header_row.height);
-
-        let selected_vcol = &VisualColumn::ALL[app.selected_column()];
-        let is_focused = selected_vcol.parent_status == status;
-        let style = if is_focused {
-            Style::default().fg(column_color(status)).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(MUTED)
-        };
-
-        let text = Paragraph::new(Line::from(Span::styled(status.as_str(), style)))
-            .alignment(Alignment::Center);
-        frame.render_widget(text, combined);
-    }
-
-    // ── Sub-column label row ──
-    // Only render labels for columns that have sub-grouping (Running and Review sub-columns).
-    // Backlog and Done are single-column groups, so leave them blank.
-    for (vcol_idx, vcol) in VisualColumn::ALL.iter().enumerate() {
-        let span_count = VisualColumn::parent_group_span(vcol.parent_status);
-        if span_count <= 1 {
-            continue; // Backlog and Done — no sub-label needed
+            let is_cursor = is_focused && !app.on_select_all() && item_idx == selected_row;
+            list_items.push(match item {
+                ColumnItem::Task(task) => build_task_list_item(task, status, app, now, is_cursor, color),
+                ColumnItem::Epic(epic) => render_epic_item(epic, is_cursor, app, status),
+            });
         }
 
-        let is_focused = app.selected_column() == vcol_idx;
-        let style = if is_focused {
-            Style::default().fg(visual_column_color(vcol_idx)).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(MUTED)
-        };
-
-        let text = Paragraph::new(Line::from(Span::styled(vcol.label, style)))
-            .alignment(Alignment::Center);
-        frame.render_widget(text, label_areas[vcol_idx]);
-    }
-
-    // ── Task card area ──
-    for vcol_idx in 0..VisualColumn::COUNT {
-        let vcol = &VisualColumn::ALL[vcol_idx];
-        let col_area = card_areas[vcol_idx];
-        let is_focused = app.selected_column() == vcol_idx;
-        let color = visual_column_color(vcol_idx);
-
-        let column_items = app.column_items_for_visual_column(vcol_idx);
-        let selected_row = app.selected_row()[vcol_idx];
-
-        let items: Vec<ListItem> = column_items
-            .iter()
-            .enumerate()
-            .map(|(row_idx, item)| {
-                let is_cursor = is_focused && !app.on_select_all() && row_idx == selected_row;
-                match item {
-                    ColumnItem::Task(task) => build_task_list_item(task, vcol.parent_status, app, now, is_cursor, color),
-                    ColumnItem::Epic(epic) => render_epic_item(epic, is_cursor, app, vcol.parent_status),
-                }
-            })
-            .collect();
-
-        // Update ListState selection for the focused column so the widget
-        // auto-scrolls to keep the cursor visible.
+        let on_select_all = app.on_select_all();
         let sel = app.selection_mut();
         if is_focused {
-            *sel.list_states[vcol_idx].selected_mut() = sel.list_state_index(vcol_idx);
+            *sel.list_states[col_idx].selected_mut() =
+                if on_select_all { None } else { list_selection_idx };
         }
 
         if is_focused {
             let block = Block::default()
-                .style(Style::default().bg(visual_column_bg_color(vcol_idx)));
+                .style(Style::default().bg(column_bg_color(status)));
             let inner = block.inner(col_area);
             frame.render_widget(block, col_area);
-            let list = List::new(items);
-            frame.render_stateful_widget(list, inner, &mut sel.list_states[vcol_idx]);
+            frame.render_stateful_widget(List::new(list_items), inner, &mut sel.list_states[col_idx]);
         } else {
-            let list = List::new(items);
-            frame.render_stateful_widget(list, col_area, &mut sel.list_states[vcol_idx]);
+            frame.render_stateful_widget(List::new(list_items), col_area, &mut sel.list_states[col_idx]);
         }
     }
 }
@@ -922,7 +844,7 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect, _now: DateTime<Utc>) 
                         ));
                     }
                 }
-                if app.rebase_conflict_tasks().contains(&task.id) {
+                if task.sub_status == SubStatus::Conflict {
                     spans.push(Span::styled(
                         " \u{26a0} conflict",
                         Style::default().fg(Color::Red),
@@ -1424,7 +1346,9 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     match &app.input.mode {
         InputMode::Normal => {
-            let key_color = column_color(VisualColumn::ALL[app.selected_column()].parent_status);
+            let key_color = TaskStatus::from_column_index(app.selected_column())
+                .map(column_color)
+                .unwrap_or(MUTED);
             let spans = if app.has_selection() {
                 let count = app.selected_tasks().len() + app.selected_epics().len();
                 let has_tasks = !app.selected_tasks().is_empty();

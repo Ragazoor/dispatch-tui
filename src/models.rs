@@ -113,6 +113,7 @@ pub enum SubStatus {
     NeedsInput,
     Stale,
     Crashed,
+    Conflict,
     AwaitingReview,
     ChangesRequested,
     Approved,
@@ -126,6 +127,7 @@ impl SubStatus {
             SubStatus::NeedsInput => "needs_input",
             SubStatus::Stale => "stale",
             SubStatus::Crashed => "crashed",
+            SubStatus::Conflict => "conflict",
             SubStatus::AwaitingReview => "awaiting_review",
             SubStatus::ChangesRequested => "changes_requested",
             SubStatus::Approved => "approved",
@@ -139,6 +141,7 @@ impl SubStatus {
             "needs_input" => Some(SubStatus::NeedsInput),
             "stale" => Some(SubStatus::Stale),
             "crashed" => Some(SubStatus::Crashed),
+            "conflict" => Some(SubStatus::Conflict),
             "awaiting_review" => Some(SubStatus::AwaitingReview),
             "changes_requested" => Some(SubStatus::ChangesRequested),
             "approved" => Some(SubStatus::Approved),
@@ -152,7 +155,11 @@ impl SubStatus {
             TaskStatus::Backlog => matches!(self, SubStatus::None),
             TaskStatus::Running => matches!(
                 self,
-                SubStatus::Active | SubStatus::NeedsInput | SubStatus::Stale | SubStatus::Crashed
+                SubStatus::Active
+                    | SubStatus::NeedsInput
+                    | SubStatus::Stale
+                    | SubStatus::Crashed
+                    | SubStatus::Conflict
             ),
             TaskStatus::Review => matches!(
                 self,
@@ -171,6 +178,36 @@ impl SubStatus {
             TaskStatus::Review => SubStatus::AwaitingReview,
             TaskStatus::Done => SubStatus::None,
             TaskStatus::Archived => SubStatus::None,
+        }
+    }
+
+    /// Sort priority for column grouping (lower = more urgent = top of column).
+    pub fn column_priority(self) -> u8 {
+        match self {
+            SubStatus::Conflict  => 0,
+            SubStatus::Crashed   => 1,
+            SubStatus::Stale     => 2,
+            SubStatus::NeedsInput => 3,
+            SubStatus::ChangesRequested => 4,
+            SubStatus::Active    => 5,
+            SubStatus::AwaitingReview => 5,  // same slot as Active
+            SubStatus::None      => 5,
+            SubStatus::Approved  => 6,
+        }
+    }
+
+    /// Label for section header lines within a column.
+    pub fn header_label(self) -> &'static str {
+        match self {
+            SubStatus::None => "active",
+            SubStatus::Active => "active",
+            SubStatus::NeedsInput => "needs input",
+            SubStatus::Stale => "stale",
+            SubStatus::Crashed => "crashed",
+            SubStatus::Conflict => "conflict",
+            SubStatus::AwaitingReview => "awaiting review",
+            SubStatus::ChangesRequested => "changes requested",
+            SubStatus::Approved => "approved",
         }
     }
 }
@@ -205,7 +242,7 @@ impl VisualColumn {
         VisualColumn { label: "Backlog",    parent_status: TaskStatus::Backlog,  sub_statuses: &[SubStatus::None] },
         VisualColumn { label: "Active",     parent_status: TaskStatus::Running,  sub_statuses: &[SubStatus::Active] },
         VisualColumn { label: "Blocked",    parent_status: TaskStatus::Running,  sub_statuses: &[SubStatus::NeedsInput] },
-        VisualColumn { label: "Stale",      parent_status: TaskStatus::Running,  sub_statuses: &[SubStatus::Stale, SubStatus::Crashed] },
+        VisualColumn { label: "Stale",      parent_status: TaskStatus::Running,  sub_statuses: &[SubStatus::Stale, SubStatus::Crashed, SubStatus::Conflict] },
         VisualColumn { label: "PR Created", parent_status: TaskStatus::Review,   sub_statuses: &[SubStatus::AwaitingReview] },
         VisualColumn { label: "Revise",     parent_status: TaskStatus::Review,   sub_statuses: &[SubStatus::ChangesRequested] },
         VisualColumn { label: "Approved",   parent_status: TaskStatus::Review,   sub_statuses: &[SubStatus::Approved] },

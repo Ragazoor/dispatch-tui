@@ -29,7 +29,6 @@ pub struct App {
     pub(in crate::tui) archive: ArchiveState,
     pub(in crate::tui) selected_tasks: HashSet<TaskId>,
     pub(in crate::tui) selected_epics: HashSet<EpicId>,
-    pub(in crate::tui) rebase_conflict_tasks: HashSet<TaskId>,
     pub(in crate::tui) pending_done_tasks: Vec<TaskId>,
     pub(in crate::tui) notifications_enabled: bool,
     pub(in crate::tui) repo_filter: HashSet<String>,
@@ -68,7 +67,6 @@ impl App {
             archive: ArchiveState::default(),
             selected_tasks: HashSet::new(),
             selected_epics: HashSet::new(),
-            rebase_conflict_tasks: HashSet::new(),
             pending_done_tasks: Vec::new(),
             notifications_enabled: true,
             repo_filter: HashSet::new(),
@@ -103,7 +101,7 @@ impl App {
     pub fn tasks(&self) -> &[Task] { &self.tasks }
     pub fn should_quit(&self) -> bool { self.should_quit }
     pub fn selected_column(&self) -> usize { self.selection().column() }
-    pub fn selected_row(&self) -> &[usize; VisualColumn::COUNT] { &self.selection().selected_row }
+    pub fn selected_row(&self) -> &[usize; TaskStatus::COLUMN_COUNT] { &self.selection().selected_row }
     pub fn view_mode(&self) -> &ViewMode { &self.view_mode }
     pub fn epics(&self) -> &[Epic] { &self.epics }
     pub fn mode(&self) -> &InputMode { &self.input.mode }
@@ -123,7 +121,7 @@ impl App {
     pub fn selected_epics(&self) -> &HashSet<EpicId> { &self.selected_epics }
     pub fn on_select_all(&self) -> bool { self.selection().on_select_all }
     pub fn has_selection(&self) -> bool { !self.selected_tasks.is_empty() || !self.selected_epics.is_empty() }
-    pub fn rebase_conflict_tasks(&self) -> &HashSet<TaskId> { &self.rebase_conflict_tasks }
+
     pub fn merge_queue(&self) -> Option<&MergeQueue> { self.merge_queue.as_ref() }
     pub fn notifications_enabled(&self) -> bool { self.notifications_enabled }
     pub fn repo_filter(&self) -> &HashSet<String> { &self.repo_filter }
@@ -224,11 +222,12 @@ impl App {
         }
 
         items.sort_by_key(|item| {
-            let (sort_order, id) = match item {
-                ColumnItem::Task(t) => (t.sort_order, t.id.0),
-                ColumnItem::Epic(e) => (e.sort_order, e.id.0),
-            };
-            (sort_order.unwrap_or(id), id)
+            match item {
+                ColumnItem::Task(t) => {
+                    (t.sub_status.column_priority(), t.sort_order.unwrap_or(t.id.0), t.id.0)
+                }
+                ColumnItem::Epic(e) => (9u8, e.sort_order.unwrap_or(e.id.0), e.id.0),
+            }
         });
 
         items
@@ -285,10 +284,8 @@ impl App {
             return None;
         }
         let col = self.selection().column();
-        if col >= VisualColumn::COUNT {
-            return None;
-        }
-        let items = self.column_items_for_visual_column(col);
+        let status = TaskStatus::from_column_index(col)?;
+        let items = self.column_items_for_status(status);
         let row = self.selection().row(col);
         items.into_iter().nth(row)
     }
@@ -304,8 +301,8 @@ impl App {
 
     /// Clamp all selected_row values to be within bounds for each column.
     pub fn clamp_selection(&mut self) {
-        for col in 0..VisualColumn::COUNT {
-            let count = self.column_items_for_visual_column(col).len();
+        for (col, &status) in TaskStatus::ALL.iter().enumerate() {
+            let count = self.column_items_for_status(status).len();
             let sel = self.selection_mut();
             if count == 0 {
                 sel.set_row(col, 0);
@@ -545,7 +542,7 @@ impl App {
 
     fn handle_navigate_column(&mut self, delta: isize) -> Vec<Command> {
         let new_col = (self.selection().column() as isize + delta)
-            .clamp(0, (VisualColumn::COUNT - 1) as isize) as usize;
+            .clamp(0, (TaskStatus::COLUMN_COUNT - 1) as isize) as usize;
         self.selection_mut().set_column(new_col);
         self.clamp_selection();
         vec![]
@@ -553,10 +550,14 @@ impl App {
 
     fn handle_navigate_row(&mut self, delta: isize) -> Vec<Command> {
         let col = self.selection().column();
-        if col >= VisualColumn::COUNT {
+        if col >= TaskStatus::COLUMN_COUNT {
             return vec![];
         }
-        let count = self.column_items_for_visual_column(col).len();
+        let status = match TaskStatus::from_column_index(col) {
+            Some(s) => s,
+            None => return vec![],
+        };
+        let count = self.column_items_for_status(status).len();
 
         if self.selection().on_select_all {
             // On the toggle row
@@ -651,7 +652,6 @@ impl App {
     }
 
     fn handle_move_task(&mut self, id: TaskId, direction: MoveDirection) -> Vec<Command> {
-        self.rebase_conflict_tasks.remove(&id);
         if let Some(task) = self.find_task_mut(id) {
             let new_status = match direction {
                 MoveDirection::Forward => task.status.next(),
@@ -905,7 +905,6 @@ impl App {
         // Prune selections for tasks that no longer exist
         let valid_ids: HashSet<TaskId> = new_tasks.iter().map(|t| t.id).collect();
         self.selected_tasks.retain(|id| valid_ids.contains(id));
-        self.rebase_conflict_tasks.retain(|id| valid_ids.contains(id));
         self.tasks = new_tasks;
         self.clamp_selection();
         cmds
@@ -1073,7 +1072,6 @@ impl App {
     }
 
     fn handle_resumed(&mut self, id: TaskId, tmux_window: String) -> Vec<Command> {
-        self.rebase_conflict_tasks.remove(&id);
         if let Some(task) = self.find_task_mut(id) {
             task.tmux_window = Some(tmux_window);
             task.status = TaskStatus::Running;
@@ -1536,10 +1534,10 @@ impl App {
     fn handle_finish_complete(&mut self, id: TaskId) -> Vec<Command> {
         let in_queue = self.merge_queue.as_ref().is_some_and(|q| q.current == Some(id));
 
-        self.rebase_conflict_tasks.remove(&id);
         let mut cmds = if let Some(task) = self.find_task_mut(id) {
             task.tmux_window = None;
             task.status = TaskStatus::Done;
+            task.sub_status = SubStatus::None;
             let task_clone = task.clone();
             self.clear_agent_tracking(id);
             self.clamp_selection();
@@ -1563,8 +1561,13 @@ impl App {
     }
 
     fn handle_finish_failed(&mut self, id: TaskId, error: String, is_conflict: bool) -> Vec<Command> {
+        let mut cmds = Vec::new();
+
         if is_conflict {
-            self.rebase_conflict_tasks.insert(id);
+            if let Some(task) = self.find_task_mut(id) {
+                task.sub_status = SubStatus::Conflict;
+            }
+            cmds.push(Command::PatchSubStatus { id, sub_status: SubStatus::Conflict });
         }
 
         if let Some(q) = &mut self.merge_queue {
@@ -1576,12 +1579,12 @@ impl App {
                 self.set_status(format!(
                     "Epic merge paused ({completed}/{total}): #{id} \u{2014} {error}"
                 ));
-                return vec![];
+                return cmds;
             }
         }
 
         self.set_status(error);
-        vec![]
+        cmds
     }
 
     // -----------------------------------------------------------------------
@@ -1720,7 +1723,12 @@ impl App {
         };
         self.input.mode = InputMode::Normal;
         self.set_status("Rebasing...".to_string());
-        self.rebase_conflict_tasks.remove(&id);
+        // Optimistically clear conflict substatus — FinishComplete will persist it.
+        if let Some(task) = self.find_task_mut(id) {
+            if task.sub_status == SubStatus::Conflict {
+                task.sub_status = SubStatus::None;
+            }
+        }
 
         if let Some(task) = self.find_task(id) {
             let worktree = match &task.worktree {
@@ -1887,7 +1895,6 @@ impl App {
 
         match action {
             MergeAction::Rebase => {
-                self.rebase_conflict_tasks.remove(&next_id);
                 vec![Command::Finish {
                     id: next_id,
                     repo_path,
