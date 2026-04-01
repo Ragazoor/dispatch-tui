@@ -1509,7 +1509,7 @@ async fn wrap_up_accepts_running_active_task() {
         MockProcessRunner::ok(),                       // git rebase main
         MockProcessRunner::ok(),                       // git merge --ff-only
     ]));
-    let state = Arc::new(McpState { db: db.clone(), notify_tx: None, runner, mcp_port: crate::DEFAULT_PORT });
+    let state = Arc::new(McpState { db: db.clone(), notify_tx: None, runner });
 
     let task_id = db.create_task("T", "d", "/repo", None, TaskStatus::Running).unwrap();
     db.patch_task(task_id, &db::TaskPatch::new()

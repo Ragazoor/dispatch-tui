@@ -6341,6 +6341,21 @@ fn handle_key_tag_esc_cancels() {
 }
 
 #[test]
+fn render_input_form_shows_during_input_tag() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputTag;
+    app.input.task_draft = Some(TaskDraft {
+        title: "My task".to_string(),
+        ..Default::default()
+    });
+
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(buffer_contains(&buf, "New Task"), "form overlay title should be visible");
+    assert!(buffer_contains(&buf, "My task"), "draft title should be shown as completed");
+    assert!(buffer_contains(&buf, "(b)ug"), "tag options should be visible");
+}
+
+#[test]
 fn handle_key_repo_filter_toggle() {
     let mut app = make_app();
     app.repo_paths = vec!["/repo".to_string(), "/other".to_string()];

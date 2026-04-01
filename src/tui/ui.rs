@@ -931,6 +931,18 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
                 Line::from(Span::styled("  Enter to confirm, Esc to cancel", hint)),
             ]
         }
+        InputMode::InputTag => {
+            let title = app.input.task_draft.as_ref().map(|d| d.title.as_str()).unwrap_or("");
+            vec![
+                Line::from(Span::styled(format!("  Title: {title}"), completed)),
+                Line::from(Span::styled(
+                    "  Tag: (b)ug  (f)eature  (c)hore  (e)pic  (Enter=none)",
+                    active,
+                )),
+                Line::from(""),
+                Line::from(Span::styled("  Select a tag or Enter to skip, Esc to cancel", hint)),
+            ]
+        }
         InputMode::InputDescription => {
             let title = app.input.task_draft.as_ref().map(|d| d.title.as_str()).unwrap_or("");
             vec![
