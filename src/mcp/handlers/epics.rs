@@ -54,7 +54,9 @@ pub(super) fn handle_create_epic(state: &McpState, id: Option<Value>, args: Valu
     };
     tracing::info!(title = %parsed.title, "MCP create_epic");
 
-    match state.db.create_epic(&parsed.title, &parsed.description, &parsed.repo_path) {
+    let repo_path = crate::models::expand_tilde(&parsed.repo_path);
+
+    match state.db.create_epic(&parsed.title, &parsed.description, &repo_path) {
         Ok(epic) => {
             if let Some(so) = parsed.sort_order {
                 let _ = state.db.patch_epic(epic.id, &EpicPatch::new().sort_order(Some(so)));

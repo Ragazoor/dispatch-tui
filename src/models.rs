@@ -1,6 +1,25 @@
 use chrono::{DateTime, Utc};
 
 // ---------------------------------------------------------------------------
+// Path utilities
+// ---------------------------------------------------------------------------
+
+/// Expand a leading `~` or `~/` to the user's home directory.
+/// Returns the path unchanged if it doesn't start with `~` or `$HOME` is unset.
+pub fn expand_tilde(path: &str) -> String {
+    if let Some(rest) = path.strip_prefix("~/") {
+        if let Some(home) = std::env::var_os("HOME") {
+            return format!("{}/{rest}", home.to_string_lossy());
+        }
+    } else if path == "~" {
+        if let Some(home) = std::env::var_os("HOME") {
+            return home.to_string_lossy().into_owned();
+        }
+    }
+    path.to_string()
+}
+
+// ---------------------------------------------------------------------------
 // TaskStatus
 // ---------------------------------------------------------------------------
 
@@ -1319,4 +1338,25 @@ mod tests {
         }
     }
 
+    #[test]
+    fn expand_tilde_with_home() {
+        let home = std::env::var("HOME").unwrap();
+        assert_eq!(expand_tilde("~/foo/bar"), format!("{home}/foo/bar"));
+        assert_eq!(expand_tilde("~"), home);
+    }
+
+    #[test]
+    fn expand_tilde_absolute_unchanged() {
+        assert_eq!(expand_tilde("/absolute/path"), "/absolute/path");
+    }
+
+    #[test]
+    fn expand_tilde_relative_unchanged() {
+        assert_eq!(expand_tilde("relative/path"), "relative/path");
+    }
+
+    #[test]
+    fn expand_tilde_not_at_start_unchanged() {
+        assert_eq!(expand_tilde("/foo/~/bar"), "/foo/~/bar");
+    }
 }

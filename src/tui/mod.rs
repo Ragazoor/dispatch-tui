@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use crate::dispatch;
-use crate::models::{Epic, EpicId, SubStatus, Task, TaskId, TaskStatus, TaskUsage, VisualColumn, epic_status};
+use crate::models::{self, Epic, EpicId, SubStatus, Task, TaskId, TaskStatus, TaskUsage, VisualColumn, epic_status};
 
 // ---------------------------------------------------------------------------
 // App
@@ -1510,6 +1510,7 @@ impl App {
     }
 
     fn finish_task_creation(&mut self, repo_path: String) -> Vec<Command> {
+        let repo_path = models::expand_tilde(&repo_path);
         let mut draft = self.input.task_draft.take().unwrap_or_default();
         draft.repo_path = repo_path.clone();
         self.input.mode = InputMode::Normal;
@@ -2408,6 +2409,7 @@ impl App {
     }
 
     fn finish_epic_creation(&mut self, repo_path: String) -> Vec<Command> {
+        let repo_path = models::expand_tilde(&repo_path);
         let mut draft = self.input.epic_draft.take().unwrap_or_default();
         draft.repo_path = repo_path.clone();
         self.input.mode = InputMode::Normal;

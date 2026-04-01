@@ -211,6 +211,8 @@ pub(super) fn handle_update_task(state: &McpState, id: Option<Value>, args: Valu
         );
     }
 
+    let expanded_repo_path = parsed.repo_path.as_deref().map(crate::models::expand_tilde);
+
     let mut patch = db::TaskPatch::new();
     if let Some(s) = status {
         patch = patch.status(s);
@@ -224,7 +226,7 @@ pub(super) fn handle_update_task(state: &McpState, id: Option<Value>, args: Valu
     if let Some(ref d) = parsed.description {
         patch = patch.description(d);
     }
-    if let Some(ref r) = parsed.repo_path {
+    if let Some(ref r) = expanded_repo_path {
         patch = patch.repo_path(r);
     }
     if let Some(so) = parsed.sort_order {
@@ -292,6 +294,8 @@ pub(super) fn handle_create_task(state: &McpState, id: Option<Value>, args: Valu
     };
     tracing::info!(title = %parsed.title, epic_id = ?parsed.epic_id, "MCP create_task");
 
+    let repo_path = crate::models::expand_tilde(&parsed.repo_path);
+
     let plan = parsed.plan.as_deref().map(|p| {
         std::fs::canonicalize(p)
             .map(|abs| abs.to_string_lossy().into_owned())
@@ -303,7 +307,7 @@ pub(super) fn handle_create_task(state: &McpState, id: Option<Value>, args: Valu
     match state.db.create_task(
         &parsed.title,
         &parsed.description,
-        &parsed.repo_path,
+        &repo_path,
         plan.as_deref(),
         status,
     ) {
