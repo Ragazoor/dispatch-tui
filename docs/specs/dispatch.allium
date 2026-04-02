@@ -45,6 +45,7 @@ enum SubStatus {
     needs_input     -- agent is blocked waiting for human interaction (Blocked visual column)
     stale           -- no output change detected beyond inactivity_timeout
     crashed         -- tmux window disappeared unexpectedly
+    conflict        -- rebase/merge encountered a conflict
 
     -- review
     awaiting_review   -- PR created, no review decision yet
@@ -57,7 +58,7 @@ enum SubStatus {
 
 -- Valid SubStatus values per parent status (enforced by MCP; bypassed by CLI hooks):
 --   backlog   : none
---   running   : active | needs_input | stale | crashed
+--   running   : active | needs_input | stale | crashed | conflict
 --   review    : awaiting_review | changes_requested | approved
 --   done      : none
 --   archived  : none
@@ -122,7 +123,7 @@ entity Epic {
     title: String
     description: String
     repo_path: String
-    done: Boolean
+    status: TaskStatus
     plan: String?
     sort_order: Integer?
     created_at: Timestamp
@@ -133,9 +134,6 @@ entity Epic {
     subtasks: Task with epic = this
     active_subtasks: subtasks where status != archived
     subtask_statuses: active_subtasks -> status
-
-    -- Derived kanban status (not persisted)
-    derived_status: derive_epic_status(this)
 }
 
 entity TaskUsage {
@@ -184,7 +182,7 @@ config {
 --   0 | Backlog          | backlog       | none
 --   1 | Active           | running       | active
 --   2 | Blocked          | running       | needs_input
---   3 | Stale            | running       | stale, crashed
+--   3 | Stale            | running       | stale, crashed, conflict
 --   4 | PR Created       | review        | awaiting_review  (split into "awaiting review" / "awaiting merge" sections by detach state)
 --   5 | Revise           | review        | changes_requested
 --   6 | Approved         | review        | approved
@@ -232,7 +230,7 @@ rule CreateTask {
 }
 
 rule CreateQuickTask {
-    when: QuickDispatch(repo_path)
+    when: QuickDispatch(repo_path, epic_id?)
 
     ensures:
         let task = Task.created(
@@ -241,10 +239,15 @@ rule CreateQuickTask {
             repo_path: repo_path,
             status: backlog,
             sub_status: SubStatus.default_for(backlog),
+            epic: if epic_id != null then Epic.find(epic_id) else null,
             created_at: now,
             updated_at: now
         )
         AgentDispatched(task: task, mode: quick)
+
+    @guidance
+        -- When invoked from the epic view, epic_id is set to the
+        -- current epic, linking the quick task as a subtask.
 }
 
 -- == Dispatch ==
@@ -279,6 +282,29 @@ rule BrainstormTask {
     )
     ensures: task.tmux_window = TmuxWindow.created(name: "task-" + task.id)
     ensures: AgentLaunched(task: task, mode: brainstorm)
+}
+
+rule PlanTask {
+    when: PlanTask(task)
+
+    requires: task.status = backlog
+    requires: task.has_plan = false
+    requires: task.tag = "feature"
+
+    ensures: task.status = running
+    ensures: task.sub_status = SubStatus.default_for(running)
+    ensures: task.worktree = Worktree.created(
+        path: task.repo_path + "/.worktrees/" + task.id + "-" + slugify(task.title),
+        branch: task.id + "-" + slugify(task.title)
+    )
+    ensures: task.tmux_window = TmuxWindow.created(name: "task-" + task.id)
+    ensures: AgentLaunched(task: task, mode: plan)
+
+    @guidance
+        -- Plan mode launches Claude with --permission-mode plan, which
+        -- restricts the agent to writing an implementation plan without
+        -- making code changes. This is the dispatch path for feature-
+        -- tagged tasks that do not yet have a plan.
 }
 
 rule ResumeTask {
@@ -422,14 +448,8 @@ rule PrMerged {
 rule WrapUpRebase {
     when: WrapUp(task, rebase)
 
-    -- Available from any wrappable task:
-    --   review (any sub_status), or
-    --   running with sub_status = needs_input (Blocked visual column).
-    -- The running/needs_input case arises when HookPreToolUse fires
-    -- during the same agent session as the wrap_up MCP call, temporarily
-    -- moving the task to running before the handler checks.
-    requires: task.status = review
-              or (task.status = running and task.sub_status = needs_input)
+    -- Available from any running or review task with a worktree.
+    requires: task.status = review or task.status = running
     requires: task.worktree != null
 
     let branch = task.worktree.branch
@@ -453,11 +473,8 @@ rule WrapUpRebase {
 rule WrapUpPr {
     when: WrapUp(task, pr)
 
-    -- Available from any wrappable task:
-    --   review (any sub_status), or
-    --   running with sub_status = needs_input (Blocked visual column).
-    requires: task.status = review
-              or (task.status = running and task.sub_status = needs_input)
+    -- Available from any running or review task with a worktree.
+    requires: task.status = review or task.status = running
     requires: task.worktree != null
 
     ensures: task.pr_url != null
@@ -505,12 +522,19 @@ rule FinishTaskConflict {
     when: RebaseConflict(task)
 
     -- Fires when FinishTask's rebase encounters a conflict.
-    -- The rebase is aborted and the task stays in review.
+    -- The rebase is aborted and the task is marked with conflict sub_status.
 
-    requires: task.status = review
-
-    ensures: task.status = review
+    ensures: task.sub_status = conflict
     ensures: UserInformed(about: rebase_conflict, task: task)
+
+    @guidance
+        -- Conflict has the highest visual column priority (0, above
+        -- crashed at 1). It appears in the Stale visual column alongside
+        -- stale and crashed tasks.
+        -- Staleness detection skips conflict tasks (they are not
+        -- re-evaluated for inactivity).
+        -- PR review polling skips overwriting conflict sub_status.
+        -- Wrap-up rebase clears conflict optimistically before rebasing.
 }
 
 -- == Archive ==
@@ -564,7 +588,7 @@ rule DetectStaleAgent {
     when: task.status = running
           and task.tmux_window != null
           and time_since_last_output(task) > inactivity_timeout
-          and task.sub_status not in {stale, crashed}
+          and task.sub_status not in {stale, crashed, conflict}
 
     ensures: task.sub_status = stale
     ensures: UserInformed(
@@ -605,7 +629,7 @@ rule DetectCrashedAgent {
 rule NotifyNeedsInput {
     when: task: Task.sub_status transitions_to needs_input
 
-    requires: task.status = review
+    requires: task.status = running
 
     ensures: DesktopNotification(
         task: task,
@@ -618,7 +642,7 @@ rule NotifyNeedsInput {
         -- once per transition to needs_input. The notified state is
         -- cleared when sub_status leaves needs_input, allowing
         -- re-notification on a subsequent re-entry.
-        -- The task is in review/needs_input (Blocked visual column),
+        -- The task is in running/needs_input (Blocked visual column),
         -- set by HookNotification when the agent raises a notification.
 }
 
@@ -752,21 +776,23 @@ rule ClaimTaskViaMcp {
 }
 
 rule UpdateEpicViaMcp {
-    when: McpUpdateEpic(epic, title?, description?, done?, plan?, sort_order?)
+    when: McpUpdateEpic(epic, title?, description?, status?, plan?, sort_order?, repo_path?)
 
-    requires: title != null or description != null or done != null
-              or plan != null or sort_order != null
+    requires: title != null or description != null or status != null
+              or plan != null or sort_order != null or repo_path != null
 
     ensures:
         if title != null: epic.title = title
     ensures:
         if description != null: epic.description = description
     ensures:
-        if done != null: epic.done = done
+        if status != null: epic.status = status
     ensures:
         if plan != null: epic.plan = plan
     ensures:
         if sort_order != null: epic.sort_order = sort_order
+    ensures:
+        if repo_path != null: epic.repo_path = repo_path
     ensures: epic.updated_at = now
 }
 
@@ -851,7 +877,7 @@ rule CreateEpic {
         title: title,
         description: description,
         repo_path: repo_path,
-        done: false,
+        status: backlog,
         sort_order: sort_order,
         created_at: now,
         updated_at: now
@@ -861,7 +887,7 @@ rule CreateEpic {
 rule DispatchEpicPlanning {
     when: DispatchEpic(epic)
 
-    requires: epic.derived_status = backlog
+    requires: epic.status = backlog
     requires: !epic.has_plan
     requires: epic.active_subtasks.count = 0
 
@@ -892,7 +918,7 @@ rule DispatchEpicPlanning {
 rule DispatchEpicSubtask {
     when: DispatchEpic(epic)
 
-    requires: epic.derived_status = backlog
+    requires: epic.status = backlog
 
     -- Dispatches the next backlog subtask of this epic, ordered by
     -- sort_order ascending (nulls last, tie-broken by id ascending).
@@ -925,16 +951,16 @@ rule DispatchEpicSubtask {
 rule MarkEpicDone {
     when: MarkEpicDone(epic)
 
-    ensures: epic.done = true
+    ensures: epic.status = done
     ensures: epic.updated_at = now
 }
 
 rule MarkEpicUndone {
     when: MarkEpicUndone(epic)
 
-    requires: epic.done = true
+    requires: epic.status = done
 
-    ensures: epic.done = false
+    ensures: epic.status = backlog
     ensures: epic.updated_at = now
 }
 
@@ -997,21 +1023,22 @@ rule DeleteEpic {
     -- operations, not implementation work. The PreToolUse hook filters
     -- them out to prevent clobbering review status during wrap-up.
     -- However, non-MCP tools (Bash, Read, etc.) still fire PreToolUse
-    -- and can set a review task to running. The wrap_up MCP handler
-    -- therefore accepts both review and running status.
+    -- and can set a review task to running. The wrap_up handler
+    -- accepts any running or review task with a worktree.
 
-@invariant EpicDerivedStatus
-    -- Epic kanban status is derived from subtask statuses and persisted.
+@invariant EpicStatusRecalculation
+    -- Epic status is persisted and recalculated via recalculate_epic_status.
     -- It only advances forward (never moves to a lower-priority status).
     -- Derivation logic (checked in priority order):
-    --   no subtasks                   => backlog
-    --   all subtasks done             => done
-    --   any subtask in review         => review
-    --   any subtask running           => running
+    --   no active subtasks            => backlog
+    --   all active subtasks done      => done
+    --   any active subtask in review  => review
+    --   any active subtask running    => running
     --   otherwise                     => backlog
-    -- Review takes precedence over running: once any subtask reaches
-    -- review, the epic is considered in-review even if other subtasks
-    -- are still running.
+    -- The derived status is compared to the current epic.status; it is
+    -- only applied if the derived status is further forward (higher
+    -- column_index) than the current status. This prevents backward
+    -- movement when subtasks are archived or moved back.
     --
     -- Epic substatus (display label for epic cards):
     --   backlog + no plan             => unplanned
