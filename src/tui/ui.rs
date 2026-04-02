@@ -11,7 +11,7 @@ use super::{App, ColumnItem, ColumnLayout, InputMode, RepoFilterMode, ReviewBoar
 use crate::dispatch;
 use crate::models::{
     epic_substatus, format_age, CiStatus, Epic, ReviewDecision, ReviewPr, Staleness, SubStatus,
-    Task, TaskStatus, TaskUsage,
+    Task, TaskId, TaskStatus, TaskUsage,
 };
 
 // ── Tokyo Night palette ─────────────────────────────────────────────
@@ -889,6 +889,155 @@ fn format_usage(u: &TaskUsage) -> String {
     )
 }
 
+// ── Detail-panel component functions ────────────────────────────────
+
+fn task_detail_lines(app: &App, task: &Task) -> Vec<Line<'static>> {
+    let status_color = column_color(task.status);
+
+    // Line 1: title (bold, colored) + inline metadata (dim)
+    let mut line1_spans = vec![
+        Span::styled(
+            task.title.clone(),
+            Style::default().fg(status_color).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            if task.sub_status != SubStatus::None {
+                format!(" \u{00b7} #{} \u{00b7} {} ({}) \u{00b7} {}", task.id, task.status.as_str(), task.sub_status.as_str(), task.repo_path)
+            } else {
+                format!(" \u{00b7} #{} \u{00b7} {} \u{00b7} {}", task.id, task.status.as_str(), task.repo_path)
+            },
+            Style::default().fg(MUTED),
+        ),
+    ];
+
+    // Add crash/stale suffix
+    if app.is_crashed(task.id) {
+        line1_spans.push(Span::styled(
+            " (crashed)",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        ));
+    } else if app.is_stale(task.id) {
+        let mins = app.agents.last_output_change.get(&task.id)
+            .map(|t| t.elapsed().as_secs() / 60)
+            .unwrap_or(0);
+        line1_spans.push(Span::styled(
+            format!(" (stale \u{00b7} {}m)", mins),
+            Style::default().fg(Color::Yellow),
+        ));
+    }
+
+    if let Some(tag) = &task.tag {
+        line1_spans.push(Span::styled(
+            format!(" \u{00b7} [{tag}]"),
+            Style::default().fg(Color::Cyan),
+        ));
+    }
+
+    if let Some(pr_url) = &task.pr_url {
+        line1_spans.push(Span::styled(
+            format!(" \u{00b7} PR: {pr_url}"),
+            Style::default().fg(Color::Cyan),
+        ));
+    }
+
+    if let Some(epic_id) = task.epic_id {
+        if let Some(epic_title) = app.epic_title(epic_id) {
+            line1_spans.push(Span::styled(
+                format!(" \u{00b7} Epic: {epic_title} (#{epic_id})"),
+                Style::default().fg(Color::Magenta),
+            ));
+        }
+    }
+
+    let mut lines = vec![
+        Line::from(line1_spans),
+        Line::from(Span::styled(
+            task.description.clone(),
+            Style::default().fg(MUTED_LIGHT),
+        )),
+    ];
+    if let Some(u) = app.usage.get(&task.id) {
+        lines.push(Line::from(Span::styled(
+            format_usage(u),
+            Style::default().fg(MUTED),
+        )));
+    }
+    lines
+}
+
+fn epic_detail_lines(app: &App, epic: &Epic) -> Vec<Line<'static>> {
+    let epic_id = epic.id;
+    let line1 = Line::from(vec![
+        Span::styled(
+            epic.title.clone(),
+            Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!(" \u{00b7} #{} \u{00b7} {}", epic.id, epic.repo_path),
+            Style::default().fg(MUTED),
+        ),
+    ]);
+    let line2 = Line::from(Span::styled(
+        epic.description.clone(),
+        Style::default().fg(MUTED_LIGHT),
+    ));
+    let mut lines = vec![line1, line2];
+    if let Some(plan) = &epic.plan {
+        lines.push(Line::from(Span::styled(
+            format!("plan: {plan}"),
+            Style::default().fg(MUTED),
+        )));
+    }
+
+    // Subtask status list
+    let mut subtasks: Vec<&Task> = app.tasks()
+        .iter()
+        .filter(|t| t.epic_id == Some(epic_id) && t.status != TaskStatus::Archived)
+        .collect();
+    subtasks.sort_by_key(|t| (t.status.column_index(), t.sort_order.unwrap_or(t.id.0)));
+
+    if !subtasks.is_empty() {
+        lines.push(Line::from(""));
+        for task in &subtasks {
+            let icon = status_icon(task.status);
+            let icon_color = column_color(task.status);
+            let mut spans = vec![
+                Span::styled(
+                    format!("  {icon} "),
+                    Style::default().fg(icon_color),
+                ),
+                Span::styled(
+                    truncate_for_detail(&task.title, 40),
+                    Style::default().fg(Color::Rgb(180, 184, 200)),
+                ),
+            ];
+            if let Some(wt) = &task.worktree {
+                if let Some(branch) = dispatch::branch_from_worktree(wt) {
+                    spans.push(Span::styled(
+                        format!(" ({branch})"),
+                        Style::default().fg(Color::Rgb(86, 95, 137)),
+                    ));
+                }
+            }
+            if task.sub_status == SubStatus::Conflict {
+                spans.push(Span::styled(
+                    " \u{26a0} conflict",
+                    Style::default().fg(Color::Red),
+                ));
+            }
+            if let Some(pr_url) = &task.pr_url {
+                spans.push(Span::styled(
+                    format!(" \u{00b7} PR: {}", truncate_for_detail(pr_url, 30)),
+                    Style::default().fg(Color::Cyan),
+                ));
+            }
+            lines.push(Line::from(spans));
+        }
+    }
+
+    lines
+}
+
 fn render_detail(frame: &mut Frame, app: &App, area: Rect, _now: DateTime<Utc>) {
     // When in input mode, show the input form instead of detail
     if render_input_form(frame, app, area) {
@@ -907,148 +1056,9 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect, _now: DateTime<Utc>) 
     }
 
     let lines: Vec<Line> = if let Some(task) = app.selected_task() {
-        let status_color = column_color(task.status);
-
-        // Line 1: title (bold, colored) + inline metadata (dim)
-        let mut line1_spans = vec![
-            Span::styled(
-                task.title.clone(),
-                Style::default().fg(status_color).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                if task.sub_status != SubStatus::None {
-                    format!(" \u{00b7} #{} \u{00b7} {} ({}) \u{00b7} {}", task.id, task.status.as_str(), task.sub_status.as_str(), task.repo_path)
-                } else {
-                    format!(" \u{00b7} #{} \u{00b7} {} \u{00b7} {}", task.id, task.status.as_str(), task.repo_path)
-                },
-                Style::default().fg(MUTED),
-            ),
-        ];
-
-        // Add crash/stale suffix
-        if app.is_crashed(task.id) {
-            line1_spans.push(Span::styled(
-                " (crashed)",
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-            ));
-        } else if app.is_stale(task.id) {
-            let mins = app.agents.last_output_change.get(&task.id)
-                .map(|t| t.elapsed().as_secs() / 60)
-                .unwrap_or(0);
-            line1_spans.push(Span::styled(
-                format!(" (stale \u{00b7} {}m)", mins),
-                Style::default().fg(Color::Yellow),
-            ));
-        }
-
-        if let Some(tag) = &task.tag {
-            line1_spans.push(Span::styled(
-                format!(" \u{00b7} [{tag}]"),
-                Style::default().fg(Color::Cyan),
-            ));
-        }
-
-        if let Some(pr_url) = &task.pr_url {
-            line1_spans.push(Span::styled(
-                format!(" \u{00b7} PR: {pr_url}"),
-                Style::default().fg(Color::Cyan),
-            ));
-        }
-
-        if let Some(epic_id) = task.epic_id {
-            if let Some(epic_title) = app.epic_title(epic_id) {
-                line1_spans.push(Span::styled(
-                    format!(" \u{00b7} Epic: {epic_title} (#{epic_id})"),
-                    Style::default().fg(Color::Magenta),
-                ));
-            }
-        }
-
-        let mut lines = vec![
-            Line::from(line1_spans),
-            Line::from(Span::styled(
-                task.description.clone(),
-                Style::default().fg(MUTED_LIGHT),
-            )),
-        ];
-        if let Some(u) = app.usage.get(&task.id) {
-            lines.push(Line::from(Span::styled(
-                format_usage(u),
-                Style::default().fg(MUTED),
-            )));
-        }
-        lines
+        task_detail_lines(app, task)
     } else if let Some(ColumnItem::Epic(epic)) = app.selected_column_item() {
-        let epic_id = epic.id;
-        let line1 = Line::from(vec![
-            Span::styled(
-                epic.title.clone(),
-                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!(" \u{00b7} #{} \u{00b7} {}", epic.id, epic.repo_path),
-                Style::default().fg(MUTED),
-            ),
-        ]);
-        let line2 = Line::from(Span::styled(
-            epic.description.clone(),
-            Style::default().fg(MUTED_LIGHT),
-        ));
-        let mut lines = vec![line1, line2];
-        if let Some(plan) = &epic.plan {
-            lines.push(Line::from(Span::styled(
-                format!("plan: {plan}"),
-                Style::default().fg(MUTED),
-            )));
-        }
-
-        // Subtask status list
-        let mut subtasks: Vec<&Task> = app.tasks()
-            .iter()
-            .filter(|t| t.epic_id == Some(epic_id) && t.status != TaskStatus::Archived)
-            .collect();
-        subtasks.sort_by_key(|t| (t.status.column_index(), t.sort_order.unwrap_or(t.id.0)));
-
-        if !subtasks.is_empty() {
-            lines.push(Line::from(""));
-            for task in &subtasks {
-                let icon = status_icon(task.status);
-                let icon_color = column_color(task.status);
-                let mut spans = vec![
-                    Span::styled(
-                        format!("  {icon} "),
-                        Style::default().fg(icon_color),
-                    ),
-                    Span::styled(
-                        truncate_for_detail(&task.title, 40),
-                        Style::default().fg(Color::Rgb(180, 184, 200)),
-                    ),
-                ];
-                if let Some(wt) = &task.worktree {
-                    if let Some(branch) = dispatch::branch_from_worktree(wt) {
-                        spans.push(Span::styled(
-                            format!(" ({branch})"),
-                            Style::default().fg(Color::Rgb(86, 95, 137)),
-                        ));
-                    }
-                }
-                if task.sub_status == SubStatus::Conflict {
-                    spans.push(Span::styled(
-                        " \u{26a0} conflict",
-                        Style::default().fg(Color::Red),
-                    ));
-                }
-                if let Some(pr_url) = &task.pr_url {
-                    spans.push(Span::styled(
-                        format!(" \u{00b7} PR: {}", truncate_for_detail(pr_url, 30)),
-                        Style::default().fg(Color::Cyan),
-                    ));
-                }
-                lines.push(Line::from(spans));
-            }
-        }
-
-        lines
+        epic_detail_lines(app, epic)
     } else {
         vec![Line::from(Span::styled(
             "No task selected",
@@ -1094,169 +1104,201 @@ fn append_repo_path_list<'a>(
 }
 
 /// Renders the input form in the detail panel area. Returns true if it rendered.
+// ── Input-form component functions ──────────────────────────────────
+
+fn input_title_lines(app: &App, active: Style, hint: Style) -> Vec<Line<'static>> {
+    vec![
+        Line::from(Span::styled(
+            format!("  Title: {}_ ", app.input.buffer),
+            active,
+        )),
+        Line::from(""),
+        Line::from(Span::styled("  Enter to confirm, Esc to cancel", hint)),
+    ]
+}
+
+fn input_tag_lines(app: &App, completed: Style, active: Style, hint: Style) -> Vec<Line<'static>> {
+    let title = app.input.task_draft.as_ref().map(|d| d.title.as_str()).unwrap_or("");
+    vec![
+        Line::from(Span::styled(format!("  Title: {title}"), completed)),
+        Line::from(Span::styled(
+            "  Tag: (b)ug  (f)eature  (c)hore  (e)pic  (Enter=none)",
+            active,
+        )),
+        Line::from(""),
+        Line::from(Span::styled("  Select a tag or Enter to skip, Esc to cancel", hint)),
+    ]
+}
+
+fn input_description_lines(app: &App, completed: Style, active: Style, hint: Style) -> Vec<Line<'static>> {
+    let title = app.input.task_draft.as_ref().map(|d| d.title.as_str()).unwrap_or("");
+    vec![
+        Line::from(Span::styled(format!("  Title: {title}"), completed)),
+        Line::from(Span::styled(
+            format!("  Description: {}_ ", app.input.buffer),
+            active,
+        )),
+        Line::from(""),
+        Line::from(Span::styled("  Enter to confirm, Esc to cancel", hint)),
+    ]
+}
+
+fn input_repo_path_lines<'a>(
+    app: &'a App,
+    area: Rect,
+    completed: Style,
+    active: Style,
+    hint: Style,
+) -> Vec<Line<'a>> {
+    let title = app.input.task_draft.as_ref().map(|d| d.title.as_str()).unwrap_or("");
+    let description = app.input.task_draft.as_ref().map(|d| d.description.as_str()).unwrap_or("");
+    let mut lines = vec![
+        Line::from(Span::styled(format!("  Title: {title}"), completed)),
+        Line::from(Span::styled(
+            format!("  Description: {description}"),
+            completed,
+        )),
+        Line::from(Span::styled(
+            format!("  Repo path: {}_ ", app.input.buffer),
+            active,
+        )),
+    ];
+    if app.input.buffer.is_empty() {
+        append_repo_path_list(
+            &mut lines,
+            &app.repo_paths,
+            app.input.repo_cursor,
+            7,
+            area.height,
+            hint,
+        );
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "  Type a path · j/k navigate · Enter select · Esc cancel",
+        hint,
+    )));
+    lines
+}
+
+fn quick_dispatch_lines<'a>(app: &'a App, area: Rect, active: Style, hint: Style) -> Vec<Line<'a>> {
+    let mut lines = vec![
+        Line::from(Span::styled("  Quick Dispatch — select repo:", active)),
+        Line::from(""),
+    ];
+    append_repo_path_list(
+        &mut lines,
+        &app.repo_paths,
+        app.input.repo_cursor,
+        6,
+        area.height,
+        hint,
+    );
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "  j/k navigate · Enter select · 1-9 shortcut · Esc cancel",
+        hint,
+    )));
+    lines
+}
+
+fn confirm_retry_lines(app: &App, id: TaskId) -> Vec<Line<'static>> {
+    let label = if app.is_crashed(id) {
+        "crashed"
+    } else {
+        "stale"
+    };
+    let warning = Style::default().fg(Color::Red).add_modifier(Modifier::BOLD);
+    let hint = Style::default().fg(Color::DarkGray);
+    vec![
+        Line::from(Span::styled(
+            format!("  Agent is {label}. What do you want to do?"),
+            warning,
+        )),
+        Line::from(""),
+        Line::from(Span::styled("  [r] Resume (--continue in existing worktree)", hint)),
+        Line::from(Span::styled("  [f] Fresh start (clean worktree + new dispatch)", hint)),
+        Line::from(Span::styled("  [Esc] Cancel", hint)),
+    ]
+}
+
+fn input_epic_title_lines(app: &App, active: Style, hint: Style) -> Vec<Line<'static>> {
+    vec![
+        Line::from(Span::styled(
+            format!("  Title: {}_ ", app.input.buffer),
+            active,
+        )),
+        Line::from(""),
+        Line::from(Span::styled("  Enter to confirm, Esc to cancel", hint)),
+    ]
+}
+
+fn input_epic_description_lines(app: &App, completed: Style, active: Style, hint: Style) -> Vec<Line<'static>> {
+    let title = app.input.epic_draft.as_ref().map(|d| d.title.as_str()).unwrap_or("");
+    vec![
+        Line::from(Span::styled(format!("  Title: {title}"), completed)),
+        Line::from(Span::styled(
+            format!("  Description: {}_ ", app.input.buffer),
+            active,
+        )),
+        Line::from(""),
+        Line::from(Span::styled("  Enter to confirm, Esc to cancel", hint)),
+    ]
+}
+
+fn input_epic_repo_path_lines<'a>(
+    app: &'a App,
+    area: Rect,
+    completed: Style,
+    active: Style,
+    hint: Style,
+) -> Vec<Line<'a>> {
+    let title = app.input.epic_draft.as_ref().map(|d| d.title.as_str()).unwrap_or("");
+    let description = app.input.epic_draft.as_ref().map(|d| d.description.as_str()).unwrap_or("");
+    let mut lines = vec![
+        Line::from(Span::styled(format!("  Title: {title}"), completed)),
+        Line::from(Span::styled(
+            format!("  Description: {description}"),
+            completed,
+        )),
+        Line::from(Span::styled(
+            format!("  Repo path: {}_ ", app.input.buffer),
+            active,
+        )),
+    ];
+    if app.input.buffer.is_empty() {
+        append_repo_path_list(
+            &mut lines,
+            &app.repo_paths,
+            app.input.repo_cursor,
+            7,
+            area.height,
+            hint,
+        );
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "  Type a path · j/k navigate · Enter select · Esc cancel",
+        hint,
+    )));
+    lines
+}
+
 fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
     let completed = Style::default().fg(Color::White);
     let active = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
     let hint = Style::default().fg(Color::DarkGray);
 
     let lines: Vec<Line> = match &app.input.mode {
-        InputMode::InputTitle => {
-            vec![
-                Line::from(Span::styled(
-                    format!("  Title: {}_ ", app.input.buffer),
-                    active,
-                )),
-                Line::from(""),
-                Line::from(Span::styled("  Enter to confirm, Esc to cancel", hint)),
-            ]
-        }
-        InputMode::InputTag => {
-            let title = app.input.task_draft.as_ref().map(|d| d.title.as_str()).unwrap_or("");
-            vec![
-                Line::from(Span::styled(format!("  Title: {title}"), completed)),
-                Line::from(Span::styled(
-                    "  Tag: (b)ug  (f)eature  (c)hore  (e)pic  (Enter=none)",
-                    active,
-                )),
-                Line::from(""),
-                Line::from(Span::styled("  Select a tag or Enter to skip, Esc to cancel", hint)),
-            ]
-        }
-        InputMode::InputDescription => {
-            let title = app.input.task_draft.as_ref().map(|d| d.title.as_str()).unwrap_or("");
-            vec![
-                Line::from(Span::styled(format!("  Title: {title}"), completed)),
-                Line::from(Span::styled(
-                    format!("  Description: {}_ ", app.input.buffer),
-                    active,
-                )),
-                Line::from(""),
-                Line::from(Span::styled("  Enter to confirm, Esc to cancel", hint)),
-            ]
-        }
-        InputMode::InputRepoPath => {
-            let title = app.input.task_draft.as_ref().map(|d| d.title.as_str()).unwrap_or("");
-            let description = app.input.task_draft.as_ref().map(|d| d.description.as_str()).unwrap_or("");
-            let mut lines = vec![
-                Line::from(Span::styled(format!("  Title: {title}"), completed)),
-                Line::from(Span::styled(
-                    format!("  Description: {description}"),
-                    completed,
-                )),
-                Line::from(Span::styled(
-                    format!("  Repo path: {}_ ", app.input.buffer),
-                    active,
-                )),
-            ];
-            if app.input.buffer.is_empty() {
-                append_repo_path_list(
-                    &mut lines,
-                    &app.repo_paths,
-                    app.input.repo_cursor,
-                    7,
-                    area.height,
-                    hint,
-                );
-            }
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                "  Type a path · j/k navigate · Enter select · Esc cancel",
-                hint,
-            )));
-            lines
-        }
-        InputMode::QuickDispatch => {
-            let mut lines = vec![
-                Line::from(Span::styled("  Quick Dispatch — select repo:", active)),
-                Line::from(""),
-            ];
-            append_repo_path_list(
-                &mut lines,
-                &app.repo_paths,
-                app.input.repo_cursor,
-                6,
-                area.height,
-                hint,
-            );
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                "  j/k navigate · Enter select · 1-9 shortcut · Esc cancel",
-                hint,
-            )));
-            lines
-        }
-        InputMode::ConfirmRetry(id) => {
-            let label = if app.is_crashed(*id) {
-                "crashed"
-            } else {
-                "stale"
-            };
-            let warning = Style::default().fg(Color::Red).add_modifier(Modifier::BOLD);
-            let hint = Style::default().fg(Color::DarkGray);
-            vec![
-                Line::from(Span::styled(
-                    format!("  Agent is {label}. What do you want to do?"),
-                    warning,
-                )),
-                Line::from(""),
-                Line::from(Span::styled("  [r] Resume (--continue in existing worktree)", hint)),
-                Line::from(Span::styled("  [f] Fresh start (clean worktree + new dispatch)", hint)),
-                Line::from(Span::styled("  [Esc] Cancel", hint)),
-            ]
-        }
-        InputMode::InputEpicTitle => {
-            vec![
-                Line::from(Span::styled(
-                    format!("  Title: {}_ ", app.input.buffer),
-                    active,
-                )),
-                Line::from(""),
-                Line::from(Span::styled("  Enter to confirm, Esc to cancel", hint)),
-            ]
-        }
-        InputMode::InputEpicDescription => {
-            let title = app.input.epic_draft.as_ref().map(|d| d.title.as_str()).unwrap_or("");
-            vec![
-                Line::from(Span::styled(format!("  Title: {title}"), completed)),
-                Line::from(Span::styled(
-                    format!("  Description: {}_ ", app.input.buffer),
-                    active,
-                )),
-                Line::from(""),
-                Line::from(Span::styled("  Enter to confirm, Esc to cancel", hint)),
-            ]
-        }
-        InputMode::InputEpicRepoPath => {
-            let title = app.input.epic_draft.as_ref().map(|d| d.title.as_str()).unwrap_or("");
-            let description = app.input.epic_draft.as_ref().map(|d| d.description.as_str()).unwrap_or("");
-            let mut lines = vec![
-                Line::from(Span::styled(format!("  Title: {title}"), completed)),
-                Line::from(Span::styled(
-                    format!("  Description: {description}"),
-                    completed,
-                )),
-                Line::from(Span::styled(
-                    format!("  Repo path: {}_ ", app.input.buffer),
-                    active,
-                )),
-            ];
-            if app.input.buffer.is_empty() {
-                append_repo_path_list(
-                    &mut lines,
-                    &app.repo_paths,
-                    app.input.repo_cursor,
-                    7,
-                    area.height,
-                    hint,
-                );
-            }
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                "  Type a path · j/k navigate · Enter select · Esc cancel",
-                hint,
-            )));
-            lines
-        }
+        InputMode::InputTitle => input_title_lines(app, active, hint),
+        InputMode::InputTag => input_tag_lines(app, completed, active, hint),
+        InputMode::InputDescription => input_description_lines(app, completed, active, hint),
+        InputMode::InputRepoPath => input_repo_path_lines(app, area, completed, active, hint),
+        InputMode::QuickDispatch => quick_dispatch_lines(app, area, active, hint),
+        InputMode::ConfirmRetry(id) => confirm_retry_lines(app, *id),
+        InputMode::InputEpicTitle => input_epic_title_lines(app, active, hint),
+        InputMode::InputEpicDescription => input_epic_description_lines(app, completed, active, hint),
+        InputMode::InputEpicRepoPath => input_epic_repo_path_lines(app, area, completed, active, hint),
         _ => return false,
     };
 
