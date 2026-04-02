@@ -115,13 +115,13 @@ pub(super) struct SendMessageArgs {
 // ---------------------------------------------------------------------------
 
 fn build_epic_titles(state: &McpState) -> HashMap<EpicId, String> {
-    state
-        .db
-        .list_epics()
-        .unwrap_or_default()
-        .into_iter()
-        .map(|e| (e.id, e.title))
-        .collect()
+    match state.db.list_epics() {
+        Ok(epics) => epics.into_iter().map(|e| (e.id, e.title)).collect(),
+        Err(e) => {
+            tracing::warn!("failed to load epic titles for response formatting: {e}");
+            HashMap::new()
+        }
+    }
 }
 
 fn format_task_detail(task: &Task, epic_titles: &HashMap<EpicId, String>) -> String {
@@ -295,18 +295,21 @@ pub(super) fn handle_update_task(
             Err(resp) => return resp,
         };
         // Validate against current (or new) status
-        let effective_status = parsed
-            .status
-            .as_deref()
-            .and_then(TaskStatus::parse)
-            .or_else(|| {
-                state
-                    .db
-                    .get_task(TaskId(parsed.task_id))
-                    .ok()
-                    .flatten()
-                    .map(|t| t.status)
-            });
+        let effective_status = if let Some(ref s) = parsed.status {
+            TaskStatus::parse(s)
+        } else {
+            match state.db.get_task(TaskId(parsed.task_id)) {
+                Ok(Some(t)) => Some(t.status),
+                Ok(None) => None,
+                Err(e) => {
+                    return JsonRpcResponse::err(
+                        id,
+                        -32603,
+                        format!("Database error looking up task for sub_status validation: {e}"),
+                    );
+                }
+            }
+        };
         if let Some(eff) = effective_status {
             if !ss.is_valid_for(eff) {
                 return JsonRpcResponse::err(
@@ -332,7 +335,10 @@ pub(super) fn handle_update_task(
         // Recalculate old epic before reassignment
         if let Ok(Some(task)) = state.db.get_task(TaskId(parsed.task_id)) {
             if let Some(old_epic_id) = task.epic_id {
-                let _ = state.db.recalculate_epic_status(old_epic_id);
+                // Best-effort: epic status is derived data, failure doesn't affect the update
+                if let Err(e) = state.db.recalculate_epic_status(old_epic_id) {
+                    tracing::warn!(epic_id = old_epic_id.0, "failed to recalculate epic status: {e}");
+                }
             }
         }
         if let Err(e) = state
@@ -345,14 +351,26 @@ pub(super) fn handle_update_task(
                 format!("Failed to link task to epic: {e}"),
             );
         }
-        let _ = state.db.recalculate_epic_status(EpicId(new_epic_id));
+        // Best-effort: epic status is derived data, failure doesn't affect the update
+        if let Err(e) = state.db.recalculate_epic_status(EpicId(new_epic_id)) {
+            tracing::warn!(epic_id = new_epic_id, "failed to recalculate epic status: {e}");
+        }
     }
 
     // Recalculate parent epic status if subtask status changed
     if parsed.status.is_some() {
-        if let Ok(Some(task)) = state.db.get_task(TaskId(parsed.task_id)) {
-            if let Some(epic_id) = task.epic_id {
-                let _ = state.db.recalculate_epic_status(epic_id);
+        match state.db.get_task(TaskId(parsed.task_id)) {
+            Ok(Some(task)) => {
+                if let Some(epic_id) = task.epic_id {
+                    // Best-effort: epic status is derived data, failure doesn't affect the update
+                    if let Err(e) = state.db.recalculate_epic_status(epic_id) {
+                        tracing::warn!(epic_id = epic_id.0, "failed to recalculate epic status: {e}");
+                    }
+                }
+            }
+            Ok(None) => {}
+            Err(e) => {
+                tracing::warn!(task_id = parsed.task_id, "failed to reload task for epic recalculation: {e}");
             }
         }
     }
@@ -436,16 +454,16 @@ pub(super) fn handle_create_task(
                 }
             }
             if let Some(so) = parsed.sort_order {
-                let _ = state
-                    .db
-                    .patch_task(task_id, &db::TaskPatch::new().sort_order(Some(so)));
+                if let Err(e) = state.db.patch_task(task_id, &db::TaskPatch::new().sort_order(Some(so))) {
+                    return JsonRpcResponse::err(id, -32603, format!("Failed to set sort_order: {e}"));
+                }
             }
             if let Some(ref t) = parsed.tag {
                 match validation::parse_tag_or_error(t, &id) {
                     Ok(tag) => {
-                        let _ = state
-                            .db
-                            .patch_task(task_id, &db::TaskPatch::new().tag(Some(tag)));
+                        if let Err(e) = state.db.patch_task(task_id, &db::TaskPatch::new().tag(Some(tag))) {
+                            return JsonRpcResponse::err(id, -32603, format!("Failed to set tag: {e}"));
+                        }
                     }
                     Err(resp) => return resp,
                 }
@@ -746,15 +764,22 @@ pub(super) async fn handle_wrap_up(
                         );
                     }
                     if let Some(epic_id) = task.epic_id {
-                        let _ = db.recalculate_epic_status(epic_id);
+                        // Best-effort: epic status is derived data
+                        if let Err(e) = db.recalculate_epic_status(epic_id) {
+                            tracing::warn!(epic_id = epic_id.0, "failed to recalculate epic status after rebase: {e}");
+                        }
                     }
-                    // Fire-and-forget: kill tmux, auto-dispatch, notify
+                    // Fire-and-forget: kill tmux, auto-dispatch, notify.
+                    // Runs in background after response is sent — errors are logged, not propagated.
                     let ad_runner = state.runner.clone();
                     tokio::task::spawn_blocking(move || {
                         if let Some(window) = &tmux_window {
-                            let _ = crate::tmux::kill_window(window, &*ad_runner);
+                            if let Err(e) = crate::tmux::kill_window(window, &*ad_runner) {
+                                tracing::warn!("failed to kill tmux window after rebase: {e}");
+                            }
                         }
                         auto_dispatch_next(next_epic_task, &*db, &*ad_runner);
+                        // Channel send: receiver may be dropped if TUI exited; nothing to do
                         if let Some(tx) = notify_tx {
                             let _ = tx.send(crate::mcp::McpEvent::Refresh);
                         }
@@ -765,6 +790,7 @@ pub(super) async fn handle_wrap_up(
                     )
                 }
                 Err(e) => {
+                    // Channel send: receiver may be dropped if TUI exited; nothing to do
                     if let Some(tx) = notify_tx {
                         let _ = tx.send(crate::mcp::McpEvent::Refresh);
                     }
@@ -799,11 +825,15 @@ pub(super) async fn handle_wrap_up(
                         );
                     }
                     if let Some(epic_id) = task.epic_id {
-                        let _ = db.recalculate_epic_status(epic_id);
+                        // Best-effort: epic status is derived data
+                        if let Err(e) = db.recalculate_epic_status(epic_id) {
+                            tracing::warn!(epic_id = epic_id.0, "failed to recalculate epic status after PR: {e}");
+                        }
                     }
                     // Save before closure moves result
                     let pr_url = result.pr_url.clone();
-                    // Fire-and-forget: inject code review, auto-dispatch, notify
+                    // Fire-and-forget: inject code review, auto-dispatch, notify.
+                    // Runs in background after response is sent — errors are logged, not propagated.
                     let ad_runner = state.runner.clone();
                     tokio::task::spawn_blocking(move || {
                         if let Some(window) = &tmux_window {
@@ -817,6 +847,7 @@ pub(super) async fn handle_wrap_up(
                             }
                         }
                         auto_dispatch_next(next_epic_task, &*db, &*ad_runner);
+                        // Channel send: receiver may be dropped if TUI exited; nothing to do
                         if let Some(tx) = notify_tx {
                             let _ = tx.send(crate::mcp::McpEvent::Refresh);
                         }
@@ -827,6 +858,7 @@ pub(super) async fn handle_wrap_up(
                     )
                 }
                 Err(e) => {
+                    // Channel send: receiver may be dropped if TUI exited; nothing to do
                     if let Some(tx) = notify_tx {
                         let _ = tx.send(crate::mcp::McpEvent::Refresh);
                     }
@@ -980,7 +1012,10 @@ fn auto_dispatch_next(
                 );
             }
             if let Some(epic_id) = next_task.epic_id {
-                let _ = db.recalculate_epic_status(epic_id);
+                // Best-effort: epic status is derived data
+                if let Err(e) = db.recalculate_epic_status(epic_id) {
+                    tracing::warn!(epic_id = epic_id.0, "auto-dispatch: failed to recalculate epic status: {e}");
+                }
             }
         }
         Err(e) => {

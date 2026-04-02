@@ -60,7 +60,9 @@ pub(super) fn handle_create_epic(state: &McpState, id: Option<Value>, args: Valu
     match state.db.create_epic(&parsed.title, &parsed.description, &parsed.repo_path) {
         Ok(epic) => {
             if let Some(so) = parsed.sort_order {
-                let _ = state.db.patch_epic(epic.id, &EpicPatch::new().sort_order(Some(so)));
+                if let Err(e) = state.db.patch_epic(epic.id, &EpicPatch::new().sort_order(Some(so))) {
+                    return JsonRpcResponse::err(id, -32603, format!("Failed to set sort_order: {e}"));
+                }
             }
             state.notify();
             JsonRpcResponse::ok(
@@ -81,7 +83,10 @@ pub(super) fn handle_get_epic(state: &McpState, id: Option<Value>, args: Value) 
 
     match state.db.get_epic(EpicId(parsed.epic_id)) {
         Ok(Some(epic)) => {
-            let subtasks = state.db.list_tasks_for_epic(epic.id).unwrap_or_default();
+            let subtasks = state.db.list_tasks_for_epic(epic.id).unwrap_or_else(|e| {
+                tracing::warn!(epic_id = epic.id.0, "failed to list subtasks for epic detail: {e}");
+                Vec::new()
+            });
             let done_count = subtasks.iter().filter(|t| t.status == TaskStatus::Done).count();
             let total = subtasks.len();
             let mut text = format!(
@@ -120,7 +125,10 @@ pub(super) fn handle_list_epics(state: &McpState, id: Option<Value>, _args: Valu
                 );
             }
             let lines: Vec<String> = epics.iter().map(|e| {
-                let subtasks = state.db.list_tasks_for_epic(e.id).unwrap_or_default();
+                let subtasks = state.db.list_tasks_for_epic(e.id).unwrap_or_else(|err| {
+                    tracing::warn!(epic_id = e.id.0, "failed to list subtasks for epic listing: {err}");
+                    Vec::new()
+                });
                 let done = subtasks.iter().filter(|t| t.status == TaskStatus::Done).count();
                 let plan_indicator = if e.plan.is_some() { " [plan]" } else { "" };
                 let status_indicator = if e.status != TaskStatus::Backlog { format!(" [{}]", e.status.as_str()) } else { String::new() };
