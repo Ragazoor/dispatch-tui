@@ -973,7 +973,15 @@ impl TuiRuntime {
     }
 
     fn exec_dispatch_review_agent(&self, mut req: ReviewAgentRequest) {
-        let known_paths = self.database.list_repo_paths().unwrap_or_default();
+        let mut known_paths = self.database.list_repo_paths().unwrap_or_default();
+        // Also include repo paths from existing tasks as fallback
+        if let Ok(tasks) = self.database.list_all() {
+            for t in tasks {
+                if !known_paths.contains(&t.repo_path) {
+                    known_paths.push(t.repo_path);
+                }
+            }
+        }
         match crate::dispatch::resolve_repo_path(&req.repo, &known_paths) {
             Some(p) => req.repo = p,
             None => {
