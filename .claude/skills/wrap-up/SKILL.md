@@ -32,16 +32,18 @@ git status --porcelain
 
 If there are modified or untracked files, commit them before proceeding. Use a `/commit` skill if available, otherwise create a commit directly.
 
-## Step 3: Ask the user to choose
+## Step 3: Ask the user to choose — MANDATORY
 
-Present:
+**You MUST use the `AskUserQuestion` tool here.** Do NOT skip this step. Do NOT assume a default. Do NOT proceed to Step 4 without an explicit answer from the user.
+
+Use the `AskUserQuestion` tool with a question like:
 
 > Wrap up task #{id} (`{title}`):
 > **(r)** rebase onto main — fast-forwards main with this branch, kills this tmux window
 > **(p)** create PR — pushes branch and opens a GitHub PR
 > **(Esc / n)** cancel
 
-Wait for the user's response. If they cancel or say no, exit without calling any tool.
+If the user cancels or says no, exit without calling any tool.
 
 ## Step 4: Execute the chosen action
 
