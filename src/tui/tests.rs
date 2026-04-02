@@ -3650,7 +3650,7 @@ fn g_key_on_epic_no_active_window_enters_epic_view() {
 }
 
 #[test]
-fn g_key_on_epic_with_running_subtask_jumps_to_tmux() {
+fn g_key_on_epic_skips_active_running_subtask() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
@@ -3658,6 +3658,7 @@ fn g_key_on_epic_with_running_subtask_jumps_to_tmux() {
 
     let mut subtask = make_task(1, TaskStatus::Running);
     subtask.epic_id = Some(EpicId(10));
+    subtask.sub_status = SubStatus::Active;
     subtask.tmux_window = Some("win-running".to_string());
     app.tasks = vec![subtask];
 
@@ -3665,12 +3666,12 @@ fn g_key_on_epic_with_running_subtask_jumps_to_tmux() {
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 0);
 
-    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
-    assert!(matches!(&cmds[0], Command::JumpToTmux { window } if window == "win-running"));
+    let _cmds = app.handle_key(make_key(KeyCode::Char('g')));
+    assert!(matches!(app.view_mode, ViewMode::Epic { epic_id, .. } if epic_id == EpicId(10)));
 }
 
 #[test]
-fn g_key_on_epic_prefers_running_over_review() {
+fn g_key_on_epic_prefers_blocked_running_over_review() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
@@ -3682,6 +3683,7 @@ fn g_key_on_epic_prefers_running_over_review() {
 
     let mut running_task = make_task(2, TaskStatus::Running);
     running_task.epic_id = Some(EpicId(10));
+    running_task.sub_status = SubStatus::NeedsInput;
     running_task.tmux_window = Some("win-running".to_string());
 
     app.tasks = vec![review_task, running_task];
@@ -3695,6 +3697,31 @@ fn g_key_on_epic_prefers_running_over_review() {
 }
 
 #[test]
+fn g_key_on_epic_active_running_falls_through_to_review() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut epic = make_epic(10);
+    epic.status = TaskStatus::Running;
+    app.epics = vec![epic];
+
+    let mut review_task = make_task(1, TaskStatus::Review);
+    review_task.epic_id = Some(EpicId(10));
+    review_task.tmux_window = Some("win-review".to_string());
+
+    let mut running_task = make_task(2, TaskStatus::Running);
+    running_task.epic_id = Some(EpicId(10));
+    running_task.sub_status = SubStatus::Active;
+    running_task.tmux_window = Some("win-running".to_string());
+
+    app.tasks = vec![review_task, running_task];
+
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
+    assert!(matches!(&cmds[0], Command::JumpToTmux { window } if window == "win-review"));
+}
+
+#[test]
 fn g_key_on_epic_picks_lowest_sort_order() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
@@ -3703,11 +3730,13 @@ fn g_key_on_epic_picks_lowest_sort_order() {
 
     let mut task_high = make_task(1, TaskStatus::Running);
     task_high.epic_id = Some(EpicId(10));
+    task_high.sub_status = SubStatus::NeedsInput;
     task_high.sort_order = Some(5);
     task_high.tmux_window = Some("win-high".to_string());
 
     let mut task_low = make_task(2, TaskStatus::Running);
     task_low.epic_id = Some(EpicId(10));
+    task_low.sub_status = SubStatus::Stale;
     task_low.sort_order = Some(1);
     task_low.tmux_window = Some("win-low".to_string());
 

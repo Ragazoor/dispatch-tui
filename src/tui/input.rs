@@ -110,11 +110,12 @@ impl App {
                         self.update(Message::StatusInfo("No active session".to_string()))
                     }
                 } else if let Some(ColumnItem::Epic(epic)) = self.selected_column_item() {
-                    // Prefer Running subtasks, then Review, by sort_order
+                    // Prefer blocked Running subtasks, then Review, by sort_order
                     let window = self.tasks.iter()
                         .filter(|t| {
                             t.epic_id == Some(epic.id)
                                 && t.status == TaskStatus::Running
+                                && t.sub_status != SubStatus::Active
                                 && t.tmux_window.is_some()
                         })
                         .min_by_key(|t| (t.sort_order.unwrap_or(t.id.0), t.id.0))
