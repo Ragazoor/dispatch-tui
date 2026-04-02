@@ -113,6 +113,12 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
         Err(e) => tracing::warn!("Failed to load cached review PRs: {e}"),
     }
 
+    // Load cached bot PRs from database
+    match database.load_bot_prs() {
+        Ok(prs) => app.set_bot_prs(prs),
+        Err(e) => tracing::warn!("Failed to load cached bot PRs: {e}"),
+    }
+
     // 4. Set up terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -978,6 +984,74 @@ impl TuiRuntime {
         }
     }
 
+    fn exec_fetch_bot_prs(&self) {
+        let tx = self.msg_tx.clone();
+        let runner = self.runner.clone();
+        tokio::task::spawn_blocking(move || {
+            tracing::info!("fetching bot PRs via gh");
+            match crate::github::fetch_bot_prs(&*runner) {
+                Ok(prs) => {
+                    tracing::info!(count = prs.len(), "bot PRs fetched successfully");
+                    let _ = tx.send(Message::BotPrsLoaded(prs));
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "bot PR fetch failed");
+                    let _ = tx.send(Message::BotPrsFetchFailed(e));
+                }
+            }
+        });
+    }
+
+    fn exec_persist_bot_prs(&self, prs: Vec<crate::models::ReviewPr>) {
+        if let Err(e) = self.database.save_bot_prs(&prs) {
+            tracing::warn!("Failed to persist bot PRs: {e}");
+        }
+    }
+
+    fn exec_batch_approve_prs(&self, urls: Vec<String>) {
+        let tx = self.msg_tx.clone();
+        let runner = self.runner.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut approved = 0usize;
+            for url in &urls {
+                tracing::info!(url, "approving PR");
+                match runner.run("gh", &["pr", "review", "--approve", url]) {
+                    Ok(output) if output.status.success() => approved += 1,
+                    Ok(output) => {
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        tracing::warn!(url, error = %stderr, "failed to approve PR");
+                    }
+                    Err(e) => tracing::warn!(url, error = %e, "failed to run gh"),
+                }
+            }
+            tracing::info!(approved, total = urls.len(), "batch approve complete");
+            let _ = tx.send(Message::RefreshBotPrs);
+            let _ = tx.send(Message::StatusInfo(format!("Approved {approved}/{} PRs", urls.len())));
+        });
+    }
+
+    fn exec_batch_merge_prs(&self, urls: Vec<String>) {
+        let tx = self.msg_tx.clone();
+        let runner = self.runner.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut merged = 0usize;
+            for url in &urls {
+                tracing::info!(url, "merging PR");
+                match runner.run("gh", &["pr", "merge", "--merge", url]) {
+                    Ok(output) if output.status.success() => merged += 1,
+                    Ok(output) => {
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        tracing::warn!(url, error = %stderr, "failed to merge PR");
+                    }
+                    Err(e) => tracing::warn!(url, error = %e, "failed to run gh"),
+                }
+            }
+            tracing::info!(merged, total = urls.len(), "batch merge complete");
+            let _ = tx.send(Message::RefreshBotPrs);
+            let _ = tx.send(Message::StatusInfo(format!("Merged {merged}/{} PRs", urls.len())));
+        });
+    }
+
     fn exec_open_in_browser(&self, url: String) {
         let runner = self.runner.clone();
         tokio::task::spawn_blocking(move || {
@@ -1011,7 +1085,7 @@ impl TuiRuntime {
         let runner = self.runner.clone();
         tokio::task::spawn_blocking(move || {
             match crate::dispatch::dispatch_review_agent(
-                &req.repo, req.number, &req.title, &req.body, &req.head_ref, &*runner,
+                &req.repo, req.number, &req.title, &req.body, &req.head_ref, req.is_dependabot, &*runner,
             ) {
                 Ok(result) => {
                     let _ = tx.send(Message::ReviewAgentDispatched {
@@ -1145,6 +1219,10 @@ async fn execute_commands(
             Command::PersistReviewPrs(prs) => rt.exec_persist_review_prs(prs),
             Command::FetchMyPrs => rt.exec_fetch_my_prs(),
             Command::PersistMyPrs(prs) => rt.exec_persist_my_prs(prs),
+            Command::FetchBotPrs => rt.exec_fetch_bot_prs(),
+            Command::PersistBotPrs(prs) => rt.exec_persist_bot_prs(prs),
+            Command::BatchApprovePrs(urls) => rt.exec_batch_approve_prs(urls),
+            Command::BatchMergePrs(urls) => rt.exec_batch_merge_prs(urls),
             Command::OpenInBrowser { url } => rt.exec_open_in_browser(url),
             Command::PersistFilterPreset { name, repo_paths, mode } => {
                 let mode_str = match mode {

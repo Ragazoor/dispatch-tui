@@ -35,6 +35,8 @@ impl App {
             InputMode::ReviewRepoFilter => self.handle_key_review_repo_filter(key),
             InputMode::InputPresetName => self.handle_key_input_preset_name(key),
             InputMode::ConfirmDeletePreset => self.handle_key_confirm_delete_preset(key),
+            InputMode::ConfirmBatchApprove(_) => self.handle_key_confirm_batch(key, true),
+            InputMode::ConfirmBatchMerge(_) => self.handle_key_confirm_batch(key, false),
         }
     }
 
@@ -687,7 +689,14 @@ impl App {
     fn handle_key_review_board(&mut self, key: KeyEvent) -> Vec<Command> {
         match key.code {
             KeyCode::Char('q') => self.update(Message::Quit),
-            KeyCode::Tab | KeyCode::Esc => self.update(Message::SwitchToTaskBoard),
+            KeyCode::Tab => self.update(Message::SwitchToTaskBoard),
+            KeyCode::Esc => {
+                if self.has_bot_pr_selection() {
+                    self.update(Message::ClearBotPrSelection)
+                } else {
+                    self.update(Message::SwitchToTaskBoard)
+                }
+            }
 
             KeyCode::Char('h') | KeyCode::Left => {
                 if let Some(sel) = self.review_selection_mut() {
@@ -728,12 +737,17 @@ impl App {
 
             KeyCode::Char('d') => {
                 if let Some(pr) = self.selected_review_pr() {
+                    let is_dependabot = matches!(
+                        self.view_mode,
+                        ViewMode::ReviewBoard { mode: ReviewBoardMode::Dependabot, .. }
+                    );
                     self.update(Message::DispatchReviewAgent(ReviewAgentRequest {
                         repo: pr.repo.clone(),
                         number: pr.number,
                         title: pr.title.clone(),
                         body: pr.body.clone(),
                         head_ref: pr.head_ref.clone(),
+                        is_dependabot,
                     }))
                 } else {
                     vec![]
@@ -752,7 +766,58 @@ impl App {
 
             KeyCode::BackTab => self.update(Message::ToggleReviewBoardMode),
 
+            // Dependabot-specific bindings
+            KeyCode::Char(' ') => {
+                if matches!(self.view_mode, ViewMode::ReviewBoard { mode: ReviewBoardMode::Dependabot, .. }) {
+                    if let Some(pr) = self.selected_review_pr() {
+                        let url = pr.url.clone();
+                        self.update(Message::ToggleSelectBotPr(url))
+                    } else {
+                        vec![]
+                    }
+                } else {
+                    vec![]
+                }
+            }
+
+            KeyCode::Char('a') => {
+                if matches!(self.view_mode, ViewMode::ReviewBoard { mode: ReviewBoardMode::Dependabot, .. }) {
+                    self.update(Message::SelectAllBotPrColumn)
+                } else {
+                    vec![]
+                }
+            }
+
+            KeyCode::Char('A') => {
+                if matches!(self.view_mode, ViewMode::ReviewBoard { mode: ReviewBoardMode::Dependabot, .. }) {
+                    self.update(Message::StartBatchApprove)
+                } else {
+                    vec![]
+                }
+            }
+
+            KeyCode::Char('m') => {
+                if matches!(self.view_mode, ViewMode::ReviewBoard { mode: ReviewBoardMode::Dependabot, .. }) {
+                    self.update(Message::StartBatchMerge)
+                } else {
+                    vec![]
+                }
+            }
+
             _ => vec![],
+        }
+    }
+
+    fn handle_key_confirm_batch(&mut self, key: KeyEvent, is_approve: bool) -> Vec<Command> {
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                if is_approve {
+                    self.update(Message::ConfirmBatchApprove)
+                } else {
+                    self.update(Message::ConfirmBatchMerge)
+                }
+            }
+            _ => self.update(Message::CancelBatchOperation),
         }
     }
 }

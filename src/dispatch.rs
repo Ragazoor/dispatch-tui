@@ -829,6 +829,7 @@ pub fn dispatch_review_agent(
     title: &str,
     body: &str,
     head_ref: &str,
+    is_dependabot: bool,
     runner: &dyn ProcessRunner,
 ) -> Result<DispatchResult> {
     let repo_path = expand_tilde(repo_path);
@@ -883,16 +884,34 @@ pub fn dispatch_review_agent(
         .context("failed to create tmux window")?;
 
     // Write prompt and launch Claude
-    let prompt = format!(
-        "You are reviewing PR #{number}: {title}\n\n\
-         ## PR Description\n\n{body}\n\n\
-         ## Instructions\n\n\
-         1. Read the diff: `gh pr diff {number}`\n\
-         2. Review the changes for correctness, style, bugs, and security issues\n\
-         3. Submit your review using `gh pr review {number}` with appropriate comments\n\
-         4. If changes are needed, use `--request-changes`. If it looks good, use `--approve`.\n\n\
-         Focus on substantive issues. Don't nitpick style unless it affects readability."
-    );
+    let prompt = if is_dependabot {
+        format!(
+            "You are reviewing a dependency update PR #{number}: {title}\n\n\
+             ## PR Description\n\n{body}\n\n\
+             ## Instructions\n\n\
+             This is an automated dependency update from dependabot or renovate.\n\
+             Focus your review on:\n\n\
+             1. Read the diff: `gh pr diff {number}`\n\
+             2. **Breaking changes**: Check if this is a major version bump that could break the build\n\
+             3. **Changelog**: Look for notable changes, deprecations, or security fixes in the update\n\
+             4. **Version bump type**: Identify if this is a patch, minor, or major update\n\
+             5. **Dependency health**: Check if the dependency is actively maintained\n\n\
+             If the update is a routine patch/minor bump with passing CI, approve with `gh pr review {number} --approve`.\n\
+             If it's a major bump or you find concerns, use `--request-changes` with specific feedback.\n\n\
+             Be concise. Dependency updates rarely need extensive review unless they're major version bumps."
+        )
+    } else {
+        format!(
+            "You are reviewing PR #{number}: {title}\n\n\
+             ## PR Description\n\n{body}\n\n\
+             ## Instructions\n\n\
+             1. Read the diff: `gh pr diff {number}`\n\
+             2. Review the changes for correctness, style, bugs, and security issues\n\
+             3. Submit your review using `gh pr review {number}` with appropriate comments\n\
+             4. If changes are needed, use `--request-changes`. If it looks good, use `--approve`.\n\n\
+             Focus on substantive issues. Don't nitpick style unless it affects readability."
+        )
+    };
     let prompt_file = format!("{worktree_path}/.claude-prompt");
     fs::write(&prompt_file, &prompt)
         .with_context(|| format!("failed to write {prompt_file}"))?;
@@ -1868,7 +1887,7 @@ mod tests {
             MockProcessRunner::ok_with_stdout(tmux_window.as_bytes()),
         ]);
 
-        let result = dispatch_review_agent(&repo_path, 99, "Fix it", "body", "feature-branch", &mock).unwrap();
+        let result = dispatch_review_agent(&repo_path, 99, "Fix it", "body", "feature-branch", false, &mock).unwrap();
 
         let calls = mock.recorded_calls();
         assert_eq!(calls.len(), 1, "only list-windows should be called");
@@ -1896,7 +1915,7 @@ mod tests {
             MockProcessRunner::ok(),                              // tmux send-keys Enter
         ]);
 
-        let result = dispatch_review_agent(&repo_path, 99, "Fix it", "desc", "feature-branch", &mock).unwrap();
+        let result = dispatch_review_agent(&repo_path, 99, "Fix it", "desc", "feature-branch", false, &mock).unwrap();
 
         let calls = mock.recorded_calls();
         assert!(
@@ -1928,7 +1947,7 @@ mod tests {
             MockProcessRunner::ok(),                              // tmux send-keys Enter
         ]);
 
-        let result = dispatch_review_agent(&repo_path, 99, "Fix it", "PR body here", "feature-branch", &mock).unwrap();
+        let result = dispatch_review_agent(&repo_path, 99, "Fix it", "PR body here", "feature-branch", false, &mock).unwrap();
 
         let calls = mock.recorded_calls();
         // Verify git fetch
@@ -1973,7 +1992,7 @@ mod tests {
         ]);
 
         // The function will error at fs::write since mock doesn't create the dir
-        let result = dispatch_review_agent(&repo_path, 99, "Fix it", "body", "feature-branch", &mock);
+        let result = dispatch_review_agent(&repo_path, 99, "Fix it", "body", "feature-branch", false, &mock);
         assert!(result.is_err());
 
         let calls = mock.recorded_calls();
@@ -1995,7 +2014,7 @@ mod tests {
             MockProcessRunner::fail("fatal: couldn't find remote ref"), // git fetch fails
         ]);
 
-        let result = dispatch_review_agent(&repo_path, 99, "Fix it", "body", "nonexistent", &mock);
+        let result = dispatch_review_agent(&repo_path, 99, "Fix it", "body", "nonexistent", false, &mock);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("git fetch failed"));
     }
@@ -2016,7 +2035,7 @@ mod tests {
             MockProcessRunner::ok(),                              // tmux send-keys Enter
         ]);
 
-        dispatch_review_agent(&repo_path, 99, "Fix it", "body", "feature-branch", &mock).unwrap();
+        dispatch_review_agent(&repo_path, 99, "Fix it", "body", "feature-branch", false, &mock).unwrap();
 
         let calls = mock.recorded_calls();
         let send_keys_arg = calls[3].1.iter().find(|a| a.contains("claude")).unwrap();

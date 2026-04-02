@@ -386,6 +386,131 @@ pub fn fetch_my_prs(runner: &dyn ProcessRunner) -> Result<Vec<ReviewPr>, String>
     parse_my_prs(&json)
 }
 
+/// Fetch open dependency-bot PRs (dependabot + renovate), non-draft.
+///
+/// Uses two aliased GraphQL searches in one request:
+/// - `dependabot`: PRs authored by `app/dependabot`
+/// - `renovate`: PRs authored by `app/renovate`
+///
+/// The two result sets are merged and deduplicated by URL client-side.
+pub fn fetch_bot_prs(runner: &dyn ProcessRunner) -> Result<Vec<ReviewPr>, String> {
+    let query = format!(
+        r#"{{
+  viewer {{ login }}
+  dependabot: search(query: "is:pr is:open author:app/dependabot -is:draft", type: ISSUE, first: 100) {{
+    nodes {{
+      {PR_FIELDS}
+    }}
+  }}
+  renovate: search(query: "is:pr is:open author:app/renovate -is:draft", type: ISSUE, first: 100) {{
+    nodes {{
+      {PR_FIELDS}
+    }}
+  }}
+}}"#
+    );
+
+    let output = runner
+        .run("gh", &["api", "graphql", "-f", &format!("query={query}")])
+        .map_err(|e| format!("Failed to run gh: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("gh api graphql failed: {stderr}"));
+    }
+
+    let json = String::from_utf8_lossy(&output.stdout);
+    parse_bot_prs(&json)
+}
+
+/// Parse the bot PRs response (dependabot + renovate aliases), deduplicate by URL.
+fn parse_bot_prs(json: &str) -> Result<Vec<ReviewPr>, String> {
+    let root: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| format!("Failed to parse JSON: {e}"))?;
+
+    let viewer_login = root
+        .pointer("/data/viewer/login")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let mut seen_urls = std::collections::HashSet::new();
+    let mut all_nodes: Vec<serde_json::Value> = Vec::new();
+    for alias in &["dependabot", "renovate"] {
+        let path = format!("/data/{alias}/nodes");
+        if let Some(nodes) = root.pointer(&path).and_then(|v| v.as_array()) {
+            for node in nodes {
+                let url = node["url"].as_str().unwrap_or("").to_string();
+                if !url.is_empty() && seen_urls.insert(url) {
+                    all_nodes.push(node.clone());
+                }
+            }
+        }
+    }
+
+    let mut prs = Vec::with_capacity(all_nodes.len());
+    for node in &all_nodes {
+        if node["isDraft"].as_bool() == Some(true) {
+            continue;
+        }
+
+        let review_decision = classify_review_decision(node, viewer_login);
+
+        let labels = node["labels"]["nodes"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|l| l["name"].as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let created_at = node["createdAt"]
+            .as_str()
+            .and_then(|s| s.parse::<DateTime<Utc>>().ok())
+            .unwrap_or_else(Utc::now);
+        let updated_at = node["updatedAt"]
+            .as_str()
+            .and_then(|s| s.parse::<DateTime<Utc>>().ok())
+            .unwrap_or_else(Utc::now);
+
+        let body = node["body"].as_str().unwrap_or("").to_string();
+        let head_ref = node["headRefName"].as_str().unwrap_or("").to_string();
+
+        let ci_state = node["commits"]["nodes"]
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(|n| n["commit"]["statusCheckRollup"]["state"].as_str());
+        let ci_status = CiStatus::from_github(ci_state);
+
+        let reviewers = parse_reviewers(node);
+
+        prs.push(ReviewPr {
+            number: node["number"].as_i64().unwrap_or(0),
+            title: node["title"].as_str().unwrap_or("").to_string(),
+            author: node["author"]["login"].as_str().unwrap_or("").to_string(),
+            repo: node["repository"]["nameWithOwner"]
+                .as_str()
+                .unwrap_or("")
+                .to_string(),
+            url: node["url"].as_str().unwrap_or("").to_string(),
+            is_draft: node["isDraft"].as_bool().unwrap_or(false),
+            created_at,
+            updated_at,
+            additions: node["additions"].as_i64().unwrap_or(0),
+            deletions: node["deletions"].as_i64().unwrap_or(0),
+            review_decision,
+            labels,
+            body,
+            head_ref,
+            ci_status,
+            reviewers,
+        });
+    }
+
+    prs.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    Ok(prs)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

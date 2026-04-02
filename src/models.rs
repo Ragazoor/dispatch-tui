@@ -583,6 +583,16 @@ impl CiStatus {
         }
     }
 
+    /// Column index for the dependabot board: Passing=0, Failing=1, Pending=2.
+    /// `None` maps to Pending (col 2) as a safe default.
+    pub fn column_index(self) -> usize {
+        match self {
+            Self::Success => 0,
+            Self::Failure => 1,
+            Self::Pending | Self::None => 2,
+        }
+    }
+
     pub fn from_github(s: Option<&str>) -> Self {
         match s {
             Some("SUCCESS") => Self::Success,

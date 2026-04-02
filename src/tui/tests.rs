@@ -7670,6 +7670,12 @@ fn shift_tab_toggles_review_board_mode() {
         ViewMode::ReviewBoard { mode, .. } => assert_eq!(*mode, ReviewBoardMode::Author),
         _ => panic!("expected ReviewBoard"),
     }
+    // Toggle to Dependabot
+    app.update(Message::ToggleReviewBoardMode);
+    match app.view_mode() {
+        ViewMode::ReviewBoard { mode, .. } => assert_eq!(*mode, ReviewBoardMode::Dependabot),
+        _ => panic!("expected ReviewBoard"),
+    }
     // Toggle back to Reviewer
     app.update(Message::ToggleReviewBoardMode);
     match app.view_mode() {

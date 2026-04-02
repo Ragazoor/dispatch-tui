@@ -45,6 +45,7 @@ pub struct App {
     pub(in crate::tui) archive: ArchiveState,
     pub(in crate::tui) selected_tasks: HashSet<TaskId>,
     pub(in crate::tui) selected_epics: HashSet<EpicId>,
+    pub(in crate::tui) selected_bot_prs: HashSet<String>,
     pub(in crate::tui) pending_done_tasks: Vec<TaskId>,
     pub(in crate::tui) notifications_enabled: bool,
     pub(in crate::tui) repo_filter: HashSet<String>,
@@ -82,6 +83,7 @@ impl App {
             archive: ArchiveState::default(),
             selected_tasks: HashSet::new(),
             selected_epics: HashSet::new(),
+            selected_bot_prs: HashSet::new(),
             pending_done_tasks: Vec::new(),
             notifications_enabled: true,
             repo_filter: HashSet::new(),
@@ -178,6 +180,18 @@ impl App {
     pub fn dispatch_pr_filter(&self) -> bool {
         self.review.dispatch_pr_filter
     }
+    pub fn bot_prs(&self) -> &[crate::models::ReviewPr] {
+        &self.review.bot_prs
+    }
+    pub fn bot_prs_loading(&self) -> bool {
+        self.review.bot_prs_loading
+    }
+    pub fn selected_bot_prs(&self) -> &HashSet<String> {
+        &self.selected_bot_prs
+    }
+    pub fn has_bot_pr_selection(&self) -> bool {
+        !self.selected_bot_prs.is_empty()
+    }
 
     /// Set of PR URLs from dispatch tasks (for matching against ReviewPr entries).
     pub fn dispatch_pr_urls(&self) -> HashSet<String> {
@@ -205,6 +219,10 @@ impl App {
 
     pub fn set_review_prs(&mut self, prs: Vec<crate::models::ReviewPr>) {
         self.review.set_prs(prs);
+    }
+
+    pub fn set_bot_prs(&mut self, prs: Vec<crate::models::ReviewPr>) {
+        self.review.set_bot_prs(prs);
     }
 
     pub fn set_repo_filter(&mut self, filter: HashSet<String>) {
@@ -608,12 +626,45 @@ impl App {
                         self.review.my_prs_loading = true;
                         cmds.push(Command::FetchMyPrs);
                     }
+                    ViewMode::ReviewBoard { mode: ReviewBoardMode::Dependabot, .. } => {
+                        self.review.bot_prs_loading = true;
+                        cmds.push(Command::FetchBotPrs);
+                    }
                     _ => {
                         self.review.loading = true;
                         cmds.push(Command::FetchReviewPrs);
                     }
                 }
                 cmds
+            }
+            Message::RefreshBotPrs => {
+                self.review.bot_prs_loading = true;
+                vec![Command::FetchBotPrs]
+            }
+            Message::BotPrsLoaded(prs) => self.handle_bot_prs_loaded(prs),
+            Message::BotPrsFetchFailed(err) => {
+                self.review.bot_prs_loading = false;
+                self.review.last_error = Some(err);
+                vec![]
+            }
+            Message::ToggleSelectBotPr(url) => {
+                if !self.selected_bot_prs.remove(&url) {
+                    self.selected_bot_prs.insert(url);
+                }
+                vec![]
+            }
+            Message::SelectAllBotPrColumn => self.handle_select_all_bot_pr_column(),
+            Message::ClearBotPrSelection => {
+                self.selected_bot_prs.clear();
+                vec![]
+            }
+            Message::StartBatchApprove => self.handle_start_batch_approve(),
+            Message::StartBatchMerge => self.handle_start_batch_merge(),
+            Message::ConfirmBatchApprove => self.handle_confirm_batch_approve(),
+            Message::ConfirmBatchMerge => self.handle_confirm_batch_merge(),
+            Message::CancelBatchOperation => {
+                self.input.mode = InputMode::Normal;
+                vec![]
             }
             // Filter presets
             Message::StartSavePreset => self.handle_start_save_preset(),
@@ -2146,7 +2197,8 @@ impl App {
         };
         *mode = match mode {
             ReviewBoardMode::Reviewer => ReviewBoardMode::Author,
-            ReviewBoardMode::Author => ReviewBoardMode::Reviewer,
+            ReviewBoardMode::Author => ReviewBoardMode::Dependabot,
+            ReviewBoardMode::Dependabot => ReviewBoardMode::Reviewer,
         };
         self.clamp_review_selection();
         let mut cmds = vec![];
@@ -2168,6 +2220,14 @@ impl App {
                         cmds.push(Command::FetchReviewPrs);
                     }
                 }
+                ReviewBoardMode::Dependabot => {
+                    if self.review.needs_bot_prs_fetch(REVIEW_REFRESH_INTERVAL)
+                        && !self.review.bot_prs_loading
+                    {
+                        self.review.bot_prs_loading = true;
+                        cmds.push(Command::FetchBotPrs);
+                    }
+                }
             }
         }
         cmds
@@ -2184,11 +2244,17 @@ impl App {
     }
 
     fn clamp_review_selection(&mut self) {
+        let mode = match &self.view_mode {
+            ViewMode::ReviewBoard { mode, .. } => *mode,
+            _ => ReviewBoardMode::Reviewer,
+        };
         let filtered = self.active_review_prs();
+        let col_count = mode.column_count();
         let counts: [usize; ReviewDecision::COLUMN_COUNT] = std::array::from_fn(|col| {
+            if col >= col_count { return 0; }
             filtered
                 .iter()
-                .filter(|pr| pr.review_decision.column_index() == col)
+                .filter(|pr| mode.pr_column(pr) == col)
                 .count()
         });
         if let Some(sel) = self.review_selection_mut() {
@@ -2234,6 +2300,99 @@ impl App {
         vec![Command::DispatchReviewAgent(req)]
     }
 
+    fn handle_bot_prs_loaded(&mut self, prs: Vec<crate::models::ReviewPr>) -> Vec<Command> {
+        let cmds = vec![Command::PersistBotPrs(prs.clone())];
+        self.review.set_bot_prs(prs);
+        self.review.bot_prs_loading = false;
+        self.review.last_bot_prs_fetch = Some(Instant::now());
+        self.clamp_review_selection();
+        cmds
+    }
+
+    fn handle_select_all_bot_pr_column(&mut self) -> Vec<Command> {
+        let mode = match &self.view_mode {
+            ViewMode::ReviewBoard { mode, .. } => *mode,
+            _ => return vec![],
+        };
+        let sel = match self.review_selection() {
+            Some(s) => s.selected_column,
+            None => return vec![],
+        };
+        let prs = self.filtered_bot_prs();
+        let column_urls: Vec<String> = prs
+            .iter()
+            .filter(|pr| mode.pr_column(pr) == sel)
+            .map(|pr| pr.url.clone())
+            .collect();
+        let all_selected = column_urls.iter().all(|u| self.selected_bot_prs.contains(u));
+        if all_selected {
+            for u in &column_urls {
+                self.selected_bot_prs.remove(u);
+            }
+        } else {
+            for u in column_urls {
+                self.selected_bot_prs.insert(u);
+            }
+        }
+        vec![]
+    }
+
+    fn handle_start_batch_approve(&mut self) -> Vec<Command> {
+        if self.selected_bot_prs.is_empty() {
+            return vec![];
+        }
+        let urls: Vec<String> = self.selected_bot_prs.iter().cloned().collect();
+        self.input.mode = InputMode::ConfirmBatchApprove(urls);
+        vec![]
+    }
+
+    fn handle_start_batch_merge(&mut self) -> Vec<Command> {
+        if self.selected_bot_prs.is_empty() {
+            return vec![];
+        }
+        // Only merge PRs that are CI-passing and approved
+        let eligible: Vec<String> = self.review.bot_prs.iter()
+            .filter(|pr| self.selected_bot_prs.contains(&pr.url))
+            .filter(|pr| {
+                pr.ci_status == crate::models::CiStatus::Success
+                    && pr.review_decision == crate::models::ReviewDecision::Approved
+            })
+            .map(|pr| pr.url.clone())
+            .collect();
+        if eligible.is_empty() {
+            self.set_status("No eligible PRs to merge (need CI passing + approved)".into());
+            return vec![];
+        }
+        self.input.mode = InputMode::ConfirmBatchMerge(eligible);
+        vec![]
+    }
+
+    fn handle_confirm_batch_approve(&mut self) -> Vec<Command> {
+        let urls = match std::mem::replace(&mut self.input.mode, InputMode::Normal) {
+            InputMode::ConfirmBatchApprove(urls) => urls,
+            other => {
+                self.input.mode = other;
+                return vec![];
+            }
+        };
+        self.selected_bot_prs.clear();
+        self.set_status(format!("Approving {} PRs...", urls.len()));
+        vec![Command::BatchApprovePrs(urls)]
+    }
+
+    fn handle_confirm_batch_merge(&mut self) -> Vec<Command> {
+        let urls = match std::mem::replace(&mut self.input.mode, InputMode::Normal) {
+            InputMode::ConfirmBatchMerge(urls) => urls,
+            other => {
+                self.input.mode = other;
+                return vec![];
+            }
+        };
+        self.selected_bot_prs.clear();
+        self.set_status(format!("Merging {} PRs...", urls.len()));
+        vec![Command::BatchMergePrs(urls)]
+    }
+
     /// Return review PRs filtered by the review repo filter.
     /// When the filter is empty, all PRs are returned.
     pub fn filtered_review_prs(&self) -> Vec<&crate::models::ReviewPr> {
@@ -2252,13 +2411,15 @@ impl App {
         }
     }
 
+    pub fn filtered_bot_prs(&self) -> Vec<&crate::models::ReviewPr> {
+        self.review.filtered_bot_prs()
+    }
+
     /// Return the PR list appropriate for the current review board mode.
-    /// In Reviewer mode, returns filtered review PRs.
-    /// In Author mode, returns filtered my PRs.
-    /// Outside ReviewBoard, returns filtered review PRs as default.
     pub fn active_review_prs(&self) -> Vec<&crate::models::ReviewPr> {
         match &self.view_mode {
             ViewMode::ReviewBoard { mode: ReviewBoardMode::Author, .. } => self.filtered_my_prs(),
+            ViewMode::ReviewBoard { mode: ReviewBoardMode::Dependabot, .. } => self.filtered_bot_prs(),
             _ => self.filtered_review_prs(),
         }
     }
@@ -2267,6 +2428,7 @@ impl App {
     pub fn active_review_repos(&self) -> &[String] {
         match &self.view_mode {
             ViewMode::ReviewBoard { mode: ReviewBoardMode::Author, .. } => &self.review.my_prs_repos,
+            ViewMode::ReviewBoard { mode: ReviewBoardMode::Dependabot, .. } => &self.review.bot_prs_repos,
             _ => &self.review.repos,
         }
     }
@@ -2282,27 +2444,31 @@ impl App {
             .collect()
     }
 
+    /// Return PRs for a given column index, using the current mode's column mapping.
+    pub fn active_prs_for_column(&self, col: usize) -> Vec<&crate::models::ReviewPr> {
+        let mode = match &self.view_mode {
+            ViewMode::ReviewBoard { mode, .. } => *mode,
+            _ => ReviewBoardMode::Reviewer,
+        };
+        self.active_review_prs()
+            .into_iter()
+            .filter(|pr| mode.pr_column(pr) == col)
+            .collect()
+    }
+
     /// Get the currently selected ReviewPr, if in review board mode.
     pub fn selected_review_pr(&self) -> Option<&crate::models::ReviewPr> {
         let sel = self.review_selection()?;
         let col = sel.column();
         let row = sel.row(col);
-        let decision = crate::models::ReviewDecision::from_column_index(col)?;
-        self.active_review_prs()
-            .into_iter()
-            .filter(|pr| pr.review_decision == decision)
-            .nth(row)
+        self.active_prs_for_column(col).into_iter().nth(row)
     }
 
     pub(in crate::tui) fn navigate_review_row(&mut self, delta: isize) {
         let (col, count) = match self.review_selection() {
             Some(sel) => {
                 let col = sel.selected_column;
-                let count = self
-                    .active_review_prs()
-                    .iter()
-                    .filter(|pr| pr.review_decision.column_index() == col)
-                    .count();
+                let count = self.active_prs_for_column(col).len();
                 (col, count)
             }
             None => return,

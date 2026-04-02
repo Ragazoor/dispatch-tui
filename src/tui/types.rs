@@ -23,6 +23,45 @@ pub enum MoveDirection {
 pub enum ReviewBoardMode {
     Reviewer,
     Author,
+    Dependabot,
+}
+
+impl ReviewBoardMode {
+    pub fn column_count(&self) -> usize {
+        4
+    }
+
+    pub fn column_label(&self, col: usize) -> &'static str {
+        match self {
+            Self::Reviewer | Self::Author => match col {
+                0 => "Needs Review",
+                1 => "Waiting for Response",
+                2 => "Changes Requested",
+                3 => "Approved",
+                _ => "",
+            },
+            Self::Dependabot => match col {
+                0 => "CI Passing",
+                1 => "CI Failing",
+                2 => "CI Pending",
+                3 => "Approved",
+                _ => "",
+            },
+        }
+    }
+
+    pub fn pr_column(&self, pr: &crate::models::ReviewPr) -> usize {
+        match self {
+            Self::Reviewer | Self::Author => pr.review_decision.column_index(),
+            Self::Dependabot => {
+                if pr.review_decision == crate::models::ReviewDecision::Approved {
+                    3
+                } else {
+                    pr.ci_status.column_index()
+                }
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -36,6 +75,7 @@ pub struct ReviewAgentRequest {
     pub title: String,
     pub body: String,
     pub head_ref: String,
+    pub is_dependabot: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -171,6 +211,18 @@ pub enum Message {
     ToggleReviewRepoFilterMode,
     // Dispatch PR filter (My PRs tab)
     ToggleDispatchPrFilter,
+    // Bot PRs (dependabot/renovate)
+    BotPrsLoaded(Vec<crate::models::ReviewPr>),
+    BotPrsFetchFailed(String),
+    RefreshBotPrs,
+    ToggleSelectBotPr(String),
+    SelectAllBotPrColumn,
+    ClearBotPrSelection,
+    StartBatchApprove,
+    StartBatchMerge,
+    ConfirmBatchApprove,
+    ConfirmBatchMerge,
+    CancelBatchOperation,
     // Filter presets
     StartSavePreset,
     SaveFilterPreset(String),
@@ -253,6 +305,10 @@ pub enum Command {
     PersistReviewPrs(Vec<crate::models::ReviewPr>),
     FetchMyPrs,
     PersistMyPrs(Vec<crate::models::ReviewPr>),
+    FetchBotPrs,
+    PersistBotPrs(Vec<crate::models::ReviewPr>),
+    BatchApprovePrs(Vec<String>),
+    BatchMergePrs(Vec<String>),
     OpenInBrowser {
         url: String,
     },
@@ -294,6 +350,9 @@ pub enum InputMode {
     ReviewRepoFilter,
     InputPresetName,
     ConfirmDeletePreset,
+    // Dependabot batch operations
+    ConfirmBatchApprove(Vec<String>),
+    ConfirmBatchMerge(Vec<String>),
 }
 
 // ---------------------------------------------------------------------------
@@ -412,6 +471,13 @@ pub struct ReviewBoardState {
     pub my_prs_repo_filter: HashSet<String>,
     pub my_prs_repo_filter_mode: RepoFilterMode,
     pub dispatch_pr_filter: bool,
+    // Bot (dependabot/renovate) PRs
+    pub bot_prs: Vec<crate::models::ReviewPr>,
+    pub bot_prs_repos: Vec<String>,
+    pub bot_prs_loading: bool,
+    pub last_bot_prs_fetch: Option<Instant>,
+    pub bot_prs_repo_filter: HashSet<String>,
+    pub bot_prs_repo_filter_mode: RepoFilterMode,
 }
 
 impl ReviewBoardState {
@@ -473,6 +539,37 @@ impl ReviewBoardState {
     /// Whether author PRs need a refresh given the interval.
     pub fn needs_my_prs_fetch(&self, interval: Duration) -> bool {
         self.last_my_prs_fetch
+            .map(|t| t.elapsed() > interval)
+            .unwrap_or(true)
+    }
+
+    /// Set bot PRs and rebuild the cached distinct repos list.
+    pub fn set_bot_prs(&mut self, prs: Vec<crate::models::ReviewPr>) {
+        self.bot_prs_repos = distinct_repos(&prs);
+        self.bot_prs = prs;
+    }
+
+    /// Return bot PRs filtered by repo filter. Empty filter means all PRs.
+    pub fn filtered_bot_prs(&self) -> Vec<&crate::models::ReviewPr> {
+        self.bot_prs
+            .iter()
+            .filter(|pr| self.bot_prs_repo_matches(&pr.repo))
+            .collect()
+    }
+
+    pub fn bot_prs_repo_matches(&self, repo: &str) -> bool {
+        if self.bot_prs_repo_filter.is_empty() {
+            return true;
+        }
+        match self.bot_prs_repo_filter_mode {
+            RepoFilterMode::Include => self.bot_prs_repo_filter.contains(repo),
+            RepoFilterMode::Exclude => !self.bot_prs_repo_filter.contains(repo),
+        }
+    }
+
+    /// Whether bot PRs need a refresh given the interval.
+    pub fn needs_bot_prs_fetch(&self, interval: Duration) -> bool {
+        self.last_bot_prs_fetch
             .map(|t| t.elapsed() > interval)
             .unwrap_or(true)
     }

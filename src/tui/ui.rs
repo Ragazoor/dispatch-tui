@@ -218,6 +218,20 @@ fn my_prs_tab_label(app: &App, prefix: &str) -> String {
     }
 }
 
+fn bot_prs_tab_label(app: &App, prefix: &str) -> String {
+    let bot_count = app.bot_prs().len();
+    let loading = if app.bot_prs_loading() {
+        " \u{21bb}"
+    } else {
+        ""
+    };
+    if bot_count > 0 {
+        format!("{prefix}Dependabot ({bot_count}){loading} ")
+    } else {
+        format!("{prefix}Dependabot{loading} ")
+    }
+}
+
 fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
     let active_style = Style::default().fg(FG).add_modifier(Modifier::BOLD);
     let inactive_style = Style::default().fg(MUTED);
@@ -254,18 +268,24 @@ fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
         ViewMode::ReviewBoard { mode, .. } => {
             spans.push(Span::styled(" Tasks ", inactive_style));
             spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
-            let (reviewer_style, author_style) = match mode {
-                ReviewBoardMode::Reviewer => (active_style, inactive_style),
-                ReviewBoardMode::Author => (inactive_style, active_style),
+            let (reviewer_style, author_style, bot_style) = match mode {
+                ReviewBoardMode::Reviewer => (active_style, inactive_style, inactive_style),
+                ReviewBoardMode::Author => (inactive_style, active_style, inactive_style),
+                ReviewBoardMode::Dependabot => (inactive_style, inactive_style, active_style),
             };
             spans.push(Span::styled(
-                review_tab_label(app, " \u{25b8} "),
+                review_tab_label(app, if matches!(mode, ReviewBoardMode::Reviewer) { " \u{25b8} " } else { " " }),
                 reviewer_style,
             ));
             spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
             spans.push(Span::styled(
-                my_prs_tab_label(app, " "),
+                my_prs_tab_label(app, if matches!(mode, ReviewBoardMode::Author) { " \u{25b8} " } else { " " }),
                 author_style,
+            ));
+            spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
+            spans.push(Span::styled(
+                bot_prs_tab_label(app, if matches!(mode, ReviewBoardMode::Dependabot) { " \u{25b8} " } else { " " }),
+                bot_style,
             ));
         }
     }
@@ -1836,6 +1856,18 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 .style(Style::default().fg(Color::Cyan));
             frame.render_widget(bar, area);
         }
+        InputMode::ConfirmBatchApprove(ref urls) => {
+            let text = format!("Approve {} PRs? (y/n)", urls.len());
+            let bar = Paragraph::new(text)
+                .style(Style::default().fg(Color::Yellow));
+            frame.render_widget(bar, area);
+        }
+        InputMode::ConfirmBatchMerge(ref urls) => {
+            let text = format!("Merge {} PRs? (y/n)", urls.len());
+            let bar = Paragraph::new(text)
+                .style(Style::default().fg(Color::Green));
+            frame.render_widget(bar, area);
+        }
     }
 }
 
@@ -1994,6 +2026,25 @@ fn review_action_hints(has_pr: bool, is_author_mode: bool) -> Vec<Span<'static>>
     spans
 }
 
+fn bot_action_hints(has_pr: bool) -> Vec<Span<'static>> {
+    let key_color = Color::Cyan;
+    let label_style = Style::default().fg(MUTED);
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut push_hint = |key: &'static str, label: &'static str| {
+        spans.push(Span::styled(key, Style::default().fg(key_color).add_modifier(Modifier::BOLD)));
+        spans.push(Span::styled(format!(" {label}  "), label_style));
+    };
+    push_hint("Space", "select");
+    push_hint("a", "select all");
+    if has_pr {
+        push_hint("d", "review");
+        push_hint("p", "open");
+    }
+    push_hint("r", "refresh");
+    push_hint("Tab", "task board");
+    spans
+}
+
 fn review_column_color(decision: ReviewDecision) -> Color {
     match decision {
         ReviewDecision::ReviewRequired => CYAN,
@@ -2042,10 +2093,12 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
     if filtered.is_empty() {
         let is_loading = match app.view_mode() {
             ViewMode::ReviewBoard { mode: ReviewBoardMode::Author, .. } => app.my_prs_loading(),
+            ViewMode::ReviewBoard { mode: ReviewBoardMode::Dependabot, .. } => app.bot_prs_loading(),
             _ => app.review_board_loading(),
         };
         let is_empty = match app.view_mode() {
             ViewMode::ReviewBoard { mode: ReviewBoardMode::Author, .. } => app.my_prs().is_empty(),
+            ViewMode::ReviewBoard { mode: ReviewBoardMode::Dependabot, .. } => app.bot_prs().is_empty(),
             _ => app.review_prs().is_empty(),
         };
         let msg = if is_loading {
@@ -2074,11 +2127,23 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
         let status =
             Paragraph::new(format!("Error: {err}")).style(Style::default().fg(Color::Red));
         frame.render_widget(status, chunks[4]);
+    } else if app.has_bot_pr_selection() {
+        let count = app.selected_bot_prs().len();
+        let text = format!("{count} selected  [A] approve  [m] merge  [Esc] clear");
+        let status = Paragraph::new(text)
+            .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+        frame.render_widget(status, chunks[4]);
     } else {
         let has_pr = app.selected_review_pr().is_some();
         let is_author_mode = matches!(app.view_mode(), ViewMode::ReviewBoard { mode: ReviewBoardMode::Author, .. });
-        let hints = Paragraph::new(Line::from(review_action_hints(has_pr, is_author_mode)));
-        frame.render_widget(hints, chunks[4]);
+        let is_bot_mode = matches!(app.view_mode(), ViewMode::ReviewBoard { mode: ReviewBoardMode::Dependabot, .. });
+        if is_bot_mode {
+            let hints = Paragraph::new(Line::from(bot_action_hints(has_pr)));
+            frame.render_widget(hints, chunks[4]);
+        } else {
+            let hints = Paragraph::new(Line::from(review_action_hints(has_pr, is_author_mode)));
+            frame.render_widget(hints, chunks[4]);
+        }
     }
 
     // Filter overlay (on top of everything)
@@ -2172,24 +2237,42 @@ fn render_review_summary_row(frame: &mut Frame, app: &App, area: Rect) {
     let sel = app.review_selection();
     let selected_col = sel.map(|s| s.column()).unwrap_or(0);
     let filtered = app.active_review_prs();
+    let mode = match app.view_mode() {
+        ViewMode::ReviewBoard { mode, .. } => *mode,
+        _ => ReviewBoardMode::Reviewer,
+    };
+    let col_count = mode.column_count();
 
     let segments = Layout::default()
         .direction(Direction::Horizontal)
         .constraints(
-            [Constraint::Ratio(1, ReviewDecision::COLUMN_COUNT as u32); ReviewDecision::COLUMN_COUNT]
+            vec![Constraint::Ratio(1, col_count as u32); col_count]
         )
         .split(area);
 
-    for (i, decision) in ReviewDecision::ALL.iter().enumerate() {
+    for i in 0..col_count {
         let count = filtered
             .iter()
-            .filter(|pr| pr.review_decision == *decision)
+            .filter(|pr| mode.pr_column(pr) == i)
             .count();
         let is_focused = i == selected_col;
         let prefix = if is_focused { "\u{25b8} " } else { "\u{25e6} " };
-        let label = format!("{prefix}{} ({count})", decision.as_str());
+        let label = format!("{prefix}{} ({count})", mode.column_label(i));
 
-        let color = review_column_color(*decision);
+        // Map column index to ReviewDecision for coloring
+        let decision_for_color = if matches!(mode, ReviewBoardMode::Dependabot) {
+            match i {
+                0 => ReviewDecision::Approved,
+                1 => ReviewDecision::ChangesRequested,
+                2 => ReviewDecision::ReviewRequired,
+                3 => ReviewDecision::Approved,
+                _ => ReviewDecision::ReviewRequired,
+            }
+        } else {
+            ReviewDecision::from_column_index(i).unwrap_or(ReviewDecision::ReviewRequired)
+        };
+
+        let color = review_column_color(decision_for_color);
         let style = if is_focused {
             Style::default().fg(color).add_modifier(Modifier::BOLD)
         } else {
@@ -2204,26 +2287,46 @@ fn render_review_summary_row(frame: &mut Frame, app: &App, area: Rect) {
 fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
     let sel_col = app.review_selection().map(|s| s.column()).unwrap_or(0);
     let dispatch_urls = app.dispatch_pr_urls();
+    let mode = match app.view_mode() {
+        ViewMode::ReviewBoard { mode, .. } => *mode,
+        _ => ReviewBoardMode::Reviewer,
+    };
+    let col_count = mode.column_count();
+    let is_bot_mode = matches!(mode, ReviewBoardMode::Dependabot);
 
     let col_areas = Layout::default()
         .direction(Direction::Horizontal)
         .constraints(
-            [Constraint::Ratio(1, ReviewDecision::COLUMN_COUNT as u32); ReviewDecision::COLUMN_COUNT]
+            vec![Constraint::Ratio(1, col_count as u32); col_count]
         )
         .split(area);
 
-    for (i, decision) in ReviewDecision::ALL.iter().enumerate() {
+    for i in 0..col_count {
         let is_focused = i == sel_col;
-        let prs: Vec<&ReviewPr> = app.active_prs_by_decision(*decision);
+        let prs: Vec<&ReviewPr> = app.active_prs_for_column(i);
 
         let selected_row = app.review_selection().map(|s| s.row(i)).unwrap_or(0);
         let items: Vec<ListItem> = prs.iter().enumerate().map(|(row, pr)| {
             let is_dispatch = dispatch_urls.contains(pr.url.as_str());
-            build_review_pr_item(pr, *decision, is_focused && row == selected_row, is_dispatch)
+            let is_selected = is_bot_mode && app.selected_bot_prs().contains(&pr.url);
+            build_review_pr_item(pr, mode, i, is_focused && row == selected_row, is_dispatch, is_selected)
         }).collect();
 
+        // Use ReviewDecision column color for Reviewer/Author, CI-based for Dependabot
+        let decision_for_color = if is_bot_mode {
+            match i {
+                0 => ReviewDecision::Approved,    // CI Passing → green-ish
+                1 => ReviewDecision::ChangesRequested, // CI Failing → red-ish
+                2 => ReviewDecision::ReviewRequired,   // CI Pending → yellow-ish
+                3 => ReviewDecision::Approved,
+                _ => ReviewDecision::ReviewRequired,
+            }
+        } else {
+            ReviewDecision::from_column_index(i).unwrap_or(ReviewDecision::ReviewRequired)
+        };
+
         let bg = if is_focused {
-            review_column_bg_color(*decision)
+            review_column_bg_color(decision_for_color)
         } else {
             Color::Reset
         };
@@ -2245,19 +2348,39 @@ fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-fn build_review_pr_item(pr: &ReviewPr, decision: ReviewDecision, is_cursor: bool, is_dispatch: bool) -> ListItem<'static> {
-    let color = review_column_color(decision);
+fn build_review_pr_item(
+    pr: &ReviewPr,
+    mode: ReviewBoardMode,
+    col: usize,
+    is_cursor: bool,
+    is_dispatch: bool,
+    is_selected: bool,
+) -> ListItem<'static> {
+    // Map to a ReviewDecision for color purposes
+    let decision_for_color = if matches!(mode, ReviewBoardMode::Dependabot) {
+        match col {
+            0 => ReviewDecision::Approved,
+            1 => ReviewDecision::ChangesRequested,
+            2 => ReviewDecision::ReviewRequired,
+            3 => ReviewDecision::Approved,
+            _ => ReviewDecision::ReviewRequired,
+        }
+    } else {
+        ReviewDecision::from_column_index(col).unwrap_or(ReviewDecision::ReviewRequired)
+    };
+    let color = review_column_color(decision_for_color);
     let now = Utc::now();
     let age = format_age(pr.created_at, now);
 
-    // Line 1: stripe + dispatch badge + repo#number + title
+    // Line 1: selection marker + stripe + dispatch badge + repo#number + title
+    let select_prefix = if is_selected { "* " } else { "" };
     let stripe = if is_cursor { "\u{258c} " } else { "\u{258e} " };
     let dispatch_badge = if is_dispatch { "\u{25c6} " } else { "" };
     let repo_short = pr.repo.split('/').next_back().unwrap_or(&pr.repo);
-    let header = format!("{dispatch_badge}{repo_short}#{} {}", pr.number, pr.title);
+    let header = format!("{select_prefix}{dispatch_badge}{repo_short}#{} {}", pr.number, pr.title);
     let header_truncated = truncate(&header, 60);
 
-    let line1_style = if is_cursor {
+    let line1_style = if is_selected || is_cursor {
         Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(color)
@@ -2293,7 +2416,7 @@ fn build_review_pr_item(pr: &ReviewPr, decision: ReviewDecision, is_cursor: bool
     let line2 = Line::from(Span::styled(meta, meta_style));
 
     let bg = if is_cursor {
-        review_cursor_bg_color(decision)
+        review_cursor_bg_color(decision_for_color)
     } else {
         Color::Reset
     };
