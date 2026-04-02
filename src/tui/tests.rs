@@ -3018,18 +3018,14 @@ fn enter_on_epic_toggles_detail() {
 }
 
 #[test]
-fn e_on_epic_enters_epic_view() {
+fn e_on_epic_opens_editor() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
     app.selection_mut().set_column(0);
     app.selection_mut().set_row(0, 0);
 
-    app.handle_key(make_key(KeyCode::Char('e')));
-
-    match &app.view_mode {
-        ViewMode::Epic { epic_id, .. } => assert_eq!(*epic_id, EpicId(10)),
-        _ => panic!("Expected ViewMode::Epic after pressing 'e' on epic"),
-    }
+    let cmds = app.handle_key(make_key(KeyCode::Char('e')));
+    assert!(matches!(&cmds[0], Command::EditEpicInEditor(e) if e.id == EpicId(10)));
 }
 
 #[test]
@@ -3435,10 +3431,9 @@ fn confirm_archive_epic_no_subtasks_allows_archive() {
 }
 
 #[test]
-fn enter_key_on_epic_enters_epic_view() {
-    // After keybinding swap: 'e' enters epic view, Enter toggles detail
+fn g_key_on_epic_from_board_enters_epic_view() {
     let mut app = make_app_with_epic_selected();
-    app.handle_key(make_key(KeyCode::Char('e')));
+    app.handle_key(make_key(KeyCode::Char('g')));
     assert!(matches!(
         app.view_mode,
         ViewMode::Epic {
@@ -3962,47 +3957,60 @@ fn confirm_archive_epic_no_epic_selected_is_noop() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn g_key_on_epic_jumps_to_review_subtask() {
+fn g_key_on_epic_enters_epic_view() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Review;
     app.epics = vec![epic];
 
-    // Subtask in Review with a tmux window
+    // Even with subtasks that have tmux windows, g enters epic view
     let mut subtask = make_task(1, TaskStatus::Review);
     subtask.epic_id = Some(EpicId(10));
     subtask.tmux_window = Some("win-1".to_string());
     app.tasks = vec![subtask];
 
-    // Epic status is Review => column 2
     app.selection_mut().set_column(2);
     app.selection_mut().set_row(2, 0);
 
-    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
-    assert!(matches!(&cmds[0], Command::JumpToTmux { window } if window == "win-1"));
+    app.handle_key(make_key(KeyCode::Char('g')));
+    assert!(matches!(app.view_mode, ViewMode::Epic { epic_id, .. } if epic_id == EpicId(10)));
 }
 
 #[test]
-fn g_key_on_epic_no_review_session_enters_epic_view() {
+fn shift_g_on_epic_jumps_to_review_subtask() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Review;
     app.epics = vec![epic];
 
-    // Subtask in Review but NO tmux window
     let mut subtask = make_task(1, TaskStatus::Review);
     subtask.epic_id = Some(EpicId(10));
+    subtask.tmux_window = Some("win-1".to_string());
     app.tasks = vec![subtask];
 
     app.selection_mut().set_column(2);
     app.selection_mut().set_row(2, 0);
 
-    let _cmds = app.handle_key(make_key(KeyCode::Char('g')));
-    assert!(matches!(app.view_mode, ViewMode::Epic { epic_id, .. } if epic_id == EpicId(10)));
+    let cmds = app.handle_key(make_key(KeyCode::Char('G')));
+    assert!(matches!(&cmds[0], Command::JumpToTmux { window } if window == "win-1"));
 }
 
 #[test]
-fn g_key_on_epic_jumps_to_blocked_running_subtask() {
+fn shift_g_on_epic_no_session_shows_status() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let epic = make_epic(10);
+    app.epics = vec![epic];
+
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 0);
+
+    let _cmds = app.handle_key(make_key(KeyCode::Char('G')));
+    // Should NOT enter epic view — shows status info instead
+    assert!(!matches!(app.view_mode, ViewMode::Epic { .. }));
+}
+
+#[test]
+fn shift_g_on_epic_jumps_to_blocked_running_subtask() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
@@ -4014,51 +4022,15 @@ fn g_key_on_epic_jumps_to_blocked_running_subtask() {
     subtask.tmux_window = Some("win-blocked".to_string());
     app.tasks = vec![subtask];
 
-    // Epic status is Running => column 1
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 0);
 
-    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('G')));
     assert!(matches!(&cmds[0], Command::JumpToTmux { window } if window == "win-blocked"));
 }
 
 #[test]
-fn g_key_on_epic_jumps_to_stale_running_subtask() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    let mut epic = make_epic(10);
-    epic.status = TaskStatus::Running;
-    app.epics = vec![epic];
-
-    let mut subtask = make_task(1, TaskStatus::Running);
-    subtask.epic_id = Some(EpicId(10));
-    subtask.sub_status = SubStatus::Stale;
-    subtask.tmux_window = Some("win-stale".to_string());
-    app.tasks = vec![subtask];
-
-    // Epic status is Running => column 1
-    app.selection_mut().set_column(1);
-    app.selection_mut().set_row(1, 0);
-
-    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
-    assert!(matches!(&cmds[0], Command::JumpToTmux { window } if window == "win-stale"));
-}
-
-#[test]
-fn g_key_on_epic_no_active_window_enters_epic_view() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    let epic = make_epic(10);
-    app.epics = vec![epic];
-
-    // Epic in Backlog, no subtasks with tmux windows
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 0);
-
-    let _cmds = app.handle_key(make_key(KeyCode::Char('g')));
-    assert!(matches!(app.view_mode, ViewMode::Epic { epic_id, .. } if epic_id == EpicId(10)));
-}
-
-#[test]
-fn g_key_on_epic_skips_active_running_subtask() {
+fn shift_g_on_epic_skips_active_running_subtask() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
@@ -4070,16 +4042,16 @@ fn g_key_on_epic_skips_active_running_subtask() {
     subtask.tmux_window = Some("win-running".to_string());
     app.tasks = vec![subtask];
 
-    // Epic status is Running => column 1; subtasks hidden in board view, epic at row 0
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 0);
 
-    let _cmds = app.handle_key(make_key(KeyCode::Char('g')));
-    assert!(matches!(app.view_mode, ViewMode::Epic { epic_id, .. } if epic_id == EpicId(10)));
+    let _cmds = app.handle_key(make_key(KeyCode::Char('G')));
+    // Active running subtask is skipped, no session found => status info
+    assert!(!matches!(app.view_mode, ViewMode::Epic { .. }));
 }
 
 #[test]
-fn g_key_on_epic_prefers_blocked_running_over_review() {
+fn shift_g_on_epic_prefers_blocked_running_over_review() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
@@ -4096,16 +4068,15 @@ fn g_key_on_epic_prefers_blocked_running_over_review() {
 
     app.tasks = vec![review_task, running_task];
 
-    // Epic status is Running => column 1; subtasks hidden in board view, epic at row 0
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 0);
 
-    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('G')));
     assert!(matches!(&cmds[0], Command::JumpToTmux { window } if window == "win-running"));
 }
 
 #[test]
-fn g_key_on_epic_active_running_falls_through_to_review() {
+fn shift_g_on_epic_active_running_falls_through_to_review() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
@@ -4125,12 +4096,12 @@ fn g_key_on_epic_active_running_falls_through_to_review() {
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 0);
 
-    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('G')));
     assert!(matches!(&cmds[0], Command::JumpToTmux { window } if window == "win-review"));
 }
 
 #[test]
-fn g_key_on_epic_picks_lowest_sort_order() {
+fn shift_g_on_epic_picks_lowest_sort_order() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
@@ -4150,11 +4121,10 @@ fn g_key_on_epic_picks_lowest_sort_order() {
 
     app.tasks = vec![task_high, task_low];
 
-    // Epic status is Running => column 1; subtasks hidden in board view, epic at row 0
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 0);
 
-    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('G')));
     assert!(matches!(&cmds[0], Command::JumpToTmux { window } if window == "win-low"));
 }
 
@@ -4386,7 +4356,7 @@ fn help_overlay_renders_when_active() {
     let mut app = make_app();
     app.input.mode = InputMode::Help;
 
-    let buf = render_to_buffer(&mut app, 80, 30);
+    let buf = render_to_buffer(&mut app, 80, 35);
     assert!(buffer_contains(&buf, "Navigation"));
     assert!(buffer_contains(&buf, "Actions"));
     assert!(buffer_contains(&buf, "General"));

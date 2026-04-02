@@ -1670,7 +1670,12 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
                 Span::styled("D", key),
                 Span::styled(" quick dsp  ", desc),
                 Span::styled("g", key),
-                Span::styled(" go to tmux", desc),
+                Span::styled(" session/board", desc),
+            ]),
+            Line::from(vec![
+                Span::styled("  G", key),
+                Span::styled(" session    ", desc),
+                Span::styled("(epic: jump to subtask tmux)", note),
             ]),
             Line::from(vec![
                 Span::styled("  H", key),
@@ -2305,8 +2310,10 @@ pub(in crate::tui) fn epic_action_hints(epic: &Epic, key_color: Color) -> Vec<Sp
     } else {
         push_hint("d", "plan");
     }
+    push_hint("g", "board");
+    push_hint("G", "session");
     push_hint("Enter", "detail");
-    push_hint("e", "open");
+    push_hint("e", "edit");
     push_hint("W", "wrap up");
     push_hint("m", "status \u{2192}");
     push_hint("M", "status \u{2190}");

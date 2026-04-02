@@ -113,6 +113,23 @@ impl App {
                         self.update(Message::StatusInfo("No active session".to_string()))
                     }
                 } else if let Some(ColumnItem::Epic(epic)) = self.selected_column_item() {
+                    let id = epic.id;
+                    self.update(Message::EnterEpic(id))
+                } else {
+                    vec![]
+                }
+            }
+
+            KeyCode::Char('G') => {
+                if let Some(task) = self.selected_task() {
+                    if let Some(window) = &task.tmux_window {
+                        vec![Command::JumpToTmux {
+                            window: window.clone(),
+                        }]
+                    } else {
+                        self.update(Message::StatusInfo("No active session".to_string()))
+                    }
+                } else if let Some(ColumnItem::Epic(epic)) = self.selected_column_item() {
                     // Prefer blocked Running subtasks, then Review, by sort_order
                     let window = self
                         .tasks
@@ -139,9 +156,9 @@ impl App {
                     if let Some(window) = window {
                         vec![Command::JumpToTmux { window }]
                     } else {
-                        // Fallback: enter epic view
-                        let id = epic.id;
-                        self.update(Message::EnterEpic(id))
+                        self.update(Message::StatusInfo(
+                            "No active subtask session".to_string(),
+                        ))
                     }
                 } else {
                     vec![]
@@ -190,7 +207,7 @@ impl App {
                 }
                 Some(ColumnItem::Epic(epic)) => {
                     let id = epic.id;
-                    self.update(Message::EnterEpic(id))
+                    self.update(Message::EditEpic(id))
                 }
                 None => {
                     if let ViewMode::Epic { epic_id, .. } = &self.view_mode {
