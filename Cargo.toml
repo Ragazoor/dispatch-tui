@@ -1,10 +1,10 @@
 [package]
-name = "dispatch-agent"
+name = "dispatch-tui"
 version = "0.2.0"
 edition = "2021"
 description = "A terminal kanban board for dispatching and managing AI agents"
 license = "MIT"
-repository = "https://github.com/Ragazoor/dispatch-agent"
+repository = "https://github.com/Ragazoor/dispatch-tui"
 readme = "README.md"
 keywords = ["tui", "kanban", "claude", "ai-agents", "tmux"]
 categories = ["command-line-utilities", "development-tools"]

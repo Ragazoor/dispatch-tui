@@ -2,9 +2,9 @@
 
 use std::time::Duration;
 
-use dispatch_agent::db::{self, Database, TaskStore};
-use dispatch_agent::models::{Task, TaskId, TaskStatus};
-use dispatch_agent::tui::{App, Command, Message, MoveDirection};
+use dispatch_tui::db::{self, Database, TaskStore};
+use dispatch_tui::models::{Task, TaskId, TaskStatus};
+use dispatch_tui::tui::{App, Command, Message, MoveDirection};
 
 fn make_app() -> (App, Database) {
     let db = Database::open_in_memory().unwrap();
@@ -59,7 +59,7 @@ fn full_lifecycle() {
             tmux_window: None,
             plan: Some("plan.md".into()),
             epic_id: None,
-            sub_status: dispatch_agent::models::SubStatus::None,
+            sub_status: dispatch_tui::models::SubStatus::None,
             pr_url: None,
             tag: None,
             sort_order: None,

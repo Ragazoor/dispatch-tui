@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use tracing::Level;
 use tracing_subscriber::EnvFilter;
 
-use dispatch_agent::db::TaskStore;
-use dispatch_agent::{db, models, plan, runtime};
+use dispatch_tui::db::TaskStore;
+use dispatch_tui::{db, models, plan, runtime};
 
 #[derive(Parser)]
 #[command(name = "dispatch")]
@@ -25,7 +25,7 @@ enum Commands {
     /// Launch the TUI interface
     Tui {
         /// MCP server port
-        #[arg(long, env = "DISPATCH_PORT", default_value_t = dispatch_agent::DEFAULT_PORT)]
+        #[arg(long, env = "DISPATCH_PORT", default_value_t = dispatch_tui::DEFAULT_PORT)]
         port: u16,
         /// Seconds of unchanged tmux output before marking agent stale
         #[arg(long, env = "DISPATCH_INACTIVITY_TIMEOUT", default_value = "180")]
@@ -85,7 +85,7 @@ enum Commands {
     /// Configure Claude Code to allow agents to use the MCP server
     Setup {
         /// MCP server port
-        #[arg(long, env = "DISPATCH_PORT", default_value_t = dispatch_agent::DEFAULT_PORT)]
+        #[arg(long, env = "DISPATCH_PORT", default_value_t = dispatch_tui::DEFAULT_PORT)]
         port: u16,
     },
 }
@@ -252,7 +252,7 @@ async fn main() -> Result<()> {
             println!("Created task #{}: \"{}\" [backlog]", id, title);
         }
         Commands::Setup { port } => {
-            dispatch_agent::setup::run_setup(port)?;
+            dispatch_tui::setup::run_setup(port)?;
         }
         Commands::Plan { id, path } => {
             if !path.exists() {

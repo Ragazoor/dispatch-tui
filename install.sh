@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="Ragazoor/dispatch-agent"
+REPO="Ragazoor/dispatch-tui"
 BINARY="dispatch"
 INSTALL_DIR="${HOME}/.local/bin"
 

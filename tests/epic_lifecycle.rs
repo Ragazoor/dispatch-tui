@@ -1,5 +1,5 @@
-use dispatch_agent::db::{Database, EpicPatch, TaskPatch, TaskStore};
-use dispatch_agent::models::*;
+use dispatch_tui::db::{Database, EpicPatch, TaskPatch, TaskStore};
+use dispatch_tui::models::*;
 
 #[test]
 fn full_epic_lifecycle() {

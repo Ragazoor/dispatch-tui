@@ -368,7 +368,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "dispatch-agent"
+name = "dispatch-tui"
 version = "0.2.0"
 dependencies = [
  "anyhow",
