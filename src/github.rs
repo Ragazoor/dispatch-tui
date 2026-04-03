@@ -557,181 +557,169 @@ fn parse_bot_prs(json: &str) -> Result<Vec<ReviewPr>, String> {
 
 use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
 
-/// Parse Dependabot alerts from the REST API JSON response for a single repo.
-fn parse_dependabot_alerts(json: &str, repo: &str) -> Vec<SecurityAlert> {
-    let arr: Vec<serde_json::Value> = match serde_json::from_str(json) {
-        Ok(v) => v,
-        Err(_) => return Vec::new(),
-    };
+/// The GraphQL fields fragment for vulnerability alerts.
+const VULN_ALERT_FIELDS: &str = r#"nodes {
+              nameWithOwner
+              vulnerabilityAlerts(first: 25, states: OPEN) {
+                nodes {
+                  number
+                  createdAt
+                  securityVulnerability {
+                    severity
+                    package { name }
+                    vulnerableVersionRange
+                    firstPatchedVersion { identifier }
+                  }
+                  securityAdvisory {
+                    summary
+                    description
+                    cvss { score }
+                  }
+                }
+              }
+            }"#;
+
+/// Parse the GraphQL vulnerability alerts response into `SecurityAlert`s.
+fn parse_graphql_security_alerts(json: &str) -> Result<Vec<SecurityAlert>, String> {
+    let root: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| format!("Failed to parse JSON: {e}"))?;
+
+    let repos = root
+        .pointer("/data/viewer/repositories/nodes")
+        .and_then(|v| v.as_array())
+        .unwrap_or(&Vec::new())
+        .clone();
 
     let mut alerts = Vec::new();
-    for node in &arr {
-        let state = node["state"].as_str().unwrap_or("open");
-        if state != "open" {
-            continue;
+    for repo_node in &repos {
+        let repo = repo_node["nameWithOwner"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+        let alert_nodes = match repo_node
+            .pointer("/vulnerabilityAlerts/nodes")
+            .and_then(|v| v.as_array())
+        {
+            Some(nodes) => nodes,
+            None => continue,
+        };
+
+        for node in alert_nodes {
+            let number = node["number"].as_i64().unwrap_or(0);
+            let severity_str = node
+                .pointer("/securityVulnerability/severity")
+                .and_then(|v| v.as_str())
+                .unwrap_or("MODERATE");
+            let severity = AlertSeverity::parse(severity_str).unwrap_or(AlertSeverity::Medium);
+
+            let title = node
+                .pointer("/securityAdvisory/summary")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let package = node
+                .pointer("/securityVulnerability/package/name")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let vulnerable_range = node
+                .pointer("/securityVulnerability/vulnerableVersionRange")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let fixed_version = node
+                .pointer("/securityVulnerability/firstPatchedVersion/identifier")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let cvss_score = node
+                .pointer("/securityAdvisory/cvss/score")
+                .and_then(|v| v.as_f64());
+            let url = format!(
+                "https://github.com/{repo}/security/dependabot/{number}"
+            );
+            let created_at = node["createdAt"]
+                .as_str()
+                .and_then(|s| s.parse::<DateTime<Utc>>().ok())
+                .unwrap_or_else(Utc::now);
+            let description = node
+                .pointer("/securityAdvisory/description")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            alerts.push(SecurityAlert {
+                number,
+                repo: repo.clone(),
+                severity,
+                kind: AlertKind::Dependabot,
+                title,
+                package,
+                vulnerable_range,
+                fixed_version,
+                cvss_score,
+                url,
+                created_at,
+                state: "open".to_string(),
+                description,
+            });
         }
-        let number = node["number"].as_i64().unwrap_or(0);
-        let severity_str = node["security_vulnerability"]["severity"]
-            .as_str()
-            .or_else(|| node["security_advisory"]["severity"].as_str())
-            .unwrap_or("medium");
-        let severity = AlertSeverity::parse(severity_str).unwrap_or(AlertSeverity::Medium);
-
-        let title = node["security_advisory"]["summary"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
-        let package = node["security_vulnerability"]["package"]["name"]
-            .as_str()
-            .map(|s| s.to_string());
-        let vulnerable_range = node["security_vulnerability"]["vulnerable_version_range"]
-            .as_str()
-            .map(|s| s.to_string());
-        let fixed_version = node["security_vulnerability"]["first_patched_version"]["identifier"]
-            .as_str()
-            .map(|s| s.to_string());
-        let cvss_score = node["security_advisory"]["cvss"]["score"].as_f64();
-        let url = node["html_url"].as_str().unwrap_or("").to_string();
-        let created_at = node["created_at"]
-            .as_str()
-            .and_then(|s| s.parse::<DateTime<Utc>>().ok())
-            .unwrap_or_else(Utc::now);
-        let description = node["security_advisory"]["description"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
-
-        alerts.push(SecurityAlert {
-            number,
-            repo: repo.to_string(),
-            severity,
-            kind: AlertKind::Dependabot,
-            title,
-            package,
-            vulnerable_range,
-            fixed_version,
-            cvss_score,
-            url,
-            created_at,
-            state: state.to_string(),
-            description,
-        });
     }
-    alerts
+    Ok(alerts)
 }
 
-/// Parse code scanning alerts from the REST API JSON response for a single repo.
-fn parse_code_scanning_alerts(json: &str, repo: &str) -> Vec<SecurityAlert> {
-    let arr: Vec<serde_json::Value> = match serde_json::from_str(json) {
-        Ok(v) => v,
-        Err(_) => return Vec::new(),
-    };
-
-    let mut alerts = Vec::new();
-    for node in &arr {
-        let state = node["state"].as_str().unwrap_or("open");
-        if state != "open" {
-            continue;
-        }
-        let number = node["number"].as_i64().unwrap_or(0);
-        let severity_str = node["rule"]["security_severity_level"]
-            .as_str()
-            .or_else(|| node["rule"]["severity"].as_str())
-            .unwrap_or("medium");
-        let severity = AlertSeverity::parse(severity_str).unwrap_or(AlertSeverity::Medium);
-
-        let title = node["rule"]["description"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
-        let url = node["html_url"].as_str().unwrap_or("").to_string();
-        let created_at = node["created_at"]
-            .as_str()
-            .and_then(|s| s.parse::<DateTime<Utc>>().ok())
-            .unwrap_or_else(Utc::now);
-        let description = node["most_recent_instance"]["message"]["text"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
-        let location = node["most_recent_instance"]["location"]["path"]
-            .as_str()
-            .map(|s| s.to_string());
-
-        alerts.push(SecurityAlert {
-            number,
-            repo: repo.to_string(),
-            severity,
-            kind: AlertKind::CodeScanning,
-            title,
-            package: location,
-            vulnerable_range: None,
-            fixed_version: None,
-            cvss_score: None,
-            url,
-            created_at,
-            state: state.to_string(),
-            description,
-        });
-    }
-    alerts
-}
-
-/// Fetch security alerts from GitHub for all repos the user is a collaborator on.
+/// Fetch security alerts from GitHub using GraphQL `vulnerabilityAlerts`.
 ///
-/// Discovers repos via `gh api /user/repos`, then fans out per-repo requests
-/// for Dependabot alerts and code scanning alerts. Silently skips 404/403 errors
-/// (repos without the feature enabled). Results are sorted by severity then CVSS desc.
+/// Paginates through the viewer's repositories (ordered by most recently pushed),
+/// collecting open Dependabot vulnerability alerts. Uses at most `MAX_PAGES`
+/// GraphQL requests (100 repos each), which is dramatically faster than the
+/// per-repo REST API approach.
+///
+/// Results are sorted by severity (critical first), then CVSS score descending.
 pub fn fetch_security_alerts(runner: &dyn ProcessRunner) -> Result<Vec<SecurityAlert>, String> {
-    // Discover collaborator repos
-    let output = runner
-        .run(
-            "gh",
-            &["api", "/user/repos", "--paginate", "-q", ".[].full_name"],
-        )
-        .map_err(|e| format!("Failed to run gh: {e}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("gh api /user/repos failed: {stderr}"));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let repos: Vec<&str> = stdout.lines().filter(|l| !l.is_empty()).collect();
+    const MAX_PAGES: usize = 3;
 
     let mut all_alerts: Vec<SecurityAlert> = Vec::new();
+    let mut cursor: Option<String> = None;
 
-    for repo in &repos {
-        // Fetch Dependabot alerts
-        let dep_output = runner.run(
-            "gh",
-            &[
-                "api",
-                &format!("/repos/{repo}/dependabot/alerts?state=open&per_page=100"),
-            ],
+    for _ in 0..MAX_PAGES {
+        let after_clause = match &cursor {
+            Some(c) => format!(", after: \"{c}\""),
+            None => String::new(),
+        };
+
+        let query = format!(
+            r#"{{
+  viewer {{
+    repositories(first: 100, affiliations: [OWNER, ORGANIZATION_MEMBER], orderBy: {{field: PUSHED_AT, direction: DESC}}{after_clause}) {{
+      pageInfo {{ hasNextPage endCursor }}
+      {VULN_ALERT_FIELDS}
+    }}
+  }}
+}}"#
         );
-        if let Ok(dep) = dep_output {
-            if dep.status.success() {
-                let json = String::from_utf8_lossy(&dep.stdout);
-                all_alerts.extend(parse_dependabot_alerts(&json, repo));
-            }
-            // Silently skip 404/403
+
+        let output = runner
+            .run("gh", &["api", "graphql", "-f", &format!("query={query}")])
+            .map_err(|e| format!("Failed to run gh: {e}"))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("gh api graphql failed: {stderr}"));
         }
 
-        // Fetch code scanning alerts
-        let cs_output = runner.run(
-            "gh",
-            &[
-                "api",
-                &format!("/repos/{repo}/code-scanning/alerts?state=open&per_page=100"),
-            ],
-        );
-        if let Ok(cs) = cs_output {
-            if cs.status.success() {
-                let json = String::from_utf8_lossy(&cs.stdout);
-                all_alerts.extend(parse_code_scanning_alerts(&json, repo));
-            }
-            // Silently skip 404/403
+        let json = String::from_utf8_lossy(&output.stdout);
+        all_alerts.extend(parse_graphql_security_alerts(&json)?);
+
+        let root: serde_json::Value = serde_json::from_str(&json)
+            .map_err(|e| format!("Failed to parse JSON: {e}"))?;
+        let page_info = root.pointer("/data/viewer/repositories/pageInfo");
+        let has_next = page_info
+            .and_then(|p| p["hasNextPage"].as_bool())
+            .unwrap_or(false);
+        if !has_next {
+            break;
         }
+        cursor = page_info
+            .and_then(|p| p["endCursor"].as_str())
+            .map(|s| s.to_string());
     }
 
     // Sort by severity (critical first), then CVSS descending
@@ -1441,88 +1429,145 @@ mod tests {
 
     // --- Security alert parsing tests ---
 
-    #[test]
-    fn parse_dependabot_alerts_basic() {
-        let json = r#"[
-            {
-                "number": 1,
-                "state": "open",
-                "html_url": "https://github.com/acme/app/security/dependabot/1",
-                "created_at": "2026-03-01T10:00:00Z",
-                "security_vulnerability": {
-                    "severity": "critical",
-                    "package": {"name": "lodash"},
-                    "vulnerable_version_range": "< 4.17.21",
-                    "first_patched_version": {"identifier": "4.17.21"}
-                },
-                "security_advisory": {
-                    "summary": "Prototype Pollution in lodash",
-                    "cvss": {"score": 9.8},
-                    "description": "A prototype pollution vuln."
-                }
-            },
-            {
-                "number": 2,
-                "state": "dismissed",
-                "html_url": "https://github.com/acme/app/security/dependabot/2",
-                "created_at": "2026-03-02T10:00:00Z",
-                "security_vulnerability": {
-                    "severity": "low",
-                    "package": {"name": "express"}
-                },
-                "security_advisory": {
-                    "summary": "Minor issue"
+    const GRAPHQL_ALERTS_RESPONSE: &str = r#"{
+        "data": {
+            "viewer": {
+                "repositories": {
+                    "pageInfo": {"hasNextPage": false, "endCursor": null},
+                    "nodes": [
+                        {
+                            "nameWithOwner": "acme/app",
+                            "vulnerabilityAlerts": {
+                                "nodes": [
+                                    {
+                                        "number": 1,
+                                        "createdAt": "2026-03-01T10:00:00Z",
+                                        "securityVulnerability": {
+                                            "severity": "CRITICAL",
+                                            "package": {"name": "lodash"},
+                                            "vulnerableVersionRange": "< 4.17.21",
+                                            "firstPatchedVersion": {"identifier": "4.17.21"}
+                                        },
+                                        "securityAdvisory": {
+                                            "summary": "Prototype Pollution in lodash",
+                                            "cvss": {"score": 9.8},
+                                            "description": "A prototype pollution vuln."
+                                        }
+                                    },
+                                    {
+                                        "number": 5,
+                                        "createdAt": "2026-03-05T10:00:00Z",
+                                        "securityVulnerability": {
+                                            "severity": "MODERATE",
+                                            "package": {"name": "express"},
+                                            "vulnerableVersionRange": "< 5.0.0",
+                                            "firstPatchedVersion": null
+                                        },
+                                        "securityAdvisory": {
+                                            "summary": "Open redirect in express",
+                                            "cvss": {"score": 5.3},
+                                            "description": "An open redirect."
+                                        }
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "nameWithOwner": "acme/lib",
+                            "vulnerabilityAlerts": {
+                                "nodes": []
+                            }
+                        }
+                    ]
                 }
             }
-        ]"#;
+        }
+    }"#;
 
-        let alerts = parse_dependabot_alerts(json, "acme/app");
-        assert_eq!(alerts.len(), 1, "dismissed alert should be filtered");
+    #[test]
+    fn parse_graphql_security_alerts_basic() {
+        let alerts = parse_graphql_security_alerts(GRAPHQL_ALERTS_RESPONSE).unwrap();
+        assert_eq!(alerts.len(), 2);
+
         assert_eq!(alerts[0].number, 1);
+        assert_eq!(alerts[0].repo, "acme/app");
         assert_eq!(alerts[0].severity, AlertSeverity::Critical);
         assert_eq!(alerts[0].kind, AlertKind::Dependabot);
         assert_eq!(alerts[0].package.as_deref(), Some("lodash"));
+        assert_eq!(alerts[0].vulnerable_range.as_deref(), Some("< 4.17.21"));
         assert_eq!(alerts[0].fixed_version.as_deref(), Some("4.17.21"));
         assert_eq!(alerts[0].cvss_score, Some(9.8));
+        assert_eq!(
+            alerts[0].url,
+            "https://github.com/acme/app/security/dependabot/1"
+        );
+        assert_eq!(alerts[0].title, "Prototype Pollution in lodash");
+
+        assert_eq!(alerts[1].number, 5);
+        assert_eq!(alerts[1].repo, "acme/app");
+        assert_eq!(alerts[1].severity, AlertSeverity::Medium);
+        assert_eq!(alerts[1].fixed_version, None);
     }
 
     #[test]
-    fn parse_code_scanning_alerts_basic() {
-        let json = r#"[
-            {
-                "number": 10,
-                "state": "open",
-                "html_url": "https://github.com/acme/app/security/code-scanning/10",
-                "created_at": "2026-03-01T10:00:00Z",
-                "rule": {
-                    "description": "SQL injection vulnerability",
-                    "security_severity_level": "high"
-                },
-                "most_recent_instance": {
-                    "message": {"text": "Potential SQL injection at line 42"},
-                    "location": {"path": "src/db.rs"}
-                }
-            }
-        ]"#;
-
-        let alerts = parse_code_scanning_alerts(json, "acme/app");
-        assert_eq!(alerts.len(), 1);
-        assert_eq!(alerts[0].number, 10);
-        assert_eq!(alerts[0].severity, AlertSeverity::High);
-        assert_eq!(alerts[0].kind, AlertKind::CodeScanning);
-        assert_eq!(alerts[0].package.as_deref(), Some("src/db.rs"));
-        assert_eq!(alerts[0].description, "Potential SQL injection at line 42");
-    }
-
-    #[test]
-    fn parse_dependabot_alerts_invalid_json() {
-        let alerts = parse_dependabot_alerts("not json", "acme/app");
+    fn parse_graphql_security_alerts_empty_repos() {
+        let json = r#"{"data":{"viewer":{"repositories":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}"#;
+        let alerts = parse_graphql_security_alerts(json).unwrap();
         assert!(alerts.is_empty());
     }
 
     #[test]
-    fn parse_code_scanning_alerts_empty_array() {
-        let alerts = parse_code_scanning_alerts("[]", "acme/app");
-        assert!(alerts.is_empty());
+    fn parse_graphql_security_alerts_invalid_json() {
+        let result = parse_graphql_security_alerts("not json");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn fetch_security_alerts_uses_graphql() {
+        let runner = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(
+            GRAPHQL_ALERTS_RESPONSE.as_bytes(),
+        )]);
+        let alerts = fetch_security_alerts(&runner).unwrap();
+        assert_eq!(alerts.len(), 2);
+
+        let calls = runner.recorded_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "gh");
+        assert!(
+            calls[0].1.contains(&"graphql".to_string()),
+            "should use graphql API"
+        );
+        let query_arg = calls[0].1.iter().find(|a| a.contains("query=")).unwrap();
+        assert!(
+            query_arg.contains("vulnerabilityAlerts"),
+            "query should include vulnerabilityAlerts"
+        );
+
+        // Results should be sorted by severity (critical first)
+        assert_eq!(alerts[0].severity, AlertSeverity::Critical);
+        assert_eq!(alerts[1].severity, AlertSeverity::Medium);
+    }
+
+    #[test]
+    fn fetch_security_alerts_paginates() {
+        let page1 = r#"{"data":{"viewer":{"repositories":{"pageInfo":{"hasNextPage":true,"endCursor":"abc123"},"nodes":[{"nameWithOwner":"acme/app","vulnerabilityAlerts":{"nodes":[{"number":1,"createdAt":"2026-03-01T10:00:00Z","securityVulnerability":{"severity":"HIGH","package":{"name":"pkg1"},"vulnerableVersionRange":"< 1.0","firstPatchedVersion":{"identifier":"1.0"}},"securityAdvisory":{"summary":"Vuln 1","cvss":{"score":7.5},"description":"desc1"}}]}}]}}}}"#;
+        let page2 = r#"{"data":{"viewer":{"repositories":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"nameWithOwner":"acme/lib","vulnerabilityAlerts":{"nodes":[{"number":2,"createdAt":"2026-03-02T10:00:00Z","securityVulnerability":{"severity":"LOW","package":{"name":"pkg2"},"vulnerableVersionRange":"< 2.0","firstPatchedVersion":{"identifier":"2.0"}},"securityAdvisory":{"summary":"Vuln 2","cvss":{"score":3.1},"description":"desc2"}}]}}]}}}}"#;
+
+        let runner = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(page1.as_bytes()),
+            MockProcessRunner::ok_with_stdout(page2.as_bytes()),
+        ]);
+        let alerts = fetch_security_alerts(&runner).unwrap();
+        assert_eq!(alerts.len(), 2);
+
+        let calls = runner.recorded_calls();
+        assert_eq!(calls.len(), 2, "should make 2 requests for pagination");
+
+        // Second query should include the cursor
+        let query_arg = calls[1].1.iter().find(|a| a.contains("query=")).unwrap();
+        assert!(
+            query_arg.contains("abc123"),
+            "second page should use cursor from first page"
+        );
     }
 }
