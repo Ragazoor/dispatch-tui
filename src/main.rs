@@ -266,7 +266,7 @@ async fn main() -> Result<()> {
             let db = db::Database::open(&cli.db)?;
             db.patch_task(
                 models::TaskId(id),
-                &db::TaskPatch::new().plan(Some(&plan_str)),
+                &db::TaskPatch::new().plan_path(Some(&plan_str)),
             )?;
             println!("Plan attached to task #{}: {}", id, plan_str);
         }

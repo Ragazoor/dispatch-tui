@@ -298,7 +298,7 @@ async fn create_task_minimal() {
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].title, "New Task");
     assert_eq!(tasks[0].status, TaskStatus::Backlog);
-    assert!(tasks[0].plan.is_none());
+    assert!(tasks[0].plan_path.is_none());
 }
 
 #[tokio::test]
@@ -316,7 +316,7 @@ async fn create_task_with_plan_stays_backlog() {
             "arguments": {
                 "title": "Planned Task",
                 "repo_path": "/my/repo",
-                "plan": plan_file.to_string_lossy()
+                "plan_path": plan_file.to_string_lossy()
             }
         })),
     )
@@ -326,7 +326,7 @@ async fn create_task_with_plan_stays_backlog() {
     let tasks = state.db.list_all().unwrap();
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].status, TaskStatus::Backlog);
-    let stored = tasks[0].plan.as_deref().unwrap();
+    let stored = tasks[0].plan_path.as_deref().unwrap();
     assert!(
         std::path::Path::new(stored).is_absolute(),
         "plan path should be absolute, got: {stored}"
@@ -461,7 +461,7 @@ async fn update_task_with_plan() {
         "tools/call",
         Some(json!({
             "name": "update_task",
-            "arguments": { "task_id": task_id.0, "status": "ready", "plan": "/path/to/plan.md" }
+            "arguments": { "task_id": task_id.0, "status": "ready", "plan_path": "/path/to/plan.md" }
         })),
     )
     .await;
@@ -469,7 +469,7 @@ async fn update_task_with_plan() {
 
     let task = state.db.get_task(task_id).unwrap().unwrap();
     assert_eq!(task.status, crate::models::TaskStatus::Backlog);
-    assert_eq!(task.plan.as_deref(), Some("/path/to/plan.md"));
+    assert_eq!(task.plan_path.as_deref(), Some("/path/to/plan.md"));
 }
 
 #[tokio::test]
@@ -684,7 +684,7 @@ async fn update_task_without_plan_preserves_existing() {
 
     let task = state.db.get_task(task_id).unwrap().unwrap();
     assert_eq!(
-        task.plan.as_deref(),
+        task.plan_path.as_deref(),
         Some("/existing.md"),
         "plan should be preserved when not provided"
     );
@@ -1053,7 +1053,7 @@ fn tool_schemas_match_arg_structs() {
             BTreeSet::from([
                 "task_id",
                 "status",
-                "plan",
+                "plan_path",
                 "title",
                 "description",
                 "repo_path",
@@ -1064,7 +1064,7 @@ fn tool_schemas_match_arg_structs() {
                 "epic_id",
             ]),
             BTreeSet::from(["task_id"]),
-            json!({"task_id": 1, "status": "review", "plan": "/p.md", "title": "t", "description": "d", "repo_path": "/r", "sort_order": 100, "pr_url": "https://github.com/org/repo/pull/1", "tag": "bug", "sub_status": "awaiting_review", "epic_id": 5}),
+            json!({"task_id": 1, "status": "review", "plan_path": "/p.md", "title": "t", "description": "d", "repo_path": "/r", "sort_order": 100, "pr_url": "https://github.com/org/repo/pull/1", "tag": "bug", "sub_status": "awaiting_review", "epic_id": 5}),
         ),
         (
             "get_task",
@@ -1078,13 +1078,13 @@ fn tool_schemas_match_arg_structs() {
                 "title",
                 "repo_path",
                 "description",
-                "plan",
+                "plan_path",
                 "epic_id",
                 "sort_order",
                 "tag",
             ]),
             BTreeSet::from(["title", "repo_path"]),
-            json!({"title": "t", "repo_path": "/r", "description": "d", "plan": "/p.md", "sort_order": 10, "tag": "feature"}),
+            json!({"title": "t", "repo_path": "/r", "description": "d", "plan_path": "/p.md", "sort_order": 10, "tag": "feature"}),
         ),
         (
             "list_tasks",
@@ -1118,12 +1118,12 @@ fn tool_schemas_match_arg_structs() {
                 "title",
                 "description",
                 "status",
-                "plan",
+                "plan_path",
                 "sort_order",
                 "repo_path",
             ]),
             BTreeSet::from(["epic_id"]),
-            json!({"epic_id": 1, "plan": "docs/plan.md", "sort_order": 42, "repo_path": "/new/path"}),
+            json!({"epic_id": 1, "plan_path": "docs/plan.md", "sort_order": 42, "repo_path": "/new/path"}),
         ),
         (
             "wrap_up",
@@ -1567,7 +1567,7 @@ async fn update_epic_plan() {
         "tools/call",
         Some(json!({
             "name": "update_epic",
-            "arguments": { "epic_id": epic.id.0, "plan": "docs/plans/epic-plan.md" }
+            "arguments": { "epic_id": epic.id.0, "plan_path": "docs/plans/epic-plan.md" }
         })),
     )
     .await;
@@ -1578,7 +1578,7 @@ async fn update_epic_plan() {
     );
 
     let updated = state.db.get_epic(epic.id).unwrap().unwrap();
-    assert_eq!(updated.plan.as_deref(), Some("docs/plans/epic-plan.md"));
+    assert_eq!(updated.plan_path.as_deref(), Some("docs/plans/epic-plan.md"));
 }
 
 // =======================================================================

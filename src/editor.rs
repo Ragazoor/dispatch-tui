@@ -78,7 +78,7 @@ pub fn parse_epic_editor_output(input: &str) -> EpicEditorFields {
 }
 
 pub fn format_editor_content(task: &Task) -> String {
-    let plan = task.plan.as_deref().unwrap_or("");
+    let plan = task.plan_path.as_deref().unwrap_or("");
     let tag = task.tag.map(|t| t.as_str()).unwrap_or("");
     format!(
         "--- TITLE ---\n{}\n--- DESCRIPTION ---\n{}\n--- REPO_PATH ---\n{}\n--- STATUS ---\n{}\n--- PLAN ---\n{}\n--- TAG ---\n{}\n",
@@ -112,7 +112,7 @@ mod tests {
             description: description.to_string(),
             repo_path: repo_path.to_string(),
             status: TaskStatus::Backlog,
-            plan: None,
+            plan_path: None,
             sort_order: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -176,7 +176,7 @@ mod tests {
             status,
             worktree: None,
             tmux_window: None,
-            plan: plan.map(|s| s.to_string()),
+            plan_path: plan.map(|s| s.to_string()),
             epic_id: None,
             sub_status: crate::models::SubStatus::None,
             pr_url: None,

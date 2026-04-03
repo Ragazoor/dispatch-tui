@@ -194,7 +194,7 @@ pub fn dispatch_agent(
         task.id,
         &task.title,
         &task.description,
-        task.plan.as_deref(),
+        task.plan_path.as_deref(),
         epic,
     );
     dispatch_with_prompt(task, &prompt, ClaudeMode::AcceptEdits, runner, None)
@@ -248,7 +248,7 @@ pub fn dispatch_chained_agent(
         task.id,
         &task.title,
         &task.description,
-        task.plan.as_deref(),
+        task.plan_path.as_deref(),
         epic,
     );
     dispatch_with_prompt(task, &prompt, ClaudeMode::AcceptEdits, runner, None)
@@ -1187,7 +1187,7 @@ mod tests {
             status: TaskStatus::Backlog,
             worktree: None,
             tmux_window: None,
-            plan: None,
+            plan_path: None,
             epic_id: None,
             sub_status: crate::models::SubStatus::None,
             pr_url: None,

@@ -11,7 +11,7 @@ use super::{Database, EpicPatch, TaskPatch, TaskStore};
 
 /// Column list shared by all task SELECT queries. Pair with `row_to_task`.
 const TASK_COLUMNS: &str = "id, title, description, repo_path, status, worktree, tmux_window, \
-     plan, epic_id, sub_status, pr_url, tag, sort_order, created_at, updated_at";
+     plan_path, epic_id, sub_status, pr_url, tag, sort_order, created_at, updated_at";
 
 impl TaskStore for Database {
     fn create_task(
@@ -25,7 +25,7 @@ impl TaskStore for Database {
         let conn = self.conn()?;
         let sub_status = SubStatus::default_for(status);
         conn.execute(
-            "INSERT INTO tasks (title, description, repo_path, plan, status, sub_status) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO tasks (title, description, repo_path, plan_path, status, sub_status) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![title, description, repo_path, plan, status.as_str(), sub_status.as_str()],
         )
         .context("Failed to insert task")?;
@@ -128,7 +128,7 @@ impl TaskStore for Database {
     fn find_task_by_plan(&self, plan: &str) -> Result<Option<Task>> {
         let conn = self.conn()?;
         conn.query_row(
-            &format!("SELECT {TASK_COLUMNS} FROM tasks WHERE plan = ?1"),
+            &format!("SELECT {TASK_COLUMNS} FROM tasks WHERE plan_path = ?1"),
             params![plan],
             row_to_task,
         )
@@ -184,8 +184,8 @@ impl TaskStore for Database {
             sets.push("repo_path = ?");
             values.push(Box::new(r.to_string()));
         }
-        if let Some(p) = patch.plan {
-            sets.push("plan = ?");
+        if let Some(p) = patch.plan_path {
+            sets.push("plan_path = ?");
             values.push(Box::new(p.map(|s| s.to_string())));
         }
         if let Some(w) = patch.worktree {
@@ -256,7 +256,7 @@ impl TaskStore for Database {
     fn get_epic(&self, id: EpicId) -> Result<Option<Epic>> {
         let conn = self.conn()?;
         conn.query_row(
-            "SELECT id, title, description, repo_path, status, plan, sort_order, created_at, updated_at
+            "SELECT id, title, description, repo_path, status, plan_path, sort_order, created_at, updated_at
              FROM epics WHERE id = ?1",
             params![id.0],
             row_to_epic,
@@ -269,7 +269,7 @@ impl TaskStore for Database {
         let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, title, description, repo_path, status, plan, sort_order, created_at, updated_at
+                "SELECT id, title, description, repo_path, status, plan_path, sort_order, created_at, updated_at
                  FROM epics ORDER BY COALESCE(sort_order, id) ASC, id ASC",
             )
             .context("Failed to prepare list_epics")?;
@@ -301,8 +301,8 @@ impl TaskStore for Database {
             sets.push("status = ?");
             values.push(Box::new(s.as_str().to_string()));
         }
-        if let Some(p) = patch.plan {
-            sets.push("plan = ?");
+        if let Some(p) = patch.plan_path {
+            sets.push("plan_path = ?");
             values.push(Box::new(p.map(|s| s.to_string())));
         }
         if let Some(so) = patch.sort_order {
@@ -953,7 +953,7 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         status,
         worktree: row.get("worktree")?,
         tmux_window: row.get("tmux_window")?,
-        plan: row.get("plan")?,
+        plan_path: row.get("plan_path")?,
         epic_id: row
             .get::<_, Option<i64>>("epic_id")
             .unwrap_or(None)
@@ -986,7 +986,7 @@ fn row_to_epic(row: &rusqlite::Row<'_>) -> rusqlite::Result<Epic> {
         description: row.get("description")?,
         repo_path: row.get("repo_path")?,
         status: TaskStatus::parse(&status_str).unwrap_or(TaskStatus::Backlog),
-        plan: row.get("plan")?,
+        plan_path: row.get("plan_path")?,
         sort_order: row.get::<_, Option<i64>>("sort_order").unwrap_or(None),
         created_at: parse_datetime(&created_str),
         updated_at: parse_datetime(&updated_str),

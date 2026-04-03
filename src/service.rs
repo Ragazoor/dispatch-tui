@@ -74,7 +74,7 @@ pub fn parse_substatus(s: &str) -> Result<SubStatus, ServiceError> {
 pub struct UpdateTaskParams {
     pub task_id: i64,
     pub status: Option<String>,
-    pub plan: Option<String>,
+    pub plan_path: Option<String>,
     pub title: Option<String>,
     pub description: Option<String>,
     pub repo_path: Option<String>,
@@ -88,7 +88,7 @@ pub struct UpdateTaskParams {
 impl UpdateTaskParams {
     fn has_any_field(&self) -> bool {
         self.status.is_some()
-            || self.plan.is_some()
+            || self.plan_path.is_some()
             || self.title.is_some()
             || self.description.is_some()
             || self.repo_path.is_some()
@@ -104,8 +104,8 @@ impl UpdateTaskParams {
         if let Some(ref s) = self.status {
             names.push(format!("status={s}"));
         }
-        if self.plan.is_some() {
-            names.push("plan".to_string());
+        if self.plan_path.is_some() {
+            names.push("plan_path".to_string());
         }
         if self.title.is_some() {
             names.push("title".to_string());
@@ -143,7 +143,7 @@ pub struct CreateTaskParams {
     pub title: String,
     pub description: String,
     pub repo_path: String,
-    pub plan: Option<String>,
+    pub plan_path: Option<String>,
     pub epic_id: Option<i64>,
     pub sort_order: Option<i64>,
     pub tag: Option<String>,
@@ -206,8 +206,8 @@ impl TaskService {
         if let Some(s) = status {
             patch = patch.status(s);
         }
-        if let Some(ref p) = params.plan {
-            patch = patch.plan(Some(p.as_str()));
+        if let Some(ref p) = params.plan_path {
+            patch = patch.plan_path(Some(p.as_str()));
         }
         if let Some(ref t) = params.title {
             patch = patch.title(t);
@@ -288,7 +288,7 @@ impl TaskService {
     pub fn create_task(&self, params: CreateTaskParams) -> Result<TaskId, ServiceError> {
         let repo_path = crate::models::expand_tilde(&params.repo_path);
 
-        let plan = params.plan.as_deref().map(|p| {
+        let plan = params.plan_path.as_deref().map(|p| {
             std::fs::canonicalize(p)
                 .map(|abs| abs.to_string_lossy().into_owned())
                 .unwrap_or_else(|_| p.to_string())
@@ -485,7 +485,7 @@ pub struct UpdateEpicParams {
     pub title: Option<String>,
     pub description: Option<String>,
     pub status: Option<String>,
-    pub plan: Option<String>,
+    pub plan_path: Option<String>,
     pub sort_order: Option<i64>,
     pub repo_path: Option<String>,
 }
@@ -495,7 +495,7 @@ impl UpdateEpicParams {
         self.title.is_some()
             || self.description.is_some()
             || self.status.is_some()
-            || self.plan.is_some()
+            || self.plan_path.is_some()
             || self.sort_order.is_some()
             || self.repo_path.is_some()
     }
@@ -511,8 +511,8 @@ impl UpdateEpicParams {
         if self.status.is_some() {
             names.push("status");
         }
-        if self.plan.is_some() {
-            names.push("plan");
+        if self.plan_path.is_some() {
+            names.push("plan_path");
         }
         if self.sort_order.is_some() {
             names.push("sort_order");
@@ -623,8 +623,8 @@ impl EpicService {
             let status = parse_status(s)?;
             patch = patch.status(status);
         }
-        if let Some(ref p) = params.plan {
-            patch = patch.plan(Some(p.as_str()));
+        if let Some(ref p) = params.plan_path {
+            patch = patch.plan_path(Some(p.as_str()));
         }
         if let Some(so) = params.sort_order {
             patch = patch.sort_order(Some(so));
@@ -711,7 +711,7 @@ mod tests {
                 title: "Test".into(),
                 description: "desc".into(),
                 repo_path: "/repo".into(),
-                plan: None,
+                plan_path: None,
                 epic_id: None,
                 sort_order: None,
                 tag: None,
@@ -733,7 +733,7 @@ mod tests {
                 title: "Bug fix".into(),
                 description: "".into(),
                 repo_path: "/repo".into(),
-                plan: None,
+                plan_path: None,
                 epic_id: None,
                 sort_order: Some(5),
                 tag: Some("bug".into()),
@@ -755,7 +755,7 @@ mod tests {
                 title: "Bad".into(),
                 description: "".into(),
                 repo_path: "/repo".into(),
-                plan: None,
+                plan_path: None,
                 epic_id: None,
                 sort_order: None,
                 tag: Some("invalid_tag".into()),
@@ -774,7 +774,7 @@ mod tests {
                 title: "T".into(),
                 description: "".into(),
                 repo_path: "/repo".into(),
-                plan: None,
+                plan_path: None,
                 epic_id: None,
                 sort_order: None,
                 tag: None,
@@ -784,7 +784,7 @@ mod tests {
         svc.update_task(UpdateTaskParams {
             task_id: id.0,
             status: Some("running".into()),
-            plan: None,
+            plan_path: None,
             title: None,
             description: None,
             repo_path: None,
@@ -810,7 +810,7 @@ mod tests {
                 title: "T".into(),
                 description: "".into(),
                 repo_path: "/repo".into(),
-                plan: None,
+                plan_path: None,
                 epic_id: None,
                 sort_order: None,
                 tag: None,
@@ -821,7 +821,7 @@ mod tests {
             .update_task(UpdateTaskParams {
                 task_id: id.0,
                 status: Some("done".into()),
-                plan: None,
+                plan_path: None,
                 title: None,
                 description: None,
                 repo_path: None,
@@ -845,7 +845,7 @@ mod tests {
                 title: "T".into(),
                 description: "".into(),
                 repo_path: "/repo".into(),
-                plan: None,
+                plan_path: None,
                 epic_id: None,
                 sort_order: None,
                 tag: None,
@@ -856,7 +856,7 @@ mod tests {
             .update_task(UpdateTaskParams {
                 task_id: id.0,
                 status: None,
-                plan: None,
+                plan_path: None,
                 title: None,
                 description: None,
                 repo_path: None,
@@ -880,7 +880,7 @@ mod tests {
                 title: "T".into(),
                 description: "".into(),
                 repo_path: "/repo".into(),
-                plan: None,
+                plan_path: None,
                 epic_id: None,
                 sort_order: None,
                 tag: None,
@@ -892,7 +892,7 @@ mod tests {
             .update_task(UpdateTaskParams {
                 task_id: id.0,
                 status: None,
-                plan: None,
+                plan_path: None,
                 title: None,
                 description: None,
                 repo_path: None,
@@ -916,7 +916,7 @@ mod tests {
                 title: "T".into(),
                 description: "".into(),
                 repo_path: "/repo".into(),
-                plan: None,
+                plan_path: None,
                 epic_id: None,
                 sort_order: None,
                 tag: None,
@@ -948,7 +948,7 @@ mod tests {
                 title: "T".into(),
                 description: "".into(),
                 repo_path: "/repo-a".into(),
-                plan: None,
+                plan_path: None,
                 epic_id: None,
                 sort_order: None,
                 tag: None,
@@ -975,7 +975,7 @@ mod tests {
                 title: "T".into(),
                 description: "".into(),
                 repo_path: "/repo".into(),
-                plan: None,
+                plan_path: None,
                 epic_id: None,
                 sort_order: None,
                 tag: None,
@@ -986,7 +986,7 @@ mod tests {
         svc.update_task(UpdateTaskParams {
             task_id: id.0,
             status: Some("running".into()),
-            plan: None,
+            plan_path: None,
             title: None,
             description: None,
             repo_path: None,
@@ -1017,7 +1017,7 @@ mod tests {
             title: "T1".into(),
             description: "".into(),
             repo_path: "/repo".into(),
-            plan: None,
+            plan_path: None,
             epic_id: None,
             sort_order: None,
             tag: None,
@@ -1088,7 +1088,7 @@ mod tests {
                 title: "T".into(),
                 description: "".into(),
                 repo_path: "/repo".into(),
-                plan: None,
+                plan_path: None,
                 epic_id: None,
                 sort_order: None,
                 tag: None,
@@ -1099,7 +1099,7 @@ mod tests {
             .update_task(UpdateTaskParams {
                 task_id: id.0,
                 status: None,
-                plan: None,
+                plan_path: None,
                 title: None,
                 description: None,
                 repo_path: None,
@@ -1162,7 +1162,7 @@ mod tests {
             title: None,
             description: None,
             status: Some("running".into()),
-            plan: None,
+            plan_path: None,
             sort_order: None,
             repo_path: None,
         })
@@ -1192,7 +1192,7 @@ mod tests {
                 title: None,
                 description: None,
                 status: None,
-                plan: None,
+                plan_path: None,
                 sort_order: None,
                 repo_path: None,
             })
@@ -1220,7 +1220,7 @@ mod tests {
                 title: None,
                 description: None,
                 status: Some("bogus".into()),
-                plan: None,
+                plan_path: None,
                 sort_order: None,
                 repo_path: None,
             })
@@ -1248,7 +1248,7 @@ mod tests {
                 title: "Sub1".into(),
                 description: "".into(),
                 repo_path: "/repo".into(),
-                plan: None,
+                plan_path: None,
                 epic_id: Some(epic.id.0),
                 sort_order: None,
                 tag: None,
@@ -1282,7 +1282,7 @@ mod tests {
                 title: "Sub".into(),
                 description: "".into(),
                 repo_path: "/repo".into(),
-                plan: None,
+                plan_path: None,
                 epic_id: Some(epic.id.0),
                 sort_order: None,
                 tag: None,

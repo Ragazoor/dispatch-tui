@@ -17,13 +17,13 @@ use crate::models::{
 // ---------------------------------------------------------------------------
 
 /// Builder for partial task updates. Each field is `None` by default (= don't
-/// change). For nullable columns (`plan`, `worktree`, `tmux_window`) we use
+/// change). For nullable columns (`plan_path`, `worktree`, `tmux_window`) we use
 /// a double-Option: `None` = don't change, `Some(None)` = set NULL,
 /// `Some(Some(x))` = set value.
 #[derive(Debug, Default)]
 pub struct TaskPatch<'a> {
     pub status: Option<TaskStatus>,
-    pub plan: Option<Option<&'a str>>,
+    pub plan_path: Option<Option<&'a str>>,
     pub title: Option<&'a str>,
     pub description: Option<&'a str>,
     pub repo_path: Option<&'a str>,
@@ -45,8 +45,8 @@ impl<'a> TaskPatch<'a> {
         self
     }
 
-    pub fn plan(mut self, plan: Option<&'a str>) -> Self {
-        self.plan = Some(plan);
+    pub fn plan_path(mut self, plan_path: Option<&'a str>) -> Self {
+        self.plan_path = Some(plan_path);
         self
     }
 
@@ -97,7 +97,7 @@ impl<'a> TaskPatch<'a> {
 
     pub fn has_changes(&self) -> bool {
         self.status.is_some()
-            || self.plan.is_some()
+            || self.plan_path.is_some()
             || self.title.is_some()
             || self.description.is_some()
             || self.repo_path.is_some()
@@ -115,7 +115,7 @@ impl<'a> TaskPatch<'a> {
 // ---------------------------------------------------------------------------
 
 /// Builder for partial epic updates, mirroring `TaskPatch`. Each field is
-/// `None` by default (= don't change). For nullable columns (`plan`) we use
+/// `None` by default (= don't change). For nullable columns (`plan_path`) we use
 /// a double-Option: `None` = don't change, `Some(None)` = set NULL,
 /// `Some(Some(x))` = set value.
 #[derive(Debug, Default)]
@@ -123,7 +123,7 @@ pub struct EpicPatch<'a> {
     pub title: Option<&'a str>,
     pub description: Option<&'a str>,
     pub status: Option<TaskStatus>,
-    pub plan: Option<Option<&'a str>>,
+    pub plan_path: Option<Option<&'a str>>,
     pub sort_order: Option<Option<i64>>,
     pub repo_path: Option<&'a str>,
 }
@@ -148,8 +148,8 @@ impl<'a> EpicPatch<'a> {
         self
     }
 
-    pub fn plan(mut self, plan: Option<&'a str>) -> Self {
-        self.plan = Some(plan);
+    pub fn plan_path(mut self, plan_path: Option<&'a str>) -> Self {
+        self.plan_path = Some(plan_path);
         self
     }
 
@@ -167,7 +167,7 @@ impl<'a> EpicPatch<'a> {
         self.title.is_some()
             || self.description.is_some()
             || self.status.is_some()
-            || self.plan.is_some()
+            || self.plan_path.is_some()
             || self.sort_order.is_some()
             || self.repo_path.is_some()
     }
@@ -311,7 +311,7 @@ impl Database {
                 status      TEXT NOT NULL DEFAULT 'backlog',
                 worktree    TEXT,
                 tmux_window TEXT,
-                plan        TEXT,
+                plan_path   TEXT,
                 tag         TEXT,
                 created_at  TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at  TEXT NOT NULL DEFAULT (datetime('now'))

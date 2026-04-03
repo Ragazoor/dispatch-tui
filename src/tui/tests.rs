@@ -52,7 +52,7 @@ fn make_task(id: i64, status: TaskStatus) -> Task {
         status,
         worktree: None,
         tmux_window: None,
-        plan: None,
+        plan_path: None,
         epic_id: None,
         sub_status: SubStatus::default_for(status),
         pr_url: None,
@@ -244,7 +244,7 @@ fn task_created_adds_to_list() {
         status: TaskStatus::Backlog,
         worktree: None,
         tmux_window: None,
-        plan: None,
+        plan_path: None,
         epic_id: None,
         sub_status: SubStatus::None,
         pr_url: None,
@@ -418,14 +418,14 @@ fn task_edited_updates_fields() {
         description: "Desc".into(),
         repo_path: "/new".into(),
         status: TaskStatus::Running,
-        plan: Some("docs/plan.md".into()),
+        plan_path: Some("docs/plan.md".into()),
         tag: None,
     }));
     assert_eq!(app.tasks[0].title, "New");
     assert_eq!(app.tasks[0].description, "Desc");
     assert_eq!(app.tasks[0].repo_path, "/new");
     assert_eq!(app.tasks[0].status, TaskStatus::Running);
-    assert_eq!(app.tasks[0].plan.as_deref(), Some("docs/plan.md"));
+    assert_eq!(app.tasks[0].plan_path.as_deref(), Some("docs/plan.md"));
 }
 
 #[test]
@@ -476,7 +476,7 @@ fn move_forward_to_done_with_live_window_enters_confirm_mode() {
 #[test]
 fn d_key_on_backlog_with_plan_dispatches() {
     let mut task = make_task(3, TaskStatus::Backlog);
-    task.plan = Some("plan.md".into());
+    task.plan_path = Some("plan.md".into());
     let mut app = App::new(vec![task], TEST_TIMEOUT);
     app.selection_mut().set_column(0); // Backlog column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
@@ -1209,7 +1209,7 @@ fn enter_key_toggles_detail() {
 #[test]
 fn dispatched_sets_fields_and_transitions_to_running() {
     let mut task = make_task(3, TaskStatus::Backlog);
-    task.plan = Some("plan.md".into());
+    task.plan_path = Some("plan.md".into());
     let mut app = App::new(vec![task], TEST_TIMEOUT);
     let cmds = app.update(Message::Dispatched {
         id: TaskId(3),
@@ -1228,7 +1228,7 @@ fn dispatched_sets_fields_and_transitions_to_running() {
 #[test]
 fn dispatched_with_switch_focus_emits_jump() {
     let mut task = make_task(3, TaskStatus::Backlog);
-    task.plan = Some("plan.md".into());
+    task.plan_path = Some("plan.md".into());
     let mut app = App::new(vec![task], TEST_TIMEOUT);
     let cmds = app.update(Message::Dispatched {
         id: TaskId(3),
@@ -1463,7 +1463,7 @@ fn action_hints_backlog_task() {
 #[test]
 fn action_hints_backlog_task_with_plan() {
     let mut task = make_task(3, TaskStatus::Backlog);
-    task.plan = Some("plan.md".into());
+    task.plan_path = Some("plan.md".into());
     let hints = ui::action_hints(Some(&task), Color::Rgb(122, 162, 247));
     let keys: Vec<&str> = hints
         .iter()
@@ -3010,7 +3010,7 @@ fn make_epic(id: i64) -> Epic {
         description: String::new(),
         repo_path: "/repo".to_string(),
         status: TaskStatus::Backlog,
-        plan: None,
+        plan_path: None,
         sort_order: None,
         created_at: now,
         updated_at: now,
@@ -3614,13 +3614,13 @@ fn dispatch_epic_on_non_backlog_shows_status() {
 fn dispatch_epic_with_plan_dispatches_next_backlog_subtask() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
-    epic.plan = Some("docs/plan.md".to_string());
+    epic.plan_path = Some("docs/plan.md".to_string());
     app.epics = vec![epic];
 
     // Add two backlog subtasks for this epic
     let mut task1 = make_task(1, TaskStatus::Backlog);
     task1.epic_id = Some(EpicId(10));
-    task1.plan = Some("plan1.md".to_string());
+    task1.plan_path = Some("plan1.md".to_string());
     let mut task2 = make_task(2, TaskStatus::Backlog);
     task2.epic_id = Some(EpicId(10));
 
@@ -3640,7 +3640,7 @@ fn dispatch_epic_with_plan_dispatches_next_backlog_subtask() {
 fn dispatch_epic_with_plan_brainstorms_subtask_without_plan() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
-    epic.plan = Some("docs/plan.md".to_string());
+    epic.plan_path = Some("docs/plan.md".to_string());
     app.epics = vec![epic];
 
     // Subtask without a plan, tagged as "epic" to trigger brainstorm
@@ -3661,7 +3661,7 @@ fn dispatch_epic_with_plan_brainstorms_subtask_without_plan() {
 fn dispatch_epic_with_plan_no_backlog_subtasks_shows_status() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
-    epic.plan = Some("docs/plan.md".to_string());
+    epic.plan_path = Some("docs/plan.md".to_string());
     app.epics = vec![epic];
 
     // Only an archived subtask — archived tasks are excluded from epic_status
@@ -5510,7 +5510,7 @@ fn repo_filter_applies_to_epics_in_column_items() {
             description: "".into(),
             repo_path: "/repo-a".into(),
             status: TaskStatus::Backlog,
-            plan: None,
+            plan_path: None,
             sort_order: None,
             created_at: now,
             updated_at: now,
@@ -5521,7 +5521,7 @@ fn repo_filter_applies_to_epics_in_column_items() {
             description: "".into(),
             repo_path: "/repo-b".into(),
             status: TaskStatus::Backlog,
-            plan: None,
+            plan_path: None,
             sort_order: None,
             created_at: now,
             updated_at: now,
@@ -5667,7 +5667,7 @@ fn repo_filter_exclude_applies_to_epics() {
             description: "".into(),
             repo_path: "/repo-a".into(),
             status: TaskStatus::Backlog,
-            plan: None,
+            plan_path: None,
             sort_order: None,
             created_at: now,
             updated_at: now,
@@ -5678,7 +5678,7 @@ fn repo_filter_exclude_applies_to_epics() {
             description: "".into(),
             repo_path: "/repo-b".into(),
             status: TaskStatus::Backlog,
-            plan: None,
+            plan_path: None,
             sort_order: None,
             created_at: now,
             updated_at: now,
@@ -6060,7 +6060,7 @@ fn dispatch_epic_with_backlog_subtasks_dispatches_first_by_sort_order() {
 
     // Create epic with a plan so subtask dispatch path is taken
     let mut epic = make_epic(1);
-    epic.plan = Some("docs/plans/epic-1.md".to_string());
+    epic.plan_path = Some("docs/plans/epic-1.md".to_string());
     app.epics = vec![epic];
 
     // Create two backlog subtasks with different sort orders (both have plans)
@@ -6068,12 +6068,12 @@ fn dispatch_epic_with_backlog_subtasks_dispatches_first_by_sort_order() {
     t1.epic_id = Some(EpicId(1));
     t1.sort_order = Some(200);
     t1.title = "Second task".to_string();
-    t1.plan = Some("docs/plans/task-10.md".to_string());
+    t1.plan_path = Some("docs/plans/task-10.md".to_string());
     let mut t2 = make_task(11, TaskStatus::Backlog);
     t2.epic_id = Some(EpicId(1));
     t2.sort_order = Some(100);
     t2.title = "First task".to_string();
-    t2.plan = Some("docs/plans/task-11.md".to_string());
+    t2.plan_path = Some("docs/plans/task-11.md".to_string());
     app.tasks = vec![t1, t2];
 
     let cmds = app.update(Message::DispatchEpic(EpicId(1)));
@@ -8649,7 +8649,7 @@ fn active_review_prs_returns_my_prs_in_author_mode() {
 fn auto_dispatch_epic_triggers_on_review_transition() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
-    epic.plan = Some("docs/plan.md".to_string());
+    epic.plan_path = Some("docs/plan.md".to_string());
     app.epics = vec![epic];
 
     let mut task1 = make_task(1, TaskStatus::Running);
@@ -8705,7 +8705,7 @@ fn auto_dispatch_epic_works_without_plan() {
 fn auto_dispatch_epic_dedup_prevents_double_dispatch() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
-    epic.plan = Some("docs/plan.md".to_string());
+    epic.plan_path = Some("docs/plan.md".to_string());
     app.epics = vec![epic];
 
     let mut task1 = make_task(1, TaskStatus::Running);
@@ -8735,7 +8735,7 @@ fn auto_dispatch_epic_dedup_prevents_double_dispatch() {
 fn auto_dispatch_epic_re_triggers_after_fresh_review() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
-    epic.plan = Some("docs/plan.md".to_string());
+    epic.plan_path = Some("docs/plan.md".to_string());
     app.epics = vec![epic];
 
     let mut task1 = make_task(1, TaskStatus::Running);
@@ -8776,7 +8776,7 @@ fn auto_dispatch_epic_re_triggers_after_fresh_review() {
 fn auto_dispatch_epic_no_backlog_subtasks_noop() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
-    epic.plan = Some("docs/plan.md".to_string());
+    epic.plan_path = Some("docs/plan.md".to_string());
     app.epics = vec![epic];
 
     let mut task1 = make_task(1, TaskStatus::Running);
@@ -8807,7 +8807,7 @@ fn auto_dispatch_epic_no_backlog_subtasks_noop() {
 fn auto_dispatch_epic_respects_tag_routing() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
-    epic.plan = Some("docs/plan.md".to_string());
+    epic.plan_path = Some("docs/plan.md".to_string());
     app.epics = vec![epic];
 
     let mut task1 = make_task(1, TaskStatus::Running);
@@ -8834,7 +8834,7 @@ fn auto_dispatch_fires_even_when_notifications_disabled() {
     app.update(Message::ToggleNotifications); // disable notifications
 
     let mut epic = make_epic(10);
-    epic.plan = Some("docs/plan.md".to_string());
+    epic.plan_path = Some("docs/plan.md".to_string());
     app.epics = vec![epic];
 
     let mut task1 = make_task(1, TaskStatus::Running);
@@ -9120,7 +9120,7 @@ fn render_card_done_merged_shows_merged() {
 #[test]
 fn render_card_idle_with_plan_shows_triangle() {
     let mut task = make_task(1, TaskStatus::Backlog);
-    task.plan = Some("docs/plans/plan.md".to_string());
+    task.plan_path = Some("docs/plans/plan.md".to_string());
     let mut app = App::new(vec![task], TEST_TIMEOUT);
     // Already in Backlog column (0)
     let buf = render_to_buffer(&mut app, 120, 30);
@@ -9566,7 +9566,7 @@ fn render_input_form_confirm_retry_shows_options() {
         status: TaskStatus::Running,
         worktree: Some("/tmp/wt".to_string()),
         tmux_window: Some("win5".to_string()),
-        plan: None,
+        plan_path: None,
         epic_id: None,
         sub_status: SubStatus::Crashed,
         pr_url: None,
@@ -9866,7 +9866,7 @@ fn render_detail_epic_shows_title_and_id() {
 fn render_detail_epic_with_plan_shows_path() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
-    epic.plan = Some("docs/plans/migration.md".to_string());
+    epic.plan_path = Some("docs/plans/migration.md".to_string());
     app.epics = vec![epic];
     app.selection_mut().set_column(0);
     app.selection_mut().set_row(0, 0);

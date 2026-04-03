@@ -28,6 +28,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (22, migrate_v22_add_filter_preset_mode),
     (23, migrate_v23_create_bot_prs_table),
     (24, migrate_v24_create_security_alerts_table),
+    (25, migrate_v25_rename_plan_to_plan_path),
 ];
 
 fn migrate_v1_add_plan_column(conn: &Connection) -> Result<()> {
@@ -482,6 +483,14 @@ fn migrate_v23_create_bot_prs_table(conn: &Connection) -> Result<()> {
         )",
     )
     .context("Failed to create bot_prs table")
+}
+
+fn migrate_v25_rename_plan_to_plan_path(conn: &Connection) -> Result<()> {
+    conn.execute_batch("ALTER TABLE tasks RENAME COLUMN plan TO plan_path")
+        .context("Failed to rename tasks.plan to plan_path")?;
+    conn.execute_batch("ALTER TABLE epics RENAME COLUMN plan TO plan_path")
+        .context("Failed to rename epics.plan to plan_path")?;
+    Ok(())
 }
 
 fn migrate_v24_create_security_alerts_table(conn: &Connection) -> Result<()> {

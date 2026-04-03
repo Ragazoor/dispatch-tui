@@ -1656,7 +1656,7 @@ impl App {
             t.description = edit.description;
             t.repo_path = edit.repo_path;
             t.status = edit.status;
-            t.plan = edit.plan;
+            t.plan_path = edit.plan_path;
             t.tag = edit.tag;
             t.updated_at = chrono::Utc::now();
         }
@@ -3003,7 +3003,7 @@ impl App {
             return vec![];
         }
 
-        if epic.plan.is_some() {
+        if epic.plan_path.is_some() {
             // Epic has a plan — dispatch the next backlog subtask sorted by sort_order
             let mut backlog_subtasks: Vec<&Task> = self
                 .tasks

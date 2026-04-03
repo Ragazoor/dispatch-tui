@@ -41,7 +41,7 @@ pub(super) struct UpdateEpicArgs {
     #[serde(default)]
     pub(super) status: Option<String>,
     #[serde(default)]
-    pub(super) plan: Option<String>,
+    pub(super) plan_path: Option<String>,
     #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
     pub(super) sort_order: Option<i64>,
     #[serde(default)]
@@ -104,7 +104,7 @@ pub(super) fn handle_get_epic(state: &McpState, id: Option<Value>, args: Value) 
                 repo = epic.repo_path,
                 status = epic.status.as_str(),
             );
-            if let Some(ref p) = epic.plan {
+            if let Some(ref p) = epic.plan_path {
                 text.push_str(&format!("\nPlan: {p}"));
             }
             if let Some(sort_order) = epic.sort_order {
@@ -144,7 +144,7 @@ pub(super) fn handle_list_epics(
             let lines: Vec<String> = epics
                 .iter()
                 .map(|(e, done, total)| {
-                    let plan_indicator = if e.plan.is_some() { " [plan]" } else { "" };
+                    let plan_indicator = if e.plan_path.is_some() { " [plan]" } else { "" };
                     let status_indicator = if e.status != TaskStatus::Backlog {
                         format!(" [{}]", e.status.as_str())
                     } else {
@@ -181,7 +181,7 @@ pub(super) fn handle_update_epic(
         title: parsed.title.clone(),
         description: parsed.description.clone(),
         status: parsed.status.clone(),
-        plan: parsed.plan.clone(),
+        plan_path: parsed.plan_path.clone(),
         sort_order: parsed.sort_order,
         repo_path: parsed.repo_path.clone(),
     };

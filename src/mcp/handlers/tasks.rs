@@ -27,7 +27,7 @@ pub(super) struct UpdateTaskArgs {
     #[serde(default)]
     pub(super) status: Option<String>,
     #[serde(default)]
-    pub(super) plan: Option<String>,
+    pub(super) plan_path: Option<String>,
     #[serde(default)]
     pub(super) title: Option<String>,
     #[serde(default)]
@@ -87,7 +87,7 @@ pub(super) struct CreateTaskWithEpicArgs {
     pub(super) repo_path: String,
     #[serde(default)]
     pub(super) description: String,
-    pub(super) plan: Option<String>,
+    pub(super) plan_path: Option<String>,
     #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
     pub(super) epic_id: Option<i64>,
     #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
@@ -146,7 +146,7 @@ fn format_task_detail(task: &Task, epic_titles: &HashMap<EpicId, String>) -> Str
     if let Some(ref tag) = task.tag {
         text.push_str(&format!("\nTag: {tag}"));
     }
-    if let Some(ref plan) = task.plan {
+    if let Some(ref plan) = task.plan_path {
         text.push_str(&format!("\nPlan: {plan}"));
     }
     if let Some(ref pr_url) = task.pr_url {
@@ -185,7 +185,7 @@ fn format_task_line(t: &Task, epic_titles: &HashMap<EpicId, String>) -> String {
     } else {
         t.description.clone()
     };
-    let plan_indicator = if t.plan.is_some() { " [plan]" } else { "" };
+    let plan_indicator = if t.plan_path.is_some() { " [plan]" } else { "" };
     let tag_indicator = match t.tag {
         Some(tag) => format!(" [{}]", tag.as_str()),
         None => String::new(),
@@ -228,7 +228,7 @@ pub(super) fn handle_update_task(
     let params = UpdateTaskParams {
         task_id: parsed.task_id,
         status: parsed.status.clone(),
-        plan: parsed.plan,
+        plan_path: parsed.plan_path,
         title: parsed.title,
         description: parsed.description,
         repo_path: parsed.repo_path,
@@ -269,7 +269,7 @@ pub(super) fn handle_create_task(
         title: parsed.title,
         description: parsed.description,
         repo_path: parsed.repo_path,
-        plan: parsed.plan,
+        plan_path: parsed.plan_path,
         epic_id: parsed.epic_id,
         sort_order: parsed.sort_order,
         tag: parsed.tag,
@@ -660,7 +660,7 @@ fn auto_dispatch_next(
 
     tracing::info!(
         next_task_id = next_id.0,
-        has_plan = next_task.plan.is_some(),
+        has_plan = next_task.plan_path.is_some(),
         "auto-dispatching next epic subtask"
     );
 

@@ -57,7 +57,7 @@ fn full_lifecycle() {
             status: TaskStatus::Backlog,
             worktree: None,
             tmux_window: None,
-            plan: Some("plan.md".into()),
+            plan_path: Some("plan.md".into()),
             epic_id: None,
             sub_status: dispatch_tui::models::SubStatus::None,
             pr_url: None,

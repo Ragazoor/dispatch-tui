@@ -794,7 +794,7 @@ pub struct TaskEdit {
     pub description: String,
     pub repo_path: String,
     pub status: TaskStatus,
-    pub plan: Option<String>,
+    pub plan_path: Option<String>,
     pub tag: Option<TaskTag>,
 }
 

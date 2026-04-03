@@ -87,7 +87,7 @@ fn create_task_with_plan() {
         )
         .unwrap();
     let task = db.get_task(id).unwrap().unwrap();
-    assert_eq!(task.plan.as_deref(), Some("docs/plan.md"));
+    assert_eq!(task.plan_path.as_deref(), Some("docs/plan.md"));
 }
 
 #[test]
@@ -97,7 +97,7 @@ fn create_task_without_plan() {
         .create_task("Simple Task", "desc", "/repo", None, TaskStatus::Backlog)
         .unwrap();
     let task = db.get_task(id).unwrap().unwrap();
-    assert!(task.plan.is_none());
+    assert!(task.plan_path.is_none());
 }
 
 #[test]
@@ -201,7 +201,7 @@ fn fresh_db_has_latest_schema_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 24, "fresh DB should be at schema version 24");
+    assert_eq!(version, 25, "fresh DB should be at schema version 25");
 }
 
 #[test]
@@ -262,15 +262,98 @@ fn legacy_db_migrates_to_latest_version() {
         "notes table should be dropped after migration"
     );
 
+    // Verify Migration 25 renamed the plan column to plan_path
+    let has_plan_path: bool = conn.prepare("SELECT plan_path FROM tasks LIMIT 1").is_ok();
+    assert!(
+        has_plan_path,
+        "Migration 25 should have renamed plan to plan_path"
+    );
+
     // Version should be latest
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 24);
+    assert_eq!(version, 25);
+}
 
-    // Verify Migration 1 added the plan column
-    let has_plan: bool = conn.prepare("SELECT plan FROM tasks LIMIT 1").is_ok();
-    assert!(has_plan, "Migration 1 should have added the plan column");
+#[test]
+fn migration_25_renames_plan_to_plan_path() {
+    // Simulate a v24 DB (plan column exists, plan_path does not)
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "PRAGMA foreign_keys=OFF;
+         PRAGMA user_version=24;
+         CREATE TABLE tasks (
+             id          INTEGER PRIMARY KEY,
+             title       TEXT NOT NULL,
+             description TEXT NOT NULL,
+             repo_path   TEXT NOT NULL,
+             status      TEXT NOT NULL DEFAULT 'backlog',
+             worktree    TEXT,
+             tmux_window TEXT,
+             plan        TEXT,
+             epic_id     INTEGER,
+             sub_status  TEXT NOT NULL DEFAULT 'none',
+             pr_url      TEXT,
+             tag         TEXT,
+             sort_order  INTEGER,
+             created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         CREATE TABLE epics (
+             id          INTEGER PRIMARY KEY,
+             title       TEXT NOT NULL,
+             description TEXT NOT NULL,
+             repo_path   TEXT NOT NULL,
+             status      TEXT NOT NULL DEFAULT 'backlog',
+             plan        TEXT,
+             sort_order  INTEGER,
+             created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         CREATE TABLE repo_paths (
+             id        INTEGER PRIMARY KEY,
+             path      TEXT NOT NULL UNIQUE,
+             last_used TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         INSERT INTO tasks (title, description, repo_path, plan)
+             VALUES ('T1', 'D1', '/r', 'docs/plans/task.md');
+         INSERT INTO epics (title, description, repo_path, plan)
+             VALUES ('E1', 'D1', '/r', 'docs/plans/epic.md');",
+    )
+    .unwrap();
+
+    // Apply migration 25
+    Database::init_schema(&conn).unwrap();
+
+    // plan_path column exists with data preserved
+    let task_plan_path: Option<String> = conn
+        .query_row("SELECT plan_path FROM tasks WHERE id = 1", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(
+        task_plan_path.as_deref(),
+        Some("docs/plans/task.md"),
+        "task plan_path should be preserved after migration"
+    );
+
+    let epic_plan_path: Option<String> = conn
+        .query_row("SELECT plan_path FROM epics WHERE id = 1", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(
+        epic_plan_path.as_deref(),
+        Some("docs/plans/epic.md"),
+        "epic plan_path should be preserved after migration"
+    );
+
+    // Version bumped to 25
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, 25);
 }
 
 #[test]
@@ -332,7 +415,7 @@ fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 24);
+    assert_eq!(version, 25);
 }
 
 #[test]
@@ -373,7 +456,7 @@ fn create_task_returning_returns_full_task() {
     assert_eq!(task.status, TaskStatus::Backlog);
     assert!(task.worktree.is_none());
     assert!(task.tmux_window.is_none());
-    assert!(task.plan.is_none());
+    assert!(task.plan_path.is_none());
 }
 
 #[test]
@@ -382,7 +465,7 @@ fn create_task_returning_with_plan() {
     let task = db
         .create_task_returning("T", "D", "/r", Some("plan.md"), TaskStatus::Backlog)
         .unwrap();
-    assert_eq!(task.plan.as_deref(), Some("plan.md"));
+    assert_eq!(task.plan_path.as_deref(), Some("plan.md"));
     assert_eq!(task.status, TaskStatus::Backlog);
 }
 
@@ -394,12 +477,12 @@ fn patch_task_applies_all_fields() {
         .unwrap();
     let patch = TaskPatch::new()
         .status(TaskStatus::Running)
-        .plan(Some("plan.md"))
+        .plan_path(Some("plan.md"))
         .title("new title");
     db.patch_task(id, &patch).unwrap();
     let task = db.get_task(id).unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Running);
-    assert_eq!(task.plan.as_deref(), Some("plan.md"));
+    assert_eq!(task.plan_path.as_deref(), Some("plan.md"));
     assert_eq!(task.title, "new title");
     assert_eq!(task.description, "desc"); // unchanged
 }
@@ -420,7 +503,7 @@ fn patch_task_none_fields_unchanged() {
     db.patch_task(id, &patch).unwrap();
     let task = db.get_task(id).unwrap().unwrap();
     assert_eq!(task.title, "title");
-    assert_eq!(task.plan.as_deref(), Some("plan.md"));
+    assert_eq!(task.plan_path.as_deref(), Some("plan.md"));
     assert_eq!(task.status, TaskStatus::Running);
 }
 
@@ -546,10 +629,10 @@ fn patch_task_clears_plan() {
             TaskStatus::Backlog,
         )
         .unwrap();
-    let patch = TaskPatch::new().plan(None);
+    let patch = TaskPatch::new().plan_path(None);
     db.patch_task(id, &patch).unwrap();
     let task = db.get_task(id).unwrap().unwrap();
-    assert!(task.plan.is_none());
+    assert!(task.plan_path.is_none());
 }
 
 #[test]
@@ -862,12 +945,12 @@ fn patch_task_sets_pr_url() {
 fn patch_epic_plan() {
     let db = in_memory_db();
     let epic = db.create_epic("Epic", "desc", "/repo").unwrap();
-    assert!(epic.plan.is_none());
+    assert!(epic.plan_path.is_none());
 
-    db.patch_epic(epic.id, &EpicPatch::new().plan(Some("docs/plan.md")))
+    db.patch_epic(epic.id, &EpicPatch::new().plan_path(Some("docs/plan.md")))
         .unwrap();
     let updated = db.get_epic(epic.id).unwrap().unwrap();
-    assert_eq!(updated.plan.as_deref(), Some("docs/plan.md"));
+    assert_eq!(updated.plan_path.as_deref(), Some("docs/plan.md"));
 }
 
 #[test]
@@ -875,12 +958,12 @@ fn patch_epic_clear_plan() {
     let db = in_memory_db();
     let epic = db.create_epic("Epic", "desc", "/repo").unwrap();
 
-    db.patch_epic(epic.id, &EpicPatch::new().plan(Some("docs/plan.md")))
+    db.patch_epic(epic.id, &EpicPatch::new().plan_path(Some("docs/plan.md")))
         .unwrap();
-    db.patch_epic(epic.id, &EpicPatch::new().plan(None))
+    db.patch_epic(epic.id, &EpicPatch::new().plan_path(None))
         .unwrap();
     let updated = db.get_epic(epic.id).unwrap().unwrap();
-    assert!(updated.plan.is_none());
+    assert!(updated.plan_path.is_none());
 }
 
 #[test]
@@ -1276,7 +1359,7 @@ fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 24);
+    assert_eq!(version, 25);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -1377,7 +1460,7 @@ fn schema_version_is_21() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 24, "fresh DB should be at schema version 24");
+    assert_eq!(version, 25, "fresh DB should be at schema version 25");
 }
 
 #[test]
@@ -1503,7 +1586,7 @@ fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 24);
+    assert_eq!(version, 25);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn

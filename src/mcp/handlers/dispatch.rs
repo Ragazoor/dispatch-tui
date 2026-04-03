@@ -83,7 +83,7 @@ mcp_tools! {
                     "description": "New status: backlog, running, or review. Setting done is not allowed via MCP — ask the human operator to move the task to done from the TUI.",
                     "enum": ["backlog", "running", "review"]
                 },
-                "plan": {
+                "plan_path": {
                     "type": "string",
                     "description": "Absolute file path to the implementation plan"
                 },
@@ -155,7 +155,7 @@ mcp_tools! {
                     "type": "string",
                     "description": "Task description (optional, defaults to empty)"
                 },
-                "plan": {
+                "plan_path": {
                     "type": "string",
                     "description": "Absolute file path to the implementation plan (optional)."
                 },
@@ -252,7 +252,7 @@ mcp_tools! {
                 "title": { "type": "string", "description": "New title" },
                 "description": { "type": "string", "description": "New description" },
                 "status": { "type": "string", "description": "New status: backlog, running, review, or done", "enum": ["backlog", "running", "review", "done"] },
-                "plan": { "type": "string", "description": "Path to the plan file" },
+                "plan_path": { "type": "string", "description": "Path to the plan file" },
                 "sort_order": { "type": "integer", "description": "Display order within column (lower values appear first)" },
                 "repo_path": { "type": "string", "description": "Repository path for the epic" }
             },

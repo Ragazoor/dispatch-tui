@@ -386,7 +386,7 @@ pub struct Epic {
     pub description: String,
     pub repo_path: String,
     pub status: TaskStatus,
-    pub plan: Option<String>,
+    pub plan_path: Option<String>,
     pub sort_order: Option<i64>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -494,7 +494,7 @@ pub fn epic_substatus(
             }
         }
         TaskStatus::Backlog => {
-            if epic.plan.is_some() {
+            if epic.plan_path.is_some() {
                 EpicSubstatus::Planned
             } else {
                 EpicSubstatus::Unplanned
@@ -696,7 +696,7 @@ pub struct Task {
     pub status: TaskStatus,
     pub worktree: Option<String>,
     pub tmux_window: Option<String>,
-    pub plan: Option<String>,
+    pub plan_path: Option<String>,
     pub epic_id: Option<EpicId>,
     pub sub_status: SubStatus,
     pub pr_url: Option<String>,
@@ -734,7 +734,7 @@ impl DispatchMode {
     /// Select the dispatch mode for a task: tasks with a plan always get
     /// `Dispatch`; otherwise the tag drives the choice.
     pub fn for_task(task: &Task) -> Self {
-        if task.plan.is_some() {
+        if task.plan_path.is_some() {
             DispatchMode::Dispatch
         } else {
             match task.tag {
@@ -1647,7 +1647,7 @@ mod tests {
             status: TaskStatus::Backlog,
             worktree: None,
             tmux_window: None,
-            plan: None,
+            plan_path: None,
             epic_id: None,
             sub_status: SubStatus::None,
             pr_url: None,
@@ -1670,7 +1670,7 @@ mod tests {
             status: TaskStatus::Backlog,
             worktree: None,
             tmux_window: None,
-            plan: None,
+            plan_path: None,
             epic_id: Some(EpicId(5)),
             sub_status: SubStatus::None,
             pr_url: None,
@@ -1691,7 +1691,7 @@ mod tests {
             description: "Rewrite auth system".to_string(),
             repo_path: "/repo".to_string(),
             status: TaskStatus::Backlog,
-            plan: None,
+            plan_path: None,
             sort_order: None,
             created_at: now,
             updated_at: now,
@@ -1709,7 +1709,7 @@ mod tests {
             description: String::new(),
             repo_path: String::new(),
             status,
-            plan: None,
+            plan_path: None,
             sort_order: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -1858,7 +1858,7 @@ mod tests {
             description: "".to_string(),
             repo_path: "/repo".to_string(),
             status: TaskStatus::Backlog,
-            plan: None,
+            plan_path: None,
             sort_order: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -1875,7 +1875,7 @@ mod tests {
             sub_status: SubStatus::None,
             worktree: None,
             tmux_window: None,
-            plan: None,
+            plan_path: None,
             epic_id: None,
             pr_url: None,
             tag: None,
@@ -1888,7 +1888,7 @@ mod tests {
     #[test]
     fn epic_substatus_unplanned() {
         let epic = Epic {
-            plan: None,
+            plan_path: None,
             status: TaskStatus::Backlog,
             ..test_epic()
         };
@@ -1898,7 +1898,7 @@ mod tests {
     #[test]
     fn epic_substatus_planned() {
         let epic = Epic {
-            plan: Some("plan.md".into()),
+            plan_path: Some("plan.md".into()),
             status: TaskStatus::Backlog,
             ..test_epic()
         };
@@ -2070,7 +2070,7 @@ mod tests {
             status: TaskStatus::Backlog,
             worktree: None,
             tmux_window: None,
-            plan: plan.map(String::from),
+            plan_path: plan.map(String::from),
             epic_id: None,
             sub_status: SubStatus::None,
             pr_url: None,

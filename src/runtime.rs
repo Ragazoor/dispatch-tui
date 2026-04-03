@@ -604,7 +604,7 @@ impl TuiRuntime {
                 .title(&title)
                 .description(&description)
                 .repo_path(&repo_path)
-                .plan(plan.as_deref())
+                .plan_path(plan.as_deref())
                 .tag(tag),
         ) {
             app.update(Message::Error(Self::db_error("updating task", e)));
@@ -615,7 +615,7 @@ impl TuiRuntime {
             description,
             repo_path,
             status: new_status,
-            plan,
+            plan_path: plan,
             tag,
         }));
         Ok(())

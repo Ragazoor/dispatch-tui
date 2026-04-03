@@ -482,7 +482,7 @@ fn classify_card_indicator(
 
     let age = format_age(task.updated_at, now);
     let staleness = Staleness::from_age(task.updated_at, now);
-    let plan_indicator = if task.plan.is_some() && status == TaskStatus::Backlog {
+    let plan_indicator = if task.plan_path.is_some() && status == TaskStatus::Backlog {
         "▸ "
     } else {
         ""
@@ -754,7 +754,7 @@ fn render_epic_item(
         .count();
 
     let title_text = truncate(&epic.title, 28);
-    let plan_indicator = if epic.plan.is_some() && status == TaskStatus::Backlog {
+    let plan_indicator = if epic.plan_path.is_some() && status == TaskStatus::Backlog {
         " \u{25b8}" // ▸
     } else {
         ""
@@ -1079,7 +1079,7 @@ fn epic_detail_lines(app: &App, epic: &Epic) -> Vec<Line<'static>> {
     if epic.description.is_empty() {
         lines.push(Line::from(Span::styled(String::new(), desc_style)));
     }
-    if let Some(plan) = &epic.plan {
+    if let Some(plan) = &epic.plan_path {
         lines.push(Line::from(Span::styled(
             format!("plan: {plan}"),
             Style::default().fg(MUTED),
@@ -2283,7 +2283,7 @@ pub(in crate::tui) fn action_hints(task: Option<&Task>, key_color: Color) -> Vec
     if let Some(task) = task {
         match task.status {
             TaskStatus::Backlog => {
-                let d_label = if task.plan.is_some() {
+                let d_label = if task.plan_path.is_some() {
                     "dispatch"
                 } else {
                     "brainstorm"
@@ -2359,7 +2359,7 @@ pub(in crate::tui) fn epic_action_hints(epic: &Epic, key_color: Color) -> Vec<Sp
         spans.push(Span::styled(format!(" {label}  "), label_style));
     };
 
-    if epic.plan.is_some() {
+    if epic.plan_path.is_some() {
         push_hint("d", "dispatch");
     } else {
         push_hint("d", "plan");
