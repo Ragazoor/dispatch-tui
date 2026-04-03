@@ -10090,3 +10090,113 @@ fn render_tab_bar_review_board_dependabot_tab() {
         "tab bar in review board mode should show 'Dependabot (2)' when 2 bot PRs loaded"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Review board Author and Dependabot mode rendering tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn render_review_board_author_shows_my_pr_titles() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::ReviewPrsLoaded(vec![]));
+    app.update(Message::MyPrsLoaded(vec![make_review_pr(
+        42,
+        "me",
+        ReviewDecision::ReviewRequired,
+    )]));
+    app.update(Message::ToggleReviewBoardMode); // Reviewer → Author
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "PR 42"),
+        "author mode should show 'PR 42' for the loaded my-PR"
+    );
+}
+
+#[test]
+fn render_review_board_author_shows_column_headers() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::ReviewPrsLoaded(vec![]));
+    app.update(Message::MyPrsLoaded(vec![make_review_pr(
+        42,
+        "me",
+        ReviewDecision::ReviewRequired,
+    )]));
+    app.update(Message::ToggleReviewBoardMode); // Reviewer → Author
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Needs Review"),
+        "author mode should show 'Needs Review' column header"
+    );
+}
+
+#[test]
+fn render_review_board_dependabot_shows_bot_prs() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::ReviewPrsLoaded(vec![]));
+    app.update(Message::BotPrsLoaded(vec![make_review_pr(
+        100,
+        "dependabot",
+        ReviewDecision::ReviewRequired,
+    )]));
+    app.update(Message::ToggleReviewBoardMode); // Reviewer → Author
+    app.update(Message::ToggleReviewBoardMode); // Author → Dependabot
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "PR 100"),
+        "dependabot mode should show 'PR 100' for the loaded bot-PR"
+    );
+}
+
+#[test]
+fn render_review_board_dependabot_shows_ci_columns() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::ReviewPrsLoaded(vec![]));
+    app.update(Message::BotPrsLoaded(vec![make_review_pr(
+        100,
+        "dependabot",
+        ReviewDecision::ReviewRequired,
+    )]));
+    app.update(Message::ToggleReviewBoardMode); // Reviewer → Author
+    app.update(Message::ToggleReviewBoardMode); // Author → Dependabot
+    let buf = render_to_buffer(&mut app, 120, 30);
+    let has_ci_column = buffer_contains(&buf, "CI Passing")
+        || buffer_contains(&buf, "CI Pending")
+        || buffer_contains(&buf, "CI Failing");
+    assert!(
+        has_ci_column,
+        "dependabot mode should show CI-based column headers (CI Passing, CI Pending, or CI Failing)"
+    );
+}
+
+#[test]
+fn render_review_board_author_empty_shows_no_prs() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::ReviewPrsLoaded(vec![]));
+    app.update(Message::MyPrsLoaded(vec![]));
+    app.update(Message::ToggleReviewBoardMode); // Reviewer → Author
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "No PRs found"),
+        "author mode with no my-PRs should show 'No PRs found'"
+    );
+}
+
+#[test]
+fn render_review_board_dependabot_empty_shows_no_prs() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::ReviewPrsLoaded(vec![]));
+    app.update(Message::BotPrsLoaded(vec![]));
+    app.update(Message::ToggleReviewBoardMode); // Reviewer → Author
+    app.update(Message::ToggleReviewBoardMode); // Author → Dependabot
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "No PRs found"),
+        "dependabot mode with no bot-PRs should show 'No PRs found'"
+    );
+}
