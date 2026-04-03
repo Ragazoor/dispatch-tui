@@ -2831,13 +2831,13 @@ fn build_review_pr_item(
     let now = Utc::now();
     let age = format_age(pr.created_at, now);
 
-    // Line 1: selection marker + stripe + dispatch badge + repo#number + title
+    // Line 1: selection marker + stripe + dispatch badge + #number + title
     let select_prefix = if is_selected { "* " } else { "" };
     let stripe = if is_cursor { "\u{258c} " } else { "\u{258e} " };
     let dispatch_badge = if is_dispatch { "\u{25c6} " } else { "" };
     let repo_short = pr.repo.split('/').next_back().unwrap_or(&pr.repo);
     let header = format!(
-        "{select_prefix}{dispatch_badge}{repo_short}#{} {}",
+        "{select_prefix}{dispatch_badge}#{} {}",
         pr.number, pr.title
     );
     let header_truncated = truncate(&header, 60);
@@ -2866,8 +2866,9 @@ fn build_review_pr_item(
         ),
     ]);
 
-    // Line 2: author · age · +/-lines
+    // Line 2: repo · author · age · +/-lines
     let meta_parts = [
+        repo_short.to_string(),
         format!("@{}", pr.author),
         age,
         format!("+{}/-{}", pr.additions, pr.deletions),
@@ -3106,10 +3107,10 @@ fn build_security_alert_item(
     let now = Utc::now();
     let age = format_age(alert.created_at, now);
 
-    // Line 1: stripe + repo#number + title
+    // Line 1: stripe + #number + title
     let stripe = if is_cursor { "\u{258c} " } else { "\u{258e} " };
     let repo_short = alert.repo.split('/').next_back().unwrap_or(&alert.repo);
-    let header = format!("{repo_short}#{} {}", alert.number, alert.title);
+    let header = format!("#{} {}", alert.number, alert.title);
     let header_truncated = truncate(&header, 55);
 
     let line1_style = if is_cursor {
@@ -3125,14 +3126,14 @@ fn build_security_alert_item(
         Span::styled(header_truncated, line1_style),
     ]);
 
-    // Line 2: kind indicator + package + CVSS + age
+    // Line 2: repo · kind indicator + package + CVSS + age
     let kind_indicator = alert.kind.indicator();
     let pkg = alert.package.as_deref().unwrap_or("-");
     let cvss_str = alert
         .cvss_score
         .map(|s| format!("CVSS:{s:.1}"))
         .unwrap_or_default();
-    let meta = format!("  [{kind_indicator}] {pkg} {cvss_str} {age}");
+    let meta = format!("  {repo_short} \u{b7} [{kind_indicator}] {pkg} {cvss_str} {age}");
 
     let meta_style = if is_cursor {
         Style::default().fg(Color::Gray)
