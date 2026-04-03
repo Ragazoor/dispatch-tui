@@ -8939,3 +8939,169 @@ fn dispatch_pr_filter_filters_my_prs() {
     assert_eq!(filtered.len(), 1);
     assert_eq!(filtered[0].number, 42);
 }
+
+// ---------------------------------------------------------------------------
+// CardIndicator rendering tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn render_card_conflict_shows_rebase_conflict() {
+    let mut task = make_task(1, TaskStatus::Running);
+    task.sub_status = SubStatus::Conflict;
+    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+    task.tmux_window = Some("task-1".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.update(Message::NavigateColumn(1)); // Running column
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "rebase conflict"),
+        "Conflict task should show 'rebase conflict'"
+    );
+}
+
+#[test]
+fn render_card_detached_shows_detached() {
+    let mut task = make_task(1, TaskStatus::Running);
+    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+    task.tmux_window = None; // detached: worktree present but no tmux
+    task.sub_status = SubStatus::Active;
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.update(Message::NavigateColumn(1)); // Running column
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "detached"),
+        "Task with worktree but no tmux_window should show 'detached'"
+    );
+}
+
+#[test]
+fn render_card_detached_review_shows_pr_label() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+    task.tmux_window = None; // detached
+    task.pr_url = Some("https://github.com/acme/app/pull/42".to_string());
+    task.sub_status = SubStatus::AwaitingReview;
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.update(Message::NavigateColumn(1)); // move to Running
+    app.update(Message::NavigateColumn(1)); // move to Review
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "PR #42"),
+        "Detached review task with pr_url should show 'PR #42'"
+    );
+}
+
+#[test]
+fn render_card_blocked_shows_blocked() {
+    let mut task = make_task(1, TaskStatus::Running);
+    task.sub_status = SubStatus::NeedsInput;
+    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+    task.tmux_window = Some("task-1".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.update(Message::NavigateColumn(1)); // Running column
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "blocked"),
+        "Running task with NeedsInput sub_status should show 'blocked'"
+    );
+}
+
+#[test]
+fn render_card_running_shows_running() {
+    let mut task = make_task(1, TaskStatus::Running);
+    task.sub_status = SubStatus::Active;
+    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+    task.tmux_window = Some("task-1".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.update(Message::NavigateColumn(1)); // Running column
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "running"),
+        "Active running task should show 'running'"
+    );
+}
+
+#[test]
+fn render_card_review_pr_shows_pr_number() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+    task.tmux_window = Some("task-1".to_string());
+    task.pr_url = Some("https://github.com/acme/app/pull/99".to_string());
+    task.sub_status = SubStatus::AwaitingReview;
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.update(Message::NavigateColumn(1)); // move to Running
+    app.update(Message::NavigateColumn(1)); // move to Review
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "PR #99"),
+        "Review task with pr_url and tmux should show 'PR #99'"
+    );
+}
+
+#[test]
+fn render_card_done_merged_shows_merged() {
+    let mut task = make_task(1, TaskStatus::Done);
+    task.pr_url = Some("https://github.com/acme/app/pull/77".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.update(Message::NavigateColumn(1)); // Running
+    app.update(Message::NavigateColumn(1)); // Review
+    app.update(Message::NavigateColumn(1)); // Done
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "PR #77 merged"),
+        "Done task with pr_url should show 'PR #77 merged'"
+    );
+}
+
+#[test]
+fn render_card_idle_with_plan_shows_triangle() {
+    let mut task = make_task(1, TaskStatus::Backlog);
+    task.plan = Some("docs/plans/plan.md".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    // Already in Backlog column (0)
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "\u{25b8}"),
+        "Backlog task with plan should show '▸' (U+25B8)"
+    );
+}
+
+#[test]
+fn render_card_idle_with_bug_tag() {
+    let mut task = make_task(1, TaskStatus::Backlog);
+    task.tag = Some(TaskTag::Bug);
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "[bug]"),
+        "Backlog task with Bug tag should show '[bug]'"
+    );
+}
+
+#[test]
+fn render_card_idle_with_feature_tag() {
+    let mut task = make_task(1, TaskStatus::Backlog);
+    task.tag = Some(TaskTag::Feature);
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "[feat]"),
+        "Backlog task with Feature tag should show '[feat]'"
+    );
+}
+
+#[test]
+fn render_card_message_flash_shows_envelope() {
+    let mut task = make_task(1, TaskStatus::Running);
+    task.sub_status = SubStatus::Active;
+    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+    task.tmux_window = Some("task-1".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.agents.message_flash.insert(TaskId(1), Instant::now());
+    app.update(Message::NavigateColumn(1)); // Running column
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "\u{2709}"),
+        "Running task with message_flash set should show '\u{2709}' (envelope)"
+    );
+}
