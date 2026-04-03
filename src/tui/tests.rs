@@ -9876,3 +9876,125 @@ fn render_detail_no_selection_shows_message() {
         "detail panel should show 'No task selected' when there are no items"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Repo filter overlay tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn render_repo_filter_overlay_shows_title() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.repo_paths = vec!["/repo/a".to_string(), "/repo/b".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+    let buf = render_to_buffer(&mut app, 100, 30);
+    assert!(
+        buffer_contains(&buf, "Repo Filter"),
+        "repo filter overlay should show 'Repo Filter' title"
+    );
+}
+
+#[test]
+fn render_repo_filter_overlay_shows_repos() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.repo_paths = vec!["/repo/alpha".to_string(), "/repo/beta".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+    let buf = render_to_buffer(&mut app, 100, 30);
+    assert!(
+        buffer_contains(&buf, "/repo/alpha"),
+        "repo filter overlay should show '/repo/alpha'"
+    );
+    assert!(
+        buffer_contains(&buf, "/repo/beta"),
+        "repo filter overlay should show '/repo/beta'"
+    );
+}
+
+#[test]
+fn render_repo_filter_overlay_shows_include_mode() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.repo_paths = vec!["/repo/a".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+    let buf = render_to_buffer(&mut app, 100, 30);
+    assert!(
+        buffer_contains(&buf, "include"),
+        "repo filter overlay should show 'include' as default mode"
+    );
+}
+
+#[test]
+fn render_repo_filter_overlay_shows_navigate_hint() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.input.mode = InputMode::RepoFilter;
+    let buf = render_to_buffer(&mut app, 100, 30);
+    assert!(
+        buffer_contains(&buf, "navigate"),
+        "repo filter overlay should show 'navigate' hint"
+    );
+}
+
+#[test]
+fn render_repo_filter_input_preset_name() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.repo_paths = vec!["/repo/a".to_string()];
+    app.input.mode = InputMode::InputPresetName;
+    app.input.buffer = "my-preset".to_string();
+    let buf = render_to_buffer(&mut app, 100, 30);
+    assert!(
+        buffer_contains(&buf, "Name:"),
+        "preset name input should show 'Name:' label"
+    );
+    assert!(
+        buffer_contains(&buf, "my-preset"),
+        "preset name input should show the buffer content 'my-preset'"
+    );
+}
+
+#[test]
+fn render_repo_filter_confirm_delete_preset() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.repo_paths = vec!["/repo/a".to_string()];
+    app.input.mode = InputMode::ConfirmDeletePreset;
+    let buf = render_to_buffer(&mut app, 100, 30);
+    assert!(
+        buffer_contains(&buf, "delete preset"),
+        "confirm delete mode should show 'delete preset' text"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Review repo filter overlay tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn render_review_repo_filter_overlay_shows_title() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::ReviewPrsLoaded(vec![make_review_pr(
+        1,
+        "alice",
+        ReviewDecision::ReviewRequired,
+    )]));
+    app.input.mode = InputMode::ReviewRepoFilter;
+    let buf = render_to_buffer(&mut app, 100, 30);
+    assert!(
+        buffer_contains(&buf, "Review Repo Filter"),
+        "review repo filter overlay should show 'Review Repo Filter' title"
+    );
+}
+
+#[test]
+fn render_review_repo_filter_overlay_shows_repos() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::ReviewPrsLoaded(vec![make_review_pr(
+        1,
+        "alice",
+        ReviewDecision::ReviewRequired,
+    )]));
+    app.input.mode = InputMode::ReviewRepoFilter;
+    let buf = render_to_buffer(&mut app, 100, 30);
+    assert!(
+        buffer_contains(&buf, "acme/app"),
+        "review repo filter overlay should show 'acme/app' repo from loaded PRs"
+    );
+}
