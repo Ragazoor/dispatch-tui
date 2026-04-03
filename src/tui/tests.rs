@@ -9398,3 +9398,206 @@ fn render_status_bar_status_message_overrides() {
         "status_message should override normal status bar text"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Input form rendering tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn render_input_form_title_shows_new_task_block() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputTitle;
+    app.input.buffer = "My new task".to_string();
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "New Task"),
+        "block title 'New Task' should be visible"
+    );
+    assert!(
+        buffer_contains(&buf, "Title:"),
+        "'Title:' label should be visible"
+    );
+    assert!(
+        buffer_contains(&buf, "My new task"),
+        "buffer text 'My new task' should be visible"
+    );
+}
+
+#[test]
+fn render_input_form_description_shows_completed_title() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputDescription;
+    app.input.task_draft = Some(TaskDraft {
+        title: "Draft title".to_string(),
+        ..Default::default()
+    });
+    app.input.buffer = "Some desc".to_string();
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Draft title"),
+        "completed title 'Draft title' should be visible"
+    );
+    assert!(
+        buffer_contains(&buf, "Description:"),
+        "'Description:' label should be visible"
+    );
+    assert!(
+        buffer_contains(&buf, "Some desc"),
+        "buffer text 'Some desc' should be visible"
+    );
+}
+
+#[test]
+fn render_input_form_repo_path_shows_repo_list() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.task_draft = Some(TaskDraft {
+        title: "Test task".to_string(),
+        description: "Test desc".to_string(),
+        ..Default::default()
+    });
+    app.input.buffer = String::new();
+    app.repo_paths = vec!["/repo/alpha".to_string(), "/repo/beta".to_string()];
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Repo path:"),
+        "'Repo path:' label should be visible"
+    );
+    assert!(
+        buffer_contains(&buf, "/repo/alpha"),
+        "first repo path '/repo/alpha' should be listed"
+    );
+    assert!(
+        buffer_contains(&buf, "/repo/beta"),
+        "second repo path '/repo/beta' should be listed"
+    );
+}
+
+#[test]
+fn render_input_form_quick_dispatch_shows_repo_selection() {
+    let mut app = make_app();
+    app.input.mode = InputMode::QuickDispatch;
+    app.repo_paths = vec!["/repo/one".to_string(), "/repo/two".to_string()];
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Quick Dispatch"),
+        "block title 'Quick Dispatch' should be visible"
+    );
+    assert!(
+        buffer_contains(&buf, "/repo/one"),
+        "first repo path '/repo/one' should be visible"
+    );
+}
+
+#[test]
+fn render_input_form_confirm_retry_shows_options() {
+    let mut app = make_app();
+    // Replace task 5 as a crashed Running task with worktree and tmux
+    let now = chrono::Utc::now();
+    let crashed_task = Task {
+        id: TaskId(5),
+        title: "Crashed task".to_string(),
+        description: String::new(),
+        repo_path: "/repo".to_string(),
+        status: TaskStatus::Running,
+        worktree: Some("/tmp/wt".to_string()),
+        tmux_window: Some("win5".to_string()),
+        plan: None,
+        epic_id: None,
+        sub_status: SubStatus::Crashed,
+        pr_url: None,
+        tag: None,
+        sort_order: None,
+        created_at: now,
+        updated_at: now,
+    };
+    app.tasks.push(crashed_task);
+    app.input.mode = InputMode::ConfirmRetry(TaskId(5));
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Retry Agent"),
+        "block title 'Retry Agent' should be visible"
+    );
+    assert!(
+        buffer_contains(&buf, "crashed"),
+        "'crashed' label should be visible"
+    );
+    assert!(
+        buffer_contains(&buf, "Resume"),
+        "'Resume' option should be visible"
+    );
+    assert!(
+        buffer_contains(&buf, "Fresh start"),
+        "'Fresh start' option should be visible"
+    );
+}
+
+#[test]
+fn render_input_form_epic_title_shows_new_epic() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputEpicTitle;
+    app.input.buffer = "My epic".to_string();
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "New Epic"),
+        "block title 'New Epic' should be visible"
+    );
+    assert!(
+        buffer_contains(&buf, "Title:"),
+        "'Title:' label should be visible"
+    );
+    assert!(
+        buffer_contains(&buf, "My epic"),
+        "buffer text 'My epic' should be visible"
+    );
+}
+
+#[test]
+fn render_input_form_epic_description_shows_fields() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputEpicDescription;
+    app.input.epic_draft = Some(EpicDraft {
+        title: "Epic title".to_string(),
+        ..Default::default()
+    });
+    app.input.buffer = "Epic desc".to_string();
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "New Epic"),
+        "block title 'New Epic' should be visible"
+    );
+    assert!(
+        buffer_contains(&buf, "Epic title"),
+        "completed title 'Epic title' should be visible"
+    );
+    assert!(
+        buffer_contains(&buf, "Description:"),
+        "'Description:' label should be visible"
+    );
+}
+
+#[test]
+fn render_input_form_epic_repo_path_shows_repos() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputEpicRepoPath;
+    app.input.epic_draft = Some(EpicDraft {
+        title: "Epic title".to_string(),
+        description: "Epic desc".to_string(),
+        ..Default::default()
+    });
+    app.input.buffer = String::new();
+    app.repo_paths = vec!["/repo/x".to_string()];
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "New Epic"),
+        "block title 'New Epic' should be visible"
+    );
+    assert!(
+        buffer_contains(&buf, "Repo path:"),
+        "'Repo path:' label should be visible"
+    );
+    assert!(
+        buffer_contains(&buf, "/repo/x"),
+        "repo path '/repo/x' should be listed"
+    );
+}
