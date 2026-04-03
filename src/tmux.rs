@@ -137,10 +137,10 @@ pub fn set_window_dispatch_dir(
 ///
 /// This is idempotent — calling it multiple times replaces the same hook.
 pub fn ensure_split_hook(runner: &dyn ProcessRunner) -> Result<()> {
-    // #{@dispatch_dir} is expanded by tmux at hook-fire time from the window
-    // where the split occurred.  if-shell -F treats a non-empty expansion as
-    // true, so windows without the option are left alone.
-    let hook_cmd = "if-shell -F '#{@dispatch_dir}' \"send-keys 'cd #{@dispatch_dir}' Enter\"";
+    // if-shell -F only format-expands its test argument, NOT the branch
+    // command.  send-keys doesn't expand formats either, so we wrap it in
+    // run-shell -C which does expand #{…} before executing the tmux command.
+    let hook_cmd = "if-shell -F '#{@dispatch_dir}' 'run-shell -bC \"send-keys \\\"cd #{@dispatch_dir}\\\" Enter\"'";
     let output = runner.run("tmux", &["set-hook", "after-split-window", hook_cmd])?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -255,7 +255,8 @@ fn ensure_split_hook_args() -> Vec<String> {
     vec![
         "set-hook".to_string(),
         "after-split-window".to_string(),
-        "if-shell -F '#{@dispatch_dir}' \"send-keys 'cd #{@dispatch_dir}' Enter\"".to_string(),
+        "if-shell -F '#{@dispatch_dir}' 'run-shell -bC \"send-keys \\\"cd #{@dispatch_dir}\\\" Enter\"'"
+            .to_string(),
     ]
 }
 
@@ -464,7 +465,7 @@ mod tests {
             vec![
                 "set-hook",
                 "after-split-window",
-                "if-shell -F '#{@dispatch_dir}' \"send-keys 'cd #{@dispatch_dir}' Enter\"",
+                "if-shell -F '#{@dispatch_dir}' 'run-shell -bC \"send-keys \\\"cd #{@dispatch_dir}\\\" Enter\"'",
             ]
         );
     }
@@ -481,7 +482,7 @@ mod tests {
             vec![
                 "set-hook",
                 "after-split-window",
-                "if-shell -F '#{@dispatch_dir}' \"send-keys 'cd #{@dispatch_dir}' Enter\"",
+                "if-shell -F '#{@dispatch_dir}' 'run-shell -bC \"send-keys \\\"cd #{@dispatch_dir}\\\" Enter\"'",
             ]
         );
     }
