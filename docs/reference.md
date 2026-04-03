@@ -94,6 +94,35 @@ dispatch create --from-plan plan.md
 | `--db` | `DISPATCH_DB` | `~/.local/share/dispatch/tasks.db` |
 | `--port` | `DISPATCH_PORT` | `3142` |
 
+## Setup
+
+`dispatch setup` configures Claude Code integration:
+
+1. **MCP server** — registers the dispatch server in `~/.claude/.mcp.json`
+2. **Plugin** — installs hooks, skills, and commands to `~/.claude/plugins/local/dispatch/`
+3. **Permissions** — adds MCP tool permissions to `~/.claude/settings.json`
+
+The setup is idempotent — safe to run on every install or upgrade.
+
+### Plugin contents
+
+| Component | Purpose |
+|-----------|---------|
+| `/wrap-up` skill | Commit, rebase or PR when a task is complete |
+| `/queue-plan` command | Queue a plan file as a task |
+| `task-status-hook` | Automatically transitions task status (running/review/needs_input) |
+| `task-usage-hook` | Reports token usage and cost per task |
+
+To verify the plugin is installed:
+```bash
+ls ~/.claude/plugins/local/dispatch/
+```
+
+To reinstall:
+```bash
+dispatch setup
+```
+
 ## Troubleshooting
 
 **`not running inside a tmux session`**
@@ -107,6 +136,12 @@ export PATH="$HOME/.local/bin:$PATH"
 
 **`claude: command not found`**
 Install Claude Code from https://claude.ai/code
+
+**Task status not updating automatically**
+Verify the dispatch plugin is installed: `ls ~/.claude/plugins/local/dispatch/hooks/hooks.json`. If missing, run `dispatch setup` to reinstall.
+
+**Skills not available (`/wrap-up`, `/queue-plan`)**
+The dispatch plugin may not be installed. Run `dispatch setup` to install it.
 
 **Review Board shows no PRs**
 Run `gh auth login` and ensure you have open PRs where you are a requested reviewer.

@@ -71,7 +71,7 @@ A task with a plan always dispatches directly regardless of tag. Tags are select
 | `src/github.rs` | GitHub CLI (`gh`) integration: PR creation, review status polling, CI status |
 | `src/editor.rs` | External `$EDITOR` integration for editing task/epic fields |
 | `src/plan.rs` | Plan file parsing (extract title/description from markdown) |
-| `src/setup.rs` | First-run setup: MCP config merging, hook script installation |
+| `src/setup.rs` | First-run setup: MCP config merging, plugin installation (hooks, skills, commands) |
 | `src/mcp/mod.rs` | MCP server bootstrap (Axum router), `McpState`, `McpEvent` notification enum |
 | `src/mcp/handlers/dispatch.rs` | JSON-RPC entry point (`handle_mcp`), tool definitions, method routing |
 | `src/mcp/handlers/tasks.rs` | Task tool handlers (thin wrappers): parse JSON-RPC args → call `TaskService` → format response |

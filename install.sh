@@ -10,18 +10,15 @@ INSTALL_DIR="${HOME}/.local/bin"
 OS="$(uname -s)"
 ARCH="$(uname -m)"
 
-if [[ "${OS}" != "Linux" ]]; then
-    echo "error: dispatch only supports Linux (got ${OS})" >&2
+case "${OS}-${ARCH}" in
+  Linux-x86_64)   TARGET="x86_64-unknown-linux-gnu" ;;
+  Darwin-arm64)   TARGET="aarch64-apple-darwin" ;;
+  *)
+    echo "error: no pre-built binary for ${OS}/${ARCH}" >&2
+    echo "       Build from source: cargo install dispatch-agent" >&2
     exit 1
-fi
-
-if [[ "${ARCH}" != "x86_64" ]]; then
-    echo "error: dispatch only provides pre-built binaries for x86_64 (got ${ARCH})" >&2
-    echo "       Build from source with: cargo build --release" >&2
-    exit 1
-fi
-
-TARGET="x86_64-unknown-linux-gnu"
+    ;;
+esac
 
 # ── Resolve version ───────────────────────────────────────────────────────────
 

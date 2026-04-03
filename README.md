@@ -13,7 +13,7 @@ A terminal kanban board for managing development tasks and dispatching Claude Co
 
 ## Installation
 
-### One-line install (Linux x86_64)
+### One-line install (Linux x86_64 / macOS Apple Silicon)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Ragazoor/dispatch-agent/main/install.sh | bash
@@ -27,7 +27,10 @@ cd dispatch
 bash install.sh
 ```
 
-The script downloads the latest release binary to `~/.local/bin/dispatch`, runs `dispatch setup` to register the MCP server and hook scripts with Claude Code, and prints a prerequisites checklist.
+The script downloads the latest release binary to `~/.local/bin/dispatch` and runs `dispatch setup`, which:
+- Registers the dispatch MCP server with Claude Code
+- Installs the dispatch plugin (hooks, skills, commands)
+- Adds MCP tool permissions
 
 If `~/.local/bin` is not in your PATH, add it to your shell profile:
 
@@ -39,6 +42,13 @@ Verify the install:
 
 ```bash
 dispatch --version
+```
+
+### Install from crates.io
+
+```bash
+cargo install dispatch-agent
+dispatch setup
 ```
 
 ### Build from source

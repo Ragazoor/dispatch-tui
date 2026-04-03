@@ -4,8 +4,13 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
-const HOOK_SCRIPT: &str = include_str!("../hooks/task-status-hook");
-const USAGE_HOOK_SCRIPT: &str = include_str!("../hooks/task-usage-hook");
+// Plugin files — embedded in the binary and installed to ~/.claude/plugins/local/dispatch/
+const PLUGIN_JSON: &str = include_str!("../plugin/.claude-plugin/plugin.json");
+const HOOKS_JSON: &str = include_str!("../plugin/hooks/hooks.json");
+const HOOK_SCRIPT: &str = include_str!("../plugin/hooks/scripts/task-status-hook");
+const USAGE_HOOK_SCRIPT: &str = include_str!("../plugin/hooks/scripts/task-usage-hook");
+const WRAP_UP_SKILL: &str = include_str!("../plugin/skills/wrap-up/SKILL.md");
+const QUEUE_PLAN_CMD: &str = include_str!("../plugin/commands/queue-plan.md");
 
 // ---------------------------------------------------------------------------
 // MCP config merging
@@ -96,38 +101,59 @@ pub fn merge_permissions(existing: Option<Value>) -> PermissionsMergeResult {
 }
 
 // ---------------------------------------------------------------------------
-// Hook script installation
+// Plugin installation
 // ---------------------------------------------------------------------------
 
-fn local_bin_dir() -> Result<PathBuf> {
-    let home = std::env::var("HOME").context("$HOME is not set")?;
-    Ok(PathBuf::from(home).join(".local").join("bin"))
+fn plugin_files() -> Vec<(&'static str, &'static str, bool)> {
+    // (relative_path, content, executable)
+    vec![
+        (".claude-plugin/plugin.json", PLUGIN_JSON, false),
+        ("hooks/hooks.json", HOOKS_JSON, false),
+        ("hooks/scripts/task-status-hook", HOOK_SCRIPT, true),
+        ("hooks/scripts/task-usage-hook", USAGE_HOOK_SCRIPT, true),
+        ("skills/wrap-up/SKILL.md", WRAP_UP_SKILL, false),
+        ("commands/queue-plan.md", QUEUE_PLAN_CMD, false),
+    ]
 }
 
-pub fn install_hook_script() -> Result<bool> {
-    let bin_dir = local_bin_dir()?;
-    fs::create_dir_all(&bin_dir)
-        .with_context(|| format!("Failed to create {}", bin_dir.display()))?;
+fn plugin_dir() -> Result<PathBuf> {
+    let claude_dir = claude_dir()?;
+    Ok(claude_dir
+        .join("plugins")
+        .join("local")
+        .join("dispatch"))
+}
 
+pub fn install_plugin() -> Result<bool> {
+    let plugin_dir = plugin_dir()?;
     let mut changed = false;
-    changed |= install_single_hook(&bin_dir, "task-status-hook", HOOK_SCRIPT)?;
-    changed |= install_single_hook(&bin_dir, "task-usage-hook", USAGE_HOOK_SCRIPT)?;
+
+    for (rel_path, content, executable) in plugin_files() {
+        let path = plugin_dir.join(rel_path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create {}", parent.display()))?;
+        }
+        changed |= write_file_if_changed(&path, content, executable)?;
+    }
+
     Ok(changed)
 }
 
-fn install_single_hook(bin_dir: &std::path::Path, name: &str, content: &str) -> Result<bool> {
-    let hook_path = bin_dir.join(name);
-    if hook_path.exists() {
-        let existing = fs::read_to_string(&hook_path)
-            .with_context(|| format!("Failed to read {}", hook_path.display()))?;
+fn write_file_if_changed(path: &std::path::Path, content: &str, executable: bool) -> Result<bool> {
+    if path.exists() {
+        let existing = fs::read_to_string(path)
+            .with_context(|| format!("Failed to read {}", path.display()))?;
         if existing == content {
             return Ok(false);
         }
     }
-    fs::write(&hook_path, content)
-        .with_context(|| format!("Failed to write {}", hook_path.display()))?;
-    fs::set_permissions(&hook_path, fs::Permissions::from_mode(0o755))
-        .with_context(|| format!("Failed to set permissions on {}", hook_path.display()))?;
+    fs::write(path, content)
+        .with_context(|| format!("Failed to write {}", path.display()))?;
+    if executable {
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755))
+            .with_context(|| format!("Failed to set permissions on {}", path.display()))?;
+    }
     Ok(true)
 }
 
@@ -197,12 +223,15 @@ pub fn run_setup(port: u16) -> Result<()> {
         );
     }
 
-    // 3. Hook script
-    if install_hook_script()? {
-        println!("Hook scripts: installed task-status-hook and task-usage-hook to ~/.local/bin/");
+    // 3. Plugin (hooks, skills, commands)
+    if install_plugin()? {
+        println!("Plugin: installed dispatch plugin to ~/.claude/plugins/local/dispatch/");
+        println!("  → Skills: /wrap-up");
+        println!("  → Commands: /queue-plan");
+        println!("  → Hooks: task-status, task-usage");
         any_changes = true;
     } else {
-        println!("Hook scripts: task-status-hook and task-usage-hook already up to date in ~/.local/bin/");
+        println!("Plugin: dispatch plugin already up to date");
     }
 
     if any_changes {
@@ -396,6 +425,82 @@ mod tests {
             !HOOK_SCRIPT.contains("--needs-input"),
             "Deprecated --needs-input flag must not appear in the hook script"
         );
+    }
+
+    // -- Plugin --
+
+    #[test]
+    fn plugin_json_is_valid() {
+        let value: Value = serde_json::from_str(PLUGIN_JSON).expect("PLUGIN_JSON is invalid JSON");
+        assert_eq!(value["name"], "dispatch");
+    }
+
+    #[test]
+    fn hooks_json_is_valid() {
+        let value: Value = serde_json::from_str(HOOKS_JSON).expect("HOOKS_JSON is invalid JSON");
+        assert!(value["PreToolUse"].is_array(), "missing PreToolUse");
+        assert!(value["Stop"].is_array(), "missing Stop");
+        assert!(value["Notification"].is_array(), "missing Notification");
+    }
+
+    #[test]
+    fn plugin_files_list_covers_all_components() {
+        let files = plugin_files();
+        let paths: Vec<&str> = files.iter().map(|(p, _, _)| *p).collect();
+        assert!(paths.contains(&".claude-plugin/plugin.json"));
+        assert!(paths.contains(&"hooks/hooks.json"));
+        assert!(paths.contains(&"hooks/scripts/task-status-hook"));
+        assert!(paths.contains(&"hooks/scripts/task-usage-hook"));
+        assert!(paths.contains(&"skills/wrap-up/SKILL.md"));
+        assert!(paths.contains(&"commands/queue-plan.md"));
+    }
+
+    #[test]
+    fn plugin_hook_scripts_are_executable() {
+        let files = plugin_files();
+        for (path, _, executable) in &files {
+            if path.contains("scripts/") {
+                assert!(executable, "{path} should be executable");
+            }
+        }
+    }
+
+    #[test]
+    fn write_file_if_changed_creates_new() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("new.txt");
+        let changed = write_file_if_changed(&path, "hello", false).unwrap();
+        assert!(changed);
+        assert_eq!(fs::read_to_string(&path).unwrap(), "hello");
+    }
+
+    #[test]
+    fn write_file_if_changed_skips_identical() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("same.txt");
+        fs::write(&path, "hello").unwrap();
+        let changed = write_file_if_changed(&path, "hello", false).unwrap();
+        assert!(!changed);
+    }
+
+    #[test]
+    fn write_file_if_changed_updates_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("stale.txt");
+        fs::write(&path, "old").unwrap();
+        let changed = write_file_if_changed(&path, "new", false).unwrap();
+        assert!(changed);
+        assert_eq!(fs::read_to_string(&path).unwrap(), "new");
+    }
+
+    #[test]
+    fn write_file_if_changed_sets_executable_permission() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("script.sh");
+        write_file_if_changed(&path, "#!/bin/bash", true).unwrap();
+        let metadata = fs::metadata(&path).unwrap();
+        let mode = metadata.permissions().mode();
+        assert_eq!(mode & 0o755, 0o755, "should have executable permissions");
     }
 
     // -- File I/O --
