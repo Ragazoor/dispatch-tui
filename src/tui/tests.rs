@@ -9105,3 +9105,296 @@ fn render_card_message_flash_shows_envelope() {
         "Running task with message_flash set should show '\u{2709}' (envelope)"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Status bar rendering tests for all InputMode variants
+// ---------------------------------------------------------------------------
+
+#[test]
+fn render_status_bar_input_title() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputTitle;
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Creating task: enter title"),
+        "InputTitle mode should show 'Creating task: enter title'"
+    );
+}
+
+#[test]
+fn render_status_bar_input_description() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputDescription;
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Creating task: enter description"),
+        "InputDescription mode should show 'Creating task: enter description'"
+    );
+}
+
+#[test]
+fn render_status_bar_input_repo_path() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputRepoPath;
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Creating task: enter repo path"),
+        "InputRepoPath mode should show 'Creating task: enter repo path'"
+    );
+}
+
+#[test]
+fn render_status_bar_input_tag() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputTag;
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Tag:"),
+        "InputTag mode should show 'Tag:'"
+    );
+}
+
+#[test]
+fn render_status_bar_confirm_retry() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmRetry(TaskId(1));
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Resume"),
+        "ConfirmRetry should show 'Resume'"
+    );
+    assert!(
+        buffer_contains(&buf, "Fresh start"),
+        "ConfirmRetry should show 'Fresh start'"
+    );
+}
+
+#[test]
+fn render_status_bar_confirm_archive() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmArchive;
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Archive task?"),
+        "ConfirmArchive should show 'Archive task?'"
+    );
+}
+
+#[test]
+fn render_status_bar_confirm_done() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmDone(TaskId(1));
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Done?"),
+        "ConfirmDone should show 'Done?'"
+    );
+}
+
+#[test]
+fn render_status_bar_confirm_wrap_up() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmWrapUp(TaskId(1));
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "rebase"),
+        "ConfirmWrapUp should show 'rebase'"
+    );
+    assert!(
+        buffer_contains(&buf, "PR"),
+        "ConfirmWrapUp should show 'PR'"
+    );
+}
+
+#[test]
+fn render_status_bar_confirm_delete_epic() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmDeleteEpic;
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Delete epic"),
+        "ConfirmDeleteEpic should show 'Delete epic'"
+    );
+}
+
+#[test]
+fn render_status_bar_confirm_archive_epic() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmArchiveEpic;
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Archive epic"),
+        "ConfirmArchiveEpic should show 'Archive epic'"
+    );
+}
+
+#[test]
+fn render_status_bar_confirm_detach_tmux() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmDetachTmux(vec![TaskId(1)]);
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Detach tmux"),
+        "ConfirmDetachTmux should show 'Detach tmux'"
+    );
+}
+
+#[test]
+fn render_status_bar_epic_title() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputEpicTitle;
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Creating epic: enter title"),
+        "InputEpicTitle should show 'Creating epic: enter title'"
+    );
+}
+
+#[test]
+fn render_status_bar_epic_description() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputEpicDescription;
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Creating epic: enter description"),
+        "InputEpicDescription should show 'Creating epic: enter description'"
+    );
+}
+
+#[test]
+fn render_status_bar_epic_repo_path() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputEpicRepoPath;
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Creating epic: enter repo path"),
+        "InputEpicRepoPath should show 'Creating epic: enter repo path'"
+    );
+}
+
+#[test]
+fn render_status_bar_help_mode() {
+    let mut app = make_app();
+    app.input.mode = InputMode::Help;
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Esc to close help"),
+        "Help mode should show 'Esc to close help'"
+    );
+}
+
+#[test]
+fn render_status_bar_repo_filter() {
+    let mut app = make_app();
+    app.input.mode = InputMode::RepoFilter;
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Filter repos"),
+        "RepoFilter mode should show 'Filter repos'"
+    );
+}
+
+#[test]
+fn render_status_bar_quick_dispatch() {
+    let mut app = make_app();
+    app.input.mode = InputMode::QuickDispatch;
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Quick dispatch"),
+        "QuickDispatch mode should show 'Quick dispatch'"
+    );
+}
+
+#[test]
+fn render_status_bar_input_preset_name() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputPresetName;
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Enter preset name"),
+        "InputPresetName mode should show 'Enter preset name'"
+    );
+}
+
+#[test]
+fn render_status_bar_confirm_delete_preset() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmDeletePreset;
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "delete preset"),
+        "ConfirmDeletePreset should show 'delete preset'"
+    );
+}
+
+#[test]
+fn render_status_bar_confirm_epic_wrap_up() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmEpicWrapUp(EpicId(1));
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Epic wrap up"),
+        "ConfirmEpicWrapUp should show 'Epic wrap up'"
+    );
+}
+
+#[test]
+fn render_status_bar_review_repo_filter() {
+    let mut app = make_app();
+    // Set mode directly (render_status_bar handles the text regardless of view)
+    app.input.mode = InputMode::ReviewRepoFilter;
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Filter repos"),
+        "ReviewRepoFilter mode should show 'Filter repos'"
+    );
+}
+
+#[test]
+fn render_status_bar_confirm_edit_task() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmEditTask(TaskId(1));
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Edit task?"),
+        "ConfirmEditTask should show 'Edit task?'"
+    );
+}
+
+#[test]
+fn render_status_bar_confirm_batch_approve() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmBatchApprove(vec![
+        "https://github.com/org/repo/pull/1".to_string(),
+        "https://github.com/org/repo/pull/2".to_string(),
+    ]);
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Approve 2 PRs?"),
+        "ConfirmBatchApprove with 2 URLs should show 'Approve 2 PRs?'"
+    );
+}
+
+#[test]
+fn render_status_bar_confirm_batch_merge() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmBatchMerge(vec![
+        "https://github.com/org/repo/pull/1".to_string(),
+    ]);
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Merge 1 PRs?"),
+        "ConfirmBatchMerge with 1 URL should show 'Merge 1 PRs?'"
+    );
+}
+
+#[test]
+fn render_status_bar_status_message_overrides() {
+    let mut app = make_app();
+    app.status_message = Some("Custom status message".to_string());
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Custom status message"),
+        "status_message should override normal status bar text"
+    );
+}
