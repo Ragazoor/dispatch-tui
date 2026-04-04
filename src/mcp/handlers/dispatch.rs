@@ -277,6 +277,19 @@ mcp_tools! {
             "required": ["task_id", "action"]
         };
 
+    async "dispatch_next" => tasks::handle_dispatch_next,
+        "Dispatch the next backlog subtask for an epic. Creates a worktree from main and launches a tmux session. Returns success even if there are no backlog tasks remaining.",
+        {
+            "type": "object",
+            "properties": {
+                "epic_id": {
+                    "type": "integer",
+                    "description": "The epic ID to dispatch the next subtask for"
+                }
+            },
+            "required": ["epic_id"]
+        };
+
     sync "report_usage" => tasks::handle_report_usage,
         "Report token usage and cost for a task session. Accumulates across sessions.",
         {

@@ -112,6 +112,12 @@ pub(super) struct SendMessageArgs {
     pub(super) body: String,
 }
 
+#[derive(Deserialize)]
+pub(super) struct DispatchNextArgs {
+    #[serde(deserialize_with = "deserialize_flexible_i64")]
+    pub(super) epic_id: i64,
+}
+
 // ---------------------------------------------------------------------------
 // Response formatting (presentation layer)
 // ---------------------------------------------------------------------------
@@ -576,6 +582,115 @@ pub(super) async fn handle_wrap_up(
         }
         _ => unreachable!(),
     }
+}
+
+pub(super) async fn handle_dispatch_next(
+    state: &McpState,
+    id: Option<Value>,
+    args: Value,
+) -> JsonRpcResponse {
+    let parsed = match parse_args::<DispatchNextArgs>(&id, args) {
+        Ok(a) => a,
+        Err(resp) => return resp,
+    };
+
+    let epic_id = EpicId(parsed.epic_id);
+
+    // Verify the epic exists
+    match state.db.get_epic(epic_id) {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return JsonRpcResponse::err(
+                id,
+                -32602,
+                format!("Epic {} not found", parsed.epic_id),
+            )
+        }
+        Err(e) => return JsonRpcResponse::err(id, -32603, format!("database error: {e}")),
+    }
+
+    // Find next backlog subtask
+    let next_task = match state.db.list_tasks_for_epic(epic_id) {
+        Ok(tasks) => {
+            let mut backlog: Vec<Task> = tasks
+                .into_iter()
+                .filter(|t| t.status == TaskStatus::Backlog)
+                .collect();
+            backlog.sort_by_key(|t| (t.sort_order.unwrap_or(t.id.0), t.id.0));
+            backlog.into_iter().next()
+        }
+        Err(e) => {
+            return JsonRpcResponse::err(
+                id,
+                -32603,
+                format!("failed to list epic tasks: {e}"),
+            )
+        }
+    };
+
+    let Some(next_task) = next_task else {
+        return JsonRpcResponse::ok(
+            id,
+            json!({"content": [{"type": "text", "text": format!(
+                "no backlog tasks to dispatch for epic #{}",
+                parsed.epic_id
+            )}]}),
+        );
+    };
+
+    let next_id = next_task.id;
+    let next_title = next_task.title.clone();
+    let db = state.db.clone();
+    let runner = state.runner.clone();
+    let notify_tx = state.notify_tx.clone();
+
+    tokio::task::spawn_blocking(move || {
+        let epic_ctx = dispatch::EpicContext::from_db(&next_task, &*db);
+        let result = match DispatchMode::for_task(&next_task) {
+            DispatchMode::Dispatch => {
+                dispatch::dispatch_agent(&next_task, &*runner, epic_ctx.as_ref())
+            }
+            DispatchMode::Brainstorm => {
+                dispatch::brainstorm_agent(&next_task, &*runner, epic_ctx.as_ref())
+            }
+            DispatchMode::Plan => {
+                dispatch::plan_agent(&next_task, &*runner, epic_ctx.as_ref())
+            }
+        };
+
+        match result {
+            Ok(dispatch_result) => {
+                let patch = db::TaskPatch::new()
+                    .status(TaskStatus::Running)
+                    .worktree(Some(&dispatch_result.worktree_path))
+                    .tmux_window(Some(&dispatch_result.tmux_window));
+                if let Err(e) = db.patch_task(next_id, &patch) {
+                    tracing::warn!(
+                        task_id = next_id.0,
+                        "dispatch_next: failed to update task: {e}"
+                    );
+                }
+                if let Some(epic_id) = next_task.epic_id {
+                    let _ = db.recalculate_epic_status(epic_id);
+                }
+            }
+            Err(e) => {
+                tracing::warn!(task_id = next_id.0, "dispatch_next: dispatch failed: {e:#}");
+            }
+        }
+
+        if let Some(tx) = notify_tx {
+            let _ = tx.send(crate::mcp::McpEvent::Refresh);
+        }
+    });
+
+    JsonRpcResponse::ok(
+        id,
+        json!({"content": [{"type": "text", "text": format!(
+            "dispatched task #{} '{}'",
+            next_id.0, next_title
+        )}]}),
+    )
 }
 
 pub(super) fn handle_send_message(
