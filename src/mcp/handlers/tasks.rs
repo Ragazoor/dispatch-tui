@@ -593,6 +593,7 @@ pub(super) async fn handle_dispatch_next(
         Ok(a) => a,
         Err(resp) => return resp,
     };
+    tracing::info!(epic_id = parsed.epic_id, "MCP dispatch_next");
 
     let epic_id = EpicId(parsed.epic_id);
 
@@ -687,7 +688,7 @@ pub(super) async fn handle_dispatch_next(
     JsonRpcResponse::ok(
         id,
         json!({"content": [{"type": "text", "text": format!(
-            "dispatched task #{} '{}'",
+            "dispatching task #{} '{}'",
             next_id.0, next_title
         )}]}),
     )
