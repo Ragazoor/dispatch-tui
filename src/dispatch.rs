@@ -244,42 +244,6 @@ pub fn epic_planning_agent(
     dispatch_with_prompt(task, &prompt, ClaudeMode::Plan, runner, None)
 }
 
-/// Dispatch a task from main (epic auto-dispatch).
-pub fn dispatch_chained_agent(
-    task: &Task,
-    runner: &dyn ProcessRunner,
-    epic: Option<&EpicContext>,
-) -> Result<DispatchResult> {
-    let prompt = build_prompt(
-        task.id,
-        &task.title,
-        &task.description,
-        task.plan_path.as_deref(),
-        epic,
-    );
-    dispatch_with_prompt(task, &prompt, ClaudeMode::AcceptEdits, runner, None)
-}
-
-/// Plan a task from main (epic auto-dispatch).
-pub fn plan_chained_agent(
-    task: &Task,
-    runner: &dyn ProcessRunner,
-    epic: Option<&EpicContext>,
-) -> Result<DispatchResult> {
-    let prompt = build_plan_prompt(task.id, &task.title, &task.description, epic);
-    dispatch_with_prompt(task, &prompt, ClaudeMode::Plan, runner, None)
-}
-
-/// Brainstorm a task from main (epic auto-dispatch).
-pub fn brainstorm_chained_agent(
-    task: &Task,
-    runner: &dyn ProcessRunner,
-    epic: Option<&EpicContext>,
-) -> Result<DispatchResult> {
-    let prompt = build_brainstorm_prompt(task.id, &task.title, &task.description, epic);
-    dispatch_with_prompt(task, &prompt, ClaudeMode::Plan, runner, None)
-}
-
 // ---------------------------------------------------------------------------
 // cleanup_task
 // ---------------------------------------------------------------------------
