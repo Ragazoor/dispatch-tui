@@ -37,7 +37,15 @@ Run:
 git status --porcelain
 ```
 
-If there are modified or untracked files, commit them before proceeding. Use a commit skill if available, otherwise create a commit directly.
+If there are no changes, skip to Step 3.
+
+If there are changes, commit them inline — do NOT invoke a commit skill or delegate to another tool. Run these commands directly:
+
+1. `git add` the relevant files (prefer named files over `git add -A`)
+2. `git diff --cached` to review what's staged
+3. `git commit -m "..."` with a short message summarizing the changes
+
+Do NOT spend time perfecting the commit message. The goal is to capture the changes, not write a polished commit. Once committed, proceed immediately to Step 3.
 
 ## Step 3: Ask the user to choose — MANDATORY
 
