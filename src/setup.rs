@@ -5,6 +5,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 // Plugin files — embedded in the binary and installed to ~/.claude/plugins/local/dispatch/
+// When adding/removing files here, also update the list in build.rs.
 const PLUGIN_JSON: &str = include_str!("../plugin/.claude-plugin/plugin.json");
 const HOOKS_JSON: &str = include_str!("../plugin/hooks/hooks.json");
 const HOOK_SCRIPT: &str = include_str!("../plugin/hooks/scripts/task-status-hook");
