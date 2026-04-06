@@ -599,12 +599,33 @@ fn render_substatus_header(label: &str, col_color: Color) -> ListItem<'static> {
 }
 
 fn render_columns(frame: &mut Frame, app: &mut App, area: Rect, now: DateTime<Utc>) {
+    // In Epic mode, wrap the whole board in a purple rounded border with a
+    // subtle purple background hint.
+    let board_area = if let ViewMode::Epic { epic_id, .. } = app.view_mode() {
+        let epic = app.epics().iter().find(|e| e.id == *epic_id);
+        let title = epic
+            .map(|e| format!(" {} ", truncate(&e.title, 40)))
+            .unwrap_or_default();
+        let block = Block::default()
+            .title(title)
+            .title_style(Style::default().fg(PURPLE).add_modifier(Modifier::BOLD))
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(PURPLE))
+            .style(Style::default().bg(Color::Rgb(24, 20, 34)));
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+        inner
+    } else {
+        area
+    };
+
     let column_areas = Layout::default()
         .direction(Direction::Horizontal)
         .constraints(
             [Constraint::Ratio(1, TaskStatus::COLUMN_COUNT as u32); TaskStatus::COLUMN_COUNT],
         )
-        .split(area);
+        .split(board_area);
 
     for (col_idx, &status) in TaskStatus::ALL.iter().enumerate() {
         let col_area = column_areas[col_idx];

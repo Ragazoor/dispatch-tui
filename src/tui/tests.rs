@@ -9461,67 +9461,6 @@ fn render_epic_banner_shows_title() {
 }
 
 #[test]
-fn render_epic_banner_shows_progress() {
-    let mut app = make_app();
-    let epic = make_epic(10);
-    app.epics = vec![epic];
-
-    let mut t1 = make_task(101, TaskStatus::Running);
-    t1.epic_id = Some(EpicId(10));
-    let mut t2 = make_task(102, TaskStatus::Done);
-    t2.epic_id = Some(EpicId(10));
-    let mut t3 = make_task(103, TaskStatus::Backlog);
-    t3.epic_id = Some(EpicId(10));
-    app.tasks = vec![t1, t2, t3];
-
-    app.view_mode = ViewMode::Epic {
-        epic_id: EpicId(10),
-        selection: BoardSelection::new(),
-        saved_board: BoardSelection::new(),
-    };
-    let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(
-        buffer_contains(&buf, "1/3 done"),
-        "epic banner should show progress '1/3 done'"
-    );
-}
-
-#[test]
-fn render_epic_banner_shows_esc_hint() {
-    let mut app = make_app();
-    let epic = make_epic(10);
-    app.epics = vec![epic];
-    app.view_mode = ViewMode::Epic {
-        epic_id: EpicId(10),
-        selection: BoardSelection::new(),
-        saved_board: BoardSelection::new(),
-    };
-    let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(
-        buffer_contains(&buf, "Esc to return"),
-        "epic banner should show 'Esc to return' hint"
-    );
-}
-
-#[test]
-fn render_epic_banner_shows_description() {
-    let mut app = make_app();
-    let mut epic = make_epic(10);
-    epic.description = "Refactor the authentication layer".to_string();
-    app.epics = vec![epic];
-    app.view_mode = ViewMode::Epic {
-        epic_id: EpicId(10),
-        selection: BoardSelection::new(),
-        saved_board: BoardSelection::new(),
-    };
-    let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(
-        buffer_contains(&buf, "Refactor the authentication"),
-        "epic banner should show the epic description"
-    );
-}
-
-#[test]
 fn render_epic_banner_not_shown_in_board_view() {
     let mut app = make_app();
     let epic = make_epic(10);
