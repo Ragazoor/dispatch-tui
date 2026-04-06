@@ -104,10 +104,9 @@ pub fn truncate(s: &str, max: usize) -> String {
 
 /// Compute how tall the detail/input panel should be based on the current input mode.
 /// Expands when a repo list is being shown so all repos (plus cursor) are visible.
-fn input_panel_height(app: &App, area_height: u16, has_banner: bool) -> u16 {
-    // Fixed overhead: tab_bar(1) + summary(1) + kanban_min(6) + status_bar(1) = 9,
-    // plus epic banner(4) when present.
-    let overhead: u16 = if has_banner { 13 } else { 9 };
+fn input_panel_height(app: &App, area_height: u16) -> u16 {
+    // Fixed overhead: tab_bar(1) + summary(1) + kanban_min(6) + status_bar(1) = 9
+    let overhead: u16 = 9;
     let max_height = area_height.saturating_sub(overhead).max(8);
     match &app.input.mode {
         InputMode::QuickDispatch => {
@@ -147,47 +146,24 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         return;
     }
 
-    let has_banner = matches!(app.view_mode(), ViewMode::Epic { .. });
-
-    let panel_h = input_panel_height(app, area.height, has_banner);
+    let panel_h = input_panel_height(app, area.height);
     let vertical = Layout::default()
         .direction(Direction::Vertical)
-        .constraints(if has_banner {
-            vec![
-                Constraint::Length(1),       // tab bar
-                Constraint::Length(1),       // summary row
-                Constraint::Length(4),       // epic banner
-                Constraint::Min(6),          // kanban board
-                Constraint::Length(panel_h), // detail panel
-                Constraint::Length(1),       // status bar
-            ]
-        } else {
-            vec![
-                Constraint::Length(1),       // tab bar
-                Constraint::Length(1),       // summary row
-                Constraint::Min(6),          // kanban board
-                Constraint::Length(panel_h), // detail panel
-                Constraint::Length(1),       // status bar
-            ]
-        })
+        .constraints(vec![
+            Constraint::Length(1),       // tab bar
+            Constraint::Length(1),       // summary row
+            Constraint::Min(6),          // kanban board
+            Constraint::Length(panel_h), // detail panel
+            Constraint::Length(1),       // status bar
+        ])
         .split(area);
 
-    if has_banner {
-        render_tab_bar(frame, app, vertical[0]);
-        render_summary(frame, app, vertical[1]);
-        render_epic_banner(frame, app, vertical[2]);
-        render_columns(frame, app, vertical[3], now);
-        render_archive_overlay(frame, app, vertical[3], now);
-        render_detail(frame, app, vertical[4], now);
-        render_status_bar(frame, app, vertical[5]);
-    } else {
-        render_tab_bar(frame, app, vertical[0]);
-        render_summary(frame, app, vertical[1]);
-        render_columns(frame, app, vertical[2], now);
-        render_archive_overlay(frame, app, vertical[2], now);
-        render_detail(frame, app, vertical[3], now);
-        render_status_bar(frame, app, vertical[4]);
-    }
+    render_tab_bar(frame, app, vertical[0]);
+    render_summary(frame, app, vertical[1]);
+    render_columns(frame, app, vertical[2], now);
+    render_archive_overlay(frame, app, vertical[2], now);
+    render_detail(frame, app, vertical[3], now);
+    render_status_bar(frame, app, vertical[4]);
 
     render_error_popup(frame, app, area);
     render_help_overlay(frame, app, area);
@@ -826,65 +802,6 @@ fn render_epic_item(
     }
 
     item
-}
-
-fn render_epic_banner(frame: &mut Frame, app: &App, area: Rect) {
-    let ViewMode::Epic { epic_id, .. } = app.view_mode() else {
-        return;
-    };
-    let Some(epic) = app.epics().iter().find(|e| e.id == *epic_id) else {
-        return;
-    };
-
-    let subtask_statuses: Vec<TaskStatus> = app
-        .tasks()
-        .iter()
-        .filter(|t| t.epic_id == Some(epic.id) && t.status != TaskStatus::Archived)
-        .map(|t| t.status)
-        .collect();
-    let total = subtask_statuses.len();
-    let done = subtask_statuses
-        .iter()
-        .filter(|s| **s == TaskStatus::Done)
-        .count();
-
-    let block = Block::default()
-        .title(format!(" Epic: {} ", epic.title))
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .border_style(Style::default().fg(Color::Magenta))
-        .title_style(
-            Style::default()
-                .fg(Color::Magenta)
-                .add_modifier(Modifier::BOLD),
-        );
-
-    let desc = truncate(&epic.description, 60);
-    let subtasks: Vec<Task> = app
-        .tasks()
-        .iter()
-        .filter(|t| t.epic_id == Some(epic.id) && t.status != TaskStatus::Archived)
-        .cloned()
-        .collect();
-    let active_merge = app.merge_queue().map(|q| q.epic_id);
-    let substatus = crate::models::epic_substatus(epic, &subtasks, active_merge);
-    let progress = format!("{done}/{total} done \u{00b7} {}", substatus.label());
-    let lines = vec![
-        Line::from(vec![
-            Span::styled(desc, Style::default().fg(Color::Gray)),
-            Span::styled(
-                format!("  {progress}"),
-                Style::default().fg(Color::DarkGray),
-            ),
-        ]),
-        Line::from(Span::styled(
-            "Esc to return to board",
-            Style::default().fg(Color::DarkGray),
-        )),
-    ];
-
-    let paragraph = Paragraph::new(lines).block(block);
-    frame.render_widget(paragraph, area);
 }
 
 fn render_archive_overlay(frame: &mut Frame, app: &mut App, area: Rect, now: DateTime<Utc>) {
