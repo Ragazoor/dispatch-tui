@@ -4,8 +4,8 @@ use std::time::{Duration, Instant};
 use ratatui::widgets::ListState;
 
 use crate::models::{
-    AlertKind, AlertSeverity, Epic, EpicId, ReviewDecision, SecurityAlert, SubStatus, Task, TaskId,
-    TaskStatus, TaskTag, TaskUsage,
+    AlertKind, AlertSeverity, Epic, EpicId, EpicSubstatus, ReviewDecision, SecurityAlert,
+    SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage,
 };
 
 // ---------------------------------------------------------------------------
@@ -567,6 +567,30 @@ pub struct TaskDraft {
     pub description: String,
     pub repo_path: String,
     pub tag: Option<TaskTag>,
+}
+
+// ---------------------------------------------------------------------------
+// BoardState — tasks, epics, view mode, and related board data
+// ---------------------------------------------------------------------------
+
+pub struct BoardState {
+    pub(in crate::tui) tasks: Vec<Task>,
+    pub(in crate::tui) epics: Vec<Epic>,
+    pub(in crate::tui) view_mode: ViewMode,
+    pub(in crate::tui) detail_visible: bool,
+    pub(in crate::tui) repo_paths: Vec<String>,
+    pub(in crate::tui) usage: HashMap<TaskId, TaskUsage>,
+}
+
+// ---------------------------------------------------------------------------
+// StatusState — transient status messages and error popups
+// ---------------------------------------------------------------------------
+
+#[derive(Default)]
+pub struct StatusState {
+    pub(in crate::tui) message: Option<String>,
+    pub(in crate::tui) message_set_at: Option<Instant>,
+    pub(in crate::tui) error_popup: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1167,10 +1191,10 @@ pub struct ColumnLayout<'a> {
 }
 
 impl<'a> ColumnLayout<'a> {
-    pub fn build(app: &'a super::App) -> Self {
+    pub fn build(app: &'a super::App, stats: &EpicStatsMap) -> Self {
         let columns = std::array::from_fn(|i| {
             let status = TaskStatus::ALL[i];
-            app.column_items_for_status(status)
+            app.column_items_for_status_with_stats(status, Some(stats))
         });
         ColumnLayout { columns }
     }
@@ -1214,3 +1238,61 @@ pub struct MergeQueue {
     pub current: Option<TaskId>,
     pub failed: Option<TaskId>,
 }
+
+// ---------------------------------------------------------------------------
+// SubtaskStats — pre-computed per-epic subtask status counts
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct SubtaskStats {
+    pub backlog: usize,
+    pub running: usize,
+    pub review: usize,
+    pub done: usize,
+    pub total: usize,
+    pub substatus: EpicSubstatus,
+}
+
+impl SubtaskStats {
+    /// Compute stats for a single epic from its non-archived subtasks.
+    pub fn for_epic(
+        epic: &Epic,
+        all_tasks: &[Task],
+        active_merge_epic: Option<EpicId>,
+    ) -> Self {
+        let subtasks: Vec<&Task> = all_tasks
+            .iter()
+            .filter(|t| t.epic_id == Some(epic.id) && t.status != TaskStatus::Archived)
+            .collect();
+
+        let mut backlog = 0;
+        let mut running = 0;
+        let mut review = 0;
+        let mut done = 0;
+        for t in &subtasks {
+            match t.status {
+                TaskStatus::Backlog => backlog += 1,
+                TaskStatus::Running => running += 1,
+                TaskStatus::Review => review += 1,
+                TaskStatus::Done => done += 1,
+                TaskStatus::Archived => {}
+            }
+        }
+
+        // epic_substatus needs owned tasks — collect only the refs we already have
+        let owned: Vec<Task> = subtasks.iter().map(|t| (*t).clone()).collect();
+        let substatus = crate::models::epic_substatus(epic, &owned, active_merge_epic);
+
+        SubtaskStats {
+            backlog,
+            running,
+            review,
+            done,
+            total: backlog + running + review + done,
+            substatus,
+        }
+    }
+}
+
+/// Pre-computed subtask stats for all epics, keyed by EpicId.
+pub type EpicStatsMap = HashMap<EpicId, SubtaskStats>;

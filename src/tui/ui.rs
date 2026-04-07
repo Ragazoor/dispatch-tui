@@ -7,11 +7,14 @@ use ratatui::{
     Frame,
 };
 
-use super::{App, ColumnItem, ColumnLayout, InputMode, RepoFilterMode, ReviewBoardMode, ViewMode};
+use super::{
+    App, ColumnItem, ColumnLayout, EpicStatsMap, InputMode, RepoFilterMode, ReviewBoardMode,
+    ViewMode,
+};
 use crate::dispatch;
 use crate::models::{
-    epic_substatus, format_age, CiStatus, Epic, EpicSubstatus, ReviewDecision, ReviewPr, Staleness,
-    SubStatus, Task, TaskId, TaskStatus, TaskUsage,
+    format_age, CiStatus, Epic, EpicSubstatus, ReviewDecision, ReviewPr, Staleness, SubStatus,
+    Task, TaskId, TaskStatus, TaskUsage,
 };
 
 // ── Tokyo Night palette ─────────────────────────────────────────────
@@ -111,17 +114,17 @@ fn input_panel_height(app: &App, area_height: u16) -> u16 {
     match &app.input.mode {
         InputMode::QuickDispatch => {
             // header(1) + blank(1) + repos(N) + blank(1) + hint(1) + borders(2) = N + 6
-            let rows = app.repo_paths.len() as u16 + 6;
+            let rows = app.board.repo_paths.len() as u16 + 6;
             rows.clamp(8, max_height)
         }
         InputMode::InputRepoPath | InputMode::InputEpicRepoPath if app.input.buffer.is_empty() => {
             // title(1) + desc(1) + path_input(1) + repos(N) + blank(1) + hint(1) + borders(2) = N + 7
-            let rows = app.repo_paths.len() as u16 + 7;
+            let rows = app.board.repo_paths.len() as u16 + 7;
             rows.clamp(8, max_height)
         }
         InputMode::InputDispatchRepoPath if app.input.buffer.is_empty() => {
             // repo(1) + path_input(1) + repos(N) + blank(1) + hint(1) + borders(2) = N + 6
-            let rows = app.repo_paths.len() as u16 + 6;
+            let rows = app.board.repo_paths.len() as u16 + 6;
             rows.clamp(8, max_height)
         }
         _ => 8,
@@ -165,9 +168,10 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         ])
         .split(area);
 
+    let epic_stats = app.compute_epic_stats();
     render_tab_bar(frame, app, vertical[0]);
-    render_summary(frame, app, vertical[1]);
-    render_columns(frame, app, vertical[2], now);
+    render_summary(frame, app, &epic_stats, vertical[1]);
+    render_columns(frame, app, &epic_stats, vertical[2], now);
     render_archive_overlay(frame, app, vertical[2], now);
     render_detail(frame, app, vertical[3], now);
     render_status_bar(frame, app, vertical[4]);
@@ -296,7 +300,7 @@ fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
     let mut right_parts: Vec<Span> = Vec::new();
     if !app.repo_filter().is_empty() {
         let active = app.repo_filter().len();
-        let total = app.repo_paths().len();
+        let total = app.board.repo_paths.len();
         let label = match app.repo_filter_mode() {
             RepoFilterMode::Include => format!("[{active}/{total} repos]  "),
             RepoFilterMode::Exclude => format!("[excl {active}/{total} repos]  "),
@@ -318,7 +322,7 @@ fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
     }
 }
 
-fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
+fn render_summary(frame: &mut Frame, app: &App, epic_stats: &EpicStatsMap, area: Rect) {
     let col_segments = Layout::default()
         .direction(Direction::Horizontal)
         .constraints(
@@ -326,7 +330,7 @@ fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
         )
         .split(area);
 
-    let layout = ColumnLayout::build(app);
+    let layout = ColumnLayout::build(app, epic_stats);
 
     for (col_idx, &status) in TaskStatus::ALL.iter().enumerate() {
         let items = layout.get(status);
@@ -611,7 +615,13 @@ fn render_substatus_header(label: &str, col_color: Color) -> ListItem<'static> {
     )))
 }
 
-fn render_columns(frame: &mut Frame, app: &mut App, area: Rect, now: DateTime<Utc>) {
+fn render_columns(
+    frame: &mut Frame,
+    app: &mut App,
+    epic_stats: &EpicStatsMap,
+    area: Rect,
+    now: DateTime<Utc>,
+) {
     // In Epic mode, wrap the whole board in a purple rounded border with a
     // subtle purple background hint.
     let board_area = if let ViewMode::Epic { epic_id, .. } = app.view_mode() {
@@ -647,7 +657,7 @@ fn render_columns(frame: &mut Frame, app: &mut App, area: Rect, now: DateTime<Ut
         // Only Running and Review benefit from substatus grouping headers.
         let show_headers = matches!(status, TaskStatus::Running | TaskStatus::Review);
 
-        let column_items = app.column_items_for_status(status);
+        let column_items = app.column_items_for_status_with_stats(status, Some(epic_stats));
         let selected_row = app.selected_row()[col_idx];
 
         let mut list_items: Vec<ListItem> = Vec::new();
@@ -658,16 +668,10 @@ fn render_columns(frame: &mut Frame, app: &mut App, area: Rect, now: DateTime<Ut
             if show_headers {
                 let priority = match item {
                     ColumnItem::Task(t) => t.sub_status.column_priority_detached(t.is_detached()),
-                    ColumnItem::Epic(e) => {
-                        let subtasks: Vec<Task> = app
-                            .tasks()
-                            .iter()
-                            .filter(|t| t.epic_id == Some(e.id) && t.status != TaskStatus::Archived)
-                            .cloned()
-                            .collect();
-                        let active_merge = app.merge_queue().map(|q| q.epic_id);
-                        epic_substatus(e, &subtasks, active_merge).column_priority()
-                    }
+                    ColumnItem::Epic(e) => epic_stats
+                        .get(&e.id)
+                        .map(|s| s.substatus.column_priority())
+                        .unwrap_or(0),
                 };
                 if Some(priority) != current_priority {
                     current_priority = Some(priority);
@@ -676,20 +680,11 @@ fn render_columns(frame: &mut Frame, app: &mut App, area: Rect, now: DateTime<Ut
                             .sub_status
                             .header_label_detached(t.is_detached())
                             .to_string(),
-                        ColumnItem::Epic(e) => {
-                            let subtasks: Vec<Task> = app
-                                .tasks()
-                                .iter()
-                                .filter(|t| {
-                                    t.epic_id == Some(e.id) && t.status != TaskStatus::Archived
-                                })
-                                .cloned()
-                                .collect();
-                            let active_merge = app.merge_queue().map(|q| q.epic_id);
-                            epic_substatus(e, &subtasks, active_merge)
-                                .header_label()
-                                .to_string()
-                        }
+                        ColumnItem::Epic(e) => epic_stats
+                            .get(&e.id)
+                            .map(|s| s.substatus.header_label())
+                            .unwrap_or_default()
+                            .to_string(),
                     };
                     list_items.push(render_substatus_header(&label, color));
                 }
@@ -704,7 +699,9 @@ fn render_columns(frame: &mut Frame, app: &mut App, area: Rect, now: DateTime<Ut
                 ColumnItem::Task(task) => {
                     build_task_list_item(task, status, app, now, is_cursor, color, col_area.width)
                 }
-                ColumnItem::Epic(epic) => render_epic_item(epic, is_cursor, app, status, col_area.width),
+                ColumnItem::Epic(epic) => {
+                    render_epic_item(epic, is_cursor, app, epic_stats, status, col_area.width)
+                }
             });
         }
 
@@ -751,28 +748,11 @@ fn render_epic_item(
     epic: &Epic,
     is_cursor: bool,
     app: &App,
+    epic_stats: &EpicStatsMap,
     status: TaskStatus,
     col_width: u16,
 ) -> ListItem<'static> {
-    let subtask_statuses: Vec<TaskStatus> = app
-        .tasks()
-        .iter()
-        .filter(|t| t.epic_id == Some(epic.id) && t.status != TaskStatus::Archived)
-        .map(|t| t.status)
-        .collect();
-
-    let done_count = subtask_statuses
-        .iter()
-        .filter(|s| **s == TaskStatus::Done)
-        .count();
-    let running_count = subtask_statuses
-        .iter()
-        .filter(|s| **s == TaskStatus::Running)
-        .count();
-    let review_count = subtask_statuses
-        .iter()
-        .filter(|s| **s == TaskStatus::Review)
-        .count();
+    let stats = epic_stats.get(&epic.id);
 
     let plan_indicator = if epic.plan_path.is_some() && status == TaskStatus::Backlog {
         " \u{25b8}" // ▸
@@ -800,28 +780,13 @@ fn render_epic_item(
     ]);
 
     // Line 2: colored status indicators + substatus label
-    let backlog_count = subtask_statuses
-        .iter()
-        .filter(|s| **s == TaskStatus::Backlog)
-        .count();
-    let total = subtask_statuses.len();
-
-    let line2 = if total > 0 {
-        let subtasks: Vec<Task> = app
-            .tasks()
-            .iter()
-            .filter(|t| t.epic_id == Some(epic.id) && t.status != TaskStatus::Archived)
-            .cloned()
-            .collect();
-        let active_merge = app.merge_queue().map(|q| q.epic_id);
-        let substatus = crate::models::epic_substatus(epic, &subtasks, active_merge);
-
+    let line2 = if let Some(s) = stats.filter(|s| s.total > 0) {
         let mut spans = vec![Span::raw("    ".to_string())];
         let indicators: &[(usize, Color)] = &[
-            (backlog_count, column_color(TaskStatus::Backlog)),
-            (running_count, column_color(TaskStatus::Running)),
-            (review_count, column_color(TaskStatus::Review)),
-            (done_count, column_color(TaskStatus::Done)),
+            (s.backlog, column_color(TaskStatus::Backlog)),
+            (s.running, column_color(TaskStatus::Running)),
+            (s.review, column_color(TaskStatus::Review)),
+            (s.done, column_color(TaskStatus::Done)),
         ];
         for (count, color) in indicators {
             if *count > 0 {
@@ -832,8 +797,8 @@ fn render_epic_item(
             }
         }
         spans.push(Span::styled(
-            substatus.label(),
-            Style::default().fg(epic_substatus_color(&substatus)),
+            s.substatus.label(),
+            Style::default().fg(epic_substatus_color(&s.substatus)),
         ));
         Line::from(spans)
     } else {
@@ -1015,7 +980,7 @@ fn task_detail_lines(app: &App, task: &Task) -> Vec<Line<'static>> {
     if task.description.is_empty() {
         lines.push(Line::from(Span::styled(String::new(), desc_style)));
     }
-    if let Some(u) = app.usage.get(&task.id) {
+    if let Some(u) = app.board.usage.get(&task.id) {
         lines.push(Line::from(Span::styled(
             format_usage(u),
             Style::default().fg(MUTED),
@@ -1114,7 +1079,7 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect, _now: DateTime<Utc>) 
         .borders(Borders::TOP)
         .border_style(Style::default().fg(BORDER));
 
-    if !app.detail_visible {
+    if !app.board.detail_visible {
         let paragraph = Paragraph::new("").block(block);
         frame.render_widget(paragraph, area);
         return;
@@ -1287,7 +1252,7 @@ fn input_repo_path_lines<'a>(
     if app.input.buffer.is_empty() {
         append_repo_path_list(
             &mut lines,
-            &app.repo_paths,
+            &app.board.repo_paths,
             app.input.repo_cursor,
             7,
             area.height,
@@ -1327,7 +1292,7 @@ fn dispatch_repo_path_lines<'a>(
     if app.input.buffer.is_empty() {
         append_repo_path_list(
             &mut lines,
-            &app.repo_paths,
+            &app.board.repo_paths,
             app.input.repo_cursor,
             5,
             area.height,
@@ -1349,7 +1314,7 @@ fn quick_dispatch_lines<'a>(app: &'a App, area: Rect, active: Style, hint: Style
     ];
     append_repo_path_list(
         &mut lines,
-        &app.repo_paths,
+        &app.board.repo_paths,
         app.input.repo_cursor,
         6,
         area.height,
@@ -1462,7 +1427,7 @@ fn input_epic_repo_path_lines<'a>(
     if app.input.buffer.is_empty() {
         append_repo_path_list(
             &mut lines,
-            &app.repo_paths,
+            &app.board.repo_paths,
             app.input.repo_cursor,
             7,
             area.height,
@@ -1542,7 +1507,7 @@ fn render_dispatch_repo_overlay(frame: &mut Frame, app: &App, area: Rect) {
     }
     let popup_width = (area.width * 60 / 100).clamp(40, 70);
     let line_count = if app.input.buffer.is_empty() {
-        app.repo_paths.len() as u16 + 6
+        app.board.repo_paths.len() as u16 + 6
     } else {
         6
     };
@@ -1556,7 +1521,7 @@ fn render_dispatch_repo_overlay(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_error_popup(frame: &mut Frame, app: &App, area: Rect) {
-    let Some(error_msg) = &app.error_popup else {
+    let Some(error_msg) = &app.status.error_popup else {
         return;
     };
 
@@ -1828,7 +1793,7 @@ fn render_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    let repo_count = app.repo_paths().len();
+    let repo_count = app.board.repo_paths.len();
     let preset_count = app.filter_presets().len();
     let preset_lines = if preset_count > 0 {
         preset_count + 2
@@ -1971,7 +1936,7 @@ fn render_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     // Help text
-    let all_selected = app.repo_filter().len() == app.repo_paths().len();
+    let all_selected = app.repo_filter().len() == app.board.repo_paths.len();
     let a_label = if all_selected {
         "clear all"
     } else {
@@ -1992,20 +1957,6 @@ fn render_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
                 Span::styled(" delete preset  ", note_style),
                 Span::styled("[Esc]", key_style),
                 Span::styled(" cancel", note_style),
-            ]));
-        }
-        InputMode::ConfirmDeleteRepoPath => {
-            let path_label = app
-                .repo_paths()
-                .get(app.input.repo_cursor)
-                .map(|p| p.as_str())
-                .unwrap_or("?");
-            lines.push(Line::from(vec![
-                Span::styled(format!("  Delete {path_label}?  "), Style::default().fg(Color::Yellow)),
-                Span::styled("y", key_style),
-                Span::styled(": yes  ", note_style),
-                Span::styled("n/Esc", key_style),
-                Span::styled(": cancel", note_style),
             ]));
         }
         InputMode::ConfirmDeleteRepoPath => {
@@ -2119,7 +2070,7 @@ fn render_review_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
-    if let Some(msg) = &app.status_message {
+    if let Some(msg) = &app.status.message {
         let bar = Paragraph::new(msg.as_str()).style(Style::default().fg(Color::Yellow));
         frame.render_widget(bar, area);
         return;
@@ -2190,14 +2141,14 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         }
         InputMode::InputTag => {
             let text = app
-                .status_message
+                .status.message
                 .as_deref()
                 .unwrap_or("Tag: [b]ug  [f]eature  [c]hore  [e]pic  [Enter] none");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
         InputMode::ConfirmDelete => {
-            let text = app.status_message.as_deref().unwrap_or("Delete? [y/n]");
+            let text = app.status.message.as_deref().unwrap_or("Delete? [y/n]");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Red));
             frame.render_widget(bar, area);
         }
@@ -2208,7 +2159,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         }
         InputMode::InputDispatchRepoPath => {
             let text = app
-                .status_message
+                .status.message
                 .as_deref()
                 .unwrap_or("Select local repo path for dispatch");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Cyan));
@@ -2226,7 +2177,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         }
         InputMode::ConfirmDone(_) => {
             let text = app
-                .status_message
+                .status.message
                 .as_deref()
                 .unwrap_or("Move to Done? [y/n]");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
@@ -2249,7 +2200,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         }
         InputMode::ConfirmDeleteEpic => {
             let text = app
-                .status_message
+                .status.message
                 .as_deref()
                 .unwrap_or("Delete epic and subtasks? [y/n]");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Red));
@@ -2272,7 +2223,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         }
         InputMode::ConfirmMergePr(_) => {
             let text = app
-                .status_message
+                .status.message
                 .as_deref()
                 .unwrap_or("Merge PR? [y/n]");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Green));
@@ -2280,7 +2231,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         }
         InputMode::ConfirmWrapUp(_) => {
             let text = app
-                .status_message
+                .status.message
                 .as_deref()
                 .unwrap_or("Wrap up: [r] rebase  [p] create PR  [Esc] cancel");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
@@ -2303,7 +2254,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         }
         InputMode::ConfirmEpicWrapUp(_) => {
             let text = app
-                .status_message
+                .status.message
                 .as_deref()
                 .unwrap_or("Epic wrap up: [r] rebase all  [p] PR all  [Esc] cancel");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
@@ -2311,7 +2262,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         }
         InputMode::ConfirmDetachTmux(_) => {
             let text = app
-                .status_message
+                .status.message
                 .as_deref()
                 .unwrap_or("Detach tmux panel? [y/n]");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
@@ -2328,7 +2279,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             frame.render_widget(bar, area);
         }
         InputMode::ConfirmEditTask(_) => {
-            let text = app.status_message.as_deref().unwrap_or("Edit task? [y/n]");
+            let text = app.status.message.as_deref().unwrap_or("Edit task? [y/n]");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
@@ -2651,7 +2602,7 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
     render_review_detail(frame, app, chunks[3]);
 
     // Status bar: transient message takes priority; fall back to persistent error
-    if let Some(msg) = app.status_message() {
+    if let Some(msg) = app.status.message.as_deref() {
         let status = Paragraph::new(msg.to_string()).style(Style::default().fg(Color::Yellow));
         frame.render_widget(status, chunks[4]);
     } else if let Some(err) = app.last_review_error() {
@@ -3104,7 +3055,7 @@ pub fn render_security_board(frame: &mut Frame, app: &mut App, area: Rect) {
     render_security_detail(frame, app, chunks[3]);
 
     // Status bar
-    if let Some(msg) = app.status_message() {
+    if let Some(msg) = app.status.message.as_deref() {
         let status = Paragraph::new(msg.to_string()).style(Style::default().fg(Color::Yellow));
         frame.render_widget(status, chunks[4]);
     } else if let Some(err) = app.last_security_error() {

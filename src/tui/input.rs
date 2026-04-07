@@ -11,7 +11,7 @@ use crate::models::{
 impl App {
     /// Translate a terminal key event into zero or more commands, depending on current mode.
     pub fn handle_key(&mut self, key: KeyEvent) -> Vec<Command> {
-        if self.error_popup.is_some() {
+        if self.status.error_popup.is_some() {
             return self.update(Message::DismissError);
         }
 
@@ -56,11 +56,11 @@ impl App {
             return self.handle_key_archive(key);
         }
 
-        if matches!(self.view_mode, ViewMode::SecurityBoard { .. }) {
+        if matches!(self.board.view_mode, ViewMode::SecurityBoard { .. }) {
             return self.handle_key_security_board(key);
         }
 
-        if matches!(self.view_mode, ViewMode::ReviewBoard { .. }) {
+        if matches!(self.board.view_mode, ViewMode::ReviewBoard { .. }) {
             return self.handle_key_review_board(key);
         }
 
@@ -68,7 +68,7 @@ impl App {
             KeyCode::Tab => self.update(Message::SwitchToReviewBoard),
 
             KeyCode::Char('q') => {
-                if matches!(self.view_mode, ViewMode::Epic { .. }) {
+                if matches!(self.board.view_mode, ViewMode::Epic { .. }) {
                     self.update(Message::ExitEpic)
                 } else {
                     self.update(Message::Quit)
@@ -143,7 +143,7 @@ impl App {
                 } else if let Some(ColumnItem::Epic(epic)) = self.selected_column_item() {
                     // Prefer blocked Running subtasks, then Review, by sort_order
                     let window = self
-                        .tasks
+                        .board.tasks
                         .iter()
                         .filter(|t| {
                             t.epic_id == Some(epic.id)
@@ -153,7 +153,7 @@ impl App {
                         })
                         .min_by_key(|t| (t.sort_order.unwrap_or(t.id.0), t.id.0))
                         .or_else(|| {
-                            self.tasks
+                            self.board.tasks
                                 .iter()
                                 .filter(|t| {
                                     t.epic_id == Some(epic.id)
@@ -229,7 +229,7 @@ impl App {
                     self.update(Message::EditEpic(id))
                 }
                 None => {
-                    if let ViewMode::Epic { epic_id, .. } = &self.view_mode {
+                    if let ViewMode::Epic { epic_id, .. } = &self.board.view_mode {
                         let id = *epic_id;
                         self.update(Message::EditEpic(id))
                     } else {
@@ -259,18 +259,18 @@ impl App {
             }
 
             KeyCode::Char('D') => {
-                let epic_id = if let ViewMode::Epic { epic_id, .. } = &self.view_mode {
+                let epic_id = if let ViewMode::Epic { epic_id, .. } = &self.board.view_mode {
                     Some(*epic_id)
                 } else {
                     None
                 };
                 self.input.pending_epic_id = epic_id;
-                match self.repo_paths.len() {
+                match self.board.repo_paths.len() {
                     0 => self.update(Message::StatusInfo(
                         "No saved repo paths — create a task first".to_string(),
                     )),
                     1 => {
-                        let repo_path = self.repo_paths[0].clone();
+                        let repo_path = self.board.repo_paths[0].clone();
                         self.update(Message::QuickDispatch { repo_path, epic_id })
                     }
                     _ => self.update(Message::StartQuickDispatchSelection),
@@ -298,7 +298,7 @@ impl App {
             }
 
             KeyCode::Esc => {
-                if matches!(self.view_mode, ViewMode::Epic { .. }) {
+                if matches!(self.board.view_mode, ViewMode::Epic { .. }) {
                     self.update(Message::ExitEpic)
                 } else if self.has_selection() || self.selection().on_select_all {
                     self.update(Message::ClearSelection)
@@ -401,7 +401,7 @@ impl App {
                 }
             }
             None => {
-                if let ViewMode::Epic { epic_id, .. } = self.view_mode {
+                if let ViewMode::Epic { epic_id, .. } = self.board.view_mode {
                     self.update(Message::DispatchEpic(epic_id))
                 } else {
                     vec![]
@@ -454,7 +454,7 @@ impl App {
                 // In repo path modes with empty buffer, Enter selects the cursor repo
                 if is_repo_mode && self.input.buffer.is_empty() {
                     let idx = self.input.repo_cursor;
-                    if let Some(path) = self.repo_paths.get(idx) {
+                    if let Some(path) = self.board.repo_paths.get(idx) {
                         let msg = match self.input.mode {
                             InputMode::InputEpicRepoPath => {
                                 Message::SubmitEpicRepoPath(path.clone())
@@ -656,8 +656,8 @@ impl App {
             KeyCode::Char('k') | KeyCode::Up => self.update(Message::MoveRepoCursor(-1)),
             KeyCode::Char(' ') => {
                 let idx = self.input.repo_cursor;
-                if idx < self.repo_paths.len() {
-                    let path = self.repo_paths[idx].clone();
+                if idx < self.board.repo_paths.len() {
+                    let path = self.board.repo_paths[idx].clone();
                     self.update(Message::ToggleRepoFilter(path))
                 } else {
                     vec![]
@@ -665,8 +665,8 @@ impl App {
             }
             KeyCode::Char(c @ '1'..='9') => {
                 let idx = (c as usize) - ('1' as usize);
-                if idx < self.repo_paths.len() {
-                    let path = self.repo_paths[idx].clone();
+                if idx < self.board.repo_paths.len() {
+                    let path = self.board.repo_paths[idx].clone();
                     self.update(Message::ToggleRepoFilter(path))
                 } else {
                     vec![]
@@ -739,8 +739,8 @@ impl App {
         match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') => {
                 let idx = self.input.repo_cursor;
-                if idx < self.repo_paths.len() {
-                    let path = self.repo_paths[idx].clone();
+                if idx < self.board.repo_paths.len() {
+                    let path = self.board.repo_paths[idx].clone();
                     self.update(Message::DeleteRepoPath(path))
                 } else {
                     self.input.mode = InputMode::RepoFilter;
@@ -764,7 +764,7 @@ impl App {
 
     fn handle_key_confirm_edit_task(&mut self, key: KeyEvent, id: TaskId) -> Vec<Command> {
         self.confirm_dialog(key, |s| {
-            if let Some(task) = s.tasks.iter().find(|t| t.id == id) {
+            if let Some(task) = s.board.tasks.iter().find(|t| t.id == id) {
                 vec![Command::EditTaskInEditor(task.clone())]
             } else {
                 vec![]
@@ -938,7 +938,7 @@ impl App {
             KeyCode::Char('d') => {
                 if let Some(pr) = self.selected_review_pr() {
                     let is_dependabot = matches!(
-                        self.view_mode,
+                        self.board.view_mode,
                         ViewMode::ReviewBoard {
                             mode: ReviewBoardMode::Dependabot,
                             ..
@@ -960,7 +960,7 @@ impl App {
 
             KeyCode::Char('D') => {
                 if matches!(
-                    self.view_mode,
+                    self.board.view_mode,
                     ViewMode::ReviewBoard {
                         mode: ReviewBoardMode::Author,
                         ..
@@ -979,7 +979,7 @@ impl App {
             // Dependabot-specific bindings
             KeyCode::Char(' ') => {
                 if matches!(
-                    self.view_mode,
+                    self.board.view_mode,
                     ViewMode::ReviewBoard {
                         mode: ReviewBoardMode::Dependabot,
                         ..
@@ -998,7 +998,7 @@ impl App {
 
             KeyCode::Char('a') => {
                 if matches!(
-                    self.view_mode,
+                    self.board.view_mode,
                     ViewMode::ReviewBoard {
                         mode: ReviewBoardMode::Dependabot,
                         ..
@@ -1012,7 +1012,7 @@ impl App {
 
             KeyCode::Char('A') => {
                 if matches!(
-                    self.view_mode,
+                    self.board.view_mode,
                     ViewMode::ReviewBoard {
                         mode: ReviewBoardMode::Dependabot,
                         ..
@@ -1026,7 +1026,7 @@ impl App {
 
             KeyCode::Char('m') => {
                 if matches!(
-                    self.view_mode,
+                    self.board.view_mode,
                     ViewMode::ReviewBoard {
                         mode: ReviewBoardMode::Dependabot,
                         ..
@@ -1039,7 +1039,7 @@ impl App {
             }
 
             KeyCode::Char('e') => {
-                if let ViewMode::ReviewBoard { mode, .. } = self.view_mode {
+                if let ViewMode::ReviewBoard { mode, .. } = self.board.view_mode {
                     vec![Command::EditGithubQueries(mode)]
                 } else {
                     vec![]

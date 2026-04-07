@@ -35,24 +35,17 @@ const SECURITY_POLL_INTERVAL: Duration = Duration::from_secs(300);
 // ---------------------------------------------------------------------------
 
 pub struct App {
-    pub(in crate::tui) tasks: Vec<Task>,
-    pub(in crate::tui) epics: Vec<Epic>,
-    pub(in crate::tui) view_mode: ViewMode,
-    pub(in crate::tui) detail_visible: bool,
-    pub(in crate::tui) status_message: Option<String>,
-    pub(in crate::tui) status_message_set_at: Option<Instant>,
-    pub(in crate::tui) error_popup: Option<String>,
-    pub(in crate::tui) repo_paths: Vec<String>,
+    pub(in crate::tui) board: BoardState,
+    pub(in crate::tui) status: StatusState,
     pub(in crate::tui) should_quit: bool,
+    pub(in crate::tui) notifications_enabled: bool,
     pub(in crate::tui) input: InputState,
     pub(in crate::tui) agents: AgentTracking,
     pub(in crate::tui) archive: ArchiveState,
     pub(in crate::tui) select: SelectionState,
-    pub(in crate::tui) notifications_enabled: bool,
     pub(in crate::tui) filter: FilterState,
     pub(in crate::tui) review: ReviewBoardState,
     pub(in crate::tui) security: SecurityBoardState,
-    pub(in crate::tui) usage: HashMap<TaskId, TaskUsage>,
     pub(in crate::tui) merge_queue: Option<MergeQueue>,
 }
 
@@ -69,31 +62,31 @@ pub(in crate::tui) fn truncate_title(title: &str, max_len: usize) -> String {
 impl App {
     pub fn new(tasks: Vec<Task>, inactivity_timeout: Duration) -> Self {
         App {
-            tasks,
-            epics: Vec::new(),
-            view_mode: ViewMode::default(),
-            detail_visible: false,
-            status_message: None,
-            status_message_set_at: None,
-            error_popup: None,
-            repo_paths: Vec::new(),
+            board: BoardState {
+                tasks,
+                epics: Vec::new(),
+                view_mode: ViewMode::default(),
+                detail_visible: false,
+                repo_paths: Vec::new(),
+                usage: HashMap::new(),
+            },
+            status: StatusState::default(),
             should_quit: false,
+            notifications_enabled: true,
             input: InputState::default(),
             agents: AgentTracking::new(inactivity_timeout),
             archive: ArchiveState::default(),
             select: SelectionState::default(),
-            notifications_enabled: true,
             filter: FilterState::default(),
             review: ReviewBoardState::default(),
             security: SecurityBoardState::default(),
-            usage: HashMap::new(),
             merge_queue: None,
         }
     }
 
     /// Get the current selection state (from whichever view mode is active).
     pub fn selection(&self) -> &BoardSelection {
-        match &self.view_mode {
+        match &self.board.view_mode {
             ViewMode::Board(sel) => sel,
             ViewMode::Epic { selection, .. } => selection,
             ViewMode::ReviewBoard { saved_board, .. } => saved_board,
@@ -103,7 +96,7 @@ impl App {
 
     /// Get mutable access to the current selection state.
     pub(in crate::tui) fn selection_mut(&mut self) -> &mut BoardSelection {
-        match &mut self.view_mode {
+        match &mut self.board.view_mode {
             ViewMode::Board(sel) => sel,
             ViewMode::Epic { selection, .. } => selection,
             ViewMode::ReviewBoard { saved_board, .. } => saved_board,
@@ -113,7 +106,7 @@ impl App {
 
     // Read-only accessors for code outside the tui module
     pub fn tasks(&self) -> &[Task] {
-        &self.tasks
+        &self.board.tasks
     }
     pub fn should_quit(&self) -> bool {
         self.should_quit
@@ -125,10 +118,10 @@ impl App {
         &self.selection().selected_row
     }
     pub fn view_mode(&self) -> &ViewMode {
-        &self.view_mode
+        &self.board.view_mode
     }
     pub fn epics(&self) -> &[Epic] {
-        &self.epics
+        &self.board.epics
     }
     pub fn mode(&self) -> &InputMode {
         &self.input.mode
@@ -137,19 +130,19 @@ impl App {
         &self.input.buffer
     }
     pub fn detail_visible(&self) -> bool {
-        self.detail_visible
+        self.board.detail_visible
     }
     pub fn tmux_outputs(&self) -> &std::collections::HashMap<TaskId, String> {
         &self.agents.tmux_outputs
     }
     pub fn status_message(&self) -> Option<&str> {
-        self.status_message.as_deref()
+        self.status.message.as_deref()
     }
     pub fn error_popup(&self) -> Option<&str> {
-        self.error_popup.as_deref()
+        self.status.error_popup.as_deref()
     }
     pub fn repo_paths(&self) -> &[String] {
-        &self.repo_paths
+        &self.board.repo_paths
     }
     pub fn task_draft(&self) -> Option<&TaskDraft> {
         self.input.task_draft.as_ref()
@@ -241,33 +234,33 @@ impl App {
 
     /// Set of PR URLs from dispatch tasks (for matching against ReviewPr entries).
     pub fn dispatch_pr_urls(&self) -> HashSet<String> {
-        self.tasks.iter().filter_map(|t| t.pr_url.clone()).collect()
+        self.board.tasks.iter().filter_map(|t| t.pr_url.clone()).collect()
     }
 
     /// Get the review board selection state, if currently in review board mode.
     pub fn review_selection(&self) -> Option<&ReviewBoardSelection> {
-        match &self.view_mode {
+        match &self.board.view_mode {
             ViewMode::ReviewBoard { selection, .. } => Some(selection),
             _ => None,
         }
     }
 
     pub(in crate::tui) fn review_selection_mut(&mut self) -> Option<&mut ReviewBoardSelection> {
-        match &mut self.view_mode {
+        match &mut self.board.view_mode {
             ViewMode::ReviewBoard { selection, .. } => Some(selection),
             _ => None,
         }
     }
 
     pub fn security_selection(&self) -> Option<&SecurityBoardSelection> {
-        match &self.view_mode {
+        match &self.board.view_mode {
             ViewMode::SecurityBoard { selection, .. } => Some(selection),
             _ => None,
         }
     }
 
     pub(in crate::tui) fn security_selection_mut(&mut self) -> Option<&mut SecurityBoardSelection> {
-        match &mut self.view_mode {
+        match &mut self.board.view_mode {
             ViewMode::SecurityBoard { selection, .. } => Some(selection),
             _ => None,
         }
@@ -378,14 +371,14 @@ impl App {
 
     /// Set a transient status message with auto-clear timestamp.
     pub(in crate::tui) fn set_status(&mut self, msg: String) {
-        self.status_message = Some(msg);
-        self.status_message_set_at = Some(Instant::now());
+        self.status.message = Some(msg);
+        self.status.message_set_at = Some(Instant::now());
     }
 
     /// Clear the status message and its timestamp.
     pub(in crate::tui) fn clear_status(&mut self) {
-        self.status_message = None;
-        self.status_message_set_at = None;
+        self.status.message = None;
+        self.status.message_set_at = None;
     }
 
     fn repo_matches(&self, repo_path: &str) -> bool {
@@ -397,15 +390,15 @@ impl App {
     /// Epic view: only subtasks of the active epic.
     pub fn tasks_for_current_view(&self) -> Vec<&Task> {
         let repo_match = |t: &&Task| self.repo_matches(&t.repo_path);
-        match &self.view_mode {
+        match &self.board.view_mode {
             ViewMode::Board(_) => self
-                .tasks
+                .board.tasks
                 .iter()
                 .filter(|t| t.epic_id.is_none() && t.status != TaskStatus::Archived)
                 .filter(repo_match)
                 .collect(),
             ViewMode::Epic { epic_id, .. } => self
-                .tasks
+                .board.tasks
                 .iter()
                 .filter(|t| t.epic_id == Some(*epic_id) && t.status != TaskStatus::Archived)
                 .filter(repo_match)
@@ -422,12 +415,21 @@ impl App {
             .collect()
     }
 
-    /// Return all archived tasks, ordered as they appear in self.tasks.
+    /// Return all archived tasks, ordered as they appear in self.board.tasks.
     pub fn archived_tasks(&self) -> Vec<&Task> {
-        self.tasks
+        self.board.tasks
             .iter()
             .filter(|t| t.status == TaskStatus::Archived)
             .filter(|t| self.repo_matches(&t.repo_path))
+            .collect()
+    }
+
+    /// Pre-compute subtask stats for all epics. Call once per render frame.
+    pub fn compute_epic_stats(&self) -> EpicStatsMap {
+        let active_merge = self.merge_queue.as_ref().map(|q| q.epic_id);
+        self.board.epics
+            .iter()
+            .map(|e| (e.id, SubtaskStats::for_epic(e, &self.board.tasks, active_merge)))
             .collect()
     }
 
@@ -435,11 +437,20 @@ impl App {
     /// In board view, epics are included (positioned by derived status).
     /// In epic view, only subtasks are included (no epic cards).
     pub fn column_items_for_status(&self, status: TaskStatus) -> Vec<ColumnItem<'_>> {
+        self.column_items_for_status_with_stats(status, None)
+    }
+
+    /// Like `column_items_for_status` but uses pre-computed epic stats for sorting.
+    pub fn column_items_for_status_with_stats<'a>(
+        &'a self,
+        status: TaskStatus,
+        stats: Option<&EpicStatsMap>,
+    ) -> Vec<ColumnItem<'a>> {
         let tasks = self.tasks_by_status(status);
         let mut items: Vec<ColumnItem<'_>> = tasks.into_iter().map(ColumnItem::Task).collect();
 
-        if matches!(self.view_mode, ViewMode::Board(_)) {
-            for epic in &self.epics {
+        if matches!(self.board.view_mode, ViewMode::Board(_)) {
+            for epic in &self.board.epics {
                 if !self.repo_matches(&epic.repo_path) {
                     continue;
                 }
@@ -456,19 +467,19 @@ impl App {
                 t.id.0,
             ),
             ColumnItem::Epic(e) => {
-                let subtasks: Vec<Task> = self
-                    .tasks
-                    .iter()
-                    .filter(|t| t.epic_id == Some(e.id) && t.status != TaskStatus::Archived)
-                    .cloned()
-                    .collect();
-                let active_merge = self.merge_queue.as_ref().map(|q| q.epic_id);
-                let substatus = epic_substatus(e, &subtasks, active_merge);
-                (
-                    substatus.column_priority(),
-                    e.sort_order.unwrap_or(e.id.0),
-                    e.id.0,
-                )
+                let priority = if let Some(s) = stats.and_then(|m| m.get(&e.id)) {
+                    s.substatus.column_priority()
+                } else {
+                    let subtasks: Vec<Task> = self
+                        .board.tasks
+                        .iter()
+                        .filter(|t| t.epic_id == Some(e.id) && t.status != TaskStatus::Archived)
+                        .cloned()
+                        .collect();
+                    let active_merge = self.merge_queue.as_ref().map(|q| q.epic_id);
+                    epic_substatus(e, &subtasks, active_merge).column_priority()
+                };
+                (priority, e.sort_order.unwrap_or(e.id.0), e.id.0)
             }
         });
 
@@ -479,11 +490,11 @@ impl App {
     /// Used by `clamp_selection()` which only needs counts, not the sorted items.
     fn column_item_count(&self, status: TaskStatus) -> usize {
         let task_count = self.tasks_by_status(status).len();
-        if !matches!(self.view_mode, ViewMode::Board(_)) {
+        if !matches!(self.board.view_mode, ViewMode::Board(_)) {
             return task_count;
         }
         let epic_count = self
-            .epics
+            .board.epics
             .iter()
             .filter(|e| self.filter.matches(&e.repo_path) && epic_status(e) == status)
             .count();
@@ -504,9 +515,9 @@ impl App {
 
         let mut items: Vec<ColumnItem<'_>> = tasks.into_iter().map(ColumnItem::Task).collect();
 
-        if matches!(self.view_mode, ViewMode::Board(_)) {
+        if matches!(self.board.view_mode, ViewMode::Board(_)) {
             let active_merge = self.merge_queue.as_ref().map(|q| q.epic_id);
-            for epic in &self.epics {
+            for epic in &self.board.epics {
                 if !self.repo_matches(&epic.repo_path) {
                     continue;
                 }
@@ -516,7 +527,7 @@ impl App {
                 }
                 if epic_parent == TaskStatus::Running {
                     let subtasks: Vec<Task> = self
-                        .tasks
+                        .board.tasks
                         .iter()
                         .filter(|t| t.epic_id == Some(epic.id) && t.status != TaskStatus::Archived)
                         .cloned()
@@ -548,7 +559,7 @@ impl App {
 
     /// Get the statuses of all subtasks belonging to an epic.
     fn subtask_statuses(&self, epic_id: EpicId) -> Vec<TaskStatus> {
-        self.tasks
+        self.board.tasks
             .iter()
             .filter(|t| t.epic_id == Some(epic_id) && t.status != TaskStatus::Archived)
             .map(|t| t.status)
@@ -569,7 +580,7 @@ impl App {
 
     /// Look up the title of an epic by ID.
     pub fn epic_title(&self, id: EpicId) -> Option<&str> {
-        self.epics
+        self.board.epics
             .iter()
             .find(|e| e.id == id)
             .map(|e| e.title.as_str())
@@ -598,11 +609,11 @@ impl App {
     }
 
     fn find_task(&self, id: TaskId) -> Option<&Task> {
-        self.tasks.iter().find(|t| t.id == id)
+        self.board.tasks.iter().find(|t| t.id == id)
     }
 
     fn find_task_mut(&mut self, id: TaskId) -> Option<&mut Task> {
-        self.tasks.iter_mut().find(|t| t.id == id)
+        self.board.tasks.iter_mut().find(|t| t.id == id)
     }
 
     /// Remove all in-memory agent tracking state for a task.
@@ -826,7 +837,7 @@ impl App {
             Message::OpenInBrowser { url } => vec![Command::OpenInBrowser { url }],
             Message::RefreshReviewPrs => {
                 let mut cmds = vec![];
-                match &self.view_mode {
+                match &self.board.view_mode {
                     ViewMode::ReviewBoard {
                         mode: ReviewBoardMode::Author,
                         ..
@@ -1181,7 +1192,7 @@ impl App {
             }
         }
         if let Some(eid) = a_epic_id {
-            if let Some(e) = self.epics.iter_mut().find(|e2| e2.id == eid) {
+            if let Some(e) = self.board.epics.iter_mut().find(|e2| e2.id == eid) {
                 e.sort_order = Some(new_a);
                 cmds.push(Command::PersistEpic {
                     id: eid,
@@ -1197,7 +1208,7 @@ impl App {
             }
         }
         if let Some(eid) = b_epic_id {
-            if let Some(e) = self.epics.iter_mut().find(|e2| e2.id == eid) {
+            if let Some(e) = self.board.epics.iter_mut().find(|e2| e2.id == eid) {
                 e.sort_order = Some(new_b);
                 cmds.push(Command::PersistEpic {
                     id: eid,
@@ -1365,7 +1376,7 @@ impl App {
     }
 
     fn handle_task_created(&mut self, task: Task) -> Vec<Command> {
-        self.tasks.push(task);
+        self.board.tasks.push(task);
         self.clamp_selection();
         vec![]
     }
@@ -1373,7 +1384,7 @@ impl App {
     fn handle_delete_task(&mut self, id: TaskId) -> Vec<Command> {
         let cleanup = self.find_task_mut(id).and_then(Self::take_cleanup);
         self.clear_agent_tracking(id);
-        self.tasks.retain(|t| t.id != id);
+        self.board.tasks.retain(|t| t.id != id);
         self.clamp_selection();
         let archive_count = self.archived_tasks().len();
         if self.archive.selected_row >= archive_count && archive_count > 0 {
@@ -1389,7 +1400,7 @@ impl App {
     }
 
     fn handle_toggle_detail(&mut self) -> Vec<Command> {
-        self.detail_visible = !self.detail_visible;
+        self.board.detail_visible = !self.board.detail_visible;
         vec![]
     }
 
@@ -1495,7 +1506,7 @@ impl App {
         // Prune selections for tasks that no longer exist
         let valid_ids: HashSet<TaskId> = new_tasks.iter().map(|t| t.id).collect();
         self.select.tasks.retain(|id| valid_ids.contains(id));
-        self.tasks = new_tasks;
+        self.board.tasks = new_tasks;
         self.clamp_selection();
         cmds
     }
@@ -1503,7 +1514,7 @@ impl App {
     fn handle_tick(&mut self) -> Vec<Command> {
         // Auto-clear transient status messages after 5 seconds (only in Normal mode)
         if self.input.mode == InputMode::Normal {
-            if let Some(set_at) = self.status_message_set_at {
+            if let Some(set_at) = self.status.message_set_at {
                 if set_at.elapsed() > STATUS_MESSAGE_TTL {
                     self.clear_status();
                 }
@@ -1516,7 +1527,7 @@ impl App {
             .retain(|_, t| t.elapsed().as_secs() < 3);
 
         let mut cmds: Vec<Command> = self
-            .tasks
+            .board.tasks
             .iter()
             .filter(|t| t.tmux_window.is_some())
             .filter_map(|t| {
@@ -1529,7 +1540,7 @@ impl App {
         // Check for stale agents
         let timeout = self.agents.inactivity_timeout;
         let newly_stale: Vec<TaskId> = self
-            .tasks
+            .board.tasks
             .iter()
             .filter(|t| t.status == TaskStatus::Running && t.tmux_window.is_some())
             .filter(|t| {
@@ -1554,7 +1565,7 @@ impl App {
 
         // Poll PR status for review tasks with open PRs
         let pr_tasks: Vec<(TaskId, String)> = self
-            .tasks
+            .board.tasks
             .iter()
             .filter(|t| t.status == TaskStatus::Review)
             .filter(|t| {
@@ -1691,7 +1702,7 @@ impl App {
     }
 
     fn handle_error(&mut self, msg: String) -> Vec<Command> {
-        self.error_popup = Some(msg);
+        self.status.error_popup = Some(msg);
         vec![]
     }
 
@@ -1710,9 +1721,9 @@ impl App {
     }
 
     fn handle_repo_paths_updated(&mut self, paths: Vec<String>) -> Vec<Command> {
-        self.repo_paths = paths;
-        if !self.repo_paths.is_empty() {
-            self.input.repo_cursor = self.input.repo_cursor.min(self.repo_paths.len() - 1);
+        self.board.repo_paths = paths;
+        if !self.board.repo_paths.is_empty() {
+            self.input.repo_cursor = self.input.repo_cursor.min(self.board.repo_paths.len() - 1);
         } else {
             self.input.repo_cursor = 0;
         }
@@ -1964,7 +1975,7 @@ impl App {
     }
 
     fn handle_dismiss_error(&mut self) -> Vec<Command> {
-        self.error_popup = None;
+        self.status.error_popup = None;
         vec![]
     }
 
@@ -2071,7 +2082,7 @@ impl App {
     fn handle_submit_repo_path(&mut self, value: String) -> Vec<Command> {
         self.input.buffer.clear();
         let repo_path = if value.is_empty() {
-            if let Some(first) = self.repo_paths.first() {
+            if let Some(first) = self.board.repo_paths.first() {
                 first.clone()
             } else {
                 self.set_status("Repo path required (no saved paths available)".to_string());
@@ -2106,8 +2117,8 @@ impl App {
             && c != '0'
         {
             let idx = (c as usize) - ('1' as usize);
-            if idx < self.repo_paths.len() {
-                let repo_path = self.repo_paths[idx].clone();
+            if idx < self.board.repo_paths.len() {
+                let repo_path = self.board.repo_paths[idx].clone();
                 if self.input.mode == InputMode::InputEpicRepoPath {
                     return self.finish_epic_creation(repo_path);
                 }
@@ -2131,8 +2142,8 @@ impl App {
     }
 
     fn handle_select_quick_dispatch_repo(&mut self, idx: usize) -> Vec<Command> {
-        if idx < self.repo_paths.len() {
-            let repo_path = self.repo_paths[idx].clone();
+        if idx < self.board.repo_paths.len() {
+            let repo_path = self.board.repo_paths[idx].clone();
             let epic_id = self.input.pending_epic_id.take();
             self.input.mode = InputMode::Normal;
             self.clear_status();
@@ -2167,7 +2178,7 @@ impl App {
         draft.repo_path = repo_path.clone();
         self.input.mode = InputMode::Normal;
         self.clear_status();
-        let epic_id = match &self.view_mode {
+        let epic_id = match &self.board.view_mode {
             ViewMode::Epic { epic_id, .. } => Some(*epic_id),
             _ => None,
         };
@@ -2540,7 +2551,7 @@ impl App {
 
     fn handle_start_epic_wrap_up(&mut self, epic_id: EpicId) -> Vec<Command> {
         let review_count = self
-            .tasks
+            .board.tasks
             .iter()
             .filter(|t| {
                 t.epic_id == Some(epic_id) && t.status == TaskStatus::Review && t.worktree.is_some()
@@ -2570,7 +2581,7 @@ impl App {
         self.input.mode = InputMode::Normal;
 
         let mut review_tasks: Vec<&Task> = self
-            .tasks
+            .board.tasks
             .iter()
             .filter(|t| {
                 t.epic_id == Some(epic_id) && t.status == TaskStatus::Review && t.worktree.is_some()
@@ -2687,13 +2698,13 @@ impl App {
     // -----------------------------------------------------------------------
 
     fn handle_switch_to_security_board(&mut self) -> Vec<Command> {
-        let saved_board = match &self.view_mode {
+        let saved_board = match &self.board.view_mode {
             ViewMode::Board(sel) => sel.clone(),
             ViewMode::Epic { saved_board, .. } => saved_board.clone(),
             ViewMode::ReviewBoard { saved_board, .. } => saved_board.clone(),
             ViewMode::SecurityBoard { saved_board, .. } => saved_board.clone(),
         };
-        self.view_mode = ViewMode::SecurityBoard {
+        self.board.view_mode = ViewMode::SecurityBoard {
             selection: SecurityBoardSelection::new(),
             saved_board,
         };
@@ -2719,13 +2730,13 @@ impl App {
     }
 
     fn handle_switch_to_review_board(&mut self) -> Vec<Command> {
-        let saved_board = match &self.view_mode {
+        let saved_board = match &self.board.view_mode {
             ViewMode::Board(sel) => sel.clone(),
             ViewMode::Epic { saved_board, .. } => saved_board.clone(),
             ViewMode::ReviewBoard { saved_board, .. } => saved_board.clone(),
             ViewMode::SecurityBoard { saved_board, .. } => saved_board.clone(),
         };
-        self.view_mode = ViewMode::ReviewBoard {
+        self.board.view_mode = ViewMode::ReviewBoard {
             mode: ReviewBoardMode::Reviewer,
             selection: ReviewBoardSelection::new(),
             saved_board,
@@ -2739,10 +2750,10 @@ impl App {
     }
 
     fn handle_switch_to_task_board(&mut self) -> Vec<Command> {
-        match &self.view_mode {
+        match &self.board.view_mode {
             ViewMode::ReviewBoard { saved_board, .. }
             | ViewMode::SecurityBoard { saved_board, .. } => {
-                self.view_mode = ViewMode::Board(saved_board.clone());
+                self.board.view_mode = ViewMode::Board(saved_board.clone());
             }
             _ => {}
         }
@@ -2750,7 +2761,7 @@ impl App {
     }
 
     fn handle_toggle_review_board_mode(&mut self) -> Vec<Command> {
-        let ViewMode::ReviewBoard { mode, .. } = &mut self.view_mode else {
+        let ViewMode::ReviewBoard { mode, .. } = &mut self.board.view_mode else {
             return vec![];
         };
         *mode = match mode {
@@ -2760,7 +2771,7 @@ impl App {
         };
         self.clamp_review_selection();
         let mut cmds = vec![];
-        if let ViewMode::ReviewBoard { mode, .. } = &self.view_mode {
+        if let ViewMode::ReviewBoard { mode, .. } = &self.board.view_mode {
             match mode {
                 ReviewBoardMode::Author => {
                     if self.review.needs_my_prs_fetch(REVIEW_REFRESH_INTERVAL)
@@ -2800,7 +2811,7 @@ impl App {
     }
 
     fn clamp_review_selection(&mut self) {
-        let mode = match &self.view_mode {
+        let mode = match &self.board.view_mode {
             ViewMode::ReviewBoard { mode, .. } => *mode,
             _ => ReviewBoardMode::Reviewer,
         };
@@ -2872,7 +2883,7 @@ impl App {
     fn handle_submit_dispatch_repo_path(&mut self, value: String) -> Vec<Command> {
         self.input.buffer.clear();
         let repo_path = if value.is_empty() {
-            if let Some(first) = self.repo_paths.first() {
+            if let Some(first) = self.board.repo_paths.first() {
                 first.clone()
             } else {
                 self.set_status("Repo path required (no saved paths available)".to_string());
@@ -2963,8 +2974,8 @@ impl App {
 
     /// Collect known local repo paths from saved paths and existing tasks.
     fn known_repo_paths(&self) -> Vec<String> {
-        let mut known = self.repo_paths.clone();
-        for t in &self.tasks {
+        let mut known = self.board.repo_paths.clone();
+        for t in &self.board.tasks {
             if !known.contains(&t.repo_path) {
                 known.push(t.repo_path.clone());
             }
@@ -2982,7 +2993,7 @@ impl App {
     }
 
     fn handle_select_all_bot_pr_column(&mut self) -> Vec<Command> {
-        let mode = match &self.view_mode {
+        let mode = match &self.board.view_mode {
             ViewMode::ReviewBoard { mode, .. } => *mode,
             _ => return vec![],
         };
@@ -3092,7 +3103,7 @@ impl App {
 
     /// Return the PR list appropriate for the current review board mode.
     pub fn active_review_prs(&self) -> Vec<&crate::models::ReviewPr> {
-        match &self.view_mode {
+        match &self.board.view_mode {
             ViewMode::ReviewBoard {
                 mode: ReviewBoardMode::Author,
                 ..
@@ -3107,7 +3118,7 @@ impl App {
 
     /// Sorted distinct repos for the currently active review board mode.
     pub fn active_review_repos(&self) -> &[String] {
-        match &self.view_mode {
+        match &self.board.view_mode {
             ViewMode::ReviewBoard {
                 mode: ReviewBoardMode::Author,
                 ..
@@ -3133,7 +3144,7 @@ impl App {
 
     /// Return PRs for a given column index, using the current mode's column mapping.
     pub fn active_prs_for_column(&self, col: usize) -> Vec<&crate::models::ReviewPr> {
-        let mode = match &self.view_mode {
+        let mode = match &self.board.view_mode {
             ViewMode::ReviewBoard { mode, .. } => *mode,
             _ => ReviewBoardMode::Reviewer,
         };
@@ -3189,7 +3200,7 @@ impl App {
     // -----------------------------------------------------------------------
 
     fn handle_dispatch_epic(&mut self, id: EpicId) -> Vec<Command> {
-        let Some(epic) = self.epics.iter().find(|e| e.id == id) else {
+        let Some(epic) = self.board.epics.iter().find(|e| e.id == id) else {
             return vec![];
         };
         let status = crate::models::epic_status(epic);
@@ -3202,7 +3213,7 @@ impl App {
         if epic.plan_path.is_some() {
             // Epic has a plan — dispatch the next backlog subtask sorted by sort_order
             let mut backlog_subtasks: Vec<&Task> = self
-                .tasks
+                .board.tasks
                 .iter()
                 .filter(|t| t.epic_id == Some(id) && t.status == TaskStatus::Backlog)
                 .collect();
@@ -3231,7 +3242,7 @@ impl App {
         } else {
             // No plan — only spawn planning subtask if epic has no active subtasks
             let has_subtasks = self
-                .tasks
+                .board.tasks
                 .iter()
                 .any(|t| t.epic_id == Some(id) && t.status != TaskStatus::Archived);
             if has_subtasks {
@@ -3244,48 +3255,48 @@ impl App {
     }
 
     fn handle_enter_epic(&mut self, epic_id: EpicId) -> Vec<Command> {
-        let saved_board = match &self.view_mode {
+        let saved_board = match &self.board.view_mode {
             ViewMode::Board(sel) => sel.clone(),
             ViewMode::Epic { saved_board, .. } => saved_board.clone(),
             ViewMode::ReviewBoard { saved_board, .. } => saved_board.clone(),
             ViewMode::SecurityBoard { saved_board, .. } => saved_board.clone(),
         };
-        self.view_mode = ViewMode::Epic {
+        self.board.view_mode = ViewMode::Epic {
             epic_id,
             selection: BoardSelection::new(),
             saved_board,
         };
-        self.detail_visible = false;
+        self.board.detail_visible = false;
         vec![]
     }
 
     fn handle_exit_epic(&mut self) -> Vec<Command> {
-        if let ViewMode::Epic { saved_board, .. } = &self.view_mode {
-            self.view_mode = ViewMode::Board(saved_board.clone());
+        if let ViewMode::Epic { saved_board, .. } = &self.board.view_mode {
+            self.board.view_mode = ViewMode::Board(saved_board.clone());
         }
-        self.detail_visible = false;
+        self.board.detail_visible = false;
         vec![]
     }
 
     fn handle_refresh_epics(&mut self, epics: Vec<Epic>) -> Vec<Command> {
-        self.epics = epics;
-        let valid_ids: HashSet<EpicId> = self.epics.iter().map(|e| e.id).collect();
+        self.board.epics = epics;
+        let valid_ids: HashSet<EpicId> = self.board.epics.iter().map(|e| e.id).collect();
         self.select.epics.retain(|id| valid_ids.contains(id));
         vec![]
     }
 
     fn handle_refresh_usage(&mut self, usage: Vec<TaskUsage>) -> Vec<Command> {
-        self.usage = usage.into_iter().map(|u| (u.task_id, u)).collect();
+        self.board.usage = usage.into_iter().map(|u| (u.task_id, u)).collect();
         vec![]
     }
 
     fn handle_epic_created(&mut self, epic: Epic) -> Vec<Command> {
-        self.epics.push(epic);
+        self.board.epics.push(epic);
         vec![]
     }
 
     fn handle_edit_epic(&mut self, id: EpicId) -> Vec<Command> {
-        if let Some(epic) = self.epics.iter().find(|e| e.id == id) {
+        if let Some(epic) = self.board.epics.iter().find(|e| e.id == id) {
             vec![Command::EditEpicInEditor(epic.clone())]
         } else {
             vec![]
@@ -3293,7 +3304,7 @@ impl App {
     }
 
     fn handle_epic_edited(&mut self, epic: Epic) -> Vec<Command> {
-        if let Some(e) = self.epics.iter_mut().find(|e| e.id == epic.id) {
+        if let Some(e) = self.board.epics.iter_mut().find(|e| e.id == epic.id) {
             e.title = epic.title;
             e.description = epic.description;
             e.repo_path = epic.repo_path;
@@ -3306,7 +3317,7 @@ impl App {
         let mut cmds = Vec::new();
         // Clean up worktrees/tmux for subtasks before deleting
         let subtask_ids: Vec<TaskId> = self
-            .tasks
+            .board.tasks
             .iter()
             .filter(|t| t.epic_id == Some(id))
             .map(|t| t.id)
@@ -3320,10 +3331,10 @@ impl App {
                 self.clear_agent_tracking(task_id);
             }
         }
-        self.epics.retain(|e| e.id != id);
-        self.tasks.retain(|t| t.epic_id != Some(id));
+        self.board.epics.retain(|e| e.id != id);
+        self.board.tasks.retain(|t| t.epic_id != Some(id));
         // If we were viewing this epic, exit
-        if matches!(&self.view_mode, ViewMode::Epic { epic_id, .. } if *epic_id == id) {
+        if matches!(&self.board.view_mode, ViewMode::Epic { epic_id, .. } if *epic_id == id) {
             self.handle_exit_epic();
         }
         self.clamp_selection();
@@ -3341,7 +3352,7 @@ impl App {
     }
 
     fn handle_move_epic_status(&mut self, id: EpicId, direction: MoveDirection) -> Vec<Command> {
-        let Some(epic) = self.epics.iter_mut().find(|e| e.id == id) else {
+        let Some(epic) = self.board.epics.iter_mut().find(|e| e.id == id) else {
             return vec![];
         };
         let new_status = match direction {
@@ -3361,7 +3372,7 @@ impl App {
         // Moving to Done cleans up all subtask tmux windows
         if new_status == TaskStatus::Done {
             let subtask_ids: Vec<TaskId> = self
-                .tasks
+                .board.tasks
                 .iter()
                 .filter(|t| t.epic_id == Some(id) && t.tmux_window.is_some())
                 .map(|t| t.id)
@@ -3382,7 +3393,7 @@ impl App {
     fn handle_archive_epic(&mut self, id: EpicId) -> Vec<Command> {
         let mut cmds = Vec::new();
         let subtask_ids: Vec<TaskId> = self
-            .tasks
+            .board.tasks
             .iter()
             .filter(|t| t.epic_id == Some(id) && t.status != TaskStatus::Archived)
             .map(|t| t.id)
@@ -3390,8 +3401,8 @@ impl App {
         for task_id in subtask_ids {
             cmds.extend(self.handle_archive_task(task_id));
         }
-        self.epics.retain(|e| e.id != id);
-        if matches!(&self.view_mode, ViewMode::Epic { epic_id, .. } if *epic_id == id) {
+        self.board.epics.retain(|e| e.id != id);
+        if matches!(&self.board.view_mode, ViewMode::Epic { epic_id, .. } if *epic_id == id) {
             self.handle_exit_epic();
         }
         self.clamp_selection();
@@ -3464,7 +3475,7 @@ impl App {
     fn handle_submit_epic_repo_path(&mut self, value: String) -> Vec<Command> {
         self.input.buffer.clear();
         let repo_path = if value.is_empty() {
-            if let Some(first) = self.repo_paths.first() {
+            if let Some(first) = self.board.repo_paths.first() {
                 first.clone()
             } else {
                 self.set_status("Repo path required".to_string());
@@ -3487,7 +3498,7 @@ impl App {
     }
 
     fn handle_move_repo_cursor(&mut self, delta: isize) -> Vec<Command> {
-        let count = self.repo_paths.len();
+        let count = self.board.repo_paths.len();
         if count == 0 {
             return vec![];
         }
@@ -3529,10 +3540,10 @@ impl App {
     }
 
     fn handle_toggle_all_repo_filter(&mut self) -> Vec<Command> {
-        if self.filter.repos.len() == self.repo_paths.len() {
+        if self.filter.repos.len() == self.board.repo_paths.len() {
             self.filter.repos.clear();
         } else {
-            self.filter.repos = self.repo_paths.iter().cloned().collect();
+            self.filter.repos = self.board.repo_paths.iter().cloned().collect();
         }
         self.clamp_selection();
         vec![]
@@ -3629,7 +3640,7 @@ impl App {
     fn handle_load_filter_preset(&mut self, name: String) -> Vec<Command> {
         if let Some((_, repos, mode)) = self.filter.presets.iter().find(|(n, _, _)| *n == name) {
             // Intersect with known repo_paths to skip stale entries
-            let known: HashSet<&String> = self.repo_paths.iter().collect();
+            let known: HashSet<&String> = self.board.repo_paths.iter().collect();
             self.filter.repos = repos
                 .iter()
                 .filter(|p| known.contains(p))
@@ -3658,7 +3669,7 @@ impl App {
     }
 
     fn handle_start_delete_repo_path(&mut self) -> Vec<Command> {
-        if self.repo_paths.is_empty() {
+        if self.board.repo_paths.is_empty() {
             return vec![];
         }
         self.input.mode = InputMode::ConfirmDeleteRepoPath;
