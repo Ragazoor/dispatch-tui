@@ -850,6 +850,20 @@ impl App {
             KeyCode::Char('t') => self.update(Message::ToggleSecurityKindFilter),
             KeyCode::Char('?') => self.update(Message::ToggleHelp),
 
+            KeyCode::Char('g') => {
+                if let Some(alert) = self.selected_security_alert() {
+                    if let Some(window) = &alert.tmux_window {
+                        vec![Command::JumpToTmux {
+                            window: window.clone(),
+                        }]
+                    } else {
+                        self.update(Message::StatusInfo("No active session".to_string()))
+                    }
+                } else {
+                    vec![]
+                }
+            }
+
             _ => vec![],
         }
     }
@@ -1027,6 +1041,20 @@ impl App {
             KeyCode::Char('e') => {
                 if let ViewMode::ReviewBoard { mode, .. } = self.view_mode {
                     vec![Command::EditGithubQueries(mode)]
+                } else {
+                    vec![]
+                }
+            }
+
+            KeyCode::Char('g') => {
+                if let Some(pr) = self.selected_review_pr() {
+                    if let Some(window) = &pr.tmux_window {
+                        vec![Command::JumpToTmux {
+                            window: window.clone(),
+                        }]
+                    } else {
+                        self.update(Message::StatusInfo("No active session".to_string()))
+                    }
                 } else {
                     vec![]
                 }

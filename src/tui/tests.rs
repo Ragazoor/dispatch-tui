@@ -11425,3 +11425,57 @@ fn archive_q_quits() {
     app.handle_key(make_key(KeyCode::Char('q')));
     assert_eq!(app.input.mode, InputMode::ConfirmQuit);
 }
+
+#[test]
+fn g_on_review_board_jumps_to_agent() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+
+    let mut pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
+    pr.tmux_window = Some("dispatch:review-42".to_string());
+    app.update(Message::ReviewPrsLoaded(vec![pr]));
+
+    let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('g')));
+    assert!(cmds.iter().any(
+        |c| matches!(c, Command::JumpToTmux { window } if window == "dispatch:review-42")
+    ));
+}
+
+#[test]
+fn g_on_review_board_without_agent_shows_status() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+
+    let pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
+    app.update(Message::ReviewPrsLoaded(vec![pr]));
+
+    let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('g')));
+    assert!(cmds.is_empty()); // StatusInfo is handled inline via self.update(), returns empty
+}
+
+#[test]
+fn g_on_security_board_jumps_to_agent() {
+    let mut app = make_app();
+    app.update(Message::SwitchToSecurityBoard);
+
+    let mut alert = make_security_alert(1, "acme/app", crate::models::AlertSeverity::Critical);
+    alert.tmux_window = Some("dispatch:fix-1".to_string());
+    app.update(Message::SecurityAlertsLoaded(vec![alert]));
+
+    let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('g')));
+    assert!(cmds.iter().any(
+        |c| matches!(c, Command::JumpToTmux { window } if window == "dispatch:fix-1")
+    ));
+}
+
+#[test]
+fn g_on_security_board_without_agent_shows_status() {
+    let mut app = make_app();
+    app.update(Message::SwitchToSecurityBoard);
+
+    let alert = make_security_alert(1, "acme/app", crate::models::AlertSeverity::Critical);
+    app.update(Message::SecurityAlertsLoaded(vec![alert]));
+
+    let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('g')));
+    assert!(cmds.is_empty());
+}
