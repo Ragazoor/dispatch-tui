@@ -29,6 +29,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (23, migrate_v23_create_bot_prs_table),
     (24, migrate_v24_create_security_alerts_table),
     (25, migrate_v25_rename_plan_to_plan_path),
+    (26, migrate_v26_add_agent_columns),
 ];
 
 fn migrate_v1_add_plan_column(conn: &Connection) -> Result<()> {
@@ -490,6 +491,18 @@ fn migrate_v25_rename_plan_to_plan_path(conn: &Connection) -> Result<()> {
         .context("Failed to rename tasks.plan to plan_path")?;
     conn.execute_batch("ALTER TABLE epics RENAME COLUMN plan TO plan_path")
         .context("Failed to rename epics.plan to plan_path")?;
+    Ok(())
+}
+
+fn migrate_v26_add_agent_columns(conn: &Connection) -> Result<()> {
+    for table in &["review_prs", "my_prs", "bot_prs", "security_alerts"] {
+        let _ = conn.execute_batch(&format!(
+            "ALTER TABLE {table} ADD COLUMN tmux_window TEXT"
+        ));
+        let _ = conn.execute_batch(&format!(
+            "ALTER TABLE {table} ADD COLUMN worktree TEXT"
+        ));
+    }
     Ok(())
 }
 

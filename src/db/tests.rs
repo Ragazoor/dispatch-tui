@@ -201,7 +201,7 @@ fn fresh_db_has_latest_schema_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 25, "fresh DB should be at schema version 25");
+    assert_eq!(version, 26, "fresh DB should be at schema version 26");
 }
 
 #[test]
@@ -273,7 +273,7 @@ fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 25);
+    assert_eq!(version, 26);
 }
 
 #[test]
@@ -353,7 +353,56 @@ fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 25);
+    assert_eq!(version, 26);
+}
+
+#[test]
+fn migrate_v26_adds_agent_columns() {
+    let db = in_memory_db();
+    let conn = db.conn.lock().unwrap();
+
+    // Verify columns exist by inserting data with them
+    conn.execute(
+        "INSERT INTO review_prs (repo, number, title, author, url, is_draft,
+         created_at, updated_at, additions, deletions, review_decision,
+         labels, body, head_ref, ci_status, reviewers, tmux_window, worktree)
+         VALUES ('acme/app', 1, 'Test', 'alice', 'https://example.com', 0,
+         '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z', 0, 0, 'ReviewRequired',
+         '[]', '', '', 'None', '[]', 'dispatch:review-1', '/tmp/wt')",
+        [],
+    )
+    .unwrap();
+
+    let (tw, wt): (Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT tmux_window, worktree FROM review_prs WHERE repo = 'acme/app' AND number = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(tw.as_deref(), Some("dispatch:review-1"));
+    assert_eq!(wt.as_deref(), Some("/tmp/wt"));
+
+    // Verify security_alerts too
+    conn.execute(
+        "INSERT INTO security_alerts (repo, number, kind, severity, title,
+         url, created_at, state, description, tmux_window, worktree)
+         VALUES ('acme/app', 1, 'dependabot', 'high', 'Alert',
+         'https://example.com', '2024-01-01T00:00:00Z', 'open', 'desc',
+         'dispatch:fix-1', '/tmp/wt4')",
+        [],
+    )
+    .unwrap();
+
+    let (tw, wt): (Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT tmux_window, worktree FROM security_alerts WHERE repo = 'acme/app'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(tw.as_deref(), Some("dispatch:fix-1"));
+    assert_eq!(wt.as_deref(), Some("/tmp/wt4"));
 }
 
 #[test]
@@ -415,7 +464,7 @@ fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 25);
+    assert_eq!(version, 26);
 }
 
 #[test]
@@ -1367,7 +1416,7 @@ fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 25);
+    assert_eq!(version, 26);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -1594,7 +1643,7 @@ fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 25);
+    assert_eq!(version, 26);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
