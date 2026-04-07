@@ -687,12 +687,230 @@ impl App {
     /// Process a message and return a list of side-effect commands.
     pub fn update(&mut self, msg: Message) -> Vec<Command> {
         match msg {
+            // Board navigation, view toggles, system events
+            msg @ (Message::Tick
+            | Message::Quit
+            | Message::NavigateColumn(_)
+            | Message::NavigateRow(_)
+            | Message::MoveTask { .. }
+            | Message::ReorderItem(_)
+            | Message::ToggleDetail
+            | Message::ToggleHelp
+            | Message::ToggleNotifications
+            | Message::ToggleArchive
+            | Message::ToggleSplitMode
+            | Message::SwapSplitPane(_)
+            | Message::SplitPaneOpened { .. }
+            | Message::SplitPaneClosed
+            | Message::RefreshTasks(_)
+            | Message::RefreshUsage(_)
+            | Message::Error(_)
+            | Message::DismissError
+            | Message::StatusInfo(_)
+            | Message::RepoPathsUpdated(_)
+            | Message::MessageReceived(_)
+            | Message::OpenInBrowser { .. }
+            | Message::TmuxOutput { .. }
+            | Message::WindowGone(_)) => self.dispatch_board(msg),
+
+            // Task lifecycle, dispatch, selection, wrap-up
+            msg @ (Message::DispatchTask(_)
+            | Message::BrainstormTask(_)
+            | Message::PlanTask(_)
+            | Message::Dispatched { .. }
+            | Message::TaskCreated { .. }
+            | Message::DeleteTask(_)
+            | Message::ResumeTask(_)
+            | Message::Resumed { .. }
+            | Message::DispatchFailed(_)
+            | Message::TaskEdited(_)
+            | Message::StaleAgent(_)
+            | Message::AgentCrashed(_)
+            | Message::KillAndRetry(_)
+            | Message::RetryResume(_)
+            | Message::RetryFresh(_)
+            | Message::ArchiveTask(_)
+            | Message::QuickDispatch { .. }
+            | Message::StartQuickDispatchSelection
+            | Message::SelectQuickDispatchRepo(_)
+            | Message::FinishComplete(_)
+            | Message::FinishFailed { .. }
+            | Message::ConfirmDone
+            | Message::CancelDone
+            | Message::StartWrapUp(_)
+            | Message::WrapUpRebase
+            | Message::WrapUpPr
+            | Message::CancelWrapUp
+            | Message::DetachTmux(_)
+            | Message::BatchDetachTmux(_)
+            | Message::ConfirmDetachTmux
+            | Message::ToggleSelect(_)
+            | Message::ClearSelection
+            | Message::SelectAllColumn
+            | Message::BatchMoveTasks { .. }
+            | Message::BatchArchiveTasks(_)) => self.dispatch_task(msg),
+
+            // Form input, text entry, creation flows
+            msg @ (Message::StartNewTask
+            | Message::CopyTask
+            | Message::CancelInput
+            | Message::ConfirmDeleteStart
+            | Message::ConfirmDeleteYes
+            | Message::CancelDelete
+            | Message::SubmitTitle(_)
+            | Message::SubmitDescription(_)
+            | Message::DescriptionEditorResult(_)
+            | Message::SubmitRepoPath(_)
+            | Message::SubmitDispatchRepoPath(_)
+            | Message::SubmitTag(_)
+            | Message::InputChar(_)
+            | Message::InputBackspace
+            | Message::CancelRetry) => self.dispatch_input(msg),
+
+            // Epic CRUD, lifecycle, wrap-up
+            msg @ (Message::DispatchEpic(_)
+            | Message::EnterEpic(_)
+            | Message::ExitEpic
+            | Message::RefreshEpics(_)
+            | Message::EpicCreated(_)
+            | Message::EditEpic(_)
+            | Message::EpicEdited(_)
+            | Message::DeleteEpic(_)
+            | Message::ConfirmDeleteEpic
+            | Message::MoveEpicStatus(_, _)
+            | Message::ArchiveEpic(_)
+            | Message::ConfirmArchiveEpic
+            | Message::StartNewEpic
+            | Message::SubmitEpicTitle(_)
+            | Message::SubmitEpicDescription(_)
+            | Message::SubmitEpicRepoPath(_)
+            | Message::StartEpicWrapUp(_)
+            | Message::EpicWrapUpRebase
+            | Message::EpicWrapUpPr
+            | Message::CancelEpicWrapUp
+            | Message::CancelMergeQueue
+            | Message::ToggleSelectEpic(_)
+            | Message::BatchArchiveEpics(_)) => self.dispatch_epic(msg),
+
+            // Review board, PR flow, review agents, bot PRs
+            msg @ (Message::SwitchToReviewBoard
+            | Message::SwitchToTaskBoard
+            | Message::ToggleReviewBoardMode
+            | Message::ReviewPrsLoaded(_)
+            | Message::ReviewPrsFetchFailed(_)
+            | Message::MyPrsLoaded(_)
+            | Message::MyPrsFetchFailed(_)
+            | Message::ToggleReviewDetail
+            | Message::DispatchReviewAgent(_)
+            | Message::ReviewAgentDispatched { .. }
+            | Message::ReviewAgentFailed { .. }
+            | Message::RefreshReviewPrs
+            | Message::RefreshBotPrs
+            | Message::BotPrsLoaded(_)
+            | Message::BotPrsFetchFailed(_)
+            | Message::ToggleSelectBotPr(_)
+            | Message::SelectAllBotPrColumn
+            | Message::ClearBotPrSelection
+            | Message::StartBatchApprove
+            | Message::StartBatchMerge
+            | Message::ConfirmBatchApprove
+            | Message::ConfirmBatchMerge
+            | Message::CancelBatchOperation
+            | Message::PrCreated { .. }
+            | Message::PrFailed { .. }
+            | Message::PrMerged(_)
+            | Message::StartMergePr(_)
+            | Message::ConfirmMergePr
+            | Message::CancelMergePr
+            | Message::MergePrFailed { .. }
+            | Message::PrReviewState { .. }
+            | Message::ReviewStatusUpdated { .. }
+            | Message::DetachReviewAgent { .. }
+            | Message::StartReviewRepoFilter
+            | Message::CloseReviewRepoFilter
+            | Message::ToggleReviewRepoFilter(_)
+            | Message::ToggleAllReviewRepoFilter
+            | Message::ToggleReviewRepoFilterMode
+            | Message::ToggleDispatchPrFilter) => self.dispatch_review(msg),
+
+            // Security board, fix agents, task filters, filter presets
+            msg @ (Message::SwitchToSecurityBoard
+            | Message::SecurityAlertsLoaded(_)
+            | Message::SecurityAlertsFetchFailed(_)
+            | Message::RefreshSecurityAlerts
+            | Message::ToggleSecurityDetail
+            | Message::ToggleSecurityKindFilter
+            | Message::StartSecurityRepoFilter
+            | Message::CloseSecurityRepoFilter
+            | Message::ToggleSecurityRepoFilter(_)
+            | Message::ToggleAllSecurityRepoFilter
+            | Message::ToggleSecurityRepoFilterMode
+            | Message::DispatchFixAgent { .. }
+            | Message::FixAgentDispatched { .. }
+            | Message::FixAgentFailed { .. }
+            | Message::DetachFixAgent { .. }
+            | Message::StartRepoFilter
+            | Message::CloseRepoFilter
+            | Message::ToggleRepoFilter(_)
+            | Message::ToggleAllRepoFilter
+            | Message::ToggleRepoFilterMode
+            | Message::MoveRepoCursor(_)
+            | Message::StartSavePreset
+            | Message::SaveFilterPreset(_)
+            | Message::LoadFilterPreset(_)
+            | Message::StartDeletePreset
+            | Message::DeleteFilterPreset(_)
+            | Message::StartDeleteRepoPath
+            | Message::DeleteRepoPath(_)
+            | Message::CancelPresetInput
+            | Message::FilterPresetsLoaded(_)) => self.dispatch_security_and_filters(msg),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Sub-dispatchers
+    // -----------------------------------------------------------------------
+
+    /// Board navigation, view toggles, and system events.
+    fn dispatch_board(&mut self, msg: Message) -> Vec<Command> {
+        match msg {
             Message::Tick => self.handle_tick(),
             Message::Quit => self.handle_quit(),
             Message::NavigateColumn(delta) => self.handle_navigate_column(delta),
             Message::NavigateRow(delta) => self.handle_navigate_row(delta),
             Message::MoveTask { id, direction } => self.handle_move_task(id, direction),
             Message::ReorderItem(dir) => self.handle_reorder_item(dir),
+            Message::ToggleDetail => self.handle_toggle_detail(),
+            Message::ToggleHelp => self.handle_toggle_help(),
+            Message::ToggleNotifications => self.handle_toggle_notifications(),
+            Message::ToggleArchive => self.handle_toggle_archive(),
+            Message::ToggleSplitMode => self.handle_toggle_split_mode(),
+            Message::SwapSplitPane(task_id) => self.handle_swap_split_pane(task_id),
+            Message::SplitPaneOpened { pane_id, task_id } => {
+                self.handle_split_pane_opened(pane_id, task_id)
+            }
+            Message::SplitPaneClosed => self.handle_split_pane_closed(),
+            Message::RefreshTasks(tasks) => self.handle_refresh_tasks(tasks),
+            Message::RefreshUsage(usage) => self.handle_refresh_usage(usage),
+            Message::Error(msg) => self.handle_error(msg),
+            Message::DismissError => self.handle_dismiss_error(),
+            Message::StatusInfo(msg) => self.handle_status_info(msg),
+            Message::RepoPathsUpdated(paths) => self.handle_repo_paths_updated(paths),
+            Message::MessageReceived(id) => self.handle_message_received(id),
+            Message::OpenInBrowser { url } => self.handle_open_in_browser(url),
+            Message::TmuxOutput {
+                id,
+                output,
+                activity_ts,
+            } => self.handle_tmux_output(id, output, activity_ts),
+            Message::WindowGone(id) => self.handle_window_gone(id),
+            _ => unreachable!(),
+        }
+    }
+
+    /// Task lifecycle: dispatch, resume, failure recovery, selection, wrap-up.
+    fn dispatch_task(&mut self, msg: Message) -> Vec<Command> {
+        match msg {
             Message::DispatchTask(id) => self.handle_dispatch_task(id),
             Message::BrainstormTask(id) => self.handle_brainstorm_task(id),
             Message::PlanTask(id) => self.handle_plan_task(id),
@@ -704,43 +922,50 @@ impl App {
             } => self.handle_dispatched(id, worktree, tmux_window, switch_focus),
             Message::TaskCreated { task } => self.handle_task_created(task),
             Message::DeleteTask(id) => self.handle_delete_task(id),
-            Message::ToggleDetail => self.handle_toggle_detail(),
-            Message::TmuxOutput {
-                id,
-                output,
-                activity_ts,
-            } => self.handle_tmux_output(id, output, activity_ts),
-            Message::WindowGone(id) => self.handle_window_gone(id),
-            Message::RefreshTasks(tasks) => self.handle_refresh_tasks(tasks),
             Message::ResumeTask(id) => self.handle_resume_task(id),
             Message::Resumed { id, tmux_window } => self.handle_resumed(id, tmux_window),
-            Message::Error(msg) => self.handle_error(msg),
-            Message::DispatchFailed(id) => {
-                self.dispatching.remove(&id);
-                vec![]
-            }
+            Message::DispatchFailed(id) => self.handle_dispatch_failed(id),
             Message::TaskEdited(edit) => self.handle_task_edited(edit),
-            Message::RepoPathsUpdated(paths) => self.handle_repo_paths_updated(paths),
-            Message::QuickDispatch { repo_path, epic_id } => {
-                self.handle_quick_dispatch(repo_path, epic_id)
-            }
             Message::StaleAgent(id) => self.handle_stale_agent(id),
             Message::AgentCrashed(id) => self.handle_agent_crashed(id),
             Message::KillAndRetry(id) => self.handle_kill_and_retry(id),
             Message::RetryResume(id) => self.handle_retry_resume(id),
             Message::RetryFresh(id) => self.handle_retry_fresh(id),
             Message::ArchiveTask(id) => self.handle_archive_task(id),
-            Message::ToggleArchive => self.handle_toggle_archive(),
+            Message::QuickDispatch { repo_path, epic_id } => {
+                self.handle_quick_dispatch(repo_path, epic_id)
+            }
+            Message::StartQuickDispatchSelection => self.handle_start_quick_dispatch_selection(),
+            Message::SelectQuickDispatchRepo(idx) => self.handle_select_quick_dispatch_repo(idx),
+            Message::FinishComplete(id) => self.handle_finish_complete(id),
+            Message::FinishFailed {
+                id,
+                error,
+                is_conflict,
+            } => self.handle_finish_failed(id, error, is_conflict),
+            Message::ConfirmDone => self.handle_confirm_done(),
+            Message::CancelDone => self.handle_cancel_done(),
+            Message::StartWrapUp(id) => self.handle_start_wrap_up(id),
+            Message::WrapUpRebase => self.handle_wrap_up_rebase(),
+            Message::WrapUpPr => self.handle_wrap_up_pr(),
+            Message::CancelWrapUp => self.handle_cancel_wrap_up(),
+            Message::DetachTmux(id) => self.handle_detach_tmux(vec![id]),
+            Message::BatchDetachTmux(ids) => self.handle_detach_tmux(ids),
+            Message::ConfirmDetachTmux => self.handle_confirm_detach_tmux(),
             Message::ToggleSelect(id) => self.handle_toggle_select(id),
-            Message::ToggleSelectEpic(id) => self.handle_toggle_select_epic(id),
             Message::ClearSelection => self.handle_clear_selection(),
             Message::SelectAllColumn => self.handle_select_all_column(),
             Message::BatchMoveTasks { ids, direction } => {
                 self.handle_batch_move_tasks(ids, direction)
             }
             Message::BatchArchiveTasks(ids) => self.handle_batch_archive_tasks(ids),
-            Message::BatchArchiveEpics(ids) => self.handle_batch_archive_epics(ids),
-            Message::DismissError => self.handle_dismiss_error(),
+            _ => unreachable!(),
+        }
+    }
+
+    /// Form input: text entry, task creation flows, confirmations.
+    fn dispatch_input(&mut self, msg: Message) -> Vec<Command> {
+        match msg {
             Message::StartNewTask => self.handle_start_new_task(),
             Message::CopyTask => self.handle_copy_task(),
             Message::CancelInput => self.handle_cancel_input(),
@@ -750,11 +975,7 @@ impl App {
             Message::SubmitTitle(value) => self.handle_submit_title(value),
             Message::SubmitDescription(value) => self.handle_submit_description(value),
             Message::DescriptionEditorResult(value) => {
-                match self.input.mode {
-                    InputMode::InputDescription => self.handle_submit_description(value),
-                    InputMode::InputEpicDescription => self.handle_submit_epic_description(value),
-                    _ => vec![],
-                }
+                self.handle_description_editor_result(value)
             }
             Message::SubmitRepoPath(value) => self.handle_submit_repo_path(value),
             Message::SubmitDispatchRepoPath(value) => {
@@ -763,35 +984,18 @@ impl App {
             Message::SubmitTag(tag) => self.handle_submit_tag(tag),
             Message::InputChar(c) => self.handle_input_char(c),
             Message::InputBackspace => self.handle_input_backspace(),
-            Message::StartQuickDispatchSelection => self.handle_start_quick_dispatch_selection(),
-            Message::SelectQuickDispatchRepo(idx) => self.handle_select_quick_dispatch_repo(idx),
             Message::CancelRetry => self.handle_cancel_retry(),
-            Message::StatusInfo(msg) => self.handle_status_info(msg),
-            Message::ToggleHelp => self.handle_toggle_help(),
-            // Split mode
-            Message::ToggleSplitMode => self.handle_toggle_split_mode(),
-            Message::SwapSplitPane(task_id) => self.handle_swap_split_pane(task_id),
-            Message::SplitPaneOpened { pane_id, task_id } => {
-                self.handle_split_pane_opened(pane_id, task_id)
-            }
-            Message::SplitPaneClosed => self.handle_split_pane_closed(),
-            // Finish (rebase + cleanup)
-            Message::FinishComplete(id) => self.handle_finish_complete(id),
-            Message::FinishFailed {
-                id,
-                error,
-                is_conflict,
-            } => self.handle_finish_failed(id, error, is_conflict),
-            // Done confirmation (no cleanup, just status change)
-            Message::ConfirmDone => self.handle_confirm_done(),
-            Message::CancelDone => self.handle_cancel_done(),
-            Message::ToggleNotifications => self.handle_toggle_notifications(),
-            // Epic messages
+            _ => unreachable!(),
+        }
+    }
+
+    /// Epic CRUD, lifecycle, and wrap-up.
+    fn dispatch_epic(&mut self, msg: Message) -> Vec<Command> {
+        match msg {
             Message::DispatchEpic(id) => self.handle_dispatch_epic(id),
             Message::EnterEpic(epic_id) => self.handle_enter_epic(epic_id),
             Message::ExitEpic => self.handle_exit_epic(),
             Message::RefreshEpics(epics) => self.handle_refresh_epics(epics),
-            Message::RefreshUsage(usage) => self.handle_refresh_usage(usage),
             Message::EpicCreated(epic) => self.handle_epic_created(epic),
             Message::EditEpic(id) => self.handle_edit_epic(id),
             Message::EpicEdited(epic) => self.handle_epic_edited(epic),
@@ -804,54 +1008,20 @@ impl App {
             Message::SubmitEpicTitle(v) => self.handle_submit_epic_title(v),
             Message::SubmitEpicDescription(v) => self.handle_submit_epic_description(v),
             Message::SubmitEpicRepoPath(v) => self.handle_submit_epic_repo_path(v),
-            // PR flow
-            Message::PrCreated { id, pr_url } => self.handle_pr_created(id, pr_url),
-            Message::PrFailed { id, error } => self.handle_pr_failed(id, error),
-            Message::PrMerged(id) => self.handle_pr_merged(id),
-            Message::StartMergePr(id) => self.handle_start_merge_pr(id),
-            Message::ConfirmMergePr => self.handle_confirm_merge_pr(),
-            Message::CancelMergePr => self.handle_cancel_merge_pr(),
-            Message::MergePrFailed { id, error } => self.handle_merge_pr_failed(id, error),
-            Message::PrReviewState {
-                id,
-                review_decision,
-            } => self.handle_pr_review_state(id, review_decision),
-            // Repo filter
-            Message::StartRepoFilter => self.handle_start_repo_filter(),
-            Message::CloseRepoFilter => self.handle_close_repo_filter(),
-            Message::ToggleRepoFilter(path) => self.handle_toggle_repo_filter(path),
-            Message::ToggleAllRepoFilter => self.handle_toggle_all_repo_filter(),
-            Message::ToggleRepoFilterMode => self.handle_toggle_repo_filter_mode(),
-            Message::MoveRepoCursor(delta) => self.handle_move_repo_cursor(delta),
-            // Review repo filter
-            Message::StartReviewRepoFilter => self.handle_start_review_repo_filter(),
-            Message::CloseReviewRepoFilter => self.handle_close_review_repo_filter(),
-            Message::ToggleReviewRepoFilter(repo) => self.handle_toggle_review_repo_filter(repo),
-            Message::ToggleAllReviewRepoFilter => self.handle_toggle_all_review_repo_filter(),
-            Message::ToggleReviewRepoFilterMode => self.handle_toggle_review_repo_filter_mode(),
-            Message::ToggleDispatchPrFilter => self.handle_toggle_dispatch_pr_filter(),
-            // Wrap up
-            Message::StartWrapUp(id) => self.handle_start_wrap_up(id),
-            Message::WrapUpRebase => self.handle_wrap_up_rebase(),
-            Message::WrapUpPr => self.handle_wrap_up_pr(),
-            Message::CancelWrapUp => self.handle_cancel_wrap_up(),
-            // Epic batch wrap-up
             Message::StartEpicWrapUp(id) => self.handle_start_epic_wrap_up(id),
             Message::EpicWrapUpRebase => self.handle_epic_wrap_up(MergeAction::Rebase),
             Message::EpicWrapUpPr => self.handle_epic_wrap_up(MergeAction::Pr),
             Message::CancelEpicWrapUp => self.handle_cancel_epic_wrap_up(),
             Message::CancelMergeQueue => self.handle_cancel_merge_queue(),
-            // Detach tmux panel
-            Message::DetachTmux(id) => self.handle_detach_tmux(vec![id]),
-            Message::BatchDetachTmux(ids) => self.handle_detach_tmux(ids),
-            Message::ConfirmDetachTmux => self.handle_confirm_detach_tmux(),
-            Message::MessageReceived(id) => {
-                self.agents
-                    .message_flash
-                    .insert(id, std::time::Instant::now());
-                vec![]
-            }
-            // Review board
+            Message::ToggleSelectEpic(id) => self.handle_toggle_select_epic(id),
+            Message::BatchArchiveEpics(ids) => self.handle_batch_archive_epics(ids),
+            _ => unreachable!(),
+        }
+    }
+
+    /// Review board: PR flow, review agents, bot PRs, review filters.
+    fn dispatch_review(&mut self, msg: Message) -> Vec<Command> {
+        match msg {
             Message::SwitchToReviewBoard => self.handle_switch_to_review_board(),
             Message::SwitchToTaskBoard => self.handle_switch_to_task_board(),
             Message::ToggleReviewBoardMode => self.handle_toggle_review_board_mode(),
@@ -866,143 +1036,72 @@ impl App {
                 number,
                 tmux_window,
                 worktree,
-            } => {
-                self.dispatching_review.remove(&(github_repo.clone(), number));
-                let repo_short = github_repo.split('/').next_back().unwrap_or(&github_repo);
-                self.set_status(format!("Review agent dispatched for {repo_short}#{number}"));
-                let table =
-                    self.find_and_set_pr_agent(&github_repo, number, &tmux_window, &worktree);
-                vec![Command::PersistReviewAgent {
-                    table,
-                    github_repo,
-                    number,
-                    tmux_window,
-                    worktree,
-                }]
-            }
+            } => self.handle_review_agent_dispatched(github_repo, number, tmux_window, worktree),
             Message::ReviewAgentFailed {
                 github_repo,
                 number,
                 error,
-            } => {
-                self.dispatching_review.remove(&(github_repo, number));
-                self.set_status(format!("Review dispatch failed: {error}"));
-                vec![]
-            }
-            Message::OpenInBrowser { url } => vec![Command::OpenInBrowser { url }],
-            Message::RefreshReviewPrs => {
-                let mut cmds = vec![];
-                match &self.board.view_mode {
-                    ViewMode::ReviewBoard {
-                        mode: ReviewBoardMode::Author,
-                        ..
-                    } => {
-                        self.review.authored.loading = true;
-                        cmds.push(Command::FetchMyPrs);
-                    }
-                    ViewMode::ReviewBoard {
-                        mode: ReviewBoardMode::Dependabot,
-                        ..
-                    } => {
-                        self.review.bot.loading = true;
-                        cmds.push(Command::FetchBotPrs);
-                    }
-                    _ => {
-                        self.review.review.loading = true;
-                        cmds.push(Command::FetchReviewPrs);
-                    }
-                }
-                cmds
-            }
-            Message::RefreshBotPrs => {
-                self.review.bot.loading = true;
-                vec![Command::FetchBotPrs]
-            }
+            } => self.handle_review_agent_failed(github_repo, number, error),
+            Message::RefreshReviewPrs => self.handle_refresh_review_prs(),
+            Message::RefreshBotPrs => self.handle_refresh_bot_prs(),
             Message::BotPrsLoaded(prs) => self.handle_bot_prs_loaded(prs),
-            Message::BotPrsFetchFailed(err) => {
-                self.review.bot.loading = false;
-                self.review.review.last_error = Some(err);
-                vec![]
-            }
-            Message::ToggleSelectBotPr(url) => {
-                if !self.select.bot_prs.remove(&url) {
-                    self.select.bot_prs.insert(url);
-                }
-                vec![]
-            }
+            Message::BotPrsFetchFailed(err) => self.handle_bot_prs_fetch_failed(err),
+            Message::ToggleSelectBotPr(url) => self.handle_toggle_select_bot_pr(url),
             Message::SelectAllBotPrColumn => self.handle_select_all_bot_pr_column(),
-            Message::ClearBotPrSelection => {
-                self.select.bot_prs.clear();
-                vec![]
-            }
+            Message::ClearBotPrSelection => self.handle_clear_bot_pr_selection(),
             Message::StartBatchApprove => self.handle_start_batch_approve(),
             Message::StartBatchMerge => self.handle_start_batch_merge(),
             Message::ConfirmBatchApprove => self.handle_confirm_batch_approve(),
             Message::ConfirmBatchMerge => self.handle_confirm_batch_merge(),
-            Message::CancelBatchOperation => {
-                self.input.mode = InputMode::Normal;
-                vec![]
+            Message::CancelBatchOperation => self.handle_cancel_batch_operation(),
+            Message::PrCreated { id, pr_url } => self.handle_pr_created(id, pr_url),
+            Message::PrFailed { id, error } => self.handle_pr_failed(id, error),
+            Message::PrMerged(id) => self.handle_pr_merged(id),
+            Message::StartMergePr(id) => self.handle_start_merge_pr(id),
+            Message::ConfirmMergePr => self.handle_confirm_merge_pr(),
+            Message::CancelMergePr => self.handle_cancel_merge_pr(),
+            Message::MergePrFailed { id, error } => self.handle_merge_pr_failed(id, error),
+            Message::PrReviewState {
+                id,
+                review_decision,
+            } => self.handle_pr_review_state(id, review_decision),
+            Message::ReviewStatusUpdated {
+                repo,
+                number,
+                status,
+            } => self.handle_review_status_updated(repo, number, status),
+            Message::DetachReviewAgent { repo, number } => {
+                self.handle_detach_review_agent(repo, number)
             }
-            // Security board
+            Message::StartReviewRepoFilter => self.handle_start_review_repo_filter(),
+            Message::CloseReviewRepoFilter => self.handle_close_review_repo_filter(),
+            Message::ToggleReviewRepoFilter(repo) => self.handle_toggle_review_repo_filter(repo),
+            Message::ToggleAllReviewRepoFilter => self.handle_toggle_all_review_repo_filter(),
+            Message::ToggleReviewRepoFilterMode => self.handle_toggle_review_repo_filter_mode(),
+            Message::ToggleDispatchPrFilter => self.handle_toggle_dispatch_pr_filter(),
+            _ => unreachable!(),
+        }
+    }
+
+    /// Security board, fix agents, task repo filters, and filter presets.
+    fn dispatch_security_and_filters(&mut self, msg: Message) -> Vec<Command> {
+        match msg {
             Message::SwitchToSecurityBoard => self.handle_switch_to_security_board(),
             Message::SecurityAlertsLoaded(alerts) => self.handle_security_alerts_loaded(alerts),
             Message::SecurityAlertsFetchFailed(err) => {
-                self.security.loading = false;
-                self.security.last_error = Some(err);
-                vec![]
+                self.handle_security_alerts_fetch_failed(err)
             }
-            Message::RefreshSecurityAlerts => {
-                self.security.loading = true;
-                vec![Command::FetchSecurityAlerts]
-            }
-            Message::ToggleSecurityDetail => {
-                self.security.detail_visible = !self.security.detail_visible;
-                vec![]
-            }
-            Message::ToggleSecurityKindFilter => {
-                self.security.kind_filter = match self.security.kind_filter {
-                    None => Some(crate::models::AlertKind::Dependabot),
-                    Some(crate::models::AlertKind::Dependabot) => {
-                        Some(crate::models::AlertKind::CodeScanning)
-                    }
-                    Some(crate::models::AlertKind::CodeScanning) => None,
-                };
-                self.clamp_security_selection();
-                vec![]
-            }
-            Message::StartSecurityRepoFilter => {
-                self.input.mode = InputMode::SecurityRepoFilter;
-                vec![]
-            }
-            Message::CloseSecurityRepoFilter => {
-                self.input.mode = InputMode::Normal;
-                self.clamp_security_selection();
-                vec![]
-            }
+            Message::RefreshSecurityAlerts => self.handle_refresh_security_alerts(),
+            Message::ToggleSecurityDetail => self.handle_toggle_security_detail(),
+            Message::ToggleSecurityKindFilter => self.handle_toggle_security_kind_filter(),
+            Message::StartSecurityRepoFilter => self.handle_start_security_repo_filter(),
+            Message::CloseSecurityRepoFilter => self.handle_close_security_repo_filter(),
             Message::ToggleSecurityRepoFilter(repo) => {
-                if !self.security.repo_filter.remove(&repo) {
-                    self.security.repo_filter.insert(repo);
-                }
-                self.clamp_security_selection();
-                vec![]
+                self.handle_toggle_security_repo_filter(repo)
             }
-            Message::ToggleAllSecurityRepoFilter => {
-                let all_repos = self.security.repos.clone();
-                if self.security.repo_filter.len() == all_repos.len() {
-                    self.security.repo_filter.clear();
-                } else {
-                    self.security.repo_filter = all_repos.into_iter().collect();
-                }
-                self.clamp_security_selection();
-                vec![]
-            }
+            Message::ToggleAllSecurityRepoFilter => self.handle_toggle_all_security_repo_filter(),
             Message::ToggleSecurityRepoFilterMode => {
-                self.security.repo_filter_mode = match self.security.repo_filter_mode {
-                    RepoFilterMode::Include => RepoFilterMode::Exclude,
-                    RepoFilterMode::Exclude => RepoFilterMode::Include,
-                };
-                self.clamp_security_selection();
-                vec![]
+                self.handle_toggle_security_repo_filter_mode()
             }
             Message::DispatchFixAgent {
                 repo,
@@ -1012,166 +1111,37 @@ impl App {
                 description,
                 package,
                 fixed_version,
-            } => {
-                let fix_key = (repo.clone(), number, kind);
-                if self.dispatching_fix.contains(&fix_key) {
-                    return vec![];
-                }
-                let known = self.known_repo_paths();
-                if let Some(path) = dispatch::resolve_repo_path(&repo, &known) {
-                    self.dispatching_fix.insert(fix_key);
-                    self.set_status(format!("Dispatching fix agent for {}#{}...", repo, number));
-                    vec![Command::DispatchFixAgent {
-                        github_repo: repo,
-                        repo: path,
-                        number,
-                        kind,
-                        title,
-                        description,
-                        package,
-                        fixed_version,
-                    }]
-                } else {
-                    self.set_status(format!(
-                        "No local repo found for {} — select a path",
-                        repo
-                    ));
-                    self.input.pending_dispatch = Some(PendingDispatch::Fix {
-                        repo,
-                        number,
-                        kind,
-                        title,
-                        description,
-                        package,
-                        fixed_version,
-                    });
-                    self.input.mode = InputMode::InputDispatchRepoPath;
-                    self.input.buffer.clear();
-                    self.input.repo_cursor = 0;
-                    vec![]
-                }
-            }
+            } => self.handle_dispatch_fix_agent(
+                repo,
+                number,
+                kind,
+                title,
+                description,
+                package,
+                fixed_version,
+            ),
             Message::FixAgentDispatched {
                 github_repo,
                 number,
                 kind,
                 tmux_window,
                 worktree,
-            } => {
-                self.dispatching_fix.remove(&(github_repo.clone(), number, kind));
-                let repo_short = github_repo
-                    .split('/')
-                    .next_back()
-                    .unwrap_or(&github_repo);
-                self.set_status(format!("Fix agent dispatched for {repo_short}#{number}"));
-                for alert in self.security.alerts.iter_mut() {
-                    if alert.repo == github_repo
-                        && alert.number == number
-                        && alert.kind == kind
-                    {
-                        alert.tmux_window = Some(tmux_window.clone());
-                        alert.worktree = Some(worktree.clone());
-                        alert.agent_status = Some(crate::models::ReviewAgentStatus::Reviewing);
-                        break;
-                    }
-                }
-                vec![Command::PersistFixAgent {
-                    github_repo,
-                    number,
-                    kind,
-                    tmux_window,
-                    worktree,
-                }]
-            }
+            } => self.handle_fix_agent_dispatched(github_repo, number, kind, tmux_window, worktree),
             Message::FixAgentFailed {
                 github_repo,
                 number,
                 kind,
                 error,
-            } => {
-                self.dispatching_fix.remove(&(github_repo, number, kind));
-                self.set_status(format!("Fix agent failed: {error}"));
-                vec![]
-            }
-            Message::ReviewStatusUpdated {
-                repo,
-                number,
-                status,
-            } => {
-                // Update in-memory state across all PR lists
-                for pr in self
-                    .review
-                    .review
-                    .prs
-                    .iter_mut()
-                    .chain(self.review.authored.prs.iter_mut())
-                    .chain(self.review.bot.prs.iter_mut())
-                {
-                    if pr.repo == repo && pr.number == number {
-                        pr.agent_status = Some(status);
-                    }
-                }
-                for alert in self.security.alerts.iter_mut() {
-                    if alert.repo == repo && alert.number == number {
-                        alert.agent_status = Some(status);
-                    }
-                }
-                // Insert flash on findings_ready
-                if status == crate::models::ReviewAgentStatus::FindingsReady {
-                    let now = std::time::Instant::now();
-                    self.review
-                        .review_flash
-                        .insert((repo.clone(), number), now);
-                    self.security
-                        .review_flash
-                        .insert((repo, number), now);
-                }
-                vec![]
-            }
-            Message::DetachReviewAgent { repo, number } => {
-                let mut cmds = Vec::new();
-                for pr in self
-                    .review
-                    .review
-                    .prs
-                    .iter_mut()
-                    .chain(self.review.authored.prs.iter_mut())
-                    .chain(self.review.bot.prs.iter_mut())
-                {
-                    if pr.repo == repo && pr.number == number {
-                        if let Some(window) = pr.tmux_window.take() {
-                            cmds.push(Command::KillTmuxWindow { window });
-                        }
-                        pr.worktree = None;
-                        pr.agent_status = None;
-                    }
-                }
-                cmds.push(Command::UpdateAgentStatus {
-                    repo,
-                    number,
-                    status: None,
-                });
-                cmds
-            }
+            } => self.handle_fix_agent_failed(github_repo, number, kind, error),
             Message::DetachFixAgent { repo, number, kind } => {
-                let mut cmds = Vec::new();
-                for alert in self.security.alerts.iter_mut() {
-                    if alert.repo == repo && alert.number == number && alert.kind == kind {
-                        if let Some(window) = alert.tmux_window.take() {
-                            cmds.push(Command::KillTmuxWindow { window });
-                        }
-                        alert.worktree = None;
-                        alert.agent_status = None;
-                    }
-                }
-                cmds.push(Command::UpdateAgentStatus {
-                    repo,
-                    number,
-                    status: None,
-                });
-                cmds
+                self.handle_detach_fix_agent(repo, number, kind)
             }
-            // Filter presets
+            Message::StartRepoFilter => self.handle_start_repo_filter(),
+            Message::CloseRepoFilter => self.handle_close_repo_filter(),
+            Message::ToggleRepoFilter(path) => self.handle_toggle_repo_filter(path),
+            Message::ToggleAllRepoFilter => self.handle_toggle_all_repo_filter(),
+            Message::ToggleRepoFilterMode => self.handle_toggle_repo_filter_mode(),
+            Message::MoveRepoCursor(delta) => self.handle_move_repo_cursor(delta),
             Message::StartSavePreset => self.handle_start_save_preset(),
             Message::SaveFilterPreset(name) => self.handle_save_filter_preset(name),
             Message::LoadFilterPreset(name) => self.handle_load_filter_preset(name),
@@ -1181,6 +1151,7 @@ impl App {
             Message::DeleteRepoPath(path) => self.handle_delete_repo_path(path),
             Message::CancelPresetInput => self.handle_cancel_preset_input(),
             Message::FilterPresetsLoaded(presets) => self.handle_filter_presets_loaded(presets),
+            _ => unreachable!(),
         }
     }
 
@@ -3948,6 +3919,369 @@ impl App {
     ) -> Vec<Command> {
         self.filter.presets = presets;
         vec![]
+    }
+
+    // -----------------------------------------------------------------------
+    // Extracted handlers (previously inline in update())
+    // -----------------------------------------------------------------------
+
+    fn handle_dispatch_failed(&mut self, id: TaskId) -> Vec<Command> {
+        self.dispatching.remove(&id);
+        vec![]
+    }
+
+    fn handle_description_editor_result(&mut self, value: String) -> Vec<Command> {
+        match self.input.mode {
+            InputMode::InputDescription => self.handle_submit_description(value),
+            InputMode::InputEpicDescription => self.handle_submit_epic_description(value),
+            _ => vec![],
+        }
+    }
+
+    fn handle_message_received(&mut self, id: TaskId) -> Vec<Command> {
+        self.agents
+            .message_flash
+            .insert(id, std::time::Instant::now());
+        vec![]
+    }
+
+    fn handle_open_in_browser(&self, url: String) -> Vec<Command> {
+        vec![Command::OpenInBrowser { url }]
+    }
+
+    fn handle_review_agent_dispatched(
+        &mut self,
+        github_repo: String,
+        number: i64,
+        tmux_window: String,
+        worktree: String,
+    ) -> Vec<Command> {
+        self.dispatching_review
+            .remove(&(github_repo.clone(), number));
+        let repo_short = github_repo.split('/').next_back().unwrap_or(&github_repo);
+        self.set_status(format!("Review agent dispatched for {repo_short}#{number}"));
+        let table =
+            self.find_and_set_pr_agent(&github_repo, number, &tmux_window, &worktree);
+        vec![Command::PersistReviewAgent {
+            table,
+            github_repo,
+            number,
+            tmux_window,
+            worktree,
+        }]
+    }
+
+    fn handle_review_agent_failed(
+        &mut self,
+        github_repo: String,
+        number: i64,
+        error: String,
+    ) -> Vec<Command> {
+        self.dispatching_review.remove(&(github_repo, number));
+        self.set_status(format!("Review dispatch failed: {error}"));
+        vec![]
+    }
+
+    fn handle_refresh_review_prs(&mut self) -> Vec<Command> {
+        let mut cmds = vec![];
+        match &self.board.view_mode {
+            ViewMode::ReviewBoard {
+                mode: ReviewBoardMode::Author,
+                ..
+            } => {
+                self.review.authored.loading = true;
+                cmds.push(Command::FetchMyPrs);
+            }
+            ViewMode::ReviewBoard {
+                mode: ReviewBoardMode::Dependabot,
+                ..
+            } => {
+                self.review.bot.loading = true;
+                cmds.push(Command::FetchBotPrs);
+            }
+            _ => {
+                self.review.review.loading = true;
+                cmds.push(Command::FetchReviewPrs);
+            }
+        }
+        cmds
+    }
+
+    fn handle_refresh_bot_prs(&mut self) -> Vec<Command> {
+        self.review.bot.loading = true;
+        vec![Command::FetchBotPrs]
+    }
+
+    fn handle_bot_prs_fetch_failed(&mut self, err: String) -> Vec<Command> {
+        self.review.bot.loading = false;
+        self.review.review.last_error = Some(err);
+        vec![]
+    }
+
+    fn handle_toggle_select_bot_pr(&mut self, url: String) -> Vec<Command> {
+        if !self.select.bot_prs.remove(&url) {
+            self.select.bot_prs.insert(url);
+        }
+        vec![]
+    }
+
+    fn handle_clear_bot_pr_selection(&mut self) -> Vec<Command> {
+        self.select.bot_prs.clear();
+        vec![]
+    }
+
+    fn handle_cancel_batch_operation(&mut self) -> Vec<Command> {
+        self.input.mode = InputMode::Normal;
+        vec![]
+    }
+
+    fn handle_review_status_updated(
+        &mut self,
+        repo: String,
+        number: i64,
+        status: crate::models::ReviewAgentStatus,
+    ) -> Vec<Command> {
+        // Update in-memory state across all PR lists
+        for pr in self
+            .review
+            .review
+            .prs
+            .iter_mut()
+            .chain(self.review.authored.prs.iter_mut())
+            .chain(self.review.bot.prs.iter_mut())
+        {
+            if pr.repo == repo && pr.number == number {
+                pr.agent_status = Some(status);
+            }
+        }
+        for alert in self.security.alerts.iter_mut() {
+            if alert.repo == repo && alert.number == number {
+                alert.agent_status = Some(status);
+            }
+        }
+        // Insert flash on findings_ready
+        if status == crate::models::ReviewAgentStatus::FindingsReady {
+            let now = std::time::Instant::now();
+            self.review
+                .review_flash
+                .insert((repo.clone(), number), now);
+            self.security.review_flash.insert((repo, number), now);
+        }
+        vec![]
+    }
+
+    fn handle_detach_review_agent(&mut self, repo: String, number: i64) -> Vec<Command> {
+        let mut cmds = Vec::new();
+        for pr in self
+            .review
+            .review
+            .prs
+            .iter_mut()
+            .chain(self.review.authored.prs.iter_mut())
+            .chain(self.review.bot.prs.iter_mut())
+        {
+            if pr.repo == repo && pr.number == number {
+                if let Some(window) = pr.tmux_window.take() {
+                    cmds.push(Command::KillTmuxWindow { window });
+                }
+                pr.worktree = None;
+                pr.agent_status = None;
+            }
+        }
+        cmds.push(Command::UpdateAgentStatus {
+            repo,
+            number,
+            status: None,
+        });
+        cmds
+    }
+
+    fn handle_security_alerts_fetch_failed(&mut self, err: String) -> Vec<Command> {
+        self.security.loading = false;
+        self.security.last_error = Some(err);
+        vec![]
+    }
+
+    fn handle_refresh_security_alerts(&mut self) -> Vec<Command> {
+        self.security.loading = true;
+        vec![Command::FetchSecurityAlerts]
+    }
+
+    fn handle_toggle_security_detail(&mut self) -> Vec<Command> {
+        self.security.detail_visible = !self.security.detail_visible;
+        vec![]
+    }
+
+    fn handle_toggle_security_kind_filter(&mut self) -> Vec<Command> {
+        self.security.kind_filter = match self.security.kind_filter {
+            None => Some(crate::models::AlertKind::Dependabot),
+            Some(crate::models::AlertKind::Dependabot) => {
+                Some(crate::models::AlertKind::CodeScanning)
+            }
+            Some(crate::models::AlertKind::CodeScanning) => None,
+        };
+        self.clamp_security_selection();
+        vec![]
+    }
+
+    fn handle_start_security_repo_filter(&mut self) -> Vec<Command> {
+        self.input.mode = InputMode::SecurityRepoFilter;
+        vec![]
+    }
+
+    fn handle_close_security_repo_filter(&mut self) -> Vec<Command> {
+        self.input.mode = InputMode::Normal;
+        self.clamp_security_selection();
+        vec![]
+    }
+
+    fn handle_toggle_security_repo_filter(&mut self, repo: String) -> Vec<Command> {
+        if !self.security.repo_filter.remove(&repo) {
+            self.security.repo_filter.insert(repo);
+        }
+        self.clamp_security_selection();
+        vec![]
+    }
+
+    fn handle_toggle_all_security_repo_filter(&mut self) -> Vec<Command> {
+        let all_repos = self.security.repos.clone();
+        if self.security.repo_filter.len() == all_repos.len() {
+            self.security.repo_filter.clear();
+        } else {
+            self.security.repo_filter = all_repos.into_iter().collect();
+        }
+        self.clamp_security_selection();
+        vec![]
+    }
+
+    fn handle_toggle_security_repo_filter_mode(&mut self) -> Vec<Command> {
+        self.security.repo_filter_mode = match self.security.repo_filter_mode {
+            RepoFilterMode::Include => RepoFilterMode::Exclude,
+            RepoFilterMode::Exclude => RepoFilterMode::Include,
+        };
+        self.clamp_security_selection();
+        vec![]
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn handle_dispatch_fix_agent(
+        &mut self,
+        repo: String,
+        number: i64,
+        kind: crate::models::AlertKind,
+        title: String,
+        description: String,
+        package: Option<String>,
+        fixed_version: Option<String>,
+    ) -> Vec<Command> {
+        let fix_key = (repo.clone(), number, kind);
+        if self.dispatching_fix.contains(&fix_key) {
+            return vec![];
+        }
+        let known = self.known_repo_paths();
+        if let Some(path) = dispatch::resolve_repo_path(&repo, &known) {
+            self.dispatching_fix.insert(fix_key);
+            self.set_status(format!("Dispatching fix agent for {}#{}...", repo, number));
+            vec![Command::DispatchFixAgent {
+                github_repo: repo,
+                repo: path,
+                number,
+                kind,
+                title,
+                description,
+                package,
+                fixed_version,
+            }]
+        } else {
+            self.set_status(format!(
+                "No local repo found for {} — select a path",
+                repo
+            ));
+            self.input.pending_dispatch = Some(PendingDispatch::Fix {
+                repo,
+                number,
+                kind,
+                title,
+                description,
+                package,
+                fixed_version,
+            });
+            self.input.mode = InputMode::InputDispatchRepoPath;
+            self.input.buffer.clear();
+            self.input.repo_cursor = 0;
+            vec![]
+        }
+    }
+
+    fn handle_fix_agent_dispatched(
+        &mut self,
+        github_repo: String,
+        number: i64,
+        kind: crate::models::AlertKind,
+        tmux_window: String,
+        worktree: String,
+    ) -> Vec<Command> {
+        self.dispatching_fix
+            .remove(&(github_repo.clone(), number, kind));
+        let repo_short = github_repo
+            .split('/')
+            .next_back()
+            .unwrap_or(&github_repo);
+        self.set_status(format!("Fix agent dispatched for {repo_short}#{number}"));
+        for alert in self.security.alerts.iter_mut() {
+            if alert.repo == github_repo
+                && alert.number == number
+                && alert.kind == kind
+            {
+                alert.tmux_window = Some(tmux_window.clone());
+                alert.worktree = Some(worktree.clone());
+                alert.agent_status = Some(crate::models::ReviewAgentStatus::Reviewing);
+                break;
+            }
+        }
+        vec![Command::PersistFixAgent {
+            github_repo,
+            number,
+            kind,
+            tmux_window,
+            worktree,
+        }]
+    }
+
+    fn handle_fix_agent_failed(
+        &mut self,
+        github_repo: String,
+        number: i64,
+        kind: crate::models::AlertKind,
+        error: String,
+    ) -> Vec<Command> {
+        self.dispatching_fix.remove(&(github_repo, number, kind));
+        self.set_status(format!("Fix agent failed: {error}"));
+        vec![]
+    }
+
+    fn handle_detach_fix_agent(
+        &mut self,
+        repo: String,
+        number: i64,
+        kind: crate::models::AlertKind,
+    ) -> Vec<Command> {
+        let mut cmds = Vec::new();
+        for alert in self.security.alerts.iter_mut() {
+            if alert.repo == repo && alert.number == number && alert.kind == kind {
+                if let Some(window) = alert.tmux_window.take() {
+                    cmds.push(Command::KillTmuxWindow { window });
+                }
+                alert.worktree = None;
+                alert.agent_status = None;
+            }
+        }
+        cmds.push(Command::UpdateAgentStatus {
+            repo,
+            number,
+            status: None,
+        });
+        cmds
     }
 
     fn finish_epic_creation(&mut self, repo_path: String) -> Vec<Command> {

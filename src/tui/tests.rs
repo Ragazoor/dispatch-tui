@@ -12937,10 +12937,10 @@ fn handle_key_review_repo_filter_esc_closes() {
 fn handle_key_review_repo_filter_tab_toggles_mode() {
     let mut app = make_review_board_app();
     app.input.mode = InputMode::ReviewRepoFilter;
-    let initial_mode = app.review.repo_filter_mode;
+    let initial_mode = app.review.review.repo_filter_mode;
 
     app.handle_key(make_key(KeyCode::Tab));
-    assert_ne!(app.review.repo_filter_mode, initial_mode);
+    assert_ne!(app.review.review.repo_filter_mode, initial_mode);
 }
 
 #[test]
@@ -12950,7 +12950,7 @@ fn handle_key_review_repo_filter_a_toggles_all() {
 
     app.handle_key(make_key(KeyCode::Char('a')));
     // All repos should be toggled
-    assert!(!app.review.repo_filter.is_empty());
+    assert!(!app.review.review.repo_filter.is_empty());
 }
 
 #[test]
@@ -13185,7 +13185,7 @@ fn review_board_m_starts_batch_merge_in_dependabot() {
 #[test]
 fn review_board_g_jumps_to_tmux_window() {
     let mut app = make_review_board_app();
-    if let Some(pr) = app.review.prs.first_mut() {
+    if let Some(pr) = app.review.review.prs.first_mut() {
         pr.tmux_window = Some("review:pr-1".to_string());
     }
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
@@ -13211,7 +13211,7 @@ fn review_board_g_no_window_shows_status() {
 #[test]
 fn review_board_capital_t_detaches_agent() {
     let mut app = make_review_board_app();
-    if let Some(pr) = app.review.prs.first_mut() {
+    if let Some(pr) = app.review.review.prs.first_mut() {
         pr.tmux_window = Some("review:pr-1".to_string());
     }
     let cmds = app.handle_key(make_key(KeyCode::Char('T')));
