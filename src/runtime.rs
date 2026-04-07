@@ -31,7 +31,7 @@ use crate::editor::{
 use crate::models::TaskId;
 use crate::process::{ProcessRunner, RealProcessRunner};
 use crate::tui::{
-    self, App, Command, Message, RepoFilterMode, ReviewAgentRequest, ReviewBoardMode,
+    self, App, Command, Message, PrListKind, RepoFilterMode, ReviewAgentRequest, ReviewBoardMode,
 };
 use crate::service::FieldUpdate;
 use crate::{db, dispatch, mcp, models, tmux};
@@ -1333,78 +1333,41 @@ impl TuiRuntime {
         });
     }
 
-    fn exec_fetch_review_prs(&self) {
+    fn exec_fetch_prs(&self, kind: PrListKind) {
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
-        let queries = self.load_github_queries("github_queries_review");
+        let queries = self.load_github_queries(kind.settings_key());
         tokio::task::spawn_blocking(move || {
-            tracing::info!("fetching review PRs via gh");
+            tracing::info!(kind = kind.label(), "fetching PRs via gh");
             match crate::github::fetch_prs(&*runner, &queries) {
                 Ok(prs) => {
-                    tracing::info!(count = prs.len(), "review PRs fetched successfully");
-                    let _ = tx.send(Message::ReviewPrsLoaded(prs));
+                    tracing::info!(kind = kind.label(), count = prs.len(), "PRs fetched successfully");
+                    let _ = tx.send(Message::PrsLoaded(kind, prs));
                 }
                 Err(e) => {
-                    tracing::warn!(error = %e, "review PR fetch failed");
-                    let _ = tx.send(Message::ReviewPrsFetchFailed(e));
+                    tracing::warn!(kind = kind.label(), error = %e, "PR fetch failed");
+                    let _ = tx.send(Message::PrsFetchFailed(kind, e));
                 }
             }
         });
     }
 
-    fn exec_persist_review_prs(&self, app: &mut App, prs: Vec<crate::models::ReviewPr>) {
-        if let Err(e) = self.database.save_review_prs(&prs) {
-            app.update(Message::Error(Self::db_error("persisting review PRs", e)));
-        }
-    }
-
-    fn exec_fetch_my_prs(&self) {
-        let tx = self.msg_tx.clone();
-        let runner = self.runner.clone();
-        let queries = self.load_github_queries("github_queries_my_prs");
-        tokio::task::spawn_blocking(move || {
-            tracing::info!("fetching my PRs via gh");
-            match crate::github::fetch_prs(&*runner, &queries) {
-                Ok(prs) => {
-                    tracing::info!(count = prs.len(), "my PRs fetched successfully");
-                    let _ = tx.send(Message::MyPrsLoaded(prs));
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "my PR fetch failed");
-                    let _ = tx.send(Message::MyPrsFetchFailed(e));
-                }
-            }
-        });
-    }
-
-    fn exec_persist_my_prs(&self, app: &mut App, prs: Vec<crate::models::ReviewPr>) {
-        if let Err(e) = self.database.save_my_prs(&prs) {
-            app.update(Message::Error(Self::db_error("persisting my PRs", e)));
-        }
-    }
-
-    fn exec_fetch_bot_prs(&self) {
-        let tx = self.msg_tx.clone();
-        let runner = self.runner.clone();
-        let queries = self.load_github_queries("github_queries_bot");
-        tokio::task::spawn_blocking(move || {
-            tracing::info!("fetching bot PRs via gh");
-            match crate::github::fetch_prs(&*runner, &queries) {
-                Ok(prs) => {
-                    tracing::info!(count = prs.len(), "bot PRs fetched successfully");
-                    let _ = tx.send(Message::BotPrsLoaded(prs));
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "bot PR fetch failed");
-                    let _ = tx.send(Message::BotPrsFetchFailed(e));
-                }
-            }
-        });
-    }
-
-    fn exec_persist_bot_prs(&self, app: &mut App, prs: Vec<crate::models::ReviewPr>) {
-        if let Err(e) = self.database.save_bot_prs(&prs) {
-            app.update(Message::Error(Self::db_error("persisting bot PRs", e)));
+    fn exec_persist_prs(
+        &self,
+        app: &mut App,
+        kind: PrListKind,
+        prs: Vec<crate::models::ReviewPr>,
+    ) {
+        let result = match kind {
+            PrListKind::Review => self.database.save_review_prs(&prs),
+            PrListKind::Authored => self.database.save_my_prs(&prs),
+            PrListKind::Bot => self.database.save_bot_prs(&prs),
+        };
+        if let Err(e) = result {
+            app.update(Message::Error(Self::db_error(
+                &format!("persisting {} PRs", kind.label()),
+                e,
+            )));
         }
     }
 
@@ -1771,12 +1734,8 @@ async fn execute_commands(
             Command::PersistStringSetting { key, value } => {
                 rt.exec_persist_string_setting(app, &key, &value)
             }
-            Command::FetchReviewPrs => rt.exec_fetch_review_prs(),
-            Command::PersistReviewPrs(prs) => rt.exec_persist_review_prs(app, prs),
-            Command::FetchMyPrs => rt.exec_fetch_my_prs(),
-            Command::PersistMyPrs(prs) => rt.exec_persist_my_prs(app, prs),
-            Command::FetchBotPrs => rt.exec_fetch_bot_prs(),
-            Command::PersistBotPrs(prs) => rt.exec_persist_bot_prs(app, prs),
+            Command::FetchPrs(kind) => rt.exec_fetch_prs(kind),
+            Command::PersistPrs(kind, prs) => rt.exec_persist_prs(app, kind, prs),
             Command::BatchApprovePrs(urls) => rt.exec_batch_approve_prs(urls),
             Command::BatchMergePrs(urls) => rt.exec_batch_merge_prs(urls),
             Command::OpenInBrowser { url } => rt.exec_open_in_browser(url),
@@ -3071,7 +3030,7 @@ mod tests {
             worktree: None,
             agent_status: None,
         };
-        rt.exec_persist_review_prs(&mut app, vec![pr]);
+        rt.exec_persist_prs(&mut app, PrListKind::Review, vec![pr]);
         assert_eq!(rt.database.load_review_prs().unwrap().len(), 1);
         assert!(app.error_popup().is_none());
     }
@@ -3103,7 +3062,7 @@ mod tests {
             worktree: None,
             agent_status: None,
         };
-        rt.exec_persist_my_prs(&mut app, vec![pr]);
+        rt.exec_persist_prs(&mut app, PrListKind::Authored, vec![pr]);
         assert_eq!(rt.database.load_my_prs().unwrap().len(), 1);
         assert!(app.error_popup().is_none());
     }
@@ -3135,7 +3094,7 @@ mod tests {
             worktree: None,
             agent_status: None,
         };
-        rt.exec_persist_bot_prs(&mut app, vec![pr]);
+        rt.exec_persist_prs(&mut app, PrListKind::Bot, vec![pr]);
         assert_eq!(rt.database.load_bot_prs().unwrap().len(), 1);
         assert!(app.error_popup().is_none());
     }
@@ -3346,15 +3305,15 @@ mod tests {
         let mock = Arc::new(MockProcessRunner::new(vec![]));
         let rt = make_runtime(db, tx, mock);
 
-        rt.exec_fetch_review_prs();
+        rt.exec_fetch_prs(PrListKind::Review);
 
         let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
             .await
             .unwrap()
             .unwrap();
         match msg {
-            Message::ReviewPrsLoaded(prs) => assert!(prs.is_empty()),
-            other => panic!("Expected ReviewPrsLoaded, got: {other:?}"),
+            Message::PrsLoaded(PrListKind::Review, prs) => assert!(prs.is_empty()),
+            other => panic!("Expected PrsLoaded(Review, _), got: {other:?}"),
         }
     }
 
@@ -3365,15 +3324,15 @@ mod tests {
         let mock = Arc::new(MockProcessRunner::new(vec![]));
         let rt = make_runtime(db, tx, mock);
 
-        rt.exec_fetch_my_prs();
+        rt.exec_fetch_prs(PrListKind::Authored);
 
         let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
             .await
             .unwrap()
             .unwrap();
         match msg {
-            Message::MyPrsLoaded(prs) => assert!(prs.is_empty()),
-            other => panic!("Expected MyPrsLoaded, got: {other:?}"),
+            Message::PrsLoaded(PrListKind::Authored, prs) => assert!(prs.is_empty()),
+            other => panic!("Expected PrsLoaded(Authored, _), got: {other:?}"),
         }
     }
 
@@ -3384,15 +3343,15 @@ mod tests {
         let mock = Arc::new(MockProcessRunner::new(vec![]));
         let rt = make_runtime(db, tx, mock);
 
-        rt.exec_fetch_bot_prs();
+        rt.exec_fetch_prs(PrListKind::Bot);
 
         let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
             .await
             .unwrap()
             .unwrap();
         match msg {
-            Message::BotPrsLoaded(prs) => assert!(prs.is_empty()),
-            other => panic!("Expected BotPrsLoaded, got: {other:?}"),
+            Message::PrsLoaded(PrListKind::Bot, prs) => assert!(prs.is_empty()),
+            other => panic!("Expected PrsLoaded(Bot, _), got: {other:?}"),
         }
     }
 
@@ -3408,15 +3367,15 @@ mod tests {
         ]));
         let rt = make_runtime(db, tx, mock);
 
-        rt.exec_fetch_review_prs();
+        rt.exec_fetch_prs(PrListKind::Review);
 
         let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
             .await
             .unwrap()
             .unwrap();
         assert!(
-            matches!(msg, Message::ReviewPrsFetchFailed(_)),
-            "Expected ReviewPrsFetchFailed, got: {msg:?}"
+            matches!(msg, Message::PrsFetchFailed(PrListKind::Review, _)),
+            "Expected PrsFetchFailed(Review, _), got: {msg:?}"
         );
     }
 

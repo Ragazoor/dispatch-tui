@@ -287,10 +287,8 @@ pub enum Message {
     SwitchToReviewBoard,
     SwitchToTaskBoard,
     ToggleReviewBoardMode,
-    ReviewPrsLoaded(Vec<crate::models::ReviewPr>),
-    ReviewPrsFetchFailed(String),
-    MyPrsLoaded(Vec<crate::models::ReviewPr>),
-    MyPrsFetchFailed(String),
+    PrsLoaded(PrListKind, Vec<crate::models::ReviewPr>),
+    PrsFetchFailed(PrListKind, String),
     OpenInBrowser {
         url: String,
     },
@@ -324,8 +322,6 @@ pub enum Message {
     // Dispatch PR filter (My PRs tab)
     ToggleDispatchPrFilter,
     // Bot PRs (dependabot/renovate)
-    BotPrsLoaded(Vec<crate::models::ReviewPr>),
-    BotPrsFetchFailed(String),
     RefreshBotPrs,
     ToggleSelectBotPr(String),
     SelectAllBotPrColumn,
@@ -541,12 +537,8 @@ pub enum Command {
         id: TaskId,
         pr_url: String,
     },
-    FetchReviewPrs,
-    PersistReviewPrs(Vec<crate::models::ReviewPr>),
-    FetchMyPrs,
-    PersistMyPrs(Vec<crate::models::ReviewPr>),
-    FetchBotPrs,
-    PersistBotPrs(Vec<crate::models::ReviewPr>),
+    FetchPrs(PrListKind),
+    PersistPrs(PrListKind, Vec<crate::models::ReviewPr>),
     BatchApprovePrs(Vec<String>),
     BatchMergePrs(Vec<String>),
     OpenInBrowser {
@@ -808,6 +800,46 @@ impl FilterState {
 }
 
 // ---------------------------------------------------------------------------
+// PrListKind — discriminator for the three PR lists
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PrListKind {
+    Review,
+    Authored,
+    Bot,
+}
+
+impl PrListKind {
+    /// Settings key for the GitHub query strings.
+    pub fn settings_key(self) -> &'static str {
+        match self {
+            Self::Review => "github_queries_review",
+            Self::Authored => "github_queries_my_prs",
+            Self::Bot => "github_queries_bot",
+        }
+    }
+
+    /// Database table name.
+    pub fn table_name(self) -> &'static str {
+        match self {
+            Self::Review => "review_prs",
+            Self::Authored => "my_prs",
+            Self::Bot => "bot_prs",
+        }
+    }
+
+    /// Human-readable label for log messages.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Review => "review",
+            Self::Authored => "my",
+            Self::Bot => "bot",
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // PrListState — per-list state shared by review / authored / bot PR lists
 // ---------------------------------------------------------------------------
 
@@ -886,6 +918,46 @@ pub struct ReviewBoardState {
     pub detail_visible: bool,
     pub dispatch_pr_filter: bool,
     pub review_flash: HashMap<PrRef, Instant>,
+}
+
+impl ReviewBoardState {
+    pub fn list(&self, kind: PrListKind) -> &PrListState {
+        match kind {
+            PrListKind::Review => &self.review,
+            PrListKind::Authored => &self.authored,
+            PrListKind::Bot => &self.bot,
+        }
+    }
+
+    pub fn list_mut(&mut self, kind: PrListKind) -> &mut PrListState {
+        match kind {
+            PrListKind::Review => &mut self.review,
+            PrListKind::Authored => &mut self.authored,
+            PrListKind::Bot => &mut self.bot,
+        }
+    }
+
+    /// Find a PR by github_repo + number across all review lists, set its agent
+    /// fields, and return the DB table name where the PR lives.
+    pub fn find_and_set_pr_agent(
+        &mut self,
+        github_repo: &str,
+        number: i64,
+        tmux_window: &str,
+        worktree: &str,
+    ) -> String {
+        for kind in [PrListKind::Review, PrListKind::Authored, PrListKind::Bot] {
+            for pr in self.list_mut(kind).prs.iter_mut() {
+                if pr.repo == github_repo && pr.number == number {
+                    pr.tmux_window = Some(tmux_window.to_string());
+                    pr.worktree = Some(worktree.to_string());
+                    pr.agent_status = Some(crate::models::ReviewAgentStatus::Reviewing);
+                    return kind.table_name().to_string();
+                }
+            }
+        }
+        "review_prs".to_string()
+    }
 }
 
 /// Compute a sorted, deduplicated list of repo names from a slice of review PRs.
@@ -1474,5 +1546,95 @@ mod tests {
     #[test]
     fn repo_filter_mode_default_is_include() {
         assert_eq!(RepoFilterMode::default(), RepoFilterMode::Include);
+    }
+
+    // -- PrListKind --
+
+    #[test]
+    fn pr_list_kind_settings_key() {
+        assert_eq!(PrListKind::Review.settings_key(), "github_queries_review");
+        assert_eq!(PrListKind::Authored.settings_key(), "github_queries_my_prs");
+        assert_eq!(PrListKind::Bot.settings_key(), "github_queries_bot");
+    }
+
+    #[test]
+    fn pr_list_kind_table_name() {
+        assert_eq!(PrListKind::Review.table_name(), "review_prs");
+        assert_eq!(PrListKind::Authored.table_name(), "my_prs");
+        assert_eq!(PrListKind::Bot.table_name(), "bot_prs");
+    }
+
+    #[test]
+    fn pr_list_kind_label() {
+        assert_eq!(PrListKind::Review.label(), "review");
+        assert_eq!(PrListKind::Authored.label(), "my");
+        assert_eq!(PrListKind::Bot.label(), "bot");
+    }
+
+    // -- ReviewBoardState::list / list_mut --
+
+    #[test]
+    fn review_board_state_list_returns_correct_list() {
+        let mut state = ReviewBoardState::default();
+        state.review.set_prs(vec![make_pr(1, "org/a")]);
+        state.authored.set_prs(vec![make_pr(2, "org/b"), make_pr(3, "org/c")]);
+        state.bot.set_prs(vec![make_pr(4, "org/d"), make_pr(5, "org/e"), make_pr(6, "org/f")]);
+
+        assert_eq!(state.list(PrListKind::Review).prs.len(), 1);
+        assert_eq!(state.list(PrListKind::Authored).prs.len(), 2);
+        assert_eq!(state.list(PrListKind::Bot).prs.len(), 3);
+    }
+
+    #[test]
+    fn review_board_state_list_mut_mutates_correct_list() {
+        let mut state = ReviewBoardState::default();
+        state.list_mut(PrListKind::Review).loading = true;
+        assert!(state.review.loading);
+        assert!(!state.authored.loading);
+        assert!(!state.bot.loading);
+    }
+
+    // -- ReviewBoardState::find_and_set_pr_agent --
+
+    #[test]
+    fn find_and_set_pr_agent_sets_fields_in_review_list() {
+        let mut state = ReviewBoardState::default();
+        state.review.set_prs(vec![make_pr(42, "org/app")]);
+
+        let table = state.find_and_set_pr_agent("org/app", 42, "win-42", "/tmp/wt");
+        assert_eq!(table, "review_prs");
+        assert_eq!(state.review.prs[0].tmux_window.as_deref(), Some("win-42"));
+        assert_eq!(state.review.prs[0].worktree.as_deref(), Some("/tmp/wt"));
+        assert_eq!(
+            state.review.prs[0].agent_status,
+            Some(crate::models::ReviewAgentStatus::Reviewing)
+        );
+    }
+
+    #[test]
+    fn find_and_set_pr_agent_sets_fields_in_authored_list() {
+        let mut state = ReviewBoardState::default();
+        state.authored.set_prs(vec![make_pr(99, "org/lib")]);
+
+        let table = state.find_and_set_pr_agent("org/lib", 99, "win-99", "/tmp/wt2");
+        assert_eq!(table, "my_prs");
+        assert_eq!(state.authored.prs[0].tmux_window.as_deref(), Some("win-99"));
+    }
+
+    #[test]
+    fn find_and_set_pr_agent_sets_fields_in_bot_list() {
+        let mut state = ReviewBoardState::default();
+        state.bot.set_prs(vec![make_pr(7, "org/infra")]);
+
+        let table = state.find_and_set_pr_agent("org/infra", 7, "win-7", "/tmp/wt3");
+        assert_eq!(table, "bot_prs");
+        assert_eq!(state.bot.prs[0].tmux_window.as_deref(), Some("win-7"));
+    }
+
+    #[test]
+    fn find_and_set_pr_agent_defaults_to_review_prs_when_not_found() {
+        let mut state = ReviewBoardState::default();
+        let table = state.find_and_set_pr_agent("org/unknown", 1, "win", "/wt");
+        assert_eq!(table, "review_prs");
     }
 }

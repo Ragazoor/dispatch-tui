@@ -813,18 +813,14 @@ impl App {
             msg @ (Message::SwitchToReviewBoard
             | Message::SwitchToTaskBoard
             | Message::ToggleReviewBoardMode
-            | Message::ReviewPrsLoaded(_)
-            | Message::ReviewPrsFetchFailed(_)
-            | Message::MyPrsLoaded(_)
-            | Message::MyPrsFetchFailed(_)
+            | Message::PrsLoaded(..)
+            | Message::PrsFetchFailed(..)
             | Message::ToggleReviewDetail
             | Message::DispatchReviewAgent(_)
             | Message::ReviewAgentDispatched { .. }
             | Message::ReviewAgentFailed { .. }
             | Message::RefreshReviewPrs
             | Message::RefreshBotPrs
-            | Message::BotPrsLoaded(_)
-            | Message::BotPrsFetchFailed(_)
             | Message::ToggleSelectBotPr(_)
             | Message::SelectAllBotPrColumn
             | Message::ClearBotPrSelection
@@ -1036,10 +1032,8 @@ impl App {
             Message::SwitchToReviewBoard => self.handle_switch_to_review_board(),
             Message::SwitchToTaskBoard => self.handle_switch_to_task_board(),
             Message::ToggleReviewBoardMode => self.handle_toggle_review_board_mode(),
-            Message::ReviewPrsLoaded(prs) => self.handle_review_prs_loaded(prs),
-            Message::ReviewPrsFetchFailed(err) => self.handle_review_prs_fetch_failed(err),
-            Message::MyPrsLoaded(prs) => self.handle_my_prs_loaded(prs),
-            Message::MyPrsFetchFailed(err) => self.handle_my_prs_fetch_failed(err),
+            Message::PrsLoaded(kind, prs) => self.handle_prs_loaded(kind, prs),
+            Message::PrsFetchFailed(kind, err) => self.handle_prs_fetch_failed(kind, err),
             Message::ToggleReviewDetail => self.handle_toggle_review_detail(),
             Message::DispatchReviewAgent(req) => self.handle_dispatch_review_agent(req),
             Message::ReviewAgentDispatched {
@@ -1055,8 +1049,6 @@ impl App {
             } => self.handle_review_agent_failed(github_repo, number, error),
             Message::RefreshReviewPrs => self.handle_refresh_review_prs(),
             Message::RefreshBotPrs => self.handle_refresh_bot_prs(),
-            Message::BotPrsLoaded(prs) => self.handle_bot_prs_loaded(prs),
-            Message::BotPrsFetchFailed(err) => self.handle_bot_prs_fetch_failed(err),
             Message::ToggleSelectBotPr(url) => self.handle_toggle_select_bot_pr(url),
             Message::SelectAllBotPrColumn => self.handle_select_all_bot_pr_column(),
             Message::ClearBotPrSelection => self.handle_clear_bot_pr_selection(),
@@ -1709,7 +1701,7 @@ impl App {
         // Refresh review board data if stale (> 30s), regardless of active tab
         if self.review.review.needs_fetch(REVIEW_REFRESH_INTERVAL) && !self.review.review.loading {
             self.review.review.loading = true;
-            cmds.push(Command::FetchReviewPrs);
+            cmds.push(Command::FetchPrs(PrListKind::Review));
         }
 
         // Also refresh my PRs data if stale (> 30s)
@@ -1717,7 +1709,7 @@ impl App {
             && !self.review.authored.loading
         {
             self.review.authored.loading = true;
-            cmds.push(Command::FetchMyPrs);
+            cmds.push(Command::FetchPrs(PrListKind::Authored));
         }
 
         // Check if split mode right pane still exists
@@ -2965,7 +2957,7 @@ impl App {
         };
         if self.review.review.needs_fetch(REVIEW_REFRESH_INTERVAL) && !self.review.review.loading {
             self.review.review.loading = true;
-            vec![Command::FetchReviewPrs]
+            vec![Command::FetchPrs(PrListKind::Review)]
         } else {
             vec![]
         }
@@ -3000,7 +2992,7 @@ impl App {
                         && !self.review.authored.loading
                     {
                         self.review.authored.loading = true;
-                        cmds.push(Command::FetchMyPrs);
+                        cmds.push(Command::FetchPrs(PrListKind::Authored));
                     }
                 }
                 ReviewBoardMode::Reviewer => {
@@ -3008,7 +3000,7 @@ impl App {
                         && !self.review.review.loading
                     {
                         self.review.review.loading = true;
-                        cmds.push(Command::FetchReviewPrs);
+                        cmds.push(Command::FetchPrs(PrListKind::Review));
                     }
                 }
                 ReviewBoardMode::Dependabot => {
@@ -3016,7 +3008,7 @@ impl App {
                         && !self.review.bot.loading
                     {
                         self.review.bot.loading = true;
-                        cmds.push(Command::FetchBotPrs);
+                        cmds.push(Command::FetchPrs(PrListKind::Bot));
                     }
                 }
             }
@@ -3024,12 +3016,17 @@ impl App {
         cmds
     }
 
-    fn handle_review_prs_loaded(&mut self, prs: Vec<crate::models::ReviewPr>) -> Vec<Command> {
-        let cmds = vec![Command::PersistReviewPrs(prs.clone())];
-        self.review.review.set_prs(prs);
-        self.review.review.loading = false;
-        self.review.review.last_fetch = Some(Instant::now());
-        self.review.review.last_error = None;
+    fn handle_prs_loaded(
+        &mut self,
+        kind: PrListKind,
+        prs: Vec<crate::models::ReviewPr>,
+    ) -> Vec<Command> {
+        let cmds = vec![Command::PersistPrs(kind, prs.clone())];
+        let list = self.review.list_mut(kind);
+        list.set_prs(prs);
+        list.loading = false;
+        list.last_fetch = Some(Instant::now());
+        list.last_error = None;
         self.clamp_review_selection();
         cmds
     }
@@ -3061,27 +3058,12 @@ impl App {
         }
     }
 
-    fn handle_review_prs_fetch_failed(&mut self, error: String) -> Vec<Command> {
-        tracing::warn!(error = %error, "review PR fetch failed");
-        self.review.review.loading = false;
-        self.review.review.last_error = Some(error.clone());
-        self.set_status(format!("Failed to fetch review PRs: {error}"));
-        vec![]
-    }
-
-    fn handle_my_prs_loaded(&mut self, prs: Vec<crate::models::ReviewPr>) -> Vec<Command> {
-        let cmds = vec![Command::PersistMyPrs(prs.clone())];
-        self.review.authored.set_prs(prs);
-        self.review.authored.loading = false;
-        self.review.authored.last_fetch = Some(Instant::now());
-        self.clamp_review_selection();
-        cmds
-    }
-
-    fn handle_my_prs_fetch_failed(&mut self, error: String) -> Vec<Command> {
-        tracing::warn!(error = %error, "my PRs fetch failed");
-        self.review.authored.loading = false;
-        self.set_status(format!("Failed to fetch my PRs: {error}"));
+    fn handle_prs_fetch_failed(&mut self, kind: PrListKind, error: String) -> Vec<Command> {
+        tracing::warn!(kind = kind.label(), error = %error, "PR fetch failed");
+        let list = self.review.list_mut(kind);
+        list.loading = false;
+        list.last_error = Some(error.clone());
+        self.set_status(format!("Failed to fetch {} PRs: {error}", kind.label()));
         vec![]
     }
 
@@ -3168,8 +3150,7 @@ impl App {
         }
     }
 
-    /// Find a PR by github_repo + number across all review lists, set its agent
-    /// fields, and return the DB table name where the PR lives.
+    /// Delegate to `ReviewBoardState::find_and_set_pr_agent`.
     pub(in crate::tui) fn find_and_set_pr_agent(
         &mut self,
         github_repo: &str,
@@ -3177,31 +3158,8 @@ impl App {
         tmux_window: &str,
         worktree: &str,
     ) -> String {
-        for pr in self.review.review.prs.iter_mut() {
-            if pr.repo == github_repo && pr.number == number {
-                pr.tmux_window = Some(tmux_window.to_string());
-                pr.worktree = Some(worktree.to_string());
-                pr.agent_status = Some(crate::models::ReviewAgentStatus::Reviewing);
-                return "review_prs".to_string();
-            }
-        }
-        for pr in self.review.authored.prs.iter_mut() {
-            if pr.repo == github_repo && pr.number == number {
-                pr.tmux_window = Some(tmux_window.to_string());
-                pr.worktree = Some(worktree.to_string());
-                pr.agent_status = Some(crate::models::ReviewAgentStatus::Reviewing);
-                return "my_prs".to_string();
-            }
-        }
-        for pr in self.review.bot.prs.iter_mut() {
-            if pr.repo == github_repo && pr.number == number {
-                pr.tmux_window = Some(tmux_window.to_string());
-                pr.worktree = Some(worktree.to_string());
-                pr.agent_status = Some(crate::models::ReviewAgentStatus::Reviewing);
-                return "bot_prs".to_string();
-            }
-        }
-        "review_prs".to_string()
+        self.review
+            .find_and_set_pr_agent(github_repo, number, tmux_window, worktree)
     }
 
     /// Collect known local repo paths from saved paths and existing tasks.
@@ -3213,15 +3171,6 @@ impl App {
             }
         }
         known
-    }
-
-    fn handle_bot_prs_loaded(&mut self, prs: Vec<crate::models::ReviewPr>) -> Vec<Command> {
-        let cmds = vec![Command::PersistBotPrs(prs.clone())];
-        self.review.bot.set_prs(prs);
-        self.review.bot.loading = false;
-        self.review.bot.last_fetch = Some(Instant::now());
-        self.clamp_review_selection();
-        cmds
     }
 
     fn handle_select_all_bot_pr_column(&mut self) -> Vec<Command> {
@@ -3991,39 +3940,24 @@ impl App {
     }
 
     fn handle_refresh_review_prs(&mut self) -> Vec<Command> {
-        let mut cmds = vec![];
-        match &self.board.view_mode {
+        let kind = match &self.board.view_mode {
             ViewMode::ReviewBoard {
                 mode: ReviewBoardMode::Author,
                 ..
-            } => {
-                self.review.authored.loading = true;
-                cmds.push(Command::FetchMyPrs);
-            }
+            } => PrListKind::Authored,
             ViewMode::ReviewBoard {
                 mode: ReviewBoardMode::Dependabot,
                 ..
-            } => {
-                self.review.bot.loading = true;
-                cmds.push(Command::FetchBotPrs);
-            }
-            _ => {
-                self.review.review.loading = true;
-                cmds.push(Command::FetchReviewPrs);
-            }
-        }
-        cmds
+            } => PrListKind::Bot,
+            _ => PrListKind::Review,
+        };
+        self.review.list_mut(kind).loading = true;
+        vec![Command::FetchPrs(kind)]
     }
 
     fn handle_refresh_bot_prs(&mut self) -> Vec<Command> {
         self.review.bot.loading = true;
-        vec![Command::FetchBotPrs]
-    }
-
-    fn handle_bot_prs_fetch_failed(&mut self, err: String) -> Vec<Command> {
-        self.review.bot.loading = false;
-        self.review.review.last_error = Some(err);
-        vec![]
+        vec![Command::FetchPrs(PrListKind::Bot)]
     }
 
     fn handle_toggle_select_bot_pr(&mut self, url: String) -> Vec<Command> {
