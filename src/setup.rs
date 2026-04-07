@@ -11,6 +11,10 @@ const HOOKS_JSON: &str = include_str!("../plugin/hooks/hooks.json");
 const HOOK_SCRIPT: &str = include_str!("../plugin/hooks/scripts/task-status-hook");
 const USAGE_HOOK_SCRIPT: &str = include_str!("../plugin/hooks/scripts/task-usage-hook");
 const WRAP_UP_SKILL: &str = include_str!("../plugin/skills/wrap-up/SKILL.md");
+const DECOMPOSE_REVIEW_SKILL: &str =
+    include_str!("../plugin/skills/decompose-review/SKILL.md");
+const DECOMPOSE_REVIEW_PLAN_TEMPLATE: &str =
+    include_str!("../plugin/skills/decompose-review/references/plan-template.md");
 const QUEUE_PLAN_CMD: &str = include_str!("../plugin/commands/queue-plan.md");
 
 // ---------------------------------------------------------------------------
@@ -113,6 +117,16 @@ fn plugin_files() -> Vec<(&'static str, &'static str, bool)> {
         ("hooks/scripts/task-status-hook", HOOK_SCRIPT, true),
         ("hooks/scripts/task-usage-hook", USAGE_HOOK_SCRIPT, true),
         ("skills/wrap-up/SKILL.md", WRAP_UP_SKILL, false),
+        (
+            "skills/decompose-review/SKILL.md",
+            DECOMPOSE_REVIEW_SKILL,
+            false,
+        ),
+        (
+            "skills/decompose-review/references/plan-template.md",
+            DECOMPOSE_REVIEW_PLAN_TEMPLATE,
+            false,
+        ),
         ("commands/queue-plan.md", QUEUE_PLAN_CMD, false),
     ]
 }
@@ -227,7 +241,7 @@ pub fn run_setup(port: u16) -> Result<()> {
     // 3. Plugin (hooks, skills, commands)
     if install_plugin()? {
         println!("Plugin: installed dispatch plugin to ~/.claude/plugins/local/dispatch/");
-        println!("  → Skills: /wrap-up");
+        println!("  → Skills: /wrap-up, /decompose-review");
         println!("  → Commands: /queue-plan");
         println!("  → Hooks: task-status, task-usage");
         any_changes = true;
@@ -453,6 +467,8 @@ mod tests {
         assert!(paths.contains(&"hooks/scripts/task-status-hook"));
         assert!(paths.contains(&"hooks/scripts/task-usage-hook"));
         assert!(paths.contains(&"skills/wrap-up/SKILL.md"));
+        assert!(paths.contains(&"skills/decompose-review/SKILL.md"));
+        assert!(paths.contains(&"skills/decompose-review/references/plan-template.md"));
         assert!(paths.contains(&"commands/queue-plan.md"));
     }
 

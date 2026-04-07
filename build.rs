@@ -9,6 +9,8 @@ fn main() {
         "plugin/hooks/scripts/task-status-hook",
         "plugin/hooks/scripts/task-usage-hook",
         "plugin/skills/wrap-up/SKILL.md",
+        "plugin/skills/decompose-review/SKILL.md",
+        "plugin/skills/decompose-review/references/plan-template.md",
         "plugin/commands/queue-plan.md",
     ];
 
