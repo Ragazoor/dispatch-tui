@@ -8395,6 +8395,102 @@ fn cancel_dispatch_repo_path_clears_pending() {
 }
 
 #[test]
+fn submit_dispatch_repo_path_dispatches_fix_agent() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    // Enter InputDispatchRepoPath via fix agent with unknown repo
+    app.update(Message::DispatchFixAgent {
+        repo: "org/my-repo".to_string(),
+        number: 1,
+        kind: crate::models::AlertKind::Dependabot,
+        title: "CVE-2025-1234".to_string(),
+        description: "desc".to_string(),
+        package: Some("serde".to_string()),
+        fixed_version: Some("1.0.1".to_string()),
+    });
+    assert_eq!(app.input.mode, InputMode::InputDispatchRepoPath);
+
+    // Submit a repo path
+    let cmds = app.update(Message::SubmitDispatchRepoPath(
+        "/home/user/Code/my-repo".to_string(),
+    ));
+    assert!(cmds.iter().any(
+        |c| matches!(c, Command::DispatchFixAgent { repo, .. } if repo == "/home/user/Code/my-repo")
+    ));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::SaveRepoPath(p) if p == "/home/user/Code/my-repo")));
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn dispatch_repo_path_cursor_navigation() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.repo_paths = vec!["/a".into(), "/b".into(), "/c".into()];
+    let pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
+    app.review.set_prs(vec![pr]);
+    app.update(Message::SwitchToReviewBoard);
+
+    // Enter dispatch repo path mode
+    app.handle_key(KeyEvent::from(KeyCode::Char('d')));
+    assert_eq!(app.input.mode, InputMode::InputDispatchRepoPath);
+    assert_eq!(app.input.repo_cursor, 0);
+
+    // Navigate down with j
+    app.handle_key(KeyEvent::from(KeyCode::Char('j')));
+    assert_eq!(app.input.repo_cursor, 1);
+
+    // Navigate down again
+    app.handle_key(KeyEvent::from(KeyCode::Char('j')));
+    assert_eq!(app.input.repo_cursor, 2);
+
+    // Navigate up with k
+    app.handle_key(KeyEvent::from(KeyCode::Char('k')));
+    assert_eq!(app.input.repo_cursor, 1);
+}
+
+#[test]
+fn dispatch_repo_path_enter_selects_cursor_item() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.repo_paths = vec!["/first".into(), "/second".into()];
+    let pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
+    app.review.set_prs(vec![pr]);
+    app.update(Message::SwitchToReviewBoard);
+
+    // Enter dispatch repo path mode
+    app.handle_key(KeyEvent::from(KeyCode::Char('d')));
+    assert_eq!(app.input.mode, InputMode::InputDispatchRepoPath);
+
+    // Navigate to second item
+    app.handle_key(KeyEvent::from(KeyCode::Char('j')));
+    assert_eq!(app.input.repo_cursor, 1);
+
+    // Press Enter to select
+    let cmds = app.handle_key(KeyEvent::from(KeyCode::Enter));
+    assert!(cmds.iter().any(
+        |c| matches!(c, Command::DispatchReviewAgent(req) if req.repo == "/second")
+    ));
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn dispatch_repo_path_empty_submit_no_paths_stays_in_mode() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
+    app.review.set_prs(vec![pr]);
+    app.update(Message::SwitchToReviewBoard);
+
+    // Enter dispatch repo path mode (no saved paths)
+    app.handle_key(KeyEvent::from(KeyCode::Char('d')));
+    assert_eq!(app.input.mode, InputMode::InputDispatchRepoPath);
+
+    // Submit empty — should stay in mode since no paths available
+    let cmds = app.update(Message::SubmitDispatchRepoPath(String::new()));
+    assert!(cmds.is_empty());
+    // Mode should NOT have changed to Normal — user needs to type a path or cancel
+    assert_eq!(app.input.mode, InputMode::InputDispatchRepoPath);
+}
+
+#[test]
 fn review_agent_dispatched_sets_status() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);

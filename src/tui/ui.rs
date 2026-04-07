@@ -135,6 +135,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     if matches!(app.view_mode(), ViewMode::ReviewBoard { .. }) {
         render_review_board(frame, app, area);
+        render_dispatch_repo_overlay(frame, app, area);
         if matches!(app.mode(), InputMode::Help) {
             render_help_overlay(frame, app, area);
         }
@@ -144,6 +145,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     if matches!(app.view_mode(), ViewMode::SecurityBoard { .. }) {
         render_security_board(frame, app, area);
+        render_dispatch_repo_overlay(frame, app, area);
         if matches!(app.mode(), InputMode::Help) {
             render_help_overlay(frame, app, area);
         }
@@ -1532,6 +1534,25 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
         .wrap(Wrap { trim: false });
     frame.render_widget(paragraph, area);
     true
+}
+
+fn render_dispatch_repo_overlay(frame: &mut Frame, app: &App, area: Rect) {
+    if !matches!(app.input.mode, InputMode::InputDispatchRepoPath) {
+        return;
+    }
+    let popup_width = (area.width * 60 / 100).clamp(40, 70);
+    let line_count = if app.input.buffer.is_empty() {
+        app.repo_paths.len() as u16 + 6
+    } else {
+        6
+    };
+    let popup_height = line_count.clamp(6, area.height.saturating_sub(4));
+    let x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+    let y = area.y + (area.height.saturating_sub(popup_height)) / 2;
+    let popup_area = Rect::new(x, y, popup_width, popup_height);
+
+    frame.render_widget(Clear, popup_area);
+    render_input_form(frame, app, popup_area);
 }
 
 fn render_error_popup(frame: &mut Frame, app: &App, area: Rect) {
