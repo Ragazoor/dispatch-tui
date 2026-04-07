@@ -13564,3 +13564,37 @@ fn handle_key_normal_uppercase_m_on_epic_moves_backward() {
         .iter()
         .any(|c| matches!(c, Command::PersistEpic { .. })));
 }
+
+// ── Backlog / Needs-Review color harmonization ──────────────────────
+
+use crate::models::ReviewDecision;
+
+#[test]
+fn needs_review_column_color_matches_backlog() {
+    let backlog = ui::column_color(TaskStatus::Backlog);
+    let needs_review = ui::review_column_color(ReviewDecision::ReviewRequired);
+    assert_eq!(
+        backlog, needs_review,
+        "Needs Review column color should match Backlog column color"
+    );
+}
+
+#[test]
+fn needs_review_cursor_bg_matches_backlog() {
+    let backlog = ui::cursor_bg_color(TaskStatus::Backlog);
+    let needs_review = ui::review_cursor_bg_color(ReviewDecision::ReviewRequired);
+    assert_eq!(
+        backlog, needs_review,
+        "Needs Review cursor bg should match Backlog cursor bg"
+    );
+}
+
+#[test]
+fn needs_review_column_bg_matches_backlog() {
+    let backlog = ui::column_bg_color(TaskStatus::Backlog);
+    let needs_review = ui::review_column_bg_color(ReviewDecision::ReviewRequired);
+    assert_eq!(
+        backlog, needs_review,
+        "Needs Review column bg should match Backlog column bg"
+    );
+}

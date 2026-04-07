@@ -30,7 +30,7 @@ const RED_DIM: Color = Color::Rgb(224, 130, 130);
 const FLASH_BG: Color = Color::Rgb(62, 52, 20);
 
 /// Column color per status
-fn column_color(status: TaskStatus) -> Color {
+pub(in crate::tui) fn column_color(status: TaskStatus) -> Color {
     match status {
         TaskStatus::Backlog => MUTED,
         TaskStatus::Running => YELLOW,
@@ -41,7 +41,7 @@ fn column_color(status: TaskStatus) -> Color {
 }
 
 /// Tinted background for the cursor card in each column.
-fn cursor_bg_color(status: TaskStatus) -> Color {
+pub(in crate::tui) fn cursor_bg_color(status: TaskStatus) -> Color {
     match status {
         TaskStatus::Backlog => Color::Rgb(34, 38, 66),
         TaskStatus::Running => Color::Rgb(62, 50, 28),
@@ -54,7 +54,7 @@ fn cursor_bg_color(status: TaskStatus) -> Color {
 /// Faint background wash for the focused column, tinted to the column color.
 /// Must be just barely visible against the terminal bg (~26,27,38) so the
 /// cursor card highlight (cursor_bg_color) stands out clearly on top of it.
-fn column_bg_color(status: TaskStatus) -> Color {
+pub(in crate::tui) fn column_bg_color(status: TaskStatus) -> Color {
     match status {
         TaskStatus::Backlog => Color::Rgb(28, 30, 44),
         TaskStatus::Running => Color::Rgb(38, 34, 26),
@@ -2578,27 +2578,27 @@ fn bot_action_hints(
     spans
 }
 
-fn review_column_color(decision: ReviewDecision) -> Color {
+pub(in crate::tui) fn review_column_color(decision: ReviewDecision) -> Color {
     match decision {
-        ReviewDecision::ReviewRequired => CYAN,
+        ReviewDecision::ReviewRequired => MUTED,
         ReviewDecision::WaitingForResponse => YELLOW,
         ReviewDecision::ChangesRequested => RED_DIM,
         ReviewDecision::Approved => GREEN,
     }
 }
 
-fn review_cursor_bg_color(decision: ReviewDecision) -> Color {
+pub(in crate::tui) fn review_cursor_bg_color(decision: ReviewDecision) -> Color {
     match decision {
-        ReviewDecision::ReviewRequired => Color::Rgb(24, 48, 52),
+        ReviewDecision::ReviewRequired => Color::Rgb(34, 38, 66),
         ReviewDecision::WaitingForResponse => Color::Rgb(52, 44, 20),
         ReviewDecision::ChangesRequested => Color::Rgb(56, 32, 32),
         ReviewDecision::Approved => Color::Rgb(32, 52, 36),
     }
 }
 
-fn review_column_bg_color(decision: ReviewDecision) -> Color {
+pub(in crate::tui) fn review_column_bg_color(decision: ReviewDecision) -> Color {
     match decision {
-        ReviewDecision::ReviewRequired => Color::Rgb(26, 36, 38),
+        ReviewDecision::ReviewRequired => Color::Rgb(28, 30, 44),
         ReviewDecision::WaitingForResponse => Color::Rgb(36, 34, 26),
         ReviewDecision::ChangesRequested => Color::Rgb(36, 28, 28),
         ReviewDecision::Approved => Color::Rgb(27, 36, 30),
