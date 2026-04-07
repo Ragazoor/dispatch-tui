@@ -2779,12 +2779,7 @@ mod tests {
             MockProcessRunner::ok(),                   // tmux send-keys -l (claude command)
             MockProcessRunner::ok(),                   // tmux send-keys Enter
         ]));
-        let rt = TuiRuntime {
-            database: db.clone(),
-            msg_tx: tx,
-            input_paused: Arc::new(AtomicBool::new(false)),
-            runner: mock,
-        };
+        let rt = make_runtime(db.clone(), tx, mock);
         let tasks = db.list_all().unwrap();
         let mut app = App::new(tasks, Duration::from_secs(300));
 
