@@ -5325,10 +5325,11 @@ fn refresh_tasks_clears_notified_state_even_when_disabled() {
 }
 
 #[test]
-fn summary_row_shows_bell_when_notifications_enabled() {
+fn summary_row_shows_bell_and_hint_when_notifications_enabled() {
     let mut app = make_app(); // notifications_enabled defaults to true
     let buf = render_to_buffer(&mut app, 100, 20);
     assert!(buffer_contains(&buf, "\u{1F514}")); // 🔔
+    assert!(buffer_contains(&buf, "[N]"));
 }
 
 #[test]

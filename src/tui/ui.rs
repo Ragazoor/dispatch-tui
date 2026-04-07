@@ -305,7 +305,7 @@ fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
     }
     if app.notifications_enabled() {
         right_parts.push(Span::styled(
-            "\u{1F514}",
+            "\u{1F514} [N]",
             Style::default().fg(Color::Yellow),
         ));
     } else {
