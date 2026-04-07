@@ -731,6 +731,9 @@ rule ArchiveTask {
     @guidance
         -- Removes the git worktree and tmux window if present.
         -- Best-effort branch deletion.
+        -- If another active task shares the same worktree, the
+        -- worktree is detached from this task but not removed
+        -- from disk (same shared-worktree logic as FinishTaskSuccess).
         -- The TUI typically restricts archive to Done tasks,
         -- but the handler accepts any non-archived task.
 }
