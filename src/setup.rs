@@ -297,6 +297,31 @@ pub fn remove_plugin(plugin_path: &std::path::Path) -> Result<bool> {
     Ok(true)
 }
 
+pub fn remove_database(db_path: &std::path::Path) -> Result<bool> {
+    if !db_path.exists() {
+        return Ok(false);
+    }
+
+    let parent = db_path
+        .parent()
+        .context("database path has no parent directory")?;
+
+    for name in ["tasks.db", "tasks.db-wal", "tasks.db-shm", "app.log"] {
+        let path = parent.join(name);
+        if path.exists() {
+            fs::remove_file(&path)
+                .with_context(|| format!("Failed to remove {}", path.display()))?;
+        }
+    }
+
+    if parent.exists() && parent.read_dir()?.next().is_none() {
+        fs::remove_dir(parent)
+            .with_context(|| format!("Failed to remove {}", parent.display()))?;
+    }
+
+    Ok(true)
+}
+
 // ---------------------------------------------------------------------------
 // run_setup — top-level orchestrator
 // ---------------------------------------------------------------------------
@@ -797,6 +822,53 @@ mod tests {
         let plugin = dir.path().join("dispatch");
 
         let removed = remove_plugin(&plugin).unwrap();
+        assert!(!removed);
+    }
+
+    // -- Database removal --
+
+    #[test]
+    fn remove_database_deletes_db_and_related_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let data_dir = dir.path().join("dispatch");
+        fs::create_dir_all(&data_dir).unwrap();
+        fs::write(data_dir.join("tasks.db"), "db").unwrap();
+        fs::write(data_dir.join("tasks.db-wal"), "wal").unwrap();
+        fs::write(data_dir.join("tasks.db-shm"), "shm").unwrap();
+        fs::write(data_dir.join("app.log"), "log").unwrap();
+
+        let db_path = data_dir.join("tasks.db");
+        let removed = remove_database(&db_path).unwrap();
+        assert!(removed);
+        assert!(!data_dir.join("tasks.db").exists());
+        assert!(!data_dir.join("tasks.db-wal").exists());
+        assert!(!data_dir.join("tasks.db-shm").exists());
+        assert!(!data_dir.join("app.log").exists());
+        assert!(!data_dir.exists());
+    }
+
+    #[test]
+    fn remove_database_keeps_parent_if_not_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let data_dir = dir.path().join("dispatch");
+        fs::create_dir_all(&data_dir).unwrap();
+        fs::write(data_dir.join("tasks.db"), "db").unwrap();
+        fs::write(data_dir.join("other.txt"), "keep").unwrap();
+
+        let db_path = data_dir.join("tasks.db");
+        let removed = remove_database(&db_path).unwrap();
+        assert!(removed);
+        assert!(!data_dir.join("tasks.db").exists());
+        assert!(data_dir.exists());
+        assert!(data_dir.join("other.txt").exists());
+    }
+
+    #[test]
+    fn remove_database_noop_when_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("dispatch").join("tasks.db");
+
+        let removed = remove_database(&db_path).unwrap();
         assert!(!removed);
     }
 
