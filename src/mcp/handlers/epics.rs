@@ -39,7 +39,7 @@ pub(super) struct UpdateEpicArgs {
     #[serde(default)]
     pub(super) description: Option<String>,
     #[serde(default)]
-    pub(super) status: Option<String>,
+    pub(super) status: Option<TaskStatus>,
     #[serde(default)]
     pub(super) plan_path: Option<String>,
     #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
@@ -178,12 +178,12 @@ pub(super) fn handle_update_epic(
 
     let params = UpdateEpicParams {
         epic_id: parsed.epic_id,
-        title: parsed.title.clone(),
-        description: parsed.description.clone(),
-        status: parsed.status.clone(),
-        plan_path: parsed.plan_path.clone(),
+        title: parsed.title,
+        description: parsed.description,
+        status: parsed.status,
+        plan_path: parsed.plan_path,
         sort_order: parsed.sort_order,
-        repo_path: parsed.repo_path.clone(),
+        repo_path: parsed.repo_path,
     };
     let field_names: Vec<String> = params
         .updated_field_names()

@@ -2638,60 +2638,6 @@ async fn send_message_target_no_tmux_window() {
     );
 }
 
-// -- Validation tests (service layer) -----------------------------------------
-// These tests verify parsing helpers via the service module. The corresponding
-// service::tests module has comprehensive coverage; these are kept as a sanity
-// check that the MCP error mapping works correctly end-to-end.
-
-mod validation_tests {
-    use crate::models::{SubStatus, TaskStatus, TaskTag};
-    use crate::service::{parse_status, parse_substatus, parse_tag, ServiceError};
-
-    #[test]
-    fn parse_status_valid() {
-        assert_eq!(parse_status("backlog").unwrap(), TaskStatus::Backlog);
-        assert_eq!(parse_status("running").unwrap(), TaskStatus::Running);
-        assert_eq!(parse_status("review").unwrap(), TaskStatus::Review);
-        assert_eq!(parse_status("done").unwrap(), TaskStatus::Done);
-    }
-
-    #[test]
-    fn parse_status_invalid() {
-        let err = parse_status("nope").unwrap_err();
-        assert!(
-            matches!(err, ServiceError::Validation(ref msg) if msg.contains("Unknown status: nope"))
-        );
-    }
-
-    #[test]
-    fn parse_tag_valid() {
-        assert_eq!(parse_tag("bug").unwrap(), TaskTag::Bug);
-        assert_eq!(parse_tag("feature").unwrap(), TaskTag::Feature);
-    }
-
-    #[test]
-    fn parse_tag_invalid() {
-        let err = parse_tag("nope").unwrap_err();
-        assert!(
-            matches!(err, ServiceError::Validation(ref msg) if msg.contains("Invalid tag: nope"))
-        );
-    }
-
-    #[test]
-    fn parse_substatus_valid() {
-        assert_eq!(parse_substatus("active").unwrap(), SubStatus::Active);
-        assert_eq!(parse_substatus("none").unwrap(), SubStatus::None);
-    }
-
-    #[test]
-    fn parse_substatus_invalid() {
-        let err = parse_substatus("nope").unwrap_err();
-        assert!(
-            matches!(err, ServiceError::Validation(ref msg) if msg.contains("Invalid sub_status: nope"))
-        );
-    }
-}
-
 // =======================================================================
 // Notification flow tests
 // =======================================================================

@@ -103,15 +103,6 @@ pub(super) enum WrapUpAction {
     Pr,
 }
 
-impl WrapUpAction {
-    fn as_str(&self) -> &'static str {
-        match self {
-            WrapUpAction::Rebase => "rebase",
-            WrapUpAction::Pr => "pr",
-        }
-    }
-}
-
 #[derive(Deserialize)]
 pub(super) struct WrapUpArgs {
     #[serde(deserialize_with = "deserialize_flexible_i64")]
@@ -249,15 +240,15 @@ pub(super) fn handle_update_task(
 
     let params = UpdateTaskParams {
         task_id: parsed.task_id,
-        status: parsed.status.map(|s| s.as_str().to_string()),
+        status: parsed.status,
         plan_path: parsed.plan_path,
         title: parsed.title,
         description: parsed.description,
         repo_path: parsed.repo_path,
         sort_order: parsed.sort_order,
         pr_url: parsed.pr_url,
-        tag: parsed.tag.map(|t| t.as_str().to_string()),
-        sub_status: parsed.sub_status.map(|s| s.as_str().to_string()),
+        tag: parsed.tag,
+        sub_status: parsed.sub_status,
         epic_id: parsed.epic_id,
     };
     let field_names = params.updated_field_names();
@@ -294,7 +285,7 @@ pub(super) fn handle_create_task(
         plan_path: parsed.plan_path,
         epic_id: parsed.epic_id,
         sort_order: parsed.sort_order,
-        tag: parsed.tag.map(|t| t.as_str().to_string()),
+        tag: parsed.tag,
     }) {
         Ok(task_id) => {
             state.notify();
@@ -436,7 +427,7 @@ pub(super) async fn handle_wrap_up(
     tracing::info!(task_id = parsed.task_id, action = ?parsed.action, "MCP wrap_up");
 
     let svc = TaskService::new(state.db.clone());
-    let task = match svc.validate_wrap_up(parsed.task_id, parsed.action.as_str()) {
+    let task = match svc.validate_wrap_up(parsed.task_id) {
         Ok(t) => t,
         Err(e) => return service_err_to_response(id, e),
     };
@@ -584,48 +575,19 @@ pub(super) async fn handle_dispatch_next(
     };
     tracing::info!(epic_id = parsed.epic_id, "MCP dispatch_next");
 
-    let epic_id = EpicId(parsed.epic_id);
-
-    // Verify the epic exists
-    match state.db.get_epic(epic_id) {
-        Ok(Some(_)) => {}
+    let svc = TaskService::new(state.db.clone());
+    let next_task = match svc.next_backlog_task(parsed.epic_id) {
+        Ok(Some(task)) => task,
         Ok(None) => {
-            return JsonRpcResponse::err(
+            return JsonRpcResponse::ok(
                 id,
-                -32602,
-                format!("Epic {} not found", parsed.epic_id),
-            )
+                json!({"content": [{"type": "text", "text": format!(
+                    "no backlog tasks to dispatch for epic #{}",
+                    parsed.epic_id
+                )}]}),
+            );
         }
-        Err(e) => return JsonRpcResponse::err(id, -32603, format!("database error: {e}")),
-    }
-
-    // Find next backlog subtask
-    let next_task = match state.db.list_tasks_for_epic(epic_id) {
-        Ok(tasks) => {
-            let mut backlog: Vec<Task> = tasks
-                .into_iter()
-                .filter(|t| t.status == TaskStatus::Backlog)
-                .collect();
-            backlog.sort_by_key(|t| (t.sort_order.unwrap_or(t.id.0), t.id.0));
-            backlog.into_iter().next()
-        }
-        Err(e) => {
-            return JsonRpcResponse::err(
-                id,
-                -32603,
-                format!("failed to list epic tasks: {e}"),
-            )
-        }
-    };
-
-    let Some(next_task) = next_task else {
-        return JsonRpcResponse::ok(
-            id,
-            json!({"content": [{"type": "text", "text": format!(
-                "no backlog tasks to dispatch for epic #{}",
-                parsed.epic_id
-            )}]}),
-        );
+        Err(e) => return service_err_to_response(id, e),
     };
 
     let next_id = next_task.id;
@@ -763,7 +725,7 @@ pub(super) struct UpdateReviewStatusArgs {
     repo: String,
     #[serde(deserialize_with = "deserialize_flexible_i64")]
     number: i64,
-    status: String,
+    status: crate::models::ReviewAgentStatus,
 }
 
 pub(super) fn handle_update_review_status(
@@ -776,31 +738,20 @@ pub(super) fn handle_update_review_status(
         Err(resp) => return resp,
     };
 
-    let status_enum = match crate::models::ReviewAgentStatus::from_db_str(&parsed.status) {
-        Some(s) => s,
-        None => {
-            return JsonRpcResponse::err(
-                id,
-                -32602,
-                format!("Invalid status: {}", parsed.status),
-            )
-        }
-    };
-
     match state
         .db
-        .update_agent_status(&parsed.repo, parsed.number, Some(&parsed.status))
+        .update_agent_status(&parsed.repo, parsed.number, Some(parsed.status.as_db_str()))
     {
         Ok(_table) => {
             state.notify();
-            if status_enum == crate::models::ReviewAgentStatus::FindingsReady {
+            if parsed.status == crate::models::ReviewAgentStatus::FindingsReady {
                 state.notify_review_ready(parsed.repo.clone(), parsed.number);
             }
             JsonRpcResponse::ok(
                 id,
                 json!({"content": [{"type": "text", "text": format!(
                     "Updated agent status for {}#{} to {}",
-                    parsed.repo, parsed.number, parsed.status
+                    parsed.repo, parsed.number, parsed.status.as_db_str()
                 )}]}),
             )
         }

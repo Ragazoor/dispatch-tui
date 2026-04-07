@@ -30,58 +30,20 @@ impl std::fmt::Display for ServiceError {
 impl std::error::Error for ServiceError {}
 
 // ---------------------------------------------------------------------------
-// Parsing helpers (moved from MCP validation layer)
-// ---------------------------------------------------------------------------
-
-pub fn parse_status(s: &str) -> Result<TaskStatus, ServiceError> {
-    TaskStatus::parse(s).ok_or_else(|| {
-        ServiceError::Validation(format!(
-            "Unknown status: {s}. Valid values: {}",
-            TaskStatus::ALL
-                .iter()
-                .map(|s| s.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ))
-    })
-}
-
-pub fn parse_tag(s: &str) -> Result<TaskTag, ServiceError> {
-    TaskTag::parse(s).ok_or_else(|| {
-        ServiceError::Validation(format!(
-            "Invalid tag: {s}. Valid values: bug, feature, chore, epic"
-        ))
-    })
-}
-
-pub fn parse_substatus(s: &str) -> Result<SubStatus, ServiceError> {
-    SubStatus::parse(s).ok_or_else(|| {
-        ServiceError::Validation(format!(
-            "Invalid sub_status: {s}. Valid values: {}",
-            SubStatus::ALL
-                .iter()
-                .map(|s| s.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ))
-    })
-}
-
-// ---------------------------------------------------------------------------
 // UpdateTaskParams — transport-agnostic input for update_task
 // ---------------------------------------------------------------------------
 
 pub struct UpdateTaskParams {
     pub task_id: i64,
-    pub status: Option<String>,
+    pub status: Option<TaskStatus>,
     pub plan_path: Option<String>,
     pub title: Option<String>,
     pub description: Option<String>,
     pub repo_path: Option<String>,
     pub sort_order: Option<i64>,
     pub pr_url: Option<String>,
-    pub tag: Option<String>,
-    pub sub_status: Option<String>,
+    pub tag: Option<TaskTag>,
+    pub sub_status: Option<SubStatus>,
     pub epic_id: Option<i64>,
 }
 
@@ -101,8 +63,8 @@ impl UpdateTaskParams {
 
     pub fn updated_field_names(&self) -> Vec<String> {
         let mut names = Vec::new();
-        if let Some(ref s) = self.status {
-            names.push(format!("status={s}"));
+        if let Some(s) = self.status {
+            names.push(format!("status={}", s.as_str()));
         }
         if self.plan_path.is_some() {
             names.push("plan_path".to_string());
@@ -146,7 +108,7 @@ pub struct CreateTaskParams {
     pub plan_path: Option<String>,
     pub epic_id: Option<i64>,
     pub sort_order: Option<i64>,
-    pub tag: Option<String>,
+    pub tag: Option<TaskTag>,
 }
 
 // ---------------------------------------------------------------------------
@@ -188,13 +150,7 @@ impl TaskService {
             ));
         }
 
-        let status = if let Some(ref s) = params.status {
-            Some(parse_status(s)?)
-        } else {
-            None
-        };
-
-        if matches!(status, Some(TaskStatus::Done | TaskStatus::Archived)) {
+        if matches!(params.status, Some(TaskStatus::Done | TaskStatus::Archived)) {
             return Err(ServiceError::Validation(
                 "Cannot set status to done or archived via MCP. Please ask the human operator to manage this from the TUI.".into(),
             ));
@@ -203,7 +159,7 @@ impl TaskService {
         let expanded_repo_path = params.repo_path.as_deref().map(crate::models::expand_tilde);
 
         let mut patch = TaskPatch::new();
-        if let Some(s) = status {
+        if let Some(s) = params.status {
             patch = patch.status(s);
         }
         if let Some(ref p) = params.plan_path {
@@ -224,29 +180,23 @@ impl TaskService {
         if let Some(ref url) = params.pr_url {
             patch = patch.pr_url(Some(url.as_str()));
         }
-        if let Some(ref t) = params.tag {
-            let tag = parse_tag(t)?;
+        if let Some(tag) = params.tag {
             patch = patch.tag(Some(tag));
         }
 
-        if let Some(ref ss_str) = params.sub_status {
-            let ss = parse_substatus(ss_str)?;
-            let effective_status = params
-                .status
-                .as_deref()
-                .and_then(TaskStatus::parse)
-                .or_else(|| {
-                    self.db
-                        .get_task(TaskId(params.task_id))
-                        .ok()
-                        .flatten()
-                        .map(|t| t.status)
-                });
+        if let Some(ss) = params.sub_status {
+            let effective_status = params.status.or_else(|| {
+                self.db
+                    .get_task(TaskId(params.task_id))
+                    .ok()
+                    .flatten()
+                    .map(|t| t.status)
+            });
             if let Some(eff) = effective_status {
                 if !ss.is_valid_for(eff) {
                     return Err(ServiceError::Validation(format!(
                         "sub_status '{}' is not valid for status '{}'",
-                        ss_str,
+                        ss.as_str(),
                         eff.as_str()
                     )));
                 }
@@ -359,8 +309,7 @@ impl TaskService {
                 .db
                 .patch_task(task_id, &TaskPatch::new().sort_order(Some(so)));
         }
-        if let Some(ref t) = params.tag {
-            let tag = parse_tag(t)?;
+        if let Some(tag) = params.tag {
             let _ = self
                 .db
                 .patch_task(task_id, &TaskPatch::new().tag(Some(tag)));
@@ -439,13 +388,7 @@ impl TaskService {
         Ok(task)
     }
 
-    pub fn validate_wrap_up(&self, task_id: i64, action: &str) -> Result<Task, ServiceError> {
-        if action != "rebase" && action != "pr" {
-            return Err(ServiceError::Validation(format!(
-                "Unknown action: {action}. Valid values: rebase, pr"
-            )));
-        }
-
+    pub fn validate_wrap_up(&self, task_id: i64) -> Result<Task, ServiceError> {
         let task = self.get_task(task_id)?;
 
         if !crate::dispatch::is_wrappable(&task) {
@@ -518,6 +461,37 @@ impl TaskService {
 
         Ok((from_task, to_task))
     }
+
+    /// Find the next backlog task for an epic, sorted by sort_order then id.
+    /// Returns `Ok(None)` if no backlog tasks remain.
+    pub fn next_backlog_task(&self, epic_id: i64) -> Result<Option<Task>, ServiceError> {
+        // Verify the epic exists
+        match self.db.get_epic(EpicId(epic_id)) {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                return Err(ServiceError::NotFound(format!(
+                    "Epic {} not found",
+                    epic_id
+                )))
+            }
+            Err(e) => {
+                return Err(ServiceError::Internal(format!("database error: {e}")))
+            }
+        }
+
+        let tasks = self
+            .db
+            .list_tasks_for_epic(EpicId(epic_id))
+            .map_err(|e| ServiceError::Internal(format!("failed to list epic tasks: {e}")))?;
+
+        let mut backlog: Vec<Task> = tasks
+            .into_iter()
+            .filter(|t| t.status == TaskStatus::Backlog)
+            .collect();
+        backlog.sort_by_key(|t| (t.sort_order.unwrap_or(t.id.0), t.id.0));
+
+        Ok(backlog.into_iter().next())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -528,7 +502,7 @@ pub struct UpdateEpicParams {
     pub epic_id: i64,
     pub title: Option<String>,
     pub description: Option<String>,
-    pub status: Option<String>,
+    pub status: Option<TaskStatus>,
     pub plan_path: Option<String>,
     pub sort_order: Option<i64>,
     pub repo_path: Option<String>,
@@ -655,12 +629,7 @@ impl EpicService {
             ));
         }
 
-        let status = params
-            .status
-            .as_deref()
-            .map(parse_status)
-            .transpose()?;
-        if matches!(status, Some(TaskStatus::Archived)) {
+        if matches!(params.status, Some(TaskStatus::Archived)) {
             return Err(ServiceError::Validation(
                 "Cannot set epic status to archived via MCP. Please ask the human operator to manage this from the TUI.".into(),
             ));
@@ -674,7 +643,7 @@ impl EpicService {
         if let Some(ref d) = params.description {
             patch = patch.description(d);
         }
-        if let Some(status) = status {
+        if let Some(status) = params.status {
             patch = patch.status(status);
         }
         if let Some(ref p) = params.plan_path {
@@ -717,42 +686,6 @@ mod tests {
         EpicService::new(Arc::clone(db))
     }
 
-    // -- parse helpers --------------------------------------------------------
-
-    #[test]
-    fn parse_status_valid() {
-        assert_eq!(parse_status("backlog").unwrap(), TaskStatus::Backlog);
-        assert_eq!(parse_status("running").unwrap(), TaskStatus::Running);
-    }
-
-    #[test]
-    fn parse_status_invalid() {
-        let err = parse_status("invalid").unwrap_err();
-        assert!(matches!(err, ServiceError::Validation(_)));
-    }
-
-    #[test]
-    fn parse_tag_valid() {
-        assert_eq!(parse_tag("bug").unwrap(), TaskTag::Bug);
-    }
-
-    #[test]
-    fn parse_tag_invalid() {
-        let err = parse_tag("nope").unwrap_err();
-        assert!(matches!(err, ServiceError::Validation(_)));
-    }
-
-    #[test]
-    fn parse_substatus_valid() {
-        assert_eq!(parse_substatus("active").unwrap(), SubStatus::Active);
-    }
-
-    #[test]
-    fn parse_substatus_invalid() {
-        let err = parse_substatus("nope").unwrap_err();
-        assert!(matches!(err, ServiceError::Validation(_)));
-    }
-
     // -- TaskService ----------------------------------------------------------
 
     #[test]
@@ -790,32 +723,13 @@ mod tests {
                 plan_path: None,
                 epic_id: None,
                 sort_order: Some(5),
-                tag: Some("bug".into()),
+                tag: Some(TaskTag::Bug),
             })
             .unwrap();
 
         let task = svc.get_task(id.0).unwrap();
         assert_eq!(task.tag, Some(TaskTag::Bug));
         assert_eq!(task.sort_order, Some(5));
-    }
-
-    #[test]
-    fn create_task_invalid_tag_returns_error() {
-        let db = test_db();
-        let svc = task_svc(&db);
-
-        let err = svc
-            .create_task(CreateTaskParams {
-                title: "Bad".into(),
-                description: "".into(),
-                repo_path: "/repo".into(),
-                plan_path: None,
-                epic_id: None,
-                sort_order: None,
-                tag: Some("invalid_tag".into()),
-            })
-            .unwrap_err();
-        assert!(matches!(err, ServiceError::Validation(_)));
     }
 
     #[test]
@@ -837,7 +751,7 @@ mod tests {
 
         svc.update_task(UpdateTaskParams {
             task_id: id.0,
-            status: Some("running".into()),
+            status: Some(TaskStatus::Running),
             plan_path: None,
             title: None,
             description: None,
@@ -874,7 +788,7 @@ mod tests {
         let err = svc
             .update_task(UpdateTaskParams {
                 task_id: id.0,
-                status: Some("done".into()),
+                status: Some(TaskStatus::Done),
                 plan_path: None,
                 title: None,
                 description: None,
@@ -953,7 +867,7 @@ mod tests {
                 sort_order: None,
                 pr_url: None,
                 tag: None,
-                sub_status: Some("active".into()),
+                sub_status: Some(SubStatus::Active),
                 epic_id: None,
             })
             .unwrap_err();
@@ -1039,7 +953,7 @@ mod tests {
         // Move to running first
         svc.update_task(UpdateTaskParams {
             task_id: id.0,
-            status: Some("running".into()),
+            status: Some(TaskStatus::Running),
             plan_path: None,
             title: None,
             description: None,
@@ -1215,7 +1129,7 @@ mod tests {
             epic_id: epic.id.0,
             title: None,
             description: None,
-            status: Some("running".into()),
+            status: Some(TaskStatus::Running),
             plan_path: None,
             sort_order: None,
             repo_path: None,
@@ -1246,34 +1160,6 @@ mod tests {
                 title: None,
                 description: None,
                 status: None,
-                plan_path: None,
-                sort_order: None,
-                repo_path: None,
-            })
-            .unwrap_err();
-        assert!(matches!(err, ServiceError::Validation(_)));
-    }
-
-    #[test]
-    fn update_epic_invalid_status() {
-        let db = test_db();
-        let svc = epic_svc(&db);
-
-        let epic = svc
-            .create_epic(CreateEpicParams {
-                title: "E".into(),
-                description: "".into(),
-                repo_path: "/repo".into(),
-                sort_order: None,
-            })
-            .unwrap();
-
-        let err = svc
-            .update_epic(UpdateEpicParams {
-                epic_id: epic.id.0,
-                title: None,
-                description: None,
-                status: Some("bogus".into()),
                 plan_path: None,
                 sort_order: None,
                 repo_path: None,
@@ -1346,5 +1232,106 @@ mod tests {
         let (e, subtasks) = epic_svc.get_epic_with_subtasks(epic.id.0).unwrap();
         assert_eq!(e.title, "E");
         assert_eq!(subtasks.len(), 1);
+    }
+
+    // -- next_backlog_task -----------------------------------------------------
+
+    #[test]
+    fn next_backlog_task_returns_first_by_sort_order() {
+        let db = test_db();
+        let task_svc = task_svc(&db);
+        let epic_svc = epic_svc(&db);
+
+        let epic = epic_svc
+            .create_epic(CreateEpicParams {
+                title: "E".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                sort_order: None,
+            })
+            .unwrap();
+
+        task_svc
+            .create_task(CreateTaskParams {
+                title: "Second".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                plan_path: None,
+                epic_id: Some(epic.id.0),
+                sort_order: Some(20),
+                tag: None,
+            })
+            .unwrap();
+
+        task_svc
+            .create_task(CreateTaskParams {
+                title: "First".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                plan_path: None,
+                epic_id: Some(epic.id.0),
+                sort_order: Some(10),
+                tag: None,
+            })
+            .unwrap();
+
+        let next = task_svc.next_backlog_task(epic.id.0).unwrap();
+        assert_eq!(next.unwrap().title, "First");
+    }
+
+    #[test]
+    fn next_backlog_task_skips_non_backlog() {
+        let db = test_db();
+        let task_svc = task_svc(&db);
+        let epic_svc = epic_svc(&db);
+
+        let epic = epic_svc
+            .create_epic(CreateEpicParams {
+                title: "E".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                sort_order: None,
+            })
+            .unwrap();
+
+        let id = task_svc
+            .create_task(CreateTaskParams {
+                title: "Running".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                plan_path: None,
+                epic_id: Some(epic.id.0),
+                sort_order: Some(1),
+                tag: None,
+            })
+            .unwrap();
+
+        // Move to running
+        task_svc
+            .update_task(UpdateTaskParams {
+                task_id: id.0,
+                status: Some(TaskStatus::Running),
+                plan_path: None,
+                title: None,
+                description: None,
+                repo_path: None,
+                sort_order: None,
+                pr_url: None,
+                tag: None,
+                sub_status: None,
+                epic_id: None,
+            })
+            .unwrap();
+
+        let next = task_svc.next_backlog_task(epic.id.0).unwrap();
+        assert!(next.is_none());
+    }
+
+    #[test]
+    fn next_backlog_task_epic_not_found() {
+        let db = test_db();
+        let svc = task_svc(&db);
+        let err = svc.next_backlog_task(999).unwrap_err();
+        assert!(matches!(err, ServiceError::NotFound(_)));
     }
 }
