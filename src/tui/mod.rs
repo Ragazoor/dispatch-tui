@@ -2474,7 +2474,7 @@ impl App {
         // Optimistically clear conflict substatus — FinishComplete will persist it.
         if let Some(task) = self.find_task_mut(id) {
             if task.sub_status == SubStatus::Conflict {
-                task.sub_status = SubStatus::None;
+                task.sub_status = SubStatus::default_for(task.status);
             }
         }
 
@@ -3360,14 +3360,19 @@ impl App {
 
         // Moving to Done cleans up all subtask tmux windows
         if new_status == TaskStatus::Done {
-            let windows: Vec<String> = self
+            let subtask_ids: Vec<TaskId> = self
                 .tasks
                 .iter()
                 .filter(|t| t.epic_id == Some(id) && t.tmux_window.is_some())
-                .filter_map(|t| t.tmux_window.clone())
+                .map(|t| t.id)
                 .collect();
-            for window in windows {
-                cmds.push(Command::KillTmuxWindow { window });
+            for task_id in subtask_ids {
+                if let Some(task) = self.find_task_mut(task_id) {
+                    if let Some(window) = task.tmux_window.take() {
+                        cmds.push(Command::KillTmuxWindow { window });
+                        cmds.push(Command::PersistTask(task.clone()));
+                    }
+                }
             }
         }
         self.clamp_selection();

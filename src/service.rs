@@ -655,6 +655,17 @@ impl EpicService {
             ));
         }
 
+        let status = params
+            .status
+            .as_deref()
+            .map(parse_status)
+            .transpose()?;
+        if matches!(status, Some(TaskStatus::Archived)) {
+            return Err(ServiceError::Validation(
+                "Cannot set epic status to archived via MCP. Please ask the human operator to manage this from the TUI.".into(),
+            ));
+        }
+
         let repo_path = params.repo_path.as_deref().map(crate::models::expand_tilde);
         let mut patch = EpicPatch::new();
         if let Some(ref t) = params.title {
@@ -663,8 +674,7 @@ impl EpicService {
         if let Some(ref d) = params.description {
             patch = patch.description(d);
         }
-        if let Some(ref s) = params.status {
-            let status = parse_status(s)?;
+        if let Some(status) = status {
             patch = patch.status(status);
         }
         if let Some(ref p) = params.plan_path {
