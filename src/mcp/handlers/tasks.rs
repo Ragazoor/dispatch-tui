@@ -469,6 +469,13 @@ pub(super) async fn handle_wrap_up(
     match parsed.action {
         WrapUpAction::Rebase => {
             let db = state.db.clone();
+            // Optimistically clear conflict sub_status before rebasing,
+            // matching the TUI behavior.
+            if task.sub_status == SubStatus::Conflict {
+                let clear_patch =
+                    db::TaskPatch::new().sub_status(SubStatus::default_for(task.status));
+                let _ = db.patch_task(task_id, &clear_patch);
+            }
             let rebase_runner = runner.clone();
             let rebase_result = match tokio::task::spawn_blocking(move || {
                 tracing::info!(task_id = task_id.0, %branch, "MCP wrap_up rebase starting");

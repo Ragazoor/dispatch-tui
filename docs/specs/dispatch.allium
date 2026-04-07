@@ -121,6 +121,9 @@ entity Task {
     is_stale: sub_status == stale
     is_crashed: sub_status == crashed
     is_epic: tag = epic
+    is_detached: worktree != null and tmux_window == null
+                 and (status == running or status == review)
+                 and sub_status != conflict
     pr_number: derived from pr_url  -- extracted at runtime, not persisted
 }
 
@@ -352,6 +355,10 @@ rule MoveTaskForward {
         -- tracking state (tmux output, staleness timer, crash detection,
         -- notification flags) for the task.
         -- sub_status is always reset to the default for the new status.
+        -- Supports batch operation on multi-selected tasks. Batch forward
+        -- splits when the selection includes Review tasks: non-Review
+        -- tasks move immediately, Review tasks are collected for a single
+        -- batch ConfirmDone prompt.
 }
 
 rule MoveTaskBackward {
@@ -373,6 +380,7 @@ rule MoveTaskBackward {
         -- tracking state (tmux output, staleness timer, crash detection,
         -- notification flags) for the task.
         -- sub_status is always reset to the default for the new status.
+        -- Supports batch operation on multi-selected tasks.
 }
 
 rule ConfirmDone {
@@ -386,11 +394,78 @@ rule ConfirmDone {
     ensures: task.updated_at = now
 
     @guidance
-        -- Batch forward-move of a multi-select that includes Review tasks
-        -- splits the operation: non-Review tasks move immediately, while
-        -- Review tasks are collected and confirmed together via a single
-        -- prompt. Each confirmed task is individually guarded by review
-        -- status before transitioning to done.
+        -- Confirmation prompt for the review -> done transition. Used by
+        -- both single-task forward moves and BatchMoveForward. Each task
+        -- is individually guarded by review status before transitioning.
+}
+
+-- == Batch Status Movement ==
+
+rule BatchMoveForward {
+    when: BatchMoveTasks(tasks, forward)
+
+    -- Split: non-Review tasks move immediately via MoveTaskForward.
+    -- Review tasks are collected and confirmed together via ConfirmDone.
+    let non_review = tasks where status != review
+    let review_tasks = tasks where status = review
+
+    ensures:
+        for task in non_review:
+            MoveTaskForward(task)
+    ensures:
+        if review_tasks.count > 0:
+            ConfirmDone(review_tasks)
+
+    @guidance
+        -- When all selected tasks are non-Review, they move forward
+        -- without any confirmation prompt. When some are in Review,
+        -- the non-Review tasks still move immediately while the Review
+        -- tasks are held for a single batch confirmation. This avoids
+        -- individual prompts per Review task.
+}
+
+rule BatchMoveBackward {
+    when: BatchMoveTasks(tasks, backward)
+
+    ensures:
+        for task in tasks:
+            MoveTaskBackward(task)
+}
+
+-- == Reorder ==
+
+rule ReorderItem {
+    when: ReorderItem(item, direction)
+    -- item: Task or Epic in the current visual column
+    -- direction: +1 (down) or -1 (up)
+
+    let items = column_items(item)
+    let current_index = items.index_of(item)
+    let target_index = current_index + direction
+
+    requires: target_index >= 0
+    requires: target_index < items.count
+
+    let target = items[target_index]
+    let item_eff = item.sort_order ?? item.id
+    let target_eff = target.sort_order ?? target.id
+
+    ensures:
+        if item_eff = target_eff:
+            -- Equal effective values: offset the moved item by 1
+            item.sort_order = item_eff + direction
+            target.sort_order = target_eff
+        else:
+            -- Swap effective sort_order values
+            item.sort_order = target_eff
+            target.sort_order = item_eff
+
+    @guidance
+        -- Operates on both tasks and epics within the same visual
+        -- column. The effective sort_order is sort_order ?? id
+        -- (falling back to the item's database id when unset).
+        -- Both updated sort_order values are persisted to the database.
+        -- No-op when the item is already at the boundary of its column.
 }
 
 -- == Detach Tmux ==
@@ -413,8 +488,26 @@ rule DetachTmux {
         -- (staleness timer, crash detection). Stale/Crashed sub_status
         -- is reset to the review default (awaiting_review); other
         -- sub_statuses (e.g. awaiting_review, approved) are preserved.
-        -- Available via the TUI (d key) on review tasks. Supports
-        -- batch operation on multi-selected tasks.
+        -- Available via the TUI (d key) on review tasks.
+}
+
+rule BatchDetachTmux {
+    when: BatchDetachTmux(tasks)
+
+    -- Filters to review tasks with a tmux window, then detaches all.
+    let detachable = tasks where status = review and tmux_window != null
+
+    requires: detachable.count > 0
+
+    ensures:
+        for task in detachable:
+            DetachTmux(task)
+
+    @guidance
+        -- Triggered via the TUI (T key) when tasks are multi-selected.
+        -- Shows a confirmation prompt with the count of detachable tasks.
+        -- Tasks that are not in review or lack a tmux window are silently
+        -- filtered out before the prompt.
 }
 
 -- == PR Workflow ==
@@ -636,6 +729,29 @@ rule ArchiveTask {
         -- but the handler accepts any non-archived task.
 }
 
+rule BatchArchive {
+    when: BatchArchive(tasks, epics)
+
+    -- Archives selected tasks and epics in one operation.
+    -- Tasks are archived unconditionally (same as ArchiveTask).
+    -- Epics with non-done active subtasks are skipped.
+
+    ensures:
+        for task in tasks:
+            ArchiveTask(task)
+    ensures:
+        for epic in epics:
+            if epic.active_subtasks.all(t => t.status = done)
+               or epic.active_subtasks.count = 0:
+                ArchiveEpic(epic)
+
+    @guidance
+        -- Triggered from the TUI (x key) when tasks or epics are
+        -- multi-selected. Shows a count-based confirmation prompt before
+        -- proceeding. Skipped epics (those with non-done subtasks) are
+        -- reported in the status bar.
+}
+
 rule DeleteTask {
     when: DeleteTask(task)
 
@@ -652,6 +768,101 @@ rule DeleteTask {
         -- The archived-status precondition is enforced by the TUI input
         -- layer (archive view only shows archived tasks), not by the
         -- handler itself.
+}
+
+-- == Copy Task ==
+
+rule CopyTask {
+    when: CopyTask(source)
+
+    ensures: Task.created(
+        title: "Copy of: " + source.title,
+        description: source.description,
+        repo_path: confirmed_repo_path,  -- user confirms or edits before creation
+        status: backlog,
+        sub_status: SubStatus.default_for(backlog),
+        tag: source.tag,
+        created_at: now,
+        updated_at: now
+    )
+
+    @guidance
+        -- Copies a subset of fields from the source task. Fields that are
+        -- NOT copied: plan, worktree, tmux_window, pr_url, epic, sort_order.
+        -- The new task is a clean backlog item with no agent history.
+        -- The user is prompted to confirm or edit the repo_path before the
+        -- task is created (the source's repo_path is pre-filled as default).
+}
+
+-- == Editor ==
+
+rule EditTask {
+    when: EditTask(task)
+
+    -- Opens $EDITOR with a structured file containing the task's
+    -- title, description, repo_path, status, plan, and tag.
+    -- The user edits the file; on save, fields are parsed back.
+    -- Empty fields retain their previous values.
+    -- Empty plan or tag clears the field.
+
+    ensures:
+        let edited = EditorSession(task)
+        if edited.title != "": task.title = edited.title
+    ensures:
+        if edited.description != "": task.description = edited.description
+    ensures:
+        if edited.repo_path != "": task.repo_path = edited.repo_path
+    ensures:
+        if edited.status != null:
+            task.status = edited.status
+            task.sub_status = SubStatus.default_for(edited.status)
+    ensures:
+        if edited.plan != "": task.plan = edited.plan
+        else: task.plan = null
+    ensures:
+        if edited.tag != "": task.tag = edited.tag
+        else: task.tag = null
+    ensures: task.updated_at = now
+
+    @guidance
+        -- Status changes via the editor bypass normal transition
+        -- preconditions. The user can set any valid TaskStatus
+        -- regardless of the current status or the transitions
+        -- declared on Task. This is intentional: the editor is a
+        -- power-user escape hatch for manual corrections.
+        -- Sub_status is auto-reset to the default for the new status
+        -- when status changes, per the SubStatusAutoreset invariant.
+        -- The TUI is suspended while the editor is open and resumes
+        -- on editor exit. If the editor exits with a non-zero status,
+        -- no changes are applied.
+}
+
+rule EditEpic {
+    when: EditEpic(epic)
+
+    -- Opens $EDITOR with a structured file containing the epic's
+    -- title, description, and repo_path.
+    -- The user edits the file; on save, fields are parsed back.
+    -- Empty fields retain their previous values.
+    -- Status is not editable via the epic editor.
+
+    ensures:
+        let edited = EditorSession(epic)
+        if edited.title != "": epic.title = edited.title
+    ensures:
+        if edited.description != "": epic.description = edited.description
+    ensures:
+        if edited.repo_path != "": epic.repo_path = edited.repo_path
+    ensures: epic.updated_at = now
+
+    @guidance
+        -- Unlike EditTask, the epic editor does not expose status.
+        -- Epic status is derived from subtask states via the
+        -- EpicStatusRecalculation invariant and is not directly
+        -- editable by the user.
+        -- The TUI is suspended while the editor is open and resumes
+        -- on editor exit. If the editor exits with a non-zero status,
+        -- no changes are applied.
 }
 
 -- == Agent Health ==
@@ -744,7 +955,9 @@ rule NotifyNeedsInput {
         -- Notifications are deduplicated: each notification fires at most
         -- once per transition to needs_input. The notified state is
         -- cleared when sub_status leaves needs_input, allowing
-        -- re-notification on a subsequent re-entry.
+        -- re-notification on a subsequent re-entry. The clearing happens
+        -- unconditionally, even when notifications are disabled, so that
+        -- stale entries do not suppress notifications after re-enabling.
         -- The task is in running/needs_input (Blocked visual column),
         -- set by HookNotification when the agent raises a notification.
 }
@@ -765,7 +978,9 @@ rule NotifyReview {
         -- setting (N key in TUI). When disabled, no notifications are sent.
         -- Notifications are deduplicated: each notification fires at most
         -- once per transition to review. The notified state is cleared
-        -- when the task leaves review status.
+        -- when the task leaves review status. The clearing happens
+        -- unconditionally, even when notifications are disabled, so that
+        -- stale entries do not suppress notifications after re-enabling.
 }
 
 rule ClearNeedsInput {
@@ -964,8 +1179,10 @@ rule DispatchNextViaMcp {
     when: McpDispatchNext(epic)
 
     -- Intentionally looser than the TUI DispatchEpicSubtask rule:
-    -- does not require epic.status = backlog. This allows running
-    -- agents to dispatch sibling subtasks regardless of epic status.
+    -- does not require epic.status = backlog. The TUI dispatches
+    -- subtasks in batch while the epic is still in backlog; MCP
+    -- dispatches sequentially as agents complete work, so the epic
+    -- will already be running.
 
     ensures:
         let candidates = epic.subtasks where status = backlog
@@ -1116,6 +1333,14 @@ rule DispatchEpicSubtask {
                 AgentLaunched(task: next, mode: standard)
 
     @guidance
+        -- The TUI requires epic.status = backlog so that all subtasks
+        -- are dispatched in a batch before any start running. Once the
+        -- first subtask is dispatched and the epic auto-advances to
+        -- running (via RecalculateEpicStatus), no further TUI dispatches
+        -- are possible until the epic returns to backlog. This is
+        -- stricter than DispatchNextViaMcp, which omits the backlog
+        -- guard so that running agents can chain-dispatch siblings.
+        --
         -- Routing is based on the subtask's plan and tag:
         --   has_plan        → implementation mode
         --   tag = epic    → brainstorm mode

@@ -3933,3 +3933,55 @@ async fn wrap_up_rebase_conflict_sets_conflict_substatus() {
         "sub_status should be Conflict after rebase conflict"
     );
 }
+
+#[tokio::test]
+async fn wrap_up_rebase_clears_conflict_substatus_on_non_conflict_error() {
+    // When a task has Conflict sub_status from a previous rebase attempt,
+    // and a new rebase fails with a non-conflict error (e.g. Other), the
+    // stale Conflict sub_status should be cleared — matching TUI behavior.
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::fail(""),                  // detect_default_branch (symbolic-ref)
+        MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse --abbrev-ref HEAD
+        MockProcessRunner::fail(""),                  // git remote get-url (no remote)
+        MockProcessRunner::fail("fatal: some other git error"), // git rebase (non-conflict failure)
+        MockProcessRunner::ok(),                                // git rebase --abort
+    ]));
+    let state = Arc::new(McpState {
+        db: db.clone(),
+        notify_tx: None,
+        runner,
+    });
+
+    let task_id = db
+        .create_task("Stale Conflict", "desc", "/repo", None, TaskStatus::Review)
+        .unwrap();
+    db.patch_task(
+        task_id,
+        &db::TaskPatch::new()
+            .worktree(Some("/repo/.worktrees/1-stale-conflict"))
+            .sub_status(SubStatus::Conflict),
+    )
+    .unwrap();
+
+    // Verify conflict is set before wrap_up
+    let task = db.get_task(task_id).unwrap().unwrap();
+    assert_eq!(task.sub_status, SubStatus::Conflict);
+
+    let _resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "wrap_up",
+            "arguments": { "task_id": task_id.0, "action": "rebase" }
+        })),
+    )
+    .await;
+
+    let task = db.get_task(task_id).unwrap().unwrap();
+    assert_ne!(
+        task.sub_status,
+        SubStatus::Conflict,
+        "Stale Conflict sub_status should be cleared even on non-conflict rebase error"
+    );
+}
