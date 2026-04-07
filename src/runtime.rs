@@ -2550,6 +2550,8 @@ mod tests {
             head_ref: String::new(),
             ci_status: CiStatus::None,
             reviewers: vec![],
+            tmux_window: None,
+            worktree: None,
         };
         rt.database.save_review_prs(&[pr]).unwrap();
 

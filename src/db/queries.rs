@@ -853,6 +853,8 @@ fn load_prs_from_table(conn: &rusqlite::Connection, table: &str) -> Result<Vec<R
             head_ref,
             ci_status,
             reviewers,
+            tmux_window: None,
+            worktree: None,
         });
     }
     Ok(prs)
@@ -963,6 +965,8 @@ fn load_security_alerts_impl(
             created_at,
             state,
             description,
+            tmux_window: None,
+            worktree: None,
         });
     }
     Ok(alerts)

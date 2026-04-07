@@ -264,6 +264,8 @@ fn parse_prs_response(json: &str, alias_count: usize) -> Result<Vec<ReviewPr>, S
             head_ref,
             ci_status,
             reviewers,
+            tmux_window: None,
+            worktree: None,
         });
     }
 
@@ -379,6 +381,8 @@ fn parse_graphql_security_alerts(json: &str) -> Result<Vec<SecurityAlert>, Strin
                 created_at,
                 state: "open".to_string(),
                 description,
+                tmux_window: None,
+                worktree: None,
             });
         }
     }

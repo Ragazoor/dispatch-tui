@@ -6222,6 +6222,8 @@ fn make_review_pr_for_repo(
         head_ref: String::new(),
         ci_status: crate::models::CiStatus::None,
         reviewers: vec![],
+        tmux_window: None,
+        worktree: None,
     }
 }
 
@@ -6244,6 +6246,8 @@ fn make_security_alert(
         created_at: chrono::Utc::now(),
         state: "open".to_string(),
         description: String::new(),
+        tmux_window: None,
+        worktree: None,
     }
 }
 

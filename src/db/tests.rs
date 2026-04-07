@@ -1139,6 +1139,8 @@ fn save_and_load_review_prs() {
         head_ref: String::new(),
         ci_status: CiStatus::None,
         reviewers: vec![],
+        tmux_window: None,
+        worktree: None,
     };
     let pr2 = ReviewPr {
         number: 99,
@@ -1157,6 +1159,8 @@ fn save_and_load_review_prs() {
         head_ref: String::new(),
         ci_status: CiStatus::None,
         reviewers: vec![],
+        tmux_window: None,
+        worktree: None,
     };
 
     db.save_review_prs(&[pr1, pr2]).unwrap();
@@ -1206,6 +1210,8 @@ fn save_review_prs_replaces_all() {
             login: "carol".to_string(),
             decision: None,
         }],
+        tmux_window: None,
+        worktree: None,
     };
     db.save_review_prs(&[pr1]).unwrap();
     assert_eq!(db.load_review_prs().unwrap().len(), 1);
@@ -1240,6 +1246,8 @@ fn save_review_prs_replaces_all() {
             login: "dave".to_string(),
             decision: Some(ReviewDecision::ChangesRequested),
         }],
+        tmux_window: None,
+        worktree: None,
     };
     db.save_review_prs(&[pr2]).unwrap();
 
@@ -1899,6 +1907,8 @@ fn security_alerts_round_trip() {
             created_at: now,
             state: "open".to_string(),
             description: "Prototype pollution".to_string(),
+            tmux_window: None,
+            worktree: None,
         },
         SecurityAlert {
             number: 2,
@@ -1914,6 +1924,8 @@ fn security_alerts_round_trip() {
             created_at: now,
             state: "open".to_string(),
             description: "Potential SQL injection".to_string(),
+            tmux_window: None,
+            worktree: None,
         },
     ];
 
@@ -1957,6 +1969,8 @@ fn security_alerts_save_replaces_previous() {
         created_at: now,
         state: "open".to_string(),
         description: "".to_string(),
+        tmux_window: None,
+        worktree: None,
     }];
     db.save_security_alerts(&alerts1).unwrap();
     assert_eq!(db.load_security_alerts().unwrap().len(), 1);
@@ -1975,6 +1989,8 @@ fn security_alerts_save_replaces_previous() {
         created_at: now,
         state: "open".to_string(),
         description: "".to_string(),
+        tmux_window: None,
+        worktree: None,
     }];
     db.save_security_alerts(&alerts2).unwrap();
     let loaded = db.load_security_alerts().unwrap();
