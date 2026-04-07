@@ -45,12 +45,12 @@ enum SubStatus {
     -- backlog / done / archived
     none
 
-    -- running
+    -- running (and review where noted)
     active          -- agent is running normally
     needs_input     -- agent is blocked waiting for human interaction (Blocked visual column)
     stale           -- no output change detected beyond inactivity_timeout
     crashed         -- tmux window disappeared unexpectedly
-    conflict        -- rebase/merge encountered a conflict
+    conflict        -- rebase/merge encountered a conflict (valid for both running and review)
 
     -- review
     awaiting_review   -- PR created, no review decision yet
@@ -64,7 +64,7 @@ enum SubStatus {
 -- Valid SubStatus values per parent status (enforced by MCP; bypassed by CLI hooks):
 --   backlog   : none
 --   running   : active | needs_input | stale | crashed | conflict
---   review    : awaiting_review | changes_requested | approved
+--   review    : awaiting_review | changes_requested | approved | conflict
 --   done      : none
 --   archived  : none
 --
@@ -431,6 +431,8 @@ rule CreatePr {
     @guidance
         -- Pushes the branch to origin and creates a GitHub PR using
         -- `gh pr create`. The task remains in review.
+        -- PRs are created as drafts (--draft flag) to avoid triggering
+        -- review requests before the agent's work is fully reviewed.
 }
 
 rule MergePr {
@@ -474,6 +476,9 @@ rule PollPrStatus {
         -- Fires PrMerged when the PR is merged.
         -- Updates sub_status to reflect the current review decision:
         --   approved | changes_requested | awaiting_review.
+        -- PRs closed without merging are silently ignored by the poll
+        -- loop. The task remains in review and requires manual
+        -- intervention (move to done or re-dispatch).
 }
 
 rule PrMerged {
@@ -541,9 +546,11 @@ rule WrapUpPr {
     ensures: task.updated_at = now
 
     @guidance
-        -- Pushes the branch to origin and creates a GitHub PR using
-        -- `gh pr create`. The task transitions to review and PR
-        -- status polling (PollPrStatus) takes over from there.
+        -- Pushes the branch to origin and creates a GitHub PR as a
+        -- draft (`gh pr create --draft`) to avoid triggering review
+        -- requests before the agent's work is fully reviewed. The task
+        -- transitions to review and PR status polling (PollPrStatus)
+        -- takes over from there.
         -- The operation runs in background via ProcessRunner.
         -- Available from both the TUI (W then p) and MCP (wrap_up
         -- tool with action "pr").
@@ -586,8 +593,10 @@ rule FinishTaskSuccess {
 rule FinishTaskConflict {
     when: RebaseConflict(task)
 
-    -- Fires when FinishTask's rebase encounters a conflict.
+    -- Fires when FinishTask's or WrapUpRebase's rebase encounters a conflict.
     -- The rebase is aborted and the task is marked with conflict sub_status.
+    -- The task may be in either running or review status at this point,
+    -- so conflict is a valid sub_status for both parent statuses.
 
     ensures: task.sub_status = conflict
     ensures: UserInformed(about: rebase_conflict, task: task)
@@ -596,6 +605,9 @@ rule FinishTaskConflict {
         -- Conflict has the highest visual column priority (0, above
         -- crashed at 1). It appears in the Stale visual column alongside
         -- stale and crashed tasks.
+        -- Conflict is valid for both running and review tasks: review
+        -- tasks hit it during FinishTask (merge via TUI), running tasks
+        -- hit it during WrapUpRebase.
         -- Staleness detection skips conflict tasks (they are not
         -- re-evaluated for inactivity).
         -- PR review polling skips overwriting conflict sub_status.
@@ -656,11 +668,13 @@ rule DetectStaleAgent {
           and task.sub_status not in {stale, crashed, conflict}
 
     ensures: task.sub_status = stale
-    ensures: DesktopNotification(
-        task: task,
-        urgency: normal,
-        about: agent_stale
-    )
+    ensures:
+        if notifications_enabled:
+            DesktopNotification(
+                task: task,
+                urgency: normal,
+                about: agent_stale
+            )
 
     @guidance
         -- Evaluated on each tick for all running tasks with a tmux window.
@@ -676,11 +690,13 @@ rule DetectCrashedAgent {
     requires: task.status = running
 
     ensures: task.sub_status = crashed
-    ensures: DesktopNotification(
-        task: task,
-        urgency: urgent,
-        about: agent_crashed
-    )
+    ensures:
+        if notifications_enabled:
+            DesktopNotification(
+                task: task,
+                urgency: urgent,
+                about: agent_crashed
+            )
 
     @guidance
         -- Triggered by the WindowGone message, which is sent when the

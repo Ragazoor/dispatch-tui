@@ -201,7 +201,7 @@ fn fresh_db_has_latest_schema_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 29, "fresh DB should be at schema version 29");
+    assert_eq!(version, 30);
 }
 
 #[test]
@@ -273,7 +273,7 @@ fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 29);
+    assert_eq!(version, 30);
 }
 
 #[test]
@@ -362,7 +362,7 @@ fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 29);
+    assert_eq!(version, 30);
 }
 
 #[test]
@@ -473,7 +473,7 @@ fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 29);
+    assert_eq!(version, 30);
 }
 
 #[test]
@@ -1559,7 +1559,7 @@ fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 29);
+    assert_eq!(version, 30);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -1660,7 +1660,7 @@ fn schema_version_is_21() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 29, "fresh DB should be at schema version 29");
+    assert_eq!(version, 30);
 }
 
 #[test]
@@ -1786,7 +1786,7 @@ fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 29);
+    assert_eq!(version, 30);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn

@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 
 use crate::db::{self, Database};
 use crate::mcp::McpState;
-use crate::models::TaskStatus;
+use crate::models::{SubStatus, TaskStatus};
 use crate::process::{MockProcessRunner, ProcessRunner};
 
 use super::dispatch::{handle_mcp, tool_definitions};
@@ -3835,4 +3835,101 @@ async fn update_review_status_invalid_status_errors() {
     )
     .await;
     assert!(resp.error.is_some());
+}
+
+#[tokio::test]
+async fn wrap_up_rebase_clears_tmux_window() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::fail(""),                  // detect_default_branch (symbolic-ref)
+        MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse --abbrev-ref HEAD
+        MockProcessRunner::fail(""),                  // git remote get-url (no remote)
+        MockProcessRunner::ok(),                      // git rebase main
+        MockProcessRunner::ok(),                      // git merge --ff-only
+        MockProcessRunner::ok(),                      // tmux kill-window
+    ]));
+    let state = Arc::new(McpState {
+        db: db.clone(),
+        notify_tx: None,
+        runner,
+    });
+
+    let task_id = db
+        .create_task("Rebase Clear Window", "desc", "/repo", None, TaskStatus::Review)
+        .unwrap();
+    db.patch_task(
+        task_id,
+        &db::TaskPatch::new()
+            .worktree(Some("/repo/.worktrees/1-rebase-clear"))
+            .tmux_window(Some("task-99")),
+    )
+    .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "wrap_up",
+            "arguments": { "task_id": task_id.0, "action": "rebase" }
+        })),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert!(text.contains("wrap_up complete"));
+
+    let task = db.get_task(task_id).unwrap().unwrap();
+    assert_eq!(task.status, TaskStatus::Done);
+    assert!(
+        task.tmux_window.is_none(),
+        "tmux_window should be cleared in DB after successful rebase"
+    );
+}
+
+#[tokio::test]
+async fn wrap_up_rebase_conflict_sets_conflict_substatus() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::fail(""),                  // detect_default_branch
+        MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse HEAD
+        MockProcessRunner::fail(""),                  // git remote get-url (no remote)
+        MockProcessRunner::fail("CONFLICT (content): Merge conflict in foo.rs"), // git rebase
+        MockProcessRunner::ok(),                      // git rebase --abort
+    ]));
+    let state = Arc::new(McpState {
+        db: db.clone(),
+        notify_tx: None,
+        runner,
+    });
+
+    let task_id = db
+        .create_task("Conflict Sub", "desc", "/repo", None, TaskStatus::Review)
+        .unwrap();
+    db.patch_task(
+        task_id,
+        &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-conflict-sub")),
+    )
+    .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "wrap_up",
+            "arguments": { "task_id": task_id.0, "action": "rebase" }
+        })),
+    )
+    .await;
+
+    assert_error(&resp, "conflict");
+    let task = db.get_task(task_id).unwrap().unwrap();
+    assert_eq!(
+        task.status,
+        TaskStatus::Review,
+        "Task should remain Review on rebase conflict"
+    );
+    assert_eq!(
+        task.sub_status,
+        SubStatus::Conflict,
+        "sub_status should be Conflict after rebase conflict"
+    );
 }

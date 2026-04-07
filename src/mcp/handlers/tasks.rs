@@ -482,7 +482,9 @@ pub(super) async fn handle_wrap_up(
 
             match rebase_result {
                 Ok(()) => {
-                    let patch = db::TaskPatch::new().status(TaskStatus::Done);
+                    let patch = db::TaskPatch::new()
+                        .status(TaskStatus::Done)
+                        .tmux_window(None);
                     if let Err(e) = db.patch_task(task_id, &patch) {
                         tracing::warn!(
                             task_id = task_id.0,
@@ -507,6 +509,10 @@ pub(super) async fn handle_wrap_up(
                     )
                 }
                 Err(e) => {
+                    if matches!(e, dispatch::FinishError::RebaseConflict(_)) {
+                        let patch = db::TaskPatch::new().sub_status(SubStatus::Conflict);
+                        let _ = db.patch_task(task_id, &patch);
+                    }
                     if let Some(tx) = notify_tx {
                         let _ = tx.send(crate::mcp::McpEvent::Refresh);
                     }

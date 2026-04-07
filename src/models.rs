@@ -198,7 +198,10 @@ impl SubStatus {
             ),
             TaskStatus::Review => matches!(
                 self,
-                SubStatus::AwaitingReview | SubStatus::ChangesRequested | SubStatus::Approved
+                SubStatus::AwaitingReview
+                    | SubStatus::ChangesRequested
+                    | SubStatus::Approved
+                    | SubStatus::Conflict
             ),
             TaskStatus::Done => matches!(self, SubStatus::None),
             TaskStatus::Archived => matches!(self, SubStatus::None),
@@ -315,7 +318,7 @@ impl VisualColumn {
         VisualColumn {
             label: "PR Created",
             parent_status: TaskStatus::Review,
-            sub_statuses: &[SubStatus::AwaitingReview],
+            sub_statuses: &[SubStatus::AwaitingReview, SubStatus::Conflict],
         },
         VisualColumn {
             label: "Revise",
