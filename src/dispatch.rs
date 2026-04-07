@@ -1007,6 +1007,7 @@ pub fn build_fix_prompt(
 /// Dispatch a Claude agent to fix a security vulnerability in an isolated worktree.
 #[allow(clippy::too_many_arguments)]
 pub fn dispatch_fix_agent(
+    repo_path: &str,
     github_repo: &str,
     number: i64,
     kind: crate::models::AlertKind,
@@ -1014,13 +1015,9 @@ pub fn dispatch_fix_agent(
     description: &str,
     package: Option<&str>,
     fixed_version: Option<&str>,
-    known_paths: &[String],
     runner: &dyn ProcessRunner,
 ) -> Result<DispatchResult> {
-    let repo_path = resolve_repo_path(github_repo, known_paths).ok_or_else(|| {
-        anyhow::anyhow!("No local repo found for {github_repo}. Add it to your repo paths.")
-    })?;
-
+    let repo_path = expand_tilde(repo_path);
     let repo_short = repo_path.split('/').next_back().unwrap_or(&repo_path);
     let worktree_name = format!("fix-vuln-{number}");
     let worktree_path = format!("{repo_path}/.worktrees/{worktree_name}");

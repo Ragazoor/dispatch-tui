@@ -8293,8 +8293,9 @@ fn quick_dispatch_enter_selects_cursor_repo() {
 }
 
 #[test]
-fn review_board_d_dispatches_review_agent() {
+fn review_board_d_dispatches_review_agent_when_path_known() {
     let mut app = make_app();
+    app.repo_paths = vec!["/home/user/Code/repo".to_string()];
     let mut pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
     pr.repo = "org/repo".to_string();
     pr.head_ref = "fix-bug".to_string();
@@ -8302,23 +8303,95 @@ fn review_board_d_dispatches_review_agent() {
     app.update(Message::SwitchToReviewBoard);
 
     let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('d')));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::DispatchReviewAgent(req) if req.repo == "org/repo")));
+    assert!(cmds.iter().any(
+        |c| matches!(c, Command::DispatchReviewAgent(req) if req.repo == "/home/user/Code/repo")
+    ));
 }
 
 #[test]
-fn review_board_d_emits_command_even_without_tasks() {
+fn review_board_d_enters_repo_input_when_path_unknown() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     let pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
     app.review.set_prs(vec![pr]);
     app.update(Message::SwitchToReviewBoard);
 
     let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('d')));
-    // App no longer resolves repo paths — it always emits the command
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::InputDispatchRepoPath);
+    assert!(app.input.pending_dispatch.is_some());
+}
+
+#[test]
+fn submit_dispatch_repo_path_dispatches_review_agent() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
+    app.review.set_prs(vec![pr]);
+    app.update(Message::SwitchToReviewBoard);
+
+    // Trigger dispatch — no known paths, enters input mode
+    app.handle_key(KeyEvent::from(KeyCode::Char('d')));
+    assert_eq!(app.input.mode, InputMode::InputDispatchRepoPath);
+
+    // Submit a repo path
+    let cmds = app.update(Message::SubmitDispatchRepoPath(
+        "/home/user/Code/repo".to_string(),
+    ));
+    assert!(cmds.iter().any(
+        |c| matches!(c, Command::DispatchReviewAgent(req) if req.repo == "/home/user/Code/repo")
+    ));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::DispatchReviewAgent(_))));
+        .any(|c| matches!(c, Command::SaveRepoPath(p) if p == "/home/user/Code/repo")));
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn fix_agent_dispatch_enters_repo_input_when_path_unknown() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let cmds = app.update(Message::DispatchFixAgent {
+        repo: "org/my-repo".to_string(),
+        number: 1,
+        kind: crate::models::AlertKind::Dependabot,
+        title: "CVE-2025-1234".to_string(),
+        description: "desc".to_string(),
+        package: Some("serde".to_string()),
+        fixed_version: Some("1.0.1".to_string()),
+    });
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::InputDispatchRepoPath);
+    assert!(app.input.pending_dispatch.is_some());
+}
+
+#[test]
+fn fix_agent_dispatch_resolves_known_path() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.repo_paths = vec!["/home/user/Code/my-repo".to_string()];
+    let cmds = app.update(Message::DispatchFixAgent {
+        repo: "org/my-repo".to_string(),
+        number: 1,
+        kind: crate::models::AlertKind::Dependabot,
+        title: "CVE-2025-1234".to_string(),
+        description: "desc".to_string(),
+        package: Some("serde".to_string()),
+        fixed_version: Some("1.0.1".to_string()),
+    });
+    assert!(cmds.iter().any(
+        |c| matches!(c, Command::DispatchFixAgent { repo, .. } if repo == "/home/user/Code/my-repo")
+    ));
+}
+
+#[test]
+fn cancel_dispatch_repo_path_clears_pending() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
+    app.review.set_prs(vec![pr]);
+    app.update(Message::SwitchToReviewBoard);
+    app.handle_key(KeyEvent::from(KeyCode::Char('d')));
+    assert_eq!(app.input.mode, InputMode::InputDispatchRepoPath);
+
+    app.update(Message::CancelInput);
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(app.input.pending_dispatch.is_none());
 }
 
 #[test]

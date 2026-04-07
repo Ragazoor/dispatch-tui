@@ -82,6 +82,33 @@ pub struct ReviewAgentRequest {
 }
 
 // ---------------------------------------------------------------------------
+// PendingDispatch — held while user selects a repo path for dispatch
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub enum PendingDispatch {
+    Review(ReviewAgentRequest),
+    Fix {
+        repo: String,
+        number: i64,
+        kind: AlertKind,
+        title: String,
+        description: String,
+        package: Option<String>,
+        fixed_version: Option<String>,
+    },
+}
+
+impl PendingDispatch {
+    pub fn github_repo(&self) -> &str {
+        match self {
+            PendingDispatch::Review(req) => &req.repo,
+            PendingDispatch::Fix { repo, .. } => repo,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // RepoFilterMode
 // ---------------------------------------------------------------------------
 
@@ -169,6 +196,7 @@ pub enum Message {
     SubmitDescription(String),
     DescriptionEditorResult(String),
     SubmitRepoPath(String),
+    SubmitDispatchRepoPath(String),
     SubmitTag(Option<TaskTag>),
     InputChar(char),
     InputBackspace,
@@ -454,6 +482,7 @@ pub enum Command {
     PersistSecurityAlerts(Vec<SecurityAlert>),
     DispatchFixAgent {
         repo: String,
+        github_repo: String,
         number: i64,
         kind: crate::models::AlertKind,
         title: String,
@@ -502,6 +531,8 @@ pub enum InputMode {
     ConfirmBatchApprove(Vec<String>),
     ConfirmBatchMerge(Vec<String>),
     ConfirmQuit,
+    // Dispatch repo path input (review/security tab fallback)
+    InputDispatchRepoPath,
 }
 
 // ---------------------------------------------------------------------------
@@ -571,6 +602,8 @@ pub struct InputState {
     pub repo_cursor: usize,
     /// Tracks epic_id during quick-dispatch repo selection in epic view.
     pub pending_epic_id: Option<EpicId>,
+    /// Holds a pending review/fix dispatch while user selects a repo path.
+    pub pending_dispatch: Option<PendingDispatch>,
 }
 
 impl Default for InputState {
@@ -582,6 +615,7 @@ impl Default for InputState {
             epic_draft: None,
             repo_cursor: 0,
             pending_epic_id: None,
+            pending_dispatch: None,
         }
     }
 }

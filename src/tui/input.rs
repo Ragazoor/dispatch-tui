@@ -20,6 +20,7 @@ impl App {
             InputMode::InputTitle
             | InputMode::InputDescription
             | InputMode::InputRepoPath
+            | InputMode::InputDispatchRepoPath
             | InputMode::InputEpicTitle
             | InputMode::InputEpicDescription
             | InputMode::InputEpicRepoPath => self.handle_key_text_input(key),
@@ -431,7 +432,9 @@ impl App {
         // In repo path modes, j/k navigate saved repo paths when the buffer is empty
         let is_repo_mode = matches!(
             self.input.mode,
-            InputMode::InputRepoPath | InputMode::InputEpicRepoPath
+            InputMode::InputRepoPath
+                | InputMode::InputEpicRepoPath
+                | InputMode::InputDispatchRepoPath
         );
         if is_repo_mode && self.input.buffer.is_empty() {
             match key.code {
@@ -455,6 +458,9 @@ impl App {
                             InputMode::InputEpicRepoPath => {
                                 Message::SubmitEpicRepoPath(path.clone())
                             }
+                            InputMode::InputDispatchRepoPath => {
+                                Message::SubmitDispatchRepoPath(path.clone())
+                            }
                             _ => Message::SubmitRepoPath(path.clone()),
                         };
                         return self.update(msg);
@@ -465,6 +471,9 @@ impl App {
                     InputMode::InputTitle => self.update(Message::SubmitTitle(value)),
                     InputMode::InputDescription => self.update(Message::SubmitDescription(value)),
                     InputMode::InputRepoPath => self.update(Message::SubmitRepoPath(value)),
+                    InputMode::InputDispatchRepoPath => {
+                        self.update(Message::SubmitDispatchRepoPath(value))
+                    }
                     InputMode::InputEpicTitle => self.update(Message::SubmitEpicTitle(value)),
                     InputMode::InputEpicDescription => {
                         self.update(Message::SubmitEpicDescription(value))

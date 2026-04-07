@@ -1332,6 +1332,7 @@ impl TuiRuntime {
     fn exec_dispatch_fix_agent(
         &self,
         repo: String,
+        github_repo: String,
         number: i64,
         kind: crate::models::AlertKind,
         title: String,
@@ -1339,26 +1340,19 @@ impl TuiRuntime {
         package: Option<String>,
         fixed_version: Option<String>,
     ) {
+        // repo is already resolved to a local path by the TUI
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
-        let mut known_paths = self.database.list_repo_paths().unwrap_or_default();
-        if let Ok(tasks) = self.database.list_all() {
-            for t in tasks {
-                if !known_paths.contains(&t.repo_path) {
-                    known_paths.push(t.repo_path.clone());
-                }
-            }
-        }
         tokio::task::spawn_blocking(move || {
             match dispatch::dispatch_fix_agent(
                 &repo,
+                &github_repo,
                 number,
                 kind,
                 &title,
                 &description,
                 package.as_deref(),
                 fixed_version.as_deref(),
-                &known_paths,
                 &*runner,
             ) {
                 Ok(result) => {
@@ -1377,26 +1371,8 @@ impl TuiRuntime {
         });
     }
 
-    fn exec_dispatch_review_agent(&self, mut req: ReviewAgentRequest) {
-        let mut known_paths = self.database.list_repo_paths().unwrap_or_default();
-        // Also include repo paths from existing tasks as fallback
-        if let Ok(tasks) = self.database.list_all() {
-            for t in tasks {
-                if !known_paths.contains(&t.repo_path) {
-                    known_paths.push(t.repo_path);
-                }
-            }
-        }
-        match crate::dispatch::resolve_repo_path(&req.repo, &known_paths) {
-            Some(p) => req.repo = p,
-            None => {
-                let _ = self.msg_tx.send(Message::ReviewAgentFailed {
-                    error: format!("No local repo found for {}", req.repo),
-                });
-                return;
-            }
-        }
-
+    fn exec_dispatch_review_agent(&self, req: ReviewAgentRequest) {
+        // repo is already resolved to a local path by the TUI
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
         tokio::task::spawn_blocking(move || {
@@ -1605,6 +1581,7 @@ async fn execute_commands(
             Command::PersistSecurityAlerts(alerts) => rt.exec_persist_security_alerts(alerts),
             Command::DispatchFixAgent {
                 repo,
+                github_repo,
                 number,
                 kind,
                 title,
@@ -1614,6 +1591,7 @@ async fn execute_commands(
             } => {
                 rt.exec_dispatch_fix_agent(
                     repo,
+                    github_repo,
                     number,
                     kind,
                     title,

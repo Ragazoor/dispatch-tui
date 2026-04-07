@@ -701,6 +701,9 @@ impl App {
                 }
             }
             Message::SubmitRepoPath(value) => self.handle_submit_repo_path(value),
+            Message::SubmitDispatchRepoPath(value) => {
+                self.handle_submit_dispatch_repo_path(value)
+            }
             Message::SubmitTag(tag) => self.handle_submit_tag(tag),
             Message::InputChar(c) => self.handle_input_char(c),
             Message::InputBackspace => self.handle_input_backspace(),
@@ -932,16 +935,38 @@ impl App {
                 package,
                 fixed_version,
             } => {
-                self.set_status(format!("Dispatching fix agent for {}#{}...", repo, number));
-                vec![Command::DispatchFixAgent {
-                    repo,
-                    number,
-                    kind,
-                    title,
-                    description,
-                    package,
-                    fixed_version,
-                }]
+                let known = self.known_repo_paths();
+                if let Some(path) = dispatch::resolve_repo_path(&repo, &known) {
+                    self.set_status(format!("Dispatching fix agent for {}#{}...", repo, number));
+                    vec![Command::DispatchFixAgent {
+                        github_repo: repo,
+                        repo: path,
+                        number,
+                        kind,
+                        title,
+                        description,
+                        package,
+                        fixed_version,
+                    }]
+                } else {
+                    self.set_status(format!(
+                        "No local repo found for {} — select a path",
+                        repo
+                    ));
+                    self.input.pending_dispatch = Some(PendingDispatch::Fix {
+                        repo,
+                        number,
+                        kind,
+                        title,
+                        description,
+                        package,
+                        fixed_version,
+                    });
+                    self.input.mode = InputMode::InputDispatchRepoPath;
+                    self.input.buffer.clear();
+                    self.input.repo_cursor = 0;
+                    vec![]
+                }
             }
             Message::FixAgentDispatched {
                 repo,
@@ -1939,6 +1964,7 @@ impl App {
         self.input.buffer.clear();
         self.input.task_draft = None;
         self.input.pending_epic_id = None;
+        self.input.pending_dispatch = None;
         self.clear_status();
         vec![]
     }
@@ -2782,9 +2808,89 @@ impl App {
         vec![]
     }
 
-    fn handle_dispatch_review_agent(&mut self, req: ReviewAgentRequest) -> Vec<Command> {
-        self.set_status(format!("Dispatching review agent for #{}...", req.number));
-        vec![Command::DispatchReviewAgent(req)]
+    fn handle_dispatch_review_agent(&mut self, mut req: ReviewAgentRequest) -> Vec<Command> {
+        let known = self.known_repo_paths();
+        if let Some(path) = dispatch::resolve_repo_path(&req.repo, &known) {
+            req.repo = path;
+            self.set_status(format!("Dispatching review agent for #{}...", req.number));
+            vec![Command::DispatchReviewAgent(req)]
+        } else {
+            self.set_status(format!(
+                "No local repo found for {} — select a path",
+                req.repo
+            ));
+            self.input.pending_dispatch = Some(PendingDispatch::Review(req));
+            self.input.mode = InputMode::InputDispatchRepoPath;
+            self.input.buffer.clear();
+            self.input.repo_cursor = 0;
+            vec![]
+        }
+    }
+
+    fn handle_submit_dispatch_repo_path(&mut self, value: String) -> Vec<Command> {
+        self.input.buffer.clear();
+        let repo_path = if value.is_empty() {
+            if let Some(first) = self.repo_paths.first() {
+                first.clone()
+            } else {
+                self.set_status("Repo path required (no saved paths available)".to_string());
+                return vec![];
+            }
+        } else {
+            value
+        };
+        self.input.mode = InputMode::Normal;
+        let pending = self.input.pending_dispatch.take();
+        match pending {
+            Some(PendingDispatch::Review(mut req)) => {
+                let save = Command::SaveRepoPath(repo_path.clone());
+                req.repo = repo_path;
+                self.set_status(format!("Dispatching review agent for #{}...", req.number));
+                vec![Command::DispatchReviewAgent(req), save]
+            }
+            Some(PendingDispatch::Fix {
+                repo: github_repo,
+                number,
+                kind,
+                title,
+                description,
+                package,
+                fixed_version,
+            }) => {
+                self.set_status(format!(
+                    "Dispatching fix agent for {}#{}...",
+                    github_repo, number
+                ));
+                vec![
+                    Command::DispatchFixAgent {
+                        repo: repo_path.clone(),
+                        github_repo,
+                        number,
+                        kind,
+                        title,
+                        description,
+                        package,
+                        fixed_version,
+                    },
+                    Command::SaveRepoPath(repo_path),
+                ]
+            }
+            None => {
+                self.set_status("No pending dispatch".to_string());
+                vec![]
+            }
+        }
+    }
+
+    /// Collect known local repo paths from saved paths and existing tasks.
+    fn known_repo_paths(&self) -> Vec<String> {
+        let mut known = self.repo_paths.clone();
+        for t in &self.tasks {
+            if !known.contains(&t.repo_path) {
+                known.push(t.repo_path.clone());
+            }
+        }
+        known
     }
 
     fn handle_bot_prs_loaded(&mut self, prs: Vec<crate::models::ReviewPr>) -> Vec<Command> {
