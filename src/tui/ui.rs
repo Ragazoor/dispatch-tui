@@ -528,11 +528,23 @@ fn build_task_list_item<'a>(
     now: DateTime<Utc>,
     is_cursor: bool,
     col_color: Color,
+    col_width: u16,
 ) -> ListItem<'a> {
     let is_batch_selected = app.selected_tasks().contains(&task.id);
     let select_prefix = if is_batch_selected { "* " } else { "  " };
 
-    let title_text = format_task_title(task, 32);
+    let has_message_flash = app
+        .agents
+        .message_flash
+        .get(&task.id)
+        .is_some_and(|t| t.elapsed().as_secs() < 3);
+
+    // Prefix: select(2) + stripe(1) + " #NNN "(id_len+3) + optional flash(" ✉", 2)
+    let id_len = format!("{}", task.id).len();
+    let flash_width = if has_message_flash { 2 } else { 0 };
+    let prefix_width = 2 + 1 + 3 + id_len + flash_width;
+    let max_title = (col_width as usize).saturating_sub(prefix_width);
+    let title_text = format_task_title(task, max_title);
 
     // Line 1: prefix + stripe + title
     // Cursor gets a thicker stripe (▌) as a left accent bar
@@ -543,12 +555,6 @@ fn build_task_list_item<'a>(
     } else {
         Style::default()
     };
-
-    let has_message_flash = app
-        .agents
-        .message_flash
-        .get(&task.id)
-        .is_some_and(|t| t.elapsed().as_secs() < 3);
 
     let mut line1_spans = vec![
         Span::styled(select_prefix.to_string(), title_style),
@@ -689,9 +695,9 @@ fn render_columns(frame: &mut Frame, app: &mut App, area: Rect, now: DateTime<Ut
             let is_cursor = is_focused && !app.on_select_all() && item_idx == selected_row;
             list_items.push(match item {
                 ColumnItem::Task(task) => {
-                    build_task_list_item(task, status, app, now, is_cursor, color)
+                    build_task_list_item(task, status, app, now, is_cursor, color, col_area.width)
                 }
-                ColumnItem::Epic(epic) => render_epic_item(epic, is_cursor, app, status),
+                ColumnItem::Epic(epic) => render_epic_item(epic, is_cursor, app, status, col_area.width),
             });
         }
 
@@ -739,6 +745,7 @@ fn render_epic_item(
     is_cursor: bool,
     app: &App,
     status: TaskStatus,
+    col_width: u16,
 ) -> ListItem<'static> {
     let subtask_statuses: Vec<TaskStatus> = app
         .tasks()
@@ -760,12 +767,17 @@ fn render_epic_item(
         .filter(|s| **s == TaskStatus::Review)
         .count();
 
-    let title_text = truncate(&epic.title, 28);
     let plan_indicator = if epic.plan_path.is_some() && status == TaskStatus::Backlog {
         " \u{25b8}" // ▸
     } else {
         ""
     };
+
+    // Prefix: select(2) + stripe(1) + " #NNN "(id_len+3) + plan_indicator
+    let id_len = format!("{}", epic.id).len();
+    let prefix_width = 2 + 1 + 3 + id_len + plan_indicator.chars().count();
+    let max_title = (col_width as usize).saturating_sub(prefix_width);
+    let title_text = truncate(&epic.title, max_title);
 
     let is_batch_selected = app.selected_epics().contains(&epic.id);
     let select_prefix = if is_batch_selected { "* " } else { "  " };
@@ -2722,6 +2734,7 @@ fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
                     is_focused && row == selected_row,
                     is_dispatch,
                     is_selected,
+                    col_areas[i].width,
                 )
             })
             .collect();
@@ -2768,6 +2781,7 @@ fn build_review_pr_item(
     is_cursor: bool,
     is_dispatch: bool,
     is_selected: bool,
+    col_width: u16,
 ) -> ListItem<'static> {
     // Map to a ReviewDecision for color purposes
     let decision_for_color = if matches!(mode, ReviewBoardMode::Dependabot) {
@@ -2794,7 +2808,14 @@ fn build_review_pr_item(
         "{select_prefix}{dispatch_badge}#{} {}",
         pr.number, pr.title
     );
-    let header_truncated = truncate(&header, 60);
+    // stripe(2) + header + ci_status(" " + symbol)
+    let ci_symbol_width = match pr.ci_status {
+        CiStatus::Pending => 2, // ⏳ is a wide character
+        _ => 1,
+    };
+    let ci_span_width = 1 + ci_symbol_width; // " " + symbol
+    let max_header = (col_width as usize).saturating_sub(2 + ci_span_width);
+    let header_truncated = truncate(&header, max_header);
 
     let line1_style = if is_selected || is_cursor {
         Style::default()
@@ -3027,7 +3048,7 @@ fn render_security_columns(frame: &mut Frame, app: &mut App, area: Rect) {
             .iter()
             .enumerate()
             .map(|(row, alert)| {
-                build_security_alert_item(alert, severity, is_focused && row == selected_row)
+                build_security_alert_item(alert, severity, is_focused && row == selected_row, col_areas[i].width)
             })
             .collect();
 
@@ -3056,6 +3077,7 @@ fn build_security_alert_item(
     alert: &SecurityAlert,
     severity: AlertSeverity,
     is_cursor: bool,
+    col_width: u16,
 ) -> ListItem<'static> {
     let color = security_column_color(severity);
     let now = Utc::now();
@@ -3065,7 +3087,9 @@ fn build_security_alert_item(
     let stripe = if is_cursor { "\u{258c} " } else { "\u{258e} " };
     let repo_short = alert.repo.split('/').next_back().unwrap_or(&alert.repo);
     let header = format!("#{} {}", alert.number, alert.title);
-    let header_truncated = truncate(&header, 55);
+    // stripe(2) + header
+    let max_header = (col_width as usize).saturating_sub(2);
+    let header_truncated = truncate(&header, max_header);
 
     let line1_style = if is_cursor {
         Style::default()

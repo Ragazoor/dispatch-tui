@@ -10088,3 +10088,78 @@ fn merge_pr_failed_sets_status_message() {
     assert!(cmds.is_empty());
     assert!(app.status_message.as_deref().unwrap().contains("CI checks failing"));
 }
+
+// ---------------------------------------------------------------------------
+// Title truncation — cards must truncate titles to fit column width
+// ---------------------------------------------------------------------------
+
+#[test]
+fn task_card_title_truncated_in_narrow_terminal() {
+    let mut task = make_task(1, TaskStatus::Backlog);
+    task.title = "This is a very long task title that should be truncated".to_string();
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+
+    // Narrow terminal: 4 columns per status column (80 / 4 statuses = 20 each)
+    let buf = render_to_buffer(&mut app, 80, 10);
+
+    // Full title should NOT appear — it's too long for the column
+    assert!(
+        !buffer_contains(&buf, "This is a very long task title that should be truncated"),
+        "full title should be truncated in narrow terminal"
+    );
+    // Truncated title with ellipsis should appear
+    assert!(
+        buffer_contains(&buf, "…"),
+        "truncated title should contain ellipsis"
+    );
+}
+
+#[test]
+fn task_card_short_title_not_truncated_in_wide_terminal() {
+    let mut task = make_task(1, TaskStatus::Backlog);
+    task.title = "Short".to_string();
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+
+    // Wide terminal: plenty of room
+    let buf = render_to_buffer(&mut app, 200, 10);
+    assert!(
+        buffer_contains(&buf, "Short"),
+        "short title should appear in full"
+    );
+}
+
+#[test]
+fn task_card_title_adapts_to_terminal_width() {
+    let mut task = make_task(1, TaskStatus::Backlog);
+    task.title = "Medium length title here".to_string();
+    let mut app_narrow = App::new(vec![task.clone()], TEST_TIMEOUT);
+    let mut app_wide = App::new(vec![task], TEST_TIMEOUT);
+
+    let buf_narrow = render_to_buffer(&mut app_narrow, 60, 10);
+    let buf_wide = render_to_buffer(&mut app_wide, 200, 10);
+
+    // In narrow terminal, should be truncated
+    assert!(
+        !buffer_contains(&buf_narrow, "Medium length title here"),
+        "title should be truncated in narrow terminal"
+    );
+    // In wide terminal, should appear in full
+    assert!(
+        buffer_contains(&buf_wide, "Medium length title here"),
+        "title should appear in full in wide terminal"
+    );
+}
+
+#[test]
+fn epic_card_title_truncated_in_narrow_terminal() {
+    let mut epic = make_epic(1);
+    epic.title = "This is a very long epic title that should be truncated to fit".to_string();
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.update(Message::RefreshEpics(vec![epic]));
+
+    let buf = render_to_buffer(&mut app, 80, 10);
+    assert!(
+        !buffer_contains(&buf, "This is a very long epic title that should be truncated to fit"),
+        "full epic title should be truncated in narrow terminal"
+    );
+}
