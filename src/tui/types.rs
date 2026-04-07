@@ -278,6 +278,8 @@ pub enum Message {
         worktree: String,
     },
     ReviewAgentFailed {
+        github_repo: String,
+        number: i64,
         error: String,
     },
     // Repo filter
@@ -336,6 +338,9 @@ pub enum Message {
         worktree: String,
     },
     FixAgentFailed {
+        github_repo: String,
+        number: i64,
+        kind: crate::models::AlertKind,
         error: String,
     },
     ReviewStatusUpdated {

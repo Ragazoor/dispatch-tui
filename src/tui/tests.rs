@@ -8577,6 +8577,8 @@ fn review_agent_failed_sets_status() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
     let cmds = app.update(Message::ReviewAgentFailed {
+        github_repo: "acme/app".to_string(),
+        number: 42,
         error: "git fetch failed".to_string(),
     });
     assert!(cmds.is_empty());
@@ -11881,4 +11883,181 @@ fn dispatch_different_tasks_both_succeed() {
     // Dispatch task 2 — different task, should succeed
     let cmds = app.update(Message::DispatchTask(TaskId(2)));
     assert!(matches!(cmds[0], Command::Dispatch { .. }));
+}
+
+// ---------------------------------------------------------------------------
+// Review agent in-flight dispatch deduplication
+// ---------------------------------------------------------------------------
+
+fn make_review_agent_req(repo: &str, number: i64) -> ReviewAgentRequest {
+    ReviewAgentRequest {
+        github_repo: repo.to_string(),
+        number,
+        title: format!("PR {number}"),
+        body: String::new(),
+        head_ref: "main".to_string(),
+        repo: "/home/user/Code/repo".to_string(),
+        is_dependabot: false,
+    }
+}
+
+#[test]
+fn review_agent_dispatch_in_flight_blocks_second_dispatch() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/home/user/Code/repo".to_string()];
+    let req = make_review_agent_req("acme/app", 42);
+    // First dispatch succeeds
+    let cmds = app.update(Message::DispatchReviewAgent(req.clone()));
+    assert!(cmds.iter().any(|c| matches!(c, Command::DispatchReviewAgent(_))));
+    // Second dispatch of same PR is blocked
+    let cmds = app.update(Message::DispatchReviewAgent(req));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn review_agent_dispatched_clears_in_flight() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/home/user/Code/repo".to_string()];
+    let req = make_review_agent_req("acme/app", 42);
+    app.update(Message::DispatchReviewAgent(req.clone()));
+    assert!(app.is_dispatching_review("acme/app", 42));
+    // Success message clears the guard
+    app.update(Message::ReviewAgentDispatched {
+        github_repo: "acme/app".to_string(),
+        number: 42,
+        tmux_window: "review-42".to_string(),
+        worktree: "/wt".to_string(),
+    });
+    assert!(!app.is_dispatching_review("acme/app", 42));
+}
+
+#[test]
+fn review_agent_failed_clears_in_flight() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/home/user/Code/repo".to_string()];
+    let req = make_review_agent_req("acme/app", 42);
+    app.update(Message::DispatchReviewAgent(req.clone()));
+    assert!(app.is_dispatching_review("acme/app", 42));
+    // Failure clears the guard
+    app.update(Message::ReviewAgentFailed {
+        github_repo: "acme/app".to_string(),
+        number: 42,
+        error: "boom".to_string(),
+    });
+    assert!(!app.is_dispatching_review("acme/app", 42));
+    // Can dispatch again
+    let cmds = app.update(Message::DispatchReviewAgent(req));
+    assert!(cmds.iter().any(|c| matches!(c, Command::DispatchReviewAgent(_))));
+}
+
+#[test]
+fn review_agent_different_prs_both_dispatch() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/home/user/Code/repo".to_string()];
+    let cmds = app.update(Message::DispatchReviewAgent(make_review_agent_req("acme/app", 42)));
+    assert!(cmds.iter().any(|c| matches!(c, Command::DispatchReviewAgent(_))));
+    let cmds = app.update(Message::DispatchReviewAgent(make_review_agent_req("acme/app", 43)));
+    assert!(cmds.iter().any(|c| matches!(c, Command::DispatchReviewAgent(_))));
+}
+
+// ---------------------------------------------------------------------------
+// Fix agent in-flight dispatch deduplication
+// ---------------------------------------------------------------------------
+
+#[test]
+fn fix_agent_dispatch_in_flight_blocks_second_dispatch() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/path/to/repo".to_string()];
+    let msg = Message::DispatchFixAgent {
+        repo: "org/repo".to_string(),
+        number: 1,
+        kind: crate::models::AlertKind::Dependabot,
+        title: "Alert 1".to_string(),
+        description: String::new(),
+        package: None,
+        fixed_version: None,
+    };
+    // First dispatch succeeds
+    let cmds = app.update(msg.clone());
+    assert!(cmds.iter().any(|c| matches!(c, Command::DispatchFixAgent { .. })));
+    // Second dispatch of same alert is blocked
+    let cmds = app.update(msg);
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn fix_agent_dispatched_clears_in_flight() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/path/to/repo".to_string()];
+    app.update(Message::DispatchFixAgent {
+        repo: "org/repo".to_string(),
+        number: 1,
+        kind: crate::models::AlertKind::Dependabot,
+        title: "Alert 1".to_string(),
+        description: String::new(),
+        package: None,
+        fixed_version: None,
+    });
+    assert!(app.is_dispatching_fix("org/repo", 1, crate::models::AlertKind::Dependabot));
+    // Success clears the guard
+    app.update(Message::FixAgentDispatched {
+        github_repo: "org/repo".to_string(),
+        number: 1,
+        kind: crate::models::AlertKind::Dependabot,
+        tmux_window: "fix-1".to_string(),
+        worktree: "/wt".to_string(),
+    });
+    assert!(!app.is_dispatching_fix("org/repo", 1, crate::models::AlertKind::Dependabot));
+}
+
+#[test]
+fn fix_agent_failed_clears_in_flight() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/path/to/repo".to_string()];
+    app.update(Message::DispatchFixAgent {
+        repo: "org/repo".to_string(),
+        number: 1,
+        kind: crate::models::AlertKind::Dependabot,
+        title: "Alert 1".to_string(),
+        description: String::new(),
+        package: None,
+        fixed_version: None,
+    });
+    assert!(app.is_dispatching_fix("org/repo", 1, crate::models::AlertKind::Dependabot));
+    // Failure clears the guard
+    app.update(Message::FixAgentFailed {
+        github_repo: "org/repo".to_string(),
+        number: 1,
+        kind: crate::models::AlertKind::Dependabot,
+        error: "boom".to_string(),
+    });
+    assert!(!app.is_dispatching_fix("org/repo", 1, crate::models::AlertKind::Dependabot));
+}
+
+#[test]
+fn fix_agent_different_alerts_both_dispatch() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/path/to/repo".to_string()];
+    // Dependabot alert
+    let cmds = app.update(Message::DispatchFixAgent {
+        repo: "org/repo".to_string(),
+        number: 1,
+        kind: crate::models::AlertKind::Dependabot,
+        title: "Alert 1".to_string(),
+        description: String::new(),
+        package: None,
+        fixed_version: None,
+    });
+    assert!(cmds.iter().any(|c| matches!(c, Command::DispatchFixAgent { .. })));
+    // CodeScanning alert on same repo+number — different kind, should succeed
+    let cmds = app.update(Message::DispatchFixAgent {
+        repo: "org/repo".to_string(),
+        number: 1,
+        kind: crate::models::AlertKind::CodeScanning,
+        title: "Alert 1".to_string(),
+        description: String::new(),
+        package: None,
+        fixed_version: None,
+    });
+    assert!(cmds.iter().any(|c| matches!(c, Command::DispatchFixAgent { .. })));
 }

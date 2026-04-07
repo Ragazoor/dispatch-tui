@@ -50,6 +50,10 @@ pub struct App {
     /// Task IDs with an in-flight dispatch (worktree + tmux setup running).
     /// Prevents duplicate dispatches when the user presses Enter rapidly.
     pub(in crate::tui) dispatching: HashSet<TaskId>,
+    /// Review agent dispatches in-flight, keyed by (github_repo, number).
+    pub(in crate::tui) dispatching_review: HashSet<(String, i64)>,
+    /// Fix agent dispatches in-flight, keyed by (github_repo, number, kind).
+    pub(in crate::tui) dispatching_fix: HashSet<(String, i64, crate::models::AlertKind)>,
 }
 
 /// Format a title for display in confirmation prompts, truncating if longer than `max_len` chars.
@@ -85,12 +89,30 @@ impl App {
             security: SecurityBoardState::default(),
             merge_queue: None,
             dispatching: HashSet::new(),
+            dispatching_review: HashSet::new(),
+            dispatching_fix: HashSet::new(),
         }
     }
 
     /// Returns true if the given task has an in-flight dispatch.
     pub fn is_dispatching(&self, id: TaskId) -> bool {
         self.dispatching.contains(&id)
+    }
+
+    /// Returns true if a review agent dispatch is in-flight for the given PR.
+    pub fn is_dispatching_review(&self, repo: &str, number: i64) -> bool {
+        self.dispatching_review.contains(&(repo.to_string(), number))
+    }
+
+    /// Returns true if a fix agent dispatch is in-flight for the given alert.
+    pub fn is_dispatching_fix(
+        &self,
+        repo: &str,
+        number: i64,
+        kind: crate::models::AlertKind,
+    ) -> bool {
+        self.dispatching_fix
+            .contains(&(repo.to_string(), number, kind))
     }
 
     /// Get the current selection state (from whichever view mode is active).
@@ -831,6 +853,7 @@ impl App {
                 tmux_window,
                 worktree,
             } => {
+                self.dispatching_review.remove(&(github_repo.clone(), number));
                 let repo_short = github_repo.split('/').next_back().unwrap_or(&github_repo);
                 self.set_status(format!("Review agent dispatched for {repo_short}#{number}"));
                 let table =
@@ -843,7 +866,12 @@ impl App {
                     worktree,
                 }]
             }
-            Message::ReviewAgentFailed { error } => {
+            Message::ReviewAgentFailed {
+                github_repo,
+                number,
+                error,
+            } => {
+                self.dispatching_review.remove(&(github_repo, number));
                 self.set_status(format!("Review dispatch failed: {error}"));
                 vec![]
             }
@@ -971,8 +999,13 @@ impl App {
                 package,
                 fixed_version,
             } => {
+                let fix_key = (repo.clone(), number, kind);
+                if self.dispatching_fix.contains(&fix_key) {
+                    return vec![];
+                }
                 let known = self.known_repo_paths();
                 if let Some(path) = dispatch::resolve_repo_path(&repo, &known) {
+                    self.dispatching_fix.insert(fix_key);
                     self.set_status(format!("Dispatching fix agent for {}#{}...", repo, number));
                     vec![Command::DispatchFixAgent {
                         github_repo: repo,
@@ -1011,6 +1044,7 @@ impl App {
                 tmux_window,
                 worktree,
             } => {
+                self.dispatching_fix.remove(&(github_repo.clone(), number, kind));
                 let repo_short = github_repo
                     .split('/')
                     .next_back()
@@ -1035,7 +1069,13 @@ impl App {
                     worktree,
                 }]
             }
-            Message::FixAgentFailed { error } => {
+            Message::FixAgentFailed {
+                github_repo,
+                number,
+                kind,
+                error,
+            } => {
+                self.dispatching_fix.remove(&(github_repo, number, kind));
                 self.set_status(format!("Fix agent failed: {error}"));
                 vec![]
             }
@@ -2969,9 +3009,14 @@ impl App {
     }
 
     fn handle_dispatch_review_agent(&mut self, mut req: ReviewAgentRequest) -> Vec<Command> {
+        let key = (req.github_repo.clone(), req.number);
+        if self.dispatching_review.contains(&key) {
+            return vec![];
+        }
         let known = self.known_repo_paths();
         if let Some(path) = dispatch::resolve_repo_path(&req.repo, &known) {
             req.repo = path;
+            self.dispatching_review.insert(key);
             self.set_status(format!("Dispatching review agent for #{}...", req.number));
             vec![Command::DispatchReviewAgent(req)]
         } else {

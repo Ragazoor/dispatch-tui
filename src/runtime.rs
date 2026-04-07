@@ -1430,6 +1430,9 @@ impl TuiRuntime {
                 }
                 Err(e) => {
                     let _ = tx.send(Message::FixAgentFailed {
+                        github_repo,
+                        number,
+                        kind,
                         error: e.to_string(),
                     });
                 }
@@ -1462,6 +1465,8 @@ impl TuiRuntime {
                 }
                 Err(e) => {
                     let _ = tx.send(Message::ReviewAgentFailed {
+                        github_repo: req.github_repo,
+                        number: req.number,
                         error: format!("{e:#}"),
                     });
                 }

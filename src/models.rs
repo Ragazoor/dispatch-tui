@@ -1093,7 +1093,7 @@ impl AlertSeverity {
 // AlertKind — type of security alert
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AlertKind {
     Dependabot,
     CodeScanning,
