@@ -686,6 +686,7 @@ impl App {
             Message::BatchArchiveEpics(ids) => self.handle_batch_archive_epics(ids),
             Message::DismissError => self.handle_dismiss_error(),
             Message::StartNewTask => self.handle_start_new_task(),
+            Message::CopyTask => self.handle_copy_task(),
             Message::CancelInput => self.handle_cancel_input(),
             Message::ConfirmDeleteStart => self.handle_confirm_delete_start(),
             Message::ConfirmDeleteYes => self.handle_confirm_delete_yes(),
@@ -1901,6 +1902,27 @@ impl App {
 
     fn handle_dismiss_error(&mut self) -> Vec<Command> {
         self.error_popup = None;
+        vec![]
+    }
+
+    fn handle_copy_task(&mut self) -> Vec<Command> {
+        let task = match self.selected_task() {
+            Some(t) => t,
+            None => return vec![],
+        };
+        let title = format!("Copy of: {}", task.title);
+        let description = task.description.clone();
+        let repo_path = task.repo_path.clone();
+        let tag = task.tag;
+        self.input.task_draft = Some(TaskDraft {
+            title,
+            description,
+            tag,
+            ..Default::default()
+        });
+        self.input.buffer = repo_path;
+        self.input.mode = InputMode::InputRepoPath;
+        self.set_status("Enter repo path: ".to_string());
         vec![]
     }
 

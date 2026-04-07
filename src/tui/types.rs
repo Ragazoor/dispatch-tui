@@ -160,6 +160,7 @@ pub enum Message {
     // Input routing messages
     DismissError,
     StartNewTask,
+    CopyTask,
     CancelInput,
     ConfirmDeleteStart,
     ConfirmDeleteYes,

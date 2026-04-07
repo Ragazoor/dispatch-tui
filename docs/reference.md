@@ -18,6 +18,7 @@
 | Key | Action |
 |-----|--------|
 | `n` | New task |
+| `c` | Copy selected task |
 | `e` | Edit task in editor |
 | `d` | Dispatch agent (Backlog task with plan) / brainstorm (without plan) / resume (Running task whose window is gone) |
 | `D` | Quick dispatch — pick repo and dispatch immediately |

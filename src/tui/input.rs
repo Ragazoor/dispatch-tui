@@ -81,6 +81,7 @@ impl App {
             KeyCode::Char('K') => self.update(Message::ReorderItem(-1)),
 
             KeyCode::Char('n') => self.update(Message::StartNewTask),
+            KeyCode::Char('c') => self.update(Message::CopyTask),
             KeyCode::Char('N') => self.update(Message::ToggleNotifications),
             KeyCode::Char('E') => self.update(Message::StartNewEpic),
             KeyCode::Char('d') => self.handle_key_dispatch(),
