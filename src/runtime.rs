@@ -1077,6 +1077,97 @@ impl TuiRuntime {
         }
     }
 
+    fn exec_enter_split_mode(&self, app: &mut App) {
+        let dispatch_pane = match tmux::current_pane_id(&*self.runner) {
+            Ok(id) => id,
+            Err(_) => {
+                app.update(Message::StatusInfo(
+                    "Split mode requires tmux".to_string(),
+                ));
+                return;
+            }
+        };
+        match tmux::split_window_horizontal(&dispatch_pane, &*self.runner) {
+            Ok(pane_id) => {
+                app.update(Message::SplitPaneOpened {
+                    pane_id,
+                    task_id: None,
+                });
+            }
+            Err(e) => {
+                app.update(Message::Error(format!("Split failed: {e:#}")));
+            }
+        }
+    }
+
+    fn exec_exit_split_mode(
+        &self,
+        app: &mut App,
+        pane_id: &str,
+        restore_window: Option<&str>,
+    ) {
+        if let Some(window_name) = restore_window {
+            if let Err(e) = tmux::break_pane_to_window(pane_id, window_name, &*self.runner) {
+                app.update(Message::Error(format!("Break pane failed: {e:#}")));
+                return;
+            }
+        } else if let Err(e) = tmux::kill_pane(pane_id, &*self.runner) {
+            app.update(Message::Error(format!("Kill pane failed: {e:#}")));
+            return;
+        }
+        app.update(Message::SplitPaneClosed);
+    }
+
+    fn exec_swap_split_pane(
+        &self,
+        app: &mut App,
+        task_id: TaskId,
+        new_window: &str,
+        old_pane_id: Option<&str>,
+        old_window: Option<&str>,
+    ) {
+        // Break out the old pane first (restore it as its own window)
+        if let (Some(pane_id), Some(window_name)) = (old_pane_id, old_window) {
+            if let Err(e) = tmux::break_pane_to_window(pane_id, window_name, &*self.runner) {
+                app.update(Message::Error(format!("Break pane failed: {e:#}")));
+                return;
+            }
+        } else if let Some(pane_id) = old_pane_id {
+            // Old pane exists but has no task window name — kill it
+            if let Err(e) = tmux::kill_pane(pane_id, &*self.runner) {
+                app.update(Message::Error(format!("Kill pane failed: {e:#}")));
+                return;
+            }
+        }
+
+        // Get the dispatch pane to use as target for join
+        let dispatch_pane = match tmux::current_pane_id(&*self.runner) {
+            Ok(id) => id,
+            Err(e) => {
+                app.update(Message::Error(format!("Cannot get pane ID: {e:#}")));
+                return;
+            }
+        };
+
+        match tmux::join_pane(new_window, &dispatch_pane, &*self.runner) {
+            Ok(pane_id) => {
+                app.update(Message::SplitPaneOpened {
+                    pane_id,
+                    task_id: Some(task_id),
+                });
+            }
+            Err(e) => {
+                app.update(Message::Error(format!("Join pane failed: {e:#}")));
+            }
+        }
+    }
+
+    fn exec_check_split_pane(&self, app: &mut App, pane_id: &str) {
+        if !tmux::pane_exists(pane_id, &*self.runner) {
+            app.update(Message::SplitPaneClosed);
+        }
+    }
+
     fn exec_dispatch_epic(&self, app: &mut App, epic: models::Epic) {
         let title = format!("Plan: {}", epic.title);
         let description = format!(
@@ -1701,6 +1792,21 @@ async fn execute_commands(
             }
             Command::EditGithubQueries(mode) => {
                 rt.exec_edit_github_queries(app, mode, terminal, key_rx)?
+            }
+            // Split mode
+            Command::EnterSplitMode => rt.exec_enter_split_mode(app),
+            Command::ExitSplitMode {
+                pane_id,
+                restore_window,
+            } => rt.exec_exit_split_mode(app, &pane_id, restore_window.as_deref()),
+            Command::SwapSplitPane {
+                task_id,
+                new_window,
+                old_pane_id,
+                old_window,
+            } => rt.exec_swap_split_pane(app, task_id, &new_window, old_pane_id.as_deref(), old_window.as_deref()),
+            Command::CheckSplitPaneExists { pane_id } => {
+                rt.exec_check_split_pane(app, &pane_id)
             }
         }
     }

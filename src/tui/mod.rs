@@ -69,6 +69,7 @@ impl App {
                 detail_visible: false,
                 repo_paths: Vec::new(),
                 usage: HashMap::new(),
+                split: SplitState::default(),
             },
             status: StatusState::default(),
             should_quit: false,
@@ -131,6 +132,12 @@ impl App {
     }
     pub fn detail_visible(&self) -> bool {
         self.board.detail_visible
+    }
+    pub fn split_active(&self) -> bool {
+        self.board.split.active
+    }
+    pub fn split_pinned_task_id(&self) -> Option<TaskId> {
+        self.board.split.pinned_task_id
     }
     pub fn tmux_outputs(&self) -> &std::collections::HashMap<TaskId, String> {
         &self.agents.tmux_outputs
@@ -726,6 +733,13 @@ impl App {
             Message::CancelRetry => self.handle_cancel_retry(),
             Message::StatusInfo(msg) => self.handle_status_info(msg),
             Message::ToggleHelp => self.handle_toggle_help(),
+            // Split mode
+            Message::ToggleSplitMode => self.handle_toggle_split_mode(),
+            Message::SwapSplitPane(task_id) => self.handle_swap_split_pane(task_id),
+            Message::SplitPaneOpened { pane_id, task_id } => {
+                self.handle_split_pane_opened(pane_id, task_id)
+            }
+            Message::SplitPaneClosed => self.handle_split_pane_closed(),
             // Finish (rebase + cleanup)
             Message::FinishComplete(id) => self.handle_finish_complete(id),
             Message::FinishFailed {
@@ -1594,6 +1608,15 @@ impl App {
             cmds.push(Command::FetchMyPrs);
         }
 
+        // Check if split mode right pane still exists
+        if self.board.split.active {
+            if let Some(pane_id) = &self.board.split.right_pane_id {
+                cmds.push(Command::CheckSplitPaneExists {
+                    pane_id: pane_id.clone(),
+                });
+            }
+        }
+
         cmds.push(Command::RefreshFromDb);
         cmds
     }
@@ -2170,6 +2193,73 @@ impl App {
         } else {
             self.input.mode = InputMode::Help;
         }
+        vec![]
+    }
+
+    fn handle_toggle_split_mode(&mut self) -> Vec<Command> {
+        if self.board.split.active {
+            let pane_id = match self.board.split.right_pane_id.take() {
+                Some(id) => id,
+                None => return vec![],
+            };
+            let restore_window = self
+                .board
+                .split
+                .pinned_task_id
+                .and_then(|id| self.find_task(id))
+                .and_then(|t| t.tmux_window.clone());
+            vec![Command::ExitSplitMode {
+                pane_id,
+                restore_window,
+            }]
+        } else {
+            vec![Command::EnterSplitMode]
+        }
+    }
+
+    fn handle_swap_split_pane(&mut self, task_id: TaskId) -> Vec<Command> {
+        let task = match self.find_task(task_id) {
+            Some(t) => t,
+            None => return vec![],
+        };
+        let new_window = match &task.tmux_window {
+            Some(w) => w.clone(),
+            None => {
+                return self.update(Message::StatusInfo(
+                    "No agent session for this task".to_string(),
+                ))
+            }
+        };
+        let old_pane_id = self.board.split.right_pane_id.clone();
+        let old_window = self
+            .board
+            .split
+            .pinned_task_id
+            .and_then(|id| self.find_task(id))
+            .and_then(|t| t.tmux_window.clone());
+        vec![Command::SwapSplitPane {
+            task_id,
+            new_window,
+            old_pane_id,
+            old_window,
+        }]
+    }
+
+    fn handle_split_pane_opened(
+        &mut self,
+        pane_id: String,
+        task_id: Option<TaskId>,
+    ) -> Vec<Command> {
+        self.board.split.active = true;
+        self.board.split.right_pane_id = Some(pane_id);
+        self.board.split.pinned_task_id = task_id;
+        vec![]
+    }
+
+    fn handle_split_pane_closed(&mut self) -> Vec<Command> {
+        self.board.split.active = false;
+        self.board.split.right_pane_id = None;
+        self.board.split.pinned_task_id = None;
         vec![]
     }
 

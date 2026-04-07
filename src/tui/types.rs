@@ -206,6 +206,14 @@ pub enum Message {
     CancelRetry,
     StatusInfo(String),
     ToggleHelp,
+    // Split mode messages
+    ToggleSplitMode,
+    SwapSplitPane(TaskId),
+    SplitPaneOpened {
+        pane_id: String,
+        task_id: Option<TaskId>,
+    },
+    SplitPaneClosed,
     // Epic messages
     DispatchEpic(EpicId),
     EnterEpic(EpicId),
@@ -424,6 +432,21 @@ pub enum Command {
     JumpToTmux {
         window: String,
     },
+    // Split mode commands
+    EnterSplitMode,
+    ExitSplitMode {
+        pane_id: String,
+        restore_window: Option<String>,
+    },
+    SwapSplitPane {
+        task_id: TaskId,
+        new_window: String,
+        old_pane_id: Option<String>,
+        old_window: Option<String>,
+    },
+    CheckSplitPaneExists {
+        pane_id: String,
+    },
     KillTmuxWindow {
         window: String,
     },
@@ -580,6 +603,7 @@ pub struct BoardState {
     pub(in crate::tui) detail_visible: bool,
     pub(in crate::tui) repo_paths: Vec<String>,
     pub(in crate::tui) usage: HashMap<TaskId, TaskUsage>,
+    pub(in crate::tui) split: SplitState,
 }
 
 // ---------------------------------------------------------------------------
@@ -675,6 +699,17 @@ pub struct ArchiveState {
     pub visible: bool,
     pub selected_row: usize,
     pub list_state: ListState,
+}
+
+// ---------------------------------------------------------------------------
+// SplitState — tmux split mode state
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Default)]
+pub struct SplitState {
+    pub(in crate::tui) active: bool,
+    pub(in crate::tui) right_pane_id: Option<String>,
+    pub(in crate::tui) pinned_task_id: Option<TaskId>,
 }
 
 // ---------------------------------------------------------------------------
