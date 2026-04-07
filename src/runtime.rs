@@ -124,15 +124,7 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     // Load saved filter presets
     match database.list_filter_presets() {
         Ok(raw) => {
-            let presets: Vec<(String, HashSet<String>, RepoFilterMode)> = raw
-                .into_iter()
-                .map(|(name, paths, mode_str)| {
-                    let set: HashSet<String> = paths.into_iter().collect();
-                    let mode = mode_str.parse().unwrap_or_default();
-                    (name, set, mode)
-                })
-                .collect();
-            app.update(Message::FilterPresetsLoaded(presets));
+            app.update(Message::FilterPresetsLoaded(parse_raw_presets(raw, None)));
         }
         Err(e) => {
             app.update(Message::StatusInfo(format!(
@@ -761,17 +753,8 @@ impl TuiRuntime {
         }
         // Refresh presets since delete_repo_path cleans them
         if let Ok(raw) = self.database.list_filter_presets() {
-            let known: std::collections::HashSet<String> =
-                app.repo_paths().iter().cloned().collect();
-            let presets = raw
-                .into_iter()
-                .map(|(name, paths, mode_str)| {
-                    let repos: std::collections::HashSet<String> =
-                        paths.into_iter().filter(|p| known.contains(p)).collect();
-                    let mode = mode_str.parse().unwrap_or_default();
-                    (name, repos, mode)
-                })
-                .collect();
+            let known: HashSet<String> = app.repo_paths().iter().cloned().collect();
+            let presets = parse_raw_presets(raw, Some(&known));
             app.update(Message::FilterPresetsLoaded(presets));
         }
     }
@@ -1793,6 +1776,27 @@ async fn execute_commands(
     }
 
     Ok(())
+}
+
+/// Convert raw DB preset tuples into typed presets.
+///
+/// When `known_repos` is `Some`, each preset's paths are filtered to only
+/// include paths present in the set. When `None`, all paths are kept.
+fn parse_raw_presets(
+    raw: Vec<(String, Vec<String>, String)>,
+    known_repos: Option<&HashSet<String>>,
+) -> Vec<(String, HashSet<String>, RepoFilterMode)> {
+    raw.into_iter()
+        .map(|(name, paths, mode_str)| {
+            let set: HashSet<String> = if let Some(known) = known_repos {
+                paths.into_iter().filter(|p| known.contains(p)).collect()
+            } else {
+                paths.into_iter().collect()
+            };
+            let mode = mode_str.parse().unwrap_or_default();
+            (name, set, mode)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -2870,6 +2874,68 @@ mod tests {
         rt.exec_delete_filter_preset(&mut app, "doomed");
         assert!(rt.database.list_filter_presets().unwrap().is_empty());
         assert!(app.error_popup().is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // parse_raw_presets tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_raw_presets_converts_all_paths() {
+        let raw = vec![(
+            "backend".to_string(),
+            vec!["/a".to_string(), "/b".to_string()],
+            "include".to_string(),
+        )];
+        let result = parse_raw_presets(raw, None);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].0, "backend");
+        assert_eq!(
+            result[0].1,
+            HashSet::from(["/a".to_string(), "/b".to_string()])
+        );
+        assert_eq!(result[0].2, RepoFilterMode::Include);
+    }
+
+    #[test]
+    fn parse_raw_presets_filters_against_known_repos() {
+        let raw = vec![(
+            "backend".to_string(),
+            vec!["/a".to_string(), "/b".to_string(), "/gone".to_string()],
+            "exclude".to_string(),
+        )];
+        let known = HashSet::from(["/a".to_string(), "/b".to_string()]);
+        let result = parse_raw_presets(raw, Some(&known));
+        assert_eq!(
+            result[0].1,
+            HashSet::from(["/a".to_string(), "/b".to_string()])
+        );
+        assert_eq!(result[0].2, RepoFilterMode::Exclude);
+    }
+
+    #[test]
+    fn parse_raw_presets_defaults_invalid_mode() {
+        let raw = vec![("x".to_string(), vec![], "bogus".to_string())];
+        let result = parse_raw_presets(raw, None);
+        assert_eq!(result[0].2, RepoFilterMode::Include);
+    }
+
+    #[test]
+    fn parse_raw_presets_empty_input() {
+        let result = parse_raw_presets(vec![], None);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn parse_raw_presets_multiple_presets() {
+        let raw = vec![
+            ("a".to_string(), vec!["/x".to_string()], "include".to_string()),
+            ("b".to_string(), vec!["/y".to_string()], "exclude".to_string()),
+        ];
+        let result = parse_raw_presets(raw, None);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].2, RepoFilterMode::Include);
+        assert_eq!(result[1].2, RepoFilterMode::Exclude);
     }
 
     // -----------------------------------------------------------------------

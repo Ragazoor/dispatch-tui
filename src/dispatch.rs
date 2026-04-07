@@ -3,7 +3,8 @@ use std::fs;
 
 use crate::db;
 use crate::models::{
-    slugify, DispatchResult, EpicId, ResumeResult, ReviewDecision, Task, TaskId, TaskStatus,
+    expand_tilde, slugify, DispatchResult, EpicId, ResumeResult, ReviewDecision, Task, TaskId,
+    TaskStatus,
 };
 use crate::process::ProcessRunner;
 use crate::tmux;
@@ -1133,16 +1134,6 @@ fn stdout_str(output: &std::process::Output) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
-/// Expand a leading `~` or `~/` to the user's home directory.
-fn expand_tilde(path: &str) -> String {
-    if path == "~" || path.starts_with("~/") {
-        if let Some(home) = std::env::var_os("HOME") {
-            return format!("{}{}", home.to_string_lossy(), &path[1..]);
-        }
-    }
-    path.to_string()
-}
-
 /// Validate that a repo path points to an existing directory.
 ///
 /// Returns the expanded path on success, or an error message on failure.
@@ -1290,26 +1281,6 @@ mod tests {
             ..make_task("/repo")
         };
         assert!(!is_wrappable(&task));
-    }
-
-    #[test]
-    fn expand_tilde_with_path() {
-        let home = std::env::var("HOME").unwrap();
-        assert_eq!(
-            expand_tilde("~/projects/foo"),
-            format!("{home}/projects/foo")
-        );
-    }
-
-    #[test]
-    fn expand_tilde_bare() {
-        let home = std::env::var("HOME").unwrap();
-        assert_eq!(expand_tilde("~"), home);
-    }
-
-    #[test]
-    fn expand_tilde_absolute_unchanged() {
-        assert_eq!(expand_tilde("/home/user/foo"), "/home/user/foo");
     }
 
     #[test]

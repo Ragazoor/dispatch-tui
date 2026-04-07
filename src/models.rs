@@ -1211,6 +1211,28 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
+    // --- expand_tilde ---
+
+    #[test]
+    fn expand_tilde_with_path() {
+        let home = std::env::var("HOME").unwrap();
+        assert_eq!(
+            expand_tilde("~/projects/foo"),
+            format!("{home}/projects/foo")
+        );
+    }
+
+    #[test]
+    fn expand_tilde_bare() {
+        let home = std::env::var("HOME").unwrap();
+        assert_eq!(expand_tilde("~"), home);
+    }
+
+    #[test]
+    fn expand_tilde_absolute_unchanged() {
+        assert_eq!(expand_tilde("/home/user/foo"), "/home/user/foo");
+    }
+
     // --- TaskStatus ---
 
     #[test]
