@@ -2520,7 +2520,7 @@ fn batch_action_hints(count: usize, key_color: Color, has_tasks: bool) -> Vec<Sp
 // Review board rendering
 // ---------------------------------------------------------------------------
 
-fn review_action_hints(has_pr: bool, is_author_mode: bool) -> Vec<Span<'static>> {
+fn review_action_hints(has_pr: bool, is_author_mode: bool, has_agent: bool) -> Vec<Span<'static>> {
     let key_color = Color::Cyan;
     let label_style = Style::default().fg(MUTED);
     let mut spans: Vec<Span<'static>> = Vec::new();
@@ -2529,6 +2529,9 @@ fn review_action_hints(has_pr: bool, is_author_mode: bool) -> Vec<Span<'static>>
     };
     if has_pr {
         push_hint("Enter", "open PR");
+    }
+    if has_agent {
+        push_hint("g", "go to");
     }
     push_hint("r", "refresh");
     push_hint("e", "edit queries");
@@ -2541,7 +2544,7 @@ fn review_action_hints(has_pr: bool, is_author_mode: bool) -> Vec<Span<'static>>
     spans
 }
 
-fn bot_action_hints(has_pr: bool) -> Vec<Span<'static>> {
+fn bot_action_hints(has_pr: bool, has_agent: bool) -> Vec<Span<'static>> {
     let key_color = Color::Cyan;
     let label_style = Style::default().fg(MUTED);
     let mut spans: Vec<Span<'static>> = Vec::new();
@@ -2551,6 +2554,9 @@ fn bot_action_hints(has_pr: bool) -> Vec<Span<'static>> {
     push_hint("Space", "select");
     push_hint("a", "select all");
     if has_pr {
+        if has_agent {
+            push_hint("g", "go to");
+        }
         push_hint("d", "review");
         push_hint("p", "open");
     }
@@ -2676,11 +2682,12 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
                 ..
             }
         );
+        let has_agent = app.selected_review_pr().and_then(|pr| pr.tmux_window.as_ref()).is_some();
         if is_bot_mode {
-            let hints = Paragraph::new(Line::from(bot_action_hints(has_pr)));
+            let hints = Paragraph::new(Line::from(bot_action_hints(has_pr, has_agent)));
             frame.render_widget(hints, chunks[4]);
         } else {
-            let hints = Paragraph::new(Line::from(review_action_hints(has_pr, is_author_mode)));
+            let hints = Paragraph::new(Line::from(review_action_hints(has_pr, is_author_mode, has_agent)));
             frame.render_widget(hints, chunks[4]);
         }
     }
@@ -2885,7 +2892,7 @@ fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
                 list_selection_idx = Some(list_items.len());
             }
 
-            let is_dispatch = dispatch_urls.contains(pr.url.as_str());
+            let is_dispatch = dispatch_urls.contains(pr.url.as_str()) || pr.tmux_window.is_some();
             let is_selected = is_bot_mode && app.selected_bot_prs().contains(&pr.url);
             list_items.push(build_review_pr_item(
                 pr,
@@ -3105,7 +3112,8 @@ pub fn render_security_board(frame: &mut Frame, app: &mut App, area: Rect) {
         frame.render_widget(status, chunks[4]);
     } else {
         let has_alert = app.selected_security_alert().is_some();
-        let hints = Paragraph::new(Line::from(security_action_hints(app, has_alert)));
+        let has_agent = app.selected_security_alert().and_then(|a| a.tmux_window.as_ref()).is_some();
+        let hints = Paragraph::new(Line::from(security_action_hints(app, has_alert, has_agent)));
         frame.render_widget(hints, chunks[4]);
     }
 
@@ -3115,7 +3123,7 @@ pub fn render_security_board(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-fn security_action_hints(app: &App, has_alert: bool) -> Vec<Span<'static>> {
+fn security_action_hints(app: &App, has_alert: bool, has_agent: bool) -> Vec<Span<'static>> {
     let key_color = Color::Cyan;
     let label_style = Style::default().fg(MUTED);
     let mut spans: Vec<Span<'static>> = Vec::new();
@@ -3124,6 +3132,9 @@ fn security_action_hints(app: &App, has_alert: bool) -> Vec<Span<'static>> {
     };
     if has_alert {
         push_hint(&mut spans, "Enter", "detail".into());
+        if has_agent {
+            push_hint(&mut spans, "g", "go to".into());
+        }
         push_hint(&mut spans, "p", "open".into());
     }
     push_hint(&mut spans, "r", "refresh".into());
