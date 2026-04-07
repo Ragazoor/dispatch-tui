@@ -191,6 +191,112 @@ pub fn unbind_key(key: &str, runner: &dyn ProcessRunner) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
+// Split mode operations
+// ---------------------------------------------------------------------------
+
+/// Return the tmux pane ID of the current pane (e.g. "%42").
+pub fn current_pane_id(runner: &dyn ProcessRunner) -> Result<String> {
+    let output = runner.run("tmux", &["display-message", "-p", "#{pane_id}"])?;
+    if !output.status.success() {
+        bail!("tmux display-message failed with status {}", output.status);
+    }
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(text)
+}
+
+/// Create a horizontal split (right pane) at 40% width, keeping focus on the
+/// left pane. Returns the new pane's ID.
+pub fn split_window_horizontal(
+    target_pane: &str,
+    runner: &dyn ProcessRunner,
+) -> Result<String> {
+    let output = runner.run(
+        "tmux",
+        &[
+            "split-window",
+            "-h",
+            "-d",
+            "-l",
+            "40%",
+            "-t",
+            target_pane,
+            "-P",
+            "-F",
+            "#{pane_id}",
+        ],
+    )?;
+    if !output.status.success() {
+        bail!("tmux split-window failed with status {}", output.status);
+    }
+    let pane_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(pane_id)
+}
+
+/// Move a tmux window into the current window as a right pane (40% width).
+/// Returns the new pane's ID.
+pub fn join_pane(
+    source_window: &str,
+    target_pane: &str,
+    runner: &dyn ProcessRunner,
+) -> Result<String> {
+    let output = runner.run(
+        "tmux",
+        &[
+            "join-pane",
+            "-h",
+            "-d",
+            "-s",
+            source_window,
+            "-t",
+            target_pane,
+            "-l",
+            "40%",
+            "-P",
+            "-F",
+            "#{pane_id}",
+        ],
+    )?;
+    if !output.status.success() {
+        bail!("tmux join-pane failed with status {}", output.status);
+    }
+    let pane_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(pane_id)
+}
+
+/// Break a pane out into its own tmux window with the given name.
+pub fn break_pane_to_window(
+    pane_id: &str,
+    window_name: &str,
+    runner: &dyn ProcessRunner,
+) -> Result<()> {
+    let output = runner.run(
+        "tmux",
+        &["break-pane", "-d", "-s", pane_id, "-n", window_name],
+    )?;
+    if !output.status.success() {
+        bail!("tmux break-pane failed with status {}", output.status);
+    }
+    Ok(())
+}
+
+/// Kill a specific tmux pane by ID.
+pub fn kill_pane(pane_id: &str, runner: &dyn ProcessRunner) -> Result<()> {
+    let output = runner.run("tmux", &["kill-pane", "-t", pane_id])?;
+    if !output.status.success() {
+        bail!("tmux kill-pane failed with status {}", output.status);
+    }
+    Ok(())
+}
+
+/// Check whether a tmux pane with the given ID still exists.
+pub fn pane_exists(pane_id: &str, runner: &dyn ProcessRunner) -> bool {
+    runner
+        .run("tmux", &["display-message", "-t", pane_id, "-p", ""])
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+// ---------------------------------------------------------------------------
 // Internal helpers (kept for arg-shape unit tests)
 // ---------------------------------------------------------------------------
 

@@ -117,9 +117,14 @@ impl App {
             KeyCode::Char('g') => {
                 if let Some(task) = self.selected_task() {
                     if let Some(window) = &task.tmux_window {
-                        vec![Command::JumpToTmux {
-                            window: window.clone(),
-                        }]
+                        if self.board.split.active {
+                            let id = task.id;
+                            self.update(Message::SwapSplitPane(id))
+                        } else {
+                            vec![Command::JumpToTmux {
+                                window: window.clone(),
+                            }]
+                        }
                     } else {
                         self.update(Message::StatusInfo("No active session".to_string()))
                     }
@@ -280,6 +285,8 @@ impl App {
             KeyCode::Char('H') => self.update(Message::ToggleArchive),
 
             KeyCode::Char('?') => self.update(Message::ToggleHelp),
+
+            KeyCode::Char('S') => self.update(Message::ToggleSplitMode),
 
             KeyCode::Char('T') => {
                 if !self.select.tasks.is_empty() {

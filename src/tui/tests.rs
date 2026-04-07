@@ -12061,3 +12061,122 @@ fn fix_agent_different_alerts_both_dispatch() {
     });
     assert!(cmds.iter().any(|c| matches!(c, Command::DispatchFixAgent { .. })));
 }
+
+// ---------------------------------------------------------------------------
+// Split mode tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn toggle_split_mode_emits_enter_command() {
+    let mut app = make_app();
+    let cmds = app.handle_key(make_key(KeyCode::Char('S')));
+    assert_eq!(cmds.len(), 1);
+    assert!(matches!(&cmds[0], Command::EnterSplitMode));
+}
+
+#[test]
+fn toggle_split_mode_emits_exit_command() {
+    let mut app = make_app();
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.pinned_task_id = None;
+    let cmds = app.handle_key(make_key(KeyCode::Char('S')));
+    assert_eq!(cmds.len(), 1);
+    assert!(
+        matches!(&cmds[0], Command::ExitSplitMode { pane_id, restore_window } if pane_id == "%42" && restore_window.is_none())
+    );
+}
+
+#[test]
+fn toggle_split_exit_restores_pinned_task_window() {
+    let mut task = make_task(3, TaskStatus::Running);
+    task.tmux_window = Some("task-3".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.pinned_task_id = Some(TaskId(3));
+    let cmds = app.handle_key(make_key(KeyCode::Char('S')));
+    assert_eq!(cmds.len(), 1);
+    assert!(
+        matches!(&cmds[0], Command::ExitSplitMode { pane_id, restore_window } if pane_id == "%42" && restore_window.as_deref() == Some("task-3"))
+    );
+}
+
+#[test]
+fn g_in_split_mode_emits_swap_command() {
+    let mut task = make_task(4, TaskStatus::Running);
+    task.tmux_window = Some("task-4".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some("%42".to_string());
+    app.selection_mut().set_column(1); // Running column
+    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
+    assert_eq!(cmds.len(), 1);
+    assert!(matches!(
+        &cmds[0],
+        Command::SwapSplitPane {
+            task_id,
+            new_window,
+            ..
+        } if *task_id == TaskId(4) && new_window == "task-4"
+    ));
+}
+
+#[test]
+fn g_without_split_mode_emits_jump_command() {
+    let mut task = make_task(4, TaskStatus::Running);
+    task.tmux_window = Some("task-4".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.selection_mut().set_column(1); // Running column
+    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
+    assert!(matches!(
+        &cmds[0],
+        Command::JumpToTmux { window } if window == "task-4"
+    ));
+}
+
+#[test]
+fn split_pane_opened_updates_state() {
+    let mut app = make_app();
+    assert!(!app.board.split.active);
+    app.update(Message::SplitPaneOpened {
+        pane_id: "%42".to_string(),
+        task_id: Some(TaskId(3)),
+    });
+    assert!(app.board.split.active);
+    assert_eq!(app.board.split.right_pane_id.as_deref(), Some("%42"));
+    assert_eq!(app.board.split.pinned_task_id, Some(TaskId(3)));
+}
+
+#[test]
+fn split_pane_closed_resets_state() {
+    let mut app = make_app();
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.pinned_task_id = Some(TaskId(3));
+    app.update(Message::SplitPaneClosed);
+    assert!(!app.board.split.active);
+    assert!(app.board.split.right_pane_id.is_none());
+    assert!(app.board.split.pinned_task_id.is_none());
+}
+
+#[test]
+fn tick_with_active_split_checks_pane() {
+    let mut app = make_app();
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some("%42".to_string());
+    let cmds = app.update(Message::Tick);
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::CheckSplitPaneExists { pane_id } if pane_id == "%42"
+    )));
+}
+
+#[test]
+fn tick_without_split_does_not_check_pane() {
+    let mut app = make_app();
+    let cmds = app.update(Message::Tick);
+    assert!(!cmds
+        .iter()
+        .any(|c| matches!(c, Command::CheckSplitPaneExists { .. })));
+}

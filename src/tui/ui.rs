@@ -1743,6 +1743,11 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
                 Span::styled("(Review tasks, supports batch)", note),
             ]),
             Line::from(vec![
+                Span::styled("  [S]", key),
+                Span::styled(" toggle split mode  ", desc),
+                Span::styled("(side-by-side with agent)", note),
+            ]),
+            Line::from(vec![
                 Span::styled("  [P]", key),
                 Span::styled(" merge PR  ", desc),
                 Span::styled("[p]", key),
@@ -2122,7 +2127,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     match &app.input.mode {
         InputMode::Normal => {
             let key_color = CYAN;
-            let spans = if app.has_selection() {
+            let mut spans = if app.has_selection() {
                 let count = app.selected_tasks().len() + app.selected_epics().len();
                 let has_tasks = !app.selected_tasks().is_empty();
                 batch_action_hints(count, key_color, has_tasks)
@@ -2131,6 +2136,19 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             } else {
                 action_hints(app.selected_task(), key_color)
             };
+            if app.split_active() {
+                let mut prefix = vec![
+                    Span::styled(
+                        "[S]",
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled("plit ", Style::default().fg(Color::Green)),
+                ];
+                prefix.append(&mut spans);
+                spans = prefix;
+            }
             let bar = Paragraph::new(Line::from(spans));
             frame.render_widget(bar, area);
         }
