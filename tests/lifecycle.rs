@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use dispatch_tui::db::{self, Database, TaskStore};
-use dispatch_tui::models::{Task, TaskId, TaskStatus};
+use dispatch_tui::models::{DispatchMode, Task, TaskId, TaskStatus};
 use dispatch_tui::tui::{App, Command, Message, MoveDirection};
 
 fn make_app() -> (App, Database) {
@@ -77,8 +77,8 @@ fn full_lifecycle() {
     assert_eq!(db_task.title, "Fix auth bug");
 
     // 2. Dispatch directly from Backlog (task has a plan) → Dispatch command issued
-    let cmds = app.update(Message::DispatchTask(task_id));
-    assert!(matches!(cmds[0], Command::Dispatch { .. }));
+    let cmds = app.update(Message::DispatchTask(task_id, DispatchMode::Dispatch));
+    assert!(matches!(cmds[0], Command::DispatchAgent { .. }));
 
     // Simulate dispatch result → moves to Running
     let cmds = app.update(Message::Dispatched {

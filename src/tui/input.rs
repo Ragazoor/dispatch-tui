@@ -376,12 +376,8 @@ impl App {
 
                 match status {
                     TaskStatus::Backlog => {
-                        let msg = match DispatchMode::for_task(task) {
-                            DispatchMode::Dispatch => Message::DispatchTask(id),
-                            DispatchMode::Brainstorm => Message::BrainstormTask(id),
-                            DispatchMode::Plan => Message::PlanTask(id),
-                        };
-                        self.update(msg)
+                        let mode = DispatchMode::for_task(task);
+                        self.update(Message::DispatchTask(id, mode))
                     }
                     TaskStatus::Running | TaskStatus::Review => {
                         if is_problematic {

@@ -500,30 +500,23 @@ impl TuiRuntime {
         });
     }
 
-    fn exec_dispatch(&self, task: models::Task) {
+    fn exec_dispatch_agent(&self, task: models::Task, mode: models::DispatchMode) {
         let epic_ctx = dispatch::EpicContext::from_db(&task, &*self.database);
+        let label = match mode {
+            models::DispatchMode::Dispatch => "Dispatch",
+            models::DispatchMode::Brainstorm => "Brainstorm",
+            models::DispatchMode::Plan => "Plan",
+        };
         self.spawn_dispatch(
             task,
-            move |t, r| dispatch::dispatch_agent(t, r, epic_ctx.as_ref()),
-            "Dispatch",
-        );
-    }
-
-    fn exec_brainstorm(&self, task: models::Task) {
-        let epic_ctx = dispatch::EpicContext::from_db(&task, &*self.database);
-        self.spawn_dispatch(
-            task,
-            move |t, r| dispatch::brainstorm_agent(t, r, epic_ctx.as_ref()),
-            "Brainstorm",
-        );
-    }
-
-    fn exec_plan(&self, task: models::Task) {
-        let epic_ctx = dispatch::EpicContext::from_db(&task, &*self.database);
-        self.spawn_dispatch(
-            task,
-            move |t, r| dispatch::plan_agent(t, r, epic_ctx.as_ref()),
-            "Plan",
+            move |t, r| match mode {
+                models::DispatchMode::Dispatch => dispatch::dispatch_agent(t, r, epic_ctx.as_ref()),
+                models::DispatchMode::Brainstorm => {
+                    dispatch::brainstorm_agent(t, r, epic_ctx.as_ref())
+                }
+                models::DispatchMode::Plan => dispatch::plan_agent(t, r, epic_ctx.as_ref()),
+            },
+            label,
         );
     }
 
@@ -1709,9 +1702,7 @@ async fn execute_commands(
                 epic_id,
             ),
             Command::DeleteTask(id) => rt.exec_delete_task(app, id),
-            Command::Dispatch { task } => rt.exec_dispatch(task),
-            Command::Brainstorm { task } => rt.exec_brainstorm(task),
-            Command::Plan { task } => rt.exec_plan(task),
+            Command::DispatchAgent { task, mode } => rt.exec_dispatch_agent(task, mode),
             Command::CaptureTmux { id, window } => rt.exec_capture_tmux(id, window),
             Command::EditTaskInEditor(task) => {
                 rt.exec_edit_in_editor(app, task, terminal, key_rx)?
@@ -2168,7 +2159,7 @@ mod tests {
         let task = db
             .create_task_returning("Test Task", "desc", repo, None, models::TaskStatus::Backlog)
             .unwrap();
-        rt.exec_dispatch(task);
+        rt.exec_dispatch_agent(task, models::DispatchMode::Dispatch);
 
         let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
             .await
@@ -2198,7 +2189,7 @@ mod tests {
                 models::TaskStatus::Backlog,
             )
             .unwrap();
-        rt.exec_dispatch(task.clone());
+        rt.exec_dispatch_agent(task.clone(), models::DispatchMode::Dispatch);
 
         let msg1 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
             .await
@@ -2992,7 +2983,12 @@ mod tests {
     #[test]
     fn exec_insert_epic_creates_in_db_and_app() {
         let (rt, mut app) = test_runtime();
-        rt.exec_insert_epic(&mut app, "My Epic".into(), "description".into(), "/repo".into());
+        rt.exec_insert_epic(
+            &mut app,
+            "My Epic".into(),
+            "description".into(),
+            "/repo".into(),
+        );
         assert_eq!(app.epics().len(), 1);
         assert_eq!(app.epics()[0].title, "My Epic");
         assert_eq!(rt.database.list_epics().unwrap().len(), 1);
@@ -3001,10 +2997,7 @@ mod tests {
     #[test]
     fn exec_delete_epic_removes_from_db() {
         let (rt, mut app) = test_runtime();
-        let epic = rt
-            .database
-            .create_epic("Doomed", "bye", "/repo")
-            .unwrap();
+        let epic = rt.database.create_epic("Doomed", "bye", "/repo").unwrap();
         rt.exec_delete_epic(&mut app, epic.id);
         assert!(rt.database.list_epics().unwrap().is_empty());
         assert!(app.error_popup().is_none());
@@ -3013,10 +3006,7 @@ mod tests {
     #[test]
     fn exec_persist_epic_updates_status() {
         let (rt, mut app) = test_runtime();
-        let epic = rt
-            .database
-            .create_epic("Epic", "desc", "/repo")
-            .unwrap();
+        let epic = rt.database.create_epic("Epic", "desc", "/repo").unwrap();
         rt.exec_persist_epic(&mut app, epic.id, Some(models::TaskStatus::Running), None);
         let updated = rt.database.get_epic(epic.id).unwrap().unwrap();
         assert_eq!(updated.status, models::TaskStatus::Running);
@@ -3025,10 +3015,7 @@ mod tests {
     #[test]
     fn exec_persist_epic_noop_when_nothing_to_update() {
         let (rt, mut app) = test_runtime();
-        let epic = rt
-            .database
-            .create_epic("Epic", "desc", "/repo")
-            .unwrap();
+        let epic = rt.database.create_epic("Epic", "desc", "/repo").unwrap();
         // Should return early without error
         rt.exec_persist_epic(&mut app, epic.id, None, None);
         assert!(app.error_popup().is_none());
@@ -3190,8 +3177,8 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, _rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"%1\n"),  // current_pane_id
-            MockProcessRunner::ok_with_stdout(b"%2\n"),  // split_window_horizontal
+            MockProcessRunner::ok_with_stdout(b"%1\n"), // current_pane_id
+            MockProcessRunner::ok_with_stdout(b"%2\n"), // split_window_horizontal
         ]));
         let rt = make_runtime(db.clone(), tx, mock);
         let tasks = db.list_all().unwrap();
@@ -3206,17 +3193,14 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, _rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::fail("no server"),  // current_pane_id fails
+            MockProcessRunner::fail("no server"), // current_pane_id fails
         ]));
         let rt = make_runtime(db.clone(), tx, mock);
         let tasks = db.list_all().unwrap();
         let mut app = App::new(tasks, Duration::from_secs(300));
 
         rt.exec_enter_split_mode(&mut app);
-        assert_eq!(
-            app.status_message(),
-            Some("Split mode requires tmux")
-        );
+        assert_eq!(app.status_message(), Some("Split mode requires tmux"));
     }
 
     #[test]
@@ -3224,7 +3208,7 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, _rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::ok(),  // break_pane_to_window
+            MockProcessRunner::ok(), // break_pane_to_window
         ]));
         let rt = make_runtime(db.clone(), tx, mock.clone());
         let tasks = db.list_all().unwrap();
@@ -3241,7 +3225,7 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, _rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::ok(),  // kill_pane
+            MockProcessRunner::ok(), // kill_pane
         ]));
         let rt = make_runtime(db.clone(), tx, mock.clone());
         let tasks = db.list_all().unwrap();
@@ -3258,7 +3242,7 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, _rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::ok(),  // pane_exists → display-message succeeds
+            MockProcessRunner::ok(), // pane_exists → display-message succeeds
         ]));
         let rt = make_runtime(db.clone(), tx, mock);
         let tasks = db.list_all().unwrap();
@@ -3274,7 +3258,7 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, _rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::fail("no pane"),  // pane_exists → display-message fails
+            MockProcessRunner::fail("no pane"), // pane_exists → display-message fails
         ]));
         let rt = make_runtime(db.clone(), tx, mock);
         let tasks = db.list_all().unwrap();
@@ -3290,9 +3274,9 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, _rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::ok(),                     // kill_pane (old pane, no window name)
-            MockProcessRunner::ok_with_stdout(b"%1\n"),  // current_pane_id
-            MockProcessRunner::ok_with_stdout(b"%3\n"),  // join_pane
+            MockProcessRunner::ok(), // kill_pane (old pane, no window name)
+            MockProcessRunner::ok_with_stdout(b"%1\n"), // current_pane_id
+            MockProcessRunner::ok_with_stdout(b"%3\n"), // join_pane
         ]));
         let rt = make_runtime(db.clone(), tx, mock.clone());
         let tasks = db.list_all().unwrap();
@@ -3313,7 +3297,7 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::ok(),  // gh pr merge --merge
+            MockProcessRunner::ok(), // gh pr merge --merge
         ]));
         let rt = make_runtime(db, tx, mock);
 
@@ -3334,7 +3318,7 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::fail("merge conflict"),  // gh pr merge fails
+            MockProcessRunner::fail("merge conflict"), // gh pr merge fails
         ]));
         let rt = make_runtime(db, tx, mock);
 
@@ -3420,7 +3404,7 @@ mod tests {
             .unwrap();
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::fail("gh auth failure"),  // gh api graphql fails
+            MockProcessRunner::fail("gh auth failure"), // gh api graphql fails
         ]));
         let rt = make_runtime(db, tx, mock);
 
@@ -3445,8 +3429,8 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::ok(),  // gh pr review --approve (PR 1)
-            MockProcessRunner::ok(),  // gh pr review --approve (PR 2)
+            MockProcessRunner::ok(), // gh pr review --approve (PR 1)
+            MockProcessRunner::ok(), // gh pr review --approve (PR 2)
         ]));
         let rt = make_runtime(db, tx, mock.clone());
 
@@ -3486,8 +3470,8 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::ok(),                  // PR 1 succeeds
-            MockProcessRunner::fail("not allowed"),   // PR 2 fails
+            MockProcessRunner::ok(),                // PR 1 succeeds
+            MockProcessRunner::fail("not allowed"), // PR 2 fails
         ]));
         let rt = make_runtime(db, tx, mock);
 
@@ -3515,8 +3499,8 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::ok(),  // gh pr merge --merge (PR 1)
-            MockProcessRunner::ok(),  // gh pr merge --merge (PR 2)
+            MockProcessRunner::ok(), // gh pr merge --merge (PR 1)
+            MockProcessRunner::ok(), // gh pr merge --merge (PR 2)
         ]));
         let rt = make_runtime(db, tx, mock.clone());
 
@@ -3553,8 +3537,8 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::fail("checks pending"),  // PR 1 fails
-            MockProcessRunner::ok(),                     // PR 2 succeeds
+            MockProcessRunner::fail("checks pending"), // PR 1 fails
+            MockProcessRunner::ok(),                   // PR 2 succeeds
         ]));
         let rt = make_runtime(db, tx, mock);
 
@@ -3586,7 +3570,7 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, _rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::ok(),  // xdg-open
+            MockProcessRunner::ok(), // xdg-open
         ]));
         let rt = make_runtime(db, tx, mock.clone());
 
@@ -3597,7 +3581,9 @@ mod tests {
         let calls = mock.recorded_calls();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].0, "xdg-open");
-        assert!(calls[0].1.contains(&"https://github.com/org/repo/pull/1".to_string()));
+        assert!(calls[0]
+            .1
+            .contains(&"https://github.com/org/repo/pull/1".to_string()));
     }
 
     #[tokio::test]
@@ -3605,7 +3591,7 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, _rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::ok(),  // tmux kill-window
+            MockProcessRunner::ok(), // tmux kill-window
         ]));
         let rt = make_runtime(db, tx, mock.clone());
 
@@ -3623,9 +3609,9 @@ mod tests {
     async fn exec_kill_tmux_window_failure_sends_error() {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::fail("no such window"),
-        ]));
+        let mock = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::fail(
+            "no such window",
+        )]));
         let rt = make_runtime(db, tx, mock);
 
         rt.exec_kill_tmux_window("gone-window".into());
@@ -3649,7 +3635,7 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::fail("auth error"),  // gh api graphql fails
+            MockProcessRunner::fail("auth error"), // gh api graphql fails
         ]));
         let rt = make_runtime(db, tx, mock);
 
@@ -3697,7 +3683,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Brainstorm / Plan (same dispatch path as exec_dispatch)
+    // Brainstorm / Plan modes (via exec_dispatch_agent)
     // -----------------------------------------------------------------------
 
     #[tokio::test]
@@ -3719,9 +3705,15 @@ mod tests {
         let rt = make_runtime(db.clone(), tx, mock);
 
         let task = db
-            .create_task_returning("Brainstorm Task", "desc", repo, None, models::TaskStatus::Backlog)
+            .create_task_returning(
+                "Brainstorm Task",
+                "desc",
+                repo,
+                None,
+                models::TaskStatus::Backlog,
+            )
             .unwrap();
-        rt.exec_brainstorm(task);
+        rt.exec_dispatch_agent(task, models::DispatchMode::Brainstorm);
 
         let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
             .await
@@ -3737,15 +3729,21 @@ mod tests {
     async fn exec_brainstorm_sends_error_on_failure() {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::fail("fatal: not a git repository"),
-        ]));
+        let mock = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::fail(
+            "fatal: not a git repository",
+        )]));
         let rt = make_runtime(db.clone(), tx, mock);
 
         let task = db
-            .create_task_returning("Fail", "desc", "/nonexistent", None, models::TaskStatus::Backlog)
+            .create_task_returning(
+                "Fail",
+                "desc",
+                "/nonexistent",
+                None,
+                models::TaskStatus::Backlog,
+            )
             .unwrap();
-        rt.exec_brainstorm(task.clone());
+        rt.exec_dispatch_agent(task.clone(), models::DispatchMode::Brainstorm);
 
         let msg1 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
             .await
@@ -3778,7 +3776,7 @@ mod tests {
         let task = db
             .create_task_returning("Plan Task", "desc", repo, None, models::TaskStatus::Backlog)
             .unwrap();
-        rt.exec_plan(task);
+        rt.exec_dispatch_agent(task, models::DispatchMode::Plan);
 
         let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
             .await
@@ -3794,15 +3792,21 @@ mod tests {
     async fn exec_plan_sends_error_on_failure() {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::fail("fatal: not a git repository"),
-        ]));
+        let mock = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::fail(
+            "fatal: not a git repository",
+        )]));
         let rt = make_runtime(db.clone(), tx, mock);
 
         let task = db
-            .create_task_returning("Fail", "desc", "/nonexistent", None, models::TaskStatus::Backlog)
+            .create_task_returning(
+                "Fail",
+                "desc",
+                "/nonexistent",
+                None,
+                models::TaskStatus::Backlog,
+            )
             .unwrap();
-        rt.exec_plan(task.clone());
+        rt.exec_dispatch_agent(task.clone(), models::DispatchMode::Plan);
 
         let msg1 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
             .await
@@ -3829,13 +3833,13 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"\n"), // has_window (list-windows, no match)
-            MockProcessRunner::ok(),                   // git worktree prune
+            MockProcessRunner::ok(),                  // git worktree prune
             MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // symbolic-ref
-            MockProcessRunner::ok(),                   // git fetch origin main
+            MockProcessRunner::ok(),                  // git fetch origin main
             // worktree dir exists, skip git worktree add
-            MockProcessRunner::ok(),                   // tmux new-window
-            MockProcessRunner::ok(),                   // tmux send-keys -l
-            MockProcessRunner::ok(),                   // tmux send-keys Enter
+            MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux send-keys -l
+            MockProcessRunner::ok(), // tmux send-keys Enter
         ]));
         let rt = make_runtime(db, tx, mock);
 
@@ -3864,9 +3868,9 @@ mod tests {
     async fn exec_dispatch_fix_agent_failure() {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::fail("tmux not running"),
-        ]));
+        let mock = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::fail(
+            "tmux not running",
+        )]));
         let rt = make_runtime(db, tx, mock);
 
         rt.exec_dispatch_fix_agent(
@@ -3901,12 +3905,12 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"\n"), // has_window (no match)
-            MockProcessRunner::ok(),                   // git worktree prune
-            MockProcessRunner::ok(),                   // git fetch origin fix-branch
+            MockProcessRunner::ok(),                  // git worktree prune
+            MockProcessRunner::ok(),                  // git fetch origin fix-branch
             // worktree dir exists, skip git worktree add
-            MockProcessRunner::ok(),                   // tmux new-window
-            MockProcessRunner::ok(),                   // tmux send-keys -l
-            MockProcessRunner::ok(),                   // tmux send-keys Enter
+            MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux send-keys -l
+            MockProcessRunner::ok(), // tmux send-keys Enter
         ]));
         let rt = make_runtime(db, tx, mock);
 
@@ -3934,9 +3938,9 @@ mod tests {
     async fn exec_dispatch_review_agent_failure() {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::fail("tmux not running"),
-        ]));
+        let mock = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::fail(
+            "tmux not running",
+        )]));
         let rt = make_runtime(db, tx, mock);
 
         rt.exec_dispatch_review_agent(tui::ReviewAgentRequest {

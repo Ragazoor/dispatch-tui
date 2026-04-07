@@ -4,8 +4,8 @@ use std::time::{Duration, Instant};
 use ratatui::widgets::ListState;
 
 use crate::models::{
-    AlertKind, AlertSeverity, Epic, EpicId, EpicSubstatus, PrRef, ReviewDecision, SecurityAlert,
-    SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage,
+    AlertKind, AlertSeverity, DispatchMode, Epic, EpicId, EpicSubstatus, PrRef, ReviewDecision,
+    SecurityAlert, SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage,
 };
 
 // ---------------------------------------------------------------------------
@@ -155,9 +155,7 @@ pub enum Message {
         direction: MoveDirection,
     },
     ReorderItem(isize), // +1 = down, -1 = up
-    DispatchTask(TaskId),
-    BrainstormTask(TaskId),
-    PlanTask(TaskId),
+    DispatchTask(TaskId, DispatchMode),
     Dispatched {
         id: TaskId,
         worktree: String,
@@ -440,14 +438,9 @@ pub enum Command {
         epic_id: Option<EpicId>,
     },
     DeleteTask(TaskId),
-    Dispatch {
+    DispatchAgent {
         task: Task,
-    },
-    Brainstorm {
-        task: Task,
-    },
-    Plan {
-        task: Task,
+        mode: DispatchMode,
     },
     Cleanup {
         id: TaskId,

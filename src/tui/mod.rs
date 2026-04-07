@@ -102,7 +102,8 @@ impl App {
 
     /// Returns true if a review agent dispatch is in-flight for the given PR.
     pub fn is_dispatching_review(&self, repo: &str, number: i64) -> bool {
-        self.dispatching_review.contains(&(repo.to_string(), number))
+        self.dispatching_review
+            .contains(&(repo.to_string(), number))
     }
 
     /// Returns true if a fix agent dispatch is in-flight for the given alert.
@@ -272,7 +273,11 @@ impl App {
 
     /// Set of PR URLs from dispatch tasks (for matching against ReviewPr entries).
     pub fn dispatch_pr_urls(&self) -> HashSet<String> {
-        self.board.tasks.iter().filter_map(|t| t.pr_url.clone()).collect()
+        self.board
+            .tasks
+            .iter()
+            .filter_map(|t| t.pr_url.clone())
+            .collect()
     }
 
     /// Get the review board selection state, if currently in review board mode.
@@ -430,13 +435,15 @@ impl App {
         let repo_match = |t: &&Task| self.repo_matches(&t.repo_path);
         match &self.board.view_mode {
             ViewMode::Board(_) => self
-                .board.tasks
+                .board
+                .tasks
                 .iter()
                 .filter(|t| t.epic_id.is_none() && t.status != TaskStatus::Archived)
                 .filter(repo_match)
                 .collect(),
             ViewMode::Epic { epic_id, .. } => self
-                .board.tasks
+                .board
+                .tasks
                 .iter()
                 .filter(|t| t.epic_id == Some(*epic_id) && t.status != TaskStatus::Archived)
                 .filter(repo_match)
@@ -455,7 +462,8 @@ impl App {
 
     /// Return all archived tasks, ordered as they appear in self.board.tasks.
     pub fn archived_tasks(&self) -> Vec<&Task> {
-        self.board.tasks
+        self.board
+            .tasks
             .iter()
             .filter(|t| t.status == TaskStatus::Archived)
             .filter(|t| self.repo_matches(&t.repo_path))
@@ -465,9 +473,15 @@ impl App {
     /// Pre-compute subtask stats for all epics. Call once per render frame.
     pub fn compute_epic_stats(&self) -> EpicStatsMap {
         let active_merge = self.merge_queue.as_ref().map(|q| q.epic_id);
-        self.board.epics
+        self.board
+            .epics
             .iter()
-            .map(|e| (e.id, SubtaskStats::for_epic(e, &self.board.tasks, active_merge)))
+            .map(|e| {
+                (
+                    e.id,
+                    SubtaskStats::for_epic(e, &self.board.tasks, active_merge),
+                )
+            })
             .collect()
     }
 
@@ -509,7 +523,8 @@ impl App {
                     s.substatus.column_priority()
                 } else {
                     let subtasks: Vec<Task> = self
-                        .board.tasks
+                        .board
+                        .tasks
                         .iter()
                         .filter(|t| t.epic_id == Some(e.id) && t.status != TaskStatus::Archived)
                         .cloned()
@@ -532,7 +547,8 @@ impl App {
             return task_count;
         }
         let epic_count = self
-            .board.epics
+            .board
+            .epics
             .iter()
             .filter(|e| self.filter.matches(&e.repo_path) && epic_status(e) == status)
             .count();
@@ -565,7 +581,8 @@ impl App {
                 }
                 if epic_parent == TaskStatus::Running {
                     let subtasks: Vec<Task> = self
-                        .board.tasks
+                        .board
+                        .tasks
                         .iter()
                         .filter(|t| t.epic_id == Some(epic.id) && t.status != TaskStatus::Archived)
                         .cloned()
@@ -597,7 +614,8 @@ impl App {
 
     /// Get the statuses of all subtasks belonging to an epic.
     fn subtask_statuses(&self, epic_id: EpicId) -> Vec<TaskStatus> {
-        self.board.tasks
+        self.board
+            .tasks
             .iter()
             .filter(|t| t.epic_id == Some(epic_id) && t.status != TaskStatus::Archived)
             .map(|t| t.status)
@@ -618,7 +636,8 @@ impl App {
 
     /// Look up the title of an epic by ID.
     pub fn epic_title(&self, id: EpicId) -> Option<&str> {
-        self.board.epics
+        self.board
+            .epics
             .iter()
             .find(|e| e.id == id)
             .map(|e| e.title.as_str())
@@ -714,9 +733,7 @@ impl App {
             | Message::WindowGone(_)) => self.dispatch_board(msg),
 
             // Task lifecycle, dispatch, selection, wrap-up
-            msg @ (Message::DispatchTask(_)
-            | Message::BrainstormTask(_)
-            | Message::PlanTask(_)
+            msg @ (Message::DispatchTask(..)
             | Message::Dispatched { .. }
             | Message::TaskCreated { .. }
             | Message::DeleteTask(_)
@@ -911,9 +928,7 @@ impl App {
     /// Task lifecycle: dispatch, resume, failure recovery, selection, wrap-up.
     fn dispatch_task(&mut self, msg: Message) -> Vec<Command> {
         match msg {
-            Message::DispatchTask(id) => self.handle_dispatch_task(id),
-            Message::BrainstormTask(id) => self.handle_brainstorm_task(id),
-            Message::PlanTask(id) => self.handle_plan_task(id),
+            Message::DispatchTask(id, mode) => self.handle_dispatch_task(id, mode),
             Message::Dispatched {
                 id,
                 worktree,
@@ -974,13 +989,9 @@ impl App {
             Message::CancelDelete => self.handle_cancel_delete(),
             Message::SubmitTitle(value) => self.handle_submit_title(value),
             Message::SubmitDescription(value) => self.handle_submit_description(value),
-            Message::DescriptionEditorResult(value) => {
-                self.handle_description_editor_result(value)
-            }
+            Message::DescriptionEditorResult(value) => self.handle_description_editor_result(value),
             Message::SubmitRepoPath(value) => self.handle_submit_repo_path(value),
-            Message::SubmitDispatchRepoPath(value) => {
-                self.handle_submit_dispatch_repo_path(value)
-            }
+            Message::SubmitDispatchRepoPath(value) => self.handle_submit_dispatch_repo_path(value),
             Message::SubmitTag(tag) => self.handle_submit_tag(tag),
             Message::InputChar(c) => self.handle_input_char(c),
             Message::InputBackspace => self.handle_input_backspace(),
@@ -1100,9 +1111,7 @@ impl App {
                 self.handle_toggle_security_repo_filter(repo)
             }
             Message::ToggleAllSecurityRepoFilter => self.handle_toggle_all_security_repo_filter(),
-            Message::ToggleSecurityRepoFilterMode => {
-                self.handle_toggle_security_repo_filter_mode()
-            }
+            Message::ToggleSecurityRepoFilterMode => self.handle_toggle_security_repo_filter_mode(),
             Message::DispatchFixAgent {
                 repo,
                 number,
@@ -1438,38 +1447,17 @@ impl App {
         }]
     }
 
-    fn handle_dispatch_task(&mut self, id: TaskId) -> Vec<Command> {
+    fn handle_dispatch_task(&mut self, id: TaskId, mode: DispatchMode) -> Vec<Command> {
         if self.dispatching.contains(&id) {
             return vec![];
         }
-        let task = self.find_task(id).filter(|t| t.status == TaskStatus::Backlog).cloned();
+        let task = self
+            .find_task(id)
+            .filter(|t| t.status == TaskStatus::Backlog)
+            .cloned();
         if let Some(task) = task {
             self.dispatching.insert(id);
-            return vec![Command::Dispatch { task }];
-        }
-        vec![]
-    }
-
-    fn handle_brainstorm_task(&mut self, id: TaskId) -> Vec<Command> {
-        if self.dispatching.contains(&id) {
-            return vec![];
-        }
-        let task = self.find_task(id).filter(|t| t.status == TaskStatus::Backlog).cloned();
-        if let Some(task) = task {
-            self.dispatching.insert(id);
-            return vec![Command::Brainstorm { task }];
-        }
-        vec![]
-    }
-
-    fn handle_plan_task(&mut self, id: TaskId) -> Vec<Command> {
-        if self.dispatching.contains(&id) {
-            return vec![];
-        }
-        let task = self.find_task(id).filter(|t| t.status == TaskStatus::Backlog).cloned();
-        if let Some(task) = task {
-            self.dispatching.insert(id);
-            return vec![Command::Plan { task }];
+            return vec![Command::DispatchAgent { task, mode }];
         }
         vec![]
     }
@@ -1660,7 +1648,8 @@ impl App {
             .retain(|_, t| t.elapsed().as_secs() < 3);
 
         let mut cmds: Vec<Command> = self
-            .board.tasks
+            .board
+            .tasks
             .iter()
             .filter(|t| t.tmux_window.is_some())
             .filter_map(|t| {
@@ -1673,7 +1662,8 @@ impl App {
         // Check for stale agents
         let timeout = self.agents.inactivity_timeout;
         let newly_stale: Vec<TaskId> = self
-            .board.tasks
+            .board
+            .tasks
             .iter()
             .filter(|t| t.status == TaskStatus::Running && t.tmux_window.is_some())
             .filter(|t| {
@@ -1698,7 +1688,8 @@ impl App {
 
         // Poll PR status for review tasks with open PRs
         let pr_tasks: Vec<(TaskId, String)> = self
-            .board.tasks
+            .board
+            .tasks
             .iter()
             .filter(|t| t.status == TaskStatus::Review)
             .filter(|t| {
@@ -1722,7 +1713,9 @@ impl App {
         }
 
         // Also refresh my PRs data if stale (> 30s)
-        if self.review.authored.needs_fetch(REVIEW_REFRESH_INTERVAL) && !self.review.authored.loading {
+        if self.review.authored.needs_fetch(REVIEW_REFRESH_INTERVAL)
+            && !self.review.authored.loading
+        {
             self.review.authored.loading = true;
             cmds.push(Command::FetchMyPrs);
         }
@@ -1953,7 +1946,10 @@ impl App {
             }
             cmds.push(Command::PersistTask(task_clone.clone()));
             self.dispatching.insert(id);
-            cmds.push(Command::Dispatch { task: task_clone });
+            cmds.push(Command::DispatchAgent {
+                task: task_clone,
+                mode: DispatchMode::Dispatch,
+            });
             cmds
         } else {
             vec![]
@@ -2071,9 +2067,7 @@ impl App {
         }
         if skipped > 0 {
             let noun = if skipped == 1 { "epic" } else { "epics" };
-            self.set_status(format!(
-                "Skipped {skipped} {noun} with non-done subtasks"
-            ));
+            self.set_status(format!("Skipped {skipped} {noun} with non-done subtasks"));
         }
         self.select.epics.clear();
         self.select.tasks.clear();
@@ -2777,7 +2771,8 @@ impl App {
 
     fn handle_start_epic_wrap_up(&mut self, epic_id: EpicId) -> Vec<Command> {
         let review_count = self
-            .board.tasks
+            .board
+            .tasks
             .iter()
             .filter(|t| {
                 t.epic_id == Some(epic_id) && t.status == TaskStatus::Review && t.worktree.is_some()
@@ -2807,7 +2802,8 @@ impl App {
         self.input.mode = InputMode::Normal;
 
         let mut review_tasks: Vec<&Task> = self
-            .board.tasks
+            .board
+            .tasks
             .iter()
             .filter(|t| {
                 t.epic_id == Some(epic_id) && t.status == TaskStatus::Review && t.worktree.is_some()
@@ -3008,7 +3004,9 @@ impl App {
                     }
                 }
                 ReviewBoardMode::Reviewer => {
-                    if self.review.review.needs_fetch(REVIEW_REFRESH_INTERVAL) && !self.review.review.loading {
+                    if self.review.review.needs_fetch(REVIEW_REFRESH_INTERVAL)
+                        && !self.review.review.loading
+                    {
                         self.review.review.loading = true;
                         cmds.push(Command::FetchReviewPrs);
                     }
@@ -3448,7 +3446,8 @@ impl App {
         if epic.plan_path.is_some() {
             // Epic has a plan — dispatch the next backlog subtask sorted by sort_order
             let mut backlog_subtasks: Vec<&Task> = self
-                .board.tasks
+                .board
+                .tasks
                 .iter()
                 .filter(|t| {
                     t.epic_id == Some(id)
@@ -3461,18 +3460,11 @@ impl App {
             match backlog_subtasks.first() {
                 Some(task) => {
                     self.dispatching.insert(task.id);
-                    let cmd = match DispatchMode::for_task(task) {
-                        DispatchMode::Dispatch => Command::Dispatch {
-                            task: (*task).clone(),
-                        },
-                        DispatchMode::Brainstorm => Command::Brainstorm {
-                            task: (*task).clone(),
-                        },
-                        DispatchMode::Plan => Command::Plan {
-                            task: (*task).clone(),
-                        },
-                    };
-                    vec![cmd]
+                    let mode = DispatchMode::for_task(task);
+                    vec![Command::DispatchAgent {
+                        task: (*task).clone(),
+                        mode,
+                    }]
                 }
                 None => {
                     self.set_status("No backlog subtasks in epic".to_string());
@@ -3482,7 +3474,8 @@ impl App {
         } else {
             // No plan — only spawn planning subtask if epic has no active subtasks
             let has_subtasks = self
-                .board.tasks
+                .board
+                .tasks
                 .iter()
                 .any(|t| t.epic_id == Some(id) && t.status != TaskStatus::Archived);
             if has_subtasks {
@@ -3557,7 +3550,8 @@ impl App {
         let mut cmds = Vec::new();
         // Clean up worktrees/tmux for subtasks before deleting
         let subtask_ids: Vec<TaskId> = self
-            .board.tasks
+            .board
+            .tasks
             .iter()
             .filter(|t| t.epic_id == Some(id))
             .map(|t| t.id)
@@ -3612,7 +3606,8 @@ impl App {
         // Moving to Done cleans up all subtask tmux windows
         if new_status == TaskStatus::Done {
             let subtask_ids: Vec<TaskId> = self
-                .board.tasks
+                .board
+                .tasks
                 .iter()
                 .filter(|t| t.epic_id == Some(id) && t.tmux_window.is_some())
                 .map(|t| t.id)
@@ -3633,7 +3628,8 @@ impl App {
     fn handle_archive_epic(&mut self, id: EpicId) -> Vec<Command> {
         let mut cmds = Vec::new();
         let subtask_ids: Vec<TaskId> = self
-            .board.tasks
+            .board
+            .tasks
             .iter()
             .filter(|t| t.epic_id == Some(id) && t.status != TaskStatus::Archived)
             .map(|t| t.id)
@@ -3973,8 +3969,7 @@ impl App {
             .remove(&(github_repo.clone(), number));
         let repo_short = github_repo.split('/').next_back().unwrap_or(&github_repo);
         self.set_status(format!("Review agent dispatched for {repo_short}#{number}"));
-        let table =
-            self.find_and_set_pr_agent(&github_repo, number, &tmux_window, &worktree);
+        let table = self.find_and_set_pr_agent(&github_repo, number, &tmux_window, &worktree);
         vec![Command::PersistReviewAgent {
             table,
             github_repo,
@@ -4208,10 +4203,7 @@ impl App {
                 fixed_version,
             }]
         } else {
-            self.set_status(format!(
-                "No local repo found for {} — select a path",
-                repo
-            ));
+            self.set_status(format!("No local repo found for {} — select a path", repo));
             self.input.pending_dispatch = Some(PendingDispatch::Fix {
                 repo,
                 number,
@@ -4238,16 +4230,10 @@ impl App {
     ) -> Vec<Command> {
         self.dispatching_fix
             .remove(&(github_repo.clone(), number, kind));
-        let repo_short = github_repo
-            .split('/')
-            .next_back()
-            .unwrap_or(&github_repo);
+        let repo_short = github_repo.split('/').next_back().unwrap_or(&github_repo);
         self.set_status(format!("Fix agent dispatched for {repo_short}#{number}"));
         for alert in self.security.alerts.iter_mut() {
-            if alert.repo == github_repo
-                && alert.number == number
-                && alert.kind == kind
-            {
+            if alert.repo == github_repo && alert.number == number && alert.kind == kind {
                 alert.tmux_window = Some(tmux_window.clone());
                 alert.worktree = Some(worktree.clone());
                 alert.agent_status = Some(crate::models::ReviewAgentStatus::Reviewing);
