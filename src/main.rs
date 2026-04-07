@@ -100,15 +100,7 @@ fn parse_status(s: &str) -> anyhow::Result<models::TaskStatus> {
 }
 
 fn default_db_path() -> PathBuf {
-    let base = std::env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            let home = std::env::var_os("HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("."));
-            home.join(".local").join("share")
-        });
-    base.join("dispatch").join("tasks.db")
+    dispatch_tui::default_db_path()
 }
 
 #[tokio::main]
