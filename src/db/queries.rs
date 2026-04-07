@@ -614,52 +614,7 @@ impl TaskStore for Database {
 
     fn save_review_prs(&self, prs: &[ReviewPr]) -> Result<()> {
         let conn = self.conn()?;
-        let tx = conn.unchecked_transaction()?;
-        tx.execute("DELETE FROM review_prs", [])?;
-        {
-            let mut stmt = tx.prepare(
-                "INSERT INTO review_prs (repo, number, title, author, url, is_draft,
-                 created_at, updated_at, additions, deletions, review_decision, labels,
-                 body, head_ref, ci_status, reviewers)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
-            )?;
-            for pr in prs {
-                let labels_json =
-                    serde_json::to_string(&pr.labels).context("Failed to serialize labels")?;
-                let reviewers_json = serde_json::to_string(
-                    &pr.reviewers
-                        .iter()
-                        .map(|r| {
-                            serde_json::json!({
-                                "login": r.login,
-                                "decision": r.decision.map(|d| d.as_db_str())
-                            })
-                        })
-                        .collect::<Vec<_>>(),
-                )
-                .unwrap_or_default();
-                stmt.execute(params![
-                    pr.repo,
-                    pr.number,
-                    pr.title,
-                    pr.author,
-                    pr.url,
-                    pr.is_draft,
-                    pr.created_at.to_rfc3339(),
-                    pr.updated_at.to_rfc3339(),
-                    pr.additions,
-                    pr.deletions,
-                    pr.review_decision.as_db_str(),
-                    labels_json,
-                    pr.body,
-                    pr.head_ref,
-                    pr.ci_status.as_db_str(),
-                    reviewers_json,
-                ])?;
-            }
-        }
-        tx.commit()?;
-        Ok(())
+        save_prs_to_table(&conn, "review_prs", prs)
     }
 
     fn load_review_prs(&self) -> Result<Vec<ReviewPr>> {
@@ -704,13 +659,21 @@ impl TaskStore for Database {
 
 fn save_prs_to_table(conn: &rusqlite::Connection, table: &str, prs: &[ReviewPr]) -> Result<()> {
     let tx = conn.unchecked_transaction()?;
-    tx.execute(&format!("DELETE FROM {table}"), [])?;
+
+    // Upsert all PRs — ON CONFLICT preserves tmux_window and worktree
     {
         let mut stmt = tx.prepare(&format!(
             "INSERT INTO {table} (repo, number, title, author, url, is_draft,
              created_at, updated_at, additions, deletions, review_decision, labels,
              body, head_ref, ci_status, reviewers)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)"
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+             ON CONFLICT(repo, number) DO UPDATE SET
+             title = excluded.title, author = excluded.author, url = excluded.url,
+             is_draft = excluded.is_draft, created_at = excluded.created_at,
+             updated_at = excluded.updated_at, additions = excluded.additions,
+             deletions = excluded.deletions, review_decision = excluded.review_decision,
+             labels = excluded.labels, body = excluded.body, head_ref = excluded.head_ref,
+             ci_status = excluded.ci_status, reviewers = excluded.reviewers"
         ))?;
         for pr in prs {
             let labels_json =
@@ -747,6 +710,24 @@ fn save_prs_to_table(conn: &rusqlite::Connection, table: &str, prs: &[ReviewPr])
             ])?;
         }
     }
+
+    // Delete stale rows not in the fresh set
+    if prs.is_empty() {
+        tx.execute(&format!("DELETE FROM {table}"), [])?;
+    } else {
+        let keys: Vec<String> = prs
+            .iter()
+            .map(|pr| format!("('{}', {})", pr.repo.replace('\'', "''"), pr.number))
+            .collect();
+        tx.execute(
+            &format!(
+                "DELETE FROM {table} WHERE (repo, number) NOT IN ({})",
+                keys.join(", ")
+            ),
+            [],
+        )?;
+    }
+
     tx.commit()?;
     Ok(())
 }
@@ -755,7 +736,8 @@ fn load_prs_from_table(conn: &rusqlite::Connection, table: &str) -> Result<Vec<R
     let mut stmt = conn.prepare(&format!(
         "SELECT repo, number, title, author, url, is_draft,
                 created_at, updated_at, additions, deletions,
-                review_decision, labels, body, head_ref, ci_status, reviewers
+                review_decision, labels, body, head_ref, ci_status, reviewers,
+                tmux_window, worktree
          FROM {table}"
     ))?;
     let rows = stmt.query_map([], |row| {
@@ -775,6 +757,8 @@ fn load_prs_from_table(conn: &rusqlite::Connection, table: &str) -> Result<Vec<R
         let head_ref: String = row.get(13)?;
         let ci_status_str: String = row.get(14)?;
         let reviewers_json: String = row.get(15)?;
+        let tmux_window: Option<String> = row.get(16)?;
+        let worktree: Option<String> = row.get(17)?;
         Ok((
             repo,
             number,
@@ -792,6 +776,8 @@ fn load_prs_from_table(conn: &rusqlite::Connection, table: &str) -> Result<Vec<R
             head_ref,
             ci_status_str,
             reviewers_json,
+            tmux_window,
+            worktree,
         ))
     })?;
 
@@ -814,6 +800,8 @@ fn load_prs_from_table(conn: &rusqlite::Connection, table: &str) -> Result<Vec<R
             head_ref,
             ci_status_str,
             reviewers_json,
+            tmux_window,
+            worktree,
         ) = row?;
 
         let created_at = DateTime::parse_from_rfc3339(&created_at_str)
@@ -853,8 +841,8 @@ fn load_prs_from_table(conn: &rusqlite::Connection, table: &str) -> Result<Vec<R
             head_ref,
             ci_status,
             reviewers,
-            tmux_window: None,
-            worktree: None,
+            tmux_window,
+            worktree,
         });
     }
     Ok(prs)

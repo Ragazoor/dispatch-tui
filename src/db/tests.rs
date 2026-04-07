@@ -1316,6 +1316,122 @@ fn save_review_prs_replaces_all() {
 }
 
 #[test]
+fn save_review_prs_preserves_agent_fields() {
+    use crate::models::{CiStatus, ReviewDecision, ReviewPr};
+    use chrono::Utc;
+
+    let db = Database::open_in_memory().unwrap();
+
+    // Insert a PR and manually set agent fields
+    let pr = ReviewPr {
+        number: 42,
+        title: "Initial".to_string(),
+        author: "alice".to_string(),
+        repo: "acme/app".to_string(),
+        url: "https://github.com/acme/app/pull/42".to_string(),
+        is_draft: false,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        additions: 10,
+        deletions: 5,
+        review_decision: ReviewDecision::ReviewRequired,
+        labels: vec![],
+        body: String::new(),
+        head_ref: "feature-branch".to_string(),
+        ci_status: CiStatus::None,
+        reviewers: vec![],
+        tmux_window: None,
+        worktree: None,
+    };
+    db.save_review_prs(&[pr]).unwrap();
+
+    // Simulate agent dispatch by setting agent fields directly
+    {
+        let conn = db.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE review_prs SET tmux_window = 'dispatch:review-42', worktree = '/tmp/wt'
+             WHERE repo = 'acme/app' AND number = 42",
+            [],
+        )
+        .unwrap();
+    }
+
+    // Now save a refreshed version of the same PR (as if GitHub API returned it)
+    let refreshed_pr = ReviewPr {
+        number: 42,
+        title: "Updated title".to_string(),
+        author: "alice".to_string(),
+        repo: "acme/app".to_string(),
+        url: "https://github.com/acme/app/pull/42".to_string(),
+        is_draft: false,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        additions: 15,
+        deletions: 8,
+        review_decision: ReviewDecision::Approved,
+        labels: vec![],
+        body: String::new(),
+        head_ref: "feature-branch".to_string(),
+        ci_status: CiStatus::Success,
+        reviewers: vec![],
+        tmux_window: None,
+        worktree: None,
+    };
+    db.save_review_prs(&[refreshed_pr]).unwrap();
+
+    // Agent fields should be preserved, GitHub fields should be updated
+    let loaded = db.load_review_prs().unwrap();
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0].title, "Updated title");
+    assert_eq!(loaded[0].review_decision, ReviewDecision::Approved);
+    assert_eq!(
+        loaded[0].tmux_window.as_deref(),
+        Some("dispatch:review-42")
+    );
+    assert_eq!(loaded[0].worktree.as_deref(), Some("/tmp/wt"));
+}
+
+#[test]
+fn save_review_prs_removes_stale_prs() {
+    use crate::models::{CiStatus, ReviewDecision, ReviewPr};
+    use chrono::Utc;
+
+    let db = Database::open_in_memory().unwrap();
+
+    let make_pr = |number: i64, repo: &str| ReviewPr {
+        number,
+        title: format!("PR {number}"),
+        author: "alice".to_string(),
+        repo: repo.to_string(),
+        url: format!("https://github.com/{repo}/pull/{number}"),
+        is_draft: false,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        additions: 0,
+        deletions: 0,
+        review_decision: ReviewDecision::ReviewRequired,
+        labels: vec![],
+        body: String::new(),
+        head_ref: String::new(),
+        ci_status: CiStatus::None,
+        reviewers: vec![],
+        tmux_window: None,
+        worktree: None,
+    };
+
+    // Save two PRs
+    db.save_review_prs(&[make_pr(1, "acme/app"), make_pr(2, "acme/other")])
+        .unwrap();
+    assert_eq!(db.load_review_prs().unwrap().len(), 2);
+
+    // Refresh with only one — the other should be removed
+    db.save_review_prs(&[make_pr(1, "acme/app")]).unwrap();
+    let loaded = db.load_review_prs().unwrap();
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0].number, 1);
+}
+
+#[test]
 fn task_sub_status_persists() {
     let db = Database::open_in_memory().unwrap();
     let id = db
@@ -1517,7 +1633,7 @@ fn schema_version_is_21() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 25, "fresh DB should be at schema version 25");
+    assert_eq!(version, 26, "fresh DB should be at schema version 26");
 }
 
 #[test]
