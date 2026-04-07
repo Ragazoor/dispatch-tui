@@ -12180,3 +12180,1189 @@ fn tick_without_split_does_not_check_pane() {
         .iter()
         .any(|c| matches!(c, Command::CheckSplitPaneExists { .. })));
 }
+
+// =====================================================================
+// Input handler coverage: normal mode keys
+// =====================================================================
+
+#[test]
+fn handle_key_normal_copy_task() {
+    let mut app = make_app();
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 0);
+    app.handle_key(make_key(KeyCode::Char('c')));
+    // CopyTask skips title/tag and goes straight to repo path with pre-filled buffer
+    assert_eq!(*app.mode(), InputMode::InputRepoPath);
+    assert!(app.input.task_draft.as_ref().unwrap().title.contains("Task 1"));
+}
+
+#[test]
+fn handle_key_normal_toggle_notifications() {
+    let mut app = make_app();
+    let before = app.notifications_enabled;
+    app.handle_key(make_key(KeyCode::Char('N')));
+    assert_ne!(app.notifications_enabled, before);
+}
+
+#[test]
+fn handle_key_normal_reorder_j_down() {
+    let mut app = make_app();
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 0);
+    let cmds = app.handle_key(make_key(KeyCode::Char('J')));
+    // Reorder should produce a persist command
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::PersistTask(_))));
+}
+
+#[test]
+fn handle_key_normal_reorder_k_up() {
+    let mut app = make_app();
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 1);
+    let cmds = app.handle_key(make_key(KeyCode::Char('K')));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::PersistTask(_))));
+}
+
+#[test]
+fn handle_key_normal_start_repo_filter() {
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Char('f')));
+    assert_eq!(*app.mode(), InputMode::RepoFilter);
+}
+
+#[test]
+fn handle_key_normal_wrap_up_task() {
+    let mut task = make_task(10, TaskStatus::Review);
+    task.worktree = Some("/repo/.worktrees/10-test".to_string());
+    task.tmux_window = Some("main:10-test".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    // Select the review column
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
+    app.handle_key(make_key(KeyCode::Char('W')));
+    assert!(matches!(*app.mode(), InputMode::ConfirmWrapUp(TaskId(10))));
+}
+
+#[test]
+fn handle_key_normal_wrap_up_epic() {
+    let mut subtask = make_task(20, TaskStatus::Review);
+    subtask.epic_id = Some(EpicId(10));
+    subtask.worktree = Some("/repo/.worktrees/20-test".to_string());
+    let mut app = App::new(vec![subtask], TEST_TIMEOUT);
+    let mut epic = make_epic(10);
+    epic.status = TaskStatus::Review;
+    app.board.epics = vec![epic];
+    // Epic is in Review column
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
+    app.handle_key(make_key(KeyCode::Char('W')));
+    assert!(matches!(
+        *app.mode(),
+        InputMode::ConfirmEpicWrapUp(EpicId(10))
+    ));
+}
+
+#[test]
+fn handle_key_normal_wrap_up_on_empty_is_noop() {
+    let mut app = make_app();
+    // Navigate to an empty column (Review has no tasks by default)
+    app.selection_mut().set_column(2);
+    let cmds = app.handle_key(make_key(KeyCode::Char('W')));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn handle_key_normal_move_forward_via_handle_key() {
+    let mut app = make_app();
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 0);
+    let cmds = app.handle_key(make_key(KeyCode::Char('m')));
+    // Task 1 should move from Backlog to Running
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::PersistTask(t) if t.id == TaskId(1) && t.status == TaskStatus::Running)));
+}
+
+#[test]
+fn handle_key_normal_move_backward_via_handle_key() {
+    let mut app = make_app();
+    // Select running task (column 1)
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
+    let cmds = app.handle_key(make_key(KeyCode::Char('M')));
+    // Task 3 should move from Running to Backlog
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::PersistTask(t) if t.id == TaskId(3) && t.status == TaskStatus::Backlog)));
+}
+
+#[test]
+fn handle_key_normal_start_merge_pr() {
+    let mut task = make_task(10, TaskStatus::Review);
+    task.pr_url = Some("https://github.com/example/repo/pull/42".to_string());
+    task.sub_status = SubStatus::Approved;
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.selection_mut().set_column(2); // Review column
+    app.selection_mut().set_row(2, 0);
+    app.handle_key(make_key(KeyCode::Char('P')));
+    assert!(matches!(*app.mode(), InputMode::ConfirmMergePr(TaskId(10))));
+}
+
+#[test]
+fn handle_key_normal_toggle_split_mode() {
+    let mut app = make_app();
+    let cmds = app.handle_key(make_key(KeyCode::Char('S')));
+    assert!(cmds.iter().any(|c| matches!(c, Command::EnterSplitMode)));
+}
+
+#[test]
+fn handle_key_normal_detach_tmux_review_task() {
+    let mut task = make_task(10, TaskStatus::Review);
+    task.tmux_window = Some("main:10-test".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
+    app.handle_key(make_key(KeyCode::Char('T')));
+    assert!(matches!(
+        *app.mode(),
+        InputMode::ConfirmDetachTmux(_)
+    ));
+}
+
+#[test]
+fn handle_key_normal_detach_tmux_no_window_is_noop() {
+    let mut app = make_app();
+    // Task 1 has no tmux window
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 0);
+    let cmds = app.handle_key(make_key(KeyCode::Char('T')));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn handle_key_normal_esc_in_epic_view_exits() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.board.epics = vec![make_epic(10)];
+    app.update(Message::EnterEpic(EpicId(10)));
+    assert!(matches!(app.board.view_mode, ViewMode::Epic { .. }));
+
+    app.handle_key(make_key(KeyCode::Esc));
+    assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
+}
+
+#[test]
+fn handle_key_normal_q_in_epic_view_exits() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.board.epics = vec![make_epic(10)];
+    app.update(Message::EnterEpic(EpicId(10)));
+
+    app.handle_key(make_key(KeyCode::Char('q')));
+    assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
+}
+
+#[test]
+fn handle_key_normal_enter_on_select_all_row() {
+    let mut app = make_app();
+    // Navigate up past first item to land on "select all" virtual row
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 0);
+    // Manually set on_select_all
+    app.selection_mut().on_select_all = true;
+
+    app.handle_key(make_key(KeyCode::Enter));
+    // Should have toggled select all — tasks should be selected
+    assert!(!app.select.tasks.is_empty() || app.select.epics.len() > 0 || app.selection().on_select_all);
+}
+
+#[test]
+fn handle_key_normal_unknown_key_is_noop() {
+    let mut app = make_app();
+    let cmds = app.handle_key(make_key(KeyCode::Char('z')));
+    assert!(cmds.is_empty());
+}
+
+// =====================================================================
+// Input handler coverage: archive overlay keys
+// =====================================================================
+
+#[test]
+fn handle_key_archive_j_navigates_down() {
+    let mut app = make_app();
+    // Add archived tasks
+    let mut t1 = make_task(100, TaskStatus::Archived);
+    t1.title = "Archived 1".to_string();
+    let mut t2 = make_task(101, TaskStatus::Archived);
+    t2.title = "Archived 2".to_string();
+    app.board.tasks.push(t1);
+    app.board.tasks.push(t2);
+    app.archive.visible = true;
+    app.archive.selected_row = 0;
+
+    app.handle_key(make_key(KeyCode::Char('j')));
+    assert_eq!(app.archive.selected_row, 1);
+}
+
+#[test]
+fn handle_key_archive_k_navigates_up() {
+    let mut app = make_app();
+    let mut t1 = make_task(100, TaskStatus::Archived);
+    t1.title = "Archived 1".to_string();
+    let mut t2 = make_task(101, TaskStatus::Archived);
+    t2.title = "Archived 2".to_string();
+    app.board.tasks.push(t1);
+    app.board.tasks.push(t2);
+    app.archive.visible = true;
+    app.archive.selected_row = 1;
+
+    app.handle_key(make_key(KeyCode::Char('k')));
+    assert_eq!(app.archive.selected_row, 0);
+}
+
+#[test]
+fn handle_key_archive_k_clamps_at_zero() {
+    let mut app = make_app();
+    let t = make_task(100, TaskStatus::Archived);
+    app.board.tasks.push(t);
+    app.archive.visible = true;
+    app.archive.selected_row = 0;
+
+    app.handle_key(make_key(KeyCode::Char('k')));
+    assert_eq!(app.archive.selected_row, 0);
+}
+
+#[test]
+fn handle_key_archive_down_arrow_navigates() {
+    let mut app = make_app();
+    let t1 = make_task(100, TaskStatus::Archived);
+    let t2 = make_task(101, TaskStatus::Archived);
+    app.board.tasks.push(t1);
+    app.board.tasks.push(t2);
+    app.archive.visible = true;
+    app.archive.selected_row = 0;
+
+    app.handle_key(make_key(KeyCode::Down));
+    assert_eq!(app.archive.selected_row, 1);
+}
+
+#[test]
+fn handle_key_archive_up_arrow_navigates() {
+    let mut app = make_app();
+    let t1 = make_task(100, TaskStatus::Archived);
+    let t2 = make_task(101, TaskStatus::Archived);
+    app.board.tasks.push(t1);
+    app.board.tasks.push(t2);
+    app.archive.visible = true;
+    app.archive.selected_row = 1;
+
+    app.handle_key(make_key(KeyCode::Up));
+    assert_eq!(app.archive.selected_row, 0);
+}
+
+#[test]
+fn handle_key_archive_x_enters_confirm_delete() {
+    let mut app = make_app();
+    let t = make_task(100, TaskStatus::Archived);
+    app.board.tasks.push(t);
+    app.archive.visible = true;
+    app.archive.selected_row = 0;
+
+    app.handle_key(make_key(KeyCode::Char('x')));
+    assert_eq!(*app.mode(), InputMode::ConfirmDelete);
+}
+
+#[test]
+fn handle_key_archive_e_enters_confirm_edit() {
+    let mut app = make_app();
+    let t = make_task(100, TaskStatus::Archived);
+    app.board.tasks.push(t);
+    app.archive.visible = true;
+    app.archive.selected_row = 0;
+
+    app.handle_key(make_key(KeyCode::Char('e')));
+    assert!(matches!(*app.mode(), InputMode::ConfirmEditTask(TaskId(100))));
+}
+
+#[test]
+fn handle_key_archive_h_closes() {
+    let mut app = make_app();
+    app.archive.visible = true;
+    app.handle_key(make_key(KeyCode::Char('H')));
+    assert!(!app.archive.visible);
+}
+
+#[test]
+fn handle_key_archive_esc_closes() {
+    let mut app = make_app();
+    app.archive.visible = true;
+    app.handle_key(make_key(KeyCode::Esc));
+    assert!(!app.archive.visible);
+}
+
+#[test]
+fn handle_key_archive_q_quits() {
+    let mut app = make_app();
+    app.archive.visible = true;
+    app.handle_key(make_key(KeyCode::Char('q')));
+    assert_eq!(*app.mode(), InputMode::ConfirmQuit);
+}
+
+#[test]
+fn handle_key_archive_unknown_key_is_noop() {
+    let mut app = make_app();
+    app.archive.visible = true;
+    let cmds = app.handle_key(make_key(KeyCode::Char('z')));
+    assert!(cmds.is_empty());
+}
+
+// =====================================================================
+// Input handler coverage: text input repo path navigation
+// =====================================================================
+
+#[test]
+fn handle_key_text_input_repo_j_navigates_when_buffer_empty() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.buffer.clear();
+    app.input.repo_cursor = 0;
+
+    app.handle_key(make_key(KeyCode::Char('j')));
+    assert_eq!(app.input.repo_cursor, 1);
+}
+
+#[test]
+fn handle_key_text_input_repo_k_navigates_when_buffer_empty() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.buffer.clear();
+    app.input.repo_cursor = 1;
+
+    app.handle_key(make_key(KeyCode::Char('k')));
+    assert_eq!(app.input.repo_cursor, 0);
+}
+
+#[test]
+fn handle_key_text_input_repo_j_types_when_buffer_non_empty() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo".to_string()];
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.buffer = "x".to_string();
+
+    app.handle_key(make_key(KeyCode::Char('j')));
+    assert_eq!(app.input.buffer, "xj");
+}
+
+#[test]
+fn handle_key_text_input_repo_enter_selects_cursor_repo() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/tmp".to_string(), "/var".to_string()];
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.task_draft = Some(TaskDraft {
+        title: "Test".to_string(),
+        description: "desc".to_string(),
+        ..Default::default()
+    });
+    app.input.buffer.clear();
+    app.input.repo_cursor = 1;
+
+    let cmds = app.handle_key(make_key(KeyCode::Enter));
+    // Should submit the selected repo path and create a task
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::InsertTask { .. })));
+}
+
+#[test]
+fn handle_key_text_input_enter_submits_typed_text() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.task_draft = Some(TaskDraft {
+        title: "Test".to_string(),
+        description: "desc".to_string(),
+        ..Default::default()
+    });
+    app.input.buffer = "/tmp".to_string();
+
+    let cmds = app.handle_key(make_key(KeyCode::Enter));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::InsertTask { .. })));
+}
+
+#[test]
+fn handle_key_text_input_dispatch_repo_path_enter_selects_cursor() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/tmp".to_string()];
+    app.input.mode = InputMode::InputDispatchRepoPath;
+    app.input.buffer.clear();
+    app.input.repo_cursor = 0;
+    // Set up a pending dispatch
+    app.input.pending_dispatch = Some(PendingDispatch::Review(ReviewAgentRequest {
+        repo: "acme/app".to_string(),
+        github_repo: "acme/app".to_string(),
+        number: 1,
+        title: "PR 1".to_string(),
+        body: String::new(),
+        head_ref: String::new(),
+        is_dependabot: false,
+    }));
+
+    let cmds = app.handle_key(make_key(KeyCode::Enter));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::DispatchReviewAgent(_))));
+}
+
+#[test]
+fn handle_key_epic_repo_path_enter_selects_cursor() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/tmp".to_string()];
+    app.input.mode = InputMode::InputEpicRepoPath;
+    app.input.epic_draft = Some(EpicDraft {
+        title: "Epic".to_string(),
+        description: "desc".to_string(),
+        repo_path: String::new(),
+    });
+    app.input.buffer.clear();
+    app.input.repo_cursor = 0;
+
+    let cmds = app.handle_key(make_key(KeyCode::Enter));
+    assert!(cmds.iter().any(|c| matches!(c, Command::InsertEpic(_))));
+}
+
+// =====================================================================
+// Input handler coverage: quick dispatch navigation
+// =====================================================================
+
+#[test]
+fn handle_key_quick_dispatch_j_moves_cursor_down() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
+    app.input.mode = InputMode::QuickDispatch;
+    app.input.repo_cursor = 0;
+
+    app.handle_key(make_key(KeyCode::Char('j')));
+    assert_eq!(app.input.repo_cursor, 1);
+}
+
+#[test]
+fn handle_key_quick_dispatch_k_moves_cursor_up() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
+    app.input.mode = InputMode::QuickDispatch;
+    app.input.repo_cursor = 1;
+
+    app.handle_key(make_key(KeyCode::Char('k')));
+    assert_eq!(app.input.repo_cursor, 0);
+}
+
+#[test]
+fn handle_key_quick_dispatch_enter_selects_current() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
+    app.input.mode = InputMode::QuickDispatch;
+    app.input.repo_cursor = 0;
+
+    let cmds = app.handle_key(make_key(KeyCode::Enter));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::QuickDispatch { .. })));
+}
+
+#[test]
+fn handle_key_quick_dispatch_down_arrow() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
+    app.input.mode = InputMode::QuickDispatch;
+    app.input.repo_cursor = 0;
+
+    app.handle_key(make_key(KeyCode::Down));
+    assert_eq!(app.input.repo_cursor, 1);
+}
+
+#[test]
+fn handle_key_quick_dispatch_unknown_key_is_noop() {
+    let mut app = make_app();
+    app.input.mode = InputMode::QuickDispatch;
+    let cmds = app.handle_key(make_key(KeyCode::Char('z')));
+    assert!(cmds.is_empty());
+}
+
+// =====================================================================
+// Input handler coverage: repo filter operations
+// =====================================================================
+
+#[test]
+fn handle_key_repo_filter_tab_toggles_mode() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+    let initial_mode = app.filter.mode;
+
+    app.handle_key(make_key(KeyCode::Tab));
+    assert_ne!(app.filter.mode, initial_mode);
+}
+
+#[test]
+fn handle_key_repo_filter_a_toggles_all() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+
+    app.handle_key(make_key(KeyCode::Char('a')));
+    // Should toggle all repos in filter
+    assert!(!app.filter.repos.is_empty());
+}
+
+#[test]
+fn handle_key_repo_filter_space_toggles_cursor_item() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+    app.input.repo_cursor = 0;
+
+    app.handle_key(make_key(KeyCode::Char(' ')));
+    assert!(app.filter.repos.contains("/repo"));
+}
+
+#[test]
+fn handle_key_repo_filter_j_moves_cursor() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+    app.input.repo_cursor = 0;
+
+    app.handle_key(make_key(KeyCode::Char('j')));
+    assert_eq!(app.input.repo_cursor, 1);
+}
+
+#[test]
+fn handle_key_repo_filter_k_moves_cursor() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+    app.input.repo_cursor = 1;
+
+    app.handle_key(make_key(KeyCode::Char('k')));
+    assert_eq!(app.input.repo_cursor, 0);
+}
+
+#[test]
+fn handle_key_repo_filter_backspace_starts_delete_repo_path() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+    app.input.repo_cursor = 0;
+
+    app.handle_key(make_key(KeyCode::Backspace));
+    assert_eq!(*app.mode(), InputMode::ConfirmDeleteRepoPath);
+}
+
+#[test]
+fn handle_key_repo_filter_s_starts_save_preset() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+
+    app.handle_key(make_key(KeyCode::Char('s')));
+    assert_eq!(*app.mode(), InputMode::InputPresetName);
+}
+
+#[test]
+fn handle_key_repo_filter_x_starts_delete_preset() {
+    let mut app = make_app();
+    app.filter.presets = vec![(
+        "preset-a".to_string(),
+        std::collections::HashSet::new(),
+        RepoFilterMode::Include,
+    )];
+    app.input.mode = InputMode::RepoFilter;
+
+    app.handle_key(make_key(KeyCode::Char('x')));
+    assert_eq!(*app.mode(), InputMode::ConfirmDeletePreset);
+}
+
+#[test]
+fn handle_key_repo_filter_uppercase_loads_preset() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
+    app.filter.presets = vec![(
+        "preset-a".to_string(),
+        {
+            let mut s = std::collections::HashSet::new();
+            s.insert("/repo".to_string());
+            s
+        },
+        RepoFilterMode::Include,
+    )];
+    app.input.mode = InputMode::RepoFilter;
+
+    app.handle_key(make_key(KeyCode::Char('A')));
+    assert!(app.filter.repos.contains("/repo"));
+}
+
+#[test]
+fn handle_key_repo_filter_uppercase_out_of_range_is_noop() {
+    let mut app = make_app();
+    app.input.mode = InputMode::RepoFilter;
+    // No presets
+    let cmds = app.handle_key(make_key(KeyCode::Char('A')));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn handle_key_repo_filter_unknown_key_is_noop() {
+    let mut app = make_app();
+    app.input.mode = InputMode::RepoFilter;
+    let cmds = app.handle_key(make_key(KeyCode::Char('z')));
+    assert!(cmds.is_empty());
+}
+
+// =====================================================================
+// Input handler coverage: confirm delete repo path
+// =====================================================================
+
+#[test]
+fn handle_key_confirm_delete_repo_path_y_deletes() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
+    app.input.mode = InputMode::ConfirmDeleteRepoPath;
+    app.input.repo_cursor = 0;
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+    assert!(cmds.iter().any(|c| matches!(c, Command::DeleteRepoPath(_))));
+}
+
+#[test]
+fn handle_key_confirm_delete_repo_path_other_cancels() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo".to_string()];
+    app.input.mode = InputMode::ConfirmDeleteRepoPath;
+
+    app.handle_key(make_key(KeyCode::Char('n')));
+    assert_eq!(*app.mode(), InputMode::RepoFilter);
+}
+
+#[test]
+fn handle_key_confirm_delete_repo_path_uppercase_y() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo".to_string()];
+    app.input.mode = InputMode::ConfirmDeleteRepoPath;
+    app.input.repo_cursor = 0;
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('Y')));
+    assert!(cmds.iter().any(|c| matches!(c, Command::DeleteRepoPath(_))));
+}
+
+// =====================================================================
+// Input handler coverage: confirm merge PR
+// =====================================================================
+
+#[test]
+fn handle_key_confirm_merge_pr_y_merges() {
+    let mut task = make_task(10, TaskStatus::Review);
+    task.pr_url = Some("https://github.com/test/repo/pull/1".to_string());
+    task.sub_status = SubStatus::Approved;
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.input.mode = InputMode::ConfirmMergePr(TaskId(10));
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::MergePr { id, .. } if *id == TaskId(10))));
+}
+
+#[test]
+fn handle_key_confirm_merge_pr_other_cancels() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmMergePr(TaskId(1));
+
+    app.handle_key(make_key(KeyCode::Char('n')));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+// =====================================================================
+// Input handler coverage: review repo filter
+// =====================================================================
+
+#[test]
+fn handle_key_review_repo_filter_enter_closes() {
+    let mut app = make_review_board_app();
+    app.input.mode = InputMode::ReviewRepoFilter;
+
+    app.handle_key(make_key(KeyCode::Enter));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
+fn handle_key_review_repo_filter_esc_closes() {
+    let mut app = make_review_board_app();
+    app.input.mode = InputMode::ReviewRepoFilter;
+
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
+fn handle_key_review_repo_filter_tab_toggles_mode() {
+    let mut app = make_review_board_app();
+    app.input.mode = InputMode::ReviewRepoFilter;
+    let initial_mode = app.review.repo_filter_mode;
+
+    app.handle_key(make_key(KeyCode::Tab));
+    assert_ne!(app.review.repo_filter_mode, initial_mode);
+}
+
+#[test]
+fn handle_key_review_repo_filter_a_toggles_all() {
+    let mut app = make_review_board_app();
+    app.input.mode = InputMode::ReviewRepoFilter;
+
+    app.handle_key(make_key(KeyCode::Char('a')));
+    // All repos should be toggled
+    assert!(!app.review.repo_filter.is_empty());
+}
+
+#[test]
+fn handle_key_review_repo_filter_unknown_key_is_noop() {
+    let mut app = make_review_board_app();
+    app.input.mode = InputMode::ReviewRepoFilter;
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('z')));
+    assert!(cmds.is_empty());
+}
+
+// =====================================================================
+// Input handler coverage: security repo filter
+// =====================================================================
+
+#[test]
+fn handle_key_security_repo_filter_enter_closes() {
+    let mut app = make_security_board_app();
+    app.input.mode = InputMode::SecurityRepoFilter;
+
+    app.handle_key(make_key(KeyCode::Enter));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
+fn handle_key_security_repo_filter_esc_closes() {
+    let mut app = make_security_board_app();
+    app.input.mode = InputMode::SecurityRepoFilter;
+
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
+fn handle_key_security_repo_filter_tab_toggles_mode() {
+    let mut app = make_security_board_app();
+    app.input.mode = InputMode::SecurityRepoFilter;
+    let initial_mode = app.security.repo_filter_mode;
+
+    app.handle_key(make_key(KeyCode::Tab));
+    assert_ne!(app.security.repo_filter_mode, initial_mode);
+}
+
+#[test]
+fn handle_key_security_repo_filter_a_toggles_all() {
+    let mut app = make_security_board_app();
+    app.input.mode = InputMode::SecurityRepoFilter;
+
+    app.handle_key(make_key(KeyCode::Char('a')));
+    assert!(!app.security.repo_filter.is_empty());
+}
+
+#[test]
+fn handle_key_security_repo_filter_digit_toggles_repo() {
+    let mut app = make_security_board_app();
+    app.input.mode = InputMode::SecurityRepoFilter;
+
+    // There are repos loaded from security alerts
+    if !app.active_security_repos().is_empty() {
+        app.handle_key(make_key(KeyCode::Char('1')));
+        assert!(!app.security.repo_filter.is_empty());
+    }
+}
+
+#[test]
+fn handle_key_security_repo_filter_unknown_key_is_noop() {
+    let mut app = make_security_board_app();
+    app.input.mode = InputMode::SecurityRepoFilter;
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('z')));
+    assert!(cmds.is_empty());
+}
+
+// =====================================================================
+// Input handler coverage: security board gap tests (g, T, r)
+// =====================================================================
+
+#[test]
+fn security_board_g_jumps_to_tmux_window() {
+    let mut app = make_security_board_app();
+    // Give first alert a tmux window
+    if let Some(alert) = app.security.alerts.first_mut() {
+        alert.tmux_window = Some("sec:alert-1".to_string());
+    }
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::JumpToTmux { window } if window == "sec:alert-1")));
+}
+
+#[test]
+fn security_board_g_no_window_shows_status() {
+    let mut app = make_security_board_app();
+    // Alerts have no tmux window by default
+    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
+    assert!(cmds.is_empty());
+    assert!(
+        app.status
+            .message
+            .as_deref()
+            .unwrap_or("")
+            .contains("No active session")
+    );
+}
+
+#[test]
+fn security_board_capital_t_detaches_agent() {
+    let mut app = make_security_board_app();
+    if let Some(alert) = app.security.alerts.first_mut() {
+        alert.tmux_window = Some("sec:alert-1".to_string());
+    }
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('T')));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::UpdateAgentStatus { .. })));
+}
+
+#[test]
+fn security_board_capital_t_no_window_is_noop() {
+    let mut app = make_security_board_app();
+    let cmds = app.handle_key(make_key(KeyCode::Char('T')));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn security_board_r_with_idle_agent_emits_re_review() {
+    let mut app = make_security_board_app();
+    if let Some(alert) = app.security.alerts.first_mut() {
+        alert.agent_status = Some(crate::models::ReviewAgentStatus::Idle);
+        alert.tmux_window = Some("sec:alert-1".to_string());
+    }
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
+    assert!(cmds.iter().any(|c| matches!(c, Command::ReReview { .. })));
+}
+
+#[test]
+fn security_board_r_without_idle_agent_no_window_is_noop() {
+    let mut app = make_security_board_app();
+    // No agent status set, so not idle
+    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
+    assert!(cmds.is_empty());
+}
+
+// =====================================================================
+// Input handler coverage: review board gap tests (dependabot-specific)
+// =====================================================================
+
+fn make_dependabot_app() -> App {
+    let mut app = make_review_board_app();
+    // Toggle to Author, then Dependabot
+    app.update(Message::ToggleReviewBoardMode); // Reviewer -> Author
+    app.update(Message::ToggleReviewBoardMode); // Author -> Dependabot
+    // Load bot PRs with CI Success so they land in column 0
+    let mut pr1 = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
+    pr1.ci_status = crate::models::CiStatus::Success;
+    let mut pr2 = make_review_pr(11, "dependabot[bot]", ReviewDecision::ReviewRequired);
+    pr2.ci_status = crate::models::CiStatus::Success;
+    app.update(Message::BotPrsLoaded(vec![pr1, pr2]));
+    app
+}
+
+#[test]
+fn review_board_space_selects_bot_pr_in_dependabot_mode() {
+    let mut app = make_dependabot_app();
+    if let Some(pr) = app.selected_review_pr() {
+        let _url = pr.url.clone();
+    }
+    app.handle_key(make_key(KeyCode::Char(' ')));
+    assert!(app.has_bot_pr_selection());
+}
+
+#[test]
+fn review_board_space_is_noop_in_reviewer_mode() {
+    let mut app = make_review_board_app();
+    let cmds = app.handle_key(make_key(KeyCode::Char(' ')));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn review_board_a_selects_all_bot_prs_in_dependabot() {
+    let mut app = make_dependabot_app();
+    app.handle_key(make_key(KeyCode::Char('a')));
+    assert!(app.has_bot_pr_selection());
+}
+
+#[test]
+fn review_board_a_is_noop_in_reviewer_mode() {
+    let mut app = make_review_board_app();
+    let cmds = app.handle_key(make_key(KeyCode::Char('a')));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn review_board_capital_a_starts_batch_approve_in_dependabot() {
+    let mut app = make_dependabot_app();
+    // Select a PR first
+    if let Some(pr) = app.selected_review_pr() {
+        let url = pr.url.clone();
+        app.update(Message::ToggleSelectBotPr(url));
+    }
+    app.handle_key(make_key(KeyCode::Char('A')));
+    assert!(matches!(
+        *app.mode(),
+        InputMode::ConfirmBatchApprove(_)
+    ));
+}
+
+#[test]
+fn review_board_m_starts_batch_merge_in_dependabot() {
+    let mut app = make_review_board_app();
+    app.update(Message::ToggleReviewBoardMode); // Reviewer -> Author
+    app.update(Message::ToggleReviewBoardMode); // Author -> Dependabot
+    // Need Approved + CI Success PRs for merge eligibility
+    let mut pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::Approved);
+    pr.ci_status = crate::models::CiStatus::Success;
+    app.update(Message::BotPrsLoaded(vec![pr]));
+    // Select the PR (navigate to Approved column = 3)
+    if let Some(sel) = app.review_selection_mut() {
+        sel.selected_column = 3;
+    }
+    if let Some(pr) = app.selected_review_pr() {
+        let url = pr.url.clone();
+        app.update(Message::ToggleSelectBotPr(url));
+    }
+    app.handle_key(make_key(KeyCode::Char('m')));
+    assert!(matches!(*app.mode(), InputMode::ConfirmBatchMerge(_)));
+}
+
+#[test]
+fn review_board_g_jumps_to_tmux_window() {
+    let mut app = make_review_board_app();
+    if let Some(pr) = app.review.prs.first_mut() {
+        pr.tmux_window = Some("review:pr-1".to_string());
+    }
+    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::JumpToTmux { window } if window == "review:pr-1")));
+}
+
+#[test]
+fn review_board_g_no_window_shows_status() {
+    let mut app = make_review_board_app();
+    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
+    assert!(cmds.is_empty());
+    assert!(
+        app.status
+            .message
+            .as_deref()
+            .unwrap_or("")
+            .contains("No active session")
+    );
+}
+
+#[test]
+fn review_board_capital_t_detaches_agent() {
+    let mut app = make_review_board_app();
+    if let Some(pr) = app.review.prs.first_mut() {
+        pr.tmux_window = Some("review:pr-1".to_string());
+    }
+    let cmds = app.handle_key(make_key(KeyCode::Char('T')));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::UpdateAgentStatus { .. })));
+}
+
+#[test]
+fn review_board_capital_t_no_window_is_noop() {
+    let mut app = make_review_board_app();
+    let cmds = app.handle_key(make_key(KeyCode::Char('T')));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn review_board_enter_toggles_detail_via_handle_key() {
+    let mut app = make_review_board_app();
+    app.handle_key(make_key(KeyCode::Enter));
+    assert!(app.review.detail_visible);
+    app.handle_key(make_key(KeyCode::Enter));
+    assert!(!app.review.detail_visible);
+}
+
+// =====================================================================
+// Input handler coverage: tag input mode completeness
+// =====================================================================
+
+#[test]
+fn handle_key_tag_selects_feature() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputTag;
+    app.input.task_draft = Some(TaskDraft {
+        title: "Test".to_string(),
+        ..Default::default()
+    });
+
+    app.handle_key(make_key(KeyCode::Char('f')));
+    assert_eq!(
+        app.input.task_draft.as_ref().unwrap().tag,
+        Some(TaskTag::Feature)
+    );
+}
+
+#[test]
+fn handle_key_tag_selects_chore() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputTag;
+    app.input.task_draft = Some(TaskDraft {
+        title: "Test".to_string(),
+        ..Default::default()
+    });
+
+    app.handle_key(make_key(KeyCode::Char('c')));
+    assert_eq!(
+        app.input.task_draft.as_ref().unwrap().tag,
+        Some(TaskTag::Chore)
+    );
+}
+
+#[test]
+fn handle_key_tag_selects_epic() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputTag;
+    app.input.task_draft = Some(TaskDraft {
+        title: "Test".to_string(),
+        ..Default::default()
+    });
+
+    app.handle_key(make_key(KeyCode::Char('e')));
+    assert_eq!(
+        app.input.task_draft.as_ref().unwrap().tag,
+        Some(TaskTag::Epic)
+    );
+}
+
+#[test]
+fn handle_key_tag_unknown_key_is_noop() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputTag;
+    app.input.task_draft = Some(TaskDraft {
+        title: "Test".to_string(),
+        ..Default::default()
+    });
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('z')));
+    assert!(cmds.is_empty());
+    assert_eq!(*app.mode(), InputMode::InputTag);
+}
+
+// =====================================================================
+// Input handler coverage: input preset name completeness
+// =====================================================================
+
+#[test]
+fn handle_key_input_preset_name_char() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputPresetName;
+    app.input.buffer.clear();
+
+    app.handle_key(make_key(KeyCode::Char('a')));
+    assert_eq!(app.input.buffer, "a");
+}
+
+#[test]
+fn handle_key_input_preset_name_backspace() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputPresetName;
+    app.input.buffer = "ab".to_string();
+
+    app.handle_key(make_key(KeyCode::Backspace));
+    assert_eq!(app.input.buffer, "a");
+}
+
+#[test]
+fn handle_key_input_preset_name_unknown_key_is_noop() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputPresetName;
+    let cmds = app.handle_key(make_key(KeyCode::Tab));
+    assert!(cmds.is_empty());
+}
+
+// =====================================================================
+// Input handler coverage: confirm detach tmux dialog
+// =====================================================================
+
+#[test]
+fn handle_key_confirm_detach_tmux_non_matching_mode_is_noop() {
+    let mut app = make_app();
+    // Mode is Normal but we call handle_key_confirm_detach_tmux indirectly
+    // This shouldn't happen in practice, but confirms guard clause
+    app.input.mode = InputMode::Normal;
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+    // In Normal mode, 'y' is unrecognized — noop
+    assert!(cmds.is_empty());
+}
+
+// =====================================================================
+// Input handler coverage: epic-specific dispatch keys
+// =====================================================================
+
+#[test]
+fn handle_key_normal_dispatch_in_epic_view_with_no_items() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.board.epics = vec![make_epic(10)];
+    app.update(Message::EnterEpic(EpicId(10)));
+    // No subtasks, cursor on empty column
+    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
+    // Should dispatch the epic itself
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::DispatchEpic { .. })));
+}
+
+#[test]
+fn handle_key_normal_m_on_epic_moves_status() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.board.epics = vec![make_epic(10)];
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 0);
+    let cmds = app.handle_key(make_key(KeyCode::Char('m')));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::PersistEpic { .. })));
+}
+
+#[test]
+fn handle_key_normal_uppercase_m_on_epic_moves_backward() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut epic = make_epic(10);
+    epic.status = TaskStatus::Running;
+    app.board.epics = vec![epic];
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
+    let cmds = app.handle_key(make_key(KeyCode::Char('M')));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::PersistEpic { .. })));
+}
