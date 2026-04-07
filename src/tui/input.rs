@@ -221,7 +221,7 @@ impl App {
                 Some(ColumnItem::Task(task)) => {
                     let title = super::truncate_title(&task.title, 30);
                     self.input.mode = InputMode::ConfirmEditTask(task.id);
-                    self.set_status(format!("Edit {title}? (y/n)"));
+                    self.set_status(format!("Edit {title}? [y/n]"));
                     vec![]
                 }
                 Some(ColumnItem::Epic(epic)) => {
@@ -242,7 +242,7 @@ impl App {
                 if self.has_selection() {
                     let count = self.select.tasks.len() + self.select.epics.len();
                     self.input.mode = InputMode::ConfirmArchive;
-                    self.set_status(format!("Archive {} items? (y/n)", count));
+                    self.set_status(format!("Archive {} items? [y/n]", count));
                     vec![]
                 } else {
                     match self.selected_column_item() {
@@ -250,7 +250,7 @@ impl App {
                         _ => {
                             if self.selected_task().is_some() {
                                 self.input.mode = InputMode::ConfirmArchive;
-                                self.set_status("Archive task? (y/n)".to_string());
+                                self.set_status("Archive task? [y/n]".to_string());
                             }
                             vec![]
                         }
@@ -333,7 +333,7 @@ impl App {
                 if let Some(task) = archived.get(self.archive.selected_row) {
                     let title = super::truncate_title(&task.title, 30);
                     self.input.mode = InputMode::ConfirmDelete;
-                    self.set_status(format!("Delete {title}? (y/n)"));
+                    self.set_status(format!("Delete {title}? [y/n]"));
                 }
                 vec![]
             }
@@ -342,7 +342,7 @@ impl App {
                 if let Some(task) = archived.get(self.archive.selected_row) {
                     let title = super::truncate_title(&task.title, 30);
                     self.input.mode = InputMode::ConfirmEditTask(task.id);
-                    self.set_status(format!("Edit {title}? (y/n)"));
+                    self.set_status(format!("Edit {title}? [y/n]"));
                 }
                 vec![]
             }

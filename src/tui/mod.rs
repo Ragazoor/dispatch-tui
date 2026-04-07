@@ -1019,9 +1019,9 @@ impl App {
 
         let count = detachable.len();
         let msg = if count == 1 {
-            "Detach tmux panel? (y/n)".to_string()
+            "Detach tmux panel? [y/n]".to_string()
         } else {
-            format!("Detach {count} tmux panels? (y/n)")
+            format!("Detach {count} tmux panels? [y/n]")
         };
         self.input.mode = InputMode::ConfirmDetachTmux(detachable);
         self.set_status(msg);
@@ -1199,7 +1199,7 @@ impl App {
             if new_status == TaskStatus::Done {
                 let title = truncate_title(&task.title, 30);
                 self.input.mode = InputMode::ConfirmDone(id);
-                self.set_status(format!("Move {title} to Done? (y/n)"));
+                self.set_status(format!("Move {title} to Done? [y/n]"));
                 return vec![];
             }
 
@@ -1910,7 +1910,7 @@ impl App {
                 let count = self.select.pending_done.len();
                 self.input.mode = InputMode::ConfirmDone(self.select.pending_done[0]);
                 self.set_status(format!(
-                    "Move {} {} to Done? (y/n)",
+                    "Move {} {} to Done? [y/n]",
                     count,
                     if count == 1 { "task" } else { "tasks" }
                 ));
@@ -1989,7 +1989,7 @@ impl App {
                 ""
             };
             self.input.mode = InputMode::ConfirmDelete;
-            self.set_status(format!("Delete {title} [{status}]{warning}? (y/n)"));
+            self.set_status(format!("Delete {title} [{status}]{warning}? [y/n]"));
         }
         vec![]
     }
@@ -2025,7 +2025,7 @@ impl App {
                 tag: None,
             });
             self.input.mode = InputMode::InputTag;
-            self.set_status("Tag: (b)ug (f)eature (c)hore (e)pic (Enter=none)".to_string());
+            self.set_status("Tag: [b] bug  [f] feature  [c] chore  [e] epic  [Enter] none".to_string());
         }
         vec![]
     }
@@ -2346,7 +2346,7 @@ impl App {
         let title = truncate_title(&task.title, 30);
 
         self.input.mode = InputMode::ConfirmMergePr(id);
-        self.set_status(format!("Merge {pr_label} for {title}? (y/n)"));
+        self.set_status(format!("Merge {pr_label} for {title}? [y/n]"));
         vec![]
     }
 
@@ -2430,7 +2430,7 @@ impl App {
 
         self.input.mode = InputMode::ConfirmWrapUp(id);
         self.set_status(format!(
-            "Wrap up {}: (r) rebase onto main  (p) create PR  (Esc) cancel",
+            "Wrap up {}: [r] rebase onto main  [p] create PR  [Esc] cancel",
             branch
         ));
         vec![]
@@ -2527,7 +2527,7 @@ impl App {
 
         self.input.mode = InputMode::ConfirmEpicWrapUp(epic_id);
         self.set_status(format!(
-            "Wrap up {} review task{}: (r) rebase all  (p) PR all  (Esc) cancel",
+            "Wrap up {} review task{}: [r] rebase all  [p] PR all  [Esc] cancel",
             review_count,
             if review_count == 1 { "" } else { "s" },
         ));
@@ -3274,7 +3274,7 @@ impl App {
         if let Some(ColumnItem::Epic(epic)) = self.selected_column_item() {
             let title = truncate_title(&epic.title, 30);
             self.input.mode = InputMode::ConfirmDeleteEpic;
-            self.set_status(format!("Delete epic {title} and subtasks? (y/n)"));
+            self.set_status(format!("Delete epic {title} and subtasks? [y/n]"));
         }
         vec![]
     }
@@ -3354,7 +3354,7 @@ impl App {
                 return vec![];
             }
             self.input.mode = InputMode::ConfirmArchiveEpic;
-            self.set_status("Archive epic and all subtasks? (y/n)".to_string());
+            self.set_status("Archive epic and all subtasks? [y/n]".to_string());
         }
         vec![]
     }

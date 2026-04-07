@@ -1184,7 +1184,7 @@ fn input_title_lines(app: &App, active: Style, hint: Style) -> Vec<Line<'static>
             active,
         )),
         Line::from(""),
-        Line::from(Span::styled("  Enter to confirm, Esc to cancel", hint)),
+        Line::from(Span::styled("  [Enter] confirm  [Esc] cancel", hint)),
     ]
 }
 
@@ -1198,12 +1198,12 @@ fn input_tag_lines(app: &App, completed: Style, active: Style, hint: Style) -> V
     vec![
         Line::from(Span::styled(format!("  Title: {title}"), completed)),
         Line::from(Span::styled(
-            "  Tag: (b)ug  (f)eature  (c)hore  (e)pic  (Enter=none)",
+            "  Tag: [b] bug  [f] feature  [c] chore  [e] epic  [Enter] none",
             active,
         )),
         Line::from(""),
         Line::from(Span::styled(
-            "  Select a tag or Enter to skip, Esc to cancel",
+            "  [Enter] skip  [Esc] cancel",
             hint,
         )),
     ]
@@ -1236,7 +1236,7 @@ fn input_description_lines(
             active,
         )),
         Line::from(""),
-        Line::from(Span::styled("  Esc to cancel", hint)),
+        Line::from(Span::styled("  [Esc] cancel", hint)),
     ]
 }
 
@@ -1296,7 +1296,7 @@ fn input_repo_path_lines<'a>(
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "  Type a path · j/k navigate · Enter select · Esc cancel",
+        "  Type a path · [j/k] navigate · [Enter] select · [Esc] cancel",
         hint,
     )));
     lines
@@ -1336,7 +1336,7 @@ fn dispatch_repo_path_lines<'a>(
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "  Type a path · j/k navigate · Enter select · Esc cancel",
+        "  Type a path · [j/k] navigate · [Enter] select · [Esc] cancel",
         hint,
     )));
     lines
@@ -1357,7 +1357,7 @@ fn quick_dispatch_lines<'a>(app: &'a App, area: Rect, active: Style, hint: Style
     );
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "  j/k navigate · Enter select · 1-9 shortcut · Esc cancel",
+        "  [j/k] navigate · [Enter] select · [1-9] shortcut · [Esc] cancel",
         hint,
     )));
     lines
@@ -1396,7 +1396,7 @@ fn input_epic_title_lines(app: &App, active: Style, hint: Style) -> Vec<Line<'st
             active,
         )),
         Line::from(""),
-        Line::from(Span::styled("  Enter to confirm, Esc to cancel", hint)),
+        Line::from(Span::styled("  [Enter] confirm  [Esc] cancel", hint)),
     ]
 }
 
@@ -1419,7 +1419,7 @@ fn input_epic_description_lines(
             active,
         )),
         Line::from(""),
-        Line::from(Span::styled("  Esc to cancel", hint)),
+        Line::from(Span::styled("  [Esc] cancel", hint)),
     ]
 }
 
@@ -1471,7 +1471,7 @@ fn input_epic_repo_path_lines<'a>(
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "  Type a path · j/k navigate · Enter select · Esc cancel",
+        "  Type a path · [j/k] navigate · [Enter] select · [Esc] cancel",
         hint,
     )));
     lines
@@ -1634,149 +1634,149 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
             Line::from(""),
             Line::from(Span::styled("  Review Board", header)),
             Line::from(vec![
-                Span::styled("  h/\u{2190}", key),
-                Span::styled(" previous column   ", desc),
-                Span::styled("l/\u{2192}", key),
+                Span::styled("  [h/\u{2190}]", key),
+                Span::styled(" prev column     ", desc),
+                Span::styled("[l/\u{2192}]", key),
                 Span::styled(" next column", desc),
             ]),
             Line::from(vec![
-                Span::styled("  j/\u{2193}", key),
-                Span::styled(" next PR           ", desc),
-                Span::styled("k/\u{2191}", key),
-                Span::styled(" previous PR", desc),
+                Span::styled("  [j/\u{2193}]", key),
+                Span::styled(" next PR         ", desc),
+                Span::styled("[k/\u{2191}]", key),
+                Span::styled(" prev PR", desc),
             ]),
             Line::from(vec![
-                Span::styled("  Enter", key),
+                Span::styled("  [Enter]", key),
                 Span::styled(" detail panel  ", desc),
-                Span::styled("p", key),
+                Span::styled("[p]", key),
                 Span::styled(" open PR in browser", desc),
             ]),
             Line::from(""),
             Line::from(Span::styled("  Actions", header)),
             Line::from(vec![
-                Span::styled("  r", key),
+                Span::styled("  [r]", key),
                 Span::styled(" refresh from GitHub  ", desc),
-                Span::styled("d", key),
+                Span::styled("[d]", key),
                 Span::styled(" dispatch review agent", desc),
             ]),
             Line::from(vec![
-                Span::styled("  f", key),
+                Span::styled("  [f]", key),
                 Span::styled(" filter repos          ", desc),
-                Span::styled("e", key),
+                Span::styled("[e]", key),
                 Span::styled(" edit search queries", desc),
             ]),
             Line::from(""),
             Line::from(Span::styled("  General", header)),
             Line::from(vec![
-                Span::styled("  Shift+Tab", key),
+                Span::styled("  [S-Tab]", key),
                 Span::styled(" toggle Reviews / My PRs", desc),
             ]),
             Line::from(vec![
-                Span::styled("  Tab/Esc", key),
+                Span::styled("  [Tab/Esc]", key),
                 Span::styled(" back to Task Board  ", desc),
-                Span::styled("q", key),
+                Span::styled("[q]", key),
                 Span::styled(" quit", desc),
             ]),
             Line::from(vec![
-                Span::styled("  ?", key),
+                Span::styled("  [?]", key),
                 Span::styled(" close this help", desc),
             ]),
             Line::from(""),
-            Line::from(Span::styled("  Press ? or Esc to close", note)),
+            Line::from(Span::styled("  [?] or [Esc] to close", note)),
         ]
     } else {
         vec![
             Line::from(""),
             Line::from(Span::styled("  Navigation", header)),
             Line::from(vec![
-                Span::styled("  h/\u{2190}", key),
-                Span::styled(" previous column   ", desc),
-                Span::styled("j/\u{2193}", key),
+                Span::styled("  [h/\u{2190}]", key),
+                Span::styled(" prev column     ", desc),
+                Span::styled("[j/\u{2193}]", key),
                 Span::styled(" next task", desc),
             ]),
             Line::from(vec![
-                Span::styled("  l/\u{2192}", key),
-                Span::styled(" next column       ", desc),
-                Span::styled("k/\u{2191}", key),
-                Span::styled(" previous task", desc),
+                Span::styled("  [l/\u{2192}]", key),
+                Span::styled(" next column     ", desc),
+                Span::styled("[k/\u{2191}]", key),
+                Span::styled(" prev task", desc),
             ]),
             Line::from(vec![
-                Span::styled("  Enter", key),
-                Span::styled(" detail panel       ", desc),
-                Span::styled("e", key),
+                Span::styled("  [Enter]", key),
+                Span::styled(" detail panel     ", desc),
+                Span::styled("[e]", key),
                 Span::styled(" edit / enter epic", desc),
             ]),
             Line::from(vec![
-                Span::styled("  q", key),
-                Span::styled(" exit epic (in epic view)   ", desc),
-                Span::styled("Esc", key),
+                Span::styled("  [q]", key),
+                Span::styled(" exit epic (in epic)   ", desc),
+                Span::styled("[Esc]", key),
                 Span::styled(" clear selection", desc),
             ]),
             Line::from(""),
             Line::from(Span::styled("  Actions", header)),
             Line::from(vec![
-                Span::styled("  n", key),
+                Span::styled("  [n]", key),
                 Span::styled(" new task   ", desc),
-                Span::styled("E", key),
+                Span::styled("[E]", key),
                 Span::styled(" new epic   ", desc),
-                Span::styled("N", key),
+                Span::styled("[N]", key),
                 Span::styled(" notifications", desc),
             ]),
             Line::from(vec![
-                Span::styled("  d", key),
+                Span::styled("  [d]", key),
                 Span::styled(" dispatch*  ", desc),
-                Span::styled("m", key),
+                Span::styled("[m]", key),
                 Span::styled(" move fwd   ", desc),
-                Span::styled("M", key),
+                Span::styled("[M]", key),
                 Span::styled(" move back", desc),
             ]),
             Line::from(vec![
-                Span::styled("  x", key),
+                Span::styled("  [x]", key),
                 Span::styled(" archive    ", desc),
-                Span::styled("D", key),
+                Span::styled("[D]", key),
                 Span::styled(" quick dsp  ", desc),
-                Span::styled("g", key),
+                Span::styled("[g]", key),
                 Span::styled(" session/board", desc),
             ]),
             Line::from(vec![
-                Span::styled("  G", key),
+                Span::styled("  [G]", key),
                 Span::styled(" session    ", desc),
                 Span::styled("(epic: jump to subtask tmux)", note),
             ]),
             Line::from(vec![
-                Span::styled("  H", key),
+                Span::styled("  [H]", key),
                 Span::styled(" history    ", desc),
-                Span::styled("V", key),
+                Span::styled("[V]", key),
                 Span::styled(" epic done  ", desc),
-                Span::styled("a", key),
+                Span::styled("[a]", key),
                 Span::styled(" select all", desc),
             ]),
             Line::from(vec![
-                Span::styled("  Space", key),
+                Span::styled("  [Space]", key),
                 Span::styled(" select  ", desc),
-                Span::styled("f", key),
+                Span::styled("[f]", key),
                 Span::styled(" filter repos  ", desc),
-                Span::styled("W", key),
-                Span::styled(" wrap up    ", desc),
-                Span::styled("(task: rebase/PR, epic: batch)", note),
+                Span::styled("[W]", key),
+                Span::styled(" wrap up  ", desc),
+                Span::styled("(task/epic)", note),
             ]),
             Line::from(vec![
-                Span::styled("  T", key),
+                Span::styled("  [T]", key),
                 Span::styled(" detach tmux panel  ", desc),
                 Span::styled("(Review tasks, supports batch)", note),
             ]),
             Line::from(vec![
-                Span::styled("  P", key),
+                Span::styled("  [P]", key),
                 Span::styled(" merge PR  ", desc),
-                Span::styled("p", key),
+                Span::styled("[p]", key),
                 Span::styled(" open PR in browser", desc),
             ]),
             Line::from(vec![
-                Span::styled("  J/K", key),
+                Span::styled("  [J/K]", key),
                 Span::styled(" reorder item up/down in column", desc),
             ]),
             Line::from(""),
-            Line::from(Span::styled("  * d is context-dependent:", note)),
+            Line::from(Span::styled("  * [d] is context-dependent:", note)),
             Line::from(Span::styled(
                 "    Backlog (no plan) \u{2192} brainstorm",
                 note,
@@ -1796,19 +1796,19 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
             Line::from(""),
             Line::from(Span::styled("  General", header)),
             Line::from(vec![
-                Span::styled("  ?", key),
+                Span::styled("  [?]", key),
                 Span::styled(" this help  ", desc),
-                Span::styled("N", key),
+                Span::styled("[N]", key),
                 Span::styled(" notify on/off  ", desc),
-                Span::styled("q", key),
+                Span::styled("[q]", key),
                 Span::styled(" quit (or exit epic)", desc),
             ]),
             Line::from(vec![
-                Span::styled("  Tab", key),
+                Span::styled("  [Tab]", key),
                 Span::styled(" switch to Review Board", desc),
             ]),
             Line::from(""),
-            Line::from(Span::styled("  Press ? or Esc to close", note)),
+            Line::from(Span::styled("  [?] or [Esc] to close", note)),
         ]
     };
 
@@ -1980,18 +1980,18 @@ fn render_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
     match app.mode() {
         InputMode::InputPresetName => {
             lines.push(Line::from(vec![
-                Span::styled("  Enter", key_style),
-                Span::styled(": save  ", note_style),
-                Span::styled("Esc", key_style),
-                Span::styled(": cancel", note_style),
+                Span::styled("  [Enter]", key_style),
+                Span::styled(" save  ", note_style),
+                Span::styled("[Esc]", key_style),
+                Span::styled(" cancel", note_style),
             ]));
         }
         InputMode::ConfirmDeletePreset => {
             lines.push(Line::from(vec![
-                Span::styled("  A-Z", key_style),
-                Span::styled(": delete preset  ", note_style),
-                Span::styled("Esc", key_style),
-                Span::styled(": cancel", note_style),
+                Span::styled("  [A-Z]", key_style),
+                Span::styled(" delete preset  ", note_style),
+                Span::styled("[Esc]", key_style),
+                Span::styled(" cancel", note_style),
             ]));
         }
         InputMode::ConfirmDeleteRepoPath => {
@@ -2010,24 +2010,24 @@ fn render_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
         }
         _ => {
             lines.push(Line::from(vec![
-                Span::styled("  j/k", key_style),
-                Span::styled(": navigate  ", note_style),
-                Span::styled("Space", key_style),
-                Span::styled(": toggle  ", note_style),
-                Span::styled("a", key_style),
-                Span::styled(format!(": {a_label}  "), note_style),
-                Span::styled("Tab", key_style),
-                Span::styled(": incl/excl", note_style),
+                Span::styled("  [j/k]", key_style),
+                Span::styled(" navigate  ", note_style),
+                Span::styled("[Space]", key_style),
+                Span::styled(" toggle  ", note_style),
+                Span::styled("[a]", key_style),
+                Span::styled(format!(" {a_label}  "), note_style),
+                Span::styled("[Tab]", key_style),
+                Span::styled(" incl/excl", note_style),
             ]));
             lines.push(Line::from(vec![
-                Span::styled("  s", key_style),
-                Span::styled(": save preset  ", note_style),
-                Span::styled("x", key_style),
-                Span::styled(": del preset  ", note_style),
-                Span::styled("Bksp", key_style),
-                Span::styled(": del repo  ", note_style),
-                Span::styled("q/Esc", key_style),
-                Span::styled(": close", note_style),
+                Span::styled("  [s]", key_style),
+                Span::styled(" save preset  ", note_style),
+                Span::styled("[x]", key_style),
+                Span::styled(" del preset  ", note_style),
+                Span::styled("[Bksp]", key_style),
+                Span::styled(" del repo  ", note_style),
+                Span::styled("[q/Esc]", key_style),
+                Span::styled(" close", note_style),
             ]));
         }
     }
@@ -2092,12 +2092,12 @@ fn render_review_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
         "select all"
     };
     lines.push(Line::from(vec![
-        Span::styled("  a", key_style),
-        Span::styled(format!(": {a_label}  "), note_style),
-        Span::styled("Tab", key_style),
-        Span::styled(": incl/excl  ", note_style),
-        Span::styled("Enter/Esc", key_style),
-        Span::styled(": close", note_style),
+        Span::styled("  [a]", key_style),
+        Span::styled(format!(" {a_label}  "), note_style),
+        Span::styled("[Tab]", key_style),
+        Span::styled(" incl/excl  ", note_style),
+        Span::styled("[Enter/Esc]", key_style),
+        Span::styled(" close", note_style),
     ]));
 
     let paragraph = Paragraph::new(lines).block(block);
@@ -2117,22 +2117,22 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         let label_style = Style::default().fg(MUTED);
         let spans = vec![
             Span::styled(
-                "x",
+                "[x]",
                 Style::default().fg(key_color).add_modifier(Modifier::BOLD),
             ),
             Span::styled(" delete  ", label_style),
             Span::styled(
-                "e",
+                "[e]",
                 Style::default().fg(key_color).add_modifier(Modifier::BOLD),
             ),
             Span::styled(" edit  ", label_style),
             Span::styled(
-                "H",
+                "[H]",
                 Style::default().fg(key_color).add_modifier(Modifier::BOLD),
             ),
             Span::styled(" close  ", label_style),
             Span::styled(
-                "q",
+                "[q]",
                 Style::default().fg(key_color).add_modifier(Modifier::BOLD),
             ),
             Span::styled(" quit  ", label_style),
@@ -2178,12 +2178,12 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             let text = app
                 .status_message
                 .as_deref()
-                .unwrap_or("Tag: (b)ug (f)eature (c)hore (e)pic (Enter=none)");
+                .unwrap_or("Tag: [b] bug  [f] feature  [c] chore  [e] epic  [Enter] none");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
         InputMode::ConfirmDelete => {
-            let text = app.status_message.as_deref().unwrap_or("Delete? (y/n)");
+            let text = app.status_message.as_deref().unwrap_or("Delete? [y/n]");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Red));
             frame.render_widget(bar, area);
         }
@@ -2207,14 +2207,14 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         }
         InputMode::ConfirmArchive => {
             let bar =
-                Paragraph::new("Archive task? (y/n)").style(Style::default().fg(Color::Yellow));
+                Paragraph::new("Archive task? [y/n]").style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
         InputMode::ConfirmDone(_) => {
             let text = app
                 .status_message
                 .as_deref()
-                .unwrap_or("Move to Done? (y/n)");
+                .unwrap_or("Move to Done? [y/n]");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
@@ -2237,22 +2237,22 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             let text = app
                 .status_message
                 .as_deref()
-                .unwrap_or("Delete epic and subtasks? (y/n)");
+                .unwrap_or("Delete epic and subtasks? [y/n]");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Red));
             frame.render_widget(bar, area);
         }
         InputMode::ConfirmArchiveEpic => {
-            let bar = Paragraph::new("Archive epic and subtasks? (y/n)")
+            let bar = Paragraph::new("Archive epic and subtasks? [y/n]")
                 .style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
         InputMode::Help => {
-            let bar = Paragraph::new("Press ? or Esc to close help")
+            let bar = Paragraph::new("[?] or [Esc] to close help")
                 .style(Style::default().fg(Color::Cyan));
             frame.render_widget(bar, area);
         }
         InputMode::RepoFilter => {
-            let bar = Paragraph::new("Filter repos: 1-9 toggle, (a)ll, q/Enter/Esc close")
+            let bar = Paragraph::new("Filter repos: [1-9] toggle  [a] all  [q/Enter/Esc] close")
                 .style(Style::default().fg(Color::Cyan));
             frame.render_widget(bar, area);
         }
@@ -2260,7 +2260,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             let text = app
                 .status_message
                 .as_deref()
-                .unwrap_or("Merge PR? (y/n)");
+                .unwrap_or("Merge PR? [y/n]");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Green));
             frame.render_widget(bar, area);
         }
@@ -2268,17 +2268,17 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             let text = app
                 .status_message
                 .as_deref()
-                .unwrap_or("Wrap up: (r) rebase  (p) create PR  (Esc) cancel");
+                .unwrap_or("Wrap up: [r] rebase  [p] create PR  [Esc] cancel");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
         InputMode::InputPresetName => {
-            let bar = Paragraph::new("Enter preset name, Enter to save, Esc to cancel")
+            let bar = Paragraph::new("Enter preset name, [Enter] save, [Esc] cancel")
                 .style(Style::default().fg(Color::Cyan));
             frame.render_widget(bar, area);
         }
         InputMode::ConfirmDeletePreset => {
-            let bar = Paragraph::new("Press A-Z to delete preset, Esc to cancel")
+            let bar = Paragraph::new("[A-Z] delete preset  [Esc] cancel")
                 .style(Style::default().fg(Color::Cyan));
             frame.render_widget(bar, area);
         }
@@ -2291,7 +2291,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             let text = app
                 .status_message
                 .as_deref()
-                .unwrap_or("Epic wrap up: (r) rebase all  (p) PR all  (Esc) cancel");
+                .unwrap_or("Epic wrap up: [r] rebase all  [p] PR all  [Esc] cancel");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
@@ -2299,38 +2299,38 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             let text = app
                 .status_message
                 .as_deref()
-                .unwrap_or("Detach tmux panel? (y/n)");
+                .unwrap_or("Detach tmux panel? [y/n]");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
         InputMode::ReviewRepoFilter => {
-            let bar = Paragraph::new("Filter repos: 1-9 toggle, (a)ll, Enter/Esc close")
+            let bar = Paragraph::new("Filter repos: [1-9] toggle  [a] all  [Enter/Esc] close")
                 .style(Style::default().fg(Color::Cyan));
             frame.render_widget(bar, area);
         }
         InputMode::SecurityRepoFilter => {
-            let bar = Paragraph::new("Filter repos: 1-9 toggle, (a)ll, Enter/Esc close")
+            let bar = Paragraph::new("Filter repos: [1-9] toggle  [a] all  [Enter/Esc] close")
                 .style(Style::default().fg(Color::Cyan));
             frame.render_widget(bar, area);
         }
         InputMode::ConfirmEditTask(_) => {
-            let text = app.status_message.as_deref().unwrap_or("Edit task? (y/n)");
+            let text = app.status_message.as_deref().unwrap_or("Edit task? [y/n]");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
         InputMode::ConfirmBatchApprove(ref urls) => {
-            let text = format!("Approve {} PRs? (y/n)", urls.len());
+            let text = format!("Approve {} PRs? [y/n]", urls.len());
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
         InputMode::ConfirmBatchMerge(ref urls) => {
-            let text = format!("Merge {} PRs? (y/n)", urls.len());
+            let text = format!("Merge {} PRs? [y/n]", urls.len());
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Green));
             frame.render_widget(bar, area);
         }
         InputMode::ConfirmQuit => {
             let bar =
-                Paragraph::new("Quit dispatch? (y/n)").style(Style::default().fg(Color::Yellow));
+                Paragraph::new("Quit dispatch? [y/n]").style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
     }
@@ -2345,7 +2345,7 @@ pub(in crate::tui) fn action_hints(task: Option<&Task>, key_color: Color) -> Vec
 
     let mut push_hint = |key: &'static str, label: &'static str| {
         spans.push(Span::styled(
-            key,
+            format!("[{key}]"),
             Style::default().fg(key_color).add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::styled(format!(" {label}  "), label_style));
@@ -2424,7 +2424,7 @@ pub(in crate::tui) fn epic_action_hints(epic: &Epic, key_color: Color) -> Vec<Sp
 
     let mut push_hint = |key: &'static str, label: &'static str| {
         spans.push(Span::styled(
-            key,
+            format!("[{key}]"),
             Style::default().fg(key_color).add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::styled(format!(" {label}  "), label_style));
@@ -2464,7 +2464,7 @@ fn batch_action_hints(count: usize, key_color: Color, has_tasks: bool) -> Vec<Sp
 
     let mut push_hint = |key: &'static str, label: &'static str| {
         spans.push(Span::styled(
-            key,
+            format!("[{key}]"),
             Style::default().fg(key_color).add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::styled(format!(" {label}  "), label_style));
@@ -2491,7 +2491,7 @@ fn review_action_hints(has_pr: bool, is_author_mode: bool) -> Vec<Span<'static>>
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut push_hint = |key: &'static str, label: &'static str| {
         spans.push(Span::styled(
-            key,
+            format!("[{key}]"),
             Style::default().fg(key_color).add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::styled(format!(" {label}  "), label_style));
@@ -2516,7 +2516,7 @@ fn bot_action_hints(has_pr: bool) -> Vec<Span<'static>> {
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut push_hint = |key: &'static str, label: &'static str| {
         spans.push(Span::styled(
-            key,
+            format!("[{key}]"),
             Style::default().fg(key_color).add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::styled(format!(" {label}  "), label_style));
@@ -3094,7 +3094,7 @@ fn security_action_hints(app: &App, has_alert: bool) -> Vec<Span<'static>> {
     let mut spans: Vec<Span<'static>> = Vec::new();
     let push_hint = |spans: &mut Vec<Span<'static>>, key: &'static str, label: String| {
         spans.push(Span::styled(
-            key,
+            format!("[{key}]"),
             Style::default().fg(key_color).add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::styled(format!(" {label}  "), label_style));
@@ -3388,11 +3388,11 @@ fn render_security_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect)
         _ => "include",
     };
     lines.push(Line::from(Span::styled(
-        format!(" Mode: {mode_str} [Tab to toggle]"),
+        format!(" Mode: {mode_str} [Tab] toggle"),
         Style::default().fg(MUTED_LIGHT),
     )));
     lines.push(Line::from(Span::styled(
-        " (a) toggle all",
+        " [a] toggle all",
         Style::default().fg(MUTED),
     )));
 

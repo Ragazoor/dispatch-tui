@@ -669,7 +669,7 @@ fn enter_with_title_advances_to_tag() {
     assert_eq!(app.input.task_draft.as_ref().unwrap().title, "My Task");
     assert_eq!(
         app.status_message.as_deref(),
-        Some("Tag: (b)ug (f)eature (c)hore (e)pic (Enter=none)")
+        Some("Tag: [b] bug  [f] feature  [c] chore  [e] epic  [Enter] none")
     );
 }
 
@@ -881,7 +881,7 @@ fn x_key_enters_confirm_archive_mode() {
     let cmds = app.handle_key(make_key(KeyCode::Char('x')));
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::ConfirmArchive);
-    assert_eq!(app.status_message.as_deref(), Some("Archive task? (y/n)"));
+    assert_eq!(app.status_message.as_deref(), Some("Archive task? [y/n]"));
 }
 
 #[test]
@@ -1476,13 +1476,13 @@ fn action_hints_backlog_task() {
         .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
         .map(|s| s.content.as_ref())
         .collect();
-    assert!(keys.contains(&"d"), "should have dispatch/brainstorm hint");
-    assert!(keys.contains(&"e"), "should have edit hint");
-    assert!(keys.contains(&"m"), "should have move hint");
-    assert!(!keys.contains(&"M"), "backlog has no back movement");
-    assert!(keys.contains(&"x"), "should have archive hint");
-    assert!(keys.contains(&"n"), "should have new hint");
-    assert!(keys.contains(&"q"), "should have quit hint");
+    assert!(keys.contains(&"[d]"), "should have dispatch/brainstorm hint");
+    assert!(keys.contains(&"[e]"), "should have edit hint");
+    assert!(keys.contains(&"[m]"), "should have move hint");
+    assert!(!keys.contains(&"[M]"), "backlog has no back movement");
+    assert!(keys.contains(&"[x]"), "should have archive hint");
+    assert!(keys.contains(&"[n]"), "should have new hint");
+    assert!(keys.contains(&"[q]"), "should have quit hint");
     let text: String = hints.iter().map(|s| s.content.as_ref()).collect();
     assert!(
         text.contains("brainstorm"),
@@ -1500,7 +1500,7 @@ fn action_hints_backlog_task_with_plan() {
         .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
         .map(|s| s.content.as_ref())
         .collect();
-    assert!(keys.contains(&"d"), "should have dispatch hint");
+    assert!(keys.contains(&"[d]"), "should have dispatch hint");
     let text: String = hints.iter().map(|s| s.content.as_ref()).collect();
     assert!(
         text.contains("dispatch"),
@@ -1518,9 +1518,9 @@ fn action_hints_running_with_window() {
         .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
         .map(|s| s.content.as_ref())
         .collect();
-    assert!(keys.contains(&"g"), "should have go-to-session hint");
+    assert!(keys.contains(&"[g]"), "should have go-to-session hint");
     assert!(
-        !keys.contains(&"d"),
+        !keys.contains(&"[d]"),
         "should not have dispatch/resume when window exists"
     );
 }
@@ -1535,8 +1535,8 @@ fn action_hints_running_with_worktree_no_window() {
         .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
         .map(|s| s.content.as_ref())
         .collect();
-    assert!(keys.contains(&"d"), "should have resume hint");
-    assert!(!keys.contains(&"g"), "no go-to-session without window");
+    assert!(keys.contains(&"[d]"), "should have resume hint");
+    assert!(!keys.contains(&"[g]"), "no go-to-session without window");
     let text: String = hints.iter().map(|s| s.content.as_ref()).collect();
     assert!(text.contains("resume"), "d means resume here");
 }
@@ -1550,9 +1550,9 @@ fn action_hints_running_no_worktree_no_window() {
         .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
         .map(|s| s.content.as_ref())
         .collect();
-    assert!(!keys.contains(&"d"), "no dispatch/resume without worktree");
-    assert!(!keys.contains(&"g"), "no go-to-session without window");
-    assert!(keys.contains(&"e"), "still has edit");
+    assert!(!keys.contains(&"[d]"), "no dispatch/resume without worktree");
+    assert!(!keys.contains(&"[g]"), "no go-to-session without window");
+    assert!(keys.contains(&"[e]"), "still has edit");
 }
 
 #[test]
@@ -1566,7 +1566,7 @@ fn action_hints_review_with_window() {
         .map(|s| s.content.as_ref())
         .collect();
     assert!(
-        keys.contains(&"g"),
+        keys.contains(&"[g]"),
         "review with window shows go-to-session"
     );
 }
@@ -1580,11 +1580,11 @@ fn action_hints_done_task() {
         .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
         .map(|s| s.content.as_ref())
         .collect();
-    assert!(keys.contains(&"e"), "done has edit");
-    assert!(keys.contains(&"M"), "done has back");
-    assert!(keys.contains(&"x"), "done has archive");
-    assert!(!keys.contains(&"m"), "done has no forward move");
-    assert!(!keys.contains(&"d"), "done has no dispatch");
+    assert!(keys.contains(&"[e]"), "done has edit");
+    assert!(keys.contains(&"[M]"), "done has back");
+    assert!(keys.contains(&"[x]"), "done has archive");
+    assert!(!keys.contains(&"[m]"), "done has no forward move");
+    assert!(!keys.contains(&"[d]"), "done has no dispatch");
 }
 
 #[test]
@@ -1595,10 +1595,10 @@ fn action_hints_no_task() {
         .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
         .map(|s| s.content.as_ref())
         .collect();
-    assert!(keys.contains(&"n"), "no-task shows new");
-    assert!(keys.contains(&"q"), "no-task shows quit");
-    assert!(!keys.contains(&"d"), "no-task has no dispatch");
-    assert!(!keys.contains(&"e"), "no-task has no edit");
+    assert!(keys.contains(&"[n]"), "no-task shows new");
+    assert!(keys.contains(&"[q]"), "no-task shows quit");
+    assert!(!keys.contains(&"[d]"), "no-task has no dispatch");
+    assert!(!keys.contains(&"[e]"), "no-task has no edit");
 }
 
 // --- epic_action_hints ---
@@ -1612,11 +1612,11 @@ fn epic_action_hints_not_done() {
         .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
         .map(|s| s.content.as_ref())
         .collect();
-    assert!(keys.contains(&"Enter"), "epic shows detail");
-    assert!(keys.contains(&"m"), "epic shows status forward");
-    assert!(keys.contains(&"M"), "epic shows status backward");
-    assert!(keys.contains(&"x"), "epic shows archive");
-    assert!(keys.contains(&"q"), "epic shows quit");
+    assert!(keys.contains(&"[Enter]"), "epic shows detail");
+    assert!(keys.contains(&"[m]"), "epic shows status forward");
+    assert!(keys.contains(&"[M]"), "epic shows status backward");
+    assert!(keys.contains(&"[x]"), "epic shows archive");
+    assert!(keys.contains(&"[q]"), "epic shows quit");
 }
 
 #[test]
@@ -1629,8 +1629,8 @@ fn epic_action_hints_done() {
         .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
         .map(|s| s.content.as_ref())
         .collect();
-    assert!(keys.contains(&"m"), "done epic shows status forward");
-    assert!(keys.contains(&"M"), "done epic shows status backward");
+    assert!(keys.contains(&"[m]"), "done epic shows status forward");
+    assert!(keys.contains(&"[M]"), "done epic shows status backward");
 }
 
 // --- Edit key ---
@@ -1827,7 +1827,7 @@ fn submit_title_with_text_advances_to_tag() {
     assert_eq!(app.input.task_draft.as_ref().unwrap().title, "My Task");
     assert_eq!(
         app.status_message.as_deref(),
-        Some("Tag: (b)ug (f)eature (c)hore (e)pic (Enter=none)")
+        Some("Tag: [b] bug  [f] feature  [c] chore  [e] epic  [Enter] none")
     );
 }
 
@@ -2019,7 +2019,7 @@ fn confirm_delete_start_enters_mode() {
     // make_app() selects column 0, row 0 = Task 1 (Backlog)
     assert_eq!(
         app.status_message.as_deref(),
-        Some("Delete \"Task 1\" [backlog]? (y/n)")
+        Some("Delete \"Task 1\" [backlog]? [y/n]")
     );
 }
 
@@ -2027,7 +2027,7 @@ fn confirm_delete_start_enters_mode() {
 fn cancel_delete_returns_to_normal() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::ConfirmDelete;
-    app.status_message = Some("Delete \"Task 1\" [backlog]? (y/n)".to_string());
+    app.status_message = Some("Delete \"Task 1\" [backlog]? [y/n]".to_string());
     app.update(Message::CancelDelete);
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(app.status_message.is_none());
@@ -2180,7 +2180,7 @@ fn archive_panel_x_enters_confirm_delete() {
     assert_eq!(app.input.mode, InputMode::ConfirmDelete);
     assert_eq!(
         app.status_message.as_deref(),
-        Some("Delete \"Task 1\"? (y/n)")
+        Some("Delete \"Task 1\"? [y/n]")
     );
 }
 
@@ -2439,7 +2439,7 @@ fn x_key_with_selection_shows_count_in_confirm() {
     assert_eq!(app.input.mode, InputMode::ConfirmArchive);
     assert_eq!(
         app.status_message.as_deref(),
-        Some("Archive 2 items? (y/n)")
+        Some("Archive 2 items? [y/n]")
     );
 }
 
@@ -2733,20 +2733,19 @@ fn render_v2_detail_panel_shows_inline_metadata() {
 }
 
 #[test]
-fn render_v2_status_bar_no_brackets() {
+fn render_status_bar_uses_bracket_format() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
-    let buf = render_to_buffer(&mut app, 120, 20);
-    let content: String = buf.content().iter().map(|cell| cell.symbol()).collect();
-    // Old format had [n], [q] etc. New format should NOT have brackets
+    let buf = render_to_buffer(&mut app, 160, 20);
+    // Hints should use [key] bracket format
     assert!(
-        !content.contains("[n]"),
-        "status bar should not use bracket format"
+        buffer_contains(&buf, "[n]"),
+        "status bar should use [key] bracket format"
     );
     assert!(
-        !content.contains("[q]"),
-        "status bar should not use bracket format"
+        buffer_contains(&buf, "[q]"),
+        "status bar should use [key] bracket format"
     );
-    // But should still contain the action words
+    // Should also contain the action words
     assert!(
         buffer_contains(&buf, "new"),
         "status bar should show 'new' hint"
@@ -3920,7 +3919,7 @@ fn make_app_confirm_delete_epic() -> App {
     app.selection_mut().set_column(0);
     app.selection_mut().set_row(0, 1); // cursor on epic (same priority as task, sorts after by id)
     app.input.mode = InputMode::ConfirmDeleteEpic;
-    app.status_message = Some("Delete epic \"Epic 10\" and subtasks? (y/n)".to_string());
+    app.status_message = Some("Delete epic \"Epic 10\" and subtasks? [y/n]".to_string());
     app
 }
 
@@ -3934,7 +3933,7 @@ fn confirm_delete_epic_enters_mode_with_title() {
     assert_eq!(app.input.mode, InputMode::ConfirmDeleteEpic);
     assert_eq!(
         app.status_message.as_deref(),
-        Some("Delete epic \"Epic 10\" and subtasks? (y/n)")
+        Some("Delete epic \"Epic 10\" and subtasks? [y/n]")
     );
 }
 
@@ -3991,7 +3990,7 @@ fn make_app_confirm_archive_epic() -> App {
     app.selection_mut().set_column(0);
     app.selection_mut().set_row(0, 1); // cursor on epic (same priority as task, sorts after by id)
     app.input.mode = InputMode::ConfirmArchiveEpic;
-    app.status_message = Some("Archive epic and all subtasks? (y/n)".to_string());
+    app.status_message = Some("Archive epic and all subtasks? [y/n]".to_string());
     app
 }
 
@@ -4325,7 +4324,7 @@ fn confirm_archive_esc_cancels() {
     let mut app = make_app();
     app.selection_mut().set_column(0);
     app.input.mode = InputMode::ConfirmArchive;
-    app.status_message = Some("Archive task? (y/n)".to_string());
+    app.status_message = Some("Archive task? [y/n]".to_string());
     let cmds = app.handle_key(make_key(KeyCode::Esc));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(app.status_message.is_none());
@@ -4623,7 +4622,7 @@ fn confirm_delete_start_running_with_worktree_shows_warning() {
     assert_eq!(app.input.mode, InputMode::ConfirmDelete);
     assert_eq!(
         app.status_message.as_deref(),
-        Some("Delete \"Task 4\" [running] (has worktree)? (y/n)")
+        Some("Delete \"Task 4\" [running] (has worktree)? [y/n]")
     );
 }
 
@@ -4853,7 +4852,7 @@ fn status_message_persists_before_timeout() {
 fn status_message_does_not_clear_during_interactive_mode() {
     let mut app = make_app();
     app.input.mode = InputMode::ConfirmDelete;
-    app.status_message = Some("Delete task? (y/n)".to_string());
+    app.status_message = Some("Delete task? [y/n]".to_string());
     app.status_message_set_at = Some(Instant::now() - Duration::from_secs(10));
 
     // Tick should NOT clear it during an interactive mode
@@ -7711,7 +7710,7 @@ fn render_input_form_shows_during_input_tag() {
         "draft title should be shown as completed"
     );
     assert!(
-        buffer_contains(&buf, "(b)ug"),
+        buffer_contains(&buf, "[b] bug"),
         "tag options should be visible"
     );
 }
@@ -8047,7 +8046,7 @@ fn x_key_with_epic_selection_shows_count_in_confirm() {
     assert_eq!(app.input.mode, InputMode::ConfirmArchive);
     assert_eq!(
         app.status_message.as_deref(),
-        Some("Archive 2 items? (y/n)")
+        Some("Archive 2 items? [y/n]")
     );
 }
 
@@ -8062,7 +8061,7 @@ fn batch_archive_mixed_tasks_and_epics() {
     assert_eq!(app.input.mode, InputMode::ConfirmArchive);
     assert_eq!(
         app.status_message.as_deref(),
-        Some("Archive 2 items? (y/n)")
+        Some("Archive 2 items? [y/n]")
     );
 
     // Confirm
@@ -9346,8 +9345,8 @@ fn render_status_bar_help_mode() {
     app.input.mode = InputMode::Help;
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
-        buffer_contains(&buf, "Esc to close help"),
-        "Help mode should show 'Esc to close help'"
+        buffer_contains(&buf, "[Esc] to close help"),
+        "Help mode should show '[Esc] to close help'"
     );
 }
 
