@@ -11731,3 +11731,54 @@ fn review_board_t_without_agent_does_nothing() {
     let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('T')));
     assert!(cmds.is_empty());
 }
+
+/// Extract the foreground color of the first `[` bracket in the given row.
+fn first_bracket_fg(buf: &Buffer, row: u16) -> Option<Color> {
+    let area = buf.area();
+    for x in area.left()..area.right() {
+        if buf[(x, row)].symbol() == "[" {
+            return Some(buf[(x, row)].fg);
+        }
+    }
+    None
+}
+
+#[test]
+fn status_bar_key_color_is_consistent_across_columns() {
+    let mut app = App::new(
+        vec![
+            make_task(1, TaskStatus::Backlog),
+            make_task(2, TaskStatus::Running),
+            make_task(3, TaskStatus::Review),
+            make_task(4, TaskStatus::Done),
+        ],
+        TEST_TIMEOUT,
+    );
+
+    let width = 160;
+    let height = 30;
+    let status_row = height - 1;
+
+    // Collect the key color from the status bar for each column
+    let mut colors = Vec::new();
+    for _ in 0..4 {
+        let buf = render_to_buffer(&mut app, width, status_row + 1);
+        if let Some(color) = first_bracket_fg(&buf, status_row) {
+            colors.push(color);
+        }
+        // Move to next column
+        app.handle_key(make_key(KeyCode::Right));
+    }
+
+    assert!(
+        colors.len() >= 2,
+        "should have rendered hints in at least 2 columns"
+    );
+    let first = colors[0];
+    for (i, color) in colors.iter().enumerate() {
+        assert_eq!(
+            *color, first,
+            "column {i} key color {color:?} differs from column 0 color {first:?}"
+        );
+    }
+}

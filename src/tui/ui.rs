@@ -2123,9 +2123,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     match &app.input.mode {
         InputMode::Normal => {
-            let key_color = TaskStatus::from_column_index(app.selected_column())
-                .map(column_color)
-                .unwrap_or(MUTED);
+            let key_color = CYAN;
             let spans = if app.has_selection() {
                 let count = app.selected_tasks().len() + app.selected_epics().len();
                 let has_tasks = !app.selected_tasks().is_empty();
