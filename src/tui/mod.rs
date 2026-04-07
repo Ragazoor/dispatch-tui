@@ -3762,7 +3762,7 @@ impl App {
         self.clamp_selection();
         let mut paths: Vec<_> = self.filter.repos.iter().cloned().collect();
         paths.sort();
-        let value = paths.join("\n");
+        let value = serde_json::to_string(&paths).unwrap_or_else(|_| "[]".to_string());
         let mode_value = match self.filter.mode {
             RepoFilterMode::Include => "include",
             RepoFilterMode::Exclude => "exclude",
@@ -3882,7 +3882,7 @@ impl App {
         paths.sort();
         vec![Command::PersistFilterPreset {
             name,
-            repo_paths: paths.join("\n"),
+            repo_paths: paths,
             mode,
         }]
     }

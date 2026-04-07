@@ -201,7 +201,7 @@ fn fresh_db_has_latest_schema_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 27, "fresh DB should be at schema version 27");
+    assert_eq!(version, 29, "fresh DB should be at schema version 29");
 }
 
 #[test]
@@ -273,7 +273,7 @@ fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 27);
+    assert_eq!(version, 29);
 }
 
 #[test]
@@ -316,6 +316,15 @@ fn migration_25_renames_plan_to_plan_path() {
              path      TEXT NOT NULL UNIQUE,
              last_used TEXT NOT NULL DEFAULT (datetime('now'))
          );
+         CREATE TABLE settings (
+             key   TEXT PRIMARY KEY,
+             value TEXT NOT NULL
+         );
+         CREATE TABLE filter_presets (
+             name       TEXT PRIMARY KEY,
+             repo_paths TEXT NOT NULL,
+             mode       TEXT NOT NULL DEFAULT 'include'
+         );
          INSERT INTO tasks (title, description, repo_path, plan)
              VALUES ('T1', 'D1', '/r', 'docs/plans/task.md');
          INSERT INTO epics (title, description, repo_path, plan)
@@ -353,7 +362,7 @@ fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 27);
+    assert_eq!(version, 29);
 }
 
 #[test]
@@ -464,7 +473,7 @@ fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 27);
+    assert_eq!(version, 29);
 }
 
 #[test]
@@ -1127,9 +1136,13 @@ fn get_all_usage_empty() {
 #[test]
 fn filter_presets_save_and_list() {
     let db = Database::open_in_memory().unwrap();
-    db.save_filter_preset("frontend", "/repo-a\n/repo-b", "include")
-        .unwrap();
-    db.save_filter_preset("backend", "/repo-c", "exclude")
+    db.save_filter_preset(
+        "frontend",
+        &["/repo-a".to_string(), "/repo-b".to_string()],
+        "include",
+    )
+    .unwrap();
+    db.save_filter_preset("backend", &["/repo-c".to_string()], "exclude")
         .unwrap();
 
     let presets = db.list_filter_presets().unwrap();
@@ -1137,21 +1150,31 @@ fn filter_presets_save_and_list() {
     assert_eq!(presets[0].0, "backend"); // sorted by name
     assert_eq!(presets[0].2, "exclude");
     assert_eq!(presets[1].0, "frontend");
-    assert_eq!(presets[1].1, "/repo-a\n/repo-b");
+    assert_eq!(
+        presets[1].1,
+        vec!["/repo-a".to_string(), "/repo-b".to_string()]
+    );
     assert_eq!(presets[1].2, "include");
 }
 
 #[test]
 fn filter_presets_overwrite_and_delete() {
     let db = Database::open_in_memory().unwrap();
-    db.save_filter_preset("frontend", "/repo-a", "include")
+    db.save_filter_preset("frontend", &["/repo-a".to_string()], "include")
         .unwrap();
-    db.save_filter_preset("frontend", "/repo-x\n/repo-y", "exclude")
-        .unwrap();
+    db.save_filter_preset(
+        "frontend",
+        &["/repo-x".to_string(), "/repo-y".to_string()],
+        "exclude",
+    )
+    .unwrap();
 
     let presets = db.list_filter_presets().unwrap();
     assert_eq!(presets.len(), 1);
-    assert_eq!(presets[0].1, "/repo-x\n/repo-y");
+    assert_eq!(
+        presets[0].1,
+        vec!["/repo-x".to_string(), "/repo-y".to_string()]
+    );
     assert_eq!(presets[0].2, "exclude");
 
     db.delete_filter_preset("frontend").unwrap();
@@ -1539,7 +1562,7 @@ fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 27);
+    assert_eq!(version, 29);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -1640,7 +1663,7 @@ fn schema_version_is_21() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 27, "fresh DB should be at schema version 27");
+    assert_eq!(version, 29, "fresh DB should be at schema version 29");
 }
 
 #[test]
@@ -1766,7 +1789,7 @@ fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 27);
+    assert_eq!(version, 29);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -2308,21 +2331,29 @@ fn delete_repo_path_cleans_presets() {
     let db = in_memory_db();
     db.save_repo_path("/home/user/a").unwrap();
     db.save_repo_path("/home/user/b").unwrap();
-    db.save_filter_preset("my_preset", "/home/user/a\n/home/user/b", "include")
-        .unwrap();
+    db.save_filter_preset(
+        "my_preset",
+        &["/home/user/a".to_string(), "/home/user/b".to_string()],
+        "include",
+    )
+    .unwrap();
     db.delete_repo_path("/home/user/a").unwrap();
     let presets = db.list_filter_presets().unwrap();
     assert_eq!(presets.len(), 1);
     assert_eq!(presets[0].0, "my_preset");
-    assert_eq!(presets[0].1, "/home/user/b");
+    assert_eq!(presets[0].1, vec!["/home/user/b".to_string()]);
 }
 
 #[test]
 fn delete_repo_path_removes_empty_preset() {
     let db = in_memory_db();
     db.save_repo_path("/home/user/solo").unwrap();
-    db.save_filter_preset("solo_preset", "/home/user/solo", "include")
-        .unwrap();
+    db.save_filter_preset(
+        "solo_preset",
+        &["/home/user/solo".to_string()],
+        "include",
+    )
+    .unwrap();
     db.delete_repo_path("/home/user/solo").unwrap();
     let presets = db.list_filter_presets().unwrap();
     assert!(presets.is_empty());
@@ -2692,6 +2723,7 @@ fn migration_v18_expands_tilde_paths() {
         .unwrap();
     assert_eq!(rp, format!("{home}/project/c"));
 
+    // After v29, repo_filter is stored as JSON array
     let setting: String = conn
         .query_row(
             "SELECT value FROM settings WHERE key = 'repo_filter'",
@@ -2699,8 +2731,10 @@ fn migration_v18_expands_tilde_paths() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(setting, format!("{home}/project/d"));
+    let filter_paths: Vec<String> = serde_json::from_str(&setting).unwrap();
+    assert_eq!(filter_paths, vec![format!("{home}/project/d")]);
 
+    // After v29, filter_presets.repo_paths is stored as JSON array
     let preset: String = conn
         .query_row(
             "SELECT repo_paths FROM filter_presets WHERE name = 'preset'",
@@ -2708,7 +2742,8 @@ fn migration_v18_expands_tilde_paths() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(preset, format!("{home}/project/e"));
+    let preset_paths: Vec<String> = serde_json::from_str(&preset).unwrap();
+    assert_eq!(preset_paths, vec![format!("{home}/project/e")]);
 }
 
 #[test]
@@ -2756,6 +2791,10 @@ fn migration_v20_converts_done_boolean_to_status_enum() {
              id        INTEGER PRIMARY KEY,
              path      TEXT NOT NULL UNIQUE,
              last_used TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         CREATE TABLE settings (
+             key   TEXT PRIMARY KEY,
+             value TEXT NOT NULL
          );
          CREATE TABLE filter_presets (
              name       TEXT PRIMARY KEY,
@@ -3034,4 +3073,560 @@ fn update_agent_status_skips_pr_without_tmux() {
     // PR has no tmux_window, so update should fail
     let result = db.update_agent_status("acme/app", 42, Some("findings_ready"));
     assert!(result.is_err());
+}
+
+#[test]
+fn migration_v17_adds_conflict_sub_status() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "PRAGMA foreign_keys=ON;
+         PRAGMA user_version=16;
+         CREATE TABLE tasks (
+             id          INTEGER PRIMARY KEY,
+             title       TEXT NOT NULL,
+             description TEXT NOT NULL,
+             repo_path   TEXT NOT NULL,
+             status      TEXT NOT NULL DEFAULT 'backlog',
+             worktree    TEXT,
+             tmux_window TEXT,
+             plan        TEXT,
+             epic_id     INTEGER,
+             sub_status  TEXT NOT NULL DEFAULT 'none',
+             pr_url      TEXT,
+             tag         TEXT,
+             sort_order  INTEGER,
+             created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+             CHECK (
+                 (status = 'backlog'  AND sub_status = 'none') OR
+                 (status = 'running'  AND sub_status IN ('active','needs_input','stale','crashed')) OR
+                 (status = 'review'   AND sub_status IN ('awaiting_review','changes_requested','approved')) OR
+                 (status = 'done'     AND sub_status = 'none') OR
+                 (status = 'archived' AND sub_status = 'none')
+             )
+         );
+         CREATE TABLE epics (
+             id          INTEGER PRIMARY KEY,
+             title       TEXT NOT NULL,
+             description TEXT NOT NULL,
+             repo_path   TEXT NOT NULL,
+             done        INTEGER NOT NULL DEFAULT 0,
+             plan        TEXT,
+             sort_order  INTEGER,
+             created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         CREATE TABLE repo_paths (
+             id        INTEGER PRIMARY KEY,
+             path      TEXT NOT NULL UNIQUE,
+             last_used TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         CREATE TABLE settings (
+             key   TEXT PRIMARY KEY,
+             value TEXT NOT NULL
+         );
+         CREATE TABLE filter_presets (
+             name       TEXT PRIMARY KEY,
+             repo_paths TEXT NOT NULL
+         );
+         -- Insert tasks with valid sub_status values
+         INSERT INTO tasks (title, description, repo_path, status, sub_status)
+             VALUES ('Active', 'desc', '/r', 'running', 'active');
+         INSERT INTO tasks (title, description, repo_path, status, sub_status)
+             VALUES ('Stale', 'desc', '/r', 'running', 'stale');
+         INSERT INTO tasks (title, description, repo_path, status, sub_status)
+             VALUES ('In Review', 'desc', '/r', 'review', 'awaiting_review');",
+    )
+    .unwrap();
+
+    // Before migration, 'conflict' should be rejected by CHECK constraint
+    let result = conn.execute(
+        "INSERT INTO tasks (title, description, repo_path, status, sub_status)
+         VALUES ('x', 'x', '/x', 'running', 'conflict')",
+        [],
+    );
+    assert!(
+        result.is_err(),
+        "pre-migration CHECK should reject 'conflict'"
+    );
+
+    Database::init_schema(&conn).unwrap();
+
+    // Existing data preserved
+    let rows: Vec<(String, String, String)> = conn
+        .prepare("SELECT title, status, sub_status FROM tasks ORDER BY id")
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+
+    assert_eq!(rows[0], ("Active".into(), "running".into(), "active".into()));
+    assert_eq!(rows[1], ("Stale".into(), "running".into(), "stale".into()));
+    assert_eq!(
+        rows[2],
+        (
+            "In Review".into(),
+            "review".into(),
+            "awaiting_review".into()
+        )
+    );
+
+    // 'conflict' now accepted after migration
+    let result = conn.execute(
+        "INSERT INTO tasks (title, description, repo_path, status, sub_status)
+         VALUES ('Conflict', 'desc', '/r', 'running', 'conflict')",
+        [],
+    );
+    assert!(
+        result.is_ok(),
+        "post-migration CHECK should accept 'conflict'"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Query coverage: delete_task
+// ---------------------------------------------------------------------------
+
+#[test]
+fn delete_task_removes_task() {
+    let db = in_memory_db();
+    let id = db
+        .create_task("Doomed", "desc", "/repo", None, TaskStatus::Backlog)
+        .unwrap();
+    assert!(db.get_task(id).unwrap().is_some());
+
+    db.delete_task(id).unwrap();
+    assert!(db.get_task(id).unwrap().is_none());
+}
+
+#[test]
+fn delete_task_nonexistent_errors() {
+    let db = in_memory_db();
+    let result = db.delete_task(TaskId(9999));
+    assert!(result.is_err());
+}
+
+// ---------------------------------------------------------------------------
+// Query coverage: my_prs / bot_prs round-trip
+// ---------------------------------------------------------------------------
+
+#[test]
+fn save_and_load_my_prs() {
+    use crate::models::{CiStatus, ReviewDecision, ReviewPr};
+    use chrono::Utc;
+
+    let db = Database::open_in_memory().unwrap();
+    assert!(db.load_my_prs().unwrap().is_empty());
+
+    let pr = ReviewPr {
+        number: 7,
+        title: "My feature".to_string(),
+        author: "me".to_string(),
+        repo: "acme/app".to_string(),
+        url: "https://github.com/acme/app/pull/7".to_string(),
+        is_draft: false,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        additions: 42,
+        deletions: 10,
+        review_decision: ReviewDecision::Approved,
+        labels: vec!["feature".to_string()],
+        body: "Add new feature".to_string(),
+        head_ref: "feature/my-branch".to_string(),
+        ci_status: CiStatus::Success,
+        reviewers: vec![],
+        tmux_window: None,
+        worktree: None,
+        agent_status: None,
+    };
+    db.save_my_prs(&[pr]).unwrap();
+
+    let loaded = db.load_my_prs().unwrap();
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0].number, 7);
+    assert_eq!(loaded[0].title, "My feature");
+    assert_eq!(loaded[0].author, "me");
+    assert_eq!(loaded[0].review_decision, ReviewDecision::Approved);
+    assert_eq!(loaded[0].labels, vec!["feature".to_string()]);
+    assert_eq!(loaded[0].body, "Add new feature");
+    assert_eq!(loaded[0].ci_status, CiStatus::Success);
+}
+
+#[test]
+fn save_and_load_bot_prs() {
+    use crate::models::{CiStatus, ReviewDecision, ReviewPr};
+    use chrono::Utc;
+
+    let db = Database::open_in_memory().unwrap();
+    assert!(db.load_bot_prs().unwrap().is_empty());
+
+    let pr = ReviewPr {
+        number: 55,
+        title: "Bump lodash".to_string(),
+        author: "dependabot[bot]".to_string(),
+        repo: "acme/lib".to_string(),
+        url: "https://github.com/acme/lib/pull/55".to_string(),
+        is_draft: false,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        additions: 3,
+        deletions: 3,
+        review_decision: ReviewDecision::ReviewRequired,
+        labels: vec!["dependencies".to_string()],
+        body: "Bumps lodash".to_string(),
+        head_ref: "dependabot/npm_and_yarn/lodash-4.17.21".to_string(),
+        ci_status: CiStatus::Pending,
+        reviewers: vec![],
+        tmux_window: None,
+        worktree: None,
+        agent_status: None,
+    };
+    db.save_bot_prs(&[pr]).unwrap();
+
+    let loaded = db.load_bot_prs().unwrap();
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0].number, 55);
+    assert_eq!(loaded[0].title, "Bump lodash");
+    assert_eq!(loaded[0].author, "dependabot[bot]");
+    assert_eq!(loaded[0].ci_status, CiStatus::Pending);
+}
+
+#[test]
+fn my_prs_and_review_prs_are_independent() {
+    use crate::models::{CiStatus, ReviewDecision, ReviewPr};
+    use chrono::Utc;
+
+    let db = Database::open_in_memory().unwrap();
+
+    let make_pr = |number: i64, title: &str| ReviewPr {
+        number,
+        title: title.to_string(),
+        author: "alice".to_string(),
+        repo: "acme/app".to_string(),
+        url: format!("https://github.com/acme/app/pull/{number}"),
+        is_draft: false,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        additions: 0,
+        deletions: 0,
+        review_decision: ReviewDecision::ReviewRequired,
+        labels: vec![],
+        body: String::new(),
+        head_ref: String::new(),
+        ci_status: CiStatus::None,
+        reviewers: vec![],
+        tmux_window: None,
+        worktree: None,
+        agent_status: None,
+    };
+
+    db.save_my_prs(&[make_pr(1, "My PR")]).unwrap();
+    db.save_review_prs(&[make_pr(2, "Review PR")]).unwrap();
+    db.save_bot_prs(&[make_pr(3, "Bot PR")]).unwrap();
+
+    assert_eq!(db.load_my_prs().unwrap().len(), 1);
+    assert_eq!(db.load_review_prs().unwrap().len(), 1);
+    assert_eq!(db.load_bot_prs().unwrap().len(), 1);
+
+    // Saving empty to one table doesn't affect others
+    db.save_my_prs(&[]).unwrap();
+    assert!(db.load_my_prs().unwrap().is_empty());
+    assert_eq!(db.load_review_prs().unwrap().len(), 1);
+    assert_eq!(db.load_bot_prs().unwrap().len(), 1);
+}
+
+// ---------------------------------------------------------------------------
+// Query coverage: patch_epic edge cases
+// ---------------------------------------------------------------------------
+
+#[test]
+fn patch_epic_nonexistent_errors() {
+    let db = in_memory_db();
+    let result = db.patch_epic(EpicId(9999), &EpicPatch::new().title("x"));
+    assert!(result.is_err());
+}
+
+#[test]
+fn patch_epic_no_changes_is_noop() {
+    let db = in_memory_db();
+    let epic = db.create_epic("Title", "desc", "/repo").unwrap();
+    // Empty patch — has_changes() is false, so this should succeed without touching DB
+    db.patch_epic(epic.id, &EpicPatch::new()).unwrap();
+    let fetched = db.get_epic(epic.id).unwrap().unwrap();
+    assert_eq!(fetched.title, "Title");
+}
+
+#[test]
+fn patch_epic_sort_order() {
+    let db = in_memory_db();
+    let epic = db.create_epic("E", "desc", "/repo").unwrap();
+    assert!(epic.sort_order.is_none());
+
+    db.patch_epic(epic.id, &EpicPatch::new().sort_order(Some(42)))
+        .unwrap();
+    let updated = db.get_epic(epic.id).unwrap().unwrap();
+    assert_eq!(updated.sort_order, Some(42));
+
+    // Clear sort_order
+    db.patch_epic(epic.id, &EpicPatch::new().sort_order(None))
+        .unwrap();
+    let cleared = db.get_epic(epic.id).unwrap().unwrap();
+    assert!(cleared.sort_order.is_none());
+}
+
+#[test]
+fn delete_epic_nonexistent_errors() {
+    let db = in_memory_db();
+    let result = db.delete_epic(EpicId(9999));
+    assert!(result.is_err());
+}
+
+#[test]
+fn recalculate_epic_status_ignores_archived_subtasks() {
+    let db = in_memory_db();
+    let epic = db.create_epic("E", "", "/repo").unwrap();
+
+    let t1 = db
+        .create_task_returning("T1", "", "/repo", None, TaskStatus::Backlog)
+        .unwrap();
+    let t2 = db
+        .create_task_returning("T2", "", "/repo", None, TaskStatus::Backlog)
+        .unwrap();
+    db.set_task_epic_id(t1.id, Some(epic.id)).unwrap();
+    db.set_task_epic_id(t2.id, Some(epic.id)).unwrap();
+
+    // t1 done, t2 archived — only non-archived counted, so all done → Done
+    db.patch_task(t1.id, &TaskPatch::new().status(TaskStatus::Done))
+        .unwrap();
+    db.patch_task(t2.id, &TaskPatch::new().status(TaskStatus::Archived))
+        .unwrap();
+
+    db.recalculate_epic_status(epic.id).unwrap();
+    let epic = db.get_epic(epic.id).unwrap().unwrap();
+    assert_eq!(epic.status, TaskStatus::Done);
+}
+
+#[test]
+fn recalculate_epic_status_no_subtasks_stays_backlog() {
+    let db = in_memory_db();
+    let epic = db.create_epic("E", "", "/repo").unwrap();
+    db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Running))
+        .unwrap();
+
+    db.recalculate_epic_status(epic.id).unwrap();
+    let epic = db.get_epic(epic.id).unwrap().unwrap();
+    assert_eq!(epic.status, TaskStatus::Backlog);
+}
+
+#[test]
+fn recalculate_epic_status_nonexistent_is_noop() {
+    let db = in_memory_db();
+    // Should not error for nonexistent epic
+    db.recalculate_epic_status(EpicId(9999)).unwrap();
+}
+
+#[test]
+fn migration_v29_converts_newline_presets_to_json() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "PRAGMA foreign_keys=ON;
+         PRAGMA user_version=28;
+         CREATE TABLE tasks (
+             id          INTEGER PRIMARY KEY,
+             title       TEXT NOT NULL,
+             description TEXT NOT NULL,
+             repo_path   TEXT NOT NULL,
+             status      TEXT NOT NULL DEFAULT 'backlog',
+             worktree    TEXT,
+             tmux_window TEXT,
+             plan_path   TEXT,
+             epic_id     INTEGER,
+             sub_status  TEXT NOT NULL DEFAULT 'none',
+             pr_url      TEXT,
+             tag         TEXT,
+             sort_order  INTEGER,
+             created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+             CHECK (
+                 (status = 'backlog'  AND sub_status = 'none') OR
+                 (status = 'running'  AND sub_status IN ('active','needs_input','stale','crashed','conflict')) OR
+                 (status = 'review'   AND sub_status IN ('awaiting_review','changes_requested','approved')) OR
+                 (status = 'done'     AND sub_status = 'none') OR
+                 (status = 'archived' AND sub_status = 'none')
+             )
+         );
+         CREATE TABLE epics (
+             id          INTEGER PRIMARY KEY,
+             title       TEXT NOT NULL,
+             description TEXT NOT NULL,
+             repo_path   TEXT NOT NULL,
+             status      TEXT NOT NULL DEFAULT 'backlog',
+             plan_path   TEXT,
+             sort_order  INTEGER,
+             created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         CREATE TABLE repo_paths (
+             id        INTEGER PRIMARY KEY,
+             path      TEXT NOT NULL UNIQUE,
+             last_used TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         CREATE TABLE settings (
+             key   TEXT PRIMARY KEY,
+             value TEXT NOT NULL
+         );
+         CREATE TABLE filter_presets (
+             name       TEXT PRIMARY KEY,
+             repo_paths TEXT NOT NULL,
+             mode       TEXT NOT NULL DEFAULT 'include'
+         );
+         -- Newline-delimited preset
+         INSERT INTO filter_presets (name, repo_paths, mode)
+             VALUES ('multi', '/repo/a\n/repo/b\n/repo/c', 'include');
+         -- Single-path preset (no newlines)
+         INSERT INTO filter_presets (name, repo_paths, mode)
+             VALUES ('single', '/repo/only', 'exclude');
+         -- Newline-delimited repo_filter setting
+         INSERT INTO settings (key, value) VALUES ('repo_filter', '/repo/x\n/repo/y');
+         -- Non-filter setting should be unaffected
+         INSERT INTO settings (key, value) VALUES ('other_key', 'some\nvalue');",
+    )
+    .unwrap();
+
+    Database::init_schema(&conn).unwrap();
+
+    // Filter presets converted to JSON
+    let multi: String = conn
+        .query_row(
+            "SELECT repo_paths FROM filter_presets WHERE name = 'multi'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let multi_paths: Vec<String> = serde_json::from_str(&multi).unwrap();
+    assert_eq!(
+        multi_paths,
+        vec!["/repo/a".to_string(), "/repo/b".to_string(), "/repo/c".to_string()]
+    );
+
+    let single: String = conn
+        .query_row(
+            "SELECT repo_paths FROM filter_presets WHERE name = 'single'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let single_paths: Vec<String> = serde_json::from_str(&single).unwrap();
+    assert_eq!(single_paths, vec!["/repo/only".to_string()]);
+
+    // repo_filter setting converted to JSON
+    let filter: String = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'repo_filter'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let filter_paths: Vec<String> = serde_json::from_str(&filter).unwrap();
+    assert_eq!(
+        filter_paths,
+        vec!["/repo/x".to_string(), "/repo/y".to_string()]
+    );
+
+    // Non-filter settings unchanged
+    let other: String = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'other_key'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(other, "some\nvalue");
+}
+
+#[test]
+fn migration_v29_skips_already_json_presets() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "PRAGMA foreign_keys=ON;
+         PRAGMA user_version=28;
+         CREATE TABLE tasks (
+             id          INTEGER PRIMARY KEY,
+             title       TEXT NOT NULL,
+             description TEXT NOT NULL,
+             repo_path   TEXT NOT NULL,
+             status      TEXT NOT NULL DEFAULT 'backlog',
+             worktree    TEXT,
+             tmux_window TEXT,
+             plan_path   TEXT,
+             epic_id     INTEGER,
+             sub_status  TEXT NOT NULL DEFAULT 'none',
+             pr_url      TEXT,
+             tag         TEXT,
+             sort_order  INTEGER,
+             created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+             CHECK (
+                 (status = 'backlog'  AND sub_status = 'none') OR
+                 (status = 'running'  AND sub_status IN ('active','needs_input','stale','crashed','conflict')) OR
+                 (status = 'review'   AND sub_status IN ('awaiting_review','changes_requested','approved')) OR
+                 (status = 'done'     AND sub_status = 'none') OR
+                 (status = 'archived' AND sub_status = 'none')
+             )
+         );
+         CREATE TABLE epics (
+             id          INTEGER PRIMARY KEY,
+             title       TEXT NOT NULL,
+             description TEXT NOT NULL,
+             repo_path   TEXT NOT NULL,
+             status      TEXT NOT NULL DEFAULT 'backlog',
+             plan_path   TEXT,
+             sort_order  INTEGER,
+             created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         CREATE TABLE repo_paths (
+             id        INTEGER PRIMARY KEY,
+             path      TEXT NOT NULL UNIQUE,
+             last_used TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         CREATE TABLE settings (
+             key   TEXT PRIMARY KEY,
+             value TEXT NOT NULL
+         );
+         CREATE TABLE filter_presets (
+             name       TEXT PRIMARY KEY,
+             repo_paths TEXT NOT NULL,
+             mode       TEXT NOT NULL DEFAULT 'include'
+         );
+         -- Already JSON — should not be double-converted
+         INSERT INTO filter_presets (name, repo_paths, mode)
+             VALUES ('already_json', '[\"/repo/a\",\"/repo/b\"]', 'include');
+         INSERT INTO settings (key, value)
+             VALUES ('repo_filter', '[\"/repo/x\"]');",
+    )
+    .unwrap();
+
+    Database::init_schema(&conn).unwrap();
+
+    let preset: String = conn
+        .query_row(
+            "SELECT repo_paths FROM filter_presets WHERE name = 'already_json'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let paths: Vec<String> = serde_json::from_str(&preset).unwrap();
+    assert_eq!(paths, vec!["/repo/a".to_string(), "/repo/b".to_string()]);
+
+    let filter: String = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'repo_filter'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let filter_paths: Vec<String> = serde_json::from_str(&filter).unwrap();
+    assert_eq!(filter_paths, vec!["/repo/x".to_string()]);
 }

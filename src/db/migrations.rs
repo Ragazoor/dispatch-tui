@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 pub(super) type Migration = (i64, fn(&Connection) -> Result<()>);
 
@@ -31,6 +31,8 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (25, migrate_v25_rename_plan_to_plan_path),
     (26, migrate_v26_add_agent_columns),
     (27, migrate_v27_add_agent_status),
+    (28, migrate_v28_add_my_prs_agent_status),
+    (29, migrate_v29_json_filter_presets),
 ];
 
 fn migrate_v1_add_plan_column(conn: &Connection) -> Result<()> {
@@ -542,4 +544,56 @@ fn migrate_v24_create_security_alerts_table(conn: &Connection) -> Result<()> {
         )",
     )
     .context("Failed to create security_alerts table")
+}
+
+fn migrate_v28_add_my_prs_agent_status(conn: &Connection) -> Result<()> {
+    // v27 missed my_prs when adding agent_status. Fix the gap.
+    if let Err(e) =
+        conn.execute_batch("ALTER TABLE my_prs ADD COLUMN agent_status TEXT")
+    {
+        tracing::debug!("ALTER my_prs ADD agent_status (may already exist): {e}");
+    }
+    Ok(())
+}
+
+fn migrate_v29_json_filter_presets(conn: &Connection) -> Result<()> {
+    // Convert filter_presets.repo_paths from newline-delimited to JSON arrays.
+    let rows: Vec<(String, String)> = conn
+        .prepare("SELECT name, repo_paths FROM filter_presets")?
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    for (name, raw) in rows {
+        // Skip values that are already valid JSON arrays
+        if raw.starts_with('[') {
+            continue;
+        }
+        let paths: Vec<&str> = raw.split('\n').filter(|s| !s.is_empty()).collect();
+        let json = serde_json::to_string(&paths).unwrap_or_else(|_| "[]".to_string());
+        conn.execute(
+            "UPDATE filter_presets SET repo_paths = ?1 WHERE name = ?2",
+            params![json, name],
+        )?;
+    }
+
+    // Convert settings.repo_filter from newline-delimited to JSON array.
+    let filter: Option<String> = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'repo_filter'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if let Some(raw) = filter {
+        if !raw.starts_with('[') {
+            let paths: Vec<&str> = raw.split('\n').filter(|s| !s.is_empty()).collect();
+            let json = serde_json::to_string(&paths).unwrap_or_else(|_| "[]".to_string());
+            conn.execute(
+                "UPDATE settings SET value = ?1 WHERE key = 'repo_filter'",
+                params![json],
+            )?;
+        }
+    }
+
+    Ok(())
 }

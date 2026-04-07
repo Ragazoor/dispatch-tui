@@ -240,9 +240,9 @@ pub trait TaskStore: Send + Sync {
     fn get_all_usage(&self) -> Result<Vec<TaskUsage>>;
 
     // Filter presets
-    fn save_filter_preset(&self, name: &str, repo_paths: &str, mode: &str) -> Result<()>;
+    fn save_filter_preset(&self, name: &str, repo_paths: &[String], mode: &str) -> Result<()>;
     fn delete_filter_preset(&self, name: &str) -> Result<()>;
-    fn list_filter_presets(&self) -> Result<Vec<(String, String, String)>>;
+    fn list_filter_presets(&self) -> Result<Vec<(String, Vec<String>, String)>>;
 
     // Review PRs
     fn save_review_prs(&self, prs: &[crate::models::ReviewPr]) -> Result<()>;

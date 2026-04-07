@@ -142,10 +142,11 @@ impl TaskStore for Database {
                 .context("Failed to list presets for cleanup")?;
             rows
         };
-        for (name, repo_paths) in presets {
-            let filtered: Vec<&str> = repo_paths
-                .split('\n')
-                .filter(|p| !p.is_empty() && *p != path)
+        for (name, json) in presets {
+            let paths: Vec<String> = serde_json::from_str(&json).unwrap_or_default();
+            let filtered: Vec<String> = paths
+                .into_iter()
+                .filter(|p| p != path)
                 .collect();
             if filtered.is_empty() {
                 conn.execute(
@@ -153,7 +154,8 @@ impl TaskStore for Database {
                     params![name],
                 )?;
             } else {
-                let updated = filtered.join("\n");
+                let updated = serde_json::to_string(&filtered)
+                    .context("Failed to serialize filtered repo_paths")?;
                 conn.execute(
                     "UPDATE filter_presets SET repo_paths = ?1 WHERE name = ?2",
                     params![updated, name],
@@ -581,12 +583,14 @@ impl TaskStore for Database {
         Ok(out)
     }
 
-    fn save_filter_preset(&self, name: &str, repo_paths: &str, mode: &str) -> Result<()> {
+    fn save_filter_preset(&self, name: &str, repo_paths: &[String], mode: &str) -> Result<()> {
         let conn = self.conn()?;
+        let json =
+            serde_json::to_string(repo_paths).context("Failed to serialize repo_paths")?;
         conn.execute(
             "INSERT INTO filter_presets (name, repo_paths, mode) VALUES (?1, ?2, ?3)
              ON CONFLICT(name) DO UPDATE SET repo_paths = ?2, mode = ?3",
-            params![name, repo_paths, mode],
+            params![name, json, mode],
         )?;
         Ok(())
     }
@@ -597,7 +601,7 @@ impl TaskStore for Database {
         Ok(())
     }
 
-    fn list_filter_presets(&self) -> Result<Vec<(String, String, String)>> {
+    fn list_filter_presets(&self) -> Result<Vec<(String, Vec<String>, String)>> {
         let conn = self.conn()?;
         let mut stmt =
             conn.prepare("SELECT name, repo_paths, mode FROM filter_presets ORDER BY name")?;
@@ -608,8 +612,16 @@ impl TaskStore for Database {
                 row.get::<_, String>(2)?,
             ))
         })?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .context("Failed to list filter presets")
+        let raw: Vec<(String, String, String)> = rows
+            .collect::<Result<Vec<_>, _>>()
+            .context("Failed to list filter presets")?;
+        Ok(raw
+            .into_iter()
+            .map(|(name, json, mode)| {
+                let paths: Vec<String> = serde_json::from_str(&json).unwrap_or_default();
+                (name, paths, mode)
+            })
+            .collect())
     }
 
     fn save_review_prs(&self, prs: &[ReviewPr]) -> Result<()> {

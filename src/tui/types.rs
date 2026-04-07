@@ -506,7 +506,7 @@ pub enum Command {
     },
     PersistFilterPreset {
         name: String,
-        repo_paths: String,
+        repo_paths: Vec<String>,
         mode: RepoFilterMode,
     },
     DeleteFilterPreset(String),

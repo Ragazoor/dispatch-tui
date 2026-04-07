@@ -98,10 +98,11 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     if let Some(filter_str) = database.get_setting_string("repo_filter").unwrap_or(None) {
         if !filter_str.is_empty() {
             let known: HashSet<&str> = app.repo_paths().iter().map(|s| s.as_str()).collect();
-            let filter: HashSet<String> = filter_str
-                .split('\n')
-                .filter(|s| known.contains(s))
-                .map(|s| s.to_string())
+            let paths: Vec<String> =
+                serde_json::from_str(&filter_str).unwrap_or_default();
+            let filter: HashSet<String> = paths
+                .into_iter()
+                .filter(|s| known.contains(s.as_str()))
                 .collect();
             app.set_repo_filter(filter);
         }
@@ -124,12 +125,8 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
         Ok(raw) => {
             let presets: Vec<(String, HashSet<String>, RepoFilterMode)> = raw
                 .into_iter()
-                .map(|(name, paths_str, mode_str)| {
-                    let set: HashSet<String> = paths_str
-                        .split('\n')
-                        .filter(|s| !s.is_empty())
-                        .map(|s| s.to_string())
-                        .collect();
+                .map(|(name, paths, mode_str)| {
+                    let set: HashSet<String> = paths.into_iter().collect();
                     let mode = match mode_str.as_str() {
                         "exclude" => RepoFilterMode::Exclude,
                         _ => RepoFilterMode::Include,
@@ -734,7 +731,7 @@ impl TuiRuntime {
         }
     }
 
-    fn exec_persist_filter_preset(&self, app: &mut App, name: &str, repo_paths: &str, mode: &str) {
+    fn exec_persist_filter_preset(&self, app: &mut App, name: &str, repo_paths: &[String], mode: &str) {
         if let Err(e) = self.database.save_filter_preset(name, repo_paths, mode) {
             app.update(Message::Error(Self::db_error("saving filter preset", e)));
         }
@@ -765,11 +762,10 @@ impl TuiRuntime {
                 app.repo_paths().iter().cloned().collect();
             let presets = raw
                 .into_iter()
-                .map(|(name, paths_str, mode_str)| {
-                    let repos: std::collections::HashSet<String> = paths_str
-                        .split('\n')
-                        .filter(|p| !p.is_empty() && known.contains(*p))
-                        .map(String::from)
+                .map(|(name, paths, mode_str)| {
+                    let repos: std::collections::HashSet<String> = paths
+                        .into_iter()
+                        .filter(|p| known.contains(p))
                         .collect();
                     let mode = if mode_str == "exclude" {
                         crate::tui::RepoFilterMode::Exclude
@@ -1774,7 +1770,7 @@ async fn execute_commands(
                     RepoFilterMode::Include => "include",
                     RepoFilterMode::Exclude => "exclude",
                 };
-                rt.exec_persist_filter_preset(app, &name, &repo_paths, mode_str)
+                rt.exec_persist_filter_preset(app, &name, &repo_paths, mode_str);
             }
             Command::DeleteFilterPreset(name) => rt.exec_delete_filter_preset(app, &name),
             Command::DeleteRepoPath(path) => rt.exec_delete_repo_path(app, &path),
