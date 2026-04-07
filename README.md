@@ -39,7 +39,7 @@ tmux new-session -s dev
 **4. Start the TUI:**
 
 ```bash
-dispatch tui
+cargo run tui
 ```
 
 ## Usage
