@@ -393,11 +393,12 @@ impl TuiRuntime {
         let _ = self.database.save_repo_path(&repo_path);
         let paths = self.database.list_repo_paths().unwrap_or_default();
         app.update(Message::RepoPathsUpdated(paths));
+        let epic_ctx = dispatch::EpicContext::from_db(&task, &*self.database);
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
         tokio::task::spawn_blocking(move || {
             let id = task.id;
-            match dispatch::quick_dispatch_agent(&task, &*runner, None) {
+            match dispatch::quick_dispatch_agent(&task, &*runner, epic_ctx.as_ref()) {
                 Ok(result) => {
                     let _ = tx.send(Message::Dispatched {
                         id,
@@ -2757,6 +2758,54 @@ mod tests {
                     ..
                 }
             ),
+            "Expected Dispatched, got: {msg:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn exec_quick_dispatch_with_epic_dispatches_successfully() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().to_str().unwrap();
+        std::fs::create_dir_all(format!("{repo}/.worktrees/1-epic-task")).unwrap();
+
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let epic = db.create_epic("My Epic", "epic desc", repo).unwrap();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::fail("not a git repo"), // detect_default_branch
+            MockProcessRunner::ok(),                   // tmux new-window
+            MockProcessRunner::ok(),                   // tmux set-option @dispatch_dir
+            MockProcessRunner::ok(),                   // tmux set-hook
+            MockProcessRunner::ok(),                   // tmux send-keys -l (claude command)
+            MockProcessRunner::ok(),                   // tmux send-keys Enter
+        ]));
+        let rt = TuiRuntime {
+            database: db.clone(),
+            msg_tx: tx,
+            input_paused: Arc::new(AtomicBool::new(false)),
+            runner: mock,
+        };
+        let tasks = db.list_all().unwrap();
+        let mut app = App::new(tasks, Duration::from_secs(300));
+
+        rt.exec_quick_dispatch(
+            &mut app,
+            "Epic Task".into(),
+            "do stuff".into(),
+            repo.to_string(),
+            Some(epic.id),
+        );
+
+        // Task was created with epic linkage
+        assert_eq!(app.tasks().len(), 1);
+        assert_eq!(app.tasks()[0].epic_id, Some(epic.id));
+
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(msg, Message::Dispatched { .. }),
             "Expected Dispatched, got: {msg:?}"
         );
     }

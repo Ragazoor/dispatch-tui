@@ -1403,6 +1403,22 @@ mod tests {
     }
 
     #[test]
+    fn build_quick_dispatch_prompt_includes_epic_context() {
+        let ctx = EpicContext {
+            epic_id: EpicId(7),
+            epic_title: "My Epic".to_string(),
+            sibling_summaries: vec!["[2] Sibling (running)".to_string()],
+        };
+        let prompt = build_quick_dispatch_prompt(TaskId(42), "Quick task", "", Some(&ctx));
+        assert!(prompt.contains("EpicId: 7"), "should include epic ID");
+        assert!(prompt.contains("My Epic"), "should include epic title");
+        assert!(
+            prompt.contains("Sibling"),
+            "should include sibling summaries"
+        );
+    }
+
+    #[test]
     fn rebase_preamble_prepended_to_all_prompts() {
         let body = build_prompt(TaskId(1), "Task", "Desc", None, None);
         let full = format!(

@@ -752,11 +752,13 @@ rule NotifyNeedsInput {
 rule NotifyReview {
     when: task: Task.status transitions_to review
 
-    ensures: DesktopNotification(
-        task: task,
-        urgency: normal,
-        about: status_review
-    )
+    ensures:
+        if notifications_enabled:
+            DesktopNotification(
+                task: task,
+                urgency: normal,
+                about: status_review
+            )
 
     @guidance
         -- Notifications are gated by a user-togglable notifications_enabled
