@@ -5,6 +5,8 @@
 -- Includes: Task, Epic, dispatch, finish/merge, archive, agent health, MCP constraints
 -- Excludes:
 --   - TUI rendering, keyboard input, selection state (UI implementation)
+--   - ReviewBoard view mode and ReviewPr entities (separate concern: inbound PR review)
+--   - SecurityBoard view mode and SecurityAlert entities (separate concern: vulnerability triage)
 --   - Git worktree creation mechanics (infrastructure)
 --   - Tmux subprocess commands (infrastructure)
 --   - SQLite schema and migrations (persistence implementation)
@@ -161,8 +163,6 @@ config {
     tick_interval: Duration = 2.seconds
     inactivity_timeout: Duration = 3.minutes
     status_message_expiry: Duration = 5.seconds
-    staleness_fresh_threshold: Duration = 3.days
-    staleness_aging_threshold: Duration = 7.days
     notifications_enabled: Boolean = true
     pr_poll_interval: Duration = 30.seconds
 }
@@ -256,7 +256,11 @@ rule DispatchTask {
     when: DispatchTask(task)
 
     requires: task.status = backlog
+    -- Tasks with a plan always dispatch. Tasks without a plan dispatch
+    -- if their tag is bug, chore or unset. Epic and feature tags route
+    -- to BrainstormTask and PlanTask respectively.
     requires: task.has_plan = true
+              or task.tag not in {"epic", "feature"}
 
     ensures: task.status = running
     ensures: task.sub_status = SubStatus.default_for(running)
@@ -383,12 +387,36 @@ rule ConfirmDone {
         -- status before transitioning to done.
 }
 
+-- == Detach Tmux ==
+
+rule DetachTmux {
+    when: DetachTmux(task)
+
+    requires: task.status = review
+    requires: task.tmux_window != null
+
+    ensures: task.tmux_window = null
+    ensures:
+        if task.sub_status in {stale, crashed}:
+            task.sub_status = SubStatus.default_for(review)
+
+    @guidance
+        -- Kills the tmux window for a review task while preserving
+        -- the worktree. The agent is gone but the branch remains for
+        -- PR review or later resume. Clears agent health tracking
+        -- (staleness timer, crash detection). Stale/Crashed sub_status
+        -- is reset to the review default (awaiting_review); other
+        -- sub_statuses (e.g. awaiting_review, approved) are preserved.
+        -- Available via the TUI (d key) on review tasks. Supports
+        -- batch operation on multi-selected tasks.
+}
+
 -- == PR Workflow ==
 
 rule CreatePr {
     when: CreatePr(task)
 
-    requires: task.status = review
+    requires: task.status = running or task.status = review
     requires: task.worktree != null
 
     ensures: task.pr_url != null
@@ -397,6 +425,23 @@ rule CreatePr {
     @guidance
         -- Pushes the branch to origin and creates a GitHub PR using
         -- `gh pr create`. The task remains in review.
+}
+
+rule MergePr {
+    when: MergePr(task)
+
+    requires: task.status = review
+    requires: task.pr_url != null
+    requires: task.sub_status = approved
+
+    ensures: PrMerged(task: task)
+
+    @guidance
+        -- Human-initiated merge of an approved PR via the TUI (M key).
+        -- Runs `gh pr merge --merge` on the task's pr_url.
+        -- On success, fires PrMerged which transitions the task to done.
+        -- On failure, the error is shown in the status bar without
+        -- changing task state.
 }
 
 rule PollPrStatus {
@@ -478,6 +523,8 @@ rule WrapUpPr {
     requires: task.worktree != null
 
     ensures: task.pr_url != null
+    ensures: task.status = review
+    ensures: task.sub_status = SubStatus.default_for(review)
     ensures: task.updated_at = now
 
     @guidance
@@ -591,9 +638,10 @@ rule DetectStaleAgent {
           and task.sub_status not in {stale, crashed, conflict}
 
     ensures: task.sub_status = stale
-    ensures: UserInformed(
-        about: agent_stale,
-        task: task
+    ensures: DesktopNotification(
+        task: task,
+        urgency: normal,
+        about: agent_stale
     )
 
     @guidance
@@ -610,9 +658,10 @@ rule DetectCrashedAgent {
     requires: task.status = running
 
     ensures: task.sub_status = crashed
-    ensures: UserInformed(
-        about: agent_crashed,
-        task: task
+    ensures: DesktopNotification(
+        task: task,
+        urgency: urgent,
+        about: agent_crashed
     )
 
     @guidance
@@ -718,11 +767,11 @@ rule RetryFresh {
 
 rule UpdateTaskViaMcp {
     when: McpUpdateTask(task, status?, sub_status?, plan?, title?, description?,
-                        repo_path?, sort_order?, pr_url?, tag?)
+                        repo_path?, sort_order?, pr_url?, tag?, epic_id?)
 
     requires: status != null or sub_status != null or plan != null or title != null
               or description != null or repo_path != null
-              or sort_order != null
+              or sort_order != null or epic_id != null
 
     -- Cannot set status to done or archived via MCP
     requires: status != done
@@ -753,6 +802,8 @@ rule UpdateTaskViaMcp {
         if pr_url != null: task.pr_url = pr_url
     ensures:
         if tag != null: task.tag = tag
+    ensures:
+        if epic_id != null: task.epic = Epic.find(epic_id)
     ensures: task.updated_at = now
 }
 
@@ -814,6 +865,61 @@ rule ReportUsageViaMcp {
         -- already exists, numeric fields are summed with existing values.
         -- cache_read_tokens and cache_write_tokens default to zero when
         -- omitted by the caller.
+}
+
+rule SendMessageViaMcp {
+    when: McpSendMessage(from_task, to_task, body)
+
+    requires: from_task != null
+    requires: to_task != null
+    requires: to_task.worktree != null
+    requires: to_task.tmux_window != null
+
+    ensures: MessageDelivered(
+        from: from_task,
+        to: to_task,
+        path: to_task.worktree + "/.claude-messages/" + from_task.id + "-" + timestamp() + ".md"
+    )
+    ensures: TmuxNotificationSent(to: to_task, about: message_received)
+
+    @guidance
+        -- Inter-agent messaging. An agent writes a message file into the
+        -- target agent's worktree under .claude-messages/ and injects a
+        -- tmux notification telling the target to read and delete it.
+        -- The TUI shows a brief envelope flash on the target task's card
+        -- via the message_flash tracking state.
+        -- Both tasks must exist. The target must have an active worktree
+        -- and tmux window (i.e. a running agent). The sender has no
+        -- such constraint — it only needs to exist.
+}
+
+rule DispatchNextViaMcp {
+    when: McpDispatchNext(epic)
+
+    -- Intentionally looser than the TUI DispatchEpicSubtask rule:
+    -- does not require epic.status = backlog. This allows running
+    -- agents to dispatch sibling subtasks regardless of epic status.
+
+    ensures:
+        let candidates = epic.subtasks where status = backlog
+        let next = sort_by_order(candidates).first
+        if next != null:
+            if next.has_plan:
+                AgentLaunched(task: next, mode: implementation)
+            else if next.tag = "epic":
+                AgentLaunched(task: next, mode: brainstorm)
+            else if next.tag = "feature":
+                AgentLaunched(task: next, mode: plan)
+            else:
+                AgentLaunched(task: next, mode: standard)
+
+    @guidance
+        -- MCP tool for agents to dispatch the next backlog subtask of
+        -- their epic. Uses the same dispatch mode routing as the TUI's
+        -- DispatchEpicSubtask (plan/tag based). The task is transitioned
+        -- to running with a provisioned worktree and tmux window.
+        -- When no backlog subtasks remain, returns an informational
+        -- message without error.
 }
 
 -- == Hook-Based Status Transitions ==
@@ -946,6 +1052,32 @@ rule DispatchEpicSubtask {
         -- When no backlog subtasks remain, the TUI shows a status
         -- message instead of dispatching. This rule only fires when
         -- there is at least one backlog subtask.
+}
+
+rule EpicBatchWrapUp {
+    when: EpicBatchWrapUp(epic, action)
+
+    -- action: rebase | pr
+
+    let review_tasks = epic.subtasks where status = review and worktree != null
+
+    requires: review_tasks.count > 0
+
+    ensures:
+        for task in sort_by_order(review_tasks):
+            if action = rebase:
+                WrapUpRebase(task)
+            else:
+                WrapUpPr(task)
+
+    @guidance
+        -- Sequences rebase or PR creation across all review tasks in an
+        -- epic that have a worktree. Tasks are processed one at a time in
+        -- sort_order. On success, the next task is processed automatically.
+        -- On conflict or failure, the queue pauses and reports the failing
+        -- task — the user can resolve the conflict and resume or cancel.
+        -- The MergeQueue tracks progress (completed count, current task,
+        -- failed task) and can be cancelled at any time (Esc).
 }
 
 rule MarkEpicDone {

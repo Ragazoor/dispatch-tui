@@ -115,7 +115,7 @@ mcp_tools! {
                 "sub_status": {
                     "type": "string",
                     "description": "Sub-status within the current status column. Running: active, needs_input, stale, crashed. Review: awaiting_review, changes_requested, approved. Must be valid for the task's current (or new) status.",
-                    "enum": ["none", "active", "needs_input", "stale", "crashed", "awaiting_review", "changes_requested", "approved"]
+                    "enum": ["none", "active", "needs_input", "stale", "crashed", "conflict", "awaiting_review", "changes_requested", "approved"]
                 },
                 "epic_id": {
                     "type": "integer",
