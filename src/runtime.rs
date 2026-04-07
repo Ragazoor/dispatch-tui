@@ -82,7 +82,9 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
 
     // Seed default GitHub query strings (no-op if already set)
     if let Err(e) = database.seed_github_query_defaults() {
-        tracing::warn!("Failed to seed GitHub query defaults: {e}");
+        app.update(Message::StatusInfo(format!(
+            "Failed to seed GitHub query defaults: {e}"
+        )));
     }
 
     // Load notification preference
@@ -138,26 +140,40 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
             app.update(Message::FilterPresetsLoaded(presets));
         }
         Err(e) => {
-            tracing::warn!("Failed to load filter presets: {e}");
+            app.update(Message::StatusInfo(format!(
+                "Failed to load filter presets: {e}"
+            )));
         }
     }
 
     // Load cached review PRs from database
     match database.load_review_prs() {
         Ok(prs) => app.set_review_prs(prs),
-        Err(e) => tracing::warn!("Failed to load cached review PRs: {e}"),
+        Err(e) => {
+            app.update(Message::StatusInfo(format!(
+                "Failed to load cached review PRs: {e}"
+            )));
+        }
     }
 
     // Load cached bot PRs from database
     match database.load_bot_prs() {
         Ok(prs) => app.set_bot_prs(prs),
-        Err(e) => tracing::warn!("Failed to load cached bot PRs: {e}"),
+        Err(e) => {
+            app.update(Message::StatusInfo(format!(
+                "Failed to load cached bot PRs: {e}"
+            )));
+        }
     }
 
     // Load cached security alerts from database
     match database.load_security_alerts() {
         Ok(alerts) => app.set_security_alerts(alerts),
-        Err(e) => tracing::warn!("Failed to load cached security alerts: {e}"),
+        Err(e) => {
+            app.update(Message::StatusInfo(format!(
+                "Failed to load cached security alerts: {e}"
+            )));
+        }
     }
 
     // 4. Set up terminal
@@ -666,13 +682,16 @@ impl TuiRuntime {
 
     fn exec_save_repo_path(&self, app: &mut App, path: String) {
         if let Err(e) = self.database.save_repo_path(&path) {
-            tracing::warn!("failed to save repo path: {e}");
+            app.update(Message::Error(Self::db_error("saving repo path", e)));
         }
-        let paths = self.database.list_repo_paths().unwrap_or_else(|e| {
-            tracing::warn!("failed to list repo paths: {e}");
-            vec![]
-        });
-        app.update(Message::RepoPathsUpdated(paths));
+        match self.database.list_repo_paths() {
+            Ok(paths) => {
+                app.update(Message::RepoPathsUpdated(paths));
+            }
+            Err(e) => {
+                app.update(Message::Error(Self::db_error("listing repo paths", e)));
+            }
+        }
     }
 
     fn exec_refresh_from_db(&self, app: &mut App) -> Vec<Command> {
@@ -731,11 +750,14 @@ impl TuiRuntime {
             app.update(Message::Error(Self::db_error("deleting repo path", e)));
             return;
         }
-        let paths = self.database.list_repo_paths().unwrap_or_else(|e| {
-            tracing::warn!("failed to list repo paths: {e}");
-            vec![]
-        });
-        app.update(Message::RepoPathsUpdated(paths));
+        match self.database.list_repo_paths() {
+            Ok(paths) => {
+                app.update(Message::RepoPathsUpdated(paths));
+            }
+            Err(e) => {
+                app.update(Message::Error(Self::db_error("listing repo paths", e)));
+            }
+        }
         // Refresh presets since delete_repo_path cleans them
         if let Ok(raw) = self.database.list_filter_presets() {
             let known: std::collections::HashSet<String> =
@@ -927,7 +949,7 @@ impl TuiRuntime {
                 app.update(Message::RefreshUsage(usage));
             }
             Err(e) => {
-                tracing::warn!("Failed to refresh usage from db: {e}");
+                app.update(Message::Error(Self::db_error("refreshing usage", e)));
             }
         }
     }
@@ -1229,9 +1251,9 @@ impl TuiRuntime {
         });
     }
 
-    fn exec_persist_review_prs(&self, prs: Vec<crate::models::ReviewPr>) {
+    fn exec_persist_review_prs(&self, app: &mut App, prs: Vec<crate::models::ReviewPr>) {
         if let Err(e) = self.database.save_review_prs(&prs) {
-            tracing::warn!("Failed to persist review PRs: {e}");
+            app.update(Message::Error(Self::db_error("persisting review PRs", e)));
         }
     }
 
@@ -1254,9 +1276,9 @@ impl TuiRuntime {
         });
     }
 
-    fn exec_persist_my_prs(&self, prs: Vec<crate::models::ReviewPr>) {
+    fn exec_persist_my_prs(&self, app: &mut App, prs: Vec<crate::models::ReviewPr>) {
         if let Err(e) = self.database.save_my_prs(&prs) {
-            tracing::warn!("Failed to persist my PRs: {e}");
+            app.update(Message::Error(Self::db_error("persisting my PRs", e)));
         }
     }
 
@@ -1279,9 +1301,9 @@ impl TuiRuntime {
         });
     }
 
-    fn exec_persist_bot_prs(&self, prs: Vec<crate::models::ReviewPr>) {
+    fn exec_persist_bot_prs(&self, app: &mut App, prs: Vec<crate::models::ReviewPr>) {
         if let Err(e) = self.database.save_bot_prs(&prs) {
-            tracing::warn!("Failed to persist bot PRs: {e}");
+            app.update(Message::Error(Self::db_error("persisting bot PRs", e)));
         }
     }
 
@@ -1362,9 +1384,9 @@ impl TuiRuntime {
         });
     }
 
-    fn exec_persist_security_alerts(&self, alerts: Vec<crate::models::SecurityAlert>) {
+    fn exec_persist_security_alerts(&self, app: &mut App, alerts: Vec<crate::models::SecurityAlert>) {
         if let Err(e) = self.database.save_security_alerts(&alerts) {
-            tracing::warn!("Failed to persist security alerts: {e}");
+            app.update(Message::Error(Self::db_error("persisting security alerts", e)));
         }
     }
 
@@ -1593,11 +1615,11 @@ async fn execute_commands(
                 rt.exec_persist_string_setting(app, &key, &value)
             }
             Command::FetchReviewPrs => rt.exec_fetch_review_prs(),
-            Command::PersistReviewPrs(prs) => rt.exec_persist_review_prs(prs),
+            Command::PersistReviewPrs(prs) => rt.exec_persist_review_prs(app, prs),
             Command::FetchMyPrs => rt.exec_fetch_my_prs(),
-            Command::PersistMyPrs(prs) => rt.exec_persist_my_prs(prs),
+            Command::PersistMyPrs(prs) => rt.exec_persist_my_prs(app, prs),
             Command::FetchBotPrs => rt.exec_fetch_bot_prs(),
-            Command::PersistBotPrs(prs) => rt.exec_persist_bot_prs(prs),
+            Command::PersistBotPrs(prs) => rt.exec_persist_bot_prs(app, prs),
             Command::BatchApprovePrs(urls) => rt.exec_batch_approve_prs(urls),
             Command::BatchMergePrs(urls) => rt.exec_batch_merge_prs(urls),
             Command::OpenInBrowser { url } => rt.exec_open_in_browser(url),
@@ -1619,7 +1641,7 @@ async fn execute_commands(
             }
             Command::DispatchReviewAgent(req) => rt.exec_dispatch_review_agent(req),
             Command::FetchSecurityAlerts => rt.exec_fetch_security_alerts(),
-            Command::PersistSecurityAlerts(alerts) => rt.exec_persist_security_alerts(alerts),
+            Command::PersistSecurityAlerts(alerts) => rt.exec_persist_security_alerts(app, alerts),
             Command::DispatchFixAgent {
                 repo,
                 github_repo,

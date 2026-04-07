@@ -3602,7 +3602,7 @@ impl App {
     fn handle_delete_repo_path(&mut self, path: String) -> Vec<Command> {
         self.filter.repos.remove(&path);
         self.input.mode = InputMode::RepoFilter;
-        self.set_status(format!("Deleted repo path"));
+        self.set_status("Deleted repo path".to_string());
         vec![Command::DeleteRepoPath(path)]
     }
 
