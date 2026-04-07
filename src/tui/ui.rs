@@ -620,10 +620,14 @@ fn build_task_list_item<'a>(
 }
 
 /// Non-selectable section header injected between substatus groups.
-fn render_substatus_header(label: &str, col_color: Color) -> ListItem<'static> {
+fn substatus_header_style() -> Style {
+    Style::default().fg(MUTED_LIGHT)
+}
+
+fn render_substatus_header(label: &str) -> ListItem<'static> {
     ListItem::new(Line::from(Span::styled(
         format!("  \u{2500}\u{2500} {label} "),
-        Style::default().fg(col_color).add_modifier(Modifier::DIM),
+        substatus_header_style(),
     )))
 }
 
@@ -698,7 +702,7 @@ fn render_columns(
                             .unwrap_or_default()
                             .to_string(),
                     };
-                    list_items.push(render_substatus_header(&label, color));
+                    list_items.push(render_substatus_header(&label));
                 }
             }
 
@@ -2882,8 +2886,6 @@ fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
         } else {
             ReviewDecision::from_column_index(i).unwrap_or(ReviewDecision::ReviewRequired)
         };
-        let color = review_column_color(decision_for_color);
-
         let selected_row = app.review_selection().map(|s| s.row(i)).unwrap_or(0);
         let mut list_items: Vec<ListItem> = Vec::new();
         let mut list_selection_idx: Option<usize> = None;
@@ -2893,7 +2895,7 @@ fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
             if current_repo != Some(pr.repo.as_str()) {
                 current_repo = Some(pr.repo.as_str());
                 let repo_short = pr.repo.split('/').next_back().unwrap_or(&pr.repo);
-                list_items.push(render_substatus_header(repo_short, color));
+                list_items.push(render_substatus_header(repo_short));
             }
 
             if item_idx == selected_row {
@@ -3222,7 +3224,6 @@ fn render_security_columns(frame: &mut Frame, app: &mut App, area: Rect) {
     for i in 0..col_count {
         let severity = AlertSeverity::from_column_index(i).unwrap_or(AlertSeverity::Medium);
         let is_focused = i == sel_col;
-        let color = security_column_color(severity);
         let alerts: Vec<&SecurityAlert> = app.security_alerts_for_column(i);
 
         let selected_row = app.security_selection().map(|s| s.row(i)).unwrap_or(0);
@@ -3234,7 +3235,7 @@ fn render_security_columns(frame: &mut Frame, app: &mut App, area: Rect) {
             if current_repo != Some(alert.repo.as_str()) {
                 current_repo = Some(alert.repo.as_str());
                 let repo_short = alert.repo.split('/').next_back().unwrap_or(&alert.repo);
-                list_items.push(render_substatus_header(repo_short, color));
+                list_items.push(render_substatus_header(repo_short));
             }
 
             if item_idx == selected_row {
@@ -3559,6 +3560,20 @@ mod tests {
         let lines = input_repo_path_lines(&app, area, dummy_style(), dummy_style(), dummy_style());
         let text: String = lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
         assert!(text.contains("Tag: none"), "expected 'Tag: none', got:\n{text}");
+    }
+
+    #[test]
+    fn substatus_header_uses_muted_light_without_dim() {
+        let style = substatus_header_style();
+        assert_eq!(
+            style.fg,
+            Some(MUTED_LIGHT),
+            "substatus header should use MUTED_LIGHT, not the column color"
+        );
+        assert!(
+            !style.add_modifier.contains(Modifier::DIM),
+            "substatus header should not be dimmed"
+        );
     }
 
     #[test]
