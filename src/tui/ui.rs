@@ -2799,25 +2799,6 @@ fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
         let is_focused = i == sel_col;
         let prs: Vec<&ReviewPr> = app.active_prs_for_column(i);
 
-        let selected_row = app.review_selection().map(|s| s.row(i)).unwrap_or(0);
-        let items: Vec<ListItem> = prs
-            .iter()
-            .enumerate()
-            .map(|(row, pr)| {
-                let is_dispatch = dispatch_urls.contains(pr.url.as_str());
-                let is_selected = is_bot_mode && app.selected_bot_prs().contains(&pr.url);
-                build_review_pr_item(
-                    pr,
-                    mode,
-                    i,
-                    is_focused && row == selected_row,
-                    is_dispatch,
-                    is_selected,
-                    col_areas[i].width,
-                )
-            })
-            .collect();
-
         // Use ReviewDecision column color for Reviewer/Author, CI-based for Dependabot
         let decision_for_color = if is_bot_mode {
             match i {
@@ -2830,6 +2811,36 @@ fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
         } else {
             ReviewDecision::from_column_index(i).unwrap_or(ReviewDecision::ReviewRequired)
         };
+        let color = review_column_color(decision_for_color);
+
+        let selected_row = app.review_selection().map(|s| s.row(i)).unwrap_or(0);
+        let mut list_items: Vec<ListItem> = Vec::new();
+        let mut list_selection_idx: Option<usize> = None;
+        let mut current_repo: Option<&str> = None;
+
+        for (item_idx, pr) in prs.iter().enumerate() {
+            if current_repo != Some(pr.repo.as_str()) {
+                current_repo = Some(pr.repo.as_str());
+                let repo_short = pr.repo.split('/').next_back().unwrap_or(&pr.repo);
+                list_items.push(render_substatus_header(repo_short, color));
+            }
+
+            if item_idx == selected_row {
+                list_selection_idx = Some(list_items.len());
+            }
+
+            let is_dispatch = dispatch_urls.contains(pr.url.as_str());
+            let is_selected = is_bot_mode && app.selected_bot_prs().contains(&pr.url);
+            list_items.push(build_review_pr_item(
+                pr,
+                mode,
+                i,
+                is_focused && item_idx == selected_row,
+                is_dispatch,
+                is_selected,
+                col_areas[i].width,
+            ));
+        }
 
         let bg = if is_focused {
             review_column_bg_color(decision_for_color)
@@ -2837,11 +2848,11 @@ fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
             Color::Reset
         };
 
-        let list = List::new(items).block(Block::default().style(Style::default().bg(bg)));
+        let list = List::new(list_items).block(Block::default().style(Style::default().bg(bg)));
 
         let mut list_state = ListState::default();
         if is_focused {
-            list_state.select(Some(selected_row));
+            list_state.select(list_selection_idx);
         }
 
         frame.render_stateful_widget(list, col_areas[i], &mut list_state);
@@ -2882,7 +2893,6 @@ fn build_review_pr_item(
     let select_prefix = if is_selected { "* " } else { "" };
     let stripe = if is_cursor { "\u{258c} " } else { "\u{258e} " };
     let dispatch_badge = if is_dispatch { "\u{25c6} " } else { "" };
-    let repo_short = pr.repo.split('/').next_back().unwrap_or(&pr.repo);
     let header = format!(
         "{select_prefix}{dispatch_badge}#{} {}",
         pr.number, pr.title
@@ -2924,7 +2934,7 @@ fn build_review_pr_item(
     let staleness = Staleness::from_age(pr.created_at, now);
     let age_color = staleness_color(staleness);
 
-    let before_age = format!("  {} \u{b7} @{} \u{b7} ", repo_short, pr.author);
+    let before_age = format!("  @{} \u{b7} ", pr.author);
     let after_age = format!(" \u{b7} +{}/-{} ", pr.additions, pr.deletions);
 
     let meta_style = if is_cursor {
@@ -3122,16 +3132,32 @@ fn render_security_columns(frame: &mut Frame, app: &mut App, area: Rect) {
     for i in 0..col_count {
         let severity = AlertSeverity::from_column_index(i).unwrap_or(AlertSeverity::Medium);
         let is_focused = i == sel_col;
+        let color = security_column_color(severity);
         let alerts: Vec<&SecurityAlert> = app.security_alerts_for_column(i);
 
         let selected_row = app.security_selection().map(|s| s.row(i)).unwrap_or(0);
-        let items: Vec<ListItem> = alerts
-            .iter()
-            .enumerate()
-            .map(|(row, alert)| {
-                build_security_alert_item(alert, severity, is_focused && row == selected_row, col_areas[i].width)
-            })
-            .collect();
+        let mut list_items: Vec<ListItem> = Vec::new();
+        let mut list_selection_idx: Option<usize> = None;
+        let mut current_repo: Option<&str> = None;
+
+        for (item_idx, alert) in alerts.iter().enumerate() {
+            if current_repo != Some(alert.repo.as_str()) {
+                current_repo = Some(alert.repo.as_str());
+                let repo_short = alert.repo.split('/').next_back().unwrap_or(&alert.repo);
+                list_items.push(render_substatus_header(repo_short, color));
+            }
+
+            if item_idx == selected_row {
+                list_selection_idx = Some(list_items.len());
+            }
+
+            list_items.push(build_security_alert_item(
+                alert,
+                severity,
+                is_focused && item_idx == selected_row,
+                col_areas[i].width,
+            ));
+        }
 
         let bg = if is_focused {
             security_column_bg_color(severity)
@@ -3139,11 +3165,11 @@ fn render_security_columns(frame: &mut Frame, app: &mut App, area: Rect) {
             Color::Reset
         };
 
-        let list = List::new(items).block(Block::default().style(Style::default().bg(bg)));
+        let list = List::new(list_items).block(Block::default().style(Style::default().bg(bg)));
 
         let mut list_state = ListState::default();
         if is_focused {
-            list_state.select(Some(selected_row));
+            list_state.select(list_selection_idx);
         }
 
         frame.render_stateful_widget(list, col_areas[i], &mut list_state);
@@ -3166,7 +3192,6 @@ fn build_security_alert_item(
 
     // Line 1: stripe + #number + title
     let stripe = if is_cursor { "\u{258c} " } else { "\u{258e} " };
-    let repo_short = alert.repo.split('/').next_back().unwrap_or(&alert.repo);
     let header = format!("#{} {}", alert.number, alert.title);
     // stripe(2) + header
     let max_header = (col_width as usize).saturating_sub(2);
@@ -3195,7 +3220,7 @@ fn build_security_alert_item(
         .cvss_score
         .map(|s| format!("CVSS:{s:.1}"))
         .unwrap_or_default();
-    let before_age = format!("  {repo_short} \u{b7} [{kind_indicator}] {pkg} {cvss_str} ");
+    let before_age = format!("  [{kind_indicator}] {pkg} {cvss_str} ");
 
     let meta_style = if is_cursor {
         Style::default().fg(Color::Gray)

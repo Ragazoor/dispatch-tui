@@ -6200,12 +6200,21 @@ fn dispatch_epic_all_done_shows_message() {
 use crate::models::ReviewDecision;
 
 fn make_review_pr(number: i64, author: &str, decision: ReviewDecision) -> crate::models::ReviewPr {
+    make_review_pr_for_repo(number, author, decision, "acme/app")
+}
+
+fn make_review_pr_for_repo(
+    number: i64,
+    author: &str,
+    decision: ReviewDecision,
+    repo: &str,
+) -> crate::models::ReviewPr {
     crate::models::ReviewPr {
         number,
         title: format!("PR {number}"),
         author: author.to_string(),
-        repo: "acme/app".to_string(),
-        url: format!("https://github.com/acme/app/pull/{number}"),
+        repo: repo.to_string(),
+        url: format!("https://github.com/{repo}/pull/{number}"),
         is_draft: false,
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
@@ -6217,6 +6226,28 @@ fn make_review_pr(number: i64, author: &str, decision: ReviewDecision) -> crate:
         head_ref: String::new(),
         ci_status: crate::models::CiStatus::None,
         reviewers: vec![],
+    }
+}
+
+fn make_security_alert(
+    number: i64,
+    repo: &str,
+    severity: crate::models::AlertSeverity,
+) -> crate::models::SecurityAlert {
+    crate::models::SecurityAlert {
+        number,
+        repo: repo.to_string(),
+        severity,
+        kind: crate::models::AlertKind::Dependabot,
+        title: format!("Alert {number}"),
+        package: Some("some-pkg".to_string()),
+        vulnerable_range: None,
+        fixed_version: None,
+        cvss_score: None,
+        url: format!("https://github.com/{repo}/security/dependabot/{number}"),
+        created_at: chrono::Utc::now(),
+        state: "open".to_string(),
+        description: String::new(),
     }
 }
 
@@ -10359,4 +10390,99 @@ fn epic_card_title_truncated_in_narrow_terminal() {
         !buffer_contains(&buf, "This is a very long epic title that should be truncated to fit"),
         "full epic title should be truncated in narrow terminal"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Repo grouping in review/security columns
+// ---------------------------------------------------------------------------
+
+#[test]
+fn active_prs_for_column_sorts_by_repo() {
+    let mut app = make_app();
+    app.update(Message::ReviewPrsLoaded(vec![
+        make_review_pr_for_repo(1, "alice", ReviewDecision::ReviewRequired, "org/zebra"),
+        make_review_pr_for_repo(2, "bob", ReviewDecision::ReviewRequired, "org/alpha"),
+        make_review_pr_for_repo(3, "carol", ReviewDecision::ReviewRequired, "org/middle"),
+    ]));
+    app.update(Message::SwitchToReviewBoard);
+
+    let col = ReviewDecision::ReviewRequired.column_index();
+    let prs = app.active_prs_for_column(col);
+    assert_eq!(prs.len(), 3);
+    assert_eq!(prs[0].repo, "org/alpha");
+    assert_eq!(prs[1].repo, "org/middle");
+    assert_eq!(prs[2].repo, "org/zebra");
+}
+
+#[test]
+fn selected_review_pr_agrees_with_sorted_order() {
+    let mut app = make_app();
+    app.update(Message::ReviewPrsLoaded(vec![
+        make_review_pr_for_repo(1, "alice", ReviewDecision::ReviewRequired, "org/zebra"),
+        make_review_pr_for_repo(2, "bob", ReviewDecision::ReviewRequired, "org/alpha"),
+    ]));
+    app.update(Message::SwitchToReviewBoard);
+
+    // Row 0 should be "org/alpha" (sorted first), row 1 should be "org/zebra"
+    let pr0 = app.selected_review_pr().unwrap();
+    assert_eq!(pr0.repo, "org/alpha", "row 0 should be the alphabetically first repo");
+
+    app.navigate_review_row(1);
+    let pr1 = app.selected_review_pr().unwrap();
+    assert_eq!(pr1.repo, "org/zebra", "row 1 should be the alphabetically second repo");
+}
+
+#[test]
+fn active_prs_for_column_preserves_order_within_same_repo() {
+    let mut app = make_app();
+    app.update(Message::ReviewPrsLoaded(vec![
+        make_review_pr_for_repo(10, "alice", ReviewDecision::ReviewRequired, "org/alpha"),
+        make_review_pr_for_repo(5, "bob", ReviewDecision::ReviewRequired, "org/alpha"),
+        make_review_pr_for_repo(20, "carol", ReviewDecision::ReviewRequired, "org/alpha"),
+    ]));
+    app.update(Message::SwitchToReviewBoard);
+
+    let col = ReviewDecision::ReviewRequired.column_index();
+    let prs = app.active_prs_for_column(col);
+    assert_eq!(prs.len(), 3);
+    // Stable sort: original insertion order preserved within same repo
+    assert_eq!(prs[0].number, 10);
+    assert_eq!(prs[1].number, 5);
+    assert_eq!(prs[2].number, 20);
+}
+
+#[test]
+fn security_alerts_for_column_sorts_by_repo() {
+    let mut app = make_app();
+    app.update(Message::SwitchToSecurityBoard);
+    app.update(Message::SecurityAlertsLoaded(vec![
+        make_security_alert(1, "org/zebra", crate::models::AlertSeverity::Critical),
+        make_security_alert(2, "org/alpha", crate::models::AlertSeverity::Critical),
+        make_security_alert(3, "org/middle", crate::models::AlertSeverity::Critical),
+    ]));
+
+    let col = crate::models::AlertSeverity::Critical.column_index();
+    let alerts = app.security_alerts_for_column(col);
+    assert_eq!(alerts.len(), 3);
+    assert_eq!(alerts[0].repo, "org/alpha");
+    assert_eq!(alerts[1].repo, "org/middle");
+    assert_eq!(alerts[2].repo, "org/zebra");
+}
+
+#[test]
+fn selected_security_alert_agrees_with_sorted_order() {
+    let mut app = make_app();
+    app.update(Message::SwitchToSecurityBoard);
+    app.update(Message::SecurityAlertsLoaded(vec![
+        make_security_alert(1, "org/zebra", crate::models::AlertSeverity::Critical),
+        make_security_alert(2, "org/alpha", crate::models::AlertSeverity::Critical),
+    ]));
+
+    // Default selection is column 0 (Critical). Row 0 should be "org/alpha" (sorted first).
+    let a0 = app.selected_security_alert().unwrap();
+    assert_eq!(a0.repo, "org/alpha", "row 0 should be the alphabetically first repo");
+
+    app.navigate_security_row(1);
+    let a1 = app.selected_security_alert().unwrap();
+    assert_eq!(a1.repo, "org/zebra", "row 1 should be the alphabetically second repo");
 }

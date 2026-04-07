@@ -296,10 +296,13 @@ impl App {
 
     /// Return alerts for a specific severity column using the active filter.
     pub fn security_alerts_for_column(&self, col: usize) -> Vec<&crate::models::SecurityAlert> {
-        self.filtered_security_alerts()
+        let mut alerts: Vec<_> = self
+            .filtered_security_alerts()
             .into_iter()
             .filter(|a| a.severity.column_index() == col)
-            .collect()
+            .collect();
+        alerts.sort_by(|a, b| a.repo.cmp(&b.repo));
+        alerts
     }
 
     /// Get the currently selected SecurityAlert, if in security board mode.
@@ -3066,10 +3069,13 @@ impl App {
             ViewMode::ReviewBoard { mode, .. } => *mode,
             _ => ReviewBoardMode::Reviewer,
         };
-        self.active_review_prs()
+        let mut prs: Vec<_> = self
+            .active_review_prs()
             .into_iter()
             .filter(|pr| mode.pr_column(pr) == col)
-            .collect()
+            .collect();
+        prs.sort_by(|a, b| a.repo.cmp(&b.repo));
+        prs
     }
 
     /// Get the currently selected ReviewPr, if in review board mode.
