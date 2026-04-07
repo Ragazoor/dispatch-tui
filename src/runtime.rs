@@ -2487,7 +2487,7 @@ mod tests {
                 review_decision,
             } => {
                 assert_eq!(id, TaskId(1));
-                assert_eq!(review_decision, Some(dispatch::PrReviewDecision::Approved));
+                assert_eq!(review_decision, Some(models::ReviewDecision::Approved));
             }
             other => panic!("Expected PrReviewState, got {:?}", other),
         }

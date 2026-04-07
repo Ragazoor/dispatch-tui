@@ -249,7 +249,7 @@ pub enum Message {
     },
     PrReviewState {
         id: TaskId,
-        review_decision: Option<crate::dispatch::PrReviewDecision>,
+        review_decision: Option<crate::models::ReviewDecision>,
     },
     // Done confirmation (no cleanup, just status change)
     ConfirmDone,

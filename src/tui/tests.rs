@@ -8,7 +8,6 @@ use ratatui::{
 use std::time::{Duration, Instant};
 
 use super::*;
-use crate::dispatch;
 use crate::models::{
     Epic, EpicId, SubStatus, TaskId, TaskStatus, TaskTag, DEFAULT_QUICK_TASK_TITLE,
 };
@@ -6197,8 +6196,6 @@ fn dispatch_epic_all_done_shows_message() {
 // Review board tests
 // ---------------------------------------------------------------------------
 
-use crate::models::ReviewDecision;
-
 fn make_review_pr(number: i64, author: &str, decision: ReviewDecision) -> crate::models::ReviewPr {
     make_review_pr_for_repo(number, author, decision, "acme/app")
 }
@@ -7285,7 +7282,7 @@ fn pr_review_state_updates_substatus() {
     app.find_task_mut(id).unwrap().sub_status = SubStatus::AwaitingReview;
     let cmds = app.update(Message::PrReviewState {
         id,
-        review_decision: Some(dispatch::PrReviewDecision::Approved),
+        review_decision: Some(ReviewDecision::Approved),
     });
     let task = app.find_task(id).unwrap();
     assert_eq!(task.sub_status, SubStatus::Approved);
@@ -7313,7 +7310,7 @@ fn pr_review_state_changes_requested() {
     app.find_task_mut(id).unwrap().sub_status = SubStatus::AwaitingReview;
     let cmds = app.update(Message::PrReviewState {
         id,
-        review_decision: Some(dispatch::PrReviewDecision::ChangesRequested),
+        review_decision: Some(ReviewDecision::ChangesRequested),
     });
     let task = app.find_task(id).unwrap();
     assert_eq!(task.sub_status, SubStatus::ChangesRequested);
@@ -7328,7 +7325,7 @@ fn pr_review_state_ignores_non_review_task() {
     assert_eq!(app.find_task(id).unwrap().status, TaskStatus::Running);
     let cmds = app.update(Message::PrReviewState {
         id,
-        review_decision: Some(dispatch::PrReviewDecision::Approved),
+        review_decision: Some(ReviewDecision::Approved),
     });
     assert!(cmds.is_empty());
     // sub_status should not have changed
@@ -7343,7 +7340,7 @@ fn pr_review_state_preserves_conflict_substatus() {
     app.find_task_mut(id).unwrap().sub_status = SubStatus::Conflict;
     let cmds = app.update(Message::PrReviewState {
         id,
-        review_decision: Some(dispatch::PrReviewDecision::Approved),
+        review_decision: Some(ReviewDecision::Approved),
     });
     assert!(cmds.is_empty());
     assert_eq!(app.find_task(id).unwrap().sub_status, SubStatus::Conflict);

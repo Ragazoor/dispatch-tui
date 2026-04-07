@@ -2385,7 +2385,7 @@ impl App {
     fn handle_pr_review_state(
         &mut self,
         id: TaskId,
-        review_decision: Option<dispatch::PrReviewDecision>,
+        review_decision: Option<ReviewDecision>,
     ) -> Vec<Command> {
         if let Some(task) = self.find_task_mut(id) {
             if task.status != TaskStatus::Review {
@@ -2396,8 +2396,8 @@ impl App {
                 return vec![];
             }
             let new_sub = match review_decision {
-                Some(dispatch::PrReviewDecision::Approved) => SubStatus::Approved,
-                Some(dispatch::PrReviewDecision::ChangesRequested) => SubStatus::ChangesRequested,
+                Some(ReviewDecision::Approved) => SubStatus::Approved,
+                Some(ReviewDecision::ChangesRequested) => SubStatus::ChangesRequested,
                 _ => SubStatus::AwaitingReview,
             };
             if task.sub_status != new_sub {

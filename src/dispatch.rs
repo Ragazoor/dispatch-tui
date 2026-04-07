@@ -2,7 +2,9 @@ use anyhow::{Context, Result};
 use std::fs;
 
 use crate::db;
-use crate::models::{slugify, DispatchResult, EpicId, ResumeResult, Task, TaskId, TaskStatus};
+use crate::models::{
+    slugify, DispatchResult, EpicId, ResumeResult, ReviewDecision, Task, TaskId, TaskStatus,
+};
 use crate::process::ProcessRunner;
 use crate::tmux;
 
@@ -690,17 +692,10 @@ pub enum PrState {
     Closed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PrReviewDecision {
-    Approved,
-    ChangesRequested,
-    ReviewRequired,
-}
-
 #[derive(Debug)]
 pub struct PrStatus {
     pub state: PrState,
-    pub review_decision: Option<PrReviewDecision>,
+    pub review_decision: Option<ReviewDecision>,
 }
 
 // ---------------------------------------------------------------------------
@@ -810,12 +805,7 @@ pub fn check_pr_status(pr_url: &str, runner: &dyn ProcessRunner) -> Result<PrSta
         _ => PrState::Open,
     };
 
-    let review_decision = match review_str.as_str() {
-        "APPROVED" => Some(PrReviewDecision::Approved),
-        "CHANGES_REQUESTED" => Some(PrReviewDecision::ChangesRequested),
-        "REVIEW_REQUIRED" => Some(PrReviewDecision::ReviewRequired),
-        _ => None,
-    };
+    let review_decision = ReviewDecision::parse(&review_str);
 
     Ok(PrStatus {
         state,
@@ -854,6 +844,153 @@ pub fn resolve_repo_path(github_repo: &str, known_paths: &[String]) -> Option<St
         .cloned()
 }
 
+// ---------------------------------------------------------------------------
+// Shared agent dispatch infrastructure
+// ---------------------------------------------------------------------------
+
+/// How to set up the git worktree for a dispatched agent.
+enum WorktreeStrategy<'a> {
+    /// Check out an existing remote branch (e.g. for PR reviews).
+    CheckoutRemote { head_ref: &'a str },
+    /// Create a new branch from the repo's default branch (e.g. for fixes).
+    NewBranch { branch_name: String },
+}
+
+/// Configuration for dispatching an agent into an isolated worktree.
+struct AgentDispatchConfig<'a> {
+    repo_path: String,
+    worktree_name: String,
+    tmux_prefix: &'a str,
+    number: i64,
+    git_strategy: WorktreeStrategy<'a>,
+    prompt: String,
+}
+
+/// Shared worktree provisioning + agent launch used by both review and fix dispatch.
+fn provision_and_dispatch(
+    config: AgentDispatchConfig,
+    runner: &dyn ProcessRunner,
+) -> Result<DispatchResult> {
+    let repo_short = config
+        .repo_path
+        .split('/')
+        .next_back()
+        .unwrap_or(&config.repo_path);
+    let worktree_path = format!("{}/.worktrees/{}", config.repo_path, config.worktree_name);
+    let tmux_window = format!("{}-{}-{}", config.tmux_prefix, repo_short, config.number);
+
+    // Check if tmux window already exists — focus it instead
+    if tmux::has_window(&tmux_window, runner).unwrap_or(false) {
+        return Ok(DispatchResult {
+            worktree_path,
+            tmux_window,
+        });
+    }
+
+    std::fs::create_dir_all(format!("{}/.worktrees", config.repo_path))
+        .context("failed to create .worktrees directory")?;
+
+    // Set up the worktree according to the chosen strategy
+    match &config.git_strategy {
+        WorktreeStrategy::CheckoutRemote { head_ref } => {
+            let fetch_output = runner
+                .run(
+                    "git",
+                    &["-C", &config.repo_path, "fetch", "origin", head_ref],
+                )
+                .context("failed to fetch PR branch")?;
+            anyhow::ensure!(
+                fetch_output.status.success(),
+                "git fetch failed: {}",
+                stderr_str(&fetch_output)
+            );
+
+            if !std::path::Path::new(&worktree_path).exists() {
+                let output = runner
+                    .run(
+                        "git",
+                        &[
+                            "-C",
+                            &config.repo_path,
+                            "worktree",
+                            "add",
+                            &worktree_path,
+                            &format!("origin/{head_ref}"),
+                        ],
+                    )
+                    .context("failed to create review worktree")?;
+                anyhow::ensure!(
+                    output.status.success(),
+                    "git worktree add failed: {}",
+                    stderr_str(&output)
+                );
+            }
+        }
+        WorktreeStrategy::NewBranch { branch_name } => {
+            let head_output = runner
+                .run(
+                    "git",
+                    &[
+                        "-C",
+                        &config.repo_path,
+                        "symbolic-ref",
+                        "refs/remotes/origin/HEAD",
+                    ],
+                )
+                .context("failed to detect default branch")?;
+            let head_stdout = String::from_utf8_lossy(&head_output.stdout);
+            let default_branch = head_stdout
+                .trim()
+                .strip_prefix("refs/remotes/origin/")
+                .unwrap_or("main");
+
+            let _ = runner.run(
+                "git",
+                &["-C", &config.repo_path, "fetch", "origin", default_branch],
+            );
+
+            if !std::path::Path::new(&worktree_path).exists() {
+                let output = runner
+                    .run(
+                        "git",
+                        &[
+                            "-C",
+                            &config.repo_path,
+                            "worktree",
+                            "add",
+                            "-b",
+                            branch_name,
+                            &worktree_path,
+                            &format!("origin/{default_branch}"),
+                        ],
+                    )
+                    .context("failed to create fix worktree")?;
+                anyhow::ensure!(
+                    output.status.success(),
+                    "git worktree add failed: {}",
+                    stderr_str(&output)
+                );
+            }
+        }
+    }
+
+    tmux::new_window(&tmux_window, &worktree_path, runner)
+        .context("failed to create tmux window")?;
+
+    // Write prompt and launch Claude
+    let prompt_file = format!("{worktree_path}/.claude-prompt");
+    fs::write(&prompt_file, &config.prompt)
+        .with_context(|| format!("failed to write {prompt_file}"))?;
+    let claude_cmd = &format!("bash -c 'prompt=$(cat .claude-prompt) && rm -f .claude-prompt && claude {DISPATCH_PLUGIN_DIR} --permission-mode acceptEdits \"$prompt\"'");
+    tmux::send_keys(&tmux_window, claude_cmd, runner)
+        .context("failed to send keys to tmux window")?;
+
+    Ok(DispatchResult {
+        worktree_path,
+        tmux_window,
+    })
+}
+
 /// Dispatch a Claude agent to review a PR in an isolated worktree.
 pub fn dispatch_review_agent(
     repo_path: &str,
@@ -864,58 +1001,6 @@ pub fn dispatch_review_agent(
     is_dependabot: bool,
     runner: &dyn ProcessRunner,
 ) -> Result<DispatchResult> {
-    let repo_path = expand_tilde(repo_path);
-    let repo_short = repo_path.split('/').next_back().unwrap_or(&repo_path);
-    let worktree_name = format!("review-{number}");
-    let worktree_path = format!("{repo_path}/.worktrees/{worktree_name}");
-    let tmux_window = format!("review-{repo_short}-{number}");
-
-    // Check if tmux window already exists — focus it instead
-    if tmux::has_window(&tmux_window, runner).unwrap_or(false) {
-        return Ok(DispatchResult {
-            worktree_path,
-            tmux_window,
-        });
-    }
-
-    std::fs::create_dir_all(format!("{repo_path}/.worktrees"))
-        .context("failed to create .worktrees directory")?;
-
-    // Fetch the PR branch and create worktree tracking it
-    let fetch_output = runner
-        .run("git", &["-C", &repo_path, "fetch", "origin", head_ref])
-        .context("failed to fetch PR branch")?;
-    anyhow::ensure!(
-        fetch_output.status.success(),
-        "git fetch failed: {}",
-        stderr_str(&fetch_output)
-    );
-
-    if !std::path::Path::new(&worktree_path).exists() {
-        let output = runner
-            .run(
-                "git",
-                &[
-                    "-C",
-                    &repo_path,
-                    "worktree",
-                    "add",
-                    &worktree_path,
-                    &format!("origin/{head_ref}"),
-                ],
-            )
-            .context("failed to create review worktree")?;
-        anyhow::ensure!(
-            output.status.success(),
-            "git worktree add failed: {}",
-            stderr_str(&output)
-        );
-    }
-
-    tmux::new_window(&tmux_window, &worktree_path, runner)
-        .context("failed to create tmux window")?;
-
-    // Write prompt and launch Claude
     let prompt = if is_dependabot {
         format!(
             "You are reviewing a dependency update PR #{number}: {title}\n\n\
@@ -944,16 +1029,18 @@ pub fn dispatch_review_agent(
              Focus on substantive issues. Don't nitpick style unless it affects readability."
         )
     };
-    let prompt_file = format!("{worktree_path}/.claude-prompt");
-    fs::write(&prompt_file, &prompt).with_context(|| format!("failed to write {prompt_file}"))?;
-    let claude_cmd = &format!("bash -c 'prompt=$(cat .claude-prompt) && rm -f .claude-prompt && claude {DISPATCH_PLUGIN_DIR} --permission-mode acceptEdits \"$prompt\"'");
-    tmux::send_keys(&tmux_window, claude_cmd, runner)
-        .context("failed to send keys to tmux window")?;
 
-    Ok(DispatchResult {
-        worktree_path,
-        tmux_window,
-    })
+    provision_and_dispatch(
+        AgentDispatchConfig {
+            repo_path: expand_tilde(repo_path),
+            worktree_name: format!("review-{number}"),
+            tmux_prefix: "review",
+            number,
+            git_strategy: WorktreeStrategy::CheckoutRemote { head_ref },
+            prompt,
+        },
+        runner,
+    )
 }
 
 /// Build the prompt for a fix agent based on the alert kind.
@@ -1017,85 +1104,21 @@ pub fn dispatch_fix_agent(
     fixed_version: Option<&str>,
     runner: &dyn ProcessRunner,
 ) -> Result<DispatchResult> {
-    let repo_path = expand_tilde(repo_path);
-    let repo_short = repo_path.split('/').next_back().unwrap_or(&repo_path);
-    let worktree_name = format!("fix-vuln-{number}");
-    let worktree_path = format!("{repo_path}/.worktrees/{worktree_name}");
-    let branch_name = format!("fix/vuln-{number}");
-    let tmux_window = format!("fix-{repo_short}-{number}");
+    let prompt = build_fix_prompt(github_repo, number, kind, title, description, package, fixed_version);
 
-    if tmux::has_window(&tmux_window, runner).unwrap_or(false) {
-        return Ok(DispatchResult {
-            worktree_path,
-            tmux_window,
-        });
-    }
-
-    std::fs::create_dir_all(format!("{repo_path}/.worktrees"))
-        .context("failed to create .worktrees directory")?;
-
-    let head_output = runner
-        .run(
-            "git",
-            &["-C", &repo_path, "symbolic-ref", "refs/remotes/origin/HEAD"],
-        )
-        .context("failed to detect default branch")?;
-    let head_stdout = String::from_utf8_lossy(&head_output.stdout);
-    let default_branch = head_stdout
-        .trim()
-        .strip_prefix("refs/remotes/origin/")
-        .unwrap_or("main");
-
-    let _ = runner.run(
-        "git",
-        &["-C", &repo_path, "fetch", "origin", default_branch],
-    );
-
-    if !std::path::Path::new(&worktree_path).exists() {
-        let output = runner
-            .run(
-                "git",
-                &[
-                    "-C",
-                    &repo_path,
-                    "worktree",
-                    "add",
-                    "-b",
-                    &branch_name,
-                    &worktree_path,
-                    &format!("origin/{default_branch}"),
-                ],
-            )
-            .context("failed to create fix worktree")?;
-        anyhow::ensure!(
-            output.status.success(),
-            "git worktree add failed: {}",
-            stderr_str(&output)
-        );
-    }
-
-    tmux::new_window(&tmux_window, &worktree_path, runner)
-        .context("failed to create tmux window")?;
-
-    let prompt = build_fix_prompt(
-        github_repo,
-        number,
-        kind,
-        title,
-        description,
-        package,
-        fixed_version,
-    );
-    let prompt_file = format!("{worktree_path}/.claude-prompt");
-    fs::write(&prompt_file, &prompt).with_context(|| format!("failed to write {prompt_file}"))?;
-    let claude_cmd = &format!("bash -c 'prompt=$(cat .claude-prompt) && rm -f .claude-prompt && claude {DISPATCH_PLUGIN_DIR} --permission-mode acceptEdits \"$prompt\"'");
-    tmux::send_keys(&tmux_window, claude_cmd, runner)
-        .context("failed to send keys to tmux window")?;
-
-    Ok(DispatchResult {
-        worktree_path,
-        tmux_window,
-    })
+    provision_and_dispatch(
+        AgentDispatchConfig {
+            repo_path: expand_tilde(repo_path),
+            worktree_name: format!("fix-vuln-{number}"),
+            tmux_prefix: "fix",
+            number,
+            git_strategy: WorktreeStrategy::NewBranch {
+                branch_name: format!("fix/vuln-{number}"),
+            },
+            prompt,
+        },
+        runner,
+    )
 }
 
 /// A task can be wrapped up if it has a worktree and is either Running or Review.
@@ -2157,7 +2180,7 @@ mod tests {
         assert_eq!(result.state, PrState::Open);
         assert_eq!(
             result.review_decision,
-            Some(PrReviewDecision::ReviewRequired)
+            Some(ReviewDecision::ReviewRequired)
         );
     }
 
@@ -2183,7 +2206,7 @@ mod tests {
             MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"OPEN\nAPPROVED\n")]);
         let result = check_pr_status("https://github.com/org/repo/pull/42", &mock).unwrap();
         assert_eq!(result.state, PrState::Open);
-        assert_eq!(result.review_decision, Some(PrReviewDecision::Approved));
+        assert_eq!(result.review_decision, Some(ReviewDecision::Approved));
     }
 
     #[test]
@@ -2195,7 +2218,7 @@ mod tests {
         assert_eq!(result.state, PrState::Open);
         assert_eq!(
             result.review_decision,
-            Some(PrReviewDecision::ChangesRequested)
+            Some(ReviewDecision::ChangesRequested)
         );
     }
 
