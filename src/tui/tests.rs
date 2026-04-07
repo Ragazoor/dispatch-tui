@@ -8554,11 +8554,15 @@ fn review_agent_dispatched_sets_status() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
     let cmds = app.update(Message::ReviewAgentDispatched {
-        repo: "org/my-repo".to_string(),
+        github_repo: "org/my-repo".to_string(),
         number: 99,
         tmux_window: "review-my-repo-99".to_string(),
+        worktree: "/tmp/worktree".to_string(),
     });
-    assert!(cmds.is_empty());
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, Command::PersistReviewAgent { .. }))
+    );
     assert!(app
         .status_message
         .as_deref()

@@ -802,13 +802,22 @@ impl App {
             Message::ToggleReviewDetail => self.handle_toggle_review_detail(),
             Message::DispatchReviewAgent(req) => self.handle_dispatch_review_agent(req),
             Message::ReviewAgentDispatched {
-                repo,
+                github_repo,
                 number,
-                tmux_window: _,
+                tmux_window,
+                worktree,
             } => {
-                let repo_short = repo.split('/').next_back().unwrap_or(&repo);
+                let repo_short = github_repo.split('/').next_back().unwrap_or(&github_repo);
                 self.set_status(format!("Review agent dispatched for {repo_short}#{number}"));
-                vec![]
+                let table =
+                    self.find_and_set_pr_agent(&github_repo, number, &tmux_window, &worktree);
+                vec![Command::PersistReviewAgent {
+                    table,
+                    github_repo,
+                    number,
+                    tmux_window,
+                    worktree,
+                }]
             }
             Message::ReviewAgentFailed { error } => {
                 self.set_status(format!("Review dispatch failed: {error}"));
@@ -972,15 +981,34 @@ impl App {
                 }
             }
             Message::FixAgentDispatched {
-                repo,
+                github_repo,
                 number,
+                kind,
                 tmux_window,
+                worktree,
             } => {
-                self.set_status(format!(
-                    "Fix agent dispatched for {}#{} ({})",
-                    repo, number, tmux_window
-                ));
-                vec![]
+                let repo_short = github_repo
+                    .split('/')
+                    .next_back()
+                    .unwrap_or(&github_repo);
+                self.set_status(format!("Fix agent dispatched for {repo_short}#{number}"));
+                for alert in self.security.alerts.iter_mut() {
+                    if alert.repo == github_repo
+                        && alert.number == number
+                        && alert.kind == kind
+                    {
+                        alert.tmux_window = Some(tmux_window.clone());
+                        alert.worktree = Some(worktree.clone());
+                        break;
+                    }
+                }
+                vec![Command::PersistFixAgent {
+                    github_repo,
+                    number,
+                    kind,
+                    tmux_window,
+                    worktree,
+                }]
             }
             Message::FixAgentFailed { error } => {
                 self.set_status(format!("Fix agent failed: {error}"));
@@ -2898,6 +2926,39 @@ impl App {
                 vec![]
             }
         }
+    }
+
+    /// Find a PR by github_repo + number across all review lists, set its agent
+    /// fields, and return the DB table name where the PR lives.
+    pub(in crate::tui) fn find_and_set_pr_agent(
+        &mut self,
+        github_repo: &str,
+        number: i64,
+        tmux_window: &str,
+        worktree: &str,
+    ) -> String {
+        for pr in self.review.prs.iter_mut() {
+            if pr.repo == github_repo && pr.number == number {
+                pr.tmux_window = Some(tmux_window.to_string());
+                pr.worktree = Some(worktree.to_string());
+                return "review_prs".to_string();
+            }
+        }
+        for pr in self.review.my_prs.iter_mut() {
+            if pr.repo == github_repo && pr.number == number {
+                pr.tmux_window = Some(tmux_window.to_string());
+                pr.worktree = Some(worktree.to_string());
+                return "my_prs".to_string();
+            }
+        }
+        for pr in self.review.bot_prs.iter_mut() {
+            if pr.repo == github_repo && pr.number == number {
+                pr.tmux_window = Some(tmux_window.to_string());
+                pr.worktree = Some(worktree.to_string());
+                return "bot_prs".to_string();
+            }
+        }
+        "review_prs".to_string()
     }
 
     /// Collect known local repo paths from saved paths and existing tasks.

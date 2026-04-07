@@ -932,6 +932,7 @@ impl App {
                     );
                     self.update(Message::DispatchReviewAgent(ReviewAgentRequest {
                         repo: pr.repo.clone(),
+                        github_repo: pr.repo.clone(),
                         number: pr.number,
                         title: pr.title.clone(),
                         body: pr.body.clone(),

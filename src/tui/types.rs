@@ -74,6 +74,7 @@ impl ReviewBoardMode {
 #[derive(Debug, Clone)]
 pub struct ReviewAgentRequest {
     pub repo: String,
+    pub github_repo: String,
     pub number: i64,
     pub title: String,
     pub body: String,
@@ -102,7 +103,7 @@ pub enum PendingDispatch {
 impl PendingDispatch {
     pub fn github_repo(&self) -> &str {
         match self {
-            PendingDispatch::Review(req) => &req.repo,
+            PendingDispatch::Review(req) => &req.github_repo,
             PendingDispatch::Fix { repo, .. } => repo,
         }
     }
@@ -270,9 +271,10 @@ pub enum Message {
     RefreshReviewPrs,
     DispatchReviewAgent(ReviewAgentRequest),
     ReviewAgentDispatched {
-        repo: String,
+        github_repo: String,
         number: i64,
         tmux_window: String,
+        worktree: String,
     },
     ReviewAgentFailed {
         error: String,
@@ -326,9 +328,11 @@ pub enum Message {
         fixed_version: Option<String>,
     },
     FixAgentDispatched {
-        repo: String,
+        github_repo: String,
         number: i64,
+        kind: crate::models::AlertKind,
         tmux_window: String,
+        worktree: String,
     },
     FixAgentFailed {
         error: String,
@@ -369,6 +373,20 @@ pub enum Message {
 #[derive(Debug, Clone)]
 pub enum Command {
     PersistTask(Task),
+    PersistReviewAgent {
+        table: String,
+        github_repo: String,
+        number: i64,
+        tmux_window: String,
+        worktree: String,
+    },
+    PersistFixAgent {
+        github_repo: String,
+        number: i64,
+        kind: crate::models::AlertKind,
+        tmux_window: String,
+        worktree: String,
+    },
     InsertTask {
         draft: TaskDraft,
         epic_id: Option<EpicId>,
@@ -717,13 +735,43 @@ pub struct ReviewBoardState {
 
 impl ReviewBoardState {
     /// Set review PRs and rebuild the cached distinct repos list.
-    pub fn set_prs(&mut self, prs: Vec<crate::models::ReviewPr>) {
+    /// Preserves agent fields (tmux_window, worktree) from old PRs.
+    pub fn set_prs(&mut self, mut prs: Vec<crate::models::ReviewPr>) {
+        for new_pr in prs.iter_mut() {
+            if let Some(old_pr) = self
+                .prs
+                .iter()
+                .find(|p| p.repo == new_pr.repo && p.number == new_pr.number)
+            {
+                if new_pr.tmux_window.is_none() {
+                    new_pr.tmux_window = old_pr.tmux_window.clone();
+                }
+                if new_pr.worktree.is_none() {
+                    new_pr.worktree = old_pr.worktree.clone();
+                }
+            }
+        }
         self.repos = distinct_repos(&prs);
         self.prs = prs;
     }
 
     /// Set author PRs and rebuild the cached distinct repos list.
-    pub fn set_my_prs(&mut self, prs: Vec<crate::models::ReviewPr>) {
+    /// Preserves agent fields (tmux_window, worktree) from old PRs.
+    pub fn set_my_prs(&mut self, mut prs: Vec<crate::models::ReviewPr>) {
+        for new_pr in prs.iter_mut() {
+            if let Some(old_pr) = self
+                .my_prs
+                .iter()
+                .find(|p| p.repo == new_pr.repo && p.number == new_pr.number)
+            {
+                if new_pr.tmux_window.is_none() {
+                    new_pr.tmux_window = old_pr.tmux_window.clone();
+                }
+                if new_pr.worktree.is_none() {
+                    new_pr.worktree = old_pr.worktree.clone();
+                }
+            }
+        }
         self.my_prs_repos = distinct_repos(&prs);
         self.my_prs = prs;
     }
@@ -779,7 +827,22 @@ impl ReviewBoardState {
     }
 
     /// Set bot PRs and rebuild the cached distinct repos list.
-    pub fn set_bot_prs(&mut self, prs: Vec<crate::models::ReviewPr>) {
+    /// Preserves agent fields (tmux_window, worktree) from old PRs.
+    pub fn set_bot_prs(&mut self, mut prs: Vec<crate::models::ReviewPr>) {
+        for new_pr in prs.iter_mut() {
+            if let Some(old_pr) = self
+                .bot_prs
+                .iter()
+                .find(|p| p.repo == new_pr.repo && p.number == new_pr.number)
+            {
+                if new_pr.tmux_window.is_none() {
+                    new_pr.tmux_window = old_pr.tmux_window.clone();
+                }
+                if new_pr.worktree.is_none() {
+                    new_pr.worktree = old_pr.worktree.clone();
+                }
+            }
+        }
         self.bot_prs_repos = distinct_repos(&prs);
         self.bot_prs = prs;
     }
@@ -1003,7 +1066,20 @@ pub struct SecurityBoardState {
 
 impl SecurityBoardState {
     /// Set alerts and rebuild the cached distinct repos list.
-    pub fn set_alerts(&mut self, alerts: Vec<SecurityAlert>) {
+    /// Preserves agent fields (tmux_window, worktree) from old alerts.
+    pub fn set_alerts(&mut self, mut alerts: Vec<SecurityAlert>) {
+        for new_alert in alerts.iter_mut() {
+            if let Some(old_alert) = self.alerts.iter().find(|a| {
+                a.repo == new_alert.repo && a.number == new_alert.number && a.kind == new_alert.kind
+            }) {
+                if new_alert.tmux_window.is_none() {
+                    new_alert.tmux_window = old_alert.tmux_window.clone();
+                }
+                if new_alert.worktree.is_none() {
+                    new_alert.worktree = old_alert.worktree.clone();
+                }
+            }
+        }
         self.repos = {
             let mut set = BTreeSet::new();
             for a in &alerts {

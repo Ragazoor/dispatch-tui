@@ -1405,6 +1405,7 @@ impl TuiRuntime {
         // repo is already resolved to a local path by the TUI
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
+        let github_repo_clone = github_repo.clone();
         tokio::task::spawn_blocking(move || {
             match dispatch::dispatch_fix_agent(
                 &repo,
@@ -1419,9 +1420,11 @@ impl TuiRuntime {
             ) {
                 Ok(result) => {
                     let _ = tx.send(Message::FixAgentDispatched {
-                        repo,
+                        github_repo: github_repo_clone,
                         number,
+                        kind,
                         tmux_window: result.tmux_window,
+                        worktree: result.worktree_path,
                     });
                 }
                 Err(e) => {
@@ -1449,9 +1452,10 @@ impl TuiRuntime {
             ) {
                 Ok(result) => {
                     let _ = tx.send(Message::ReviewAgentDispatched {
-                        repo: req.repo,
+                        github_repo: req.github_repo,
                         number: req.number,
                         tmux_window: result.tmux_window,
+                        worktree: result.worktree_path,
                     });
                 }
                 Err(e) => {
@@ -1534,6 +1538,38 @@ async fn execute_commands(
     while let Some(command) = queue.pop_front() {
         match command {
             Command::PersistTask(task) => rt.exec_persist_task(app, task),
+            Command::PersistReviewAgent {
+                table,
+                github_repo,
+                number,
+                tmux_window,
+                worktree,
+            } => {
+                if let Err(e) =
+                    rt.database
+                        .set_pr_agent(&table, &github_repo, number, &tmux_window, &worktree)
+                {
+                    let extra =
+                        app.update(Message::Error(format!("Failed to persist review agent: {e}")));
+                    queue.extend(extra);
+                }
+            }
+            Command::PersistFixAgent {
+                github_repo,
+                number,
+                kind,
+                tmux_window,
+                worktree,
+            } => {
+                if let Err(e) =
+                    rt.database
+                        .set_alert_agent(&github_repo, number, kind, &tmux_window, &worktree)
+                {
+                    let extra =
+                        app.update(Message::Error(format!("Failed to persist fix agent: {e}")));
+                    queue.extend(extra);
+                }
+            }
             Command::InsertTask { draft, epic_id } => rt.exec_insert_task(
                 app,
                 draft.title,
