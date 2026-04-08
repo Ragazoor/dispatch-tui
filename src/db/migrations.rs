@@ -34,6 +34,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (28, migrate_v28_add_my_prs_agent_status),
     (29, migrate_v29_json_filter_presets),
     (30, migrate_v30_allow_conflict_for_review),
+    (31, migrate_v31_re_expand_tilde_paths),
 ];
 
 fn migrate_v1_add_plan_column(conn: &Connection) -> Result<()> {
@@ -591,6 +592,87 @@ fn migrate_v28_add_my_prs_agent_status(conn: &Connection) -> Result<()> {
     // v27 missed my_prs when adding agent_status. Fix the gap.
     if let Err(e) = conn.execute_batch("ALTER TABLE my_prs ADD COLUMN agent_status TEXT") {
         tracing::debug!("ALTER my_prs ADD agent_status (may already exist): {e}");
+    }
+    Ok(())
+}
+
+fn migrate_v31_re_expand_tilde_paths(conn: &Connection) -> Result<()> {
+    // Re-expand ~/... to $HOME/... in all path columns.
+    // Migration v18 did this once, but paths saved between v18 and the
+    // expand_tilde-on-write fix (commit fd26d80) may still contain tildes.
+    if let Some(home) = std::env::var_os("HOME") {
+        let home = home.to_string_lossy();
+        let prefix = format!("{home}/");
+
+        // Simple text columns: tasks.repo_path, epics.repo_path, repo_paths.path
+        conn.execute(
+            "UPDATE tasks SET repo_path = ?1 || substr(repo_path, 3) WHERE repo_path LIKE '~/%'",
+            params![prefix],
+        )
+        .context("Failed to expand ~ in tasks.repo_path")?;
+        conn.execute(
+            "UPDATE epics SET repo_path = ?1 || substr(repo_path, 3) WHERE repo_path LIKE '~/%'",
+            params![prefix],
+        )
+        .context("Failed to expand ~ in epics.repo_path")?;
+        conn.execute(
+            "UPDATE repo_paths SET path = ?1 || substr(path, 3) WHERE path LIKE '~/%'",
+            params![prefix],
+        )
+        .context("Failed to expand ~ in repo_paths.path")?;
+
+        // JSON array columns (post v29): filter_presets.repo_paths, settings.repo_filter
+        let presets: Vec<(String, String)> = conn
+            .prepare("SELECT name, repo_paths FROM filter_presets WHERE repo_paths LIKE '%~/%'")?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        for (name, raw) in presets {
+            if let Ok(paths) = serde_json::from_str::<Vec<String>>(&raw) {
+                let expanded: Vec<String> = paths
+                    .into_iter()
+                    .map(|p| {
+                        if let Some(rest) = p.strip_prefix("~/") {
+                            format!("{prefix}{rest}")
+                        } else {
+                            p
+                        }
+                    })
+                    .collect();
+                let json = serde_json::to_string(&expanded).unwrap_or(raw);
+                conn.execute(
+                    "UPDATE filter_presets SET repo_paths = ?1 WHERE name = ?2",
+                    params![json, name],
+                )?;
+            }
+        }
+
+        let filter: Option<String> = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'repo_filter' AND value LIKE '%~/%'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(raw) = filter {
+            if let Ok(paths) = serde_json::from_str::<Vec<String>>(&raw) {
+                let expanded: Vec<String> = paths
+                    .into_iter()
+                    .map(|p| {
+                        if let Some(rest) = p.strip_prefix("~/") {
+                            format!("{prefix}{rest}")
+                        } else {
+                            p
+                        }
+                    })
+                    .collect();
+                let json = serde_json::to_string(&expanded).unwrap_or(raw);
+                conn.execute(
+                    "UPDATE settings SET value = ?1 WHERE key = 'repo_filter'",
+                    params![json],
+                )?;
+            }
+        }
     }
     Ok(())
 }

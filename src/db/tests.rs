@@ -215,7 +215,7 @@ fn fresh_db_has_latest_schema_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 30);
+    assert_eq!(version, 31);
 }
 
 #[test]
@@ -287,7 +287,7 @@ fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 30);
+    assert_eq!(version, 31);
 }
 
 #[test]
@@ -376,7 +376,7 @@ fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 30);
+    assert_eq!(version, 31);
 }
 
 #[test]
@@ -487,7 +487,7 @@ fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 30);
+    assert_eq!(version, 31);
 }
 
 #[test]
@@ -1573,7 +1573,7 @@ fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 30);
+    assert_eq!(version, 31);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -1674,7 +1674,7 @@ fn schema_version_is_21() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 30);
+    assert_eq!(version, 31);
 }
 
 #[test]
@@ -1800,7 +1800,7 @@ fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 30);
+    assert_eq!(version, 31);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -3690,4 +3690,168 @@ fn migration_v29_skips_already_json_presets() {
         .unwrap();
     let filter_paths: Vec<String> = serde_json::from_str(&filter).unwrap();
     assert_eq!(filter_paths, vec!["/repo/x".to_string()]);
+}
+
+#[test]
+fn migration_31_re_expands_tilde_paths() {
+    // Simulate a v30 DB where tilde paths snuck in after the v18 migration
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "PRAGMA foreign_keys=OFF;
+         PRAGMA user_version=30;
+         CREATE TABLE tasks (
+             id          INTEGER PRIMARY KEY,
+             title       TEXT NOT NULL,
+             description TEXT NOT NULL,
+             repo_path   TEXT NOT NULL,
+             status      TEXT NOT NULL DEFAULT 'backlog',
+             worktree    TEXT,
+             tmux_window TEXT,
+             plan_path   TEXT,
+             epic_id     INTEGER,
+             sub_status  TEXT NOT NULL DEFAULT 'none',
+             pr_url      TEXT,
+             tag         TEXT,
+             sort_order  INTEGER,
+             created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+             CHECK (
+                 (status = 'backlog'  AND sub_status = 'none') OR
+                 (status = 'running'  AND sub_status IN ('active','needs_input','stale','crashed','conflict')) OR
+                 (status = 'review'   AND sub_status IN ('awaiting_review','changes_requested','approved','conflict')) OR
+                 (status = 'done'     AND sub_status = 'none') OR
+                 (status = 'archived' AND sub_status = 'none')
+             )
+         );
+         CREATE TABLE epics (
+             id          INTEGER PRIMARY KEY,
+             title       TEXT NOT NULL,
+             description TEXT NOT NULL,
+             repo_path   TEXT NOT NULL,
+             status      TEXT NOT NULL DEFAULT 'backlog',
+             plan_path   TEXT,
+             sort_order  INTEGER,
+             created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         CREATE TABLE repo_paths (
+             id        INTEGER PRIMARY KEY,
+             path      TEXT NOT NULL UNIQUE,
+             last_used TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         CREATE TABLE settings (
+             key   TEXT PRIMARY KEY,
+             value TEXT NOT NULL
+         );
+         CREATE TABLE filter_presets (
+             name       TEXT PRIMARY KEY,
+             repo_paths TEXT NOT NULL,
+             mode       TEXT NOT NULL DEFAULT 'include'
+         );",
+    )
+    .unwrap();
+
+    let home = std::env::var("HOME").unwrap();
+
+    // Insert rows with tilde paths
+    conn.execute(
+        "INSERT INTO tasks (title, description, repo_path) VALUES ('T1', 'D', '~/code/project')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO tasks (title, description, repo_path) VALUES ('T2', 'D', '/absolute/path')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO epics (title, description, repo_path) VALUES ('E1', 'D', '~/code/epic')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO repo_paths (path) VALUES ('~/code/saved')",
+        [],
+    )
+    .unwrap();
+    // filter_presets are now JSON arrays (post v29)
+    conn.execute(
+        r#"INSERT INTO filter_presets (name, repo_paths) VALUES ('my_preset', '["~/code/a","~/code/b","/abs/c"]')"#,
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        r#"INSERT INTO settings (key, value) VALUES ('repo_filter', '["~/code/x"]')"#,
+        [],
+    )
+    .unwrap();
+
+    Database::init_schema(&conn).unwrap();
+
+    // tasks.repo_path expanded
+    let repo: String = conn
+        .query_row("SELECT repo_path FROM tasks WHERE id = 1", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(repo, format!("{home}/code/project"));
+
+    // Absolute path unchanged
+    let repo2: String = conn
+        .query_row("SELECT repo_path FROM tasks WHERE id = 2", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(repo2, "/absolute/path");
+
+    // epics.repo_path expanded
+    let epic_repo: String = conn
+        .query_row("SELECT repo_path FROM epics WHERE id = 1", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(epic_repo, format!("{home}/code/epic"));
+
+    // repo_paths.path expanded
+    let rp: String = conn
+        .query_row("SELECT path FROM repo_paths WHERE id = 1", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(rp, format!("{home}/code/saved"));
+
+    // filter_presets.repo_paths (JSON) expanded
+    let preset: String = conn
+        .query_row(
+            "SELECT repo_paths FROM filter_presets WHERE name = 'my_preset'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let paths: Vec<String> = serde_json::from_str(&preset).unwrap();
+    assert_eq!(
+        paths,
+        vec![
+            format!("{home}/code/a"),
+            format!("{home}/code/b"),
+            "/abs/c".to_string(),
+        ]
+    );
+
+    // settings.repo_filter (JSON) expanded
+    let filter: String = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'repo_filter'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let filter_paths: Vec<String> = serde_json::from_str(&filter).unwrap();
+    assert_eq!(filter_paths, vec![format!("{home}/code/x")]);
+
+    // Version bumped
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, 31);
 }
