@@ -385,7 +385,8 @@ impl TuiRuntime {
             return;
         };
         app.update(Message::TaskCreated { task: task.clone() });
-        let _ = self.database.save_repo_path(&repo_path);
+        let expanded = models::expand_tilde(&repo_path);
+        let _ = self.database.save_repo_path(&expanded);
         let paths = self.database.list_repo_paths().unwrap_or_default();
         app.update(Message::RepoPathsUpdated(paths));
         let epic_ctx = dispatch::EpicContext::from_db(&task, &*self.database);
@@ -668,6 +669,7 @@ impl TuiRuntime {
     }
 
     fn exec_save_repo_path(&self, app: &mut App, path: String) {
+        let path = models::expand_tilde(&path);
         if let Err(e) = self.database.save_repo_path(&path) {
             app.update(Message::Error(Self::db_error("saving repo path", e)));
         }
@@ -1978,6 +1980,23 @@ mod tests {
         let (rt, mut app) = test_runtime();
         rt.exec_save_repo_path(&mut app, "/repo".into());
         assert!(app.repo_paths().contains(&"/repo".to_string()));
+    }
+
+    #[test]
+    fn exec_save_repo_path_expands_tilde() {
+        let (rt, mut app) = test_runtime();
+        let home = std::env::var("HOME").unwrap();
+        rt.exec_save_repo_path(&mut app, "~/myrepo".into());
+        let expected = format!("{home}/myrepo");
+        assert!(
+            app.repo_paths().contains(&expected),
+            "Expected repo_paths to contain '{expected}', got: {:?}",
+            app.repo_paths()
+        );
+        // Verify the DB also has the expanded path, not the tilde version
+        let db_paths = rt.database.list_repo_paths().unwrap();
+        assert!(db_paths.contains(&expected));
+        assert!(!db_paths.iter().any(|p| p.starts_with("~/")));
     }
 
     #[test]
