@@ -1274,11 +1274,10 @@ impl TuiRuntime {
 
     fn exec_kill_tmux_window(&self, window: String) {
         let runner = self.runner.clone();
-        let tx = self.msg_tx.clone();
 
         tokio::task::spawn_blocking(move || {
             if let Err(e) = tmux::kill_window(&window, &*runner) {
-                let _ = tx.send(Message::Error(format!("Kill window failed: {e:#}")));
+                tracing::warn!(%window, "failed to kill tmux window (best-effort): {e:#}");
             }
         });
     }
@@ -2902,6 +2901,24 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn exec_kill_tmux_window_failure_does_not_send_error() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::fail("no such window"), // tmux kill-window fails
+        ]));
+        let rt = make_runtime(db.clone(), tx, mock);
+
+        rt.exec_kill_tmux_window("task-99".to_string());
+
+        // Give the spawned task time to complete
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // Channel should be empty — no error message sent
+        assert!(rx.try_recv().is_err(), "Expected no message, but got one");
+    }
+
     #[test]
     fn exec_patch_sub_status_updates_db() {
         let (rt, mut app) = test_runtime();
@@ -3754,7 +3771,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn exec_kill_tmux_window_failure_sends_error() {
+    async fn exec_kill_tmux_window_failure_is_best_effort() {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::fail(
@@ -3764,14 +3781,11 @@ mod tests {
 
         rt.exec_kill_tmux_window("gone-window".into());
 
-        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(
-            matches!(msg, Message::Error(_)),
-            "Expected Error, got: {msg:?}"
-        );
+        // Give the spawned task time to complete
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // Kill-window failure is best-effort — no error message sent
+        assert!(rx.try_recv().is_err(), "Expected no message, but got one");
     }
 
     // -----------------------------------------------------------------------
