@@ -297,6 +297,18 @@ pub fn kill_pane(pane_id: &str, runner: &dyn ProcessRunner) -> Result<()> {
     Ok(())
 }
 
+/// Replace the content of a pane with a fresh shell, preserving the pane itself.
+pub fn respawn_pane(pane_id: &str, runner: &dyn ProcessRunner) -> Result<()> {
+    let output = runner.run("tmux", &["respawn-pane", "-k", "-t", pane_id])?;
+    if !output.status.success() {
+        bail!(
+            "tmux respawn-pane failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(())
+}
+
 /// Get the pane ID for a window's first pane.
 pub fn pane_id_for_window(window: &str, runner: &dyn ProcessRunner) -> Result<String> {
     let output = runner.run(

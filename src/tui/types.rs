@@ -499,6 +499,9 @@ pub enum Command {
     CheckSplitPaneExists {
         pane_id: String,
     },
+    RespawnSplitPane {
+        pane_id: String,
+    },
     KillTmuxWindow {
         window: String,
     },

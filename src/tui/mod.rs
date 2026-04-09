@@ -1400,6 +1400,7 @@ impl App {
                     cmds.push(c);
                 }
                 cmds.push(Command::PersistTask(task_clone));
+                cmds.extend(self.maybe_respawn_split_pane(id));
             }
         }
         self.select.tasks.clear();
@@ -1926,6 +1927,7 @@ impl App {
                 cmds.push(Command::KillTmuxWindow { window });
             }
             cmds.push(Command::Resume { task: task_clone });
+            cmds.extend(self.maybe_respawn_split_pane(id));
             cmds
         } else {
             vec![]
@@ -1979,6 +1981,7 @@ impl App {
                 cmds.push(c);
             }
             cmds.push(Command::PersistTask(task_clone));
+            cmds.extend(self.maybe_respawn_split_pane(id));
             cmds
         } else {
             vec![]
@@ -2409,6 +2412,18 @@ impl App {
         vec![]
     }
 
+    /// If `task_id` is the split-pinned task, clear the pin and respawn the
+    /// pane with a fresh shell.  Split mode stays active.
+    fn maybe_respawn_split_pane(&mut self, task_id: TaskId) -> Vec<Command> {
+        if self.board.split.active && self.board.split.pinned_task_id == Some(task_id) {
+            self.board.split.pinned_task_id = None;
+            if let Some(pane_id) = self.board.split.right_pane_id.clone() {
+                return vec![Command::RespawnSplitPane { pane_id }];
+            }
+        }
+        vec![]
+    }
+
     fn finish_task_creation(&mut self, repo_path: String) -> Vec<Command> {
         let mut draft = self.input.task_draft.take().unwrap_or_default();
         draft.repo_path = repo_path.clone();
@@ -2448,6 +2463,8 @@ impl App {
         } else {
             vec![]
         };
+
+        cmds.extend(self.maybe_respawn_split_pane(id));
 
         if in_queue {
             if let Some(q) = &mut self.merge_queue {
@@ -2588,6 +2605,8 @@ impl App {
                 });
             }
         }
+
+        cmds.extend(self.maybe_respawn_split_pane(id));
 
         cmds
     }

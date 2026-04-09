@@ -14334,6 +14334,196 @@ fn confirm_quit_with_active_split_emits_exit_split_mode() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Split pane respawn on task lifecycle events
+// ---------------------------------------------------------------------------
+
+#[test]
+fn finish_complete_respawns_split_pane_for_pinned_task() {
+    let mut app = App::new(
+        vec![{
+            let mut t = make_task(1, TaskStatus::Review);
+            t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+            t.tmux_window = Some("task-1".to_string());
+            t
+        }],
+        TEST_TIMEOUT,
+    );
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some("%5".to_string());
+    app.board.split.pinned_task_id = Some(TaskId(1));
+
+    let cmds = app.update(Message::FinishComplete(TaskId(1)));
+
+    assert!(
+        cmds.iter().any(|c| matches!(c, Command::RespawnSplitPane { pane_id } if pane_id == "%5")),
+        "should emit RespawnSplitPane for the pinned pane"
+    );
+    assert_eq!(app.board.split.pinned_task_id, None, "pinned_task_id should be cleared");
+    assert!(app.board.split.active, "split mode should remain active");
+    assert_eq!(app.board.split.right_pane_id.as_deref(), Some("%5"), "pane_id should be preserved");
+}
+
+#[test]
+fn finish_complete_no_respawn_for_non_pinned_task() {
+    let mut app = App::new(
+        vec![
+            {
+                let mut t = make_task(1, TaskStatus::Review);
+                t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+                t.tmux_window = Some("task-1".to_string());
+                t
+            },
+            {
+                let mut t = make_task(2, TaskStatus::Running);
+                t.tmux_window = Some("task-2".to_string());
+                t
+            },
+        ],
+        TEST_TIMEOUT,
+    );
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some("%5".to_string());
+    app.board.split.pinned_task_id = Some(TaskId(2));
+
+    let cmds = app.update(Message::FinishComplete(TaskId(1)));
+
+    assert!(
+        !cmds.iter().any(|c| matches!(c, Command::RespawnSplitPane { .. })),
+        "should NOT respawn when a different task finishes"
+    );
+    assert_eq!(app.board.split.pinned_task_id, Some(TaskId(2)), "pinned task should be unchanged");
+}
+
+#[test]
+fn finish_complete_no_respawn_without_split() {
+    let mut app = App::new(
+        vec![{
+            let mut t = make_task(1, TaskStatus::Review);
+            t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+            t.tmux_window = Some("task-1".to_string());
+            t
+        }],
+        TEST_TIMEOUT,
+    );
+    // split is NOT active (default)
+
+    let cmds = app.update(Message::FinishComplete(TaskId(1)));
+
+    assert!(
+        !cmds.iter().any(|c| matches!(c, Command::RespawnSplitPane { .. })),
+        "should NOT respawn when split mode is inactive"
+    );
+}
+
+#[test]
+fn pr_merged_respawns_split_pane() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.tmux_window = Some("task-1".to_string());
+    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some("%5".to_string());
+    app.board.split.pinned_task_id = Some(TaskId(1));
+
+    let cmds = app.update(Message::PrMerged(TaskId(1)));
+
+    assert!(
+        cmds.iter().any(|c| matches!(c, Command::RespawnSplitPane { pane_id } if pane_id == "%5")),
+        "should respawn split pane when pinned task's PR is merged"
+    );
+    assert_eq!(app.board.split.pinned_task_id, None);
+    assert!(app.board.split.active);
+}
+
+#[test]
+fn confirm_done_respawns_split_pane() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.tmux_window = Some("task-1".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some("%5".to_string());
+    app.board.split.pinned_task_id = Some(TaskId(1));
+    app.input.mode = InputMode::ConfirmDone(TaskId(1));
+
+    let cmds = app.update(Message::ConfirmDone);
+
+    assert!(
+        cmds.iter().any(|c| matches!(c, Command::RespawnSplitPane { pane_id } if pane_id == "%5")),
+        "should respawn split pane when pinned task is confirmed done"
+    );
+    assert_eq!(app.board.split.pinned_task_id, None);
+    assert!(app.board.split.active);
+}
+
+#[test]
+fn archive_respawns_split_pane() {
+    let mut task = make_task(1, TaskStatus::Done);
+    task.tmux_window = Some("task-1".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some("%5".to_string());
+    app.board.split.pinned_task_id = Some(TaskId(1));
+
+    let cmds = app.update(Message::ArchiveTask(TaskId(1)));
+
+    assert!(
+        cmds.iter().any(|c| matches!(c, Command::RespawnSplitPane { pane_id } if pane_id == "%5")),
+        "should respawn split pane when pinned task is archived"
+    );
+    assert_eq!(app.board.split.pinned_task_id, None);
+    assert!(app.board.split.active);
+}
+
+#[test]
+fn retry_resume_respawns_split_pane() {
+    let mut task = make_task(1, TaskStatus::Running);
+    task.tmux_window = Some("task-1".to_string());
+    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+    task.sub_status = SubStatus::Crashed;
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some("%5".to_string());
+    app.board.split.pinned_task_id = Some(TaskId(1));
+    app.input.mode = InputMode::ConfirmRetry(TaskId(1));
+
+    let cmds = app.update(Message::RetryResume(TaskId(1)));
+
+    assert!(
+        cmds.iter().any(|c| matches!(c, Command::RespawnSplitPane { pane_id } if pane_id == "%5")),
+        "should respawn split pane when pinned task is retried"
+    );
+    assert_eq!(app.board.split.pinned_task_id, None);
+    assert!(app.board.split.active);
+}
+
+#[test]
+fn pr_created_does_not_respawn_split_pane() {
+    let mut task = make_task(1, TaskStatus::Running);
+    task.tmux_window = Some("task-1".to_string());
+    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some("%5".to_string());
+    app.board.split.pinned_task_id = Some(TaskId(1));
+
+    let cmds = app.update(Message::PrCreated {
+        id: TaskId(1),
+        pr_url: "https://github.com/org/repo/pull/42".to_string(),
+    });
+
+    assert!(
+        !cmds.iter().any(|c| matches!(c, Command::RespawnSplitPane { .. })),
+        "should NOT respawn — agent keeps running after PR creation"
+    );
+    assert_eq!(
+        app.board.split.pinned_task_id,
+        Some(TaskId(1)),
+        "pinned task should remain"
+    );
+}
+
 #[test]
 fn confirm_quit_with_split_no_pinned_task_kills_pane() {
     let mut app = make_app();
@@ -14367,4 +14557,35 @@ fn confirm_quit_without_split_emits_no_extra_commands() {
 
     assert!(app.should_quit);
     assert!(cmds.is_empty(), "no commands when split is not active");
+}
+
+#[test]
+fn epic_wrap_up_respawns_split_pane_only_once() {
+    let mut app = App::new(
+        vec![make_review_subtask(1, 10, 2), make_review_subtask(2, 10, 1)],
+        TEST_TIMEOUT,
+    );
+    app.board.epics = vec![make_epic(10)];
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some("%5".to_string());
+    app.board.split.pinned_task_id = Some(TaskId(2));
+    app.input.mode = InputMode::ConfirmEpicWrapUp(EpicId(10));
+    app.update(Message::EpicWrapUpRebase);
+
+    // First task completes — this is the pinned one
+    let cmds1 = app.update(Message::FinishComplete(TaskId(2)));
+    let respawn_count_1 = cmds1
+        .iter()
+        .filter(|c| matches!(c, Command::RespawnSplitPane { .. }))
+        .count();
+    assert_eq!(respawn_count_1, 1, "should respawn once for pinned task");
+    assert_eq!(app.board.split.pinned_task_id, None);
+
+    // Second task completes — no longer pinned
+    let cmds2 = app.update(Message::FinishComplete(TaskId(1)));
+    let respawn_count_2 = cmds2
+        .iter()
+        .filter(|c| matches!(c, Command::RespawnSplitPane { .. }))
+        .count();
+    assert_eq!(respawn_count_2, 0, "should NOT respawn for non-pinned task");
 }

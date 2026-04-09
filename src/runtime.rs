@@ -1206,6 +1206,17 @@ impl TuiRuntime {
         }
     }
 
+    fn exec_respawn_split_pane(&self, app: &mut App, pane_id: &str) {
+        if !tmux::pane_exists(pane_id, &*self.runner) {
+            app.update(Message::SplitPaneClosed);
+            return;
+        }
+        if let Err(e) = tmux::respawn_pane(pane_id, &*self.runner) {
+            tracing::warn!("respawn-pane failed: {e:#}");
+            app.update(Message::SplitPaneClosed);
+        }
+    }
+
     fn exec_dispatch_epic(&self, app: &mut App, epic: models::Epic) {
         let title = format!("Plan: {}", epic.title);
         let description = format!(
@@ -1806,6 +1817,7 @@ async fn execute_commands(
                 old_window.as_deref(),
             ),
             Command::CheckSplitPaneExists { pane_id } => rt.exec_check_split_pane(app, &pane_id),
+            Command::RespawnSplitPane { pane_id } => rt.exec_respawn_split_pane(app, &pane_id),
         }
     }
 

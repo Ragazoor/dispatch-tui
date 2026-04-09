@@ -2,7 +2,7 @@
 -- dispatch.allium
 --
 -- Scope: Agent dispatch and lifecycle management
--- Includes: Task, Epic, dispatch, finish/merge, archive, agent health, MCP constraints
+-- Includes: Task, Epic, dispatch, finish/merge, archive, agent health, MCP constraints, split pane lifecycle
 -- Excludes:
 --   - TUI rendering, keyboard input, selection state (UI implementation)
 --   - ReviewBoard view mode and ReviewPr entities (separate concern: inbound PR review)
@@ -27,6 +27,10 @@ external entity Worktree {
 
 external entity TmuxWindow {
     name: String
+}
+
+external entity TmuxPane {
+    id: String       -- tmux pane identifier (e.g., "%42")
 }
 
 ------------------------------------------------------------
@@ -159,6 +163,22 @@ entity TaskUsage {
         -- cache_read_tokens, cache_write_tokens) are summed with the
         -- existing values rather than replaced. updated_at reflects the
         -- time of the most recent report.
+}
+
+-- SplitPane is a runtime-only UI concept (not persisted) that tracks
+-- whether the TUI is displaying a task's tmux window as a side pane.
+-- It is modelled here because task lifecycle events (finish, PR creation)
+-- must coordinate with split pane state.
+
+entity SplitPane {
+    active: Boolean = false
+    pane: TmuxPane?
+    pinned_task: Task?
+
+    @guidance
+        -- At most one task can be pinned at a time.
+        -- When active is true, pane must be non-null.
+        -- pinned_task may be null (empty shell in the pane).
 }
 
 ------------------------------------------------------------
@@ -657,6 +677,51 @@ rule WrapUpPr {
         -- a `/code-review {pr_url}` command is injected into the tmux
         -- session after PR creation, triggering the agent to perform
         -- a self-review.
+}
+
+-- == Split Pane Lifecycle ==
+--
+-- When a task lifecycle event clears or replaces a task's tmux window,
+-- the split pane must be updated if that task is currently pinned.
+-- The pane is never destroyed — its content is respawned as a fresh
+-- shell so that split mode remains active without visual disruption.
+
+rule SplitPaneRespawnOnWindowCleared {
+    -- Fires whenever a lifecycle event clears a pinned task's tmux_window.
+    -- The trigger is the clearing of task.tmux_window, not the specific
+    -- event type. This covers all paths:
+    --   - WrapUpRebase / FinishTaskSuccess (rebase completes → Done)
+    --   - PrMerged (PR merged on GitHub → Done)
+    --   - ConfirmDone (manual Review → Done)
+    --   - ArchiveTask (any status → Archived)
+    --   - RetryResume (old window killed, new dispatch starts)
+    --
+    -- NOT triggered by WrapUpPr — the tmux window stays alive after PR
+    -- creation so the agent can continue working (e.g., self-review).
+    -- NOT triggered by failure paths (FinishTaskConflict, PrFailed) —
+    -- the pane should keep showing the agent session for inspection.
+
+    when: task.tmux_window cleared
+    requires: split_pane.active = true
+    requires: split_pane.pinned_task = task
+
+    ensures: split_pane.pinned_task = null
+    ensures: split_pane.active = true
+    ensures: split_pane.pane = RespawnedPane(split_pane.pane)
+
+    @guidance
+        -- The pane content is replaced in-place using tmux respawn-pane,
+        -- which kills the current process and starts a fresh shell without
+        -- destroying the pane itself. This avoids the flicker that would
+        -- occur from a kill-then-recreate sequence.
+        --
+        -- Handlers that also emit KillTmuxWindow for the old window name
+        -- are harmless — the window no longer exists as a standalone window
+        -- (it was absorbed into the pane via join-pane), so the kill is a
+        -- no-op. The respawn handles the actual cleanup.
+        --
+        -- If the pane was already closed externally, the respawn
+        -- degrades gracefully to SplitPaneClosed (full reset).
 }
 
 -- == Finish (Merge) ==
@@ -1531,6 +1596,15 @@ rule DeleteEpic {
     -- Exception: rules that set status and then immediately set a
     -- specific sub_status override the default (e.g., HookNotification
     -- sets status=review then sub_status=needs_input).
+
+@invariant SplitPaneStability
+    -- When split mode is active, the pane must never be destroyed and
+    -- recreated in response to task lifecycle events. Pane content is
+    -- replaced in-place (respawn) to avoid visual flicker. The only
+    -- operations that destroy the pane are explicit user actions:
+    -- toggling split mode off (S key) or manually closing the pane.
+    -- Lifecycle events (finish, PR creation) respawn the pane content
+    -- and clear pinned_task, but keep active=true and pane intact.
 
 ------------------------------------------------------------
 -- Open Questions
