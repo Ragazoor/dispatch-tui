@@ -1029,7 +1029,7 @@ fn tool_schemas_match_arg_structs() {
         .map(|t| (t["name"].as_str().unwrap(), t))
         .collect();
 
-    fn schema_props<'a>(tool: &'a Value) -> (BTreeSet<&'a str>, BTreeSet<&'a str>) {
+    fn schema_props(tool: &Value) -> (BTreeSet<&str>, BTreeSet<&str>) {
         let schema = &tool["inputSchema"];
         let props: BTreeSet<&str> = schema["properties"]
             .as_object()

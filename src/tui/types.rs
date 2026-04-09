@@ -1527,8 +1527,10 @@ mod tests {
 
     #[test]
     fn pr_list_state_needs_fetch_false_when_recently_fetched() {
-        let mut state = PrListState::default();
-        state.last_fetch = Some(Instant::now());
+        let state = PrListState {
+            last_fetch: Some(Instant::now()),
+            ..Default::default()
+        };
         assert!(!state.needs_fetch(Duration::from_secs(60)));
     }
 

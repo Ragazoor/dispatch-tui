@@ -1,4 +1,4 @@
-use dispatch_tui::db::{Database, EpicCrud, EpicPatch, TaskCrud, TaskPatch, TaskStore};
+use dispatch_tui::db::{Database, EpicCrud, EpicPatch, TaskCrud, TaskPatch};
 use dispatch_tui::models::*;
 
 #[test]

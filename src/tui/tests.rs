@@ -2895,7 +2895,7 @@ fn render_columns_fill_terminal_width() {
     // starts at x=90. The header should be somewhere after x=90.
     // If the old bug exists (34-char sidebar), each column is only ~21 chars and the
     // header would be well before x=90.
-    let expected_min_x = (width * 3 / 4) as u16;
+    let expected_min_x = width * 3 / 4;
     assert!(
         done_col_x >= expected_min_x,
         "last column header 'done' at x={done_col_x}, expected >= {expected_min_x} — \
@@ -12694,7 +12694,7 @@ fn handle_key_normal_enter_on_select_all_row() {
     app.handle_key(make_key(KeyCode::Enter));
     // Should have toggled select all — tasks should be selected
     assert!(
-        !app.select.tasks.is_empty() || app.select.epics.len() > 0 || app.selection().on_select_all
+        !app.select.tasks.is_empty() || !app.select.epics.is_empty() || app.selection().on_select_all
     );
 }
 

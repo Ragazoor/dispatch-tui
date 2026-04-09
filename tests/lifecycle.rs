@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use dispatch_tui::db::{self, Database, EpicCrud, SettingsStore, TaskCrud, TaskStore};
+use dispatch_tui::db::{self, Database, TaskCrud};
 use dispatch_tui::models::{DispatchMode, Task, TaskId, TaskStatus};
 use dispatch_tui::tui::{App, Command, Message, MoveDirection};
 
