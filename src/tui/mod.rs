@@ -708,6 +708,7 @@ impl App {
         match msg {
             // Board navigation, view toggles, system events
             msg @ (Message::Tick
+            | Message::TerminalResized
             | Message::Quit
             | Message::NavigateColumn(_)
             | Message::NavigateRow(_)
@@ -888,6 +889,7 @@ impl App {
     fn dispatch_board(&mut self, msg: Message) -> Vec<Command> {
         match msg {
             Message::Tick => self.handle_tick(),
+            Message::TerminalResized => vec![],
             Message::Quit => self.handle_quit(),
             Message::NavigateColumn(delta) => self.handle_navigate_column(delta),
             Message::NavigateRow(delta) => self.handle_navigate_row(delta),

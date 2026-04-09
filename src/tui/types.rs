@@ -173,6 +173,7 @@ impl std::str::FromStr for RepoFilterMode {
 #[derive(Debug, Clone)]
 pub enum Message {
     Tick,
+    TerminalResized,
     Quit,
     NavigateColumn(isize),
     NavigateRow(isize),

@@ -187,16 +187,23 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     // opening an external editor) via the input_paused flag.
     let input_paused = Arc::new(AtomicBool::new(false));
     let paused_clone = input_paused.clone();
+    let resize_tx = msg_tx.clone();
     tokio::task::spawn_blocking(move || loop {
         if paused_clone.load(Ordering::Relaxed) {
             std::thread::sleep(Duration::from_millis(100));
             continue;
         }
         if event::poll(Duration::from_millis(50)).unwrap_or(false) {
-            if let Ok(Event::Key(key)) = event::read() {
-                if key_tx.send(key).is_err() {
-                    break;
+            match event::read() {
+                Ok(Event::Key(key)) => {
+                    if key_tx.send(key).is_err() {
+                        break;
+                    }
                 }
+                Ok(Event::Resize(..)) => {
+                    let _ = resize_tx.send(Message::TerminalResized);
+                }
+                _ => {}
             }
         }
     });

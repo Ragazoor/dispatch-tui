@@ -14103,3 +14103,33 @@ fn handle_key_normal_epic_view_routes_correctly() {
     assert!(cmds.is_empty());
     assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
 }
+
+// ---------------------------------------------------------------------------
+// Terminal resize — re-render on size change
+// ---------------------------------------------------------------------------
+
+#[test]
+fn terminal_resized_returns_no_commands() {
+    let mut app = make_app();
+    let cmds = app.update(Message::TerminalResized);
+    assert!(cmds.is_empty(), "resize should produce no commands, just trigger a re-draw");
+}
+
+#[test]
+fn render_adapts_to_smaller_terminal_after_resize() {
+    let mut app = make_app();
+
+    // Render at a large size (pre-split)
+    let buf_large = render_to_buffer(&mut app, 160, 40);
+    // Render at a smaller size (post-split, e.g. half width)
+    let buf_small = render_to_buffer(&mut app, 80, 40);
+
+    // The smaller render should use the full width of the smaller terminal
+    assert_eq!(buf_small.area().width, 80);
+    assert_eq!(buf_large.area().width, 160);
+    // Both should contain a task title — layout adapted, content still renders
+    assert!(
+        buffer_contains(&buf_small, "Task 1"),
+        "task should render at smaller width"
+    );
+}
