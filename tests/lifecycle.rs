@@ -91,12 +91,12 @@ fn full_lifecycle() {
     assert_eq!(app.tasks()[0].status, TaskStatus::Running);
     assert_eq!(app.tasks()[0].tmux_window.as_deref(), Some("task-1"));
 
-    // 4. WindowGone on a Running task → marks as crashed (tmux_window preserved, no PersistTask)
+    // 4. WindowGone on a Running task → marks as crashed (tmux_window cleared, window is gone)
     let cmds = app.update(Message::WindowGone(task_id));
     execute(&db, &cmds);
     assert_eq!(app.tasks()[0].status, TaskStatus::Running);
-    // tmux_window is preserved so the worktree can be resumed later
-    assert!(app.tasks()[0].tmux_window.is_some());
+    // tmux_window is cleared — the window is gone by definition
+    assert!(app.tasks()[0].tmux_window.is_none());
     assert!(app.is_crashed(task_id));
 
     // 4b. Agent advances task to Review via MCP (simulated as MoveTask)
