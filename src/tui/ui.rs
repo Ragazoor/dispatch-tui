@@ -2431,12 +2431,20 @@ pub(in crate::tui) fn action_hints(task: Option<&Task>, key_color: Color) -> Vec
         }
     }
 
-    push_hint("^g", "back");
+    if task.is_some() {
+        push_hint("Enter", "detail");
+        push_hint("c", "copy");
+    }
     push_hint("a", "select all");
     push_hint("n", "new");
     push_hint("E", "epic");
     push_hint("D", "quick");
+    push_hint("S", "split");
+    push_hint("N", "notifications");
+    push_hint("f", "filter");
     push_hint("H", "history");
+    push_hint("Tab", "reviews");
+    push_hint("?", "help");
     push_hint("q", "quit");
 
     spans
@@ -2470,7 +2478,10 @@ pub(in crate::tui) fn epic_action_hints(epic: &Epic, key_color: Color) -> Vec<Sp
     push_hint("n", "new");
     push_hint("E", "epic");
     push_hint("D", "quick");
+    push_hint("f", "filter");
     push_hint("H", "history");
+    push_hint("Tab", "reviews");
+    push_hint("?", "help");
     push_hint("q", "quit");
 
     spans
@@ -2503,7 +2514,7 @@ fn batch_action_hints(count: usize, key_color: Color, has_tasks: bool) -> Vec<Sp
 // Review board rendering
 // ---------------------------------------------------------------------------
 
-fn review_action_hints(
+pub(in crate::tui) fn review_action_hints(
     has_pr: bool,
     is_author_mode: bool,
     agent_status: Option<crate::models::ReviewAgentStatus>,
@@ -2534,19 +2545,22 @@ fn review_action_hints(
             }
         }
     }
+    push_hint("f", "filter");
     push_hint("e", "edit queries");
     if is_author_mode {
         push_hint("D", "dispatch filter");
     }
+    push_hint("BackTab", "mode");
     push_hint("Tab", "task board");
     push_hint("?", "help");
     push_hint("q", "quit");
     spans
 }
 
-fn bot_action_hints(
+pub(in crate::tui) fn bot_action_hints(
     has_pr: bool,
     agent_status: Option<crate::models::ReviewAgentStatus>,
+    has_selection: bool,
 ) -> Vec<Span<'static>> {
     use crate::models::ReviewAgentStatus;
     let key_color = Color::Cyan;
@@ -2557,6 +2571,10 @@ fn bot_action_hints(
     };
     push_hint("Space", "select");
     push_hint("a", "select all");
+    if has_selection {
+        push_hint("A", "approve");
+        push_hint("m", "merge");
+    }
     if has_pr {
         match agent_status {
             Some(ReviewAgentStatus::Idle) => {
@@ -2574,7 +2592,12 @@ fn bot_action_hints(
         }
         push_hint("p", "open");
     }
+    push_hint("f", "filter");
+    push_hint("e", "edit queries");
+    push_hint("BackTab", "mode");
     push_hint("Tab", "task board");
+    push_hint("?", "help");
+    push_hint("q", "quit");
     spans
 }
 
@@ -2697,7 +2720,9 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
         );
         let agent_status = app.selected_review_pr().and_then(|pr| pr.agent_status);
         if is_bot_mode {
-            let hints = Paragraph::new(Line::from(bot_action_hints(has_pr, agent_status)));
+            let has_selection = app.has_bot_pr_selection();
+            let hints =
+                Paragraph::new(Line::from(bot_action_hints(has_pr, agent_status, has_selection)));
             frame.render_widget(hints, chunks[4]);
         } else {
             let hints = Paragraph::new(Line::from(review_action_hints(
@@ -3142,7 +3167,7 @@ pub fn render_security_board(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-fn security_action_hints(
+pub(in crate::tui) fn security_action_hints(
     app: &App,
     has_alert: bool,
     agent_status: Option<crate::models::ReviewAgentStatus>,
@@ -3181,6 +3206,7 @@ fn security_action_hints(
     push_hint(&mut spans, "t", format!("kind:{kind_label}"));
     push_hint(&mut spans, "Tab", "tasks".into());
     push_hint(&mut spans, "?", "help".into());
+    push_hint(&mut spans, "q", "quit".into());
     spans
 }
 

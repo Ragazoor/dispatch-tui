@@ -1680,6 +1680,130 @@ fn epic_action_hints_done() {
     assert!(keys.contains(&"[M]"), "done epic shows status backward");
 }
 
+// --- action_hints: missing hints ---
+
+/// Extract bold key spans (like "[d]", "[Tab]") from hint spans.
+fn hint_keys<'a>(hints: &'a [ratatui::text::Span<'static>]) -> Vec<&'a str> {
+    hints
+        .iter()
+        .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
+        .map(|s| s.content.as_ref())
+        .collect()
+}
+
+#[test]
+fn action_hints_backlog_shows_enter_detail() {
+    let task = make_task(1, TaskStatus::Backlog);
+    let hints = ui::action_hints(Some(&task), Color::Rgb(122, 162, 247));
+    let keys = hint_keys(&hints);
+    assert!(keys.contains(&"[Enter]"), "should show Enter/detail hint");
+}
+
+#[test]
+fn action_hints_shows_tab_filter_help() {
+    let task = make_task(1, TaskStatus::Backlog);
+    let hints = ui::action_hints(Some(&task), Color::Rgb(122, 162, 247));
+    let keys = hint_keys(&hints);
+    assert!(keys.contains(&"[Tab]"), "should show Tab hint");
+    assert!(keys.contains(&"[f]"), "should show filter hint");
+    assert!(keys.contains(&"[?]"), "should show help hint");
+}
+
+#[test]
+fn action_hints_shows_copy_split_notifications() {
+    let task = make_task(1, TaskStatus::Backlog);
+    let hints = ui::action_hints(Some(&task), Color::Rgb(122, 162, 247));
+    let keys = hint_keys(&hints);
+    assert!(keys.contains(&"[c]"), "should show copy hint");
+    assert!(keys.contains(&"[S]"), "should show split hint");
+    assert!(keys.contains(&"[N]"), "should show notifications hint");
+}
+
+#[test]
+fn action_hints_no_ctrl_g_outside_epic() {
+    let task = make_task(1, TaskStatus::Backlog);
+    let hints = ui::action_hints(Some(&task), Color::Rgb(122, 162, 247));
+    let keys = hint_keys(&hints);
+    assert!(
+        !keys.contains(&"[^g]"),
+        "should not show ^g back outside epic view"
+    );
+}
+
+// --- epic_action_hints: missing hints ---
+
+#[test]
+fn epic_action_hints_shows_tab_filter_help() {
+    let epic = make_epic(1);
+    let hints = ui::epic_action_hints(&epic, Color::Rgb(122, 162, 247));
+    let keys = hint_keys(&hints);
+    assert!(keys.contains(&"[Tab]"), "epic should show Tab hint");
+    assert!(keys.contains(&"[f]"), "epic should show filter hint");
+    assert!(keys.contains(&"[?]"), "epic should show help hint");
+}
+
+// --- review_action_hints: missing hints ---
+
+#[test]
+fn review_hints_shows_backtab_and_filter() {
+    let hints = ui::review_action_hints(true, false, None);
+    let keys = hint_keys(&hints);
+    assert!(
+        keys.contains(&"[BackTab]"),
+        "review should show BackTab hint"
+    );
+    assert!(keys.contains(&"[f]"), "review should show filter hint");
+}
+
+// --- bot_action_hints: missing hints ---
+
+#[test]
+fn bot_hints_shows_approve_merge_when_selected() {
+    let hints = ui::bot_action_hints(true, None, true);
+    let keys = hint_keys(&hints);
+    assert!(keys.contains(&"[A]"), "bot should show batch approve hint");
+    assert!(keys.contains(&"[m]"), "bot should show batch merge hint");
+}
+
+#[test]
+fn bot_hints_hides_approve_merge_when_no_selection() {
+    let hints = ui::bot_action_hints(true, None, false);
+    let keys = hint_keys(&hints);
+    assert!(
+        !keys.contains(&"[A]"),
+        "bot should not show approve without selection"
+    );
+    assert!(
+        !keys.contains(&"[m]"),
+        "bot should not show merge without selection"
+    );
+}
+
+#[test]
+fn bot_hints_shows_filter_queries_help_quit_backtab() {
+    let hints = ui::bot_action_hints(true, None, false);
+    let keys = hint_keys(&hints);
+    assert!(keys.contains(&"[f]"), "bot should show filter hint");
+    assert!(keys.contains(&"[e]"), "bot should show edit queries hint");
+    assert!(keys.contains(&"[?]"), "bot should show help hint");
+    assert!(keys.contains(&"[q]"), "bot should show quit hint");
+    assert!(keys.contains(&"[BackTab]"), "bot should show BackTab hint");
+}
+
+// --- security_action_hints: missing hints ---
+
+#[test]
+fn security_hints_shows_quit() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.board.view_mode = ViewMode::SecurityBoard {
+        selection: crate::tui::types::SecurityBoardSelection::new(),
+        saved_board: crate::tui::types::BoardSelection::default(),
+    };
+    let hints = ui::security_action_hints(&app, false, None);
+    let keys = hint_keys(&hints);
+    assert!(keys.contains(&"[q]"), "security should show quit hint");
+}
+
 // --- Edit key ---
 
 #[test]
@@ -2594,7 +2718,7 @@ fn render_error_popup_shows_message() {
 #[test]
 fn render_status_bar_shows_keybindings() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
-    let buf = render_to_buffer(&mut app, 100, 20);
+    let buf = render_to_buffer(&mut app, 200, 20);
     assert!(buffer_contains(&buf, "uit"));
 }
 
@@ -2790,7 +2914,7 @@ fn render_v2_detail_panel_shows_inline_metadata() {
 #[test]
 fn render_status_bar_uses_bracket_format() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
-    let buf = render_to_buffer(&mut app, 160, 20);
+    let buf = render_to_buffer(&mut app, 220, 20);
     // Hints should use [key] bracket format
     assert!(
         buffer_contains(&buf, "[n]"),
