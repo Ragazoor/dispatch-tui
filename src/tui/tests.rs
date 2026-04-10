@@ -7484,6 +7484,64 @@ fn tick_skips_conflict_tasks_for_stale_detection() {
 }
 
 #[test]
+fn refresh_from_stale_to_active_resets_last_output_change() {
+    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], TEST_TIMEOUT);
+    app.board.tasks[0].sub_status = SubStatus::Stale;
+    app.board.tasks[0].tmux_window = Some("win-3".to_string());
+    app.agents
+        .last_output_change
+        .insert(TaskId(3), Instant::now() - Duration::from_secs(300));
+
+    let mut refreshed = make_task(3, TaskStatus::Running);
+    refreshed.sub_status = SubStatus::Active;
+    refreshed.tmux_window = Some("win-3".to_string());
+
+    app.update(Message::RefreshTasks(vec![refreshed]));
+    let elapsed = app.agents.last_output_change[&TaskId(3)].elapsed();
+    assert!(elapsed < Duration::from_secs(1), "timer should be reset");
+}
+
+#[test]
+fn refresh_staying_stale_does_not_reset_last_output_change() {
+    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], TEST_TIMEOUT);
+    app.board.tasks[0].sub_status = SubStatus::Stale;
+    app.board.tasks[0].tmux_window = Some("win-3".to_string());
+    let old_instant = Instant::now() - Duration::from_secs(300);
+    app.agents
+        .last_output_change
+        .insert(TaskId(3), old_instant);
+
+    let mut refreshed = make_task(3, TaskStatus::Running);
+    refreshed.sub_status = SubStatus::Stale;
+    refreshed.tmux_window = Some("win-3".to_string());
+
+    app.update(Message::RefreshTasks(vec![refreshed]));
+    let elapsed = app.agents.last_output_change[&TaskId(3)].elapsed();
+    assert!(
+        elapsed > Duration::from_secs(200),
+        "timer should NOT be reset when staying stale"
+    );
+}
+
+#[test]
+fn refresh_from_crashed_to_active_resets_last_output_change() {
+    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], TEST_TIMEOUT);
+    app.board.tasks[0].sub_status = SubStatus::Crashed;
+    app.board.tasks[0].tmux_window = Some("win-3".to_string());
+    app.agents
+        .last_output_change
+        .insert(TaskId(3), Instant::now() - Duration::from_secs(300));
+
+    let mut refreshed = make_task(3, TaskStatus::Running);
+    refreshed.sub_status = SubStatus::Active;
+    refreshed.tmux_window = Some("win-3".to_string());
+
+    app.update(Message::RefreshTasks(vec![refreshed]));
+    let elapsed = app.agents.last_output_change[&TaskId(3)].elapsed();
+    assert!(elapsed < Duration::from_secs(1), "timer should be reset");
+}
+
+#[test]
 fn move_task_forward_resets_substatus() {
     let mut app = make_app();
     let id = TaskId(3); // Running

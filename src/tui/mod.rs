@@ -1569,6 +1569,19 @@ impl App {
             let was_needs_input = old_task.is_some_and(|t| t.sub_status == SubStatus::NeedsInput);
             let was_review = old_task.is_some_and(|t| t.status == TaskStatus::Review);
 
+            // Reset stale timer when a task recovers from Stale/Crashed via DB refresh
+            let was_stale_or_crashed = old_task
+                .is_some_and(|t| matches!(t.sub_status, SubStatus::Stale | SubStatus::Crashed));
+            let is_recovered = !matches!(
+                new_task.sub_status,
+                SubStatus::Stale | SubStatus::Crashed | SubStatus::Conflict
+            );
+            if was_stale_or_crashed && is_recovered {
+                self.agents
+                    .last_output_change
+                    .insert(new_task.id, Instant::now());
+            }
+
             if self.notifications_enabled {
                 // Detect NeedsInput transition (running tasks only)
                 if new_task.sub_status == SubStatus::NeedsInput
