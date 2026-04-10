@@ -174,6 +174,7 @@ impl std::str::FromStr for RepoFilterMode {
 pub enum Message {
     Tick,
     TerminalResized,
+    FocusChanged(bool),
     Quit,
     NavigateColumn(isize),
     NavigateRow(isize),
@@ -765,11 +766,23 @@ pub struct ArchiveState {
 // SplitState — tmux split mode state
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SplitState {
     pub(in crate::tui) active: bool,
+    pub(in crate::tui) focused: bool,
     pub(in crate::tui) right_pane_id: Option<String>,
     pub(in crate::tui) pinned_task_id: Option<TaskId>,
+}
+
+impl Default for SplitState {
+    fn default() -> Self {
+        Self {
+            active: false,
+            focused: true,
+            right_pane_id: None,
+            pinned_task_id: None,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -133,8 +133,26 @@ fn input_panel_height(app: &App, area_height: u16) -> u16 {
 
 /// Top-level render function.
 pub fn render(frame: &mut Frame, app: &mut App) {
-    let area = frame.area();
+    let full_area = frame.area();
     let now = Utc::now();
+
+    // When split mode is active, wrap everything in a focus border.
+    let area = if app.split_active() {
+        let border_color = if app.split_focused() { CYAN } else { BORDER };
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Plain)
+            .border_style(Style::default().fg(border_color));
+        frame.render_widget(block, full_area);
+        Rect {
+            x: full_area.x + 1,
+            y: full_area.y + 1,
+            width: full_area.width.saturating_sub(2),
+            height: full_area.height.saturating_sub(2),
+        }
+    } else {
+        full_area
+    };
 
     if matches!(app.view_mode(), ViewMode::ReviewBoard { .. }) {
         render_review_board(frame, app, area);

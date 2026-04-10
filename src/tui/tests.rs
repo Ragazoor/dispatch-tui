@@ -3823,6 +3823,85 @@ fn dispatch_epic_on_non_backlog_shows_status() {
 }
 
 #[test]
+fn split_focused_defaults_to_true() {
+    let app = make_app();
+    assert!(app.split_focused());
+}
+
+#[test]
+fn focus_changed_updates_split_focused_when_split_active() {
+    let mut app = make_app();
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some("pane1".to_string());
+
+    let cmds = app.update(Message::FocusChanged(false));
+    assert!(cmds.is_empty());
+    assert!(!app.split_focused());
+
+    let cmds = app.update(Message::FocusChanged(true));
+    assert!(cmds.is_empty());
+    assert!(app.split_focused());
+}
+
+#[test]
+fn split_pane_opened_resets_focused_to_true() {
+    let mut app = make_app();
+    // Simulate having lost focus before entering split
+    app.board.split.focused = false;
+
+    let _cmds = app.update(Message::SplitPaneOpened {
+        pane_id: "pane1".to_string(),
+        task_id: None,
+    });
+    assert!(app.split_active());
+    assert!(app.split_focused());
+}
+
+#[test]
+fn split_pane_closed_resets_focused_to_true() {
+    let mut app = make_app();
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some("pane1".to_string());
+    app.board.split.focused = false;
+
+    let _cmds = app.update(Message::SplitPaneClosed);
+    assert!(!app.split_active());
+    assert!(app.split_focused());
+}
+
+#[test]
+fn render_shows_border_when_split_active_and_focused() {
+    let mut app = make_app();
+    app.board.split.active = true;
+    app.board.split.focused = true;
+    app.board.split.right_pane_id = Some("pane1".to_string());
+
+    let buf = render_to_buffer(&mut app, 80, 24);
+    // Top-left corner should be a border character (┌)
+    assert_eq!(buf[(0, 0)].symbol(), "┌", "Expected border corner when split active");
+}
+
+#[test]
+fn render_no_border_when_split_inactive() {
+    let mut app = make_app();
+    assert!(!app.split_active());
+
+    let buf = render_to_buffer(&mut app, 80, 24);
+    // Top-left corner should NOT be a border character
+    assert_ne!(buf[(0, 0)].symbol(), "┌", "No border expected when split inactive");
+}
+
+#[test]
+fn focus_changed_ignored_when_split_inactive() {
+    let mut app = make_app();
+    assert!(!app.split_active());
+
+    let cmds = app.update(Message::FocusChanged(false));
+    assert!(cmds.is_empty());
+    assert!(app.split_focused()); // still true — ignored
+}
+
+#[test]
 fn dispatch_epic_with_plan_dispatches_next_backlog_subtask() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);

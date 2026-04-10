@@ -36,6 +36,13 @@ This registers the dispatch MCP server, installs the dispatch plugin (hooks, ski
 tmux new-session -s dev
 ```
 
+**Recommended tmux setting** — enable focus events so the split-view focus indicator works:
+
+```bash
+# Add to ~/.tmux.conf
+set -g focus-events on
+```
+
 **4. Start the TUI:**
 
 ```bash

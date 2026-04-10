@@ -151,6 +151,17 @@ To reinstall:
 dispatch setup
 ```
 
+## Tmux Configuration
+
+For the best experience with split-view mode, enable focus events in tmux:
+
+```bash
+# ~/.tmux.conf
+set -g focus-events on
+```
+
+This allows the TUI to show a colored border indicating which pane has focus: cyan when the TUI is focused, dim when the agent pane is focused. Without this setting, the focus border will not respond to pane switches.
+
 ## Troubleshooting
 
 **`not running inside a tmux session`**

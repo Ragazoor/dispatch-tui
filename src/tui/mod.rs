@@ -168,6 +168,9 @@ impl App {
     pub fn split_active(&self) -> bool {
         self.board.split.active
     }
+    pub fn split_focused(&self) -> bool {
+        self.board.split.focused
+    }
     pub fn split_pinned_task_id(&self) -> Option<TaskId> {
         self.board.split.pinned_task_id
     }
@@ -733,6 +736,7 @@ impl App {
             | Message::RepoPathsUpdated(_)
             | Message::MessageReceived(_)
             | Message::OpenInBrowser { .. }
+            | Message::FocusChanged(_)
             | Message::TmuxOutput { .. }
             | Message::WindowGone(_)) => self.dispatch_board(msg),
 
@@ -908,6 +912,7 @@ impl App {
                 self.handle_split_pane_opened(pane_id, task_id)
             }
             Message::SplitPaneClosed => self.handle_split_pane_closed(),
+            Message::FocusChanged(focused) => self.handle_focus_changed(focused),
             Message::RefreshTasks(tasks) => self.handle_refresh_tasks(tasks),
             Message::RefreshUsage(usage) => self.handle_refresh_usage(usage),
             Message::Error(msg) => self.handle_error(msg),
@@ -2407,13 +2412,22 @@ impl App {
         task_id: Option<TaskId>,
     ) -> Vec<Command> {
         self.board.split.active = true;
+        self.board.split.focused = true;
         self.board.split.right_pane_id = Some(pane_id);
         self.board.split.pinned_task_id = task_id;
         vec![]
     }
 
+    fn handle_focus_changed(&mut self, focused: bool) -> Vec<Command> {
+        if self.board.split.active {
+            self.board.split.focused = focused;
+        }
+        vec![]
+    }
+
     fn handle_split_pane_closed(&mut self) -> Vec<Command> {
         self.board.split.active = false;
+        self.board.split.focused = true;
         self.board.split.right_pane_id = None;
         self.board.split.pinned_task_id = None;
         vec![]

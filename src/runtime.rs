@@ -203,6 +203,12 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
                 Ok(Event::Resize(..)) => {
                     let _ = resize_tx.send(Message::TerminalResized);
                 }
+                Ok(Event::FocusGained) => {
+                    let _ = resize_tx.send(Message::FocusChanged(true));
+                }
+                Ok(Event::FocusLost) => {
+                    let _ = resize_tx.send(Message::FocusChanged(false));
+                }
                 _ => {}
             }
         }

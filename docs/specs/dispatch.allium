@@ -172,6 +172,7 @@ entity TaskUsage {
 
 entity SplitPane {
     active: Boolean = false
+    focused: Boolean = true
     pane: TmuxPane?
     pinned_task: Task?
 
@@ -179,6 +180,10 @@ entity SplitPane {
         -- At most one task can be pinned at a time.
         -- When active is true, pane must be non-null.
         -- pinned_task may be null (empty shell in the pane).
+        -- focused tracks whether the TUI pane has tmux focus.
+        -- Driven by crossterm FocusGained/FocusLost events
+        -- (requires tmux `focus-events on`). Defaults to true.
+        -- Reset to true on split entry and exit.
 }
 
 ------------------------------------------------------------
@@ -722,6 +727,26 @@ rule SplitPaneRespawnOnWindowCleared {
         --
         -- If the pane was already closed externally, the respawn
         -- degrades gracefully to SplitPaneClosed (full reset).
+}
+
+-- == Split Pane Focus Border ==
+--
+-- When split mode is active, the TUI renders a thin border around its
+-- entire area. The border color indicates whether the TUI pane has focus:
+-- cyan when focused, dim when the agent pane has focus.
+-- Requires tmux `focus-events on` for crossterm to receive focus events.
+
+rule SplitPaneFocusBorder {
+    when: split_pane.active = true
+
+    ensures: TUI renders Borders::ALL around entire area
+    ensures: border_color = CYAN when split_pane.focused = true
+    ensures: border_color = BORDER when split_pane.focused = false
+
+    @guidance
+        -- The border is only rendered during split mode. Normal single-pane
+        -- usage has no border. FocusChanged events update split_pane.focused
+        -- only when split is active — otherwise they are ignored.
 }
 
 -- == Finish (Merge) ==
