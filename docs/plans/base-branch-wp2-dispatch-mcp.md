@@ -40,7 +40,7 @@ Second work package. Makes dispatch, rebase, and PR operations use `task.base_br
 **Implement:**
 - `src/mcp/handlers/dispatch.rs`: Add `base_branch` (optional string) to `create_task` and `update_task` input schemas
 - `src/mcp/handlers/tasks.rs`:
-  - `handle_create_task`: Read `base_branch` from args, default to `"main"`, pass to `create_task()`
+  - `handle_create_task`: Read `base_branch` from args. If not provided, call `detect_default_branch()` on the task's `repo_path` to auto-detect. Pass resolved value to `create_task()`
   - `handle_update_task`: Read optional `base_branch`, include in `TaskPatch`
   - `handle_wrap_up`: Read `task.base_branch`, pass to `finish_task()` / `create_pr()`
 
