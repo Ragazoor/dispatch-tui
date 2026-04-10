@@ -1463,7 +1463,7 @@ impl App {
             task.status = TaskStatus::Running;
             task.sub_status = SubStatus::default_for(TaskStatus::Running);
             let task_clone = task.clone();
-            self.agents.last_output_change.insert(id, Instant::now());
+            self.agents.mark_active(id);
             self.clamp_selection();
             let mut cmds = vec![Command::PersistTask(task_clone)];
             if switch_focus {
@@ -1515,11 +1515,11 @@ impl App {
         let mut cmds = Vec::new();
         let activity_changed = self
             .agents
-            .last_activity
+            .prev_tmux_activity
             .get(&id)
             .is_none_or(|&prev| prev != activity_ts);
         if activity_changed {
-            self.agents.last_output_change.insert(id, Instant::now());
+            self.agents.mark_active(id);
             // Recovery: reset stale/crashed sub_status when activity resumes
             let needs_recovery = self
                 .find_task(id)
@@ -1532,7 +1532,7 @@ impl App {
                     cmds.push(Command::PersistTask(task.clone()));
                 }
             }
-            self.agents.last_activity.insert(id, activity_ts);
+            self.agents.prev_tmux_activity.insert(id, activity_ts);
         }
         self.agents.tmux_outputs.insert(id, output);
         cmds
@@ -1577,9 +1577,7 @@ impl App {
                 SubStatus::Stale | SubStatus::Crashed | SubStatus::Conflict
             );
             if was_stale_or_crashed && is_recovered {
-                self.agents
-                    .last_output_change
-                    .insert(new_task.id, Instant::now());
+                self.agents.mark_active(new_task.id);
             }
 
             if self.notifications_enabled {
@@ -1689,9 +1687,8 @@ impl App {
             })
             .filter(|t| {
                 self.agents
-                    .last_output_change
-                    .get(&t.id)
-                    .is_some_and(|instant| instant.elapsed() > timeout)
+                    .inactive_duration(t.id)
+                    .is_some_and(|d| d > timeout)
             })
             .map(|t| t.id)
             .collect();
@@ -1768,9 +1765,8 @@ impl App {
         }
         let elapsed = self
             .agents
-            .last_output_change
-            .get(&id)
-            .map(|t| t.elapsed().as_secs() / 60)
+            .inactive_duration(id)
+            .map(|d| d.as_secs() / 60)
             .unwrap_or(0);
         if let Some(task) = self.find_task(id) {
             cmds.push(Command::PersistTask(task.clone()));
@@ -1851,7 +1847,7 @@ impl App {
             task.status = TaskStatus::Running;
             task.sub_status = SubStatus::Active;
             let task_clone = task.clone();
-            self.agents.last_output_change.insert(id, Instant::now());
+            self.agents.mark_active(id);
             self.agents.last_error.remove(&id);
             self.clamp_selection();
             self.set_status(format!("Task {id} resumed"));

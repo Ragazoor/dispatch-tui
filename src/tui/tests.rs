@@ -1132,7 +1132,7 @@ fn stale_agent_detected_after_timeout() {
     let mut app = App::new(vec![make_task(4, TaskStatus::Running)], TEST_TIMEOUT);
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
     app.agents
-        .last_output_change
+        .last_active_at
         .insert(TaskId(4), Instant::now() - Duration::from_secs(301));
 
     let cmds = app.update(Message::Tick);
@@ -1176,16 +1176,16 @@ fn tmux_output_change_resets_staleness_timer() {
     let mut app = App::new(vec![make_task(4, TaskStatus::Running)], TEST_TIMEOUT);
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
     app.agents
-        .last_output_change
+        .last_active_at
         .insert(TaskId(4), Instant::now() - Duration::from_secs(301));
-    app.agents.last_activity.insert(TaskId(4), 1000);
+    app.agents.prev_tmux_activity.insert(TaskId(4), 1000);
 
     app.update(Message::TmuxOutput {
         id: TaskId(4),
         output: "output".to_string(),
         activity_ts: 1001,
     });
-    let elapsed = app.agents.last_output_change[&TaskId(4)].elapsed();
+    let elapsed = app.agents.last_active_at[&TaskId(4)].elapsed();
     assert!(elapsed < Duration::from_secs(1));
 }
 
@@ -1194,15 +1194,15 @@ fn tmux_output_same_activity_does_not_reset_timer() {
     let mut app = App::new(vec![make_task(4, TaskStatus::Running)], TEST_TIMEOUT);
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
     let old_instant = Instant::now() - Duration::from_secs(200);
-    app.agents.last_output_change.insert(TaskId(4), old_instant);
-    app.agents.last_activity.insert(TaskId(4), 1000);
+    app.agents.last_active_at.insert(TaskId(4), old_instant);
+    app.agents.prev_tmux_activity.insert(TaskId(4), 1000);
 
     app.update(Message::TmuxOutput {
         id: TaskId(4),
         output: "output".to_string(),
         activity_ts: 1000,
     });
-    let elapsed = app.agents.last_output_change[&TaskId(4)].elapsed();
+    let elapsed = app.agents.last_active_at[&TaskId(4)].elapsed();
     assert!(elapsed >= Duration::from_secs(199));
 }
 
@@ -1211,9 +1211,9 @@ fn activity_ts_change_with_same_output_resets_timer() {
     let mut app = App::new(vec![make_task(4, TaskStatus::Running)], TEST_TIMEOUT);
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
     app.agents
-        .last_output_change
+        .last_active_at
         .insert(TaskId(4), Instant::now() - Duration::from_secs(301));
-    app.agents.last_activity.insert(TaskId(4), 1000);
+    app.agents.prev_tmux_activity.insert(TaskId(4), 1000);
     app.agents
         .tmux_outputs
         .insert(TaskId(4), "same output".to_string());
@@ -1224,7 +1224,7 @@ fn activity_ts_change_with_same_output_resets_timer() {
         output: "same output".to_string(),
         activity_ts: 1001,
     });
-    let elapsed = app.agents.last_output_change[&TaskId(4)].elapsed();
+    let elapsed = app.agents.last_active_at[&TaskId(4)].elapsed();
     assert!(elapsed < Duration::from_secs(1));
 }
 
@@ -1233,8 +1233,8 @@ fn activity_ts_same_with_different_output_no_reset() {
     let mut app = App::new(vec![make_task(4, TaskStatus::Running)], TEST_TIMEOUT);
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
     let old_instant = Instant::now() - Duration::from_secs(200);
-    app.agents.last_output_change.insert(TaskId(4), old_instant);
-    app.agents.last_activity.insert(TaskId(4), 1000);
+    app.agents.last_active_at.insert(TaskId(4), old_instant);
+    app.agents.prev_tmux_activity.insert(TaskId(4), 1000);
     app.agents
         .tmux_outputs
         .insert(TaskId(4), "old text".to_string());
@@ -1245,7 +1245,7 @@ fn activity_ts_same_with_different_output_no_reset() {
         output: "new text".to_string(),
         activity_ts: 1000,
     });
-    let elapsed = app.agents.last_output_change[&TaskId(4)].elapsed();
+    let elapsed = app.agents.last_active_at[&TaskId(4)].elapsed();
     assert!(elapsed >= Duration::from_secs(199));
     // Display output is still updated for rendering
     assert_eq!(app.agents.tmux_outputs.get(&TaskId(4)).unwrap(), "new text");
@@ -1842,7 +1842,7 @@ fn e_key_confirm_n_cancels() {
 fn new_app_has_empty_agent_tracking() {
     let app = App::new(vec![], TEST_TIMEOUT);
     // stale/crashed state is now on the task's sub_status field, not in AgentTracking
-    assert!(app.agents.last_activity.is_empty());
+    assert!(app.agents.prev_tmux_activity.is_empty());
 }
 
 #[test]
@@ -2300,13 +2300,13 @@ fn archive_clears_agent_tracking() {
     app.agents
         .tmux_outputs
         .insert(TaskId(1), "output".to_string());
-    app.agents.last_activity.insert(TaskId(1), 1000);
+    app.agents.prev_tmux_activity.insert(TaskId(1), 1000);
 
     app.update(Message::ArchiveTask(TaskId(1)));
 
     // stale/crashed state is now on the task's sub_status field
     assert!(!app.agents.tmux_outputs.contains_key(&TaskId(1)));
-    assert!(!app.agents.last_activity.contains_key(&TaskId(1)));
+    assert!(!app.agents.prev_tmux_activity.contains_key(&TaskId(1)));
 }
 
 // --- Archive panel key handling ---
@@ -7455,7 +7455,7 @@ fn tick_skips_already_stale_tasks() {
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
     app.board.tasks[0].sub_status = SubStatus::Stale;
     app.agents
-        .last_output_change
+        .last_active_at
         .insert(TaskId(3), Instant::now() - Duration::from_secs(301));
 
     let cmds = app.update(Message::Tick);
@@ -7470,7 +7470,7 @@ fn tick_skips_already_crashed_tasks() {
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
     app.board.tasks[0].sub_status = SubStatus::Crashed;
     app.agents
-        .last_output_change
+        .last_active_at
         .insert(TaskId(3), Instant::now() - Duration::from_secs(301));
 
     let cmds = app.update(Message::Tick);
@@ -7483,7 +7483,7 @@ fn tick_skips_conflict_tasks_for_stale_detection() {
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
     app.board.tasks[0].sub_status = SubStatus::Conflict;
     app.agents
-        .last_output_change
+        .last_active_at
         .insert(TaskId(3), Instant::now() - Duration::from_secs(301));
 
     let cmds = app.update(Message::Tick);
@@ -7492,12 +7492,12 @@ fn tick_skips_conflict_tasks_for_stale_detection() {
 }
 
 #[test]
-fn refresh_from_stale_to_active_resets_last_output_change() {
+fn refresh_from_stale_to_active_resets_last_active_at() {
     let mut app = App::new(vec![make_task(3, TaskStatus::Running)], TEST_TIMEOUT);
     app.board.tasks[0].sub_status = SubStatus::Stale;
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
     app.agents
-        .last_output_change
+        .last_active_at
         .insert(TaskId(3), Instant::now() - Duration::from_secs(300));
 
     let mut refreshed = make_task(3, TaskStatus::Running);
@@ -7505,24 +7505,24 @@ fn refresh_from_stale_to_active_resets_last_output_change() {
     refreshed.tmux_window = Some("win-3".to_string());
 
     app.update(Message::RefreshTasks(vec![refreshed]));
-    let elapsed = app.agents.last_output_change[&TaskId(3)].elapsed();
+    let elapsed = app.agents.last_active_at[&TaskId(3)].elapsed();
     assert!(elapsed < Duration::from_secs(1), "timer should be reset");
 }
 
 #[test]
-fn refresh_staying_stale_does_not_reset_last_output_change() {
+fn refresh_staying_stale_does_not_reset_last_active_at() {
     let mut app = App::new(vec![make_task(3, TaskStatus::Running)], TEST_TIMEOUT);
     app.board.tasks[0].sub_status = SubStatus::Stale;
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
     let old_instant = Instant::now() - Duration::from_secs(300);
-    app.agents.last_output_change.insert(TaskId(3), old_instant);
+    app.agents.last_active_at.insert(TaskId(3), old_instant);
 
     let mut refreshed = make_task(3, TaskStatus::Running);
     refreshed.sub_status = SubStatus::Stale;
     refreshed.tmux_window = Some("win-3".to_string());
 
     app.update(Message::RefreshTasks(vec![refreshed]));
-    let elapsed = app.agents.last_output_change[&TaskId(3)].elapsed();
+    let elapsed = app.agents.last_active_at[&TaskId(3)].elapsed();
     assert!(
         elapsed > Duration::from_secs(200),
         "timer should NOT be reset when staying stale"
@@ -7530,12 +7530,12 @@ fn refresh_staying_stale_does_not_reset_last_output_change() {
 }
 
 #[test]
-fn refresh_from_crashed_to_active_resets_last_output_change() {
+fn refresh_from_crashed_to_active_resets_last_active_at() {
     let mut app = App::new(vec![make_task(3, TaskStatus::Running)], TEST_TIMEOUT);
     app.board.tasks[0].sub_status = SubStatus::Crashed;
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
     app.agents
-        .last_output_change
+        .last_active_at
         .insert(TaskId(3), Instant::now() - Duration::from_secs(300));
 
     let mut refreshed = make_task(3, TaskStatus::Running);
@@ -7543,7 +7543,7 @@ fn refresh_from_crashed_to_active_resets_last_output_change() {
     refreshed.tmux_window = Some("win-3".to_string());
 
     app.update(Message::RefreshTasks(vec![refreshed]));
-    let elapsed = app.agents.last_output_change[&TaskId(3)].elapsed();
+    let elapsed = app.agents.last_active_at[&TaskId(3)].elapsed();
     assert!(elapsed < Duration::from_secs(1), "timer should be reset");
 }
 
@@ -14891,4 +14891,59 @@ fn epic_wrap_up_respawns_split_pane_only_once() {
         .filter(|c| matches!(c, Command::RespawnSplitPane { .. }))
         .count();
     assert_eq!(respawn_count_2, 0, "should NOT respawn for non-pinned task");
+}
+
+// ---------------------------------------------------------------------------
+// AgentTracking helper methods
+// ---------------------------------------------------------------------------
+
+#[test]
+fn mark_active_sets_last_active_at_to_now() {
+    let mut tracking = AgentTracking::new(TEST_TIMEOUT);
+    assert!(tracking.last_active_at.get(&TaskId(1)).is_none());
+
+    tracking.mark_active(TaskId(1));
+
+    let elapsed = tracking.last_active_at[&TaskId(1)].elapsed();
+    assert!(elapsed < Duration::from_secs(1));
+}
+
+#[test]
+fn mark_active_overwrites_previous_value() {
+    let mut tracking = AgentTracking::new(TEST_TIMEOUT);
+    tracking
+        .last_active_at
+        .insert(TaskId(1), Instant::now() - Duration::from_secs(300));
+
+    tracking.mark_active(TaskId(1));
+
+    let elapsed = tracking.last_active_at[&TaskId(1)].elapsed();
+    assert!(elapsed < Duration::from_secs(1));
+}
+
+#[test]
+fn inactive_duration_returns_none_for_unknown_task() {
+    let tracking = AgentTracking::new(TEST_TIMEOUT);
+    assert!(tracking.inactive_duration(TaskId(99)).is_none());
+}
+
+#[test]
+fn inactive_duration_returns_elapsed_time() {
+    let mut tracking = AgentTracking::new(TEST_TIMEOUT);
+    tracking
+        .last_active_at
+        .insert(TaskId(1), Instant::now() - Duration::from_secs(60));
+
+    let duration = tracking.inactive_duration(TaskId(1)).unwrap();
+    assert!(duration >= Duration::from_secs(59));
+    assert!(duration < Duration::from_secs(62));
+}
+
+#[test]
+fn inactive_duration_near_zero_after_mark_active() {
+    let mut tracking = AgentTracking::new(TEST_TIMEOUT);
+    tracking.mark_active(TaskId(1));
+
+    let duration = tracking.inactive_duration(TaskId(1)).unwrap();
+    assert!(duration < Duration::from_secs(1));
 }

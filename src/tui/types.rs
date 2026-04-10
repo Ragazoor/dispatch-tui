@@ -679,11 +679,20 @@ pub struct StatusState {
 // AgentTracking — tmux output and health state for dispatched agents
 // ---------------------------------------------------------------------------
 
+/// Per-agent tmux output and health tracking for dispatched agents.
+///
+/// `last_active_at` records the wall-clock [`Instant`] when each agent was last
+/// known to be active (dispatched, resumed, or produced tmux output). Used for
+/// stale detection — if the elapsed time exceeds `inactivity_timeout`, the task
+/// is marked stale.
+///
+/// `prev_tmux_activity` caches the most recent tmux `window_activity` timestamp
+/// so we can detect genuine new activity vs. a re-poll returning the same value.
 #[derive(Debug)]
 pub struct AgentTracking {
     pub tmux_outputs: HashMap<TaskId, String>,
-    pub last_output_change: HashMap<TaskId, Instant>,
-    pub last_activity: HashMap<TaskId, u64>,
+    pub last_active_at: HashMap<TaskId, Instant>,
+    pub prev_tmux_activity: HashMap<TaskId, u64>,
     pub inactivity_timeout: Duration,
     pub notified_review: HashSet<TaskId>,
     pub notified_needs_input: HashSet<TaskId>,
@@ -696,8 +705,8 @@ impl AgentTracking {
     pub fn new(inactivity_timeout: Duration) -> Self {
         Self {
             tmux_outputs: HashMap::new(),
-            last_output_change: HashMap::new(),
-            last_activity: HashMap::new(),
+            last_active_at: HashMap::new(),
+            prev_tmux_activity: HashMap::new(),
             inactivity_timeout,
             notified_review: HashSet::new(),
             notified_needs_input: HashSet::new(),
@@ -707,10 +716,20 @@ impl AgentTracking {
         }
     }
 
+    /// Record that the agent for `id` is active right now.
+    pub fn mark_active(&mut self, id: TaskId) {
+        self.last_active_at.insert(id, Instant::now());
+    }
+
+    /// How long since the agent for `id` was last active, if known.
+    pub fn inactive_duration(&self, id: TaskId) -> Option<Duration> {
+        self.last_active_at.get(&id).map(|t| t.elapsed())
+    }
+
     /// Remove all tracking state for a task.
     pub fn clear(&mut self, id: TaskId) {
-        self.last_output_change.remove(&id);
-        self.last_activity.remove(&id);
+        self.last_active_at.remove(&id);
+        self.prev_tmux_activity.remove(&id);
         self.tmux_outputs.remove(&id);
         self.notified_review.remove(&id);
         self.notified_needs_input.remove(&id);

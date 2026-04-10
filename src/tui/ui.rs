@@ -474,9 +474,8 @@ fn classify_card_indicator(
     if task.sub_status == SubStatus::Stale {
         let inactive_mins = app
             .agents
-            .last_output_change
-            .get(&task.id)
-            .map(|t| t.elapsed().as_secs() / 60)
+            .inactive_duration(task.id)
+            .map(|d| d.as_secs() / 60)
             .unwrap_or(0);
         return CardIndicator::Stale { inactive_mins };
     }
@@ -970,9 +969,8 @@ pub(in crate::tui) fn task_detail_lines(app: &App, task: &Task) -> Vec<Line<'sta
     } else if app.is_stale(task.id) {
         let mins = app
             .agents
-            .last_output_change
-            .get(&task.id)
-            .map(|t| t.elapsed().as_secs() / 60)
+            .inactive_duration(task.id)
+            .map(|d| d.as_secs() / 60)
             .unwrap_or(0);
         line1_spans.push(Span::styled(
             format!(" (stale \u{00b7} {}m)", mins),
