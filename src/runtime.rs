@@ -1,6 +1,6 @@
 use anyhow::Result;
 use crossterm::{
-    event::{self, Event},
+    event::{self, DisableFocusChange, EnableFocusChange, Event},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -173,7 +173,7 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     // 4. Set up terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableFocusChange)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -251,7 +251,11 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
 
     // 8. Cleanup terminal
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(
+        terminal.backend_mut(),
+        DisableFocusChange,
+        LeaveAlternateScreen
+    )?;
     terminal.show_cursor()?;
 
     result
@@ -268,7 +272,11 @@ struct TerminalSuspend<'a> {
 impl<'a> TerminalSuspend<'a> {
     fn new(terminal: &'a mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<Self> {
         disable_raw_mode()?;
-        execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+        execute!(
+            terminal.backend_mut(),
+            DisableFocusChange,
+            LeaveAlternateScreen
+        )?;
         terminal.show_cursor()?;
         Ok(TerminalSuspend { terminal })
     }
@@ -277,7 +285,11 @@ impl<'a> TerminalSuspend<'a> {
 impl Drop for TerminalSuspend<'_> {
     fn drop(&mut self) {
         let _ = enable_raw_mode();
-        let _ = execute!(self.terminal.backend_mut(), EnterAlternateScreen);
+        let _ = execute!(
+            self.terminal.backend_mut(),
+            EnterAlternateScreen,
+            EnableFocusChange
+        );
         let _ = self.terminal.hide_cursor();
         let _ = self.terminal.clear();
     }
