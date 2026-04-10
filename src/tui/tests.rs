@@ -3878,7 +3878,11 @@ fn render_shows_border_when_split_active_and_focused() {
 
     let buf = render_to_buffer(&mut app, 80, 24);
     // Top-left corner should be a border character (┌)
-    assert_eq!(buf[(0, 0)].symbol(), "┌", "Expected border corner when split active");
+    assert_eq!(
+        buf[(0, 0)].symbol(),
+        "┌",
+        "Expected border corner when split active"
+    );
 }
 
 #[test]
@@ -3888,7 +3892,11 @@ fn render_no_border_when_split_inactive() {
 
     let buf = render_to_buffer(&mut app, 80, 24);
     // Top-left corner should NOT be a border character
-    assert_ne!(buf[(0, 0)].symbol(), "┌", "No border expected when split inactive");
+    assert_ne!(
+        buf[(0, 0)].symbol(),
+        "┌",
+        "No border expected when split inactive"
+    );
 }
 
 #[test]
@@ -7507,9 +7515,7 @@ fn refresh_staying_stale_does_not_reset_last_output_change() {
     app.board.tasks[0].sub_status = SubStatus::Stale;
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
     let old_instant = Instant::now() - Duration::from_secs(300);
-    app.agents
-        .last_output_change
-        .insert(TaskId(3), old_instant);
+    app.agents.last_output_change.insert(TaskId(3), old_instant);
 
     let mut refreshed = make_task(3, TaskStatus::Running);
     refreshed.sub_status = SubStatus::Stale;
