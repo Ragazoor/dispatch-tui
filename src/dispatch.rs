@@ -1006,7 +1006,7 @@ pub fn dispatch_review_agent(
         format!(
             "You are reviewing a dependency update PR #{} in {}: {}\n\n\
              {}\n\n\
-             This is an automated dependency update. Run `/review-pr {}` to review.\n\n\
+             This is an automated dependency update. Run `/anthropic-review-pr:review-pr {}` to review.\n\n\
              After the review completes, call the `update_review_status` MCP tool:\n\
              update_review_status(repo=\"{}\", number={}, status=\"findings_ready\")\n\n\
              Wait for the user.",
@@ -1022,7 +1022,7 @@ pub fn dispatch_review_agent(
         format!(
             "You are reviewing PR #{} in {}: {}\n\n\
              {}\n\n\
-             Run `/review-pr {}` to perform a comprehensive code review.\n\n\
+             Run `/anthropic-review-pr:review-pr {}` to perform a comprehensive code review.\n\n\
              After the review completes, call the `update_review_status` MCP tool:\n\
              update_review_status(repo=\"{}\", number={}, status=\"findings_ready\")\n\n\
              Wait for the user.",
@@ -2429,8 +2429,8 @@ mod tests {
             "prompt should include PR body"
         );
         assert!(
-            prompt.contains("/review-pr 99"),
-            "prompt should invoke /review-pr skill"
+            prompt.contains("/anthropic-review-pr:review-pr 99"),
+            "prompt should invoke fully qualified /anthropic-review-pr:review-pr skill"
         );
         assert!(
             prompt.contains("update_review_status"),
@@ -2632,8 +2632,8 @@ mod tests {
 
         let prompt = std::fs::read_to_string(worktree_dir.join(".claude-prompt")).unwrap();
         assert!(
-            prompt.contains("/review-pr"),
-            "prompt should invoke /review-pr skill"
+            prompt.contains("/anthropic-review-pr:review-pr"),
+            "prompt should invoke fully qualified /anthropic-review-pr:review-pr skill"
         );
         assert!(
             prompt.contains("update_review_status"),
