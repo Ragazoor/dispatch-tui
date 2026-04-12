@@ -131,14 +131,12 @@ fn rebase_preamble(target: &str) -> String {
 
 #[derive(Clone, Copy)]
 enum ClaudeMode {
-    AcceptEdits,
     Plan,
 }
 
 impl ClaudeMode {
     fn as_flag(self) -> &'static str {
         match self {
-            ClaudeMode::AcceptEdits => "acceptEdits",
             ClaudeMode::Plan => "plan",
         }
     }
@@ -233,7 +231,7 @@ pub fn quick_dispatch_agent(
     epic: Option<&EpicContext>,
 ) -> Result<DispatchResult> {
     let prompt = build_quick_dispatch_prompt(task.id, &task.title, &task.description, epic);
-    dispatch_with_prompt(task, &prompt, ClaudeMode::AcceptEdits, runner, None)
+    dispatch_with_prompt(task, &prompt, ClaudeMode::Plan, runner, None)
 }
 
 pub fn epic_planning_agent(
@@ -622,12 +620,17 @@ This is a quick-dispatched task with a placeholder title. Start by asking the us
 what they want to achieve. Once you understand the goal, call `update_task` with a \
 descriptive `title` (and optionally `description`) to rename the task on the kanban board.\n\
 \n\
+Then write a focused plan before making any changes:\n\
+\n\
+{attach}\n\
+\n\
 {tdd}\n\
 \n\
 {allium}\n\
 \n\
 {mcp}",
         block = block,
+        attach = plan_and_attach_instruction(task_id),
         tdd = tdd_instruction(),
         allium = allium_instruction(),
         mcp = mcp_tools_instruction(),
@@ -1511,6 +1514,19 @@ mod tests {
     fn build_prompt_without_plan_omits_plan_section() {
         let prompt = build_prompt(TaskId(1), "Task", "Desc", None, None);
         assert!(!prompt.contains("Plan:"));
+    }
+
+    #[test]
+    fn build_quick_dispatch_prompt_includes_planning_instruction() {
+        let prompt = build_quick_dispatch_prompt(TaskId(42), "Quick task", "", None);
+        assert!(
+            prompt.contains("docs/plans/") || prompt.contains("plan"),
+            "quick dispatch prompt should instruct agent to write a plan before implementing"
+        );
+        assert!(
+            prompt.contains("ask") || prompt.contains("permission") || prompt.contains("proceed"),
+            "quick dispatch prompt should ask for permission before implementing"
+        );
     }
 
     #[test]
