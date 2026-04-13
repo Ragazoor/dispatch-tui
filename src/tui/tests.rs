@@ -10839,6 +10839,73 @@ fn render_review_board_dependabot_empty_shows_no_prs() {
 }
 
 // ---------------------------------------------------------------------------
+// Bot error / not-configured status bar tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn last_bot_error_returns_bot_list_error() {
+    let mut app = make_app();
+    app.update(Message::PrsFetchFailed(
+        PrListKind::Bot,
+        "not configured".to_string(),
+    ));
+    assert_eq!(app.last_bot_error(), Some("not configured"));
+}
+
+#[test]
+fn render_review_board_dependabot_shows_not_configured_in_status_bar() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::PrsFetchFailed(
+        PrListKind::Bot,
+        "Bot queries not configured — press [e] to add your org filter".to_string(),
+    ));
+    app.update(Message::ToggleReviewBoardMode); // Reviewer → Author
+    app.update(Message::ToggleReviewBoardMode); // Author → Dependabot
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "not configured"),
+        "Dependabot mode should show persistent not-configured error in status bar"
+    );
+}
+
+#[test]
+fn render_review_board_reviewer_mode_does_not_show_bot_error() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::PrsFetchFailed(
+        PrListKind::Bot,
+        "bot error should not appear".to_string(),
+    ));
+    // Stay in Reviewer mode (no ToggleReviewBoardMode)
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        !buffer_contains(&buf, "bot error should not appear"),
+        "Reviewer mode must not show the bot error"
+    );
+}
+
+#[test]
+fn render_review_board_author_mode_shows_review_error_not_bot_error() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::PrsFetchFailed(
+        PrListKind::Review,
+        "review fetch error".to_string(),
+    ));
+    app.update(Message::PrsFetchFailed(
+        PrListKind::Bot,
+        "bot error should not appear".to_string(),
+    ));
+    app.update(Message::ToggleReviewBoardMode); // Reviewer → Author
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        !buffer_contains(&buf, "bot error should not appear"),
+        "Author mode must not show the bot error"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Merge PR tests
 // ---------------------------------------------------------------------------
 

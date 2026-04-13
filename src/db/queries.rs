@@ -330,8 +330,20 @@ impl super::SettingsStore for Database {
             ),
             (
                 "github_queries_bot",
-                "is:pr is:open author:app/dependabot -is:draft archived:false\n\
-                 is:pr is:open author:app/renovate -is:draft archived:false",
+                "# Uncomment and edit one or more lines below to configure the Dependabot board.\n\
+                 # Each uncommented line becomes a separate GitHub search query.\n\
+                 #\n\
+                 # Dependabot PRs in a specific repo:\n\
+                 # is:pr is:open author:app/dependabot repo:myorg/myrepo -is:draft archived:false\n\
+                 #\n\
+                 # Dependabot PRs across an org:\n\
+                 # is:pr is:open author:app/dependabot org:myorg -is:draft archived:false\n\
+                 #\n\
+                 # Renovate PRs across an org:\n\
+                 # is:pr is:open author:app/renovate org:myorg -is:draft archived:false\n\
+                 #\n\
+                 # Renovate PRs in a specific repo:\n\
+                 # is:pr is:open author:app/renovate repo:myorg/myrepo -is:draft archived:false",
             ),
         ];
         for (key, value) in defaults {

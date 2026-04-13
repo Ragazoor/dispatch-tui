@@ -356,7 +356,7 @@ impl TuiRuntime {
             .map(|s| {
                 s.lines()
                     .map(str::trim)
-                    .filter(|l| !l.is_empty())
+                    .filter(|l| !l.is_empty() && !l.starts_with('#'))
                     .map(String::from)
                     .collect()
             })
@@ -1425,6 +1425,15 @@ impl TuiRuntime {
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
         let queries = self.load_github_queries(kind.settings_key());
+
+        if queries.is_empty() && kind == PrListKind::Bot {
+            let _ = tx.send(Message::PrsFetchFailed(
+                kind,
+                "Bot queries not configured — press [e] to add your org filter".to_string(),
+            ));
+            return;
+        }
+
         tokio::task::spawn_blocking(move || {
             tracing::info!(kind = kind.label(), "fetching PRs via gh");
             match crate::github::fetch_prs(&*runner, &queries) {
@@ -3600,6 +3609,41 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // load_github_queries comment filtering
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn load_github_queries_strips_comment_lines() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        db.set_setting_string(
+            "github_queries_bot",
+            "# All comments\n# Another comment\n# Final",
+        )
+        .unwrap();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![]));
+        let rt = make_runtime(db, tx, mock);
+        assert!(rt.load_github_queries("github_queries_bot").is_empty());
+    }
+
+    #[test]
+    fn load_github_queries_strips_mixed_comments_and_queries() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        db.set_setting_string(
+            "github_queries_bot",
+            "# header comment\nis:pr is:open author:app/dependabot org:myorg\n# mid comment\nis:pr is:open author:app/renovate org:myorg",
+        )
+        .unwrap();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![]));
+        let rt = make_runtime(db, tx, mock);
+        let queries = rt.load_github_queries("github_queries_bot");
+        assert_eq!(queries.len(), 2);
+        assert_eq!(queries[0], "is:pr is:open author:app/dependabot org:myorg");
+        assert_eq!(queries[1], "is:pr is:open author:app/renovate org:myorg");
+    }
+
+    // -----------------------------------------------------------------------
     // Fetch PR tests (no queries configured → empty results)
     // -----------------------------------------------------------------------
 
@@ -3643,9 +3687,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn exec_fetch_bot_prs_no_queries_returns_empty() {
+    async fn exec_fetch_bot_prs_no_queries_sends_not_configured() {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
+        // Mock runner must never be called — not-configured short-circuits before fetch
         let mock = Arc::new(MockProcessRunner::new(vec![]));
         let rt = make_runtime(db, tx, mock);
 
@@ -3655,10 +3700,10 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        match msg {
-            Message::PrsLoaded(PrListKind::Bot, prs) => assert!(prs.is_empty()),
-            other => panic!("Expected PrsLoaded(Bot, _), got: {other:?}"),
-        }
+        assert!(
+            matches!(msg, Message::PrsFetchFailed(PrListKind::Bot, _)),
+            "Expected PrsFetchFailed(Bot, _) when queries not configured, got: {msg:?}"
+        );
     }
 
     #[tokio::test]

@@ -2764,7 +2764,13 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
     if let Some(msg) = app.status.message.as_deref() {
         let status = Paragraph::new(msg.to_string()).style(Style::default().fg(Color::Yellow));
         frame.render_widget(status, chunks[4]);
-    } else if let Some(err) = app.last_review_error() {
+    } else if let Some(err) = match app.view_mode() {
+        ViewMode::ReviewBoard {
+            mode: ReviewBoardMode::Dependabot,
+            ..
+        } => app.last_bot_error(),
+        _ => app.last_review_error(),
+    } {
         let status = Paragraph::new(format!("Error: {err}")).style(Style::default().fg(Color::Red));
         frame.render_widget(status, chunks[4]);
     } else if app.has_bot_pr_selection() {

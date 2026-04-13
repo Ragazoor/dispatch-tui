@@ -246,6 +246,9 @@ impl App {
     pub fn last_review_error(&self) -> Option<&str> {
         self.review.review.last_error.as_deref()
     }
+    pub fn last_bot_error(&self) -> Option<&str> {
+        self.review.bot.last_error.as_deref()
+    }
     pub fn review_detail_visible(&self) -> bool {
         self.review.detail_visible
     }
@@ -3192,7 +3195,11 @@ impl App {
         let list = self.review.list_mut(kind);
         list.loading = false;
         list.last_error = Some(error.clone());
-        self.set_status(format!("Failed to fetch {} PRs: {error}", kind.label()));
+        // Bot errors are shown persistently in the Dependabot tab status bar;
+        // no transient flash needed (and it would leak into other tabs).
+        if kind != PrListKind::Bot {
+            self.set_status(format!("Failed to fetch {} PRs: {error}", kind.label()));
+        }
         vec![]
     }
 
