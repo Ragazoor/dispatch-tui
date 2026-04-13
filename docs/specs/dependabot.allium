@@ -11,6 +11,9 @@
 
 enum DependabotColumn { backlog | in_review | approved }
 
+-- Note: ReviewPr, CiStatus, and ReviewAgentStatus are domain types defined in
+-- src/models.rs and not yet formalised in a separate allium spec.
+
 -- Agent status variants are defined in core.allium (ReviewAgentStatus)
 
 ------------------------------------------------------------
@@ -27,6 +30,7 @@ enum DependabotColumn { backlog | in_review | approved }
 --
 -- Approved always wins, even if an agent is still running.
 
+-- Column indices: backlog=0, in_review=1, approved=2
 rule DependabotColumnPlacement(pr: ReviewPr) -> DependabotColumn {
     when pr.review_decision == approved    => approved
     when pr.agent_status in
