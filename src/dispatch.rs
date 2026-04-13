@@ -497,7 +497,12 @@ fn epic_preamble(epic: Option<&EpicContext>) -> (String, String) {
 }
 
 /// Standard task identification block shared by all task agent prompts.
-fn task_block(task_id: TaskId, title: &str, description: &str, epic: Option<&EpicContext>) -> String {
+fn task_block(
+    task_id: TaskId,
+    title: &str,
+    description: &str,
+    epic: Option<&EpicContext>,
+) -> String {
     let (epic_id_line, epic_section) = epic_preamble(epic);
     format!(
         "Task:\n  ID: {task_id}\n  Title: {title}\n  Description: {description}\
@@ -1417,7 +1422,9 @@ mod tests {
         let prompt = build_prompt(TaskId(1), "Task", "Desc", Some("docs/plans/plan.md"), None);
         assert!(prompt.contains("docs/plans/plan.md"));
         assert!(
-            prompt.contains("Shall I proceed") || prompt.contains("permission") || prompt.contains("proceed"),
+            prompt.contains("Shall I proceed")
+                || prompt.contains("permission")
+                || prompt.contains("proceed"),
             "with-plan prompt should ask for permission before implementing"
         );
         assert!(
