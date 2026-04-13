@@ -859,7 +859,15 @@ pub fn create_pr(
     let repo_slug = parse_repo_slug(&remote_url)
         .ok_or_else(|| PrError::Other(format!("Could not parse repo slug from: {remote_url}")))?;
 
-    // 3. Create the PR
+    // 3. Create the PR.
+    // Use owner:branch format for --head so gh resolves the branch in the same repo as --repo.
+    // Without the owner prefix, gh defaults to the authenticated user's namespace, causing
+    // "Head sha can't be blank" errors when the user isn't the repo owner.
+    let owner = repo_slug
+        .split('/')
+        .next()
+        .ok_or_else(|| PrError::Other(format!("Invalid repo slug: {repo_slug}")))?;
+    let head_ref = format!("{owner}:{branch}");
     let output = runner
         .run(
             "gh",
@@ -872,7 +880,7 @@ pub fn create_pr(
                 "--body",
                 description,
                 "--head",
-                branch,
+                &head_ref,
                 "--base",
                 base_branch,
                 "--repo",
@@ -2368,6 +2376,38 @@ mod tests {
         assert!(calls[2].1.contains(&"create".to_string()));
         assert!(calls[2].1.contains(&"--draft".to_string()));
         assert!(calls[2].1.contains(&"org/repo".to_string()));
+        // --head must include owner prefix to avoid gh resolving it in the wrong namespace
+        assert!(
+            calls[2].1.contains(&"org:42-fix-bug".to_string()),
+            "--head must be owner:branch, got: {:?}",
+            calls[2].1
+        );
+    }
+
+    #[test]
+    fn create_pr_head_ref_includes_owner_prefix() {
+        // Regression: gh pr create --head branch (no owner) causes GitHub to resolve the
+        // branch in the authenticated user's namespace instead of the --repo owner's namespace,
+        // producing "Head sha can't be blank" errors. The fix is to always pass owner:branch.
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(),
+            MockProcessRunner::ok_with_stdout(b"https://github.com/myorg/myrepo.git\n"),
+            MockProcessRunner::ok_with_stdout(b"https://github.com/myorg/myrepo/pull/1\n"),
+        ]);
+
+        create_pr("/repo", "99-my-feature", "Feature", "desc", "main", &mock).unwrap();
+
+        let calls = mock.recorded_calls();
+        let gh_args = &calls[2].1;
+        let head_idx = gh_args
+            .iter()
+            .position(|a| a == "--head")
+            .expect("--head flag must be present");
+        assert_eq!(
+            gh_args[head_idx + 1],
+            "myorg:99-my-feature",
+            "--head value must be owner:branch"
+        );
     }
 
     #[test]
