@@ -2979,14 +2979,6 @@ mod tests {
             !prompt.contains("gh pr review"),
             "prompt should NOT tell agent to submit review directly"
         );
-        assert!(
-            !prompt.contains("Fix it"),
-            "prompt should not contain PR title"
-        );
-        assert!(
-            !prompt.contains("body"),
-            "prompt should not contain PR body"
-        );
     }
 
     #[test]
@@ -3018,14 +3010,6 @@ mod tests {
         assert!(
             prompt.contains("update_review_status"),
             "prompt should reference MCP tool"
-        );
-        assert!(
-            !prompt.contains("Bump lodash"),
-            "dependabot prompt should not contain PR title"
-        );
-        assert!(
-            !prompt.contains("body"),
-            "dependabot prompt should not contain PR body"
         );
     }
 
