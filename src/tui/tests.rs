@@ -5796,6 +5796,86 @@ fn pr_merged_preserves_worktree() {
 }
 
 #[test]
+fn pr_merged_kills_matching_review_board_window() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+
+    // Load a review PR that matches the task's PR URL
+    let mut review_pr = make_review_pr_for_repo(42, "alice", ReviewDecision::Approved, "org/repo");
+    review_pr.tmux_window = Some("review:pr-42".to_string());
+    review_pr.worktree = Some("/repo/.worktrees/review-42".to_string());
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![review_pr]));
+
+    let cmds = app.update(Message::PrMerged(TaskId(1)));
+
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, Command::KillTmuxWindow { window } if window == "review:pr-42")),
+        "should kill review board PR window"
+    );
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, Command::UpdateAgentStatus { repo, number, status: None }
+                if repo == "org/repo" && *number == 42)),
+        "should clear review agent status"
+    );
+    // Review PR state should be cleared in-memory
+    assert!(app.review.review.prs[0].tmux_window.is_none());
+    assert!(app.review.review.prs[0].worktree.is_none());
+    assert!(app.review.review.prs[0].agent_status.is_none());
+}
+
+#[test]
+fn pr_merged_no_review_board_match_is_ok() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+
+    // Load a review PR with a DIFFERENT number — should not be cleaned up
+    let mut other_pr = make_review_pr_for_repo(99, "bob", ReviewDecision::ReviewRequired, "org/repo");
+    other_pr.tmux_window = Some("review:pr-99".to_string());
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![other_pr]));
+
+    let cmds = app.update(Message::PrMerged(TaskId(1)));
+
+    // The task should still move to Done
+    assert_eq!(app.find_task(TaskId(1)).unwrap().status, TaskStatus::Done);
+    // The unrelated review window should NOT be killed
+    assert!(
+        !cmds
+            .iter()
+            .any(|c| matches!(c, Command::KillTmuxWindow { window } if window == "review:pr-99")),
+        "should not kill unrelated review board PR window"
+    );
+}
+
+#[test]
+fn pr_merged_kills_both_task_and_review_windows() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.tmux_window = Some("task-1".to_string());
+    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+
+    let mut review_pr = make_review_pr_for_repo(42, "alice", ReviewDecision::Approved, "org/repo");
+    review_pr.tmux_window = Some("review:pr-42".to_string());
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![review_pr]));
+
+    let cmds = app.update(Message::PrMerged(TaskId(1)));
+
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, Command::KillTmuxWindow { window } if window == "task-1")),
+        "should kill task's own tmux window"
+    );
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, Command::KillTmuxWindow { window } if window == "review:pr-42")),
+        "should kill review board PR window"
+    );
+}
+
+#[test]
 fn card_shows_pr_badge() {
     let mut task = make_task(1, TaskStatus::Review);
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
