@@ -5597,7 +5597,7 @@ fn key_n_uppercase_toggles_notifications() {
     assert!(!app.notifications_enabled()); // default: false
     let cmds = app.handle_key(make_key(KeyCode::Char('N')));
     assert!(app.notifications_enabled()); // toggled to enabled
-    // Should emit PersistSetting command
+                                          // Should emit PersistSetting command
     assert!(cmds
         .iter()
         .any(|c| matches!(c, Command::PersistSetting { .. })));

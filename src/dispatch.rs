@@ -1129,11 +1129,7 @@ pub fn dispatch_review_agent(
              After the review completes, call the `update_review_status` MCP tool:\n\
              update_review_status(repo=\"{}\", number={}, status=\"findings_ready\")\n\n\
              Wait for the user.",
-            req.number,
-            req.github_repo,
-            req.number,
-            req.github_repo,
-            req.number
+            req.number, req.github_repo, req.number, req.github_repo, req.number
         )
     } else {
         format!(
@@ -1142,11 +1138,7 @@ pub fn dispatch_review_agent(
              After the review completes, call the `update_review_status` MCP tool:\n\
              update_review_status(repo=\"{}\", number={}, status=\"findings_ready\")\n\n\
              Wait for the user.",
-            req.number,
-            req.github_repo,
-            req.number,
-            req.github_repo,
-            req.number
+            req.number, req.github_repo, req.number, req.github_repo, req.number
         )
     };
 
@@ -2737,11 +2729,9 @@ mod tests {
             MockProcessRunner::ok(), // tmux send-keys Enter
         ]);
 
-        let result = dispatch_review_agent(
-            &review_req(&repo_path, 99, "feature-branch", false),
-            &mock,
-        )
-        .unwrap();
+        let result =
+            dispatch_review_agent(&review_req(&repo_path, 99, "feature-branch", false), &mock)
+                .unwrap();
 
         let calls = mock.recorded_calls();
         // Verify git fetch
@@ -2996,11 +2986,7 @@ mod tests {
             MockProcessRunner::ok(),                // tmux send-keys -l
             MockProcessRunner::ok(),                // tmux send-keys Enter
         ]);
-        dispatch_review_agent(
-            &review_req(&repo_path, 42, "dependabot/npm", true),
-            &mock,
-        )
-        .unwrap();
+        dispatch_review_agent(&review_req(&repo_path, 42, "dependabot/npm", true), &mock).unwrap();
 
         let prompt = std::fs::read_to_string(worktree_dir.join(".claude-prompt")).unwrap();
         assert!(
