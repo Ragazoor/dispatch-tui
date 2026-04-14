@@ -591,7 +591,7 @@ fn build_prompt(
 
     match plan {
         None => {
-            // No plan yet — agent must create one and ask permission before implementing.
+            // No plan yet — agent brainstorms (if vague) or writes a plan directly.
             format!(
                 "Your task is:\n\
 {block}\n\
