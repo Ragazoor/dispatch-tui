@@ -66,6 +66,34 @@ pub(in crate::tui) fn truncate_title(title: &str, max_len: usize) -> String {
     }
 }
 
+/// Returns true if every character in `query` appears in `path` as a
+/// forward subsequence (case-insensitive). An empty query matches everything.
+#[allow(dead_code)]
+pub(in crate::tui) fn fuzzy_matches(path: &str, query: &str) -> bool {
+    if query.is_empty() {
+        return true;
+    }
+    let path_lower = path.to_lowercase();
+    let mut path_chars = path_lower.chars();
+    let query_lower = query.to_lowercase();
+    for qc in query_lower.chars() {
+        if !path_chars.any(|pc| pc == qc) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Returns the subset of `paths` that fuzzy-match `query`, preserving order.
+#[allow(dead_code)]
+pub(in crate::tui) fn filtered_repos(paths: &[String], query: &str) -> Vec<String> {
+    paths
+        .iter()
+        .filter(|p| fuzzy_matches(p, query))
+        .cloned()
+        .collect()
+}
+
 impl App {
     pub fn new(tasks: Vec<Task>, inactivity_timeout: Duration) -> Self {
         App {

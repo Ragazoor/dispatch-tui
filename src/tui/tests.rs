@@ -15687,6 +15687,61 @@ fn repo_cursor_resets_on_entering_epic_repo_path_mode() {
 }
 
 #[test]
+fn fuzzy_matches_empty_query_matches_anything() {
+    assert!(super::fuzzy_matches("/some/path", ""));
+    assert!(super::fuzzy_matches("", ""));
+}
+
+#[test]
+fn fuzzy_matches_subsequence() {
+    assert!(super::fuzzy_matches("/tmp", "tmp"));
+    assert!(super::fuzzy_matches("/home/tmp", "tmp"));
+    assert!(super::fuzzy_matches("/home/ragge/proj", "ragge"));
+}
+
+#[test]
+fn fuzzy_matches_case_insensitive() {
+    assert!(super::fuzzy_matches("/TMP", "tmp"));
+    assert!(super::fuzzy_matches("/tmp", "TMP"));
+}
+
+#[test]
+fn fuzzy_matches_no_match() {
+    assert!(!super::fuzzy_matches("/var", "tmp"));
+}
+
+#[test]
+fn fuzzy_matches_chars_must_be_in_order() {
+    // "tp" is a valid subsequence of "/tmp" (t at 1, p at 3)
+    assert!(super::fuzzy_matches("/tmp", "tp"));
+    // "pt" requires p before t: p is at 3, t is at 1 -> false
+    assert!(!super::fuzzy_matches("/tmp", "pt"));
+}
+
+#[test]
+fn filtered_repos_empty_query_returns_all() {
+    let paths = vec!["/a".to_string(), "/b".to_string()];
+    assert_eq!(super::filtered_repos(&paths, ""), vec!["/a", "/b"]);
+}
+
+#[test]
+fn filtered_repos_narrows_by_query() {
+    let paths = vec![
+        "/home/ragge/proj".to_string(),
+        "/var/log".to_string(),
+        "/home/other".to_string(),
+    ];
+    let result = super::filtered_repos(&paths, "home");
+    assert_eq!(result, vec!["/home/ragge/proj", "/home/other"]);
+}
+
+#[test]
+fn filtered_repos_no_matches_returns_empty() {
+    let paths = vec!["/tmp".to_string(), "/var".to_string()];
+    assert_eq!(super::filtered_repos(&paths, "xyz"), Vec::<String>::new());
+}
+
+#[test]
 fn repo_cursor_resets_on_copy_task() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/a".to_string(), "/b".to_string(), "/c".to_string()];
