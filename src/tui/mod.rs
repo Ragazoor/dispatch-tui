@@ -4116,7 +4116,8 @@ impl App {
     }
 
     /// Clean up any active review agent session for the given (repo, number) pair.
-    /// Searches all three PR lists. Returns commands to kill the window and persist.
+    /// Searches all three PR lists. Only emits commands when there is actual agent
+    /// state to clear (tmux_window, worktree, or agent_status non-null).
     fn cleanup_review_board_pr(&mut self, repo: String, number: i64) -> Vec<Command> {
         let mut cmds = Vec::new();
         let mut matched = false;
@@ -4129,12 +4130,14 @@ impl App {
             .chain(self.review.bot.prs.iter_mut())
         {
             if pr.repo == repo && pr.number == number {
-                matched = true;
-                if let Some(window) = pr.tmux_window.take() {
-                    cmds.push(Command::KillTmuxWindow { window });
+                if pr.tmux_window.is_some() || pr.worktree.is_some() || pr.agent_status.is_some() {
+                    matched = true;
+                    if let Some(window) = pr.tmux_window.take() {
+                        cmds.push(Command::KillTmuxWindow { window });
+                    }
+                    pr.worktree = None;
+                    pr.agent_status = None;
                 }
-                pr.worktree = None;
-                pr.agent_status = None;
             }
         }
         if matched {

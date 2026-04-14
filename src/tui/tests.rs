@@ -12113,6 +12113,33 @@ fn bot_prs_merged_kills_active_review_window() {
 }
 
 #[test]
+fn bot_prs_merged_noop_when_no_active_window() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+
+    // Bot PR with no review agent
+    let pr = make_bot_pr(
+        42,
+        ReviewDecision::Approved,
+        None,
+        crate::models::CiStatus::Success,
+    );
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
+
+    let cmds = app.update(Message::BotPrsMerged(vec![
+        "https://github.com/acme/app/pull/42".to_string(),
+    ]));
+
+    assert!(
+        !cmds.iter().any(|c| matches!(c, Command::KillTmuxWindow { .. })),
+        "no window to kill — should emit no KillTmuxWindow"
+    );
+    assert!(
+        !cmds.iter().any(|c| matches!(c, Command::UpdateAgentStatus { .. })),
+        "no agent to clear — should emit no UpdateAgentStatus"
+    );
+}
+
+#[test]
 fn review_board_unknown_key_is_noop() {
     let mut app = make_review_board_app();
     let cmds = app.handle_key(make_key(KeyCode::Char('z')));
