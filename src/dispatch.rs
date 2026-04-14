@@ -557,6 +557,14 @@ and call update_task to attach it."
         .to_string()
 }
 
+/// Dispatch instruction for no-plan tasks: conditionally suggests brainstorming
+/// based on agent judgment of task description clarity.
+fn plan_or_brainstorm_instruction() -> &'static str {
+    "Use /brainstorming to design the solution if the task description is vague or \
+underspecified. Otherwise write an implementation plan directly, save it to docs/plans/ \
+and call update_task to attach it."
+}
+
 /// Wrap-up instruction for when implementation is complete.
 fn wrap_up_instruction() -> &'static str {
     "When implementation is complete, use the /wrap-up skill to commit remaining \
@@ -596,7 +604,7 @@ fn build_prompt(
 \n\
 {mcp}",
                 block = block,
-                attach = plan_and_attach_instruction(task_id),
+                attach = plan_or_brainstorm_instruction(),
                 tdd = tdd_instruction(),
                 allium = allium_instruction(),
                 mcp = mcp_tools_instruction(),
