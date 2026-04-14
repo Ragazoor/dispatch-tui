@@ -546,7 +546,7 @@ impl super::EpicCrud for Database {
         }
         if let Some(ad) = patch.auto_dispatch {
             sets.push("auto_dispatch = ?");
-            values.push(Box::new(ad as i64));
+            values.push(Box::new(ad));
         }
 
         sets.push("updated_at = datetime('now')");
