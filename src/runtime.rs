@@ -969,6 +969,26 @@ impl TuiRuntime {
         }
     }
 
+    fn exec_toggle_epic_auto_dispatch(
+        &self,
+        app: &mut App,
+        id: models::EpicId,
+        auto_dispatch: bool,
+    ) {
+        if let Err(e) = self.epic_svc.update_epic(crate::service::UpdateEpicParams {
+            epic_id: id.0,
+            title: None,
+            description: None,
+            status: None,
+            plan_path: None,
+            sort_order: None,
+            repo_path: None,
+            auto_dispatch: Some(auto_dispatch),
+        }) {
+            app.update(Message::Error(Self::db_error("toggling auto dispatch", e)));
+        }
+    }
+
     fn exec_refresh_epics_from_db(&self, app: &mut App) {
         match self.database.list_epics() {
             Ok(epics) => {
@@ -1776,6 +1796,9 @@ async fn execute_commands(
             } => rt.exec_persist_epic(app, id, status, sort_order),
             Command::RefreshEpicsFromDb => rt.exec_refresh_epics_from_db(app),
             Command::DispatchEpic { epic } => rt.exec_dispatch_epic(app, epic),
+            Command::ToggleEpicAutoDispatch { id, auto_dispatch } => {
+                rt.exec_toggle_epic_auto_dispatch(app, id, auto_dispatch)
+            }
             Command::SendNotification {
                 title,
                 body,

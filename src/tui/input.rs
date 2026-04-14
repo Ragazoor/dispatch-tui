@@ -283,6 +283,15 @@ impl App {
                 }
             }
 
+            KeyCode::Char('U') => {
+                if let ViewMode::Epic { epic_id, .. } = &self.board.view_mode {
+                    let id = *epic_id;
+                    self.update(Message::ToggleEpicAutoDispatch(id))
+                } else {
+                    vec![]
+                }
+            }
+
             KeyCode::Char('H') => self.update(Message::ToggleArchive),
 
             KeyCode::Char('?') => self.update(Message::ToggleHelp),

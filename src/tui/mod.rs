@@ -819,7 +819,8 @@ impl App {
             | Message::CancelEpicWrapUp
             | Message::CancelMergeQueue
             | Message::ToggleSelectEpic(_)
-            | Message::BatchArchiveEpics(_)) => self.dispatch_epic(msg),
+            | Message::BatchArchiveEpics(_)
+            | Message::ToggleEpicAutoDispatch(_)) => self.dispatch_epic(msg),
 
             // Review board, PR flow, review agents, bot PRs
             msg @ (Message::SwitchToReviewBoard
@@ -1037,6 +1038,7 @@ impl App {
             Message::CancelMergeQueue => self.handle_cancel_merge_queue(),
             Message::ToggleSelectEpic(id) => self.handle_toggle_select_epic(id),
             Message::BatchArchiveEpics(ids) => self.handle_batch_archive_epics(ids),
+            Message::ToggleEpicAutoDispatch(id) => self.handle_toggle_epic_auto_dispatch(id),
             _ => unreachable!(),
         }
     }
@@ -2104,6 +2106,19 @@ impl App {
         self.select.epics.clear();
         self.select.tasks.clear();
         cmds
+    }
+
+    fn handle_toggle_epic_auto_dispatch(&mut self, id: EpicId) -> Vec<Command> {
+        if let Some(epic) = self.board.epics.iter_mut().find(|e| e.id == id) {
+            let new_val = !epic.auto_dispatch;
+            epic.auto_dispatch = new_val;
+            vec![Command::ToggleEpicAutoDispatch {
+                id,
+                auto_dispatch: new_val,
+            }]
+        } else {
+            vec![]
+        }
     }
 
     fn handle_batch_move_tasks(

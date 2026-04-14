@@ -3854,6 +3854,34 @@ fn d_key_in_epic_view_with_no_subtasks_dispatches_epic() {
 }
 
 // ---------------------------------------------------------------------------
+// ToggleEpicAutoDispatch — U key in epic view
+// ---------------------------------------------------------------------------
+
+#[test]
+fn shift_u_in_epic_view_toggles_auto_dispatch() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut epic = make_epic(42);
+    epic.auto_dispatch = true;
+    app.board.epics = vec![epic];
+
+    // Enter epic view
+    app.update(Message::EnterEpic(EpicId(42)));
+
+    // Press Shift+U — should return ToggleEpicAutoDispatch command with auto_dispatch = false
+    let cmds = app.handle_key(make_key(KeyCode::Char('U')));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::ToggleEpicAutoDispatch {
+            id: EpicId(42),
+            auto_dispatch: false
+        }
+    )));
+
+    // Also verify in-memory state was updated
+    assert!(!app.board.epics[0].auto_dispatch);
+}
+
+// ---------------------------------------------------------------------------
 // DispatchEpic message
 // ---------------------------------------------------------------------------
 
