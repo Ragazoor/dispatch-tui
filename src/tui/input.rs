@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use super::{
     App, ColumnItem, Command, FixAgentRequest, InputMode, Message, MoveDirection,
-    ReviewAgentRequest, ReviewBoardMode, ViewMode,
+    ReviewAgentRequest, ReviewBoardMode, SecurityBoardMode, ViewMode,
 };
 use crate::models::{
     AlertSeverity, DispatchMode, ReviewDecision, SubStatus, TaskId, TaskStatus, TaskTag,
@@ -46,8 +46,8 @@ impl App {
             InputMode::InputPresetName => self.handle_key_input_preset_name(key),
             InputMode::ConfirmDeletePreset => self.handle_key_confirm_delete_preset(key),
             InputMode::ConfirmDeleteRepoPath => self.handle_key_confirm_delete_repo_path(key),
-            InputMode::ConfirmBatchApprove(_) => self.handle_key_confirm_batch(key, true),
-            InputMode::ConfirmBatchMerge(_) => self.handle_key_confirm_batch(key, false),
+            InputMode::ConfirmApproveBotPr(_) => self.handle_key_confirm_pr_op(key, true),
+            InputMode::ConfirmMergeBotPr(_) => self.handle_key_confirm_pr_op(key, false),
             InputMode::ConfirmQuit => self.handle_key_confirm_quit(key),
         }
     }
@@ -808,7 +808,22 @@ impl App {
     }
 
     fn handle_key_security_board(&mut self, key: KeyEvent) -> Vec<Command> {
+        // Dispatch to sub-mode handler
+        let mode = match &self.board.view_mode {
+            ViewMode::SecurityBoard { mode, .. } => *mode,
+            _ => return vec![],
+        };
+        if mode == SecurityBoardMode::Dependabot {
+            return self.handle_key_security_dependabot(key);
+        }
+        // Alerts sub-mode (default)
         match key.code {
+            KeyCode::Char('1') => {
+                self.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Dependabot))
+            }
+            KeyCode::Char('2') => {
+                self.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Alerts))
+            }
             KeyCode::Char('q') => self.update(Message::Quit),
             KeyCode::Tab => self.update(Message::SwitchToTaskBoard),
             KeyCode::Esc => self.update(Message::SwitchToTaskBoard),
@@ -939,6 +954,185 @@ impl App {
         }
     }
 
+    fn handle_key_security_dependabot(&mut self, key: KeyEvent) -> Vec<Command> {
+        match key.code {
+            KeyCode::Char('1') => {
+                self.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Dependabot))
+            }
+            KeyCode::Char('2') => {
+                self.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Alerts))
+            }
+            KeyCode::Char(' ') => {
+                if let Some(pr) = self.selected_dependabot_pr() {
+                    let url = pr.url.clone();
+                    self.update(Message::ToggleSelectBotPr(url))
+                } else {
+                    vec![]
+                }
+            }
+            KeyCode::Char('a') => self.update(Message::StartApproveBotPr),
+            KeyCode::Char('m') => self.update(Message::StartMergeBotPr),
+            KeyCode::Char('d') => {
+                if let Some(pr) = self.selected_dependabot_pr() {
+                    self.update(Message::DispatchReviewAgent(ReviewAgentRequest {
+                        repo: pr.repo.clone(),
+                        github_repo: pr.repo.clone(),
+                        number: pr.number,
+                        head_ref: pr.head_ref.clone(),
+                        is_dependabot: true,
+                    }))
+                } else {
+                    vec![]
+                }
+            }
+            KeyCode::Char('r') => {
+                if let Some(pr) = self.selected_dependabot_pr() {
+                    if pr.agent_status == Some(crate::models::ReviewAgentStatus::Idle) {
+                        if let Some(window) = pr.tmux_window.clone() {
+                            let repo = pr.repo.clone();
+                            let number = pr.number;
+                            vec![Command::ReReview {
+                                repo,
+                                number,
+                                tmux_window: window,
+                            }]
+                        } else {
+                            vec![]
+                        }
+                    } else {
+                        vec![]
+                    }
+                } else {
+                    vec![]
+                }
+            }
+            KeyCode::Char('p') => {
+                if let Some(pr) = self.selected_dependabot_pr() {
+                    let url = pr.url.clone();
+                    vec![Command::OpenInBrowser { url }]
+                } else {
+                    vec![]
+                }
+            }
+            KeyCode::Char('g') => {
+                if let Some(pr) = self.selected_dependabot_pr() {
+                    if let Some(window) = &pr.tmux_window {
+                        vec![Command::JumpToTmux {
+                            window: window.clone(),
+                        }]
+                    } else {
+                        self.update(Message::StatusInfo("No active session".to_string()))
+                    }
+                } else {
+                    vec![]
+                }
+            }
+            KeyCode::Char('T') => {
+                if let Some(pr) = self.selected_dependabot_pr() {
+                    if pr.tmux_window.is_some() {
+                        let repo = pr.repo.clone();
+                        let number = pr.number;
+                        self.update(Message::DetachReviewAgent { repo, number })
+                    } else {
+                        vec![]
+                    }
+                } else {
+                    vec![]
+                }
+            }
+            KeyCode::Char('f') => self.update(Message::StartSecurityRepoFilter),
+            KeyCode::Enter => {
+                self.security.dependabot.detail_visible =
+                    !self.security.dependabot.detail_visible;
+                vec![]
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                let col = match &self.board.view_mode {
+                    ViewMode::SecurityBoard {
+                        dependabot_selection,
+                        ..
+                    } => dependabot_selection.selected_column,
+                    _ => return vec![],
+                };
+                let count = self
+                    .filtered_bot_prs()
+                    .into_iter()
+                    .filter(|pr| super::bot_pr_column(pr) == col)
+                    .count();
+                if let ViewMode::SecurityBoard {
+                    dependabot_selection,
+                    ..
+                } = &mut self.board.view_mode
+                {
+                    if count > 0 && dependabot_selection.selected_row[col] + 1 < count {
+                        dependabot_selection.selected_row[col] += 1;
+                    }
+                }
+                vec![]
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if let ViewMode::SecurityBoard {
+                    dependabot_selection,
+                    ..
+                } = &mut self.board.view_mode
+                {
+                    let col = dependabot_selection.selected_column;
+                    if dependabot_selection.selected_row[col] > 0 {
+                        dependabot_selection.selected_row[col] -= 1;
+                    }
+                }
+                vec![]
+            }
+            KeyCode::Char('h') | KeyCode::Left => {
+                if let ViewMode::SecurityBoard {
+                    dependabot_selection,
+                    ..
+                } = &mut self.board.view_mode
+                {
+                    if dependabot_selection.selected_column > 0 {
+                        dependabot_selection.selected_column -= 1;
+                    }
+                }
+                vec![]
+            }
+            KeyCode::Char('l') | KeyCode::Right => {
+                // 3 columns for dependabot (Backlog/In Review/Approved)
+                let col_count = 3usize;
+                if let ViewMode::SecurityBoard {
+                    dependabot_selection,
+                    ..
+                } = &mut self.board.view_mode
+                {
+                    if dependabot_selection.selected_column + 1 < col_count {
+                        dependabot_selection.selected_column += 1;
+                    }
+                }
+                vec![]
+            }
+            KeyCode::Char('?') => self.update(Message::ToggleHelp),
+            KeyCode::Tab => self.update(Message::SwitchToTaskBoard),
+            KeyCode::Esc => self.update(Message::SwitchToTaskBoard),
+            KeyCode::Char('q') => self.update(Message::Quit),
+            _ => vec![],
+        }
+    }
+
+    fn selected_dependabot_pr(&self) -> Option<&crate::models::ReviewPr> {
+        let dependabot_selection = match &self.board.view_mode {
+            ViewMode::SecurityBoard {
+                dependabot_selection,
+                ..
+            } => dependabot_selection,
+            _ => return None,
+        };
+        let col = dependabot_selection.selected_column;
+        let row = dependabot_selection.selected_row[col];
+        self.filtered_bot_prs()
+            .into_iter()
+            .filter(|pr| super::bot_pr_column(pr) == col)
+            .nth(row)
+    }
+
     fn handle_key_review_board(&mut self, key: KeyEvent) -> Vec<Command> {
         match key.code {
             KeyCode::Char('q') => self.update(Message::Quit),
@@ -1014,19 +1208,12 @@ impl App {
 
             KeyCode::Char('d') => {
                 if let Some(pr) = self.selected_review_pr() {
-                    let is_dependabot = matches!(
-                        self.board.view_mode,
-                        ViewMode::ReviewBoard {
-                            mode: ReviewBoardMode::Dependabot,
-                            ..
-                        }
-                    );
                     self.update(Message::DispatchReviewAgent(ReviewAgentRequest {
                         repo: pr.repo.clone(),
                         github_repo: pr.repo.clone(),
                         number: pr.number,
                         head_ref: pr.head_ref.clone(),
-                        is_dependabot,
+                        is_dependabot: false,
                     }))
                 } else {
                     vec![]
@@ -1049,68 +1236,12 @@ impl App {
 
             KeyCode::Char('?') => self.update(Message::ToggleHelp),
 
-            KeyCode::BackTab => self.update(Message::ToggleReviewBoardMode),
-
-            // Dependabot-specific bindings
-            KeyCode::Char(' ') => {
-                if matches!(
-                    self.board.view_mode,
-                    ViewMode::ReviewBoard {
-                        mode: ReviewBoardMode::Dependabot,
-                        ..
-                    }
-                ) {
-                    if let Some(pr) = self.selected_review_pr() {
-                        let url = pr.url.clone();
-                        self.update(Message::ToggleSelectBotPr(url))
-                    } else {
-                        vec![]
-                    }
-                } else {
-                    vec![]
-                }
+            KeyCode::Char('1') => {
+                self.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Reviewer))
             }
 
-            KeyCode::Char('a') => {
-                if matches!(
-                    self.board.view_mode,
-                    ViewMode::ReviewBoard {
-                        mode: ReviewBoardMode::Dependabot,
-                        ..
-                    }
-                ) {
-                    self.update(Message::SelectAllBotPrColumn)
-                } else {
-                    vec![]
-                }
-            }
-
-            KeyCode::Char('A') => {
-                if matches!(
-                    self.board.view_mode,
-                    ViewMode::ReviewBoard {
-                        mode: ReviewBoardMode::Dependabot,
-                        ..
-                    }
-                ) {
-                    self.update(Message::StartBatchApprove)
-                } else {
-                    vec![]
-                }
-            }
-
-            KeyCode::Char('m') => {
-                if matches!(
-                    self.board.view_mode,
-                    ViewMode::ReviewBoard {
-                        mode: ReviewBoardMode::Dependabot,
-                        ..
-                    }
-                ) {
-                    self.update(Message::StartBatchMerge)
-                } else {
-                    vec![]
-                }
+            KeyCode::Char('2') => {
+                self.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Author))
             }
 
             KeyCode::Char('e') => {
@@ -1153,16 +1284,16 @@ impl App {
         }
     }
 
-    fn handle_key_confirm_batch(&mut self, key: KeyEvent, is_approve: bool) -> Vec<Command> {
+    fn handle_key_confirm_pr_op(&mut self, key: KeyEvent, is_approve: bool) -> Vec<Command> {
         match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') => {
                 if is_approve {
-                    self.update(Message::ConfirmBatchApprove)
+                    self.update(Message::ConfirmApproveBotPr)
                 } else {
-                    self.update(Message::ConfirmBatchMerge)
+                    self.update(Message::ConfirmMergeBotPr)
                 }
             }
-            _ => self.update(Message::CancelBatchOperation),
+            _ => self.update(Message::CancelPrOperation),
         }
     }
 }

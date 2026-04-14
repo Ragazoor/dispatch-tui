@@ -892,7 +892,6 @@ impl TuiRuntime {
         let key = match mode {
             ReviewBoardMode::Reviewer => "github_queries_review",
             ReviewBoardMode::Author => "github_queries_my_prs",
-            ReviewBoardMode::Dependabot => "github_queries_bot",
         };
 
         let current = self
@@ -907,7 +906,6 @@ impl TuiRuntime {
             match mode {
                 ReviewBoardMode::Reviewer => "Review PRs",
                 ReviewBoardMode::Author => "My PRs",
-                ReviewBoardMode::Dependabot => "Bot PRs",
             }
         );
         let content = format!("{header}{current}\n");
@@ -931,9 +929,7 @@ impl TuiRuntime {
 
         // Trigger a refresh for the affected category
         let refresh_msg = match mode {
-            ReviewBoardMode::Reviewer => Message::RefreshReviewPrs,
-            ReviewBoardMode::Author => Message::RefreshReviewPrs,
-            ReviewBoardMode::Dependabot => Message::RefreshBotPrs,
+            ReviewBoardMode::Reviewer | ReviewBoardMode::Author => Message::RefreshReviewPrs,
         };
         Ok(app.update(refresh_msg))
     }
@@ -1485,59 +1481,53 @@ impl TuiRuntime {
         }
     }
 
-    fn exec_batch_approve_prs(&self, urls: Vec<String>) {
+    fn exec_approve_bot_pr(&self, url: String) {
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
         tokio::task::spawn_blocking(move || {
-            let mut approved = 0usize;
-            for url in &urls {
-                tracing::info!(url, "approving PR");
-                match runner.run("gh", &["pr", "review", "--approve", url]) {
-                    Ok(output) if output.status.success() => approved += 1,
-                    Ok(output) => {
-                        let stderr = String::from_utf8_lossy(&output.stderr);
-                        tracing::warn!(url, error = %stderr, "failed to approve PR");
-                    }
-                    Err(e) => tracing::warn!(url, error = %e, "failed to run gh"),
+            tracing::info!(url, "approving PR");
+            match runner.run("gh", &["pr", "review", "--approve", &url]) {
+                Ok(output) if output.status.success() => {
+                    let _ = tx.send(Message::RefreshBotPrs);
+                    let _ = tx.send(Message::StatusInfo(format!("Approved PR {url}")));
+                }
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    tracing::warn!(url, error = %stderr, "failed to approve PR");
+                    let _ = tx.send(Message::StatusInfo(format!(
+                        "Failed to approve PR: {stderr}"
+                    )));
+                }
+                Err(e) => {
+                    tracing::warn!(url, error = %e, "failed to run gh");
+                    let _ = tx.send(Message::StatusInfo(format!("Failed to run gh: {e}")));
                 }
             }
-            tracing::info!(approved, total = urls.len(), "batch approve complete");
-            let _ = tx.send(Message::RefreshBotPrs);
-            let _ = tx.send(Message::StatusInfo(format!(
-                "Approved {approved}/{} PRs",
-                urls.len()
-            )));
         });
     }
 
-    fn exec_batch_merge_prs(&self, urls: Vec<String>) {
+    fn exec_merge_bot_pr(&self, url: String) {
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
         tokio::task::spawn_blocking(move || {
-            let mut merged_urls = Vec::new();
-            for url in &urls {
-                tracing::info!(url, "merging PR");
-                match runner.run("gh", &["pr", "merge", "--merge", url]) {
-                    Ok(output) if output.status.success() => {
-                        merged_urls.push(url.clone());
-                    }
-                    Ok(output) => {
-                        let stderr = String::from_utf8_lossy(&output.stderr);
-                        tracing::warn!(url, error = %stderr, "failed to merge PR");
-                    }
-                    Err(e) => tracing::warn!(url, error = %e, "failed to run gh"),
+            tracing::info!(url, "merging PR");
+            match runner.run("gh", &["pr", "merge", "--merge", &url]) {
+                Ok(output) if output.status.success() => {
+                    let _ = tx.send(Message::RefreshBotPrs);
+                    let _ = tx.send(Message::StatusInfo(format!("Merged PR {url}")));
+                }
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    tracing::warn!(url, error = %stderr, "failed to merge PR");
+                    let _ = tx.send(Message::StatusInfo(format!(
+                        "Failed to merge PR: {stderr}"
+                    )));
+                }
+                Err(e) => {
+                    tracing::warn!(url, error = %e, "failed to run gh");
+                    let _ = tx.send(Message::StatusInfo(format!("Failed to run gh: {e}")));
                 }
             }
-            let merged = merged_urls.len();
-            tracing::info!(merged, total = urls.len(), "batch merge complete");
-            if !merged_urls.is_empty() {
-                let _ = tx.send(Message::BotPrsMerged(merged_urls));
-            }
-            let _ = tx.send(Message::RefreshBotPrs);
-            let _ = tx.send(Message::StatusInfo(format!(
-                "Merged {merged}/{} PRs",
-                urls.len()
-            )));
         });
     }
 
@@ -1826,8 +1816,8 @@ async fn execute_commands(
             }
             Command::FetchPrs(kind) => rt.exec_fetch_prs(kind),
             Command::PersistPrs(kind, prs) => rt.exec_persist_prs(app, kind, prs),
-            Command::BatchApprovePrs(urls) => rt.exec_batch_approve_prs(urls),
-            Command::BatchMergePrs(urls) => rt.exec_batch_merge_prs(urls),
+            Command::ApproveBotPr(url) => rt.exec_approve_bot_pr(url),
+            Command::MergeBotPr(url) => rt.exec_merge_bot_pr(url),
             Command::OpenInBrowser { url } => rt.exec_open_in_browser(url),
             Command::PersistFilterPreset {
                 name,
@@ -3763,25 +3753,21 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Batch operations
+    // Single PR approve / merge
     // -----------------------------------------------------------------------
 
     #[tokio::test]
-    async fn exec_batch_approve_prs_approves_all() {
+    async fn exec_approve_bot_pr_calls_gh_review_approve() {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::ok(), // gh pr review --approve (PR 1)
-            MockProcessRunner::ok(), // gh pr review --approve (PR 2)
+            MockProcessRunner::ok(), // gh pr review --approve
         ]));
         let rt = make_runtime(db, tx, mock.clone());
 
-        rt.exec_batch_approve_prs(vec![
-            "https://github.com/org/repo/pull/1".into(),
-            "https://github.com/org/repo/pull/2".into(),
-        ]);
+        rt.exec_approve_bot_pr("https://github.com/acme/app/pull/42".into());
 
-        // Should send RefreshBotPrs then StatusInfo
+        // RefreshBotPrs then StatusInfo
         let msg1 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
             .await
             .unwrap()
@@ -3790,174 +3776,102 @@ mod tests {
             matches!(msg1, Message::RefreshBotPrs),
             "Expected RefreshBotPrs, got: {msg1:?}"
         );
-
         let msg2 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
             .await
             .unwrap()
             .unwrap();
         match msg2 {
-            Message::StatusInfo(s) => assert!(s.contains("Approved 2/2")),
+            Message::StatusInfo(s) => assert!(s.contains("Approved PR")),
             other => panic!("Expected StatusInfo, got: {other:?}"),
         }
 
-        // Verify gh was called correctly
         let calls = mock.recorded_calls();
-        assert_eq!(calls.len(), 2);
+        assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].0, "gh");
         assert!(calls[0].1.contains(&"--approve".to_string()));
+        assert!(calls[0]
+            .1
+            .contains(&"https://github.com/acme/app/pull/42".to_string()));
     }
 
     #[tokio::test]
-    async fn exec_batch_approve_prs_partial_failure() {
+    async fn exec_approve_bot_pr_sends_status_on_failure() {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::ok(),                // PR 1 succeeds
-            MockProcessRunner::fail("not allowed"), // PR 2 fails
+            MockProcessRunner::fail("not allowed"),
         ]));
         let rt = make_runtime(db, tx, mock);
 
-        rt.exec_batch_approve_prs(vec![
-            "https://github.com/org/repo/pull/1".into(),
-            "https://github.com/org/repo/pull/2".into(),
-        ]);
+        rt.exec_approve_bot_pr("https://github.com/acme/app/pull/42".into());
 
-        let _refresh = tokio::time::timeout(Duration::from_secs(5), rx.recv())
-            .await
-            .unwrap()
-            .unwrap();
         let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
             .await
             .unwrap()
             .unwrap();
         match msg {
-            Message::StatusInfo(s) => assert!(s.contains("Approved 1/2")),
-            other => panic!("Expected StatusInfo with 1/2, got: {other:?}"),
+            Message::StatusInfo(s) => assert!(s.contains("Failed to approve PR")),
+            other => panic!("Expected StatusInfo with failure message, got: {other:?}"),
         }
     }
 
     #[tokio::test]
-    async fn exec_batch_merge_prs_merges_all() {
+    async fn exec_merge_bot_pr_calls_gh_pr_merge() {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::ok(), // gh pr merge --merge (PR 1)
-            MockProcessRunner::ok(), // gh pr merge --merge (PR 2)
+            MockProcessRunner::ok(), // gh pr merge --merge
         ]));
         let rt = make_runtime(db, tx, mock.clone());
 
-        rt.exec_batch_merge_prs(vec![
-            "https://github.com/org/repo/pull/1".into(),
-            "https://github.com/org/repo/pull/2".into(),
-        ]);
+        rt.exec_merge_bot_pr("https://github.com/acme/app/pull/42".into());
 
-        // First: BotPrsMerged with all successfully merged URLs
-        let msg1 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
-            .await
-            .unwrap()
-            .unwrap();
-        match &msg1 {
-            Message::BotPrsMerged(urls) => {
-                assert!(urls.contains(&"https://github.com/org/repo/pull/1".to_string()));
-                assert!(urls.contains(&"https://github.com/org/repo/pull/2".to_string()));
-            }
-            other => panic!("Expected BotPrsMerged, got: {other:?}"),
-        }
-
-        // Second: RefreshBotPrs
-        let msg2 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(
-            matches!(msg2, Message::RefreshBotPrs),
-            "Expected RefreshBotPrs, got: {msg2:?}"
-        );
-
-        // Third: StatusInfo
-        let msg3 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
-            .await
-            .unwrap()
-            .unwrap();
-        match msg3 {
-            Message::StatusInfo(s) => assert!(s.contains("Merged 2/2")),
-            other => panic!("Expected StatusInfo, got: {other:?}"),
-        }
-
-        let calls = mock.recorded_calls();
-        assert_eq!(calls.len(), 2);
-        assert!(calls[0].1.contains(&"--merge".to_string()));
-    }
-
-    #[tokio::test]
-    async fn exec_batch_merge_prs_partial_failure() {
-        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::fail("checks pending"), // PR 1 fails
-            MockProcessRunner::ok(),                   // PR 2 succeeds
-        ]));
-        let rt = make_runtime(db, tx, mock);
-
-        rt.exec_batch_merge_prs(vec![
-            "https://github.com/org/repo/pull/1".into(),
-            "https://github.com/org/repo/pull/2".into(),
-        ]);
-
-        // First: BotPrsMerged with only the successful URL (PR 2)
-        let msg1 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
-            .await
-            .unwrap()
-            .unwrap();
-        match &msg1 {
-            Message::BotPrsMerged(urls) => {
-                assert_eq!(urls.len(), 1);
-                assert!(urls.contains(&"https://github.com/org/repo/pull/2".to_string()));
-            }
-            other => panic!("Expected BotPrsMerged, got: {other:?}"),
-        }
-
-        // Second: RefreshBotPrs
-        let _refresh = tokio::time::timeout(Duration::from_secs(5), rx.recv())
-            .await
-            .unwrap()
-            .unwrap();
-
-        // Third: StatusInfo
-        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
-            .await
-            .unwrap()
-            .unwrap();
-        match msg {
-            Message::StatusInfo(s) => assert!(s.contains("Merged 1/2")),
-            other => panic!("Expected StatusInfo with 1/2, got: {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn exec_batch_merge_prs_all_fail_emits_no_bot_prs_merged() {
-        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::fail("network error"), // PR 1 fails
-            MockProcessRunner::fail("network error"), // PR 2 fails
-        ]));
-        let rt = make_runtime(db, tx, mock);
-
-        rt.exec_batch_merge_prs(vec![
-            "https://github.com/org/repo/pull/1".into(),
-            "https://github.com/org/repo/pull/2".into(),
-        ]);
-
-        // First message should be RefreshBotPrs (no BotPrsMerged when nothing merged)
+        // RefreshBotPrs then StatusInfo
         let msg1 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
             .await
             .unwrap()
             .unwrap();
         assert!(
             matches!(msg1, Message::RefreshBotPrs),
-            "Expected RefreshBotPrs (no BotPrsMerged when nothing merged), got: {msg1:?}"
+            "Expected RefreshBotPrs, got: {msg1:?}"
         );
+        let msg2 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        match msg2 {
+            Message::StatusInfo(s) => assert!(s.contains("Merged PR")),
+            other => panic!("Expected StatusInfo, got: {other:?}"),
+        }
+
+        let calls = mock.recorded_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "gh");
+        assert!(calls[0].1.contains(&"--merge".to_string()));
+        assert!(calls[0]
+            .1
+            .contains(&"https://github.com/acme/app/pull/42".to_string()));
+    }
+
+    #[tokio::test]
+    async fn exec_merge_bot_pr_sends_status_on_failure() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::fail("checks pending"),
+        ]));
+        let rt = make_runtime(db, tx, mock);
+
+        rt.exec_merge_bot_pr("https://github.com/acme/app/pull/42".into());
+
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        match msg {
+            Message::StatusInfo(s) => assert!(s.contains("Failed to merge PR")),
+            other => panic!("Expected StatusInfo with failure message, got: {other:?}"),
+        }
     }
 
     // -----------------------------------------------------------------------

@@ -26,69 +26,27 @@ pub enum MoveDirection {
 pub enum ReviewBoardMode {
     Reviewer,
     Author,
-    Dependabot,
 }
 
 impl ReviewBoardMode {
     pub fn column_count(&self) -> usize {
-        match self {
-            Self::Reviewer | Self::Author => 4,
-            Self::Dependabot => 3,
-        }
+        4
     }
 
     pub fn column_label(&self, col: usize) -> &'static str {
-        match self {
-            Self::Reviewer | Self::Author => match col {
-                0 => "Needs Review",
-                1 => "Waiting for Response",
-                2 => "Changes Requested",
-                3 => "Approved",
-                _ => "",
-            },
-            Self::Dependabot => match col {
-                0 => "Backlog",
-                1 => "In Review",
-                2 => "Approved",
-                _ => "",
-            },
+        match col {
+            0 => "Needs Review",
+            1 => "Waiting for Response",
+            2 => "Changes Requested",
+            3 => "Approved",
+            _ => "",
         }
     }
 
     pub fn pr_column(&self, pr: &crate::models::ReviewPr) -> usize {
-        match self {
-            Self::Reviewer | Self::Author => pr.review_decision.column_index(),
-            Self::Dependabot => {
-                if pr.review_decision == crate::models::ReviewDecision::Approved {
-                    2
-                } else if matches!(
-                    pr.agent_status,
-                    Some(
-                        crate::models::ReviewAgentStatus::Reviewing
-                            | crate::models::ReviewAgentStatus::FindingsReady
-                    )
-                ) {
-                    1
-                } else {
-                    0
-                }
-            }
-        }
+        pr.review_decision.column_index()
     }
 
-    /// Sort key for the in_review column. Lower = floats to top.
-    /// Only meaningful for Dependabot mode; returns 0 for other modes
-    /// (leaving repo-alphabetical order unchanged).
-    pub fn dependabot_sort_key(&self, pr: &crate::models::ReviewPr) -> usize {
-        match self {
-            Self::Dependabot => match pr.agent_status {
-                Some(crate::models::ReviewAgentStatus::FindingsReady) => 0,
-                Some(crate::models::ReviewAgentStatus::Reviewing) => 1,
-                _ => 2,
-            },
-            _ => 0,
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -338,7 +296,7 @@ pub enum Message {
     // Review board
     SwitchToReviewBoard,
     SwitchToTaskBoard,
-    ToggleReviewBoardMode,
+    SwitchReviewBoardMode(ReviewBoardMode),
     PrsLoaded(PrListKind, Vec<crate::models::ReviewPr>),
     PrsFetchFailed(PrListKind, String),
     OpenInBrowser {
@@ -377,13 +335,7 @@ pub enum Message {
     RefreshBotPrs,
     BotPrsMerged(Vec<String>),
     ToggleSelectBotPr(String),
-    SelectAllBotPrColumn,
     ClearBotPrSelection,
-    StartBatchApprove,
-    StartBatchMerge,
-    ConfirmBatchApprove,
-    ConfirmBatchMerge,
-    CancelBatchOperation,
     // Security board
     SwitchToSecurityBoard,
     SecurityAlertsLoaded(Vec<SecurityAlert>),
@@ -451,6 +403,14 @@ pub enum Message {
     ConfirmDetachTmux,
     // Inter-agent messaging
     MessageReceived(TaskId),
+    // Security board sub-mode switching
+    SwitchSecurityBoardMode(SecurityBoardMode),
+    // Dependabot approve/merge
+    StartApproveBotPr,
+    StartMergeBotPr,
+    ConfirmApproveBotPr,
+    ConfirmMergeBotPr,
+    CancelPrOperation,
 }
 
 // ---------------------------------------------------------------------------
@@ -600,8 +560,8 @@ pub enum Command {
     },
     FetchPrs(PrListKind),
     PersistPrs(PrListKind, Vec<crate::models::ReviewPr>),
-    BatchApprovePrs(Vec<String>),
-    BatchMergePrs(Vec<String>),
+    ApproveBotPr(String),
+    MergeBotPr(String),
     OpenInBrowser {
         url: String,
     },
@@ -661,9 +621,9 @@ pub enum InputMode {
     ConfirmDeletePreset,
     ConfirmDeleteRepoPath,
     ConfirmEditTask(TaskId),
-    // Dependabot batch operations
-    ConfirmBatchApprove(Vec<String>),
-    ConfirmBatchMerge(Vec<String>),
+    // Dependabot approve/merge confirmation
+    ConfirmApproveBotPr(String),
+    ConfirmMergeBotPr(String),
     ConfirmQuit,
     // Dispatch repo path input (review/security tab fallback)
     InputDispatchRepoPath,
@@ -857,17 +817,12 @@ impl Default for SplitState {
 pub struct SelectionState {
     pub tasks: HashSet<TaskId>,
     pub epics: HashSet<EpicId>,
-    pub bot_prs: HashSet<String>,
     pub pending_done: Vec<TaskId>,
 }
 
 impl SelectionState {
     pub fn has_selection(&self) -> bool {
         !self.tasks.is_empty() || !self.epics.is_empty()
-    }
-
-    pub fn has_bot_pr_selection(&self) -> bool {
-        !self.bot_prs.is_empty()
     }
 
     pub fn clear(&mut self) {
@@ -1018,7 +973,6 @@ impl PrListState {
 pub struct ReviewBoardState {
     pub review: PrListState,
     pub authored: PrListState,
-    pub bot: PrListState,
     pub detail_visible: bool,
     pub dispatch_pr_filter: bool,
     pub review_flash: HashMap<PrRef, Instant>,
@@ -1029,7 +983,7 @@ impl ReviewBoardState {
         match kind {
             PrListKind::Review => &self.review,
             PrListKind::Authored => &self.authored,
-            PrListKind::Bot => &self.bot,
+            PrListKind::Bot => unreachable!("bot PRs are in SecurityBoardState"),
         }
     }
 
@@ -1037,11 +991,11 @@ impl ReviewBoardState {
         match kind {
             PrListKind::Review => &mut self.review,
             PrListKind::Authored => &mut self.authored,
-            PrListKind::Bot => &mut self.bot,
+            PrListKind::Bot => unreachable!("bot PRs are in SecurityBoardState"),
         }
     }
 
-    /// Find a PR by github_repo + number across all review lists, set its agent
+    /// Find a PR by github_repo + number across review and authored lists, set its agent
     /// fields, and return the DB table name where the PR lives.
     pub fn find_and_set_pr_agent(
         &mut self,
@@ -1050,7 +1004,7 @@ impl ReviewBoardState {
         tmux_window: &str,
         worktree: &str,
     ) -> crate::db::PrKind {
-        for kind in [PrListKind::Review, PrListKind::Authored, PrListKind::Bot] {
+        for kind in [PrListKind::Review, PrListKind::Authored] {
             for pr in self.list_mut(kind).prs.iter_mut() {
                 if pr.repo == github_repo && pr.number == number {
                     pr.tmux_window = Some(tmux_window.to_string());
@@ -1240,6 +1194,28 @@ impl Default for SecurityBoardSelection {
 }
 
 // ---------------------------------------------------------------------------
+// SecurityBoardMode — sub-view selector for the Security Board
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SecurityBoardMode {
+    #[default]
+    Dependabot,
+    Alerts,
+}
+
+// ---------------------------------------------------------------------------
+// DependabotBoardState — state for the Dependabot PR sub-view
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Default)]
+pub struct DependabotBoardState {
+    pub prs: PrListState,
+    pub selected_prs: HashSet<String>,
+    pub detail_visible: bool,
+}
+
+// ---------------------------------------------------------------------------
 // SecurityBoardState — security board data and loading state
 // ---------------------------------------------------------------------------
 
@@ -1255,6 +1231,7 @@ pub struct SecurityBoardState {
     pub repo_filter_mode: RepoFilterMode,
     pub kind_filter: Option<AlertKind>,
     pub review_flash: HashMap<PrRef, Instant>,
+    pub dependabot: DependabotBoardState,
 }
 
 impl SecurityBoardState {
@@ -1331,7 +1308,9 @@ pub enum ViewMode {
         saved_board: BoardSelection,
     },
     SecurityBoard {
+        mode: SecurityBoardMode,
         selection: SecurityBoardSelection,
+        dependabot_selection: ReviewBoardSelection,
         saved_board: BoardSelection,
     },
 }
@@ -1687,15 +1666,9 @@ mod tests {
         state
             .authored
             .set_prs(vec![make_pr(2, "org/b"), make_pr(3, "org/c")]);
-        state.bot.set_prs(vec![
-            make_pr(4, "org/d"),
-            make_pr(5, "org/e"),
-            make_pr(6, "org/f"),
-        ]);
 
         assert_eq!(state.list(PrListKind::Review).prs.len(), 1);
         assert_eq!(state.list(PrListKind::Authored).prs.len(), 2);
-        assert_eq!(state.list(PrListKind::Bot).prs.len(), 3);
     }
 
     #[test]
@@ -1704,7 +1677,6 @@ mod tests {
         state.list_mut(PrListKind::Review).loading = true;
         assert!(state.review.loading);
         assert!(!state.authored.loading);
-        assert!(!state.bot.loading);
     }
 
     // -- ReviewBoardState::find_and_set_pr_agent --
@@ -1732,16 +1704,6 @@ mod tests {
         let kind = state.find_and_set_pr_agent("org/lib", 99, "win-99", "/tmp/wt2");
         assert_eq!(kind, crate::db::PrKind::My);
         assert_eq!(state.authored.prs[0].tmux_window.as_deref(), Some("win-99"));
-    }
-
-    #[test]
-    fn find_and_set_pr_agent_sets_fields_in_bot_list() {
-        let mut state = ReviewBoardState::default();
-        state.bot.set_prs(vec![make_pr(7, "org/infra")]);
-
-        let kind = state.find_and_set_pr_agent("org/infra", 7, "win-7", "/tmp/wt3");
-        assert_eq!(kind, crate::db::PrKind::Bot);
-        assert_eq!(state.bot.prs[0].tmux_window.as_deref(), Some("win-7"));
     }
 
     #[test]

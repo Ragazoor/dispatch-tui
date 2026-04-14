@@ -9,7 +9,7 @@ use ratatui::{
 
 use super::{
     App, ColumnItem, ColumnLayout, EpicStatsMap, InputMode, RepoFilterMode, ReviewBoardMode,
-    ViewMode,
+    SecurityBoardMode, ViewMode,
 };
 use crate::dispatch;
 use crate::models::{
@@ -233,6 +233,7 @@ fn my_prs_tab_label(app: &App, prefix: &str) -> String {
     }
 }
 
+#[allow(dead_code)]
 fn bot_prs_tab_label(app: &App, prefix: &str) -> String {
     let bot_count = app.bot_prs().len();
     let loading = if app.bot_prs_loading() {
@@ -284,7 +285,6 @@ fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
             let label = match mode {
                 ReviewBoardMode::Reviewer => review_tab_label(app, " \u{25b8} "),
                 ReviewBoardMode::Author => my_prs_tab_label(app, " \u{25b8} "),
-                ReviewBoardMode::Dependabot => bot_prs_tab_label(app, " \u{25b8} "),
             };
             spans.push(Span::styled(label, active_style));
             spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
@@ -1688,7 +1688,96 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
     let desc = Style::default().fg(Color::Gray);
     let note = Style::default().fg(Color::DarkGray);
 
-    let lines = if matches!(app.view_mode(), ViewMode::ReviewBoard { .. }) {
+    let lines = if matches!(app.view_mode(), ViewMode::SecurityBoard { .. }) {
+        let mode = match app.view_mode() {
+            ViewMode::SecurityBoard { mode, .. } => *mode,
+            _ => SecurityBoardMode::Dependabot,
+        };
+        let mut lines = vec![
+            Line::from(""),
+            Line::from(Span::styled("  Security Board", header)),
+            Line::from(vec![
+                Span::styled("  [1]", key),
+                Span::styled(" Dependabot sub-view  ", desc),
+                Span::styled("[2]", key),
+                Span::styled(" Alerts sub-view", desc),
+            ]),
+            Line::from(vec![
+                Span::styled("  [h/\u{2190}]", key),
+                Span::styled(" prev column     ", desc),
+                Span::styled("[l/\u{2192}]", key),
+                Span::styled(" next column", desc),
+            ]),
+            Line::from(vec![
+                Span::styled("  [j/\u{2193}]", key),
+                Span::styled(" next item       ", desc),
+                Span::styled("[k/\u{2191}]", key),
+                Span::styled(" prev item", desc),
+            ]),
+        ];
+        if mode == SecurityBoardMode::Dependabot {
+            lines.extend(vec![
+                Line::from(""),
+                Line::from(Span::styled("  Dependabot Actions", header)),
+                Line::from(vec![
+                    Span::styled("  [Space]", key),
+                    Span::styled(" select PR    ", desc),
+                    Span::styled("[a]", key),
+                    Span::styled(" approve selected", desc),
+                ]),
+                Line::from(vec![
+                    Span::styled("  [m]", key),
+                    Span::styled(" merge selected  ", desc),
+                    Span::styled("[d]", key),
+                    Span::styled(" dispatch review agent", desc),
+                ]),
+                Line::from(vec![
+                    Span::styled("  [p]", key),
+                    Span::styled(" open in browser  ", desc),
+                    Span::styled("[r]", key),
+                    Span::styled(" refresh", desc),
+                ]),
+            ]);
+        } else {
+            lines.extend(vec![
+                Line::from(""),
+                Line::from(Span::styled("  Alert Actions", header)),
+                Line::from(vec![
+                    Span::styled("  [d]", key),
+                    Span::styled(" dispatch fix agent  ", desc),
+                    Span::styled("[p]", key),
+                    Span::styled(" open in browser", desc),
+                ]),
+                Line::from(vec![
+                    Span::styled("  [f]", key),
+                    Span::styled(" filter repos  ", desc),
+                    Span::styled("[t]", key),
+                    Span::styled(" toggle kind filter", desc),
+                ]),
+                Line::from(vec![
+                    Span::styled("  [r]", key),
+                    Span::styled(" refresh from GitHub", desc),
+                ]),
+            ]);
+        }
+        lines.extend(vec![
+            Line::from(""),
+            Line::from(Span::styled("  General", header)),
+            Line::from(vec![
+                Span::styled("  [Tab/Esc]", key),
+                Span::styled(" back to Task Board  ", desc),
+                Span::styled("[q]", key),
+                Span::styled(" quit", desc),
+            ]),
+            Line::from(vec![
+                Span::styled("  [?]", key),
+                Span::styled(" close this help", desc),
+            ]),
+            Line::from(""),
+            Line::from(Span::styled("  [?] or [Esc] to close", note)),
+        ]);
+        lines
+    } else if matches!(app.view_mode(), ViewMode::ReviewBoard { .. }) {
         vec![
             Line::from(""),
             Line::from(Span::styled("  Review Board", header)),
@@ -2401,14 +2490,22 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
-        InputMode::ConfirmBatchApprove(ref urls) => {
-            let text = format!("Approve {} PRs? [y/n]", urls.len());
-            let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
+        InputMode::ConfirmApproveBotPr(_) => {
+            let text = app
+                .status
+                .message
+                .as_deref()
+                .unwrap_or("Approve PR? [y/n]");
+            let bar = Paragraph::new(text.to_owned()).style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
-        InputMode::ConfirmBatchMerge(ref urls) => {
-            let text = format!("Merge {} PRs? [y/n]", urls.len());
-            let bar = Paragraph::new(text).style(Style::default().fg(Color::Green));
+        InputMode::ConfirmMergeBotPr(_) => {
+            let text = app
+                .status
+                .message
+                .as_deref()
+                .unwrap_or("Merge PR? [y/n]");
+            let bar = Paragraph::new(text.to_owned()).style(Style::default().fg(Color::Green));
             frame.render_widget(bar, area);
         }
         InputMode::ConfirmQuit => {
@@ -2639,51 +2736,7 @@ pub(in crate::tui) fn review_action_hints(
     if is_author_mode {
         push_hint("D", "dispatch filter");
     }
-    push_hint("BackTab", "mode");
-    push_hint("Tab", "task board");
-    push_hint("?", "help");
-    push_hint("q", "quit");
-    spans
-}
-
-pub(in crate::tui) fn bot_action_hints(
-    has_pr: bool,
-    agent_status: Option<crate::models::ReviewAgentStatus>,
-    has_selection: bool,
-) -> Vec<Span<'static>> {
-    use crate::models::ReviewAgentStatus;
-    let key_color = Color::Cyan;
-    let label_style = Style::default().fg(MUTED);
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    let mut push_hint = |key: &'static str, label: &'static str| {
-        push_hint_spans(&mut spans, key, label, key_color, label_style);
-    };
-    push_hint("Space", "select");
-    push_hint("a", "select all");
-    if has_selection {
-        push_hint("A", "approve");
-        push_hint("m", "merge");
-    }
-    if has_pr {
-        match agent_status {
-            Some(ReviewAgentStatus::Idle) => {
-                push_hint("g", "go to");
-                push_hint("r", "re-review");
-                push_hint("T", "detach");
-            }
-            Some(_) => {
-                push_hint("g", "go to");
-                push_hint("T", "detach");
-            }
-            None => {
-                push_hint("d", "dispatch");
-            }
-        }
-        push_hint("p", "open");
-    }
-    push_hint("f", "filter");
-    push_hint("e", "edit queries");
-    push_hint("BackTab", "mode");
+    push_hint("1/2", "mode");
     push_hint("Tab", "task board");
     push_hint("?", "help");
     push_hint("q", "quit");
@@ -2741,10 +2794,6 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
                 mode: ReviewBoardMode::Author,
                 ..
             } => app.my_prs_loading(),
-            ViewMode::ReviewBoard {
-                mode: ReviewBoardMode::Dependabot,
-                ..
-            } => app.bot_prs_loading(),
             _ => app.review_board_loading(),
         };
         let is_empty = match app.view_mode() {
@@ -2752,10 +2801,6 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
                 mode: ReviewBoardMode::Author,
                 ..
             } => app.my_prs().is_empty(),
-            ViewMode::ReviewBoard {
-                mode: ReviewBoardMode::Dependabot,
-                ..
-            } => app.bot_prs().is_empty(),
             _ => app.review_prs().is_empty(),
         };
         let msg = if is_loading {
@@ -2779,13 +2824,7 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
     if let Some(msg) = app.status.message.as_deref() {
         let status = Paragraph::new(msg.to_string()).style(Style::default().fg(Color::Yellow));
         frame.render_widget(status, chunks[4]);
-    } else if let Some(err) = match app.view_mode() {
-        ViewMode::ReviewBoard {
-            mode: ReviewBoardMode::Dependabot,
-            ..
-        } => app.last_bot_error(),
-        _ => app.last_review_error(),
-    } {
+    } else if let Some(err) = app.last_review_error() {
         let status = Paragraph::new(format!("Error: {err}")).style(Style::default().fg(Color::Red));
         frame.render_widget(status, chunks[4]);
     } else if app.has_bot_pr_selection() {
@@ -2806,30 +2845,13 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
                 ..
             }
         );
-        let is_bot_mode = matches!(
-            app.view_mode(),
-            ViewMode::ReviewBoard {
-                mode: ReviewBoardMode::Dependabot,
-                ..
-            }
-        );
         let agent_status = app.selected_review_pr().and_then(|pr| pr.agent_status);
-        if is_bot_mode {
-            let has_selection = app.has_bot_pr_selection();
-            let hints = Paragraph::new(Line::from(bot_action_hints(
-                has_pr,
-                agent_status,
-                has_selection,
-            )));
-            frame.render_widget(hints, chunks[4]);
-        } else {
-            let hints = Paragraph::new(Line::from(review_action_hints(
-                has_pr,
-                is_author_mode,
-                agent_status,
-            )));
-            frame.render_widget(hints, chunks[4]);
-        }
+        let hints = Paragraph::new(Line::from(review_action_hints(
+            has_pr,
+            is_author_mode,
+            agent_status,
+        )));
+        frame.render_widget(hints, chunks[4]);
     }
 
     // Filter overlay (on top of everything)
@@ -2959,16 +2981,8 @@ fn render_review_summary_row(frame: &mut Frame, app: &App, area: Rect) {
         let label = format!("{prefix}{} ({count})", mode.column_label(i));
 
         // Map column index to ReviewDecision for coloring
-        let decision_for_color = if matches!(mode, ReviewBoardMode::Dependabot) {
-            match i {
-                0 => ReviewDecision::ReviewRequired,     // Backlog → blue
-                1 => ReviewDecision::WaitingForResponse, // In Review → yellow
-                2 => ReviewDecision::Approved,           // Approved → green
-                _ => ReviewDecision::ReviewRequired,
-            }
-        } else {
-            ReviewDecision::from_column_index(i).unwrap_or(ReviewDecision::ReviewRequired)
-        };
+        let decision_for_color =
+            ReviewDecision::from_column_index(i).unwrap_or(ReviewDecision::ReviewRequired);
 
         let color = review_column_color(decision_for_color);
         let style = if is_focused {
@@ -2989,7 +3003,6 @@ fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
         _ => ReviewBoardMode::Reviewer,
     };
     let col_count = mode.column_count();
-    let is_bot_mode = matches!(mode, ReviewBoardMode::Dependabot);
 
     let col_areas = Layout::default()
         .direction(Direction::Horizontal)
@@ -3000,17 +3013,8 @@ fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
         let is_focused = i == sel_col;
         let prs: Vec<&ReviewPr> = app.active_prs_for_column(i);
 
-        // Use ReviewDecision column color for Reviewer/Author, lifecycle-based for Dependabot
-        let decision_for_color = if is_bot_mode {
-            match i {
-                0 => ReviewDecision::ReviewRequired,     // Backlog → blue
-                1 => ReviewDecision::WaitingForResponse, // In Review → yellow
-                2 => ReviewDecision::Approved,           // Approved → green
-                _ => ReviewDecision::ReviewRequired,
-            }
-        } else {
-            ReviewDecision::from_column_index(i).unwrap_or(ReviewDecision::ReviewRequired)
-        };
+        let decision_for_color =
+            ReviewDecision::from_column_index(i).unwrap_or(ReviewDecision::ReviewRequired);
         let selected_row = app.review_selection().map(|s| s.row(i)).unwrap_or(0);
         let mut list_items: Vec<ListItem> = Vec::new();
         let mut list_selection_idx: Option<usize> = None;
@@ -3027,7 +3031,7 @@ fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
                 list_selection_idx = Some(list_items.len());
             }
 
-            let is_selected = is_bot_mode && app.selected_bot_prs().contains(&pr.url);
+            let is_selected = false;
             list_items.push(build_review_pr_item(
                 pr,
                 mode,
@@ -3063,7 +3067,7 @@ fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
 
 fn build_review_pr_item(
     pr: &ReviewPr,
-    mode: ReviewBoardMode,
+    _mode: ReviewBoardMode,
     col: usize,
     is_cursor: bool,
     agent_status: Option<crate::models::ReviewAgentStatus>,
@@ -3071,16 +3075,8 @@ fn build_review_pr_item(
     col_width: u16,
 ) -> ListItem<'static> {
     // Map to a ReviewDecision for color purposes
-    let decision_for_color = if matches!(mode, ReviewBoardMode::Dependabot) {
-        match col {
-            0 => ReviewDecision::ReviewRequired,     // Backlog → blue
-            1 => ReviewDecision::WaitingForResponse, // In Review → yellow
-            2 => ReviewDecision::Approved,           // Approved → green
-            _ => ReviewDecision::ReviewRequired,
-        }
-    } else {
-        ReviewDecision::from_column_index(col).unwrap_or(ReviewDecision::ReviewRequired)
-    };
+    let decision_for_color =
+        ReviewDecision::from_column_index(col).unwrap_or(ReviewDecision::ReviewRequired);
     let color = review_column_color(decision_for_color);
     let now = Utc::now();
     let age = format_age(pr.created_at, now);
@@ -3201,11 +3197,23 @@ fn security_column_bg_color(severity: AlertSeverity) -> Color {
 }
 
 pub fn render_security_board(frame: &mut Frame, app: &mut App, area: Rect) {
+    let mode = match app.view_mode() {
+        ViewMode::SecurityBoard { mode, .. } => *mode,
+        _ => SecurityBoardMode::Dependabot,
+    };
+    match mode {
+        SecurityBoardMode::Dependabot => render_dependabot_board(frame, app, area),
+        SecurityBoardMode::Alerts => render_security_alerts_board(frame, app, area),
+    }
+}
+
+fn render_security_alerts_board(frame: &mut Frame, app: &mut App, area: Rect) {
     let detail_height = if app.security_detail_visible() { 8 } else { 0 };
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),             // tab bar
+            Constraint::Length(1),             // mode header
             Constraint::Length(1),             // summary row
             Constraint::Min(1),                // board
             Constraint::Length(detail_height), // detail panel
@@ -3214,7 +3222,8 @@ pub fn render_security_board(frame: &mut Frame, app: &mut App, area: Rect) {
         .split(area);
 
     render_tab_bar(frame, app, chunks[0]);
-    render_security_summary_row(frame, app, chunks[1]);
+    render_security_mode_header(frame, SecurityBoardMode::Alerts, chunks[1]);
+    render_security_summary_row(frame, app, chunks[2]);
 
     let filtered = app.filtered_security_alerts();
     if filtered.is_empty() {
@@ -3228,20 +3237,20 @@ pub fn render_security_board(frame: &mut Frame, app: &mut App, area: Rect) {
         let p = Paragraph::new(msg)
             .alignment(Alignment::Center)
             .style(Style::default().fg(Color::DarkGray));
-        frame.render_widget(p, chunks[2]);
+        frame.render_widget(p, chunks[3]);
     } else {
-        render_security_columns(frame, app, chunks[2]);
+        render_security_columns(frame, app, chunks[3]);
     }
 
-    render_security_detail(frame, app, chunks[3]);
+    render_security_detail(frame, app, chunks[4]);
 
     // Status bar
     if let Some(msg) = app.status.message.as_deref() {
         let status = Paragraph::new(msg.to_string()).style(Style::default().fg(Color::Yellow));
-        frame.render_widget(status, chunks[4]);
+        frame.render_widget(status, chunks[5]);
     } else if let Some(err) = app.last_security_error() {
         let status = Paragraph::new(format!("Error: {err}")).style(Style::default().fg(Color::Red));
-        frame.render_widget(status, chunks[4]);
+        frame.render_widget(status, chunks[5]);
     } else {
         let has_alert = app.selected_security_alert().is_some();
         let agent_status = app.selected_security_alert().and_then(|a| a.agent_status);
@@ -3250,13 +3259,287 @@ pub fn render_security_board(frame: &mut Frame, app: &mut App, area: Rect) {
             has_alert,
             agent_status,
         )));
-        frame.render_widget(hints, chunks[4]);
+        frame.render_widget(hints, chunks[5]);
     }
 
     // Filter overlay
     if matches!(app.mode(), InputMode::SecurityRepoFilter) {
         render_security_repo_filter_overlay(frame, app, area);
     }
+}
+
+fn render_security_mode_header(frame: &mut Frame, current_mode: SecurityBoardMode, area: Rect) {
+    let active_style = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+    let inactive_style = Style::default().fg(MUTED);
+
+    let (dep_style, alerts_style) = match current_mode {
+        SecurityBoardMode::Dependabot => (active_style, inactive_style),
+        SecurityBoardMode::Alerts => (inactive_style, active_style),
+    };
+
+    let line = Line::from(vec![
+        Span::styled("[1] Dependabot", dep_style),
+        Span::styled("  ", Style::default()),
+        Span::styled("[2] Alerts", alerts_style),
+    ]);
+    frame.render_widget(Paragraph::new(line), area);
+}
+
+fn render_dependabot_board(frame: &mut Frame, app: &mut App, area: Rect) {
+    let detail_height = if app.security.dependabot.detail_visible {
+        8
+    } else {
+        0
+    };
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),             // tab bar
+            Constraint::Length(1),             // mode header
+            Constraint::Length(1),             // column summary row
+            Constraint::Min(1),                // board
+            Constraint::Length(detail_height), // detail panel (placeholder)
+            Constraint::Length(1),             // status bar
+        ])
+        .split(area);
+
+    render_tab_bar(frame, app, chunks[0]);
+    render_security_mode_header(frame, SecurityBoardMode::Dependabot, chunks[1]);
+    render_dependabot_summary_row(frame, app, chunks[2]);
+
+    let bot_prs = app.filtered_bot_prs();
+    if bot_prs.is_empty() {
+        let msg = if app.bot_prs_loading() {
+            "Loading..."
+        } else if app.security.dependabot.prs.last_error.is_some() {
+            "Failed to load PRs. Press r to retry."
+        } else {
+            "No Dependabot PRs found. Press r to refresh."
+        };
+        let p = Paragraph::new(msg)
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::DarkGray));
+        frame.render_widget(p, chunks[3]);
+    } else {
+        render_dependabot_columns(frame, app, chunks[3]);
+    }
+
+    // Detail panel placeholder (currently empty)
+    let detail_block = Block::default()
+        .borders(Borders::TOP)
+        .border_style(Style::default().fg(BORDER));
+    frame.render_widget(detail_block, chunks[4]);
+
+    // Status bar
+    if let Some(msg) = app.status.message.as_deref() {
+        let status = Paragraph::new(msg.to_string()).style(Style::default().fg(Color::Yellow));
+        frame.render_widget(status, chunks[5]);
+    } else if let Some(err) = app.security.dependabot.prs.last_error.as_deref() {
+        let status =
+            Paragraph::new(format!("Error: {err}")).style(Style::default().fg(Color::Red));
+        frame.render_widget(status, chunks[5]);
+    } else {
+        let has_selected = !app.selected_bot_prs().is_empty();
+        let col = match app.view_mode() {
+            ViewMode::SecurityBoard {
+                dependabot_selection,
+                ..
+            } => dependabot_selection.selected_column,
+            _ => 0,
+        };
+        let row = match app.view_mode() {
+            ViewMode::SecurityBoard {
+                dependabot_selection,
+                ..
+            } => dependabot_selection.selected_row[col],
+            _ => 0,
+        };
+        let selected_pr = app
+            .filtered_bot_prs()
+            .into_iter()
+            .filter(|pr| super::bot_pr_column(pr) == col)
+            .nth(row);
+        let hints = Paragraph::new(Line::from(dependabot_action_hints(
+            has_selected,
+            selected_pr,
+        )));
+        frame.render_widget(hints, chunks[5]);
+    }
+}
+
+fn render_dependabot_summary_row(frame: &mut Frame, app: &App, area: Rect) {
+    let col_count = 3usize;
+    let col_labels = ["Backlog", "In Review", "Approved"];
+    let col_colors = [
+        review_column_color(ReviewDecision::ReviewRequired),
+        review_column_color(ReviewDecision::ChangesRequested),
+        review_column_color(ReviewDecision::Approved),
+    ];
+
+    let sel_col = match app.view_mode() {
+        ViewMode::SecurityBoard {
+            dependabot_selection,
+            ..
+        } => dependabot_selection.selected_column,
+        _ => 0,
+    };
+
+    let prs = app.filtered_bot_prs();
+
+    let segments = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(vec![Constraint::Ratio(1, col_count as u32); col_count])
+        .split(area);
+
+    for i in 0..col_count {
+        let count = prs.iter().filter(|pr| super::bot_pr_column(pr) == i).count();
+        let is_focused = i == sel_col;
+        let prefix = if is_focused { "\u{25b8} " } else { "\u{25e6} " };
+        let label = format!("{prefix}{} ({count})", col_labels[i]);
+
+        let style = if is_focused {
+            Style::default()
+                .fg(col_colors[i])
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+
+        frame.render_widget(Paragraph::new(label).style(style), segments[i]);
+    }
+}
+
+fn render_dependabot_columns(frame: &mut Frame, app: &mut App, area: Rect) {
+    let col_count = 3usize;
+    let col_decisions = [
+        ReviewDecision::ReviewRequired,
+        ReviewDecision::ChangesRequested,
+        ReviewDecision::Approved,
+    ];
+
+    let (sel_col, sel_rows) = match app.view_mode() {
+        ViewMode::SecurityBoard {
+            dependabot_selection,
+            ..
+        } => (
+            dependabot_selection.selected_column,
+            dependabot_selection.selected_row,
+        ),
+        _ => (0, [0; ReviewDecision::COLUMN_COUNT]),
+    };
+
+    let col_areas = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(vec![Constraint::Ratio(1, col_count as u32); col_count])
+        .split(area);
+
+    let selected_prs: std::collections::HashSet<String> =
+        app.selected_bot_prs().iter().cloned().collect();
+
+    for i in 0..col_count {
+        let is_focused = i == sel_col;
+        let decision_for_color = col_decisions[i];
+        let selected_row = sel_rows[i];
+
+        let prs: Vec<&ReviewPr> = app
+            .filtered_bot_prs()
+            .into_iter()
+            .filter(|pr| super::bot_pr_column(pr) == i)
+            .collect();
+
+        let mut list_items: Vec<ListItem> = Vec::new();
+        let mut list_selection_idx: Option<usize> = None;
+        let mut current_repo: Option<&str> = None;
+
+        for (item_idx, pr) in prs.iter().enumerate() {
+            if current_repo != Some(pr.repo.as_str()) {
+                current_repo = Some(pr.repo.as_str());
+                let repo_short = pr.repo.split('/').next_back().unwrap_or(&pr.repo);
+                list_items.push(render_substatus_header(repo_short));
+            }
+
+            if item_idx == selected_row {
+                list_selection_idx = Some(list_items.len());
+            }
+
+            let is_selected = selected_prs.contains(&pr.url);
+            list_items.push(build_review_pr_item(
+                pr,
+                ReviewBoardMode::Reviewer,
+                i,
+                is_focused && item_idx == selected_row,
+                pr.agent_status,
+                is_selected,
+                col_areas[i].width,
+            ));
+        }
+
+        let bg = if is_focused {
+            review_column_bg_color(decision_for_color)
+        } else {
+            Color::Reset
+        };
+
+        let list = List::new(list_items).block(Block::default().style(Style::default().bg(bg)));
+
+        let mut list_state = ListState::default();
+        if is_focused {
+            list_state.select(list_selection_idx);
+        }
+
+        frame.render_stateful_widget(list, col_areas[i], &mut list_state);
+
+        // Write back list state for scroll tracking
+        if let ViewMode::SecurityBoard {
+            dependabot_selection,
+            ..
+        } = &mut app.board.view_mode
+        {
+            dependabot_selection.list_states[i] = list_state;
+        }
+    }
+}
+
+pub(in crate::tui) fn dependabot_action_hints(
+    has_selected: bool,
+    selected_pr: Option<&crate::models::ReviewPr>,
+) -> Vec<Span<'static>> {
+    use crate::models::ReviewAgentStatus;
+    let key_color = Color::Cyan;
+    let label_style = Style::default().fg(MUTED);
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let push_hint = |spans: &mut Vec<Span<'static>>, key: &'static str, label: String| {
+        push_hint_spans(spans, key, &label, key_color, label_style);
+    };
+
+    if has_selected {
+        push_hint(&mut spans, "a", "approve".into());
+        push_hint(&mut spans, "m", "merge".into());
+        push_hint(&mut spans, "Esc", "clear".into());
+    } else if let Some(pr) = selected_pr {
+        push_hint(&mut spans, "Space", "select".into());
+        match pr.agent_status {
+            Some(ReviewAgentStatus::Idle) => {
+                push_hint(&mut spans, "g", "go to".into());
+                push_hint(&mut spans, "r", "re-review".into());
+                push_hint(&mut spans, "T", "detach".into());
+            }
+            Some(_) => {
+                push_hint(&mut spans, "g", "go to".into());
+                push_hint(&mut spans, "T", "detach".into());
+            }
+            None => {
+                push_hint(&mut spans, "d", "dispatch".into());
+            }
+        }
+        push_hint(&mut spans, "p", "open".into());
+    }
+    push_hint(&mut spans, "Tab", "tasks".into());
+    push_hint(&mut spans, "?", "help".into());
+    push_hint(&mut spans, "q", "quit".into());
+    spans
 }
 
 pub(in crate::tui) fn security_action_hints(

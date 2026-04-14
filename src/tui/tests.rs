@@ -1764,49 +1764,14 @@ fn epic_action_hints_shows_filter_help() {
 // --- review_action_hints: missing hints ---
 
 #[test]
-fn review_hints_shows_backtab_and_filter() {
+fn review_hints_shows_mode_keys_and_filter() {
     let hints = ui::review_action_hints(true, false, None);
     let keys = hint_keys(&hints);
     assert!(
-        keys.contains(&"[BackTab]"),
-        "review should show BackTab hint"
+        keys.contains(&"[1/2]"),
+        "review should show 1/2 mode hint"
     );
     assert!(keys.contains(&"[f]"), "review should show filter hint");
-}
-
-// --- bot_action_hints: missing hints ---
-
-#[test]
-fn bot_hints_shows_approve_merge_when_selected() {
-    let hints = ui::bot_action_hints(true, None, true);
-    let keys = hint_keys(&hints);
-    assert!(keys.contains(&"[A]"), "bot should show batch approve hint");
-    assert!(keys.contains(&"[m]"), "bot should show batch merge hint");
-}
-
-#[test]
-fn bot_hints_hides_approve_merge_when_no_selection() {
-    let hints = ui::bot_action_hints(true, None, false);
-    let keys = hint_keys(&hints);
-    assert!(
-        !keys.contains(&"[A]"),
-        "bot should not show approve without selection"
-    );
-    assert!(
-        !keys.contains(&"[m]"),
-        "bot should not show merge without selection"
-    );
-}
-
-#[test]
-fn bot_hints_shows_filter_queries_help_quit_backtab() {
-    let hints = ui::bot_action_hints(true, None, false);
-    let keys = hint_keys(&hints);
-    assert!(keys.contains(&"[f]"), "bot should show filter hint");
-    assert!(keys.contains(&"[e]"), "bot should show edit queries hint");
-    assert!(keys.contains(&"[?]"), "bot should show help hint");
-    assert!(keys.contains(&"[q]"), "bot should show quit hint");
-    assert!(keys.contains(&"[BackTab]"), "bot should show BackTab hint");
 }
 
 // --- security_action_hints: missing hints ---
@@ -1815,7 +1780,9 @@ fn bot_hints_shows_filter_queries_help_quit_backtab() {
 fn security_hints_shows_quit() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.board.view_mode = ViewMode::SecurityBoard {
+        mode: SecurityBoardMode::default(),
         selection: crate::tui::types::SecurityBoardSelection::new(),
+        dependabot_selection: ReviewBoardSelection::new(),
         saved_board: crate::tui::types::BoardSelection::default(),
     };
     let hints = ui::security_action_hints(&app, false, None);
@@ -9461,150 +9428,62 @@ fn my_prs_loaded_updates_state() {
 }
 
 #[test]
-fn shift_tab_toggles_review_board_mode() {
+fn review_board_key_1_switches_to_reviewer() {
+    let mut app = make_review_board_app();
+    // Switch to Author first
+    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Author));
+    app.handle_key(make_key(KeyCode::Char('1')));
+    assert!(matches!(
+        app.board.view_mode,
+        ViewMode::ReviewBoard {
+            mode: ReviewBoardMode::Reviewer,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn review_board_key_2_switches_to_author() {
+    let mut app = make_review_board_app();
+    app.handle_key(make_key(KeyCode::Char('2')));
+    assert!(matches!(
+        app.board.view_mode,
+        ViewMode::ReviewBoard {
+            mode: ReviewBoardMode::Author,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn review_board_backtab_does_nothing() {
+    let mut app = make_review_board_app();
+    let initial_mode = match &app.board.view_mode {
+        ViewMode::ReviewBoard { mode, .. } => *mode,
+        _ => panic!("not review board"),
+    };
+    app.handle_key(make_key(KeyCode::BackTab));
+    let after_mode = match &app.board.view_mode {
+        ViewMode::ReviewBoard { mode, .. } => *mode,
+        _ => panic!("not review board"),
+    };
+    assert_eq!(initial_mode, after_mode);
+}
+
+#[test]
+fn switch_to_author_fetches_my_prs() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
-    match app.board.view_mode {
-        ViewMode::ReviewBoard { mode, .. } => assert_eq!(mode, ReviewBoardMode::Reviewer),
-        _ => panic!("expected ReviewBoard"),
-    }
-    // Toggle to Author
-    app.update(Message::ToggleReviewBoardMode);
-    match app.board.view_mode {
-        ViewMode::ReviewBoard { mode, .. } => assert_eq!(mode, ReviewBoardMode::Author),
-        _ => panic!("expected ReviewBoard"),
-    }
-    // Toggle to Dependabot
-    app.update(Message::ToggleReviewBoardMode);
-    match app.board.view_mode {
-        ViewMode::ReviewBoard { mode, .. } => assert_eq!(mode, ReviewBoardMode::Dependabot),
-        _ => panic!("expected ReviewBoard"),
-    }
-    // Toggle back to Reviewer
-    app.update(Message::ToggleReviewBoardMode);
-    match app.board.view_mode {
-        ViewMode::ReviewBoard { mode, .. } => assert_eq!(mode, ReviewBoardMode::Reviewer),
-        _ => panic!("expected ReviewBoard"),
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Dependabot column placement
-// ---------------------------------------------------------------------------
-
-#[test]
-fn dependabot_col_approved_wins_over_agent_status() {
-    let mode = ReviewBoardMode::Dependabot;
-    let pr = make_bot_pr(
-        1,
-        crate::models::ReviewDecision::Approved,
-        Some(crate::models::ReviewAgentStatus::Reviewing),
-        crate::models::CiStatus::None,
-    );
-    assert_eq!(mode.pr_column(&pr), 2, "Approved should be column 2");
-}
-
-#[test]
-fn dependabot_col_in_review_when_reviewing() {
-    let mode = ReviewBoardMode::Dependabot;
-    let pr = make_bot_pr(
-        1,
-        crate::models::ReviewDecision::ReviewRequired,
-        Some(crate::models::ReviewAgentStatus::Reviewing),
-        crate::models::CiStatus::None,
-    );
-    assert_eq!(mode.pr_column(&pr), 1, "Reviewing agent should be column 1");
-}
-
-#[test]
-fn dependabot_col_in_review_when_findings_ready() {
-    let mode = ReviewBoardMode::Dependabot;
-    let pr = make_bot_pr(
-        1,
-        crate::models::ReviewDecision::ReviewRequired,
-        Some(crate::models::ReviewAgentStatus::FindingsReady),
-        crate::models::CiStatus::Success,
-    );
-    assert_eq!(mode.pr_column(&pr), 1, "FindingsReady should be column 1");
-}
-
-#[test]
-fn dependabot_col_backlog_when_no_agent() {
-    let mode = ReviewBoardMode::Dependabot;
-    let pr = make_bot_pr(
-        1,
-        crate::models::ReviewDecision::ReviewRequired,
-        None,
-        crate::models::CiStatus::Success,
-    );
-    assert_eq!(
-        mode.pr_column(&pr),
-        0,
-        "No agent should be column 0 (Backlog)"
-    );
-}
-
-#[test]
-fn dependabot_col_backlog_when_agent_idle() {
-    let mode = ReviewBoardMode::Dependabot;
-    let pr = make_bot_pr(
-        1,
-        crate::models::ReviewDecision::ReviewRequired,
-        Some(crate::models::ReviewAgentStatus::Idle),
-        crate::models::CiStatus::None,
-    );
-    assert_eq!(
-        mode.pr_column(&pr),
-        0,
-        "Idle agent should be column 0 (Backlog)"
-    );
-}
-
-#[test]
-fn dependabot_sort_key_findings_ready_before_reviewing() {
-    let mode = ReviewBoardMode::Dependabot;
-    let findings = make_bot_pr(
-        1,
-        crate::models::ReviewDecision::ReviewRequired,
-        Some(crate::models::ReviewAgentStatus::FindingsReady),
-        crate::models::CiStatus::None,
-    );
-    let reviewing = make_bot_pr(
-        2,
-        crate::models::ReviewDecision::ReviewRequired,
-        Some(crate::models::ReviewAgentStatus::Reviewing),
-        crate::models::CiStatus::None,
-    );
-    assert!(
-        mode.dependabot_sort_key(&findings) < mode.dependabot_sort_key(&reviewing),
-        "FindingsReady should sort before Reviewing"
-    );
-    // Non-Dependabot modes return 0 for all PRs (no reordering)
-    assert_eq!(ReviewBoardMode::Reviewer.dependabot_sort_key(&findings), 0);
-    assert_eq!(ReviewBoardMode::Reviewer.dependabot_sort_key(&reviewing), 0);
-}
-
-#[test]
-fn dependabot_column_count_is_3() {
-    assert_eq!(ReviewBoardMode::Dependabot.column_count(), 3);
-    assert_eq!(ReviewBoardMode::Reviewer.column_count(), 4);
-    assert_eq!(ReviewBoardMode::Author.column_count(), 4);
-}
-
-#[test]
-fn toggle_to_author_fetches_my_prs() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    let cmds = app.update(Message::ToggleReviewBoardMode);
+    let cmds = app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Author));
     assert!(cmds
         .iter()
         .any(|c| matches!(c, Command::FetchPrs(PrListKind::Authored))));
 }
 
 #[test]
-fn toggle_review_board_mode_outside_review_board_is_noop() {
+fn switch_review_board_mode_outside_review_board_is_noop() {
     let mut app = make_app();
-    let cmds = app.update(Message::ToggleReviewBoardMode);
+    let cmds = app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Author));
     assert!(cmds.is_empty());
     assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
 }
@@ -9637,7 +9516,7 @@ fn active_review_prs_returns_my_prs_in_author_mode() {
         .authored
         .set_prs(vec![make_review_pr(2, "me", ReviewDecision::Approved)]);
     app.update(Message::SwitchToReviewBoard);
-    app.update(Message::ToggleReviewBoardMode);
+    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Author));
     assert_eq!(app.active_review_prs().len(), 1);
     assert_eq!(app.active_review_prs()[0].number, 2);
 }
@@ -9736,7 +9615,7 @@ fn is_detached_returns_false_for_conflict() {
 fn dispatch_pr_filter_toggles_on_d_in_author_mode() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.update(Message::SwitchToReviewBoard);
-    app.update(Message::ToggleReviewBoardMode); // switch to Author
+    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Author)); // switch to Author
     assert!(!app.dispatch_pr_filter());
 
     app.handle_key(make_key(KeyCode::Char('D')));
@@ -10204,28 +10083,28 @@ fn render_status_bar_confirm_edit_task() {
 }
 
 #[test]
-fn render_status_bar_confirm_batch_approve() {
+fn render_status_bar_confirm_approve_bot_pr() {
     let mut app = make_app();
-    app.input.mode = InputMode::ConfirmBatchApprove(vec![
-        "https://github.com/org/repo/pull/1".to_string(),
-        "https://github.com/org/repo/pull/2".to_string(),
-    ]);
+    app.input.mode =
+        InputMode::ConfirmApproveBotPr("https://github.com/org/repo/pull/1".to_string());
+    app.status.message = Some("Approve PR #1? (y/N)".to_string());
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
-        buffer_contains(&buf, "Approve 2 PRs?"),
-        "ConfirmBatchApprove with 2 URLs should show 'Approve 2 PRs?'"
+        buffer_contains(&buf, "Approve PR #1?"),
+        "ConfirmApproveBotPr should show approve message"
     );
 }
 
 #[test]
-fn render_status_bar_confirm_batch_merge() {
+fn render_status_bar_confirm_merge_bot_pr() {
     let mut app = make_app();
     app.input.mode =
-        InputMode::ConfirmBatchMerge(vec!["https://github.com/org/repo/pull/1".to_string()]);
+        InputMode::ConfirmMergeBotPr("https://github.com/org/repo/pull/1".to_string());
+    app.status.message = Some("Merge PR #1? (y/N)".to_string());
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
-        buffer_contains(&buf, "Merge 1 PRs?"),
-        "ConfirmBatchMerge with 1 URL should show 'Merge 1 PRs?'"
+        buffer_contains(&buf, "Merge PR #1?"),
+        "ConfirmMergeBotPr should show merge message"
     );
 }
 
@@ -10885,34 +10764,12 @@ fn render_tab_bar_review_board_my_prs_tab() {
         PrListKind::Authored,
         vec![make_review_pr(1, "me", ReviewDecision::Approved)],
     ));
-    // Toggle to Author mode so My PRs tab is active
-    app.update(Message::ToggleReviewBoardMode);
+    // Switch to Author mode so My PRs tab is active
+    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Author));
     let buf = render_to_buffer(&mut app, 100, 30);
     assert!(
         buffer_contains(&buf, "My PRs (1)"),
         "tab bar in review board mode should show 'My PRs (1)' when 1 author PR loaded"
-    );
-}
-
-#[test]
-fn render_tab_bar_review_board_dependabot_tab() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
-    app.update(Message::PrsLoaded(
-        PrListKind::Bot,
-        vec![
-            make_review_pr(1, "dependabot", ReviewDecision::ReviewRequired),
-            make_review_pr(2, "dependabot", ReviewDecision::ReviewRequired),
-        ],
-    ));
-    // Toggle to Dependabot mode (Reviewer → Author → Dependabot)
-    app.update(Message::ToggleReviewBoardMode);
-    app.update(Message::ToggleReviewBoardMode);
-    let buf = render_to_buffer(&mut app, 100, 30);
-    assert!(
-        buffer_contains(&buf, "Dependabot (2)"),
-        "tab bar in review board mode should show 'Dependabot (2)' when 2 bot PRs loaded"
     );
 }
 
@@ -11016,7 +10873,7 @@ fn render_review_board_author_shows_my_pr_titles() {
         PrListKind::Authored,
         vec![make_review_pr(42, "me", ReviewDecision::ReviewRequired)],
     ));
-    app.update(Message::ToggleReviewBoardMode); // Reviewer → Author
+    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Author)); // Reviewer → Author
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
         buffer_contains(&buf, "PR 42"),
@@ -11033,7 +10890,7 @@ fn render_review_board_author_shows_column_headers() {
         PrListKind::Authored,
         vec![make_review_pr(42, "me", ReviewDecision::ReviewRequired)],
     ));
-    app.update(Message::ToggleReviewBoardMode); // Reviewer → Author
+    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Author)); // Reviewer → Author
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
         buffer_contains(&buf, "Needs Review"),
@@ -11041,52 +10898,6 @@ fn render_review_board_author_shows_column_headers() {
     );
 }
 
-#[test]
-fn render_review_board_dependabot_shows_bot_prs() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
-    app.update(Message::PrsLoaded(
-        PrListKind::Bot,
-        vec![make_review_pr(
-            100,
-            "dependabot",
-            ReviewDecision::ReviewRequired,
-        )],
-    ));
-    app.update(Message::ToggleReviewBoardMode); // Reviewer → Author
-    app.update(Message::ToggleReviewBoardMode); // Author → Dependabot
-    let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(
-        buffer_contains(&buf, "PR 100"),
-        "dependabot mode should show 'PR 100' for the loaded bot-PR"
-    );
-}
-
-#[test]
-fn render_review_board_dependabot_shows_lifecycle_columns() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
-    app.update(Message::PrsLoaded(
-        PrListKind::Bot,
-        vec![make_review_pr(
-            100,
-            "dependabot",
-            ReviewDecision::ReviewRequired,
-        )],
-    ));
-    app.update(Message::ToggleReviewBoardMode); // Reviewer → Author
-    app.update(Message::ToggleReviewBoardMode); // Author → Dependabot
-    let buf = render_to_buffer(&mut app, 120, 30);
-    let has_lifecycle_column = buffer_contains(&buf, "Backlog")
-        || buffer_contains(&buf, "In Review")
-        || buffer_contains(&buf, "Approved");
-    assert!(
-        has_lifecycle_column,
-        "dependabot mode should show lifecycle column headers (Backlog, In Review, or Approved)"
-    );
-}
 
 #[test]
 fn render_review_board_author_empty_shows_no_prs() {
@@ -11094,7 +10905,7 @@ fn render_review_board_author_empty_shows_no_prs() {
     app.update(Message::SwitchToReviewBoard);
     app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
     app.update(Message::PrsLoaded(PrListKind::Authored, vec![]));
-    app.update(Message::ToggleReviewBoardMode); // Reviewer → Author
+    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Author)); // Reviewer → Author
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
         buffer_contains(&buf, "No PRs found"),
@@ -11102,20 +10913,6 @@ fn render_review_board_author_empty_shows_no_prs() {
     );
 }
 
-#[test]
-fn render_review_board_dependabot_empty_shows_no_prs() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
-    app.update(Message::PrsLoaded(PrListKind::Bot, vec![]));
-    app.update(Message::ToggleReviewBoardMode); // Reviewer → Author
-    app.update(Message::ToggleReviewBoardMode); // Author → Dependabot
-    let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(
-        buffer_contains(&buf, "No PRs found"),
-        "dependabot mode with no bot-PRs should show 'No PRs found'"
-    );
-}
 
 // ---------------------------------------------------------------------------
 // Bot error / not-configured status bar tests
@@ -11131,22 +10928,6 @@ fn last_bot_error_returns_bot_list_error() {
     assert_eq!(app.last_bot_error(), Some("not configured"));
 }
 
-#[test]
-fn render_review_board_dependabot_shows_not_configured_in_status_bar() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsFetchFailed(
-        PrListKind::Bot,
-        "Bot queries not configured — press [e] to add your org filter".to_string(),
-    ));
-    app.update(Message::ToggleReviewBoardMode); // Reviewer → Author
-    app.update(Message::ToggleReviewBoardMode); // Author → Dependabot
-    let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(
-        buffer_contains(&buf, "not configured"),
-        "Dependabot mode should show persistent not-configured error in status bar"
-    );
-}
 
 #[test]
 fn render_review_board_reviewer_mode_does_not_show_bot_error() {
@@ -11176,7 +10957,7 @@ fn render_review_board_author_mode_shows_review_error_not_bot_error() {
         PrListKind::Bot,
         "bot error should not appear".to_string(),
     ));
-    app.update(Message::ToggleReviewBoardMode); // Reviewer → Author
+    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Author)); // Reviewer → Author
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
         !buffer_contains(&buf, "bot error should not appear"),
@@ -11618,10 +11399,12 @@ fn n_in_confirm_delete_repo_path_cancels() {
 // Security board input handler tests
 // ---------------------------------------------------------------------------
 
-/// Helper: put app into SecurityBoard view with alerts loaded.
+/// Helper: put app into SecurityBoard Alerts sub-view with alerts loaded.
 fn make_security_board_app() -> App {
     let mut app = make_app();
     app.update(Message::SwitchToSecurityBoard);
+    // The security board defaults to Dependabot mode; switch to Alerts for these tests.
+    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Alerts));
     app.update(Message::SecurityAlertsLoaded(vec![
         make_security_alert(1, "org/alpha", crate::models::AlertSeverity::Critical),
         make_security_alert(2, "org/beta", crate::models::AlertSeverity::High),
@@ -11818,6 +11601,66 @@ fn security_board_unknown_key_is_noop() {
     let mut app = make_security_board_app();
     let cmds = app.handle_key(make_key(KeyCode::Char('z')));
     assert!(cmds.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Security board sub-mode switching tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn security_board_key_1_switches_to_dependabot() {
+    let mut app = make_security_board_app();
+    // make_security_board_app starts in Alerts mode; press 1 to switch to Dependabot
+    app.handle_key(make_key(KeyCode::Char('1')));
+    assert!(matches!(
+        app.board.view_mode,
+        ViewMode::SecurityBoard {
+            mode: SecurityBoardMode::Dependabot,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn security_board_key_2_switches_to_alerts() {
+    let mut app = make_security_board_app();
+    // Switch to Dependabot first
+    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Dependabot));
+    app.handle_key(make_key(KeyCode::Char('2')));
+    assert!(matches!(
+        app.board.view_mode,
+        ViewMode::SecurityBoard {
+            mode: SecurityBoardMode::Alerts,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn security_board_dependabot_space_selects_pr() {
+    let mut app = make_security_board_app();
+    let pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
+    let url = pr.url.clone();
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
+    // Switch to Dependabot mode
+    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Dependabot));
+    app.handle_key(make_key(KeyCode::Char(' ')));
+    assert!(app.security.dependabot.selected_prs.contains(&url));
+}
+
+#[test]
+fn security_board_dependabot_space_deselects_pr() {
+    let mut app = make_security_board_app();
+    let pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
+    let url = pr.url.clone();
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
+    // Switch to Dependabot mode
+    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Dependabot));
+    // Select
+    app.handle_key(make_key(KeyCode::Char(' ')));
+    // Deselect
+    app.handle_key(make_key(KeyCode::Char(' ')));
+    assert!(!app.security.dependabot.selected_prs.contains(&url));
 }
 
 // ---------------------------------------------------------------------------
@@ -12053,25 +11896,6 @@ fn review_board_question_mark_toggles_help() {
     assert_eq!(app.input.mode, InputMode::Help);
 }
 
-#[test]
-fn review_board_backtab_toggles_mode() {
-    let mut app = make_review_board_app();
-    assert!(matches!(
-        app.board.view_mode,
-        ViewMode::ReviewBoard {
-            mode: ReviewBoardMode::Reviewer,
-            ..
-        }
-    ));
-    app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
-    assert!(matches!(
-        app.board.view_mode,
-        ViewMode::ReviewBoard {
-            mode: ReviewBoardMode::Author,
-            ..
-        }
-    ));
-}
 
 #[test]
 fn review_board_e_edits_github_queries() {
@@ -12094,7 +11918,7 @@ fn refresh_review_prs_returns_fetch_command() {
 #[test]
 fn refresh_review_prs_in_author_mode_returns_fetch_my_prs() {
     let mut app = make_review_board_app();
-    app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
+    app.handle_key(make_key(KeyCode::Char('2'))); // switch to Author mode
     let cmds = app.update(Message::RefreshReviewPrs);
     assert!(cmds
         .iter()
@@ -12140,9 +11964,9 @@ fn bot_prs_merged_kills_active_review_window() {
         ),
         "should clear review agent status"
     );
-    assert!(app.review.bot.prs[0].tmux_window.is_none());
-    assert!(app.review.bot.prs[0].worktree.is_none());
-    assert!(app.review.bot.prs[0].agent_status.is_none());
+    assert!(app.security.dependabot.prs.prs[0].tmux_window.is_none());
+    assert!(app.security.dependabot.prs.prs[0].worktree.is_none());
+    assert!(app.security.dependabot.prs.prs[0].agent_status.is_none());
 }
 
 #[test]
@@ -12187,7 +12011,7 @@ fn review_board_unknown_key_is_noop() {
 fn review_board_d_capital_toggles_dispatch_filter_in_author_mode() {
     let mut app = make_review_board_app();
     // Switch to Author mode
-    app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
+    app.handle_key(make_key(KeyCode::Char('2')));
     assert!(matches!(
         app.board.view_mode,
         ViewMode::ReviewBoard {
@@ -12207,118 +12031,6 @@ fn review_board_d_capital_is_noop_in_reviewer_mode() {
     assert!(cmds.is_empty());
 }
 
-#[test]
-fn review_board_esc_clears_bot_pr_selection_first() {
-    use crate::models::CiStatus;
-    let mut app = make_review_board_app();
-    // Switch to Dependabot mode and select a PR
-    app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)); // Author
-    app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)); // Dependabot
-    let mut pr = make_review_pr(10, "dependabot", ReviewDecision::ReviewRequired);
-    pr.ci_status = CiStatus::Success; // Column 0 (CI Passing)
-    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
-    // Select a bot PR (cursor is at column 0 where the PR is)
-    app.handle_key(make_key(KeyCode::Char(' ')));
-    assert!(app.has_bot_pr_selection());
-    // Esc should clear selection, not exit board
-    app.handle_key(make_key(KeyCode::Esc));
-    assert!(!app.has_bot_pr_selection());
-    assert!(matches!(app.board.view_mode, ViewMode::ReviewBoard { .. }));
-}
-
-// ---------------------------------------------------------------------------
-// Review board dependabot-specific input tests
-// ---------------------------------------------------------------------------
-
-/// Helper: app in Dependabot review board mode with bot PRs loaded.
-fn make_dependabot_board_app() -> App {
-    use crate::models::CiStatus;
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    // Cycle to Dependabot mode: Reviewer -> Author -> Dependabot
-    app.update(Message::ToggleReviewBoardMode);
-    app.update(Message::ToggleReviewBoardMode);
-    // Use CiStatus::Success so PRs land in column 0 (CI Passing)
-    let mut pr1 = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
-    pr1.ci_status = CiStatus::Success;
-    let mut pr2 = make_review_pr(11, "dependabot[bot]", ReviewDecision::ReviewRequired);
-    pr2.ci_status = CiStatus::Success;
-    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr1, pr2]));
-    app
-}
-
-#[test]
-fn dependabot_space_toggles_select_pr() {
-    let mut app = make_dependabot_board_app();
-    assert!(!app.has_bot_pr_selection());
-    app.handle_key(make_key(KeyCode::Char(' ')));
-    assert!(app.has_bot_pr_selection());
-}
-
-#[test]
-fn dependabot_space_is_noop_in_reviewer_mode() {
-    let mut app = make_review_board_app();
-    let cmds = app.handle_key(make_key(KeyCode::Char(' ')));
-    assert!(cmds.is_empty());
-}
-
-#[test]
-fn dependabot_a_selects_all_column() {
-    let mut app = make_dependabot_board_app();
-    app.handle_key(make_key(KeyCode::Char('a')));
-    assert!(app.has_bot_pr_selection());
-}
-
-#[test]
-fn dependabot_a_is_noop_in_reviewer_mode() {
-    let mut app = make_review_board_app();
-    let cmds = app.handle_key(make_key(KeyCode::Char('a')));
-    assert!(cmds.is_empty());
-}
-
-#[test]
-fn dependabot_capital_a_starts_batch_approve() {
-    let mut app = make_dependabot_board_app();
-    // Select some PRs first
-    app.handle_key(make_key(KeyCode::Char('a'))); // select all
-    app.handle_key(make_key(KeyCode::Char('A')));
-    assert!(matches!(app.input.mode, InputMode::ConfirmBatchApprove(_)));
-}
-
-#[test]
-fn dependabot_capital_a_is_noop_in_reviewer_mode() {
-    let mut app = make_review_board_app();
-    let cmds = app.handle_key(make_key(KeyCode::Char('A')));
-    assert!(cmds.is_empty());
-}
-
-#[test]
-fn dependabot_m_starts_batch_merge() {
-    use crate::models::CiStatus;
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    app.update(Message::ToggleReviewBoardMode); // Author
-    app.update(Message::ToggleReviewBoardMode); // Dependabot
-                                                // Merge requires CI-passing + approved
-    let mut pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::Approved);
-    pr.ci_status = CiStatus::Success;
-    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
-    // Select the PR — it's in Approved column (2)
-    if let Some(sel) = app.review_selection_mut() {
-        sel.set_column(2);
-    }
-    app.handle_key(make_key(KeyCode::Char(' '))); // select
-    assert!(app.has_bot_pr_selection());
-    app.handle_key(make_key(KeyCode::Char('m')));
-    assert!(matches!(app.input.mode, InputMode::ConfirmBatchMerge(_)));
-}
-
-#[test]
-fn dependabot_m_is_noop_in_reviewer_mode() {
-    let mut app = make_review_board_app();
-    let cmds = app.handle_key(make_key(KeyCode::Char('m')));
-    assert!(cmds.is_empty());
-}
 
 // ---------------------------------------------------------------------------
 // Review repo filter input handler tests
@@ -12357,59 +12069,6 @@ fn review_repo_filter_digit_toggles_repo() {
     assert_eq!(app.input.mode, InputMode::ReviewRepoFilter);
 }
 
-// ---------------------------------------------------------------------------
-// Confirm batch input handler tests
-// ---------------------------------------------------------------------------
-
-#[test]
-fn confirm_batch_approve_y_confirms() {
-    let mut app = make_dependabot_board_app();
-    app.handle_key(make_key(KeyCode::Char('a'))); // select all
-    app.handle_key(make_key(KeyCode::Char('A'))); // start batch approve
-    assert!(matches!(app.input.mode, InputMode::ConfirmBatchApprove(_)));
-    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::BatchApprovePrs(_))));
-}
-
-#[test]
-fn confirm_batch_approve_n_cancels() {
-    let mut app = make_dependabot_board_app();
-    app.handle_key(make_key(KeyCode::Char('a'))); // select all
-    app.handle_key(make_key(KeyCode::Char('A'))); // start batch approve
-    app.handle_key(make_key(KeyCode::Char('n')));
-    assert_eq!(app.input.mode, InputMode::Normal);
-}
-
-#[test]
-fn confirm_batch_merge_y_confirms() {
-    use crate::models::CiStatus;
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    app.update(Message::ToggleReviewBoardMode); // Author
-    app.update(Message::ToggleReviewBoardMode); // Dependabot
-    let mut pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::Approved);
-    pr.ci_status = CiStatus::Success;
-    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
-    if let Some(sel) = app.review_selection_mut() {
-        sel.set_column(2); // Approved column
-    }
-    app.handle_key(make_key(KeyCode::Char(' '))); // select
-    app.handle_key(make_key(KeyCode::Char('m'))); // start batch merge
-    assert!(matches!(app.input.mode, InputMode::ConfirmBatchMerge(_)));
-    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
-    assert!(cmds.iter().any(|c| matches!(c, Command::BatchMergePrs(_))));
-}
-
-#[test]
-fn confirm_batch_merge_n_cancels() {
-    let mut app = make_dependabot_board_app();
-    app.handle_key(make_key(KeyCode::Char('a'))); // select all
-    app.handle_key(make_key(KeyCode::Char('m'))); // start batch merge
-    app.handle_key(make_key(KeyCode::Char('n')));
-    assert_eq!(app.input.mode, InputMode::Normal);
-}
 
 // ---------------------------------------------------------------------------
 // Confirm epic wrap-up input handler tests
@@ -12565,6 +12224,7 @@ fn g_on_review_board_without_agent_shows_status() {
 fn g_on_security_board_jumps_to_agent() {
     let mut app = make_app();
     app.update(Message::SwitchToSecurityBoard);
+    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Alerts));
 
     let mut alert = make_security_alert(1, "acme/app", crate::models::AlertSeverity::Critical);
     alert.tmux_window = Some("dispatch:fix-1".to_string());
@@ -14306,87 +13966,6 @@ fn security_board_r_without_idle_agent_no_window_is_noop() {
     assert!(cmds.is_empty());
 }
 
-// =====================================================================
-// Input handler coverage: review board gap tests (dependabot-specific)
-// =====================================================================
-
-fn make_dependabot_app() -> App {
-    let mut app = make_review_board_app();
-    // Toggle to Author, then Dependabot
-    app.update(Message::ToggleReviewBoardMode); // Reviewer -> Author
-    app.update(Message::ToggleReviewBoardMode); // Author -> Dependabot
-                                                // Load bot PRs with CI Success so they land in column 0
-    let mut pr1 = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
-    pr1.ci_status = crate::models::CiStatus::Success;
-    let mut pr2 = make_review_pr(11, "dependabot[bot]", ReviewDecision::ReviewRequired);
-    pr2.ci_status = crate::models::CiStatus::Success;
-    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr1, pr2]));
-    app
-}
-
-#[test]
-fn review_board_space_selects_bot_pr_in_dependabot_mode() {
-    let mut app = make_dependabot_app();
-    if let Some(pr) = app.selected_review_pr() {
-        let _url = pr.url.clone();
-    }
-    app.handle_key(make_key(KeyCode::Char(' ')));
-    assert!(app.has_bot_pr_selection());
-}
-
-#[test]
-fn review_board_space_is_noop_in_reviewer_mode() {
-    let mut app = make_review_board_app();
-    let cmds = app.handle_key(make_key(KeyCode::Char(' ')));
-    assert!(cmds.is_empty());
-}
-
-#[test]
-fn review_board_a_selects_all_bot_prs_in_dependabot() {
-    let mut app = make_dependabot_app();
-    app.handle_key(make_key(KeyCode::Char('a')));
-    assert!(app.has_bot_pr_selection());
-}
-
-#[test]
-fn review_board_a_is_noop_in_reviewer_mode() {
-    let mut app = make_review_board_app();
-    let cmds = app.handle_key(make_key(KeyCode::Char('a')));
-    assert!(cmds.is_empty());
-}
-
-#[test]
-fn review_board_capital_a_starts_batch_approve_in_dependabot() {
-    let mut app = make_dependabot_app();
-    // Select a PR first
-    if let Some(pr) = app.selected_review_pr() {
-        let url = pr.url.clone();
-        app.update(Message::ToggleSelectBotPr(url));
-    }
-    app.handle_key(make_key(KeyCode::Char('A')));
-    assert!(matches!(*app.mode(), InputMode::ConfirmBatchApprove(_)));
-}
-
-#[test]
-fn review_board_m_starts_batch_merge_in_dependabot() {
-    let mut app = make_review_board_app();
-    app.update(Message::ToggleReviewBoardMode); // Reviewer -> Author
-    app.update(Message::ToggleReviewBoardMode); // Author -> Dependabot
-                                                // Need Approved + CI Success PRs for merge eligibility
-    let mut pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::Approved);
-    pr.ci_status = crate::models::CiStatus::Success;
-    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
-    // Select the PR (navigate to Approved column = 2)
-    if let Some(sel) = app.review_selection_mut() {
-        sel.selected_column = 2;
-    }
-    if let Some(pr) = app.selected_review_pr() {
-        let url = pr.url.clone();
-        app.update(Message::ToggleSelectBotPr(url));
-    }
-    app.handle_key(make_key(KeyCode::Char('m')));
-    assert!(matches!(*app.mode(), InputMode::ConfirmBatchMerge(_)));
-}
 
 #[test]
 fn review_board_g_jumps_to_tmux_window() {
@@ -14726,7 +14305,9 @@ fn handle_key_normal_review_board_routes_correctly() {
 fn handle_key_normal_security_board_routes_correctly() {
     let mut app = make_app();
     app.board.view_mode = ViewMode::SecurityBoard {
+        mode: SecurityBoardMode::default(),
         selection: SecurityBoardSelection::new(),
+        dependabot_selection: ReviewBoardSelection::new(),
         saved_board: BoardSelection::new(),
     };
     // Tab should switch away from security board
@@ -15017,21 +14598,21 @@ fn handle_key_confirm_delete_repo_path_routes_correctly() {
     assert_eq!(app.input.mode, InputMode::RepoFilter);
 }
 
-/// ConfirmBatchApprove mode routes correctly.
+/// ConfirmApproveBotPr mode routes correctly.
 #[test]
-fn handle_key_confirm_batch_approve_routes_correctly() {
+fn handle_key_confirm_approve_bot_pr_routes_correctly() {
     let mut app = make_app();
-    app.input.mode = InputMode::ConfirmBatchApprove(vec!["url".to_string()]);
+    app.input.mode = InputMode::ConfirmApproveBotPr("url".to_string());
     let cmds = app.handle_key(make_key(KeyCode::Char('n')));
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::Normal);
 }
 
-/// ConfirmBatchMerge mode routes correctly.
+/// ConfirmMergeBotPr mode routes correctly.
 #[test]
-fn handle_key_confirm_batch_merge_routes_correctly() {
+fn handle_key_confirm_merge_bot_pr_routes_correctly() {
     let mut app = make_app();
-    app.input.mode = InputMode::ConfirmBatchMerge(vec!["url".to_string()]);
+    app.input.mode = InputMode::ConfirmMergeBotPr("url".to_string());
     let cmds = app.handle_key(make_key(KeyCode::Char('n')));
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::Normal);
@@ -15539,90 +15120,10 @@ fn inactive_duration_near_zero_after_mark_active() {
     assert!(duration < Duration::from_secs(1));
 }
 
-#[test]
-fn dependabot_right_arrow_clamps_at_column_2() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    // Switch to Dependabot mode: Reviewer → Author → Dependabot
-    app.update(Message::ToggleReviewBoardMode);
-    app.update(Message::ToggleReviewBoardMode);
-    // Navigate right 10 times — should stop at column 2
-    for _ in 0..10 {
-        app.handle_key(make_key(KeyCode::Right));
-    }
-    let col = app.review_selection().unwrap().column();
-    assert_eq!(
-        col, 2,
-        "Right arrow should clamp at column 2 in Dependabot mode"
-    );
-}
 
 #[test]
-fn dependabot_in_review_column_sorts_findings_ready_first() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    // Switch to Dependabot mode
-    app.update(Message::ToggleReviewBoardMode);
-    app.update(Message::ToggleReviewBoardMode);
-
-    let reviewing_pr = make_bot_pr(
-        10,
-        crate::models::ReviewDecision::ReviewRequired,
-        Some(crate::models::ReviewAgentStatus::Reviewing),
-        crate::models::CiStatus::None,
-    );
-    let findings_pr = make_bot_pr(
-        20,
-        crate::models::ReviewDecision::ReviewRequired,
-        Some(crate::models::ReviewAgentStatus::FindingsReady),
-        crate::models::CiStatus::Success,
-    );
-    // Load in order: Reviewing first, FindingsReady second
-    app.update(Message::PrsLoaded(
-        PrListKind::Bot,
-        vec![reviewing_pr, findings_pr],
-    ));
-
-    // Column 1 = In Review
-    let prs = app.active_prs_for_column(1);
-    assert_eq!(prs.len(), 2);
-    assert_eq!(prs[0].number, 20, "FindingsReady (#20) should be first");
-    assert_eq!(prs[1].number, 10, "Reviewing (#10) should be second");
-}
-
-#[test]
-fn dependabot_board_shows_lifecycle_column_labels() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    app.update(Message::ToggleReviewBoardMode); // → Author
-    app.update(Message::ToggleReviewBoardMode); // → Dependabot
-    let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(
-        buffer_contains(&buf, "Backlog"),
-        "Backlog column label should be visible"
-    );
-    assert!(
-        buffer_contains(&buf, "In Review"),
-        "In Review column label should be visible"
-    );
-    assert!(
-        !buffer_contains(&buf, "CI Passing"),
-        "old CI Passing label should not appear"
-    );
-    assert!(
-        !buffer_contains(&buf, "CI Failing"),
-        "old CI Failing label should not appear"
-    );
-    assert!(
-        !buffer_contains(&buf, "CI Pending"),
-        "old CI Pending label should not appear"
-    );
-}
-
-#[test]
-fn reviewer_mode_column_sort_unaffected_by_dependabot_sort_key() {
-    // Confirms that dependabot_sort_key returning 0 for all Reviewer PRs
-    // leaves the existing repo-alphabetical sort intact.
+fn reviewer_mode_column_sort_is_alphabetical_by_repo() {
+    // Confirms that PRs are sorted alphabetically by repo within a column.
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard); // starts in Reviewer mode
     app.update(Message::PrsLoaded(
@@ -15876,6 +15377,176 @@ fn render_repo_path_mode_shows_filtered_list_when_typing() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// SecurityBoardMode and DependabotBoardState tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn security_board_defaults_to_dependabot_mode() {
+    let mut app = make_app();
+    app.update(Message::SwitchToSecurityBoard);
+    assert!(matches!(
+        app.board.view_mode,
+        ViewMode::SecurityBoard {
+            mode: SecurityBoardMode::Dependabot,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn dependabot_board_state_starts_empty() {
+    let app = make_app();
+    assert!(app.security.dependabot.prs.prs.is_empty());
+    assert!(app.security.dependabot.selected_prs.is_empty());
+}
+
+#[test]
+fn prs_loaded_bot_populates_security_dependabot() {
+    let mut app = make_app();
+    let pr = make_review_pr(42, "dependabot[bot]", ReviewDecision::ReviewRequired);
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr.clone()]));
+    assert_eq!(app.security.dependabot.prs.prs.len(), 1);
+    assert_eq!(app.security.dependabot.prs.prs[0].number, 42);
+}
+
+#[test]
+fn prs_loaded_review_still_populates_review_board() {
+    let mut app = make_app();
+    let pr = make_review_pr(1, "alice", ReviewDecision::ReviewRequired);
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
+    assert_eq!(app.review.review.prs.len(), 1);
+}
+
+#[test]
+fn refresh_bot_prs_sets_dependabot_loading() {
+    let mut app = make_app();
+    app.update(Message::RefreshBotPrs);
+    assert!(app.security.dependabot.prs.loading);
+}
+
+// ---------------------------------------------------------------------------
+// Task 5: Dependabot approve/merge with confirmation
+// ---------------------------------------------------------------------------
+
+fn make_security_dependabot_app_with_pr() -> (App, String) {
+    let mut app = make_security_board_app();
+    let mut pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
+    pr.ci_status = crate::models::CiStatus::Success;
+    let url = pr.url.clone();
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
+    // Switch to Dependabot sub-mode, then select the PR with Space
+    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Dependabot));
+    app.handle_key(make_key(KeyCode::Char(' ')));
+    (app, url)
+}
+
+#[test]
+fn dependabot_approve_enters_confirm_mode() {
+    let (mut app, _url) = make_security_dependabot_app_with_pr();
+    app.handle_key(make_key(KeyCode::Char('a')));
+    assert!(matches!(app.input.mode, InputMode::ConfirmApproveBotPr(_)));
+}
+
+#[test]
+fn dependabot_approve_confirm_y_emits_approve_command() {
+    let (mut app, url) = make_security_dependabot_app_with_pr();
+    app.handle_key(make_key(KeyCode::Char('a')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+    assert!(cmds.iter().any(|c| matches!(c, Command::ApproveBotPr(u) if u == &url)));
+}
+
+#[test]
+fn dependabot_approve_confirm_n_cancels() {
+    let (mut app, _) = make_security_dependabot_app_with_pr();
+    app.handle_key(make_key(KeyCode::Char('a')));
+    app.handle_key(make_key(KeyCode::Char('n')));
+    assert!(matches!(app.input.mode, InputMode::Normal));
+}
+
+#[test]
+fn dependabot_merge_enters_confirm_mode() {
+    let (mut app, _url) = make_security_dependabot_app_with_pr();
+    app.handle_key(make_key(KeyCode::Char('m')));
+    assert!(matches!(app.input.mode, InputMode::ConfirmMergeBotPr(_)));
+}
+
+#[test]
+fn dependabot_merge_confirm_y_emits_merge_command() {
+    let (mut app, url) = make_security_dependabot_app_with_pr();
+    app.handle_key(make_key(KeyCode::Char('m')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+    assert!(cmds.iter().any(|c| matches!(c, Command::MergeBotPr(u) if u == &url)));
+}
+
+#[test]
+fn dependabot_approve_with_no_selection_is_noop() {
+    let mut app = make_security_board_app();
+    let pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
+    // Switch to Dependabot mode but do NOT press Space (no selection)
+    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Dependabot));
+    let cmds = app.handle_key(make_key(KeyCode::Char('a')));
+    assert!(cmds.is_empty());
+    assert!(matches!(app.input.mode, InputMode::Normal));
+}
+
+#[test]
+fn approve_clears_selection_after_confirm() {
+    let (mut app, _url) = make_security_dependabot_app_with_pr();
+    app.handle_key(make_key(KeyCode::Char('a')));
+    app.handle_key(make_key(KeyCode::Char('y')));
+    assert!(app.security.dependabot.selected_prs.is_empty());
+}
+
+#[test]
+fn merge_clears_selection_after_confirm() {
+    let (mut app, _url) = make_security_dependabot_app_with_pr();
+    app.handle_key(make_key(KeyCode::Char('m')));
+    app.handle_key(make_key(KeyCode::Char('y')));
+    assert!(app.security.dependabot.selected_prs.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Security Board Dependabot: dispatch/re-review/browser/tmux/detach keys
+// ---------------------------------------------------------------------------
+
+fn make_security_dependabot_app_navigated() -> (App, crate::models::ReviewPr) {
+    let mut app = make_security_board_app();
+    let pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
+    let pr_clone = pr.clone();
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
+    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Dependabot));
+    // PR is at row 0, col 0 by default — already "selected" by cursor
+    (app, pr_clone)
+}
+
+#[test]
+fn security_dependabot_d_dispatches_or_enters_select_mode() {
+    let mut app = make_security_board_app();
+    let pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
+    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Dependabot));
+    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
+    let did_something = !cmds.is_empty() || !matches!(app.input.mode, InputMode::Normal);
+    assert!(did_something, "expected dispatch or mode change, got nothing");
+}
+
+#[test]
+fn security_dependabot_d_emits_dispatch_review_agent_with_is_dependabot_true() {
+    let (mut app, pr) = make_security_dependabot_app_navigated();
+    // PR has repo "acme/app" — set a matching local path so resolve_repo_path succeeds
+    app.board.repo_paths = vec!["/repos/acme/app".to_string()];
+    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::DispatchReviewAgent(req) if req.number == pr.number && req.is_dependabot
+        )),
+        "expected DispatchReviewAgent with is_dependabot=true"
+    );
+}
+
 #[test]
 fn render_repo_path_mode_shows_all_when_buffer_empty() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
@@ -15908,4 +15579,180 @@ fn typing_resets_repo_cursor_to_zero() {
     // Type a character — cursor should reset
     app.handle_key(make_key(KeyCode::Char('/')));
     assert_eq!(app.input.repo_cursor, 0);
+}
+
+#[test]
+fn security_dependabot_d_no_pr_is_noop() {
+    let mut app = make_security_board_app();
+    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Dependabot));
+    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn security_dependabot_p_opens_browser() {
+    let (mut app, pr) = make_security_dependabot_app_navigated();
+    let cmds = app.handle_key(make_key(KeyCode::Char('p')));
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, Command::OpenInBrowser { url } if url == &pr.url)),
+        "expected OpenInBrowser with pr url"
+    );
+}
+
+#[test]
+fn security_dependabot_p_no_pr_is_noop() {
+    let mut app = make_security_board_app();
+    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Dependabot));
+    let cmds = app.handle_key(make_key(KeyCode::Char('p')));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn security_dependabot_g_no_tmux_window_shows_status() {
+    let (mut app, _pr) = make_security_dependabot_app_navigated();
+    // PR has no tmux_window by default — StatusInfo sets self.status.message
+    app.handle_key(make_key(KeyCode::Char('g')));
+    assert!(
+        app.status.message.is_some(),
+        "expected a status message when no tmux window"
+    );
+}
+
+#[test]
+fn security_dependabot_g_with_tmux_window_jumps() {
+    let mut app = make_security_board_app();
+    let mut pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
+    pr.tmux_window = Some("dispatch:review-10".to_string());
+    let window = pr.tmux_window.clone().unwrap();
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
+    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Dependabot));
+    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, Command::JumpToTmux { window: w } if w == &window)),
+        "expected JumpToTmux command"
+    );
+}
+
+#[test]
+fn security_dependabot_r_idle_with_tmux_rerequests_review() {
+    let mut app = make_security_board_app();
+    let mut pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
+    pr.tmux_window = Some("dispatch:review-10".to_string());
+    pr.agent_status = Some(crate::models::ReviewAgentStatus::Idle);
+    let window = pr.tmux_window.clone().unwrap();
+    let repo = pr.repo.clone();
+    let number = pr.number;
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
+    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Dependabot));
+    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::ReReview { repo: r, number: n, tmux_window: w }
+            if r == &repo && *n == number && w == &window
+        )),
+        "expected ReReview command"
+    );
+}
+
+#[test]
+fn security_dependabot_r_not_idle_is_noop() {
+    let mut app = make_security_board_app();
+    let mut pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
+    pr.tmux_window = Some("dispatch:review-10".to_string());
+    pr.agent_status = Some(crate::models::ReviewAgentStatus::Reviewing);
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
+    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Dependabot));
+    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn security_dependabot_r_no_tmux_window_is_noop() {
+    let mut app = make_security_board_app();
+    let mut pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
+    pr.agent_status = Some(crate::models::ReviewAgentStatus::Idle);
+    // no tmux_window set
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
+    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Dependabot));
+    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn security_dependabot_T_with_tmux_detaches_agent() {
+    let mut app = make_security_board_app();
+    let mut pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
+    pr.tmux_window = Some("dispatch:review-10".to_string());
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
+    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Dependabot));
+    let cmds = app.handle_key(make_key(KeyCode::Char('T')));
+    // DetachReviewAgent is a Message — handled inline, emits KillTmuxWindow + UpdateAgentStatus
+    assert!(
+        cmds.iter().any(|c| matches!(c, Command::KillTmuxWindow { .. })),
+        "expected KillTmuxWindow command"
+    );
+}
+
+#[test]
+fn security_dependabot_T_no_tmux_window_is_noop() {
+    let (mut app, _pr) = make_security_dependabot_app_navigated();
+    // PR has no tmux_window by default
+    let cmds = app.handle_key(make_key(KeyCode::Char('T')));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn agent_status_preserved_on_dependabot_pr_refresh() {
+    let mut app = make_security_board_app();
+    let mut pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
+    pr.tmux_window = Some("dispatch-review-acme-app-10".into());
+    pr.worktree = Some(".worktrees/review-acme-app-10".into());
+    pr.agent_status = Some(crate::models::ReviewAgentStatus::Reviewing);
+    let url = pr.url.clone();
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
+
+    // Simulate refresh with fresh PR data (no agent fields)
+    let fresh_pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![fresh_pr]));
+
+    let updated = app
+        .security
+        .dependabot
+        .prs
+        .prs
+        .iter()
+        .find(|p| p.url == url)
+        .unwrap();
+    assert_eq!(
+        updated.tmux_window.as_deref(),
+        Some("dispatch-review-acme-app-10")
+    );
+    assert_eq!(
+        updated.agent_status,
+        Some(crate::models::ReviewAgentStatus::Reviewing)
+    );
+}
+
+#[test]
+fn find_and_set_pr_agent_finds_dependabot_pr() {
+    let mut app = make_security_board_app();
+    let pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
+
+    app.find_and_set_pr_agent(
+        "acme/app",
+        10,
+        "win-acme-app-10",
+        ".worktrees/review-acme-app-10",
+    );
+
+    let pr = &app.security.dependabot.prs.prs[0];
+    assert_eq!(pr.tmux_window.as_deref(), Some("win-acme-app-10"));
+    assert_eq!(
+        pr.agent_status,
+        Some(crate::models::ReviewAgentStatus::Reviewing)
+    );
 }

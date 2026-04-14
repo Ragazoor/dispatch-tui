@@ -15,6 +15,27 @@ use crate::models::{
 };
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Column index for a bot PR in the Dependabot sub-view (3 columns: Backlog, In Review, Approved).
+fn bot_pr_column(pr: &crate::models::ReviewPr) -> usize {
+    if pr.review_decision == crate::models::ReviewDecision::Approved {
+        2
+    } else if matches!(
+        pr.agent_status,
+        Some(
+            crate::models::ReviewAgentStatus::Reviewing
+                | crate::models::ReviewAgentStatus::FindingsReady
+        )
+    ) {
+        1
+    } else {
+        0
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
@@ -275,7 +296,7 @@ impl App {
         self.review.review.last_error.as_deref()
     }
     pub fn last_bot_error(&self) -> Option<&str> {
-        self.review.bot.last_error.as_deref()
+        self.security.dependabot.prs.last_error.as_deref()
     }
     pub fn review_detail_visible(&self) -> bool {
         self.review.detail_visible
@@ -296,16 +317,16 @@ impl App {
         self.review.dispatch_pr_filter
     }
     pub fn bot_prs(&self) -> &[crate::models::ReviewPr] {
-        &self.review.bot.prs
+        &self.security.dependabot.prs.prs
     }
     pub fn bot_prs_loading(&self) -> bool {
-        self.review.bot.loading
+        self.security.dependabot.prs.loading
     }
     pub fn selected_bot_prs(&self) -> &HashSet<String> {
-        &self.select.bot_prs
+        &self.security.dependabot.selected_prs
     }
     pub fn has_bot_pr_selection(&self) -> bool {
-        self.select.has_bot_pr_selection()
+        !self.security.dependabot.selected_prs.is_empty()
     }
 
     /// Set of PR URLs from dispatch tasks (for matching against ReviewPr entries).
@@ -432,7 +453,7 @@ impl App {
     }
 
     pub fn set_bot_prs(&mut self, prs: Vec<crate::models::ReviewPr>) {
-        self.review.bot.set_prs(prs);
+        self.security.dependabot.prs.set_prs(prs);
     }
 
     pub fn set_security_alerts(&mut self, alerts: Vec<crate::models::SecurityAlert>) {
@@ -853,7 +874,7 @@ impl App {
             // Review board, PR flow, review agents, bot PRs
             msg @ (Message::SwitchToReviewBoard
             | Message::SwitchToTaskBoard
-            | Message::ToggleReviewBoardMode
+            | Message::SwitchReviewBoardMode(_)
             | Message::PrsLoaded(..)
             | Message::PrsFetchFailed(..)
             | Message::ToggleReviewDetail
@@ -864,13 +885,7 @@ impl App {
             | Message::RefreshBotPrs
             | Message::BotPrsMerged(..)
             | Message::ToggleSelectBotPr(_)
-            | Message::SelectAllBotPrColumn
             | Message::ClearBotPrSelection
-            | Message::StartBatchApprove
-            | Message::StartBatchMerge
-            | Message::ConfirmBatchApprove
-            | Message::ConfirmBatchMerge
-            | Message::CancelBatchOperation
             | Message::PrCreated { .. }
             | Message::PrFailed { .. }
             | Message::PrMerged(_)
@@ -918,7 +933,13 @@ impl App {
             | Message::StartDeleteRepoPath
             | Message::DeleteRepoPath(_)
             | Message::CancelPresetInput
-            | Message::FilterPresetsLoaded(_)) => self.dispatch_security_and_filters(msg),
+            | Message::FilterPresetsLoaded(_)
+            | Message::SwitchSecurityBoardMode(_)
+            | Message::StartApproveBotPr
+            | Message::StartMergeBotPr
+            | Message::ConfirmApproveBotPr
+            | Message::ConfirmMergeBotPr
+            | Message::CancelPrOperation) => self.dispatch_security_and_filters(msg),
         }
     }
 
@@ -1077,7 +1098,7 @@ impl App {
         match msg {
             Message::SwitchToReviewBoard => self.handle_switch_to_review_board(),
             Message::SwitchToTaskBoard => self.handle_switch_to_task_board(),
-            Message::ToggleReviewBoardMode => self.handle_toggle_review_board_mode(),
+            Message::SwitchReviewBoardMode(mode) => self.handle_switch_review_board_mode(mode),
             Message::PrsLoaded(kind, prs) => self.handle_prs_loaded(kind, prs),
             Message::PrsFetchFailed(kind, err) => self.handle_prs_fetch_failed(kind, err),
             Message::ToggleReviewDetail => self.handle_toggle_review_detail(),
@@ -1097,13 +1118,7 @@ impl App {
             Message::RefreshBotPrs => self.handle_refresh_bot_prs(),
             Message::BotPrsMerged(urls) => self.handle_bot_prs_merged(urls),
             Message::ToggleSelectBotPr(url) => self.handle_toggle_select_bot_pr(url),
-            Message::SelectAllBotPrColumn => self.handle_select_all_bot_pr_column(),
             Message::ClearBotPrSelection => self.handle_clear_bot_pr_selection(),
-            Message::StartBatchApprove => self.handle_start_batch_approve(),
-            Message::StartBatchMerge => self.handle_start_batch_merge(),
-            Message::ConfirmBatchApprove => self.handle_confirm_batch_approve(),
-            Message::ConfirmBatchMerge => self.handle_confirm_batch_merge(),
-            Message::CancelBatchOperation => self.handle_cancel_batch_operation(),
             Message::PrCreated { id, pr_url } => self.handle_pr_created(id, pr_url),
             Message::PrFailed { id, error } => self.handle_pr_failed(id, error),
             Message::PrMerged(id) => self.handle_pr_merged(id),
@@ -1183,6 +1198,14 @@ impl App {
             Message::DeleteRepoPath(path) => self.handle_delete_repo_path(path),
             Message::CancelPresetInput => self.handle_cancel_preset_input(),
             Message::FilterPresetsLoaded(presets) => self.handle_filter_presets_loaded(presets),
+            Message::SwitchSecurityBoardMode(mode) => {
+                self.handle_switch_security_board_mode(mode)
+            }
+            Message::StartApproveBotPr => self.handle_start_approve_bot_pr(),
+            Message::StartMergeBotPr => self.handle_start_merge_bot_pr(),
+            Message::ConfirmApproveBotPr => self.handle_confirm_approve_bot_pr(),
+            Message::ConfirmMergeBotPr => self.handle_confirm_merge_bot_pr(),
+            Message::CancelPrOperation => self.handle_cancel_pr_operation(),
             _ => unreachable!(),
         }
     }
@@ -3128,7 +3151,9 @@ impl App {
             ViewMode::SecurityBoard { saved_board, .. } => saved_board.clone(),
         };
         self.board.view_mode = ViewMode::SecurityBoard {
+            mode: SecurityBoardMode::default(),
             selection: SecurityBoardSelection::new(),
+            dependabot_selection: ReviewBoardSelection::new(),
             saved_board,
         };
         if self.security.needs_fetch(SECURITY_POLL_INTERVAL) && !self.security.loading {
@@ -3137,6 +3162,29 @@ impl App {
         } else {
             vec![]
         }
+    }
+
+    fn handle_switch_security_board_mode(
+        &mut self,
+        new_mode: SecurityBoardMode,
+    ) -> Vec<Command> {
+        let ViewMode::SecurityBoard { mode, .. } = &mut self.board.view_mode else {
+            return vec![];
+        };
+        *mode = new_mode;
+        let mut cmds = vec![];
+        if new_mode == SecurityBoardMode::Dependabot {
+            if self.security.dependabot.prs.needs_fetch(REVIEW_REFRESH_INTERVAL)
+                && !self.security.dependabot.prs.loading
+            {
+                self.security.dependabot.prs.loading = true;
+                cmds.push(Command::FetchPrs(PrListKind::Bot));
+            }
+        } else if self.security.needs_fetch(SECURITY_POLL_INTERVAL) && !self.security.loading {
+            self.security.loading = true;
+            cmds.push(Command::FetchSecurityAlerts);
+        }
+        cmds
     }
 
     fn handle_security_alerts_loaded(
@@ -3183,15 +3231,11 @@ impl App {
         vec![]
     }
 
-    fn handle_toggle_review_board_mode(&mut self) -> Vec<Command> {
+    fn handle_switch_review_board_mode(&mut self, new_mode: ReviewBoardMode) -> Vec<Command> {
         let ViewMode::ReviewBoard { mode, .. } = &mut self.board.view_mode else {
             return vec![];
         };
-        *mode = match mode {
-            ReviewBoardMode::Reviewer => ReviewBoardMode::Author,
-            ReviewBoardMode::Author => ReviewBoardMode::Dependabot,
-            ReviewBoardMode::Dependabot => ReviewBoardMode::Reviewer,
-        };
+        *mode = new_mode;
         self.clamp_review_selection();
         let mut cmds = vec![];
         if let ViewMode::ReviewBoard { mode, .. } = &self.board.view_mode {
@@ -3212,14 +3256,6 @@ impl App {
                         cmds.push(Command::FetchPrs(PrListKind::Review));
                     }
                 }
-                ReviewBoardMode::Dependabot => {
-                    if self.review.bot.needs_fetch(REVIEW_REFRESH_INTERVAL)
-                        && !self.review.bot.loading
-                    {
-                        self.review.bot.loading = true;
-                        cmds.push(Command::FetchPrs(PrListKind::Bot));
-                    }
-                }
             }
         }
         cmds
@@ -3231,12 +3267,20 @@ impl App {
         prs: Vec<crate::models::ReviewPr>,
     ) -> Vec<Command> {
         let cmds = vec![Command::PersistPrs(kind, prs.clone())];
-        let list = self.review.list_mut(kind);
-        list.set_prs(prs);
-        list.loading = false;
-        list.last_fetch = Some(Instant::now());
-        list.last_error = None;
-        self.clamp_review_selection();
+        if kind == PrListKind::Bot {
+            self.security.dependabot.prs.set_prs(prs);
+            self.security.dependabot.prs.loading = false;
+            self.security.dependabot.prs.last_fetch = Some(Instant::now());
+            self.security.dependabot.prs.last_error = None;
+            self.clamp_dependabot_selection();
+        } else {
+            let list = self.review.list_mut(kind);
+            list.set_prs(prs);
+            list.loading = false;
+            list.last_fetch = Some(Instant::now());
+            list.last_error = None;
+            self.clamp_review_selection();
+        }
         cmds
     }
 
@@ -3267,14 +3311,46 @@ impl App {
         }
     }
 
+    fn clamp_dependabot_selection(&mut self) {
+        // If the view is not SecurityBoard this is a silent no-op: the `if let` below
+        // simply does not match, so the selection is left unchanged until the user
+        // navigates back to the Security Board.
+        let filtered = self.filtered_bot_prs();
+        // Dependabot sub-view has 3 columns: Backlog (0), In Review (1), Approved (2)
+        let col_count = 3usize;
+        let counts: [usize; ReviewDecision::COLUMN_COUNT] = std::array::from_fn(|col| {
+            if col >= col_count {
+                return 0;
+            }
+            filtered
+                .iter()
+                .filter(|pr| bot_pr_column(pr) == col)
+                .count()
+        });
+        if let ViewMode::SecurityBoard {
+            dependabot_selection,
+            ..
+        } = &mut self.board.view_mode
+        {
+            for (col, &count) in counts.iter().enumerate() {
+                if count == 0 {
+                    dependabot_selection.selected_row[col] = 0;
+                } else if dependabot_selection.selected_row[col] >= count {
+                    dependabot_selection.selected_row[col] = count - 1;
+                }
+            }
+        }
+    }
+
     fn handle_prs_fetch_failed(&mut self, kind: PrListKind, error: String) -> Vec<Command> {
         tracing::warn!(kind = kind.label(), error = %error, "PR fetch failed");
-        let list = self.review.list_mut(kind);
-        list.loading = false;
-        list.last_error = Some(error.clone());
-        // Bot errors are shown persistently in the Dependabot tab status bar;
-        // no transient flash needed (and it would leak into other tabs).
-        if kind != PrListKind::Bot {
+        if kind == PrListKind::Bot {
+            self.security.dependabot.prs.loading = false;
+            self.security.dependabot.prs.last_error = Some(error);
+        } else {
+            let list = self.review.list_mut(kind);
+            list.loading = false;
+            list.last_error = Some(error.clone());
             self.set_status(format!("Failed to fetch {} PRs: {error}", kind.label()));
         }
         vec![]
@@ -3347,7 +3423,6 @@ impl App {
         }
     }
 
-    /// Delegate to `ReviewBoardState::find_and_set_pr_agent`.
     pub(in crate::tui) fn find_and_set_pr_agent(
         &mut self,
         github_repo: &str,
@@ -3355,8 +3430,34 @@ impl App {
         tmux_window: &str,
         worktree: &str,
     ) -> crate::db::PrKind {
-        self.review
-            .find_and_set_pr_agent(github_repo, number, tmux_window, worktree)
+        // Check review list — persists to the `review_prs` DB table
+        for pr in self.review.review.prs.iter_mut() {
+            if pr.repo == github_repo && pr.number == number {
+                pr.tmux_window = Some(tmux_window.to_string());
+                pr.worktree = Some(worktree.to_string());
+                pr.agent_status = Some(crate::models::ReviewAgentStatus::Reviewing);
+                return crate::db::PrKind::Review;
+            }
+        }
+        // Check authored list — persists to the `my_prs` DB table
+        for pr in self.review.authored.prs.iter_mut() {
+            if pr.repo == github_repo && pr.number == number {
+                pr.tmux_window = Some(tmux_window.to_string());
+                pr.worktree = Some(worktree.to_string());
+                pr.agent_status = Some(crate::models::ReviewAgentStatus::Reviewing);
+                return crate::db::PrKind::My;
+            }
+        }
+        // Check security board dependabot list — persists to the `review_prs` DB table
+        for pr in self.security.dependabot.prs.prs.iter_mut() {
+            if pr.repo == github_repo && pr.number == number {
+                pr.tmux_window = Some(tmux_window.to_string());
+                pr.worktree = Some(worktree.to_string());
+                pr.agent_status = Some(crate::models::ReviewAgentStatus::Reviewing);
+                return crate::db::PrKind::Review;
+            }
+        }
+        crate::db::PrKind::Review
     }
 
     /// Collect known local repo paths from saved paths and existing tasks.
@@ -3370,92 +3471,75 @@ impl App {
         known
     }
 
-    fn handle_select_all_bot_pr_column(&mut self) -> Vec<Command> {
-        let mode = match &self.board.view_mode {
-            ViewMode::ReviewBoard { mode, .. } => *mode,
-            _ => return vec![],
-        };
-        let sel = match self.review_selection() {
-            Some(s) => s.selected_column,
-            None => return vec![],
-        };
-        let prs = self.filtered_bot_prs();
-        let column_urls: Vec<String> = prs
-            .iter()
-            .filter(|pr| mode.pr_column(pr) == sel)
-            .map(|pr| pr.url.clone())
-            .collect();
-        let all_selected = column_urls.iter().all(|u| self.select.bot_prs.contains(u));
-        if all_selected {
-            for u in &column_urls {
-                self.select.bot_prs.remove(u);
-            }
-        } else {
-            for u in column_urls {
-                self.select.bot_prs.insert(u);
-            }
-        }
-        vec![]
-    }
-
-    fn handle_start_batch_approve(&mut self) -> Vec<Command> {
-        if self.select.bot_prs.is_empty() {
+    fn handle_start_approve_bot_pr(&mut self) -> Vec<Command> {
+        let url = self.security.dependabot.selected_prs.iter().next().cloned();
+        let Some(url) = url else {
+            self.set_status("No PR selected".into());
             return vec![];
-        }
-        let urls: Vec<String> = self.select.bot_prs.iter().cloned().collect();
-        self.input.mode = InputMode::ConfirmBatchApprove(urls);
-        vec![]
-    }
-
-    fn handle_start_batch_merge(&mut self) -> Vec<Command> {
-        if self.select.bot_prs.is_empty() {
-            return vec![];
-        }
-        // Only merge PRs that are CI-passing and approved
-        let eligible: Vec<String> = self
-            .review
-            .bot
+        };
+        let number_str = self
+            .security
+            .dependabot
+            .prs
             .prs
             .iter()
-            .filter(|pr| self.select.bot_prs.contains(&pr.url))
-            .filter(|pr| {
-                pr.ci_status == crate::models::CiStatus::Success
-                    && pr.review_decision == crate::models::ReviewDecision::Approved
-            })
-            .map(|pr| pr.url.clone())
-            .collect();
-        if eligible.is_empty() {
-            self.set_status("No eligible PRs to merge (need CI passing + approved)".into());
-            return vec![];
-        }
-        self.input.mode = InputMode::ConfirmBatchMerge(eligible);
+            .find(|pr| pr.url == url)
+            .map(|pr| format!("#{}", pr.number))
+            .unwrap_or_else(|| "?".into());
+        self.set_status(format!("Approve PR {number_str}? (y/N)"));
+        self.input.mode = InputMode::ConfirmApproveBotPr(url);
         vec![]
     }
 
-    fn handle_confirm_batch_approve(&mut self) -> Vec<Command> {
-        let urls = match std::mem::replace(&mut self.input.mode, InputMode::Normal) {
-            InputMode::ConfirmBatchApprove(urls) => urls,
-            other => {
-                self.input.mode = other;
-                return vec![];
-            }
+    fn handle_start_merge_bot_pr(&mut self) -> Vec<Command> {
+        let url = self.security.dependabot.selected_prs.iter().next().cloned();
+        let Some(url) = url else {
+            self.set_status("No PR selected".into());
+            return vec![];
         };
-        self.select.bot_prs.clear();
-        self.set_status(format!("Approving {} PRs...", urls.len()));
-        vec![Command::BatchApprovePrs(urls)]
+        let number_str = self
+            .security
+            .dependabot
+            .prs
+            .prs
+            .iter()
+            .find(|pr| pr.url == url)
+            .map(|pr| format!("#{}", pr.number))
+            .unwrap_or_else(|| "?".into());
+        self.set_status(format!("Merge PR {number_str}? (y/N)"));
+        self.input.mode = InputMode::ConfirmMergeBotPr(url);
+        vec![]
     }
 
-    fn handle_confirm_batch_merge(&mut self) -> Vec<Command> {
-        let urls = match std::mem::replace(&mut self.input.mode, InputMode::Normal) {
-            InputMode::ConfirmBatchMerge(urls) => urls,
+    fn handle_confirm_approve_bot_pr(&mut self) -> Vec<Command> {
+        let url = match std::mem::replace(&mut self.input.mode, InputMode::Normal) {
+            InputMode::ConfirmApproveBotPr(url) => url,
             other => {
                 self.input.mode = other;
                 return vec![];
             }
         };
-        self.select.bot_prs.clear();
-        self.set_status(format!("Merging {} PRs...", urls.len()));
-        vec![Command::BatchMergePrs(urls)]
+        self.security.dependabot.selected_prs.clear();
+        self.set_status("Approving PR...".into());
+        vec![Command::ApproveBotPr(url)]
+    }
+
+    fn handle_confirm_merge_bot_pr(&mut self) -> Vec<Command> {
+        let url = match std::mem::replace(&mut self.input.mode, InputMode::Normal) {
+            InputMode::ConfirmMergeBotPr(url) => url,
+            other => {
+                self.input.mode = other;
+                return vec![];
+            }
+        };
+        self.security.dependabot.selected_prs.clear();
+        self.set_status("Merging PR...".into());
+        vec![Command::MergeBotPr(url)]
+    }
+
+    fn handle_cancel_pr_operation(&mut self) -> Vec<Command> {
+        self.input.mode = InputMode::Normal;
+        vec![]
     }
 
     /// Return review PRs filtered by the review repo filter.
@@ -3477,7 +3561,7 @@ impl App {
     }
 
     pub fn filtered_bot_prs(&self) -> Vec<&crate::models::ReviewPr> {
-        self.review.bot.filtered()
+        self.security.dependabot.prs.filtered()
     }
 
     /// Return the PR list appropriate for the current review board mode.
@@ -3487,10 +3571,6 @@ impl App {
                 mode: ReviewBoardMode::Author,
                 ..
             } => self.filtered_my_prs(),
-            ViewMode::ReviewBoard {
-                mode: ReviewBoardMode::Dependabot,
-                ..
-            } => self.filtered_bot_prs(),
             _ => self.filtered_review_prs(),
         }
     }
@@ -3502,10 +3582,6 @@ impl App {
                 mode: ReviewBoardMode::Author,
                 ..
             } => &self.review.authored.repos,
-            ViewMode::ReviewBoard {
-                mode: ReviewBoardMode::Dependabot,
-                ..
-            } => &self.review.bot.repos,
             _ => &self.review.review.repos,
         }
     }
@@ -3532,11 +3608,7 @@ impl App {
             .into_iter()
             .filter(|pr| mode.pr_column(pr) == col)
             .collect();
-        prs.sort_by(|a, b| {
-            mode.dependabot_sort_key(a)
-                .cmp(&mode.dependabot_sort_key(b))
-                .then(a.repo.cmp(&b.repo))
-        });
+        prs.sort_by(|a, b| a.repo.cmp(&b.repo));
         prs
     }
 
@@ -4151,10 +4223,6 @@ impl App {
                 mode: ReviewBoardMode::Author,
                 ..
             } => PrListKind::Authored,
-            ViewMode::ReviewBoard {
-                mode: ReviewBoardMode::Dependabot,
-                ..
-            } => PrListKind::Bot,
             _ => PrListKind::Review,
         };
         self.review.list_mut(kind).loading = true;
@@ -4162,7 +4230,7 @@ impl App {
     }
 
     fn handle_refresh_bot_prs(&mut self) -> Vec<Command> {
-        self.review.bot.loading = true;
+        self.security.dependabot.prs.loading = true;
         vec![Command::FetchPrs(PrListKind::Bot)]
     }
 
@@ -4178,7 +4246,7 @@ impl App {
             .prs
             .iter_mut()
             .chain(self.review.authored.prs.iter_mut())
-            .chain(self.review.bot.prs.iter_mut())
+            .chain(self.security.dependabot.prs.prs.iter_mut())
         {
             if pr.repo == repo
                 && pr.number == number
@@ -4215,19 +4283,14 @@ impl App {
     }
 
     fn handle_toggle_select_bot_pr(&mut self, url: String) -> Vec<Command> {
-        if !self.select.bot_prs.remove(&url) {
-            self.select.bot_prs.insert(url);
+        if !self.security.dependabot.selected_prs.remove(&url) {
+            self.security.dependabot.selected_prs.insert(url);
         }
         vec![]
     }
 
     fn handle_clear_bot_pr_selection(&mut self) -> Vec<Command> {
-        self.select.bot_prs.clear();
-        vec![]
-    }
-
-    fn handle_cancel_batch_operation(&mut self) -> Vec<Command> {
-        self.input.mode = InputMode::Normal;
+        self.security.dependabot.selected_prs.clear();
         vec![]
     }
 
@@ -4244,7 +4307,7 @@ impl App {
             .prs
             .iter_mut()
             .chain(self.review.authored.prs.iter_mut())
-            .chain(self.review.bot.prs.iter_mut())
+            .chain(self.security.dependabot.prs.prs.iter_mut())
         {
             if pr.repo == repo && pr.number == number {
                 pr.agent_status = Some(status);
@@ -4276,7 +4339,7 @@ impl App {
             .prs
             .iter_mut()
             .chain(self.review.authored.prs.iter_mut())
-            .chain(self.review.bot.prs.iter_mut())
+            .chain(self.security.dependabot.prs.prs.iter_mut())
         {
             if pr.repo == repo && pr.number == number {
                 if let Some(window) = pr.tmux_window.take() {
