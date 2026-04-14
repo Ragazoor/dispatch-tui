@@ -261,6 +261,8 @@ rule UpdateEpicViaMcp {
 rule DispatchNextViaMcp {
     when: McpDispatchNext(epic)
 
+    guard: epic.auto_dispatch = true
+
     -- Intentionally looser than the TUI DispatchEpicSubtask rule:
     -- does not require epic.status = backlog. The TUI dispatches
     -- subtasks in batch while the epic is still in backlog; MCP
@@ -287,6 +289,23 @@ rule DispatchNextViaMcp {
         -- to running with a provisioned worktree and tmux window.
         -- When no backlog subtasks remain, returns an informational
         -- message without error.
+        -- When auto_dispatch = false, returns an informational message
+        -- ("auto dispatch is disabled") without dispatching.
+}
+
+rule ToggleAutoDispatch {
+    when: UserTogglesAutoDispatch(epic)
+
+    ensures:
+        epic.auto_dispatch = !epic.auto_dispatch
+
+    @guidance
+        -- Triggered by pressing U in the epic detail view.
+        -- Flips the auto_dispatch flag. When false, the MCP
+        -- dispatch_next tool returns an informational message
+        -- instead of dispatching the next backlog subtask.
+        -- The new value is persisted to the database and reflected
+        -- immediately in the header indicator (green = auto, muted = manual).
 }
 
 ------------------------------------------------------------

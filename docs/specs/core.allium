@@ -131,6 +131,7 @@ entity Epic {
     status: TaskStatus
     plan: String?
     sort_order: Integer?
+    auto_dispatch: Boolean = true
     created_at: Timestamp
     updated_at: Timestamp
 
