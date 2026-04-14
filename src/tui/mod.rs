@@ -2197,6 +2197,7 @@ impl App {
             ..Default::default()
         });
         self.input.buffer = repo_path;
+        self.input.repo_cursor = 0;
         self.input.mode = InputMode::InputRepoPath;
         self.set_status("Enter repo path: ".to_string());
         vec![]

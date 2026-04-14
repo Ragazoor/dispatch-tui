@@ -15685,3 +15685,17 @@ fn repo_cursor_resets_on_entering_epic_repo_path_mode() {
     assert_eq!(app.input.mode, InputMode::InputEpicRepoPath);
     assert_eq!(app.input.repo_cursor, 0, "cursor should reset to top");
 }
+
+#[test]
+fn repo_cursor_resets_on_copy_task() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/a".to_string(), "/b".to_string(), "/c".to_string()];
+    app.input.repo_cursor = 2; // cursor was left at position 2
+                               // Copy the first task (select it and press 'c')
+    app.handle_key(make_key(KeyCode::Char('c')));
+    assert_eq!(app.input.mode, InputMode::InputRepoPath);
+    assert_eq!(
+        app.input.repo_cursor, 0,
+        "cursor should reset to top on copy"
+    );
+}
