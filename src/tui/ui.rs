@@ -2946,10 +2946,9 @@ fn render_review_summary_row(frame: &mut Frame, app: &App, area: Rect) {
         // Map column index to ReviewDecision for coloring
         let decision_for_color = if matches!(mode, ReviewBoardMode::Dependabot) {
             match i {
-                0 => ReviewDecision::Approved,
-                1 => ReviewDecision::ChangesRequested,
-                2 => ReviewDecision::ReviewRequired,
-                3 => ReviewDecision::Approved,
+                0 => ReviewDecision::ReviewRequired,     // Backlog → blue
+                1 => ReviewDecision::WaitingForResponse, // In Review → yellow
+                2 => ReviewDecision::Approved,           // Approved → green
                 _ => ReviewDecision::ReviewRequired,
             }
         } else {
@@ -2986,13 +2985,12 @@ fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
         let is_focused = i == sel_col;
         let prs: Vec<&ReviewPr> = app.active_prs_for_column(i);
 
-        // Use ReviewDecision column color for Reviewer/Author, CI-based for Dependabot
+        // Use ReviewDecision column color for Reviewer/Author, lifecycle-based for Dependabot
         let decision_for_color = if is_bot_mode {
             match i {
-                0 => ReviewDecision::Approved,         // CI Passing → green-ish
-                1 => ReviewDecision::ChangesRequested, // CI Failing → red-ish
-                2 => ReviewDecision::ReviewRequired,   // CI Pending → yellow-ish
-                3 => ReviewDecision::Approved,
+                0 => ReviewDecision::ReviewRequired,     // Backlog → blue
+                1 => ReviewDecision::WaitingForResponse, // In Review → yellow
+                2 => ReviewDecision::Approved,           // Approved → green
                 _ => ReviewDecision::ReviewRequired,
             }
         } else {
@@ -3060,10 +3058,9 @@ fn build_review_pr_item(
     // Map to a ReviewDecision for color purposes
     let decision_for_color = if matches!(mode, ReviewBoardMode::Dependabot) {
         match col {
-            0 => ReviewDecision::Approved,
-            1 => ReviewDecision::ChangesRequested,
-            2 => ReviewDecision::ReviewRequired,
-            3 => ReviewDecision::Approved,
+            0 => ReviewDecision::ReviewRequired,     // Backlog → blue
+            1 => ReviewDecision::WaitingForResponse, // In Review → yellow
+            2 => ReviewDecision::Approved,           // Approved → green
             _ => ReviewDecision::ReviewRequired,
         }
     } else {
@@ -3083,12 +3080,9 @@ fn build_review_pr_item(
         None => "",
     };
     let header = format!("{select_prefix}{agent_badge}#{} {}", pr.number, pr.title);
-    // stripe(2) + header + ci_status(" " + symbol)
-    let ci_symbol_width = match pr.ci_status {
-        CiStatus::Pending => 2, // ⏳ is a wide character
-        _ => 1,
-    };
-    let ci_span_width = 1 + ci_symbol_width; // " " + symbol
+    // stripe(2) + header + ci_status(" " + "●")
+    // CI badge is always 1 display cell wide ("●"), so ci_span_width = " " + "●" = 2
+    let ci_span_width = 2;
     let max_header = (col_width as usize).saturating_sub(2 + ci_span_width);
     let header_truncated = truncate(&header, max_header);
 
@@ -3111,7 +3105,7 @@ fn build_review_pr_item(
         Span::styled(stripe, Style::default().fg(color)),
         Span::styled(header_truncated, line1_style),
         Span::styled(
-            format!(" {}", pr.ci_status.symbol()),
+            format!(" \u{25cf}"), // ● BLACK CIRCLE
             Style::default().fg(ci_color),
         ),
     ]);

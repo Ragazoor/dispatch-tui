@@ -15337,6 +15337,20 @@ fn dependabot_in_review_column_sorts_findings_ready_first() {
 }
 
 #[test]
+fn dependabot_board_shows_lifecycle_column_labels() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::ToggleReviewBoardMode); // → Author
+    app.update(Message::ToggleReviewBoardMode); // → Dependabot
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(buffer_contains(&buf, "Backlog"), "Backlog column label should be visible");
+    assert!(buffer_contains(&buf, "In Review"), "In Review column label should be visible");
+    assert!(!buffer_contains(&buf, "CI Passing"), "old CI Passing label should not appear");
+    assert!(!buffer_contains(&buf, "CI Failing"), "old CI Failing label should not appear");
+    assert!(!buffer_contains(&buf, "CI Pending"), "old CI Pending label should not appear");
+}
+
+#[test]
 fn reviewer_mode_column_sort_unaffected_by_dependabot_sort_key() {
     // Confirms that dependabot_sort_key returning 0 for all Reviewer PRs
     // leaves the existing repo-alphabetical sort intact.
