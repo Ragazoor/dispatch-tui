@@ -15287,3 +15287,18 @@ fn inactive_duration_near_zero_after_mark_active() {
     let duration = tracking.inactive_duration(TaskId(1)).unwrap();
     assert!(duration < Duration::from_secs(1));
 }
+
+#[test]
+fn dependabot_right_arrow_clamps_at_column_2() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    // Switch to Dependabot mode: Reviewer → Author → Dependabot
+    app.update(Message::ToggleReviewBoardMode);
+    app.update(Message::ToggleReviewBoardMode);
+    // Navigate right 10 times — should stop at column 2
+    for _ in 0..10 {
+        app.handle_key(make_key(KeyCode::Right));
+    }
+    let col = app.review_selection().unwrap().column();
+    assert_eq!(col, 2, "Right arrow should clamp at column 2 in Dependabot mode");
+}

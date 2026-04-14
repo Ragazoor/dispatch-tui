@@ -947,9 +947,13 @@ impl App {
                 vec![]
             }
             KeyCode::Char('l') | KeyCode::Right => {
+                let max_col = match &self.board.view_mode {
+                    ViewMode::ReviewBoard { mode, .. } => mode.column_count() - 1,
+                    _ => ReviewDecision::COLUMN_COUNT - 1,
+                };
                 if let Some(sel) = self.review_selection_mut() {
                     let col = sel.selected_column;
-                    sel.selected_column = (col + 1).min(ReviewDecision::COLUMN_COUNT - 1);
+                    sel.selected_column = (col + 1).min(max_col);
                 }
                 vec![]
             }
