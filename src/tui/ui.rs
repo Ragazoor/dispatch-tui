@@ -1149,7 +1149,7 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect, _now: DateTime<Utc>) 
 /// Appends a scrollable repo-path picker list to `lines`.
 fn append_repo_path_list<'a>(
     lines: &mut Vec<Line<'a>>,
-    repo_paths: &'a [String],
+    repo_paths: &[String],
     cursor: usize,
     height_offset: u16,
     area_height: u16,
@@ -1175,8 +1175,8 @@ fn append_repo_path_list<'a>(
     {
         if i == cursor {
             lines.push(Line::from(vec![
-                Span::styled("  ► ", cursor_style),
-                Span::styled(path.as_str(), cursor_style),
+                Span::styled("  ► ".to_string(), cursor_style),
+                Span::styled(path.to_string(), cursor_style),
             ]));
         } else {
             lines.push(Line::from(Span::styled(format!("    {path}"), hint)));
@@ -1290,10 +1290,11 @@ fn input_repo_path_lines<'a>(
             active,
         )),
     ];
-    if app.input.buffer.is_empty() {
+    let filtered = super::filtered_repos(&app.board.repo_paths, &app.input.buffer);
+    if !filtered.is_empty() {
         append_repo_path_list(
             &mut lines,
-            &app.board.repo_paths,
+            &filtered,
             app.input.repo_cursor,
             7,
             area.height,
@@ -1302,7 +1303,7 @@ fn input_repo_path_lines<'a>(
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "  Type a path · [j/k] navigate · [Enter] select · [Esc] cancel",
+        "  Type to filter · [j/k] navigate · [Enter] select · [Esc] cancel",
         hint,
     )));
     lines
@@ -1381,10 +1382,11 @@ fn dispatch_repo_path_lines<'a>(
             active,
         )),
     ];
-    if app.input.buffer.is_empty() {
+    let filtered = super::filtered_repos(&app.board.repo_paths, &app.input.buffer);
+    if !filtered.is_empty() {
         append_repo_path_list(
             &mut lines,
-            &app.board.repo_paths,
+            &filtered,
             app.input.repo_cursor,
             5,
             area.height,
@@ -1393,7 +1395,7 @@ fn dispatch_repo_path_lines<'a>(
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "  Type a path · [j/k] navigate · [Enter] select · [Esc] cancel",
+        "  Type to filter · [j/k] navigate · [Enter] select · [Esc] cancel",
         hint,
     )));
     lines
@@ -1516,10 +1518,11 @@ fn input_epic_repo_path_lines<'a>(
             active,
         )),
     ];
-    if app.input.buffer.is_empty() {
+    let filtered = super::filtered_repos(&app.board.repo_paths, &app.input.buffer);
+    if !filtered.is_empty() {
         append_repo_path_list(
             &mut lines,
-            &app.board.repo_paths,
+            &filtered,
             app.input.repo_cursor,
             7,
             area.height,
@@ -1528,7 +1531,7 @@ fn input_epic_repo_path_lines<'a>(
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "  Type a path · [j/k] navigate · [Enter] select · [Esc] cancel",
+        "  Type to filter · [j/k] navigate · [Enter] select · [Esc] cancel",
         hint,
     )));
     lines

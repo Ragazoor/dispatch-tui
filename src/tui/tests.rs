@@ -15858,6 +15858,41 @@ fn enter_with_typed_filter_selects_filtered_item() {
 }
 
 #[test]
+fn render_repo_path_mode_shows_filtered_list_when_typing() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.board.repo_paths = vec!["/tmp".to_string(), "/var/log".to_string()];
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.task_draft = Some(TaskDraft {
+        title: "T".to_string(),
+        ..Default::default()
+    });
+    app.input.buffer = "tmp".to_string(); // filter active
+
+    let buf = render_to_buffer(&mut app, 80, 20);
+    assert!(buffer_contains(&buf, "/tmp"), "matching path should appear");
+    assert!(
+        !buffer_contains(&buf, "/var/log"),
+        "non-matching path should be hidden"
+    );
+}
+
+#[test]
+fn render_repo_path_mode_shows_all_when_buffer_empty() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.board.repo_paths = vec!["/tmp".to_string(), "/var/log".to_string()];
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.task_draft = Some(TaskDraft {
+        title: "T".to_string(),
+        ..Default::default()
+    });
+    // buffer is empty — all paths shown
+
+    let buf = render_to_buffer(&mut app, 80, 20);
+    assert!(buffer_contains(&buf, "/tmp"));
+    assert!(buffer_contains(&buf, "/var/log"));
+}
+
+#[test]
 fn typing_resets_repo_cursor_to_zero() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.board.repo_paths = vec!["/a".to_string(), "/b".to_string(), "/c".to_string()];
