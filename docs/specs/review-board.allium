@@ -1,0 +1,146 @@
+-- allium: 3
+-- review-board.allium
+--
+-- Scope: Review Board view and review agent lifecycle
+-- Includes: ReviewPr entity, review agent dispatch/detach/cleanup rules
+-- Excludes: Task lifecycle (see tasks.allium), domain model (see core.allium)
+
+use "./core.allium" as core
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+enum ReviewAgentStatus {
+    dispatched      -- agent is running in the review worktree
+    findings_ready  -- agent has completed its review and posted findings
+}
+
+enum ReviewBoardMode { reviewer | author | dependabot }
+
+------------------------------------------------------------
+-- Entities
+------------------------------------------------------------
+
+entity ReviewPr {
+    number: Integer
+    repo: String              -- e.g. "org/repo"
+    url: String               -- full GitHub PR URL
+    title: String
+    author: String
+    is_draft: Boolean
+    review_decision: ReviewDecision
+    ci_status: CiStatus
+    tmux_window: core/TmuxWindow?
+    worktree: core/Worktree?
+    agent_status: ReviewAgentStatus?
+
+    -- Derived
+    has_agent: agent_status != null
+}
+
+enum ReviewDecision {
+    review_required
+    approved
+    changes_requested
+}
+
+enum CiStatus { none | pending | success | failure }
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- == Review Agent Dispatch ==
+
+rule DispatchReviewAgent {
+    when: DispatchReviewAgent(pr)
+
+    requires: pr.tmux_window = null
+    requires: pr.worktree = null
+
+    ensures: pr.worktree = core/Worktree.created(
+        path: repo_path + "/.worktrees/review-" + pr.number,
+        branch: "review-" + pr.number
+    )
+    ensures: pr.tmux_window = core/TmuxWindow.created(name: "review:" + pr.number)
+    ensures: pr.agent_status = dispatched
+    ensures: ReviewAgentLaunched(pr: pr)
+
+    @guidance
+        -- Triggered from the Review Board (d key on a selected PR).
+        -- Creates an isolated worktree named review-{number} and a tmux
+        -- window named review:{number}. The agent is launched in the worktree
+        -- with a review-focused prompt. Does NOT modify the associated Task
+        -- record (if any) — review agent state is tracked solely on ReviewPr.
+        -- The repo_path is derived from the PR's repo slug and the configured
+        -- repos list.
+}
+
+-- == Review Agent Detach ==
+
+rule DetachReviewAgent {
+    when: DetachReviewAgent(pr)
+
+    requires: pr.tmux_window != null
+
+    ensures: pr.tmux_window = null
+    ensures: pr.worktree = null
+    ensures: pr.agent_status = null
+
+    @guidance
+        -- Triggered from the Review Board (T key on a selected PR with an
+        -- active review agent). Kills the tmux window and clears the worktree
+        -- and agent_status on the ReviewPr. The cleared state is persisted to
+        -- the database via UpdateAgentStatus(status: null).
+        -- Available in all three Review Board modes (reviewer / author / dependabot).
+}
+
+-- == PR Merge Cleanup ==
+
+rule PrMergedCleanupReviewBoard {
+    -- Fires as a side effect of PrMerged(task) from tasks.allium.
+    -- When a task's PR is merged, any active review agent for the same
+    -- PR on the Review Board is also cleaned up.
+
+    when: PrMerged(task)
+
+    -- Find the ReviewPr matching the task's PR by (repo, number).
+    -- Extracted from task.pr_url via github_repo_from_pr_url / pr_number_from_url.
+    let pr = ReviewPr.find_by(
+        repo: github_repo_from_pr_url(task.pr_url),
+        number: pr_number_from_url(task.pr_url)
+    )
+
+    -- Only acts if a matching ReviewPr exists with an active agent session
+    requires: pr != null
+    requires: pr.tmux_window != null or pr.worktree != null or pr.agent_status != null
+
+    ensures: pr.tmux_window = null
+    ensures: pr.worktree = null
+    ensures: pr.agent_status = null
+
+    @guidance
+        -- The PR is identified by parsing (repo, number) from task.pr_url.
+        -- All three Review Board PR lists are searched (reviewer / author /
+        -- dependabot). If no matching PR has an active agent, the rule is a
+        -- no-op. The cleared state is persisted via UpdateAgentStatus(status: null).
+        -- This ensures that merging a PR via GitHub (or via the TUI M key)
+        -- never leaves a zombie review agent window open.
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+@invariant ReviewAgentIsolation
+    -- A review agent's worktree and tmux window are tracked solely on the
+    -- ReviewPr entity. They are NOT reflected on the associated Task record.
+    -- This separation allows review agents to be independently dispatched,
+    -- detached, and cleaned up without affecting task lifecycle.
+
+@invariant ReviewBoardWindowCleanup
+    -- When a ReviewPr transitions out of an active agent state (detach or
+    -- PR merge), its tmux_window, worktree, and agent_status are ALL cleared
+    -- together. There is no partial cleanup — all three fields are treated as
+    -- a unit representing "review agent session active".
