@@ -5857,6 +5857,32 @@ fn pr_merged_no_review_board_match_is_ok() {
 }
 
 #[test]
+fn pr_merged_skips_update_agent_status_when_review_pr_has_no_agent_state() {
+    // Review PR matches by (repo, number) but has no active agent session.
+    // cleanup_review_board_pr should NOT emit UpdateAgentStatus in this case —
+    // it is a no-op write to clear already-null fields.
+    let mut task = make_task(1, TaskStatus::Review);
+    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+
+    // Review PR with no tmux_window, worktree, or agent_status
+    let review_pr = make_review_pr_for_repo(42, "alice", ReviewDecision::Approved, "org/repo");
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![review_pr]));
+
+    let cmds = app.update(Message::PrMerged(TaskId(1)));
+
+    assert_eq!(app.find_task(TaskId(1)).unwrap().status, TaskStatus::Done);
+    assert!(
+        !cmds.iter().any(|c| matches!(c, Command::UpdateAgentStatus { .. })),
+        "should not emit UpdateAgentStatus when review PR has no active agent state"
+    );
+    assert!(
+        !cmds.iter().any(|c| matches!(c, Command::KillTmuxWindow { .. })),
+        "should not kill any window when review PR has no active agent state"
+    );
+}
+
+#[test]
 fn pr_merged_kills_both_task_and_review_windows() {
     let mut task = make_task(1, TaskStatus::Review);
     task.tmux_window = Some("task-1".to_string());
