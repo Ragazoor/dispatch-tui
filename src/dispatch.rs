@@ -1429,6 +1429,28 @@ mod tests {
     }
 
     #[test]
+    fn build_prompt_without_plan_mentions_brainstorm_if_vague() {
+        let prompt = build_prompt(TaskId(1), "Task", "Desc", None, None);
+        assert!(
+            prompt.contains("/brainstorming"),
+            "no-plan prompt should mention /brainstorming for vague descriptions"
+        );
+        assert!(
+            prompt.contains("vague"),
+            "no-plan prompt should mention vagueness as the condition for brainstorming"
+        );
+    }
+
+    #[test]
+    fn build_prompt_without_plan_mentions_direct_plan_alternative() {
+        let prompt = build_prompt(TaskId(1), "Task", "Desc", None, None);
+        assert!(
+            prompt.contains("implementation plan directly"),
+            "no-plan prompt should offer writing a plan directly for clear descriptions"
+        );
+    }
+
+    #[test]
     fn build_prompt_with_plan_asks_permission_before_implementing() {
         let prompt = build_prompt(TaskId(1), "Task", "Desc", Some("docs/plans/plan.md"), None);
         assert!(prompt.contains("docs/plans/plan.md"));
