@@ -834,6 +834,7 @@ impl App {
             | Message::ReviewAgentFailed { .. }
             | Message::RefreshReviewPrs
             | Message::RefreshBotPrs
+            | Message::BotPrsMerged(..)
             | Message::ToggleSelectBotPr(_)
             | Message::SelectAllBotPrColumn
             | Message::ClearBotPrSelection
@@ -1066,6 +1067,7 @@ impl App {
             } => self.handle_review_agent_failed(github_repo, number, error),
             Message::RefreshReviewPrs => self.handle_refresh_review_prs(),
             Message::RefreshBotPrs => self.handle_refresh_bot_prs(),
+            Message::BotPrsMerged(urls) => self.handle_bot_prs_merged(urls),
             Message::ToggleSelectBotPr(url) => self.handle_toggle_select_bot_pr(url),
             Message::SelectAllBotPrColumn => self.handle_select_all_bot_pr_column(),
             Message::ClearBotPrSelection => self.handle_clear_bot_pr_selection(),
@@ -2704,31 +2706,7 @@ impl App {
 
         // Kill any active review agent window on the Review Board for this PR
         if let Some((repo, number)) = review_pr_ref {
-            let mut matched = false;
-            for pr in self
-                .review
-                .review
-                .prs
-                .iter_mut()
-                .chain(self.review.authored.prs.iter_mut())
-                .chain(self.review.bot.prs.iter_mut())
-            {
-                if pr.repo == repo && pr.number == number {
-                    matched = true;
-                    if let Some(window) = pr.tmux_window.take() {
-                        cmds.push(Command::KillTmuxWindow { window });
-                    }
-                    pr.worktree = None;
-                    pr.agent_status = None;
-                }
-            }
-            if matched {
-                cmds.push(Command::UpdateAgentStatus {
-                    repo,
-                    number,
-                    status: None,
-                });
-            }
+            cmds.extend(self.cleanup_review_board_pr(repo, number));
         }
 
         cmds.extend(self.maybe_respawn_split_pane(id));
@@ -4135,6 +4113,50 @@ impl App {
     fn handle_refresh_bot_prs(&mut self) -> Vec<Command> {
         self.review.bot.loading = true;
         vec![Command::FetchPrs(PrListKind::Bot)]
+    }
+
+    /// Clean up any active review agent session for the given (repo, number) pair.
+    /// Searches all three PR lists. Returns commands to kill the window and persist.
+    fn cleanup_review_board_pr(&mut self, repo: String, number: i64) -> Vec<Command> {
+        let mut cmds = Vec::new();
+        let mut matched = false;
+        for pr in self
+            .review
+            .review
+            .prs
+            .iter_mut()
+            .chain(self.review.authored.prs.iter_mut())
+            .chain(self.review.bot.prs.iter_mut())
+        {
+            if pr.repo == repo && pr.number == number {
+                matched = true;
+                if let Some(window) = pr.tmux_window.take() {
+                    cmds.push(Command::KillTmuxWindow { window });
+                }
+                pr.worktree = None;
+                pr.agent_status = None;
+            }
+        }
+        if matched {
+            cmds.push(Command::UpdateAgentStatus {
+                repo,
+                number,
+                status: None,
+            });
+        }
+        cmds
+    }
+
+    fn handle_bot_prs_merged(&mut self, urls: Vec<String>) -> Vec<Command> {
+        let mut cmds = Vec::new();
+        for url in urls {
+            if let Some((repo, number)) = crate::models::github_repo_from_pr_url(&url)
+                .zip(crate::models::pr_number_from_url(&url))
+            {
+                cmds.extend(self.cleanup_review_board_pr(repo, number));
+            }
+        }
+        cmds
     }
 
     fn handle_toggle_select_bot_pr(&mut self, url: String) -> Vec<Command> {

@@ -375,6 +375,7 @@ pub enum Message {
     ToggleDispatchPrFilter,
     // Bot PRs (dependabot/renovate)
     RefreshBotPrs,
+    BotPrsMerged(Vec<String>),
     ToggleSelectBotPr(String),
     SelectAllBotPrColumn,
     ClearBotPrSelection,

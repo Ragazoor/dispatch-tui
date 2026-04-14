@@ -12079,6 +12079,40 @@ fn refresh_bot_prs_returns_fetch_bot_prs() {
 }
 
 #[test]
+fn bot_prs_merged_kills_active_review_window() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+
+    let mut pr = make_bot_pr(
+        42,
+        ReviewDecision::Approved,
+        Some(crate::models::ReviewAgentStatus::Reviewing),
+        crate::models::CiStatus::Success,
+    );
+    pr.tmux_window = Some("review:pr-42".to_string());
+    pr.worktree = Some("/repo/.worktrees/review-42".to_string());
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
+
+    let cmds = app.update(Message::BotPrsMerged(vec![
+        "https://github.com/acme/app/pull/42".to_string(),
+    ]));
+
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, Command::KillTmuxWindow { window } if window == "review:pr-42")),
+        "should kill review board PR window"
+    );
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, Command::UpdateAgentStatus { repo, number, status: None }
+                if repo == "acme/app" && *number == 42)),
+        "should clear review agent status"
+    );
+    assert!(app.review.bot.prs[0].tmux_window.is_none());
+    assert!(app.review.bot.prs[0].worktree.is_none());
+    assert!(app.review.bot.prs[0].agent_status.is_none());
+}
+
+#[test]
 fn review_board_unknown_key_is_noop() {
     let mut app = make_review_board_app();
     let cmds = app.handle_key(make_key(KeyCode::Char('z')));
