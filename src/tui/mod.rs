@@ -2704,6 +2704,7 @@ impl App {
 
         // Kill any active review agent window on the Review Board for this PR
         if let Some((repo, number)) = review_pr_ref {
+            let mut matched = false;
             for pr in self
                 .review
                 .review
@@ -2713,6 +2714,7 @@ impl App {
                 .chain(self.review.bot.prs.iter_mut())
             {
                 if pr.repo == repo && pr.number == number {
+                    matched = true;
                     if let Some(window) = pr.tmux_window.take() {
                         cmds.push(Command::KillTmuxWindow { window });
                     }
@@ -2720,11 +2722,13 @@ impl App {
                     pr.agent_status = None;
                 }
             }
-            cmds.push(Command::UpdateAgentStatus {
-                repo,
-                number,
-                status: None,
-            });
+            if matched {
+                cmds.push(Command::UpdateAgentStatus {
+                    repo,
+                    number,
+                    status: None,
+                });
+            }
         }
 
         cmds.extend(self.maybe_respawn_split_pane(id));

@@ -5848,6 +5848,12 @@ fn pr_merged_no_review_board_match_is_ok() {
             .any(|c| matches!(c, Command::KillTmuxWindow { window } if window == "review:pr-99")),
         "should not kill unrelated review board PR window"
     );
+    assert!(
+        !cmds
+            .iter()
+            .any(|c| matches!(c, Command::UpdateAgentStatus { .. })),
+        "should not emit UpdateAgentStatus when no review board PR matches"
+    );
 }
 
 #[test]
