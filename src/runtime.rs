@@ -1514,11 +1514,13 @@ impl TuiRuntime {
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
         tokio::task::spawn_blocking(move || {
-            let mut merged = 0usize;
+            let mut merged_urls = Vec::new();
             for url in &urls {
                 tracing::info!(url, "merging PR");
                 match runner.run("gh", &["pr", "merge", "--merge", url]) {
-                    Ok(output) if output.status.success() => merged += 1,
+                    Ok(output) if output.status.success() => {
+                        merged_urls.push(url.clone());
+                    }
                     Ok(output) => {
                         let stderr = String::from_utf8_lossy(&output.stderr);
                         tracing::warn!(url, error = %stderr, "failed to merge PR");
@@ -1526,7 +1528,11 @@ impl TuiRuntime {
                     Err(e) => tracing::warn!(url, error = %e, "failed to run gh"),
                 }
             }
+            let merged = merged_urls.len();
             tracing::info!(merged, total = urls.len(), "batch merge complete");
+            if !merged_urls.is_empty() {
+                let _ = tx.send(Message::BotPrsMerged(merged_urls));
+            }
             let _ = tx.send(Message::RefreshBotPrs);
             let _ = tx.send(Message::StatusInfo(format!(
                 "Merged {merged}/{} PRs",
@@ -3845,20 +3851,35 @@ mod tests {
             "https://github.com/org/repo/pull/2".into(),
         ]);
 
+        // First: BotPrsMerged with all successfully merged URLs
         let msg1 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
             .await
             .unwrap()
             .unwrap();
-        assert!(
-            matches!(msg1, Message::RefreshBotPrs),
-            "Expected RefreshBotPrs, got: {msg1:?}"
-        );
+        match &msg1 {
+            Message::BotPrsMerged(urls) => {
+                assert!(urls.contains(&"https://github.com/org/repo/pull/1".to_string()));
+                assert!(urls.contains(&"https://github.com/org/repo/pull/2".to_string()));
+            }
+            other => panic!("Expected BotPrsMerged, got: {other:?}"),
+        }
 
+        // Second: RefreshBotPrs
         let msg2 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
             .await
             .unwrap()
             .unwrap();
-        match msg2 {
+        assert!(
+            matches!(msg2, Message::RefreshBotPrs),
+            "Expected RefreshBotPrs, got: {msg2:?}"
+        );
+
+        // Third: StatusInfo
+        let msg3 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        match msg3 {
             Message::StatusInfo(s) => assert!(s.contains("Merged 2/2")),
             other => panic!("Expected StatusInfo, got: {other:?}"),
         }
@@ -3883,10 +3904,26 @@ mod tests {
             "https://github.com/org/repo/pull/2".into(),
         ]);
 
+        // First: BotPrsMerged with only the successful URL (PR 2)
+        let msg1 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        match &msg1 {
+            Message::BotPrsMerged(urls) => {
+                assert_eq!(urls.len(), 1);
+                assert!(urls.contains(&"https://github.com/org/repo/pull/2".to_string()));
+            }
+            other => panic!("Expected BotPrsMerged, got: {other:?}"),
+        }
+
+        // Second: RefreshBotPrs
         let _refresh = tokio::time::timeout(Duration::from_secs(5), rx.recv())
             .await
             .unwrap()
             .unwrap();
+
+        // Third: StatusInfo
         let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
             .await
             .unwrap()
@@ -3895,6 +3932,32 @@ mod tests {
             Message::StatusInfo(s) => assert!(s.contains("Merged 1/2")),
             other => panic!("Expected StatusInfo with 1/2, got: {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn exec_batch_merge_prs_all_fail_emits_no_bot_prs_merged() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::fail("network error"), // PR 1 fails
+            MockProcessRunner::fail("network error"), // PR 2 fails
+        ]));
+        let rt = make_runtime(db, tx, mock);
+
+        rt.exec_batch_merge_prs(vec![
+            "https://github.com/org/repo/pull/1".into(),
+            "https://github.com/org/repo/pull/2".into(),
+        ]);
+
+        // First message should be RefreshBotPrs (no BotPrsMerged when nothing merged)
+        let msg1 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(msg1, Message::RefreshBotPrs),
+            "Expected RefreshBotPrs (no BotPrsMerged when nothing merged), got: {msg1:?}"
+        );
     }
 
     // -----------------------------------------------------------------------
