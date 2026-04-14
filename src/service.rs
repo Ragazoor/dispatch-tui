@@ -594,6 +594,9 @@ impl UpdateEpicParams {
         if self.repo_path.is_some() {
             names.push("repo_path");
         }
+        if self.auto_dispatch.is_some() {
+            names.push("auto_dispatch");
+        }
         names
     }
 }
