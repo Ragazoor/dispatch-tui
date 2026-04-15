@@ -15801,3 +15801,47 @@ fn find_and_set_pr_agent_finds_dependabot_pr() {
 #[test]
 #[ignore = "requires a real TTY and interactive editor session; run manually to verify"]
 fn buffered_editor_keystrokes_do_not_leak_into_repo_picker() {}
+
+#[test]
+fn dependabot_in_review_column_findings_ready_sorts_before_reviewing() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+
+    // Reviewing PR comes first in the input list
+    let reviewing_pr = make_bot_pr(
+        1,
+        ReviewDecision::ReviewRequired,
+        Some(crate::models::ReviewAgentStatus::Reviewing),
+        crate::models::CiStatus::None,
+    );
+    // FindingsReady PR comes second in the input list
+    let findings_ready_pr = make_bot_pr(
+        2,
+        ReviewDecision::ReviewRequired,
+        Some(crate::models::ReviewAgentStatus::FindingsReady),
+        crate::models::CiStatus::None,
+    );
+
+    app.update(Message::PrsLoaded(
+        PrListKind::Bot,
+        vec![reviewing_pr, findings_ready_pr],
+    ));
+
+    // Filter to column 1 (in_review) — same logic as the column renderer
+    let in_review: Vec<_> = app
+        .filtered_bot_prs()
+        .into_iter()
+        .filter(|pr| super::bot_pr_column(pr) == 1)
+        .collect();
+
+    assert_eq!(in_review.len(), 2, "both PRs should be in the in_review column");
+    assert_eq!(
+        in_review[0].agent_status,
+        Some(crate::models::ReviewAgentStatus::FindingsReady),
+        "FindingsReady should sort before Reviewing"
+    );
+    assert_eq!(
+        in_review[1].agent_status,
+        Some(crate::models::ReviewAgentStatus::Reviewing),
+        "Reviewing should sort after FindingsReady"
+    );
+}

@@ -3561,7 +3561,15 @@ impl App {
     }
 
     pub fn filtered_bot_prs(&self) -> Vec<&crate::models::ReviewPr> {
-        self.security.dependabot.prs.filtered()
+        let mut prs = self.security.dependabot.prs.filtered();
+        // Within the in_review column, findings_ready PRs sort above reviewing PRs
+        // (InReviewSortPriority rule). Stable sort preserves relative order for equal keys.
+        prs.sort_by_key(|pr| match &pr.agent_status {
+            Some(crate::models::ReviewAgentStatus::FindingsReady) => 0,
+            Some(crate::models::ReviewAgentStatus::Reviewing) => 1,
+            _ => 2,
+        });
+        prs
     }
 
     /// Return the PR list appropriate for the current review board mode.
