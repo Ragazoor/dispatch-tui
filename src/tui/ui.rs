@@ -2806,7 +2806,7 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
         let msg = if is_loading {
             "Loading..."
         } else if is_empty {
-            "No PRs found. Press r to refresh."
+            "No PRs found — refreshes automatically"
         } else {
             "All PRs filtered out."
         };
@@ -3232,7 +3232,7 @@ fn render_security_alerts_board(frame: &mut Frame, app: &mut App, area: Rect) {
         } else if app.filtered_security_alerts().is_empty() && !app.security.alerts.is_empty() {
             "All alerts filtered out."
         } else {
-            "No security alerts found. Press r to refresh."
+            "No security alerts found — refreshes automatically"
         };
         let p = Paragraph::new(msg)
             .alignment(Alignment::Center)
@@ -3314,9 +3314,9 @@ fn render_dependabot_board(frame: &mut Frame, app: &mut App, area: Rect) {
         let msg = if app.bot_prs_loading() {
             "Loading..."
         } else if app.security.dependabot.prs.last_error.is_some() {
-            "Failed to load PRs. Press r to retry."
+            "Failed to load PRs."
         } else {
-            "No Dependabot PRs found. Press r to refresh."
+            "No Dependabot PRs found — refreshes automatically"
         };
         let p = Paragraph::new(msg)
             .alignment(Alignment::Center)
