@@ -929,10 +929,10 @@ pub fn check_pr_status(pr_url: &str, runner: &dyn ProcessRunner) -> Result<PrSta
     })
 }
 
-/// Merge a GitHub PR using `gh pr merge --merge`.
+/// Merge a GitHub PR using `gh pr merge --squash`.
 pub fn merge_pr(pr_url: &str, runner: &dyn ProcessRunner) -> Result<()> {
     let output = runner
-        .run("gh", &["pr", "merge", "--merge", pr_url])
+        .run("gh", &["pr", "merge", "--squash", pr_url])
         .context("Failed to run gh pr merge")?;
     if !output.status.success() {
         anyhow::bail!("{}", stderr_str(&output));

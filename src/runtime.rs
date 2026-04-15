@@ -1519,7 +1519,7 @@ impl TuiRuntime {
         let runner = self.runner.clone();
         tokio::task::spawn_blocking(move || {
             tracing::info!(url, "merging PR");
-            match runner.run("gh", &["pr", "merge", "--merge", &url]) {
+            match runner.run("gh", &["pr", "merge", "--squash", &url]) {
                 Ok(output) if output.status.success() => {
                     let _ = tx.send(Message::RefreshBotPrs);
                     let _ = tx.send(Message::StatusInfo(format!("Merged PR {url}")));
@@ -3599,7 +3599,7 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::ok(), // gh pr merge --merge
+            MockProcessRunner::ok(), // gh pr merge --squash
         ]));
         let rt = make_runtime(db, tx, mock);
 
@@ -3826,7 +3826,7 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::ok(), // gh pr merge --merge
+            MockProcessRunner::ok(), // gh pr merge --squash
         ]));
         let rt = make_runtime(db, tx, mock.clone());
 
@@ -3853,7 +3853,7 @@ mod tests {
         let calls = mock.recorded_calls();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].0, "gh");
-        assert!(calls[0].1.contains(&"--merge".to_string()));
+        assert!(calls[0].1.contains(&"--squash".to_string()));
         assert!(calls[0]
             .1
             .contains(&"https://github.com/acme/app/pull/42".to_string()));
