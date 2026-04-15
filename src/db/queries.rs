@@ -215,7 +215,7 @@ impl super::SettingsStore for Database {
     fn list_repo_paths(&self) -> Result<Vec<String>> {
         let conn = self.conn()?;
         let mut stmt = conn
-            .prepare("SELECT path FROM repo_paths ORDER BY last_used DESC LIMIT 9")
+            .prepare("SELECT path FROM repo_paths ORDER BY last_used DESC")
             .context("Failed to prepare list_repo_paths")?;
         let paths = stmt
             .query_map([], |row| row.get(0))

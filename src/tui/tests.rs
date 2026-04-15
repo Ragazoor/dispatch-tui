@@ -9111,16 +9111,16 @@ fn dispatch_repo_path_cursor_navigation() {
     assert_eq!(app.input.mode, InputMode::InputDispatchRepoPath);
     assert_eq!(app.input.repo_cursor, 0);
 
-    // Navigate down with j
-    app.handle_key(KeyEvent::from(KeyCode::Char('j')));
+    // Navigate down with arrow keys
+    app.handle_key(KeyEvent::from(KeyCode::Down));
     assert_eq!(app.input.repo_cursor, 1);
 
     // Navigate down again
-    app.handle_key(KeyEvent::from(KeyCode::Char('j')));
+    app.handle_key(KeyEvent::from(KeyCode::Down));
     assert_eq!(app.input.repo_cursor, 2);
 
-    // Navigate up with k
-    app.handle_key(KeyEvent::from(KeyCode::Char('k')));
+    // Navigate up
+    app.handle_key(KeyEvent::from(KeyCode::Up));
     assert_eq!(app.input.repo_cursor, 1);
 }
 
@@ -9137,7 +9137,7 @@ fn dispatch_repo_path_enter_selects_cursor_item() {
     assert_eq!(app.input.mode, InputMode::InputDispatchRepoPath);
 
     // Navigate to second item
-    app.handle_key(KeyEvent::from(KeyCode::Char('j')));
+    app.handle_key(KeyEvent::from(KeyCode::Down));
     assert_eq!(app.input.repo_cursor, 1);
 
     // Press Enter to select
@@ -13382,7 +13382,8 @@ fn handle_key_archive_unknown_key_is_noop() {
 // =====================================================================
 
 #[test]
-fn handle_key_text_input_repo_j_navigates_when_buffer_empty() {
+fn handle_key_text_input_repo_j_types_into_buffer() {
+    // j should be a typeable character in the repo path search box
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
     app.input.mode = InputMode::InputRepoPath;
@@ -13390,34 +13391,60 @@ fn handle_key_text_input_repo_j_navigates_when_buffer_empty() {
     app.input.repo_cursor = 0;
 
     app.handle_key(make_key(KeyCode::Char('j')));
+    assert_eq!(app.input.buffer, "j");
+    assert_eq!(app.input.repo_cursor, 0); // cursor resets on query change
+}
+
+#[test]
+fn handle_key_text_input_repo_k_types_into_buffer() {
+    // k should be a typeable character in the repo path search box
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.buffer.clear();
+    app.input.repo_cursor = 0;
+
+    app.handle_key(make_key(KeyCode::Char('k')));
+    assert_eq!(app.input.buffer, "k");
+    assert_eq!(app.input.repo_cursor, 0); // cursor resets on query change
+}
+
+#[test]
+fn handle_key_text_input_repo_jk_typed_together() {
+    // Typing "jk" should appear in the search buffer
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/jk-repo".to_string(), "/other".to_string()];
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.buffer.clear();
+
+    app.handle_key(make_key(KeyCode::Char('j')));
+    app.handle_key(make_key(KeyCode::Char('k')));
+    assert_eq!(app.input.buffer, "jk");
+}
+
+#[test]
+fn handle_key_text_input_repo_arrow_down_navigates() {
+    // Arrow keys should still navigate the list
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.buffer.clear();
+    app.input.repo_cursor = 0;
+
+    app.handle_key(make_key(KeyCode::Down));
     assert_eq!(app.input.repo_cursor, 1);
 }
 
 #[test]
-fn handle_key_text_input_repo_k_navigates_when_buffer_empty() {
+fn handle_key_text_input_repo_arrow_up_navigates() {
+    // Arrow keys should still navigate the list
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
     app.input.mode = InputMode::InputRepoPath;
     app.input.buffer.clear();
     app.input.repo_cursor = 1;
 
-    app.handle_key(make_key(KeyCode::Char('k')));
-    assert_eq!(app.input.repo_cursor, 0);
-}
-
-#[test]
-fn handle_key_text_input_repo_j_navigates_when_buffer_non_empty() {
-    // j/k now always navigate the filtered list in repo modes, even with non-empty buffer
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
-    app.input.mode = InputMode::InputRepoPath;
-    app.input.buffer = "x".to_string();
-    app.input.repo_cursor = 0;
-
-    app.handle_key(make_key(KeyCode::Char('j')));
-    // buffer unchanged — j navigates, does not type
-    assert_eq!(app.input.buffer, "x");
-    // filtered list for "x" against ["/repo", "/other"] is empty, so cursor stays 0
+    app.handle_key(make_key(KeyCode::Up));
     assert_eq!(app.input.repo_cursor, 0);
 }
 
@@ -15573,8 +15600,8 @@ fn typing_resets_repo_cursor_to_zero() {
         ..Default::default()
     });
     // Navigate to position 2
-    app.handle_key(make_key(KeyCode::Char('j')));
-    app.handle_key(make_key(KeyCode::Char('j')));
+    app.handle_key(make_key(KeyCode::Down));
+    app.handle_key(make_key(KeyCode::Down));
     assert_eq!(app.input.repo_cursor, 2);
     // Type a character — cursor should reset
     app.handle_key(make_key(KeyCode::Char('/')));

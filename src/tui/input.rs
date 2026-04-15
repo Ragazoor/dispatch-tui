@@ -452,12 +452,8 @@ impl App {
         );
         if is_repo_mode {
             match key.code {
-                KeyCode::Char('j') | KeyCode::Down => {
-                    return self.update(Message::MoveRepoCursor(1))
-                }
-                KeyCode::Char('k') | KeyCode::Up => {
-                    return self.update(Message::MoveRepoCursor(-1))
-                }
+                KeyCode::Down => return self.update(Message::MoveRepoCursor(1)),
+                KeyCode::Up => return self.update(Message::MoveRepoCursor(-1)),
                 _ => {}
             }
         }
