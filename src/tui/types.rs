@@ -46,7 +46,6 @@ impl ReviewBoardMode {
     pub fn pr_column(&self, pr: &crate::models::ReviewPr) -> usize {
         pr.review_decision.column_index()
     }
-
 }
 
 // ---------------------------------------------------------------------------

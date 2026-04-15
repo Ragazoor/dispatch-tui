@@ -538,10 +538,15 @@ fn list_repo_paths_empty_by_default() {
 fn list_repo_paths_returns_all_beyond_nine() {
     let db = in_memory_db();
     for i in 0..15 {
-        db.save_repo_path(&format!("/home/user/project{i}")).unwrap();
+        db.save_repo_path(&format!("/home/user/project{i}"))
+            .unwrap();
     }
     let paths = db.list_repo_paths().unwrap();
-    assert_eq!(paths.len(), 15, "all 15 paths should be returned, not just 9");
+    assert_eq!(
+        paths.len(),
+        15,
+        "all 15 paths should be returned, not just 9"
+    );
 }
 
 #[test]

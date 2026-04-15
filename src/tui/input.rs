@@ -814,9 +814,9 @@ impl App {
         }
         // Alerts sub-mode (default)
         match key.code {
-            KeyCode::Char('1') => {
-                self.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Dependabot))
-            }
+            KeyCode::Char('1') => self.update(Message::SwitchSecurityBoardMode(
+                SecurityBoardMode::Dependabot,
+            )),
             KeyCode::Char('2') => {
                 self.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Alerts))
             }
@@ -952,9 +952,9 @@ impl App {
 
     fn handle_key_security_dependabot(&mut self, key: KeyEvent) -> Vec<Command> {
         match key.code {
-            KeyCode::Char('1') => {
-                self.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Dependabot))
-            }
+            KeyCode::Char('1') => self.update(Message::SwitchSecurityBoardMode(
+                SecurityBoardMode::Dependabot,
+            )),
             KeyCode::Char('2') => {
                 self.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Alerts))
             }
@@ -1038,8 +1038,7 @@ impl App {
             }
             KeyCode::Char('f') => self.update(Message::StartSecurityRepoFilter),
             KeyCode::Enter => {
-                self.security.dependabot.detail_visible =
-                    !self.security.dependabot.detail_visible;
+                self.security.dependabot.detail_visible = !self.security.dependabot.detail_visible;
                 vec![]
             }
             KeyCode::Char('j') | KeyCode::Down => {

@@ -1198,9 +1198,7 @@ impl App {
             Message::DeleteRepoPath(path) => self.handle_delete_repo_path(path),
             Message::CancelPresetInput => self.handle_cancel_preset_input(),
             Message::FilterPresetsLoaded(presets) => self.handle_filter_presets_loaded(presets),
-            Message::SwitchSecurityBoardMode(mode) => {
-                self.handle_switch_security_board_mode(mode)
-            }
+            Message::SwitchSecurityBoardMode(mode) => self.handle_switch_security_board_mode(mode),
             Message::StartApproveBotPr => self.handle_start_approve_bot_pr(),
             Message::StartMergeBotPr => self.handle_start_merge_bot_pr(),
             Message::ConfirmApproveBotPr => self.handle_confirm_approve_bot_pr(),
@@ -3164,17 +3162,18 @@ impl App {
         }
     }
 
-    fn handle_switch_security_board_mode(
-        &mut self,
-        new_mode: SecurityBoardMode,
-    ) -> Vec<Command> {
+    fn handle_switch_security_board_mode(&mut self, new_mode: SecurityBoardMode) -> Vec<Command> {
         let ViewMode::SecurityBoard { mode, .. } = &mut self.board.view_mode else {
             return vec![];
         };
         *mode = new_mode;
         let mut cmds = vec![];
         if new_mode == SecurityBoardMode::Dependabot {
-            if self.security.dependabot.prs.needs_fetch(REVIEW_REFRESH_INTERVAL)
+            if self
+                .security
+                .dependabot
+                .prs
+                .needs_fetch(REVIEW_REFRESH_INTERVAL)
                 && !self.security.dependabot.prs.loading
             {
                 self.security.dependabot.prs.loading = true;

@@ -2491,20 +2491,12 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             frame.render_widget(bar, area);
         }
         InputMode::ConfirmApproveBotPr(_) => {
-            let text = app
-                .status
-                .message
-                .as_deref()
-                .unwrap_or("Approve PR? [y/n]");
+            let text = app.status.message.as_deref().unwrap_or("Approve PR? [y/n]");
             let bar = Paragraph::new(text.to_owned()).style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
         InputMode::ConfirmMergeBotPr(_) => {
-            let text = app
-                .status
-                .message
-                .as_deref()
-                .unwrap_or("Merge PR? [y/n]");
+            let text = app.status.message.as_deref().unwrap_or("Merge PR? [y/n]");
             let bar = Paragraph::new(text.to_owned()).style(Style::default().fg(Color::Green));
             frame.render_widget(bar, area);
         }
@@ -3337,8 +3329,7 @@ fn render_dependabot_board(frame: &mut Frame, app: &mut App, area: Rect) {
         let status = Paragraph::new(msg.to_string()).style(Style::default().fg(Color::Yellow));
         frame.render_widget(status, chunks[5]);
     } else if let Some(err) = app.security.dependabot.prs.last_error.as_deref() {
-        let status =
-            Paragraph::new(format!("Error: {err}")).style(Style::default().fg(Color::Red));
+        let status = Paragraph::new(format!("Error: {err}")).style(Style::default().fg(Color::Red));
         frame.render_widget(status, chunks[5]);
     } else {
         let has_selected = !app.selected_bot_prs().is_empty();
@@ -3394,7 +3385,10 @@ fn render_dependabot_summary_row(frame: &mut Frame, app: &App, area: Rect) {
         .split(area);
 
     for i in 0..col_count {
-        let count = prs.iter().filter(|pr| super::bot_pr_column(pr) == i).count();
+        let count = prs
+            .iter()
+            .filter(|pr| super::bot_pr_column(pr) == i)
+            .count();
         let is_focused = i == sel_col;
         let prefix = if is_focused { "\u{25b8} " } else { "\u{25e6} " };
         let label = format!("{prefix}{} ({count})", col_labels[i]);
