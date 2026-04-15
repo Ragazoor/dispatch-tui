@@ -15511,7 +15511,9 @@ fn dependabot_approve_without_spacebar_uses_cursor() {
     pr.ci_status = crate::models::CiStatus::Success;
     let url = pr.url.clone();
     app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
-    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Dependabot));
+    app.update(Message::SwitchSecurityBoardMode(
+        SecurityBoardMode::Dependabot,
+    ));
     // Do NOT press Space — cursor should be enough
     app.handle_key(make_key(KeyCode::Char('a')));
     assert!(matches!(app.input.mode, InputMode::ConfirmApproveBotPr(ref u) if u == &url));
@@ -15524,7 +15526,9 @@ fn dependabot_merge_without_spacebar_uses_cursor() {
     pr.ci_status = crate::models::CiStatus::Success;
     let url = pr.url.clone();
     app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
-    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Dependabot));
+    app.update(Message::SwitchSecurityBoardMode(
+        SecurityBoardMode::Dependabot,
+    ));
     // Do NOT press Space — cursor should be enough
     app.handle_key(make_key(KeyCode::Char('m')));
     assert!(matches!(app.input.mode, InputMode::ConfirmMergeBotPr(ref u) if u == &url));
