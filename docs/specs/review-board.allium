@@ -23,6 +23,11 @@ enum ReviewBoardMode { reviewer | author }
 -- Entities
 ------------------------------------------------------------
 
+entity Reviewer {
+    login: String
+    decision: ReviewDecision?   -- null if this reviewer hasn't voted yet
+}
+
 entity ReviewPr {
     number: Integer
     repo: String              -- e.g. "org/repo"
@@ -35,6 +40,14 @@ entity ReviewPr {
     tmux_window: core/TmuxWindow?
     worktree: core/Worktree?
     agent_status: ReviewAgentStatus?
+    created_at: Timestamp
+    updated_at: Timestamp
+    additions: Integer        -- lines added
+    deletions: Integer        -- lines removed
+    labels: String[]
+    body: String              -- PR description body
+    head_ref: String          -- source branch name, used when creating review worktree
+    reviewers: Reviewer[]     -- requested reviewers with their decisions
 
     -- Derived
     has_agent: agent_status != null
@@ -96,6 +109,42 @@ rule DetachReviewAgent {
         -- and agent_status on the ReviewPr. The cleared state is persisted to
         -- the database via UpdateAgentStatus(status: null).
         -- Available in both Review Board modes (reviewer / author).
+}
+
+-- == Review Agent Re-Review ==
+
+rule ReReview {
+    when: ReReview(pr)
+
+    requires: pr.agent_status = idle
+    requires: pr.tmux_window != null
+
+    ensures: pr.agent_status = reviewing
+    ensures: ReviewAgentReTriggered(pr: pr)
+
+    @guidance
+        -- Triggered from the Review Board (r key on a PR with an idle agent).
+        -- Sends "/review-pr {number}" via tmux send-keys to the existing
+        -- tmux session — does NOT create a new worktree. Sets agent_status
+        -- to reviewing. The agent is expected to call update_review_status
+        -- with "findings_ready" when done, then "idle" when the user has
+        -- finished their review. Only available when agent_status == idle.
+}
+
+-- == Author Mode Dispatch Filter ==
+
+rule DispatchFilterToggle {
+    when: ToggleDispatchFilter
+
+    -- Only available in ReviewBoardMode::Author.
+    -- Filters the Author mode PR list to show only PRs that have an
+    -- associated dispatched review agent (tmux_window != null).
+    -- Useful for tracking which of the user's own PRs have an active reviewer agent.
+
+    @guidance
+        -- Triggered from the Review Board Author mode (D key).
+        -- Toggling this filter does not affect Reviewer mode.
+        -- State is not persisted — resets to off when the board is re-entered.
 }
 
 -- == PR Merge Cleanup ==
