@@ -124,8 +124,8 @@ rule PrMergedCleanupReviewBoard {
 
     @guidance
         -- The PR is identified by parsing (repo, number) from task.pr_url.
-        -- All three Review Board PR lists are searched (reviewer / author /
-        -- author). If no matching PR has an active agent, the rule is a
+        -- Both Review Board PR lists are searched (reviewer / author).
+        -- If no matching PR has an active agent, the rule is a
         -- no-op. The cleared state is persisted via UpdateAgentStatus(status: null).
         -- This ensures that merging a PR via GitHub (or via the TUI M key)
         -- never leaves a zombie review agent window open.
@@ -133,7 +133,7 @@ rule PrMergedCleanupReviewBoard {
 
 rule BotPrsMergedCleanupReviewBoard {
     -- Fires after a successful batch merge of bot PRs (Dependabot/Renovate)
-    -- from the Dependabot tab. Distinct from PrMergedCleanupReviewBoard:
+    -- from the Security Board. Distinct from PrMergedCleanupReviewBoard:
     -- bot PRs have no associated Task record, so PrMerged(task) is never
     -- emitted for them.
 
