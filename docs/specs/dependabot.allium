@@ -72,40 +72,36 @@ visual CiBadge(status: CiStatus) -> (Color, String) {
 -- Approve / Merge Bot PRs
 ------------------------------------------------------------
 
--- The Dependabot board allows bulk-approving and bulk-merging bot PRs
--- (Dependabot / Renovate). These actions operate on the set of selected PRs.
+-- The Dependabot board allows approving and merging bot PRs
+-- (Dependabot / Renovate). These actions operate on the first selected PR.
 
 rule ApproveBotPrs {
-    when: ApproveBotPrs(prs)
+    when: ApproveBotPrs(pr)
 
-    requires: prs is not empty
-    requires: for each pr in prs: pr.review_decision != approved
+    requires: pr != null
 
-    ensures: for each pr in prs: pr.review_decision = approved
-    ensures: BotPrsApproved(approved_urls: prs.url[])
+    ensures: pr.review_decision = approved
+    ensures: BotPrsApproved(approved_url: pr.url)
 
     @guidance
-        -- Triggered from the Dependabot board (a key on selected PRs).
-        -- Runs "gh pr review --approve {number}" for each selected PR.
-        -- PRs are selected via Space (toggle individual) or prior selection state.
+        -- Triggered from the Dependabot board (a key on a selected PR).
+        -- Runs "gh pr review --approve {url}" on the first selected PR.
         -- Uses ConfirmApproveBotPr y/n dialog before executing.
         -- After approval the PR moves to the approved column on the next refresh.
 }
 
 rule MergeBotPrs {
-    when: MergeBotPrs(prs)
+    when: MergeBotPrs(pr)
 
-    requires: prs is not empty
+    requires: pr != null
 
-    ensures: for each pr in prs: BotPrsMerged(merged_urls: [pr.url])
+    ensures: BotPrsMerged(merged_url: pr.url)
 
     @guidance
-        -- Triggered from the Dependabot board (m key on selected PRs).
+        -- Triggered from the Dependabot board (m key on a selected PR).
         -- Uses ConfirmMergeBotPr y/n dialog before executing.
-        -- Runs "gh pr merge --merge {number}" for each selected PR.
-        -- Only successfully merged PRs appear in merged_urls;
-        -- failed merges are excluded from the BotPrsMerged event.
-        -- On completion BotPrsMergedCleanupReviewBoard fires (see review-board.allium).
+        -- Runs "gh pr merge --merge {url}" on the first selected PR.
+        -- On success BotPrsMergedCleanupReviewBoard fires (see review-board.allium).
 }
 
 ------------------------------------------------------------
@@ -128,11 +124,13 @@ rule MergeBotPrs {
 -- Visual: Agent Status Badge
 ------------------------------------------------------------
 
-visual AgentStatusBadge(status: rb/ReviewAgentStatus?) -> (Color, String) {
-    reviewing      => (yellow, "◆")   -- agent analyzing
-    findings_ready => (green,  "✓")   -- findings ready, user should look
-    idle           => (dim,    "○")   -- agent waiting for user action
-    null           => (none,   "")    -- no agent
+visual AgentStatusBadge(status: rb/ReviewAgentStatus?) -> String {
+    -- Note: badge text is concatenated into the card header line and rendered
+    -- with the line's inherited color — no per-status color is applied.
+    reviewing      => "◆"   -- agent analyzing
+    findings_ready => "✔"   -- findings ready, user should look
+    idle           => "○"   -- agent waiting for user action
+    null           => ""    -- no agent
 }
 
 ------------------------------------------------------------
@@ -145,7 +143,6 @@ visual AgentStatusBadge(status: rb/ReviewAgentStatus?) -> (Color, String) {
 visual StalenessColor(age: Duration) -> Color {
     age < 3.days  => green
     age < 7.days  => yellow
-    age < 14.days => orange
     otherwise     => red
 }
 
