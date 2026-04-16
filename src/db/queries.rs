@@ -787,14 +787,14 @@ impl super::PrStore for Database {
         number: i64,
         tmux_window: &str,
         worktree: &str,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let table = kind.table_name();
         let conn = self.conn()?;
-        conn.execute(
+        let rows = conn.execute(
             &format!("UPDATE {table} SET tmux_window = ?1, worktree = ?2, agent_status = 'reviewing' WHERE repo = ?3 AND number = ?4"),
             params![tmux_window, worktree, repo, number],
         )?;
-        Ok(())
+        Ok(rows > 0)
     }
 
     fn get_review_pr(&self, repo: &str, number: i64) -> Result<Option<ReviewPr>> {
@@ -852,13 +852,13 @@ impl super::AlertStore for Database {
         kind: crate::models::AlertKind,
         tmux_window: &str,
         worktree: &str,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let conn = self.conn()?;
-        conn.execute(
+        let rows = conn.execute(
             "UPDATE security_alerts SET tmux_window = ?1, worktree = ?2, agent_status = 'reviewing' WHERE repo = ?3 AND number = ?4 AND kind = ?5",
             params![tmux_window, worktree, repo, number, kind.as_db_str()],
         )?;
-        Ok(())
+        Ok(rows > 0)
     }
 
     fn get_security_alert(

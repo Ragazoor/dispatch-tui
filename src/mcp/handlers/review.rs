@@ -73,15 +73,15 @@ fn format_review_pr(pr: &crate::models::ReviewPr) -> String {
         .unwrap_or_default();
     let draft = if pr.is_draft { " [draft]" } else { "" };
     format!(
-        "#{} {}{}{}\n  repo: {}\n  author: {} | decision: {:?} | ci: {:?}\n  url: {}",
+        "#{} {}{}{}\n  repo: {}\n  author: {} | decision: {} | ci: {}\n  url: {}",
         pr.number,
         pr.title,
         draft,
         agent,
         pr.repo,
         pr.author,
-        pr.review_decision,
-        pr.ci_status,
+        pr.review_decision.as_str(),
+        pr.ci_status.as_str(),
         pr.url,
     )
 }
@@ -319,6 +319,8 @@ pub(super) async fn handle_dispatch_review_agent(
         Err(e) => return JsonRpcResponse::err(id, -32603, format!("DB error: {e}")),
     };
 
+    // FindingsReady is intentionally excluded: it means the agent completed successfully
+    // and re-dispatching is allowed (e.g. to do a fresh review pass).
     if pr.agent_status == Some(ReviewAgentStatus::Reviewing) {
         return JsonRpcResponse::err(
             id,
@@ -355,17 +357,30 @@ pub(super) async fn handle_dispatch_review_agent(
     match result {
         Ok(dispatch_result) => {
             // Try both PR table kinds — set_pr_agent uses WHERE clause so only the
-            // matching table will be updated.
+            // matching table will be updated. Warn only if neither table was updated.
+            let mut persisted = false;
             for kind in [PrKind::Review, PrKind::My] {
-                if let Err(e) = db.set_pr_agent(
+                match db.set_pr_agent(
                     kind,
                     &repo,
                     number,
                     &dispatch_result.tmux_window,
                     &dispatch_result.worktree_path,
                 ) {
-                    tracing::warn!("dispatch_review_agent: failed to persist agent ({kind:?}): {e}");
+                    Ok(true) => {
+                        persisted = true;
+                        break;
+                    }
+                    Ok(false) => {} // PR not in this table
+                    Err(e) => {
+                        tracing::warn!("dispatch_review_agent: failed to persist agent ({kind:?}): {e}")
+                    }
                 }
+            }
+            if !persisted {
+                tracing::warn!(
+                    "dispatch_review_agent: could not find {repo}#{number} in any PR table to persist agent"
+                );
             }
             state.notify();
             JsonRpcResponse::ok(
@@ -418,6 +433,8 @@ pub(super) async fn handle_dispatch_fix_agent(
         Err(e) => return JsonRpcResponse::err(id, -32603, format!("DB error: {e}")),
     };
 
+    // FindingsReady is intentionally excluded: it means the agent completed successfully
+    // and re-dispatching is allowed (e.g. to do a fresh fix pass).
     if alert.agent_status == Some(ReviewAgentStatus::Reviewing) {
         return JsonRpcResponse::err(
             id,
@@ -444,7 +461,6 @@ pub(super) async fn handle_dispatch_fix_agent(
     let db = state.db.clone();
     let repo = parsed.repo.clone();
     let number = parsed.number;
-    let kind_str = parsed.kind.clone();
 
     let result = match tokio::task::spawn_blocking(move || {
         crate::dispatch::dispatch_fix_agent(req, &*runner)
@@ -458,21 +474,25 @@ pub(super) async fn handle_dispatch_fix_agent(
     match result {
         Ok(dispatch_result) => {
             // set_alert_agent also sets agent_status = 'reviewing'
-            if let Err(e) = db.set_alert_agent(
+            match db.set_alert_agent(
                 &repo,
                 number,
                 kind,
                 &dispatch_result.tmux_window,
                 &dispatch_result.worktree_path,
             ) {
-                tracing::warn!("dispatch_fix_agent: failed to persist agent: {e}");
+                Ok(true) => {}
+                Ok(false) => tracing::warn!(
+                    "dispatch_fix_agent: alert {repo}#{number} not found in DB to persist agent"
+                ),
+                Err(e) => tracing::warn!("dispatch_fix_agent: failed to persist agent: {e}"),
             }
             state.notify();
             JsonRpcResponse::ok(
                 id,
                 json!({"content": [{"type": "text", "text": format!(
                     "Fix agent dispatched for {}#{} ({}) (window: {}, worktree: {})",
-                    repo, number, kind_str,
+                    repo, number, kind.as_db_str(),
                     dispatch_result.tmux_window, dispatch_result.worktree_path
                 )}]}),
             )

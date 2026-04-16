@@ -4807,6 +4807,23 @@ async fn get_review_pr_not_found() {
     assert_error(&resp, "not found");
 }
 
+#[tokio::test]
+async fn get_review_pr_found_in_my_prs() {
+    let state = test_state();
+    insert_my_pr_fixture(&state, 55, "acme/app");
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({"name": "get_review_pr", "arguments": {"repo": "acme/app", "number": 55}})),
+    )
+    .await;
+    assert!(resp.error.is_none());
+    let text = extract_response_text(&resp);
+    assert!(text.contains("acme/app"));
+    assert!(text.contains("55"));
+}
+
 // ---------------------------------------------------------------------------
 // list_security_alerts tests
 // ---------------------------------------------------------------------------

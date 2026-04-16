@@ -611,6 +611,15 @@ impl CiStatus {
         }
     }
 
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Pending => "Pending",
+            Self::Success => "Success",
+            Self::Failure => "Failure",
+            Self::None => "None",
+        }
+    }
+
     pub fn as_db_str(&self) -> &'static str {
         match self {
             Self::Pending => "pending",
