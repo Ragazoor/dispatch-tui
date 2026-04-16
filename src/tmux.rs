@@ -184,6 +184,32 @@ pub fn set_focus_events(runner: &dyn ProcessRunner) -> Result<()> {
     Ok(())
 }
 
+/// Write `set -g focus-events on` to `~/.tmux.conf` so the setting persists
+/// across tmux server restarts.
+pub fn write_focus_events_to_tmux_conf() -> Result<()> {
+    let home = std::env::var("HOME").context("HOME not set")?;
+    let conf = std::path::PathBuf::from(home).join(".tmux.conf");
+    write_focus_events_to_tmux_conf_at(&conf)
+}
+
+fn write_focus_events_to_tmux_conf_at(path: &std::path::Path) -> Result<()> {
+    let existing = if path.exists() {
+        std::fs::read_to_string(path).context("failed to read .tmux.conf")?
+    } else {
+        String::new()
+    };
+    if existing.contains("focus-events on") {
+        return Ok(());
+    }
+    let addition = if existing.ends_with('\n') || existing.is_empty() {
+        "set -g focus-events on\n".to_string()
+    } else {
+        "\nset -g focus-events on\n".to_string()
+    };
+    std::fs::write(path, existing + &addition).context("failed to write .tmux.conf")?;
+    Ok(())
+}
+
 /// Return the name of the currently active tmux window.
 pub fn current_window_name(runner: &dyn ProcessRunner) -> Result<String> {
     let output = runner.run("tmux", &["display-message", "-p", "#W"])?;
@@ -853,5 +879,39 @@ mod tests {
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].0, "tmux");
         assert_eq!(calls[0].1, vec!["set-option", "-g", "focus-events", "on"]);
+    }
+
+    #[test]
+    fn write_focus_events_creates_file_if_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let conf = dir.path().join(".tmux.conf");
+        write_focus_events_to_tmux_conf_at(&conf).unwrap();
+        let content = std::fs::read_to_string(&conf).unwrap();
+        assert!(content.contains("set -g focus-events on"));
+    }
+
+    #[test]
+    fn write_focus_events_appends_to_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let conf = dir.path().join(".tmux.conf");
+        std::fs::write(&conf, "set -g mouse on\n").unwrap();
+        write_focus_events_to_tmux_conf_at(&conf).unwrap();
+        let content = std::fs::read_to_string(&conf).unwrap();
+        assert!(content.contains("set -g mouse on"));
+        assert!(content.contains("set -g focus-events on"));
+    }
+
+    #[test]
+    fn write_focus_events_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let conf = dir.path().join(".tmux.conf");
+        std::fs::write(&conf, "set -g focus-events on\n").unwrap();
+        write_focus_events_to_tmux_conf_at(&conf).unwrap();
+        let content = std::fs::read_to_string(&conf).unwrap();
+        assert_eq!(
+            content.matches("focus-events on").count(),
+            1,
+            "should not duplicate the line"
+        );
     }
 }

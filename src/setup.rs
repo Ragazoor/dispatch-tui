@@ -410,15 +410,17 @@ pub fn run_setup(port: u16, yes: bool) -> Result<()> {
     // 4. Tmux focus-events
     let runner = RealProcessRunner;
     if !tmux::focus_events_enabled(&runner) {
-        if yes || confirm("Enable tmux focus-events? (needed for split-view focus indicator)")? {
+        if yes || confirm("Enable tmux focus-events? (will run `tmux set-option -g focus-events on` and add `set -g focus-events on` to ~/.tmux.conf)")? {
             tmux::set_focus_events(&runner)?;
-            println!("Tmux: enabled focus-events globally");
+            tmux::write_focus_events_to_tmux_conf()?;
+            println!("Tmux: enabled focus-events (set for current server and added to ~/.tmux.conf)");
             any_changes = true;
         } else {
             println!("Tmux: focus-events skipped");
         }
     } else {
-        println!("Tmux: focus-events already enabled");
+        tmux::write_focus_events_to_tmux_conf()?;
+        println!("Tmux: focus-events already enabled (ensuring ~/.tmux.conf is up to date)");
     }
 
     if any_changes {
