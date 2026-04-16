@@ -67,7 +67,10 @@ mod tests {
         let tip = parse_tip(1, content);
         assert_eq!(tip.id, 1);
         assert_eq!(tip.title, "Quick Dispatch");
-        assert_eq!(tip.body.trim(), "Press **Shift+D** to dispatch immediately.");
+        assert_eq!(
+            tip.body.trim(),
+            "Press **Shift+D** to dispatch immediately."
+        );
     }
 
     #[test]
