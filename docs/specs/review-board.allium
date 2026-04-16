@@ -226,3 +226,47 @@ rule BotPrsMergedCleanupReviewBoard {
     -- PR merge), its tmux_window, worktree, and agent_status are ALL cleared
     -- together. There is no partial cleanup — all three fields are treated as
     -- a unit representing "review agent session active".
+
+-- == MCP Review Board Tools ==
+
+rule ListReviewPrsViaMcp {
+    when: McpListReviewPrs(mode?, repo?)
+    -- mode: reviewer (review_prs table) | author (my_prs table) | null = both
+    -- repo: optional GitHub repo filter (e.g. "acme/app")
+    returns: Vec<ReviewPr>
+    @guidance
+        -- Reads from the DB (review_prs and/or my_prs tables).
+        -- Returns the most recently fetched board state.
+        -- mode=null returns rows from both tables concatenated.
+        -- repo filter is an exact match on ReviewPr.repo.
+}
+
+rule GetReviewPrViaMcp {
+    when: McpGetReviewPr(repo, number)
+    returns: ReviewPr
+    @guidance
+        -- Looks up (repo, number) in review_prs first, then my_prs.
+        -- Returns the first match. Returns not_found error if absent
+        -- from both tables.
+}
+
+rule DispatchReviewAgentViaMcp {
+    when: McpDispatchReviewAgent(repo, number, local_repo)
+
+    requires: pr = GetReviewPrViaMcp(repo, number)
+    requires: pr.agent_status != reviewing
+
+    ensures: pr.agent_status = reviewing
+    ensures: pr.tmux_window set
+    ensures: pr.worktree set
+
+    @guidance
+        -- local_repo is the filesystem path to the local clone used
+        -- to create the worktree (e.g. "/home/user/Code/work/myrepo").
+        -- head_ref and is_dependabot are read from the PR record in the DB.
+        -- Returns error if the PR is not found in the DB.
+        -- Returns error if pr.agent_status is already "reviewing" to
+        -- prevent duplicate agent dispatch.
+        -- On success, persists tmux_window, worktree, and agent_status
+        -- to the DB and triggers a TUI refresh.
+}

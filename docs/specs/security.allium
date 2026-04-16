@@ -203,3 +203,45 @@ visual KindBadge(kind: AlertKind) -> String {
     -- (detach), its tmux_window, worktree, and agent_status are ALL
     -- cleared together. There is no partial cleanup — all three fields
     -- are treated as a unit representing "fix agent session active".
+
+-- == MCP Security Board Tools ==
+
+rule ListSecurityAlertsViaMcp {
+    when: McpListSecurityAlerts(repo?, severity?, kind?)
+    -- All params optional; combinable
+    returns: Vec<SecurityAlert>
+    @guidance
+        -- Reads from the security_alerts table.
+        -- repo: exact match on SecurityAlert.repo.
+        -- severity: one of critical | high | medium | low.
+        -- kind: one of dependabot | code_scanning.
+        -- Returns all open alerts matching the given filters.
+}
+
+rule GetSecurityAlertViaMcp {
+    when: McpGetSecurityAlert(repo, number, kind)
+    returns: SecurityAlert
+    @guidance
+        -- (repo, number, kind) is the primary key in security_alerts.
+        -- Returns not_found error if no matching row exists.
+}
+
+rule DispatchFixAgentViaMcp {
+    when: McpDispatchFixAgent(repo, number, kind, local_repo)
+
+    requires: alert = GetSecurityAlertViaMcp(repo, number, kind)
+    requires: alert.agent_status != reviewing
+
+    ensures: alert.agent_status = reviewing
+    ensures: alert.tmux_window set
+    ensures: alert.worktree set
+
+    @guidance
+        -- local_repo is the filesystem path to the local clone.
+        -- title, description, package, and fixed_version are read
+        -- from the alert record in the DB.
+        -- Returns error if the alert is not found in the DB.
+        -- Returns error if alert.agent_status is already "reviewing".
+        -- On success, persists tmux_window, worktree, and agent_status
+        -- to the DB and triggers a TUI refresh.
+}
