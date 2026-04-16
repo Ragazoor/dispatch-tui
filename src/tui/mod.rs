@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use crate::dispatch;
 use crate::models::{
-    epic_status, epic_substatus, DispatchMode, Epic, EpicId, EpicSubstatus, PrRef, ReviewDecision,
+    epic_substatus, DispatchMode, Epic, EpicId, EpicSubstatus, PrRef, ReviewDecision,
     SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage, VisualColumn,
     DEFAULT_BASE_BRANCH, DEFAULT_QUICK_TASK_TITLE,
 };
@@ -562,7 +562,7 @@ impl App {
                 if !self.repo_matches(&epic.repo_path) {
                     continue;
                 }
-                if epic_status(epic) == status {
+                if epic.status == status {
                     items.push(ColumnItem::Epic(epic));
                 }
             }
@@ -606,7 +606,7 @@ impl App {
             .board
             .epics
             .iter()
-            .filter(|e| self.filter.matches(&e.repo_path) && epic_status(e) == status)
+            .filter(|e| self.filter.matches(&e.repo_path) && e.status == status)
             .count();
         task_count + epic_count
     }
@@ -631,7 +631,7 @@ impl App {
                 if !self.repo_matches(&epic.repo_path) {
                     continue;
                 }
-                let epic_parent = epic_status(epic);
+                let epic_parent = epic.status;
                 if epic_parent != vcol.parent_status {
                     continue;
                 }
@@ -3649,7 +3649,7 @@ impl App {
         let Some(epic) = self.board.epics.iter().find(|e| e.id == id) else {
             return vec![];
         };
-        let status = crate::models::epic_status(epic);
+        let status = epic.status;
 
         if status != TaskStatus::Backlog {
             self.set_status("No backlog tasks in epic".to_string());

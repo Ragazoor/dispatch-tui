@@ -36,13 +36,13 @@ fn full_epic_lifecycle() {
 
     // 3. Verify epic status is Backlog (new epics start as Backlog)
     let epic = db.get_epic(epic.id).unwrap().unwrap();
-    assert_eq!(epic_status(&epic), TaskStatus::Backlog);
+    assert_eq!(epic.status, TaskStatus::Backlog);
 
     // 4. Move epic status to Running
     db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Running))
         .unwrap();
     let epic = db.get_epic(epic.id).unwrap().unwrap();
-    assert_eq!(epic_status(&epic), TaskStatus::Running);
+    assert_eq!(epic.status, TaskStatus::Running);
 
     // 5. Move all subtasks to Done, advance epic to Review
     db.patch_task(sub1, &TaskPatch::new().status(TaskStatus::Done))
@@ -52,13 +52,13 @@ fn full_epic_lifecycle() {
     db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Review))
         .unwrap();
     let epic = db.get_epic(epic.id).unwrap().unwrap();
-    assert_eq!(epic_status(&epic), TaskStatus::Review);
+    assert_eq!(epic.status, TaskStatus::Review);
 
     // 6. Mark epic as done
     db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Done))
         .unwrap();
     let epic = db.get_epic(epic.id).unwrap().unwrap();
-    assert_eq!(epic_status(&epic), TaskStatus::Done);
+    assert_eq!(epic.status, TaskStatus::Done);
 
     // 7. Delete epic cascades
     db.delete_epic(epic.id).unwrap();

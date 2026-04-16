@@ -400,13 +400,6 @@ pub struct Epic {
     pub updated_at: DateTime<Utc>,
 }
 
-/// Return the stored status for an epic. Previously this was derived from
-/// subtask statuses, but now it is persisted and advanced forward by
-/// `recalculate_epic_status` in the `TaskStore` trait.
-pub fn epic_status(epic: &Epic) -> TaskStatus {
-    epic.status
-}
-
 // ---------------------------------------------------------------------------
 // EpicSubstatus — derived display state for epics
 // ---------------------------------------------------------------------------
@@ -1826,7 +1819,9 @@ mod tests {
         assert_eq!(epic.status, TaskStatus::Backlog);
     }
 
-    // --- epic_status ---
+    // --- Epic.status direct access ---
+    // epic_status() was a wrapper that once derived status from subtasks.
+    // It was deleted; callers should access epic.status directly.
 
     fn make_epic_for_status(status: TaskStatus) -> Epic {
         Epic {
@@ -1844,18 +1839,20 @@ mod tests {
     }
 
     #[test]
-    fn epic_status_returns_stored_status() {
+    fn epic_has_status_field_directly_accessible() {
+        // Regression guard: epic.status is public and accessible directly.
+        // Previously callers used epic_status(&epic) — that wrapper no longer exists.
         let epic = make_epic_for_status(TaskStatus::Done);
-        assert_eq!(epic_status(&epic), TaskStatus::Done);
+        assert_eq!(epic.status, TaskStatus::Done);
 
         let epic = make_epic_for_status(TaskStatus::Backlog);
-        assert_eq!(epic_status(&epic), TaskStatus::Backlog);
+        assert_eq!(epic.status, TaskStatus::Backlog);
 
         let epic = make_epic_for_status(TaskStatus::Running);
-        assert_eq!(epic_status(&epic), TaskStatus::Running);
+        assert_eq!(epic.status, TaskStatus::Running);
 
         let epic = make_epic_for_status(TaskStatus::Review);
-        assert_eq!(epic_status(&epic), TaskStatus::Review);
+        assert_eq!(epic.status, TaskStatus::Review);
     }
 
     // --- ReviewDecision ---
