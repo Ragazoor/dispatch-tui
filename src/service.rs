@@ -81,46 +81,46 @@ impl UpdateTaskParams {
             || self.base_branch.is_some()
     }
 
-    pub fn updated_field_names(&self) -> Vec<String> {
+    pub fn updated_field_names(&self) -> Vec<&str> {
         let mut names = Vec::new();
-        if let Some(s) = self.status {
-            names.push(format!("status={}", s.as_str()));
+        if self.status.is_some() {
+            names.push("status");
         }
         if self.plan_path.is_some() {
-            names.push("plan_path".to_string());
+            names.push("plan_path");
         }
         if self.title.is_some() {
-            names.push("title".to_string());
+            names.push("title");
         }
         if self.description.is_some() {
-            names.push("description".to_string());
+            names.push("description");
         }
         if self.repo_path.is_some() {
-            names.push("repo_path".to_string());
+            names.push("repo_path");
         }
         if self.sort_order.is_some() {
-            names.push("sort_order".to_string());
+            names.push("sort_order");
         }
         if self.pr_url.is_some() {
-            names.push("pr_url".to_string());
+            names.push("pr_url");
         }
         if self.tag.is_some() {
-            names.push("tag".to_string());
+            names.push("tag");
         }
         if self.sub_status.is_some() {
-            names.push("sub_status".to_string());
+            names.push("sub_status");
         }
         if self.epic_id.is_some() {
-            names.push("epic_id".to_string());
+            names.push("epic_id");
         }
         if self.worktree.is_some() {
-            names.push("worktree".to_string());
+            names.push("worktree");
         }
         if self.tmux_window.is_some() {
-            names.push("tmux_window".to_string());
+            names.push("tmux_window");
         }
         if self.base_branch.is_some() {
-            names.push("base_branch".to_string());
+            names.push("base_branch");
         }
         names
     }
@@ -2131,5 +2131,15 @@ mod tests {
 
         let err = svc.validate_send_message(from_id.0, 999).unwrap_err();
         assert!(matches!(err, ServiceError::NotFound(_)));
+    }
+
+    // -- UpdateTaskParams::updated_field_names ----------------------------------
+
+    #[test]
+    fn update_task_params_field_names_returns_str_slices() {
+        // Verify return type is Vec<&str> (not Vec<String>) — consistent with UpdateEpicParams.
+        let params = UpdateTaskParams::for_task(1).title("x".to_string());
+        let names: Vec<&str> = params.updated_field_names();
+        assert!(names.contains(&"title"));
     }
 }

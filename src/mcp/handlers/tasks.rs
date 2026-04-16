@@ -287,7 +287,7 @@ pub(super) fn handle_update_task(
     if let Some(epic_id) = parsed.epic_id {
         params = params.epic_id(epic_id);
     }
-    let field_names = params.updated_field_names();
+    let fields_display = params.updated_field_names().join(", ");
 
     let svc = TaskService::new(state.db.clone());
     match svc.update_task(params) {
@@ -295,7 +295,7 @@ pub(super) fn handle_update_task(
             state.notify();
             JsonRpcResponse::ok(
                 id,
-                json!({"content": [{"type": "text", "text": format!("Task {} updated ({})", task_id, field_names.join(", "))}]}),
+                json!({"content": [{"type": "text", "text": format!("Task {} updated ({})", task_id, fields_display)}]}),
             )
         }
         Err(e) => service_err_to_response(id, e),
