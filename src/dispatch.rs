@@ -129,26 +129,16 @@ fn rebase_preamble(target: &str) -> String {
     )
 }
 
-#[derive(Clone, Copy)]
-enum ClaudeMode {
-    Plan,
-}
-
-impl ClaudeMode {
-    fn as_flag(self) -> &'static str {
-        match self {
-            ClaudeMode::Plan => "plan",
-        }
-    }
-}
-
 /// Provision worktree, write prompt file, launch Claude via tmux.
 /// The prompt file is deleted after Claude reads it.
 /// Shared by all dispatch variants.
+///
+/// Uses `--permission-mode plan`: the agent may read files and run commands
+/// but must ask before writing. Review and fix agents use `acceptEdits`
+/// instead because they make direct code changes without interactive approval.
 fn dispatch_with_prompt(
     task: &Task,
     prompt: &str,
-    mode: ClaudeMode,
     runner: &dyn ProcessRunner,
     base_branch: Option<&str>,
 ) -> Result<DispatchResult> {
@@ -178,8 +168,7 @@ fn dispatch_with_prompt(
         .with_context(|| format!("failed to write {prompt_file}"))?;
     let claude_cmd = format!(
         "bash -c 'prompt=$(cat .claude-prompt) && rm -f .claude-prompt \
-         && claude {DISPATCH_PLUGIN_DIR} --permission-mode {} \"$prompt\"'",
-        mode.as_flag()
+         && claude {DISPATCH_PLUGIN_DIR} --permission-mode plan \"$prompt\"'"
     );
     tmux::send_keys(&provision.tmux_window, &claude_cmd, runner)
         .context("failed to send keys to tmux window")?;
@@ -204,13 +193,7 @@ pub fn dispatch_agent(
         task.plan_path.as_deref(),
         epic,
     );
-    dispatch_with_prompt(
-        task,
-        &prompt,
-        ClaudeMode::Plan,
-        runner,
-        Some(&task.base_branch),
-    )
+    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch))
 }
 
 pub fn brainstorm_agent(
@@ -219,13 +202,7 @@ pub fn brainstorm_agent(
     epic: Option<&EpicContext>,
 ) -> Result<DispatchResult> {
     let prompt = build_brainstorm_prompt(task.id, &task.title, &task.description, epic);
-    dispatch_with_prompt(
-        task,
-        &prompt,
-        ClaudeMode::Plan,
-        runner,
-        Some(&task.base_branch),
-    )
+    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch))
 }
 
 pub fn plan_agent(
@@ -234,13 +211,7 @@ pub fn plan_agent(
     epic: Option<&EpicContext>,
 ) -> Result<DispatchResult> {
     let prompt = build_plan_prompt(task.id, &task.title, &task.description, epic);
-    dispatch_with_prompt(
-        task,
-        &prompt,
-        ClaudeMode::Plan,
-        runner,
-        Some(&task.base_branch),
-    )
+    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch))
 }
 
 pub fn quick_dispatch_agent(
@@ -249,13 +220,7 @@ pub fn quick_dispatch_agent(
     epic: Option<&EpicContext>,
 ) -> Result<DispatchResult> {
     let prompt = build_quick_dispatch_prompt(task.id, &task.title, &task.description, epic);
-    dispatch_with_prompt(
-        task,
-        &prompt,
-        ClaudeMode::Plan,
-        runner,
-        Some(&task.base_branch),
-    )
+    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch))
 }
 
 pub fn epic_planning_agent(
@@ -266,13 +231,7 @@ pub fn epic_planning_agent(
     runner: &dyn ProcessRunner,
 ) -> Result<DispatchResult> {
     let prompt = build_epic_planning_prompt(epic_id, epic_title, epic_description);
-    dispatch_with_prompt(
-        task,
-        &prompt,
-        ClaudeMode::Plan,
-        runner,
-        Some(&task.base_branch),
-    )
+    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch))
 }
 
 // ---------------------------------------------------------------------------
@@ -1096,7 +1055,10 @@ fn provision_and_dispatch(
     tmux::new_window(&tmux_window, &worktree_path, runner)
         .context("failed to create tmux window")?;
 
-    // Write prompt and launch Claude
+    // Write prompt and launch Claude.
+    // Uses `--permission-mode acceptEdits`: review and fix agents make direct code
+    // changes and don't need interactive approval for every edit. Task agents use
+    // `plan` mode instead (see dispatch_with_prompt).
     let prompt_file = format!("{worktree_path}/.claude-prompt");
     fs::write(&prompt_file, &config.prompt)
         .with_context(|| format!("failed to write {prompt_file}"))?;
