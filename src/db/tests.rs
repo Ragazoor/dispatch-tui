@@ -1371,6 +1371,83 @@ fn save_and_load_review_prs() {
 }
 
 #[test]
+fn get_review_pr_found_in_review_prs_table() {
+    use crate::models::{CiStatus, ReviewDecision, ReviewPr};
+
+    let db = Database::open_in_memory().unwrap();
+    let pr = ReviewPr {
+        number: 42,
+        title: "Fix bug".to_string(),
+        author: "alice".to_string(),
+        repo: "acme/app".to_string(),
+        url: "https://github.com/acme/app/pull/42".to_string(),
+        is_draft: false,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+        additions: 10,
+        deletions: 5,
+        review_decision: ReviewDecision::ReviewRequired,
+        labels: vec![],
+        body: String::new(),
+        head_ref: "feature/fix".to_string(),
+        ci_status: CiStatus::None,
+        reviewers: vec![],
+        tmux_window: None,
+        worktree: None,
+        agent_status: None,
+    };
+    db.save_prs(super::PrKind::Review, &[pr]).unwrap();
+
+    let found = db.get_review_pr("acme/app", 42).unwrap();
+    assert!(found.is_some());
+    let found = found.unwrap();
+    assert_eq!(found.number, 42);
+    assert_eq!(found.title, "Fix bug");
+    assert_eq!(found.head_ref, "feature/fix");
+}
+
+#[test]
+fn get_review_pr_found_in_my_prs_table() {
+    use crate::models::{CiStatus, ReviewDecision, ReviewPr};
+
+    let db = Database::open_in_memory().unwrap();
+    let pr = ReviewPr {
+        number: 99,
+        title: "My authored PR".to_string(),
+        author: "me".to_string(),
+        repo: "acme/lib".to_string(),
+        url: "https://github.com/acme/lib/pull/99".to_string(),
+        is_draft: false,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+        additions: 5,
+        deletions: 2,
+        review_decision: ReviewDecision::Approved,
+        labels: vec![],
+        body: String::new(),
+        head_ref: "my-branch".to_string(),
+        ci_status: CiStatus::None,
+        reviewers: vec![],
+        tmux_window: None,
+        worktree: None,
+        agent_status: None,
+    };
+    db.save_prs(super::PrKind::My, &[pr]).unwrap();
+
+    // Not in review_prs — should fall back to my_prs
+    let found = db.get_review_pr("acme/lib", 99).unwrap();
+    assert!(found.is_some());
+    assert_eq!(found.unwrap().title, "My authored PR");
+}
+
+#[test]
+fn get_review_pr_not_found() {
+    let db = Database::open_in_memory().unwrap();
+    let result = db.get_review_pr("acme/app", 999).unwrap();
+    assert!(result.is_none());
+}
+
+#[test]
 fn save_review_prs_replaces_all() {
     use crate::models::{CiStatus, ReviewDecision, ReviewPr, Reviewer};
     use chrono::Utc;
@@ -2213,6 +2290,84 @@ fn security_alerts_round_trip() {
     assert_eq!(loaded[1].kind, AlertKind::CodeScanning);
     assert!(loaded[1].package.is_none());
     assert!(loaded[1].cvss_score.is_none());
+}
+
+#[test]
+fn get_security_alert_found() {
+    use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
+
+    let db = Database::open_in_memory().unwrap();
+    let alert = SecurityAlert {
+        number: 7,
+        repo: "acme/api".to_string(),
+        severity: AlertSeverity::High,
+        kind: AlertKind::Dependabot,
+        title: "CVE-2024-9999".to_string(),
+        package: Some("openssl".to_string()),
+        vulnerable_range: Some("< 3.0".to_string()),
+        fixed_version: Some("3.0.0".to_string()),
+        cvss_score: Some(8.1),
+        url: "https://github.com/acme/api/security/dependabot/7".to_string(),
+        created_at: chrono::Utc::now(),
+        state: "open".to_string(),
+        description: "Buffer overflow in openssl".to_string(),
+        tmux_window: None,
+        worktree: None,
+        agent_status: None,
+    };
+    db.save_security_alerts(&[alert]).unwrap();
+
+    let found = db
+        .get_security_alert("acme/api", 7, AlertKind::Dependabot)
+        .unwrap();
+    assert!(found.is_some());
+    let found = found.unwrap();
+    assert_eq!(found.number, 7);
+    assert_eq!(found.title, "CVE-2024-9999");
+    assert_eq!(found.package.as_deref(), Some("openssl"));
+    assert_eq!(found.fixed_version.as_deref(), Some("3.0.0"));
+}
+
+#[test]
+fn get_security_alert_wrong_kind_returns_none() {
+    use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
+
+    let db = Database::open_in_memory().unwrap();
+    let alert = SecurityAlert {
+        number: 7,
+        repo: "acme/api".to_string(),
+        severity: AlertSeverity::High,
+        kind: AlertKind::Dependabot,
+        title: "CVE-2024-9999".to_string(),
+        package: None,
+        vulnerable_range: None,
+        fixed_version: None,
+        cvss_score: None,
+        url: "https://github.com/acme/api/security/dependabot/7".to_string(),
+        created_at: chrono::Utc::now(),
+        state: "open".to_string(),
+        description: String::new(),
+        tmux_window: None,
+        worktree: None,
+        agent_status: None,
+    };
+    db.save_security_alerts(&[alert]).unwrap();
+
+    // Same number, wrong kind
+    let result = db
+        .get_security_alert("acme/api", 7, AlertKind::CodeScanning)
+        .unwrap();
+    assert!(result.is_none());
+}
+
+#[test]
+fn get_security_alert_not_found() {
+    use crate::models::AlertKind;
+    let db = Database::open_in_memory().unwrap();
+    let result = db
+        .get_security_alert("acme/api", 999, AlertKind::Dependabot)
+        .unwrap();
+    assert!(result.is_none());
 }
 
 #[test]
