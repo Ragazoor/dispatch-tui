@@ -44,50 +44,15 @@ cargo run tui
 
 ## Usage
 
-### Create a task (`n`)
+**Create a task (`n`)** — enter a title, description, tag (`b`=bug, `f`=feature, `c`=chore, `e`=epic), and a repo path. Press `d` to dispatch: a Claude Code agent opens in a tmux window and, depending on the tag, writes a plan before implementing. When the agent moves the task to Review, press `W` to rebase onto main or open a draft PR — or type `/wrap-up` in the agent's session to commit any pending work and do the same.
 
-| Step | Key | What happens |
-|------|-----|--------------|
-| Create task | `n` | Enter title, description, tag, and repo path |
-| Dispatch | `d` | Agent explores your codebase, writes a plan, and implements it |
-| Agent needs input *(optional)* | `g` | Desktop notification — jump to agent and interact |
-| Split view *(optional)* | `S` | Side-by-side TUI + agent pane — see both at once |
-| Review the work | `g` | Jump to the agent's tmux window |
-| Wrap up | `W` | Commit, rebase, and open a PR. Or use `/wrap-up` from the agent's session |
+**Quick dispatch (`D`)** — skip the form entirely. Pick a repo (if more than one is configured) and the agent dispatches immediately with a placeholder title; it renames the task itself after learning what you want.
 
-### Quick dispatch (`D`)
+**Epics (`E`)** — group related work under an epic. The first `d` creates a planning subtask whose agent writes an implementation plan broken into subtasks; each subsequent `d` dispatches the next Backlog subtask in order.
 
-| Step | Key | What happens |
-|------|-----|--------------|
-| Quick dispatch | `D` | Pick a repo from the numbered list |
-| | | Task created and dispatched — agent sets its own title and description |
-| Check on the agent | `g` | Jump to the agent's tmux window |
-| Wrap up | `W` | Commit, rebase, and open a PR. Or use `/wrap-up` from the agent's session |
+**Navigation** — `Tab` cycles between the task, review, and security boards. `g` jumps to the selected agent's tmux window, `S` opens a side-by-side split with the TUI on the left and the agent pane on the right.
 
-### Work with an epic (`E`)
-
-| Step | Key | What happens |
-|------|-----|--------------|
-| Create epic | `E` | Enter title, description, and repo path |
-| Dispatch planning | `d` | Creates a planning subtask; agent writes an implementation plan with subtasks |
-| Dispatch subtasks | `d` | Each press dispatches the next Backlog subtask in order |
-| Reorder subtasks | `J` / `K` | Change dispatch order within the epic |
-| Wrap up each subtask | `W` | Commit, rebase, and open a PR. Or use `/wrap-up` from the agent's session |
-
-### Wrap up a task
-
-There are two ways to wrap up completed work:
-
-**From the TUI** — press `W` on a task:
-
-| Option | Key | What happens |
-|--------|-----|--------------|
-| Rebase | `r` | Rebases onto main, fast-forwards main, kills tmux window |
-| Create PR | `p` | Pushes branch and opens a draft GitHub PR |
-
-**From Claude Code** — type `/wrap-up` in the agent's session. The agent commits any uncommitted changes, then asks you the same rebase-or-PR question.
-
-From the Review Board, press `d` on a PR to dispatch a review agent. Once findings are ready, `/decompose-review` breaks the findings into actionable tasks on the board.
+Full key bindings and configuration options are in [docs/reference.md](docs/reference.md).
 
 ## Key Concepts
 
