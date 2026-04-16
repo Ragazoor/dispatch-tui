@@ -170,6 +170,20 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
         }
     }
 
+    // Load tips and show popup if appropriate
+    let tips = crate::tips::embedded_tips();
+    let (seen_up_to, show_mode) = database
+        .get_tips_state()
+        .unwrap_or((0, crate::models::TipsShowMode::Always));
+    if let Some(starting_index) = tips_starting_index(&tips, seen_up_to, show_mode) {
+        app.update(Message::ShowTips {
+            tips,
+            starting_index,
+            max_seen_id: seen_up_to,
+            show_mode,
+        });
+    }
+
     // 4. Set up terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -741,7 +755,10 @@ async fn execute_commands(
             }
             Command::CheckSplitPaneExists { pane_id } => rt.exec_check_split_pane(app, &pane_id),
             Command::RespawnSplitPane { pane_id } => rt.exec_respawn_split_pane(app, &pane_id),
-            Command::SaveTipsState { seen_up_to, show_mode } => {
+            Command::SaveTipsState {
+                seen_up_to,
+                show_mode,
+            } => {
                 if let Err(e) = rt.database.save_tips_state(seen_up_to, show_mode) {
                     tracing::warn!("Failed to save tips state: {e:#}");
                 }
@@ -771,4 +788,37 @@ fn parse_raw_presets(
             (name, set, mode)
         })
         .collect()
+}
+
+/// Determines which index to start the tips overlay at, or `None` if tips
+/// should not be shown. Pure function — enables unit testing of startup logic.
+pub fn tips_starting_index(
+    tips: &[crate::tips::Tip],
+    seen_up_to: u32,
+    show_mode: crate::models::TipsShowMode,
+) -> Option<usize> {
+    use crate::models::TipsShowMode;
+
+    if tips.is_empty() {
+        return None;
+    }
+
+    match show_mode {
+        TipsShowMode::Never => None,
+        TipsShowMode::NewOnly | TipsShowMode::Always => {
+            if let Some(idx) = tips.iter().position(|t| t.id > seen_up_to) {
+                Some(idx)
+            } else if show_mode == TipsShowMode::Always {
+                // No new tips but show anyway — pick a time-based pseudo-random index
+                let idx = (std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .subsec_nanos() as usize)
+                    % tips.len();
+                Some(idx)
+            } else {
+                None // NewOnly + no new tips
+            }
+        }
+    }
 }
