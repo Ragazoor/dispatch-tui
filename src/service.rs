@@ -2142,4 +2142,62 @@ mod tests {
         let names: Vec<&str> = params.updated_field_names();
         assert!(names.contains(&"title"));
     }
+
+    // -- has_any_field / updated_field_names consistency ----------------------
+
+    #[test]
+    fn update_task_params_has_any_field_consistent_with_updated_field_names() {
+        // When a field is set, both has_any_field() and updated_field_names() must agree.
+        // If a new field is added to UpdateTaskParams without updating both methods,
+        // this test will catch the divergence.
+        let with_field = UpdateTaskParams::for_task(1).title("x".to_string());
+        assert!(with_field.has_any_field(), "has_any_field should be true when title is set");
+        assert!(
+            !with_field.updated_field_names().is_empty(),
+            "updated_field_names should be non-empty when title is set"
+        );
+
+        let empty = UpdateTaskParams::for_task(1);
+        assert!(!empty.has_any_field(), "has_any_field should be false when no fields are set");
+        assert!(
+            empty.updated_field_names().is_empty(),
+            "updated_field_names should be empty when no fields are set"
+        );
+    }
+
+    #[test]
+    fn update_epic_params_has_any_field_consistent_with_updated_field_names() {
+        // Same consistency guard for UpdateEpicParams.
+        let with_field = UpdateEpicParams {
+            epic_id: 1,
+            title: Some("x".to_string()),
+            description: None,
+            status: None,
+            plan_path: None,
+            sort_order: None,
+            repo_path: None,
+            auto_dispatch: None,
+        };
+        assert!(with_field.has_any_field(), "has_any_field should be true when title is set");
+        assert!(
+            !with_field.updated_field_names().is_empty(),
+            "updated_field_names should be non-empty when title is set"
+        );
+
+        let empty = UpdateEpicParams {
+            epic_id: 1,
+            title: None,
+            description: None,
+            status: None,
+            plan_path: None,
+            sort_order: None,
+            repo_path: None,
+            auto_dispatch: None,
+        };
+        assert!(!empty.has_any_field(), "has_any_field should be false when no fields are set");
+        assert!(
+            empty.updated_field_names().is_empty(),
+            "updated_field_names should be empty when no fields are set"
+        );
+    }
 }
