@@ -118,14 +118,9 @@ impl App {
             KeyCode::Char('g') => {
                 if let Some(task) = self.selected_task() {
                     if let Some(window) = &task.tmux_window {
-                        if self.board.split.active {
-                            let id = task.id;
-                            self.update(Message::SwapSplitPane(id))
-                        } else {
-                            vec![Command::JumpToTmux {
-                                window: window.clone(),
-                            }]
-                        }
+                        vec![Command::JumpToTmux {
+                            window: window.clone(),
+                        }]
                     } else {
                         self.update(Message::StatusInfo("No active session".to_string()))
                     }
@@ -139,12 +134,11 @@ impl App {
 
             KeyCode::Char('G') => {
                 if let Some(task) = self.selected_task() {
-                    if let Some(window) = &task.tmux_window {
-                        vec![Command::JumpToTmux {
-                            window: window.clone(),
-                        }]
+                    if self.board.split.active {
+                        let id = task.id;
+                        self.update(Message::SwapSplitPane(id))
                     } else {
-                        self.update(Message::StatusInfo("No active session".to_string()))
+                        vec![]
                     }
                 } else if let Some(ColumnItem::Epic(epic)) = self.selected_column_item() {
                     // Prefer blocked Running subtasks, then Review, by sort_order

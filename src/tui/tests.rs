@@ -12842,32 +12842,31 @@ fn toggle_split_exit_restores_pinned_task_window() {
     );
 }
 
+// [G] tests — pin task in split pane without focus transfer
+
 #[test]
-fn g_on_already_pinned_task_emits_focus_command() {
+fn G_in_split_mode_on_already_pinned_task_does_nothing() {
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some("task-4".to_string());
     let mut app = App::new(vec![task], TEST_TIMEOUT);
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%42".to_string());
-    app.board.split.pinned_task_id = Some(TaskId(4)); // same task selected
-    app.selection_mut().set_column(1); // Running column
-    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
-    assert_eq!(cmds.len(), 1);
-    assert!(matches!(
-        &cmds[0],
-        Command::FocusSplitPane { pane_id } if pane_id == "%42"
-    ));
+    app.board.split.pinned_task_id = Some(TaskId(4)); // same task already pinned
+    app.selection_mut().set_column(1);
+    let cmds = app.handle_key(make_key(KeyCode::Char('G')));
+    assert!(cmds.is_empty(), "G on already-pinned task must not emit commands");
 }
 
 #[test]
-fn g_in_split_mode_emits_swap_command() {
+fn G_in_split_mode_emits_swap_command() {
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some("task-4".to_string());
     let mut app = App::new(vec![task], TEST_TIMEOUT);
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%42".to_string());
-    app.selection_mut().set_column(1); // Running column
-    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
+    // No pinned task — different from already-pinned case
+    app.selection_mut().set_column(1);
+    let cmds = app.handle_key(make_key(KeyCode::Char('G')));
     assert_eq!(cmds.len(), 1);
     assert!(matches!(
         &cmds[0],
@@ -12876,6 +12875,35 @@ fn g_in_split_mode_emits_swap_command() {
             new_window,
             ..
         } if *task_id == TaskId(4) && new_window == "task-4"
+    ));
+}
+
+#[test]
+fn G_outside_split_mode_is_noop() {
+    let mut task = make_task(4, TaskStatus::Running);
+    task.tmux_window = Some("task-4".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    // split NOT active
+    app.selection_mut().set_column(1);
+    let cmds = app.handle_key(make_key(KeyCode::Char('G')));
+    assert!(cmds.is_empty(), "G outside split mode must be a no-op");
+}
+
+// [g] tests — always jump to window
+
+#[test]
+fn g_in_split_mode_emits_jump_command() {
+    let mut task = make_task(4, TaskStatus::Running);
+    task.tmux_window = Some("task-4".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some("%42".to_string());
+    app.selection_mut().set_column(1);
+    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
+    assert_eq!(cmds.len(), 1);
+    assert!(matches!(
+        &cmds[0],
+        Command::JumpToTmux { window } if window == "task-4"
     ));
 }
 
