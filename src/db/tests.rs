@@ -233,7 +233,22 @@ fn fresh_db_has_latest_schema_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 34);
+    assert_eq!(version, 35);
+}
+
+#[test]
+fn self_referential_epic_is_rejected() {
+    let db = in_memory_db();
+    let epic = db.create_epic("E", "", "/repo", None).unwrap();
+    let conn = db.conn.lock().unwrap();
+    let result = conn.execute(
+        "UPDATE epics SET parent_epic_id = id WHERE id = ?1",
+        rusqlite::params![epic.id.0],
+    );
+    assert!(
+        result.is_err(),
+        "self-link should be rejected by CHECK constraint"
+    );
 }
 
 #[test]
@@ -305,7 +320,7 @@ fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 34);
+    assert_eq!(version, 35);
 }
 
 #[test]
@@ -394,7 +409,7 @@ fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 34);
+    assert_eq!(version, 35);
 }
 
 #[test]
@@ -505,7 +520,7 @@ fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 34);
+    assert_eq!(version, 35);
 }
 
 #[test]
@@ -934,6 +949,43 @@ fn delete_epic_cascades_subtasks() {
     assert!(db.get_task(sub_id).unwrap().is_none());
     // Sub 1 (not linked) should still exist
     assert_eq!(db.list_all().unwrap().len(), 1);
+}
+
+#[test]
+fn delete_epic_with_sub_epics_succeeds() {
+    let db = in_memory_db();
+    let parent = db.create_epic("Parent", "", "/repo", None).unwrap();
+    let child = db
+        .create_epic("Child", "", "/repo", Some(parent.id))
+        .unwrap();
+    let task_id = db
+        .create_task("T", "", "/repo", None, TaskStatus::Backlog, "main")
+        .unwrap();
+    db.set_task_epic_id(task_id, Some(child.id)).unwrap();
+
+    db.delete_epic(parent.id)
+        .expect("delete_epic with sub-epics should succeed");
+
+    assert!(db.get_epic(parent.id).unwrap().is_none());
+    assert!(db.get_epic(child.id).unwrap().is_none());
+    assert!(db.get_task(task_id).unwrap().is_none());
+}
+
+#[test]
+fn delete_epic_multi_level_sub_epics() {
+    let db = in_memory_db();
+    let root = db.create_epic("Root", "", "/repo", None).unwrap();
+    let child = db.create_epic("Child", "", "/repo", Some(root.id)).unwrap();
+    let grandchild = db
+        .create_epic("Grandchild", "", "/repo", Some(child.id))
+        .unwrap();
+
+    db.delete_epic(root.id).expect("deep delete should succeed");
+
+    assert!(db.get_epic(root.id).unwrap().is_none());
+    assert!(db.get_epic(child.id).unwrap().is_none());
+    assert!(db.get_epic(grandchild.id).unwrap().is_none());
+    assert_eq!(db.list_epics().unwrap().len(), 0);
 }
 
 #[test]
@@ -1624,7 +1676,7 @@ fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 34);
+    assert_eq!(version, 35);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -1841,7 +1893,7 @@ fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 34);
+    assert_eq!(version, 35);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -3862,7 +3914,7 @@ fn migration_31_re_expands_tilde_paths() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 34);
+    assert_eq!(version, 35);
 }
 
 #[test]
@@ -3938,7 +3990,7 @@ fn migrate_v32_adds_base_branch_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 34);
+    assert_eq!(version, 35);
 }
 
 #[test]
@@ -4021,16 +4073,6 @@ fn list_all_tasks_with_epic_id_returns_only_tasks_with_epic() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn schema_version_is_34() {
-    let db = in_memory_db();
-    let conn = db.conn.lock().unwrap();
-    let version: i64 = conn
-        .pragma_query_value(None, "user_version", |row| row.get(0))
-        .unwrap();
-    assert_eq!(version, 34);
-}
-
-#[test]
 fn sub_epic_has_parent_id() {
     let db = in_memory_db();
     let parent = db.create_epic("Parent", "desc", "/repo", None).unwrap();
@@ -4111,4 +4153,30 @@ fn recalculate_parent_status_from_sub_epic() {
 
     let updated_parent = db.get_epic(parent.id).unwrap().unwrap();
     assert_eq!(updated_parent.status, TaskStatus::Running);
+}
+
+#[test]
+fn recalculate_epic_status_terminates_on_cycle() {
+    // Manually create a cycle at the DB level by bypassing FK checks,
+    // then verify recalculate_epic_status returns Ok(()) rather than hanging.
+    let db = in_memory_db();
+    {
+        let conn = db.conn.lock().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+    }
+    let a = db.create_epic("A", "", "/repo", None).unwrap();
+    let b = db.create_epic("B", "", "/repo", Some(a.id)).unwrap();
+    // Point a's parent back to b → a→b→a cycle
+    {
+        let conn = db.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE epics SET parent_epic_id = ?1 WHERE id = ?2",
+            rusqlite::params![b.id.0, a.id.0],
+        )
+        .unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+    }
+    // Must return without stack overflow
+    let result = db.recalculate_epic_status(a.id);
+    assert!(result.is_ok());
 }

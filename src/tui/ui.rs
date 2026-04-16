@@ -13,8 +13,8 @@ use super::{
 };
 use crate::dispatch;
 use crate::models::{
-    format_age, CiStatus, Epic, EpicSubstatus, ReviewDecision, ReviewPr, Staleness, SubStatus,
-    Task, TaskId, TaskStatus, TaskUsage,
+    format_age, CiStatus, Epic, EpicId, EpicSubstatus, ReviewDecision, ReviewPr, Staleness,
+    SubStatus, Task, TaskId, TaskStatus, TaskUsage,
 };
 
 // ── Tokyo Night palette ─────────────────────────────────────────────
@@ -658,21 +658,32 @@ fn render_columns(
         epic_id, parent, ..
     } = app.view_mode()
     {
-        let epic = app.epics().iter().find(|e| e.id == *epic_id);
-        let current_title = epic.map(|e| truncate(&e.title, 30)).unwrap_or_default();
-        let title = if let ViewMode::Epic {
-            epic_id: parent_id, ..
-        } = parent.as_ref()
-        {
-            let parent_title = app
-                .epics()
+        let title = {
+            // Walk the parent chain to collect all ancestor IDs (innermost first),
+            // then reverse for display order (root → … → current).
+            let mut ids: Vec<EpicId> = vec![*epic_id];
+            let mut cursor: &ViewMode = parent.as_ref();
+            while let ViewMode::Epic {
+                epic_id: pid,
+                parent: grandparent,
+                ..
+            } = cursor
+            {
+                ids.push(*pid);
+                cursor = grandparent.as_ref();
+            }
+            ids.reverse();
+            let segments: Vec<String> = ids
                 .iter()
-                .find(|e| e.id == *parent_id)
-                .map(|e| truncate(&e.title, 30))
-                .unwrap_or_default();
-            format!(" {} > {} ", parent_title, current_title)
-        } else {
-            format!(" {} ", current_title)
+                .map(|id| {
+                    app.epics()
+                        .iter()
+                        .find(|e| e.id == *id)
+                        .map(|e| truncate(&e.title, 30))
+                        .unwrap_or_default()
+                })
+                .collect();
+            format!(" {} ", segments.join(" > "))
         };
         let block = Block::default()
             .title(title)

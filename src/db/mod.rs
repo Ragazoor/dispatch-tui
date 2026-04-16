@@ -125,6 +125,14 @@ impl<'a> TaskPatch<'a> {
 /// `None` by default (= don't change). For nullable columns (`plan_path`) we use
 /// a double-Option: `None` = don't change, `Some(None)` = set NULL,
 /// `Some(Some(x))` = set value.
+///
+/// # Why `parent_epic_id` is absent
+///
+/// Reparenting an epic is not supported. `parent_epic_id` is set once at
+/// creation time via [`EpicCrud::create_epic`] and never changed afterward.
+/// This keeps the parent chain immutable and prevents accidental cycle
+/// introduction. The database enforces `CHECK (parent_epic_id != id)` (added
+/// in migration v35) as a final guard against self-loops.
 #[derive(Debug, Default)]
 pub struct EpicPatch<'a> {
     pub title: Option<&'a str>,
@@ -241,6 +249,11 @@ pub trait TaskCrud: Send + Sync {
 
 /// Epic CRUD, list, patch, recalculate status.
 pub trait EpicCrud: Send + Sync {
+    /// Create a new epic. `parent_epic_id` is set once here and never changed
+    /// via [`EpicPatch`] (reparenting is unsupported). The DB enforces
+    /// `CHECK (parent_epic_id != id)` (migration v35) to prevent self-loops,
+    /// and `recalculate_epic_status` uses a visited set to guard against any
+    /// cycle that might exist in older data.
     fn create_epic(
         &self,
         title: &str,

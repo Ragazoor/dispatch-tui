@@ -38,6 +38,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (32, migrate_v32_add_base_branch),
     (33, migrate_v33_add_auto_dispatch),
     (34, migrate_v34_add_parent_epic_id),
+    (35, migrate_v35_add_self_ref_check),
 ];
 
 fn migrate_v1_add_plan_column(conn: &Connection) -> Result<()> {
@@ -735,4 +736,46 @@ pub(super) fn migrate_v33_add_auto_dispatch(conn: &Connection) -> Result<()> {
 fn migrate_v34_add_parent_epic_id(conn: &Connection) -> Result<()> {
     conn.execute_batch("ALTER TABLE epics ADD COLUMN parent_epic_id INTEGER REFERENCES epics(id);")
         .context("Failed to add parent_epic_id column to epics")
+}
+
+fn migrate_v35_add_self_ref_check(conn: &Connection) -> Result<()> {
+    // SQLite does not support ADD CONSTRAINT, so we rebuild the epics table to
+    // add CHECK (parent_epic_id != id), which prevents a row from being its
+    // own parent. This is defense-in-depth alongside the visited-set guard in
+    // recalculate_epic_status_inner.
+    //
+    // Column order matches the post-v34 layout produced by ALTER TABLE additions:
+    //   id, title, description, repo_path, status, plan_path, sort_order,
+    //   created_at, updated_at, auto_dispatch, parent_epic_id
+    conn.execute_batch(
+        "PRAGMA foreign_keys = OFF;
+         BEGIN;
+         CREATE TABLE epics_new (
+             id             INTEGER PRIMARY KEY,
+             title          TEXT NOT NULL,
+             description    TEXT NOT NULL,
+             repo_path      TEXT NOT NULL,
+             status         TEXT NOT NULL DEFAULT 'backlog',
+             plan_path      TEXT,
+             sort_order     INTEGER,
+             created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at     TEXT NOT NULL DEFAULT (datetime('now')),
+             auto_dispatch  BOOLEAN NOT NULL DEFAULT 1,
+             parent_epic_id INTEGER REFERENCES epics_new(id),
+             CHECK (parent_epic_id != id)
+         );
+         INSERT INTO epics_new (
+             id, title, description, repo_path, status, plan_path, sort_order,
+             created_at, updated_at, auto_dispatch, parent_epic_id
+         )
+         SELECT
+             id, title, description, repo_path, status, plan_path, sort_order,
+             created_at, updated_at, auto_dispatch, parent_epic_id
+         FROM epics;
+         DROP TABLE epics;
+         ALTER TABLE epics_new RENAME TO epics;
+         COMMIT;
+         PRAGMA foreign_keys = ON;",
+    )
+    .context("Failed to rebuild epics table for migration v35 (self-ref CHECK)")
 }

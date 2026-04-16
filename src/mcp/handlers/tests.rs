@@ -1184,7 +1184,13 @@ fn tool_schemas_match_arg_structs() {
         ),
         (
             "create_epic",
-            BTreeSet::from(["title", "repo_path", "description", "sort_order"]),
+            BTreeSet::from([
+                "title",
+                "repo_path",
+                "description",
+                "sort_order",
+                "parent_epic_id",
+            ]),
             BTreeSet::from(["title", "repo_path"]),
             json!({"title": "Epic", "repo_path": "/repo", "sort_order": 5}),
         ),
@@ -4543,5 +4549,21 @@ async fn mcp_create_sub_epic() {
         sub.parent_epic_id,
         Some(parent.id),
         "sub epic should have parent_epic_id set"
+    );
+}
+
+#[tokio::test]
+async fn create_epic_tool_schema_includes_parent_epic_id() {
+    let state = test_state();
+    let resp = call(&state, "tools/list", None).await;
+    let tools = resp.result.as_ref().unwrap()["tools"].as_array().unwrap();
+    let create_epic = tools
+        .iter()
+        .find(|t| t["name"] == "create_epic")
+        .expect("create_epic not in tool list");
+    let props = &create_epic["inputSchema"]["properties"];
+    assert!(
+        props.get("parent_epic_id").is_some(),
+        "create_epic schema is missing parent_epic_id property"
     );
 }

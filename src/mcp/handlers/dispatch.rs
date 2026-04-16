@@ -232,7 +232,8 @@ mcp_tools! {
                 "title": { "type": "string", "description": "Epic title" },
                 "repo_path": { "type": "string", "description": "Repository path" },
                 "description": { "type": "string", "description": "Epic description" },
-                "sort_order": { "type": "integer", "description": "Display order within column (lower values appear first)" }
+                "sort_order": { "type": "integer", "description": "Display order within column (lower values appear first)" },
+                "parent_epic_id": { "type": "integer", "description": "Optional parent epic ID. When set, this epic becomes a sub-epic of the specified parent. Cannot be set to the epic's own ID (self-referential cycles are rejected by the database)." }
             },
             "required": ["title", "repo_path"]
         };

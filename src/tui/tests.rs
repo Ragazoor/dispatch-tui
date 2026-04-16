@@ -16126,3 +16126,40 @@ fn create_epic_in_epic_view_inherits_parent() {
         "InsertEpic draft must carry parent_epic_id"
     );
 }
+
+#[test]
+fn breadcrumb_shows_three_levels() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let grandparent = make_epic_with_title(1, "Grandparent");
+    let parent = make_epic_with_title(2, "ParentEpic");
+    let child = make_epic_with_title(3, "ChildEpic");
+    app.board.epics = vec![grandparent, parent, child];
+
+    app.board.view_mode = ViewMode::Epic {
+        epic_id: EpicId(3),
+        selection: BoardSelection::new(),
+        parent: Box::new(ViewMode::Epic {
+            epic_id: EpicId(2),
+            selection: BoardSelection::new(),
+            parent: Box::new(ViewMode::Epic {
+                epic_id: EpicId(1),
+                selection: BoardSelection::new(),
+                parent: Box::new(ViewMode::Board(BoardSelection::new())),
+            }),
+        }),
+    };
+
+    let buf = render_to_buffer(&mut app, 120, 40);
+    assert!(
+        buffer_contains(&buf, "Grandparent"),
+        "breadcrumb should show grandparent title"
+    );
+    assert!(
+        buffer_contains(&buf, "ParentEpic"),
+        "breadcrumb should show parent title"
+    );
+    assert!(
+        buffer_contains(&buf, "ChildEpic"),
+        "breadcrumb should show child title"
+    );
+}

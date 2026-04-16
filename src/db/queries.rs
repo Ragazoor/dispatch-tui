@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use rusqlite::{params, OptionalExtension};
@@ -603,15 +605,23 @@ impl super::EpicCrud for Database {
 
     fn delete_epic(&self, id: EpicId) -> Result<()> {
         let conn = self.conn()?;
-        conn.execute("DELETE FROM tasks WHERE epic_id = ?1", params![id.0])
-            .context("Failed to delete epic subtasks")?;
-        let rows = conn
-            .execute("DELETE FROM epics WHERE id = ?1", params![id.0])
-            .context("Failed to delete epic")?;
-        if rows == 0 {
-            anyhow::bail!("Epic {} not found", id);
+        conn.execute_batch("BEGIN IMMEDIATE")
+            .context("Failed to begin transaction")?;
+        let result = delete_epic_recursive(&conn, id);
+        match result {
+            Ok(rows) => {
+                conn.execute_batch("COMMIT")
+                    .context("Failed to commit delete_epic transaction")?;
+                if rows == 0 {
+                    anyhow::bail!("Epic {} not found", id);
+                }
+                Ok(())
+            }
+            Err(e) => {
+                let _ = conn.execute_batch("ROLLBACK");
+                Err(e)
+            }
         }
-        Ok(())
     }
 
     fn set_task_epic_id(&self, task_id: TaskId, epic_id: Option<EpicId>) -> Result<()> {
@@ -659,53 +669,100 @@ impl super::EpicCrud for Database {
     }
 
     fn recalculate_epic_status(&self, epic_id: EpicId) -> Result<()> {
-        let epic = match self.get_epic(epic_id)? {
-            Some(e) => e,
-            None => return Ok(()),
-        };
-
-        // Collect statuses from active tasks
-        let task_statuses: Vec<TaskStatus> = self
-            .list_tasks_for_epic(epic_id)?
-            .into_iter()
-            .filter(|t| t.status != TaskStatus::Archived)
-            .map(|t| t.status)
-            .collect();
-
-        // Collect statuses from active sub-epics
-        let sub_epic_statuses: Vec<TaskStatus> = self
-            .list_sub_epics(epic_id)?
-            .into_iter()
-            .filter(|e| e.status != TaskStatus::Archived)
-            .map(|e| e.status)
-            .collect();
-
-        let all_statuses: Vec<TaskStatus> =
-            task_statuses.into_iter().chain(sub_epic_statuses).collect();
-
-        let derived = if all_statuses.is_empty() {
-            TaskStatus::Backlog
-        } else if all_statuses.iter().all(|s| *s == TaskStatus::Done) {
-            TaskStatus::Done
-        } else if all_statuses.contains(&TaskStatus::Review) {
-            TaskStatus::Review
-        } else if all_statuses.contains(&TaskStatus::Running) {
-            TaskStatus::Running
-        } else {
-            TaskStatus::Backlog
-        };
-
-        if derived != epic.status {
-            self.patch_epic(epic_id, &EpicPatch::new().status(derived))?;
-        }
-
-        // Propagate upward to the parent epic if one exists
-        if let Some(parent_id) = epic.parent_epic_id {
-            self.recalculate_epic_status(parent_id)?;
-        }
-
-        Ok(())
+        let mut visited = HashSet::new();
+        recalculate_epic_status_inner(self, epic_id, &mut visited)
     }
+}
+
+// ---------------------------------------------------------------------------
+// recalculate_epic_status helper
+// ---------------------------------------------------------------------------
+
+/// Recursively deletes sub-epics and their tasks, then deletes the epic row.
+/// Returns the number of rows deleted for the root epic (0 = not found).
+/// Caller must hold the connection lock and manage the transaction.
+fn delete_epic_recursive(conn: &rusqlite::Connection, id: EpicId) -> Result<usize> {
+    // Find direct children — collect fully before dropping the statement
+    let mut stmt = conn
+        .prepare("SELECT id FROM epics WHERE parent_epic_id = ?1")
+        .context("Failed to prepare child epic query")?;
+    let child_ids: Vec<EpicId> = stmt
+        .query_map(params![id.0], |row| row.get::<_, i64>(0))
+        .context("Failed to query child epics")?
+        .map(|r| r.map(EpicId))
+        .collect::<Result<Vec<_>, _>>()
+        .context("Failed to collect child epic ids")?;
+    drop(stmt);
+    for child_id in child_ids {
+        delete_epic_recursive(conn, child_id)?;
+    }
+    conn.execute("DELETE FROM tasks WHERE epic_id = ?1", params![id.0])
+        .context("Failed to delete epic subtasks")?;
+    conn.execute("DELETE FROM epics WHERE id = ?1", params![id.0])
+        .context("Failed to delete epic")
+}
+
+/// Inner recursive helper for `EpicCrud::recalculate_epic_status`.
+/// Threads a visited set to detect and break parent cycles, preventing
+/// infinite recursion when `parent_epic_id` forms a cycle in the DB.
+fn recalculate_epic_status_inner(
+    db: &Database,
+    epic_id: EpicId,
+    visited: &mut HashSet<EpicId>,
+) -> Result<()> {
+    use super::EpicCrud;
+
+    if !visited.insert(epic_id) {
+        // Already processed this epic in the current chain — cycle detected.
+        return Ok(());
+    }
+
+    let epic = match db.get_epic(epic_id)? {
+        Some(e) => e,
+        None => return Ok(()),
+    };
+
+    // Collect statuses from active tasks
+    let task_statuses: Vec<TaskStatus> = db
+        .list_tasks_for_epic(epic_id)?
+        .into_iter()
+        .filter(|t| t.status != TaskStatus::Archived)
+        .map(|t| t.status)
+        .collect();
+
+    // Collect statuses from active sub-epics
+    let sub_epic_statuses: Vec<TaskStatus> = db
+        .list_sub_epics(epic_id)?
+        .into_iter()
+        .filter(|e| e.status != TaskStatus::Archived)
+        .map(|e| e.status)
+        .collect();
+
+    let all_statuses: Vec<TaskStatus> =
+        task_statuses.into_iter().chain(sub_epic_statuses).collect();
+
+    let derived = if all_statuses.is_empty() {
+        TaskStatus::Backlog
+    } else if all_statuses.iter().all(|s| *s == TaskStatus::Done) {
+        TaskStatus::Done
+    } else if all_statuses.contains(&TaskStatus::Review) {
+        TaskStatus::Review
+    } else if all_statuses.contains(&TaskStatus::Running) {
+        TaskStatus::Running
+    } else {
+        TaskStatus::Backlog
+    };
+
+    if derived != epic.status {
+        db.patch_epic(epic_id, &EpicPatch::new().status(derived))?;
+    }
+
+    // Propagate upward to the parent epic if one exists
+    if let Some(parent_id) = epic.parent_epic_id {
+        recalculate_epic_status_inner(db, parent_id, visited)?;
+    }
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
