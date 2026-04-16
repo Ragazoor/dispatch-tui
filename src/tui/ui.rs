@@ -1690,7 +1690,11 @@ fn render_tips_overlay(frame: &mut Frame, app: &App, area: Rect) {
 
     let block = Block::default()
         .title(title)
-        .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .title_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Color::Cyan));
@@ -1707,7 +1711,9 @@ fn render_tips_overlay(frame: &mut Frame, app: &App, area: Rect) {
     let mut lines: Vec<Line> = vec![
         Line::from(Span::styled(
             tip.title.clone(),
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
     ];
@@ -1725,7 +1731,9 @@ fn render_tips_overlay(frame: &mut Frame, app: &App, area: Rect) {
             Span::raw(" ".repeat(inner.width.saturating_sub(5) as usize)),
             Span::styled(
                 "NEW",
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
             ),
         ]));
     }

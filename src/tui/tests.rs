@@ -16542,7 +16542,11 @@ fn tips_overlay_captures_input_not_board() {
 // --- Tips startup logic tests ---
 
 fn make_tip_with_id(id: u32) -> crate::tips::Tip {
-    crate::tips::Tip { id, title: format!("Tip {id}"), body: format!("Body {id}") }
+    crate::tips::Tip {
+        id,
+        title: format!("Tip {id}"),
+        body: format!("Body {id}"),
+    }
 }
 
 fn determine_tips_start(
@@ -16567,14 +16571,22 @@ fn startup_new_only_no_new_tips_returns_none() {
 
 #[test]
 fn startup_new_only_with_new_tips_returns_first_new() {
-    let tips = vec![make_tip_with_id(1), make_tip_with_id(2), make_tip_with_id(3)];
+    let tips = vec![
+        make_tip_with_id(1),
+        make_tip_with_id(2),
+        make_tip_with_id(3),
+    ];
     let idx = determine_tips_start(&tips, 1, crate::models::TipsShowMode::NewOnly);
     assert_eq!(idx, Some(1)); // tip id=2 is at index 1
 }
 
 #[test]
 fn startup_always_with_new_tips_returns_first_new() {
-    let tips = vec![make_tip_with_id(1), make_tip_with_id(2), make_tip_with_id(3)];
+    let tips = vec![
+        make_tip_with_id(1),
+        make_tip_with_id(2),
+        make_tip_with_id(3),
+    ];
     let idx = determine_tips_start(&tips, 1, crate::models::TipsShowMode::Always);
     assert_eq!(idx, Some(1));
 }
