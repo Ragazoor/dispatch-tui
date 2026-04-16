@@ -810,7 +810,7 @@ impl super::PrStore for Database {
 
     fn update_agent_status(&self, repo: &str, number: i64, status: Option<&str>) -> Result<String> {
         let conn = self.conn()?;
-        for table in &["review_prs", "bot_prs"] {
+        for table in &["review_prs", "my_prs", "bot_prs"] {
             let affected = conn.execute(
                 &format!("UPDATE {table} SET agent_status = ?1 WHERE repo = ?2 AND number = ?3 AND tmux_window IS NOT NULL"),
                 params![status, repo, number],
@@ -1063,6 +1063,10 @@ fn load_pr_by_key(
     repo: &str,
     number: i64,
 ) -> Result<Option<ReviewPr>> {
+    assert!(
+        matches!(table, "review_prs" | "my_prs" | "bot_prs"),
+        "invalid PR table: {table}"
+    );
     let mut stmt = conn.prepare(&format!(
         "SELECT repo, number, title, author, url, is_draft,
                 created_at, updated_at, additions, deletions,
