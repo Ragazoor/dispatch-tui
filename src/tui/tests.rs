@@ -12973,7 +12973,7 @@ fn g_on_non_pinned_task_in_split_mode_still_jumps_to_window() {
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%42".to_string());
     app.board.split.pinned_task_id = Some(TaskId(3)); // task3 is pinned, not task4
-    // Navigate to Running column and select task4 (row 1, second in column)
+                                                      // Navigate to Running column and select task4 (row 1, second in column)
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 1);
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));

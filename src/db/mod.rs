@@ -290,7 +290,7 @@ pub trait PrStore: Send + Sync {
         number: i64,
         tmux_window: &str,
         worktree: &str,
-    ) -> Result<bool>;  // true = row updated
+    ) -> Result<bool>; // true = row updated
     fn update_agent_status(&self, repo: &str, number: i64, status: Option<&str>) -> Result<String>;
     /// Look up a single PR by (repo, number) — checks review_prs then my_prs.
     fn get_review_pr(&self, repo: &str, number: i64) -> Result<Option<crate::models::ReviewPr>>;
@@ -307,7 +307,7 @@ pub trait AlertStore: Send + Sync {
         kind: crate::models::AlertKind,
         tmux_window: &str,
         worktree: &str,
-    ) -> Result<bool>;  // true = row updated
+    ) -> Result<bool>; // true = row updated
     /// Look up a single security alert by (repo, number, kind).
     fn get_security_alert(
         &self,

@@ -1006,15 +1006,14 @@ fn parse_review_pr_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReviewPr> {
         ReviewDecision::from_db_str(&decision_str).unwrap_or(ReviewDecision::ReviewRequired);
     let labels: Vec<String> = serde_json::from_str(&labels_json).unwrap_or_default();
     let ci_status = CiStatus::from_db_str(&ci_status_str);
-    let reviewers: Vec<Reviewer> =
-        serde_json::from_str::<Vec<serde_json::Value>>(&reviewers_json)
-            .unwrap_or_default()
-            .iter()
-            .map(|v| Reviewer {
-                login: v["login"].as_str().unwrap_or("").to_string(),
-                decision: v["decision"].as_str().and_then(ReviewDecision::from_db_str),
-            })
-            .collect();
+    let reviewers: Vec<Reviewer> = serde_json::from_str::<Vec<serde_json::Value>>(&reviewers_json)
+        .unwrap_or_default()
+        .iter()
+        .map(|v| Reviewer {
+            login: v["login"].as_str().unwrap_or("").to_string(),
+            decision: v["decision"].as_str().and_then(ReviewDecision::from_db_str),
+        })
+        .collect();
 
     Ok(ReviewPr {
         number,

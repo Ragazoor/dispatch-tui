@@ -5089,8 +5089,14 @@ async fn list_review_prs_mode_all() {
     )
     .await;
     let text = extract_response_text(&resp);
-    assert!(text.contains("10"), "reviewer PR #10 should appear in all mode");
-    assert!(text.contains("20"), "author PR #20 should appear in all mode");
+    assert!(
+        text.contains("10"),
+        "reviewer PR #10 should appear in all mode"
+    );
+    assert!(
+        text.contains("20"),
+        "author PR #20 should appear in all mode"
+    );
 }
 
 #[tokio::test]
@@ -5147,7 +5153,10 @@ async fn list_security_alerts_filters_by_severity() {
     .await;
     let text = extract_response_text(&resp);
     assert!(text.contains("High Alert"), "High alert should appear");
-    assert!(!text.contains("Critical Alert"), "Critical alert should not appear");
+    assert!(
+        !text.contains("Critical Alert"),
+        "Critical alert should not appear"
+    );
 }
 
 #[tokio::test]
@@ -5165,7 +5174,10 @@ async fn list_security_alerts_filters_by_repo() {
     .await;
     let text = extract_response_text(&resp);
     assert!(text.contains("acme/api"), "acme/api alert should appear");
-    assert!(!text.contains("acme/web"), "acme/web alert should not appear");
+    assert!(
+        !text.contains("acme/web"),
+        "acme/web alert should not appear"
+    );
 }
 
 #[tokio::test]
@@ -5177,13 +5189,13 @@ async fn dispatch_review_agent_success() {
 
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::ok(),  // tmux list-windows (has_window → false, empty stdout)
-        MockProcessRunner::ok(),  // git worktree prune
-        MockProcessRunner::ok(),  // git fetch origin feature/branch
+        MockProcessRunner::ok(), // tmux list-windows (has_window → false, empty stdout)
+        MockProcessRunner::ok(), // git worktree prune
+        MockProcessRunner::ok(), // git fetch origin feature/branch
         // git worktree add skipped (dir pre-exists)
-        MockProcessRunner::ok(),  // tmux new-window
-        MockProcessRunner::ok(),  // tmux send-keys -l (claude cmd)
-        MockProcessRunner::ok(),  // tmux send-keys Enter
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux send-keys -l (claude cmd)
+        MockProcessRunner::ok(), // tmux send-keys Enter
     ]));
     let state = Arc::new(McpState {
         db: db.clone(),
@@ -5203,12 +5215,22 @@ async fn dispatch_review_agent_success() {
     )
     .await;
 
-    assert!(resp.error.is_none(), "expected success, got error: {:?}", resp.error);
+    assert!(
+        resp.error.is_none(),
+        "expected success, got error: {:?}",
+        resp.error
+    );
     let text = extract_response_text(&resp);
-    assert!(text.contains("Review agent dispatched"), "expected dispatch confirmation: {text}");
+    assert!(
+        text.contains("Review agent dispatched"),
+        "expected dispatch confirmation: {text}"
+    );
 
     let pr = db.get_review_pr("acme/app", 42).unwrap().unwrap();
-    assert_eq!(pr.agent_status, Some(crate::models::ReviewAgentStatus::Reviewing));
+    assert_eq!(
+        pr.agent_status,
+        Some(crate::models::ReviewAgentStatus::Reviewing)
+    );
     assert!(pr.tmux_window.is_some());
     assert!(pr.worktree.is_some());
 }
@@ -5224,14 +5246,14 @@ async fn dispatch_fix_agent_success() {
 
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::ok(),                                           // tmux list-windows (has_window)
-        MockProcessRunner::ok(),                                           // git worktree prune
+        MockProcessRunner::ok(), // tmux list-windows (has_window)
+        MockProcessRunner::ok(), // git worktree prune
         MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // git symbolic-ref (detect default branch)
-        MockProcessRunner::ok(),                                           // git fetch origin main
+        MockProcessRunner::ok(),                                          // git fetch origin main
         // git worktree add skipped (dir pre-exists)
-        MockProcessRunner::ok(),                                           // tmux new-window
-        MockProcessRunner::ok(),                                           // tmux send-keys -l (claude cmd)
-        MockProcessRunner::ok(),                                           // tmux send-keys Enter
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux send-keys -l (claude cmd)
+        MockProcessRunner::ok(), // tmux send-keys Enter
     ]));
     let state = Arc::new(McpState {
         db: db.clone(),
@@ -5272,15 +5294,25 @@ async fn dispatch_fix_agent_success() {
     )
     .await;
 
-    assert!(resp.error.is_none(), "expected success, got error: {:?}", resp.error);
+    assert!(
+        resp.error.is_none(),
+        "expected success, got error: {:?}",
+        resp.error
+    );
     let text = extract_response_text(&resp);
-    assert!(text.contains("Fix agent dispatched"), "expected dispatch confirmation: {text}");
+    assert!(
+        text.contains("Fix agent dispatched"),
+        "expected dispatch confirmation: {text}"
+    );
 
     let alert = db
         .get_security_alert("acme/api", 7, AlertKind::Dependabot)
         .unwrap()
         .unwrap();
-    assert_eq!(alert.agent_status, Some(crate::models::ReviewAgentStatus::Reviewing));
+    assert_eq!(
+        alert.agent_status,
+        Some(crate::models::ReviewAgentStatus::Reviewing)
+    );
     assert!(alert.tmux_window.is_some());
     assert!(alert.worktree.is_some());
 }

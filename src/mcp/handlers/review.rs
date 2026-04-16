@@ -275,7 +275,10 @@ pub(super) fn handle_get_security_alert(
         }
     };
 
-    match state.db.get_security_alert(&parsed.repo, parsed.number, kind) {
+    match state
+        .db
+        .get_security_alert(&parsed.repo, parsed.number, kind)
+    {
         Ok(Some(alert)) => JsonRpcResponse::ok(
             id,
             json!({"content": [{"type": "text", "text": format_security_alert(&alert)}]}),
@@ -373,7 +376,9 @@ pub(super) async fn handle_dispatch_review_agent(
                     }
                     Ok(false) => {} // PR not in this table
                     Err(e) => {
-                        tracing::warn!("dispatch_review_agent: failed to persist agent ({kind:?}): {e}")
+                        tracing::warn!(
+                            "dispatch_review_agent: failed to persist agent ({kind:?}): {e}"
+                        )
                     }
                 }
             }
@@ -418,7 +423,10 @@ pub(super) async fn handle_dispatch_fix_agent(
         }
     };
 
-    let alert = match state.db.get_security_alert(&parsed.repo, parsed.number, kind) {
+    let alert = match state
+        .db
+        .get_security_alert(&parsed.repo, parsed.number, kind)
+    {
         Ok(Some(a)) => a,
         Ok(None) => {
             return JsonRpcResponse::err(
