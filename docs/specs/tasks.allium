@@ -548,6 +548,49 @@ rule SplitPaneFocusBorder {
         -- only when split is active — otherwise they are ignored.
 }
 
+-- == Jump to Agent Window ([g] key) ==
+--
+-- Pressing [g] on a task always jumps tmux focus to that task's standalone
+-- tmux window, regardless of whether split mode is active.
+
+rule JumpToAgentWindow {
+    when: UserAction([g], task)
+    requires: task.tmux_window != null
+
+    ensures: tmux_focus = task.tmux_window
+
+    @guidance
+        -- [g] calls tmux select-window unconditionally — no split-mode special
+        -- case. The user is taken out of the dispatch window into the agent's
+        -- own window. Contrast with [G], which peeks at the window in-place.
+}
+
+-- == Pin Task in Split Pane ([G] key) ==
+--
+-- Pressing [G] on a task in split mode pins that task's tmux window into the
+-- right pane without transferring tmux focus. The user stays on the TUI board.
+-- Outside split mode [G] is a no-op.
+
+rule PinTaskInSplitPane {
+    when: UserAction([G], task)
+    requires: split_pane.active = true
+    requires: task.tmux_window != null
+
+    ensures: split_pane.pinned_task = task
+    ensures: split_pane.pane = task.tmux_window
+    ensures: split_pane.focused = unchanged  -- focus does NOT transfer
+
+    @guidance
+        -- When the selected task is already pinned, the action is a no-op.
+        -- When a different task is pinned, the pane content is swapped in-place
+        -- via tmux swap-pane. The old content is returned to a standalone window.
+        --
+        -- No tmux select-pane is called — the TUI pane retains focus throughout.
+        -- [g] (lowercase) is the complementary "take over the window" action.
+        --
+        -- Outside split mode [G] emits no commands.
+}
+
 -- == Finish (Merge) ==
 
 rule FinishTaskSuccess {
