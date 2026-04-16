@@ -16261,9 +16261,21 @@ fn breadcrumb_shows_three_levels() {
 
 fn make_tips() -> Vec<crate::tips::Tip> {
     vec![
-        crate::tips::Tip { id: 1, title: "Tip One".into(), body: "Body one".into() },
-        crate::tips::Tip { id: 2, title: "Tip Two".into(), body: "Body two".into() },
-        crate::tips::Tip { id: 3, title: "Tip Three".into(), body: "Body three".into() },
+        crate::tips::Tip {
+            id: 1,
+            title: "Tip One".into(),
+            body: "Body one".into(),
+        },
+        crate::tips::Tip {
+            id: 2,
+            title: "Tip Two".into(),
+            body: "Body two".into(),
+        },
+        crate::tips::Tip {
+            id: 3,
+            title: "Tip Three".into(),
+            body: "Body three".into(),
+        },
     ]
 }
 
@@ -16355,12 +16367,50 @@ fn close_tips_clears_overlay_and_returns_save_command() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.update(Message::ShowTips {
         tips: make_tips(),
-        starting_index: 1,
+        starting_index: 1, // tip id=2
         max_seen_id: 0,
         show_mode: crate::models::TipsShowMode::Always,
     });
     let cmds = app.update(Message::CloseTips);
     assert!(app.tips.is_none());
-    let has_save = cmds.iter().any(|c| matches!(c, Command::SaveTipsState { .. }));
-    assert!(has_save, "CloseTips should return SaveTipsState command");
+    let save_cmd = cmds.iter().find_map(|c| {
+        if let Command::SaveTipsState {
+            seen_up_to,
+            show_mode,
+        } = c
+        {
+            Some((*seen_up_to, *show_mode))
+        } else {
+            None
+        }
+    });
+    assert!(
+        save_cmd.is_some(),
+        "CloseTips should return SaveTipsState command"
+    );
+    let (seen_up_to, _) = save_cmd.unwrap();
+    assert_eq!(
+        seen_up_to, 2,
+        "seen_up_to should be the id of the tip being viewed at close"
+    );
+}
+
+#[test]
+fn close_tips_seen_up_to_respects_max_seen_id() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.update(Message::ShowTips {
+        tips: make_tips(),
+        starting_index: 0, // tip id=1
+        max_seen_id: 5,    // already saw tip 5 previously
+        show_mode: crate::models::TipsShowMode::Always,
+    });
+    let cmds = app.update(Message::CloseTips);
+    let seen_up_to = cmds.iter().find_map(|c| {
+        if let Command::SaveTipsState { seen_up_to, .. } = c {
+            Some(*seen_up_to)
+        } else {
+            None
+        }
+    });
+    assert_eq!(seen_up_to, Some(5), "seen_up_to should not go backwards");
 }

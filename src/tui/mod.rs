@@ -986,7 +986,12 @@ impl App {
             | Message::ConfirmApproveBotPr
             | Message::ConfirmMergeBotPr
             | Message::CancelPrOperation) => self.dispatch_security_and_filters(msg),
-            Message::ShowTips { tips, starting_index, max_seen_id, show_mode } => {
+            Message::ShowTips {
+                tips,
+                starting_index,
+                max_seen_id,
+                show_mode,
+            } => {
                 self.tips = Some(TipsOverlayState {
                     index: starting_index,
                     max_seen_id,
@@ -1021,9 +1026,12 @@ impl App {
             }
             Message::CloseTips => {
                 if let Some(overlay) = self.tips.take() {
-                    let max_id = overlay.tips.iter().map(|t| t.id).max().unwrap_or(0);
+                    let seen_up_to = overlay
+                        .current_tip()
+                        .map(|t| t.id.max(overlay.max_seen_id))
+                        .unwrap_or(overlay.max_seen_id);
                     vec![Command::SaveTipsState {
-                        seen_up_to: max_id,
+                        seen_up_to,
                         show_mode: overlay.show_mode,
                     }]
                 } else {
