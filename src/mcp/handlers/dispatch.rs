@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 use crate::mcp::McpState;
 
 use super::epics;
+use super::review;
 use super::tasks;
 use super::types::{JsonRpcRequest, JsonRpcResponse};
 
@@ -346,6 +347,131 @@ mcp_tools! {
                 "body": { "type": "string", "description": "Message content to send to the other agent" }
             },
             "required": ["from_task_id", "to_task_id", "body"]
+        };
+
+    sync "list_review_prs" => review::handle_list_review_prs,
+        "List review PRs from the board. Returns PRs from the most recently fetched board state.",
+        {
+            "type": "object",
+            "properties": {
+                "mode": {
+                    "type": "string",
+                    "description": "Filter by mode: reviewer (PRs where you are a requested reviewer), author (PRs you authored), or all (default).",
+                    "enum": ["reviewer", "author", "all"]
+                },
+                "repo": {
+                    "type": "string",
+                    "description": "Filter by GitHub repo (e.g. 'acme/app'). Optional."
+                }
+            }
+        };
+
+    sync "get_review_pr" => review::handle_get_review_pr,
+        "Get details about a specific review PR by repo and number.",
+        {
+            "type": "object",
+            "properties": {
+                "repo": {
+                    "type": "string",
+                    "description": "GitHub repo (e.g. 'acme/app')"
+                },
+                "number": {
+                    "type": "integer",
+                    "description": "PR number"
+                }
+            },
+            "required": ["repo", "number"]
+        };
+
+    async "dispatch_review_agent" => review::handle_dispatch_review_agent,
+        "Dispatch a review agent for a PR. Fails if an agent is already reviewing the PR.",
+        {
+            "type": "object",
+            "properties": {
+                "repo": {
+                    "type": "string",
+                    "description": "GitHub repo (e.g. 'acme/app')"
+                },
+                "number": {
+                    "type": "integer",
+                    "description": "PR number"
+                },
+                "local_repo": {
+                    "type": "string",
+                    "description": "Filesystem path to the local clone (e.g. '/home/user/Code/work/myrepo')"
+                }
+            },
+            "required": ["repo", "number", "local_repo"]
+        };
+
+    sync "list_security_alerts" => review::handle_list_security_alerts,
+        "List security alerts from the board. Returns alerts from the most recently fetched board state.",
+        {
+            "type": "object",
+            "properties": {
+                "repo": {
+                    "type": "string",
+                    "description": "Filter by GitHub repo. Optional."
+                },
+                "severity": {
+                    "type": "string",
+                    "description": "Filter by severity: critical, high, medium, or low. Optional.",
+                    "enum": ["critical", "high", "medium", "low"]
+                },
+                "kind": {
+                    "type": "string",
+                    "description": "Filter by kind: dependabot or code_scanning. Optional.",
+                    "enum": ["dependabot", "code_scanning"]
+                }
+            }
+        };
+
+    sync "get_security_alert" => review::handle_get_security_alert,
+        "Get details about a specific security alert by repo, number, and kind.",
+        {
+            "type": "object",
+            "properties": {
+                "repo": {
+                    "type": "string",
+                    "description": "GitHub repo (e.g. 'acme/app')"
+                },
+                "number": {
+                    "type": "integer",
+                    "description": "Alert number"
+                },
+                "kind": {
+                    "type": "string",
+                    "description": "Alert kind: dependabot or code_scanning",
+                    "enum": ["dependabot", "code_scanning"]
+                }
+            },
+            "required": ["repo", "number", "kind"]
+        };
+
+    async "dispatch_fix_agent" => review::handle_dispatch_fix_agent,
+        "Dispatch a fix agent for a security alert. Fails if an agent is already fixing the alert.",
+        {
+            "type": "object",
+            "properties": {
+                "repo": {
+                    "type": "string",
+                    "description": "GitHub repo (e.g. 'acme/app')"
+                },
+                "number": {
+                    "type": "integer",
+                    "description": "Alert number"
+                },
+                "kind": {
+                    "type": "string",
+                    "description": "Alert kind: dependabot or code_scanning",
+                    "enum": ["dependabot", "code_scanning"]
+                },
+                "local_repo": {
+                    "type": "string",
+                    "description": "Filesystem path to the local clone (e.g. '/home/user/Code/work/myrepo')"
+                }
+            },
+            "required": ["repo", "number", "kind", "local_repo"]
         }
 }
 

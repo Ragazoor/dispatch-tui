@@ -10,6 +10,10 @@ use crate::process::{MockProcessRunner, ProcessRunner};
 
 use super::dispatch::{handle_mcp, tool_definitions};
 use super::epics::{CreateEpicArgs, GetEpicArgs, UpdateEpicArgs};
+use super::review::{
+    DispatchFixAgentArgs, DispatchReviewAgentArgs, GetReviewPrArgs, GetSecurityAlertArgs,
+    ListReviewPrsArgs, ListSecurityAlertsArgs,
+};
 use super::tasks::{
     ClaimTaskArgs, CreateTaskWithEpicArgs, DispatchNextArgs, GetTaskArgs, ListTasksArgs,
     ReportUsageArgs, SendMessageArgs, UpdateTaskArgs, WrapUpArgs,
@@ -1253,6 +1257,42 @@ fn tool_schemas_match_arg_structs() {
             BTreeSet::from(["repo", "number", "status"]),
             json!({"repo": "acme/app", "number": 42, "status": "findings_ready"}),
         ),
+        (
+            "list_review_prs",
+            BTreeSet::from(["mode", "repo"]),
+            BTreeSet::new(),
+            json!({"mode": "reviewer"}),
+        ),
+        (
+            "get_review_pr",
+            BTreeSet::from(["repo", "number"]),
+            BTreeSet::from(["repo", "number"]),
+            json!({"repo": "acme/app", "number": 42}),
+        ),
+        (
+            "dispatch_review_agent",
+            BTreeSet::from(["repo", "number", "local_repo"]),
+            BTreeSet::from(["repo", "number", "local_repo"]),
+            json!({"repo": "acme/app", "number": 42, "local_repo": "/tmp/repo"}),
+        ),
+        (
+            "list_security_alerts",
+            BTreeSet::from(["repo", "severity", "kind"]),
+            BTreeSet::new(),
+            json!({"kind": "dependabot"}),
+        ),
+        (
+            "get_security_alert",
+            BTreeSet::from(["repo", "number", "kind"]),
+            BTreeSet::from(["repo", "number", "kind"]),
+            json!({"repo": "acme/api", "number": 7, "kind": "dependabot"}),
+        ),
+        (
+            "dispatch_fix_agent",
+            BTreeSet::from(["repo", "number", "kind", "local_repo"]),
+            BTreeSet::from(["repo", "number", "kind", "local_repo"]),
+            json!({"repo": "acme/api", "number": 7, "kind": "dependabot", "local_repo": "/tmp/repo"}),
+        ),
     ];
 
     // Verify we cover exactly the tools that exist
@@ -1315,6 +1355,24 @@ fn tool_schemas_match_arg_structs() {
             "update_review_status" => {
                 serde_json::from_value::<super::tasks::UpdateReviewStatusArgs>(payload.clone())
                     .unwrap();
+            }
+            "list_review_prs" => {
+                serde_json::from_value::<ListReviewPrsArgs>(payload.clone()).unwrap();
+            }
+            "get_review_pr" => {
+                serde_json::from_value::<GetReviewPrArgs>(payload.clone()).unwrap();
+            }
+            "dispatch_review_agent" => {
+                serde_json::from_value::<DispatchReviewAgentArgs>(payload.clone()).unwrap();
+            }
+            "list_security_alerts" => {
+                serde_json::from_value::<ListSecurityAlertsArgs>(payload.clone()).unwrap();
+            }
+            "get_security_alert" => {
+                serde_json::from_value::<GetSecurityAlertArgs>(payload.clone()).unwrap();
+            }
+            "dispatch_fix_agent" => {
+                serde_json::from_value::<DispatchFixAgentArgs>(payload.clone()).unwrap();
             }
             other => panic!("No deserialization check for tool: {other}"),
         }
@@ -4596,7 +4654,11 @@ fn insert_review_pr_fixture(state: &Arc<McpState>, number: i64, repo: &str) {
         worktree: None,
         agent_status: None,
     };
-    state.db.save_prs(PrKind::Review, &[pr]).unwrap();
+    // Load existing PRs and append to avoid batch-replace deleting prior inserts.
+    let mut existing = state.db.load_prs(PrKind::Review).unwrap_or_default();
+    existing.retain(|p| !(p.repo == repo && p.number == number));
+    existing.push(pr);
+    state.db.save_prs(PrKind::Review, &existing).unwrap();
 }
 
 fn insert_security_alert_fixture(
@@ -4624,7 +4686,11 @@ fn insert_security_alert_fixture(
         worktree: None,
         agent_status: None,
     };
-    state.db.save_security_alerts(&[alert]).unwrap();
+    // Load existing alerts and append to avoid batch-replace deleting prior inserts.
+    let mut existing = state.db.load_security_alerts().unwrap_or_default();
+    existing.retain(|a| !(a.repo == repo && a.number == number && a.kind == kind));
+    existing.push(alert);
+    state.db.save_security_alerts(&existing).unwrap();
 }
 
 // ---------------------------------------------------------------------------
@@ -4845,11 +4911,23 @@ async fn dispatch_review_agent_already_reviewing() {
         head_ref: "feature/branch".to_string(),
         ci_status: CiStatus::None,
         reviewers: vec![],
-        tmux_window: Some("review-42".to_string()),
-        worktree: Some("/repo/.worktrees/review-42".to_string()),
-        agent_status: Some(ReviewAgentStatus::Reviewing),
+        tmux_window: None,
+        worktree: None,
+        agent_status: None,
     };
     state.db.save_prs(PrKind::Review, &[pr]).unwrap();
+    // Persist the agent tracking fields (save_prs does not write these).
+    state
+        .db
+        .set_pr_agent(
+            PrKind::Review,
+            "acme/app",
+            42,
+            "review-42",
+            "/repo/.worktrees/review-42",
+        )
+        .unwrap();
+    let _ = ReviewAgentStatus::Reviewing; // confirm variant exists
 
     let resp = call(
         &state,
@@ -4903,11 +4981,23 @@ async fn dispatch_fix_agent_already_reviewing() {
         created_at: chrono::Utc::now(),
         state: "open".to_string(),
         description: "A vuln".to_string(),
-        tmux_window: Some("fix-7".to_string()),
-        worktree: Some("/repo/.worktrees/fix-vuln-7".to_string()),
-        agent_status: Some(ReviewAgentStatus::Reviewing),
+        tmux_window: None,
+        worktree: None,
+        agent_status: None,
     };
     state.db.save_security_alerts(&[alert]).unwrap();
+    // Persist the agent tracking fields (save_security_alerts does not write these).
+    state
+        .db
+        .set_alert_agent(
+            "acme/api",
+            7,
+            AlertKind::Dependabot,
+            "fix-7",
+            "/repo/.worktrees/fix-vuln-7",
+        )
+        .unwrap();
+    let _ = ReviewAgentStatus::Reviewing; // confirm variant exists
 
     let resp = call(
         &state,
