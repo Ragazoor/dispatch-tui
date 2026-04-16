@@ -1317,6 +1317,68 @@ mod tests {
         }
     }
 
+    fn find_call_arg(calls: &[(String, Vec<String>)], call_idx: usize, pattern: &str) -> String {
+        calls[call_idx]
+            .1
+            .iter()
+            .find(|a| a.contains(pattern))
+            .unwrap_or_else(|| panic!("call {call_idx} missing arg matching {pattern:?}"))
+            .clone()
+    }
+
+    fn make_test_repo() -> (tempfile::TempDir, String) {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().to_str().unwrap().to_string();
+        (dir, path)
+    }
+
+    fn make_test_repo_with_worktree(slug: &str) -> (tempfile::TempDir, String, std::path::PathBuf) {
+        let (dir, repo_path) = make_test_repo();
+        let worktree_dir = dir.path().join(".worktrees").join(slug);
+        std::fs::create_dir_all(&worktree_dir).unwrap();
+        (dir, repo_path, worktree_dir)
+    }
+
+    #[test]
+    fn find_call_arg_returns_matching_arg() {
+        let calls = vec![
+            (
+                "git".to_string(),
+                vec!["worktree".to_string(), "add".to_string()],
+            ),
+            (
+                "tmux".to_string(),
+                vec!["new-window".to_string(), "-d".to_string()],
+            ),
+        ];
+        let arg = find_call_arg(&calls, 1, "new-window");
+        assert_eq!(arg, "new-window");
+    }
+
+    #[test]
+    #[should_panic(expected = "call 0 missing arg matching \"nonexistent\"")]
+    fn find_call_arg_panics_with_message_on_missing() {
+        let calls = vec![("git".to_string(), vec!["status".to_string()])];
+        find_call_arg(&calls, 0, "nonexistent");
+    }
+
+    #[test]
+    fn make_test_repo_returns_live_directory() {
+        let (dir, repo_path) = make_test_repo();
+        assert!(dir.path().exists());
+        assert_eq!(repo_path, dir.path().to_str().unwrap());
+    }
+
+    #[test]
+    fn make_test_repo_with_worktree_creates_directory() {
+        let (dir, _repo_path, worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+        assert!(worktree_dir.exists());
+        assert_eq!(
+            worktree_dir,
+            dir.path().join(".worktrees").join("42-fix-bug")
+        );
+    }
+
     #[test]
     fn resolve_repo_path_matches_directory_name() {
         let paths = vec![
@@ -1701,12 +1763,9 @@ mod tests {
 
     #[test]
     fn dispatch_reuses_existing_worktree() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let repo_path = dir.path().to_str().unwrap().to_string();
         // Pre-create worktree dir — simulates a re-dispatch where the worktree
         // already exists on disk from a previous dispatch cycle.
-        let worktree_dir = dir.path().join(".worktrees").join("42-fix-bug");
-        std::fs::create_dir_all(&worktree_dir).unwrap();
+        let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
 
         let mock = MockProcessRunner::new(vec![
             // No detect_default_branch call — task.base_branch is used directly
@@ -1738,10 +1797,7 @@ mod tests {
 
     #[test]
     fn dispatch_sends_claude_command() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let repo_path = dir.path().to_str().unwrap().to_string();
-        let worktree_dir = dir.path().join(".worktrees").join("42-fix-bug");
-        std::fs::create_dir_all(&worktree_dir).unwrap();
+        let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
 
         let mock = MockProcessRunner::new(vec![
             // No detect_default_branch call — task.base_branch is used directly
@@ -1772,10 +1828,7 @@ mod tests {
 
     #[test]
     fn dispatch_agent_uses_plan_mode() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let repo_path = dir.path().to_str().unwrap().to_string();
-        let worktree_dir = dir.path().join(".worktrees").join("42-fix-bug");
-        std::fs::create_dir_all(&worktree_dir).unwrap();
+        let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
 
         let mock = MockProcessRunner::new(vec![
             // No detect_default_branch call — task.base_branch is used directly
@@ -1790,7 +1843,7 @@ mod tests {
         dispatch_agent(&task, &mock, None).unwrap();
 
         let calls = mock.recorded_calls();
-        let send_keys_arg = calls[3].1.iter().find(|a| a.contains("claude")).unwrap();
+        let send_keys_arg = find_call_arg(&calls, 3, "claude");
         assert!(
             send_keys_arg.contains("--permission-mode plan"),
             "dispatch_agent should use plan mode, got: {send_keys_arg}"
@@ -1799,10 +1852,7 @@ mod tests {
 
     #[test]
     fn plan_agent_uses_plan_mode() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let repo_path = dir.path().to_str().unwrap().to_string();
-        let worktree_dir = dir.path().join(".worktrees").join("42-fix-bug");
-        std::fs::create_dir_all(&worktree_dir).unwrap();
+        let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
 
         let mock = MockProcessRunner::new(vec![
             // No detect_default_branch call — task.base_branch is used directly
@@ -1817,7 +1867,7 @@ mod tests {
         plan_agent(&task, &mock, None).unwrap();
 
         let calls = mock.recorded_calls();
-        let send_keys_arg = calls[3].1.iter().find(|a| a.contains("claude")).unwrap();
+        let send_keys_arg = find_call_arg(&calls, 3, "claude");
         assert!(
             send_keys_arg.contains("--permission-mode plan"),
             "plan_agent should use plan mode, got: {send_keys_arg}"
@@ -1826,8 +1876,7 @@ mod tests {
 
     #[test]
     fn provision_worktree_creates_new_when_dir_missing() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let repo_path = dir.path().to_str().unwrap().to_string();
+        let (_dir, repo_path) = make_test_repo();
         // Do NOT pre-create the worktree dir — test the "create" path
 
         let mock = MockProcessRunner::new(vec![
@@ -1853,10 +1902,7 @@ mod tests {
 
     #[test]
     fn provision_worktree_skips_git_when_dir_exists() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let repo_path = dir.path().to_str().unwrap().to_string();
-        let worktree_dir = dir.path().join(".worktrees").join("42-fix-bug");
-        std::fs::create_dir_all(&worktree_dir).unwrap();
+        let (_dir, repo_path, worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
 
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok(), // tmux new-window
@@ -1879,8 +1925,7 @@ mod tests {
 
     #[test]
     fn provision_worktree_with_base_branch_passes_start_point() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let repo_path = dir.path().to_str().unwrap().to_string();
+        let (_dir, repo_path) = make_test_repo();
 
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok(), // git worktree add (with base branch)
@@ -1934,8 +1979,7 @@ mod tests {
 
     #[test]
     fn resume_skips_git_issues_tmux_continue() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let worktree_path = dir.path().to_str().unwrap().to_string();
+        let (_dir, worktree_path) = make_test_repo();
 
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok(), // tmux new-window
@@ -2003,10 +2047,7 @@ mod tests {
 
     #[test]
     fn dispatch_uses_task_base_branch_in_prompt() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let repo_path = dir.path().to_str().unwrap().to_string();
-        let worktree_dir = dir.path().join(".worktrees").join("42-fix-bug");
-        std::fs::create_dir_all(&worktree_dir).unwrap();
+        let (_dir, repo_path, worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
 
         let mock = MockProcessRunner::new(vec![
             // No detect_default_branch call — task.base_branch is used directly
@@ -2037,8 +2078,7 @@ mod tests {
 
     #[test]
     fn dispatch_fails_fast_if_git_fails() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let repo_path = dir.path().to_str().unwrap().to_string();
+        let (_dir, repo_path) = make_test_repo();
 
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::fail("not a git repo"), // git worktree add fails
@@ -2057,10 +2097,7 @@ mod tests {
 
     #[test]
     fn brainstorm_reuses_existing_worktree() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let repo_path = dir.path().to_str().unwrap().to_string();
-        let worktree_dir = dir.path().join(".worktrees").join("42-fix-bug");
-        std::fs::create_dir_all(&worktree_dir).unwrap();
+        let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
 
         let mock = MockProcessRunner::new(vec![
             // No detect_default_branch call — task.base_branch is used directly
@@ -2088,10 +2125,7 @@ mod tests {
 
     #[test]
     fn brainstorm_sends_brainstorm_prompt() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let repo_path = dir.path().to_str().unwrap().to_string();
-        let worktree_dir = dir.path().join(".worktrees").join("42-fix-bug");
-        std::fs::create_dir_all(&worktree_dir).unwrap();
+        let (_dir, repo_path, worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
 
         let mock = MockProcessRunner::new(vec![
             // No detect_default_branch call — task.base_branch is used directly
@@ -2120,10 +2154,7 @@ mod tests {
 
     #[test]
     fn quick_dispatch_reuses_existing_worktree() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let repo_path = dir.path().to_str().unwrap().to_string();
-        let worktree_dir = dir.path().join(".worktrees").join("42-fix-bug");
-        std::fs::create_dir_all(&worktree_dir).unwrap();
+        let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
 
         let mock = MockProcessRunner::new(vec![
             // No detect_default_branch call — task.base_branch is used directly
@@ -2151,10 +2182,7 @@ mod tests {
 
     #[test]
     fn quick_dispatch_sends_rename_prompt() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let repo_path = dir.path().to_str().unwrap().to_string();
-        let worktree_dir = dir.path().join(".worktrees").join("42-fix-bug");
-        std::fs::create_dir_all(&worktree_dir).unwrap();
+        let (_dir, repo_path, worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
 
         let mock = MockProcessRunner::new(vec![
             // No detect_default_branch call — task.base_branch is used directly
@@ -2621,10 +2649,7 @@ mod tests {
 
     #[test]
     fn dispatch_agent_uses_task_base_branch_in_prompt() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let repo_path = dir.path().to_str().unwrap().to_string();
-        let worktree_dir = dir.path().join(".worktrees").join("42-fix-bug");
-        std::fs::create_dir_all(&worktree_dir).unwrap();
+        let (_dir, repo_path, worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
 
         // No detect_default_branch call expected — task.base_branch is used directly
         let mock = MockProcessRunner::new(vec![
@@ -2674,8 +2699,7 @@ mod tests {
 
     #[test]
     fn review_agent_returns_early_when_window_exists() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let repo_path = dir.path().to_str().unwrap().to_string();
+        let (dir, repo_path) = make_test_repo();
         let repo_short = dir.path().file_name().unwrap().to_str().unwrap();
         let tmux_window = format!("review-{repo_short}-99");
 
@@ -2699,11 +2723,8 @@ mod tests {
 
     #[test]
     fn review_agent_skips_worktree_add_when_dir_exists() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let repo_path = dir.path().to_str().unwrap().to_string();
         // Pre-create the review worktree directory
-        let worktree_dir = dir.path().join(".worktrees").join("review-99");
-        std::fs::create_dir_all(&worktree_dir).unwrap();
+        let (_dir, repo_path, worktree_dir) = make_test_repo_with_worktree("review-99");
 
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"other-window\n"), // has_window: no match
@@ -2735,12 +2756,9 @@ mod tests {
 
     #[test]
     fn review_agent_happy_path_writes_prompt_and_launches_claude() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let repo_path = dir.path().to_str().unwrap().to_string();
         // Pre-create worktree dir (simulates a previous fetch or existing
         // worktree — the mock git worktree add can't create dirs on disk)
-        let worktree_dir = dir.path().join(".worktrees").join("review-99");
-        std::fs::create_dir_all(&worktree_dir).unwrap();
+        let (dir, repo_path, worktree_dir) = make_test_repo_with_worktree("review-99");
 
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"other-window\n"), // has_window: no match
@@ -2792,8 +2810,7 @@ mod tests {
 
     #[test]
     fn review_agent_calls_worktree_add_when_dir_missing() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let repo_path = dir.path().to_str().unwrap().to_string();
+        let (_dir, repo_path) = make_test_repo();
         // Do NOT pre-create the review worktree directory
 
         let mock = MockProcessRunner::new(vec![
@@ -2828,8 +2845,7 @@ mod tests {
 
     #[test]
     fn review_agent_fails_when_git_fetch_fails() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let repo_path = dir.path().to_str().unwrap().to_string();
+        let (_dir, repo_path) = make_test_repo();
 
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"\n"), // has_window: no match
@@ -2845,10 +2861,7 @@ mod tests {
 
     #[test]
     fn review_agent_uses_accept_edits_mode() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let repo_path = dir.path().to_str().unwrap().to_string();
-        let worktree_dir = dir.path().join(".worktrees").join("review-99");
-        std::fs::create_dir_all(&worktree_dir).unwrap();
+        let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("review-99");
 
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"\n"), // has_window: no match
@@ -2863,7 +2876,7 @@ mod tests {
         dispatch_review_agent(&review_req(&repo_path, 99, "feature-branch", false), &mock).unwrap();
 
         let calls = mock.recorded_calls();
-        let send_keys_arg = calls[4].1.iter().find(|a| a.contains("claude")).unwrap();
+        let send_keys_arg = find_call_arg(&calls, 4, "claude");
         assert!(
             send_keys_arg.contains("--permission-mode acceptEdits"),
             "review agent should use acceptEdits mode, got: {send_keys_arg}"
@@ -2874,10 +2887,7 @@ mod tests {
 
     #[test]
     fn dispatch_agent_includes_plugin_dir() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let repo_path = dir.path().to_str().unwrap().to_string();
-        let worktree_dir = dir.path().join(".worktrees").join("42-fix-bug");
-        std::fs::create_dir_all(&worktree_dir).unwrap();
+        let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
 
         let mock = MockProcessRunner::new(vec![
             // No detect_default_branch call — task.base_branch is used directly
@@ -2892,7 +2902,7 @@ mod tests {
         dispatch_agent(&task, &mock, None).unwrap();
 
         let calls = mock.recorded_calls();
-        let send_keys_arg = calls[3].1.iter().find(|a| a.contains("claude")).unwrap();
+        let send_keys_arg = find_call_arg(&calls, 3, "claude");
         assert!(
             send_keys_arg.contains("--plugin-dir"),
             "dispatch_agent should include --plugin-dir, got: {send_keys_arg}"
@@ -2905,8 +2915,7 @@ mod tests {
 
     #[test]
     fn resume_agent_includes_plugin_dir() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let worktree_path = dir.path().to_str().unwrap().to_string();
+        let (_dir, worktree_path) = make_test_repo();
 
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok(), // tmux new-window
@@ -2919,7 +2928,7 @@ mod tests {
         resume_agent(TaskId(42), &worktree_path, &mock).unwrap();
 
         let calls = mock.recorded_calls();
-        let send_keys_arg = calls[3].1.iter().find(|a| a.contains("claude")).unwrap();
+        let send_keys_arg = find_call_arg(&calls, 3, "claude");
         assert!(
             send_keys_arg.contains("--plugin-dir"),
             "resume_agent should include --plugin-dir, got: {send_keys_arg}"
@@ -2932,10 +2941,7 @@ mod tests {
 
     #[test]
     fn review_agent_includes_plugin_dir() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let repo_path = dir.path().to_str().unwrap().to_string();
-        let worktree_dir = dir.path().join(".worktrees").join("review-99");
-        std::fs::create_dir_all(&worktree_dir).unwrap();
+        let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("review-99");
 
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"\n"), // has_window: no match
@@ -2949,7 +2955,7 @@ mod tests {
         dispatch_review_agent(&review_req(&repo_path, 99, "feature-branch", false), &mock).unwrap();
 
         let calls = mock.recorded_calls();
-        let send_keys_arg = calls[4].1.iter().find(|a| a.contains("claude")).unwrap();
+        let send_keys_arg = find_call_arg(&calls, 4, "claude");
         assert!(
             send_keys_arg.contains("--plugin-dir"),
             "review_agent should include --plugin-dir, got: {send_keys_arg}"
@@ -2964,10 +2970,7 @@ mod tests {
 
     #[test]
     fn review_prompt_invokes_review_skill() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let repo_path = dir.path().to_str().unwrap().to_string();
-        let worktree_dir = dir.path().join(".worktrees").join("review-42");
-        std::fs::create_dir_all(&worktree_dir).unwrap();
+        let (_dir, repo_path, worktree_dir) = make_test_repo_with_worktree("review-42");
 
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b""), // has_window: no match
@@ -2996,10 +2999,7 @@ mod tests {
 
     #[test]
     fn review_prompt_dependabot_mentions_dependency_update() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let repo_path = dir.path().to_str().unwrap().to_string();
-        let worktree_dir = dir.path().join(".worktrees").join("review-42");
-        std::fs::create_dir_all(&worktree_dir).unwrap();
+        let (_dir, repo_path, worktree_dir) = make_test_repo_with_worktree("review-42");
 
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b""), // has_window
