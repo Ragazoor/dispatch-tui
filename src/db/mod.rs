@@ -11,6 +11,7 @@ use std::sync::Mutex;
 use crate::models::{
     Epic, EpicId, SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage, UsageReport,
 };
+use crate::tui::types::TipsShowMode;
 
 // ---------------------------------------------------------------------------
 // TaskPatch — builder for selective field updates
@@ -426,5 +427,15 @@ impl Database {
         self.conn
             .lock()
             .map_err(|_| anyhow::anyhow!("db lock poisoned"))
+    }
+
+    pub fn get_tips_state(&self) -> Result<(u32, TipsShowMode)> {
+        let conn = self.conn()?;
+        queries::get_tips_state(&conn)
+    }
+
+    pub fn save_tips_state(&self, seen_up_to: u32, show_mode: TipsShowMode) -> Result<()> {
+        let conn = self.conn()?;
+        queries::save_tips_state(&conn, seen_up_to, show_mode)
     }
 }

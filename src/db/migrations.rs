@@ -39,6 +39,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (33, migrate_v33_add_auto_dispatch),
     (34, migrate_v34_add_parent_epic_id),
     (35, migrate_v35_add_self_ref_check),
+    (36, migrate_v36_tips_state),
 ];
 
 fn migrate_v1_add_plan_column(conn: &Connection) -> Result<()> {
@@ -736,6 +737,20 @@ pub(super) fn migrate_v33_add_auto_dispatch(conn: &Connection) -> Result<()> {
 fn migrate_v34_add_parent_epic_id(conn: &Connection) -> Result<()> {
     conn.execute_batch("ALTER TABLE epics ADD COLUMN parent_epic_id INTEGER REFERENCES epics(id);")
         .context("Failed to add parent_epic_id column to epics")
+}
+
+fn migrate_v36_tips_state(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS tips_state (
+            id         INTEGER PRIMARY KEY DEFAULT 1,
+            seen_up_to INTEGER NOT NULL DEFAULT 0,
+            show_mode  TEXT    NOT NULL DEFAULT 'always',
+            CHECK (id = 1)
+        );
+        INSERT OR IGNORE INTO tips_state (id, seen_up_to, show_mode)
+        VALUES (1, 0, 'always');",
+    )
+    .context("Failed to create tips_state table (migration v36)")
 }
 
 fn migrate_v35_add_self_ref_check(conn: &Connection) -> Result<()> {

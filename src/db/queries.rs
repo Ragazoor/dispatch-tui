@@ -1297,3 +1297,42 @@ fn parse_datetime(s: &str) -> DateTime<Utc> {
         .map(|ndt| Utc.from_utc_datetime(&ndt))
         .unwrap_or_else(Utc::now)
 }
+
+pub(super) fn get_tips_state(
+    conn: &rusqlite::Connection,
+) -> Result<(u32, crate::tui::types::TipsShowMode)> {
+    use crate::tui::types::TipsShowMode;
+    let result = conn.query_row(
+        "SELECT seen_up_to, show_mode FROM tips_state WHERE id = 1",
+        [],
+        |row| {
+            let seen_up_to: u32 = row.get(0)?;
+            let show_mode_str: String = row.get(1)?;
+            Ok((seen_up_to, show_mode_str))
+        },
+    );
+
+    match result {
+        Ok((seen_up_to, show_mode_str)) => {
+            let show_mode = show_mode_str
+                .parse::<TipsShowMode>()
+                .unwrap_or(TipsShowMode::Always);
+            Ok((seen_up_to, show_mode))
+        }
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok((0, TipsShowMode::Always)),
+        Err(e) => Err(e).context("Failed to read tips_state"),
+    }
+}
+
+pub(super) fn save_tips_state(
+    conn: &rusqlite::Connection,
+    seen_up_to: u32,
+    show_mode: crate::tui::types::TipsShowMode,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE tips_state SET seen_up_to = ?1, show_mode = ?2 WHERE id = 1",
+        rusqlite::params![seen_up_to, show_mode.as_str()],
+    )
+    .context("Failed to save tips_state")?;
+    Ok(())
+}

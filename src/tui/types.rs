@@ -19,6 +19,40 @@ pub enum MoveDirection {
 }
 
 // ---------------------------------------------------------------------------
+// TipsShowMode
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TipsShowMode {
+    Always,
+    NewOnly,
+    Never,
+}
+
+impl TipsShowMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TipsShowMode::Always => "always",
+            TipsShowMode::NewOnly => "new_only",
+            TipsShowMode::Never => "never",
+        }
+    }
+}
+
+impl std::str::FromStr for TipsShowMode {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "always" => Ok(TipsShowMode::Always),
+            "new_only" => Ok(TipsShowMode::NewOnly),
+            "never" => Ok(TipsShowMode::Never),
+            _ => Err(format!("unknown tips show mode: {s}")),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // ReviewBoardMode
 // ---------------------------------------------------------------------------
 

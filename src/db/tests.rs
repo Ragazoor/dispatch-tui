@@ -233,7 +233,7 @@ fn fresh_db_has_latest_schema_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 35);
+    assert_eq!(version, 36);
 }
 
 #[test]
@@ -320,7 +320,7 @@ fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 35);
+    assert_eq!(version, 36);
 }
 
 #[test]
@@ -409,7 +409,7 @@ fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 35);
+    assert_eq!(version, 36);
 }
 
 #[test]
@@ -520,7 +520,7 @@ fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 35);
+    assert_eq!(version, 36);
 }
 
 #[test]
@@ -1753,7 +1753,7 @@ fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 35);
+    assert_eq!(version, 36);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -1970,7 +1970,7 @@ fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 35);
+    assert_eq!(version, 36);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -4069,7 +4069,7 @@ fn migration_31_re_expands_tilde_paths() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 35);
+    assert_eq!(version, 36);
 }
 
 #[test]
@@ -4145,7 +4145,7 @@ fn migrate_v32_adds_base_branch_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 35);
+    assert_eq!(version, 36);
 }
 
 #[test]
@@ -4334,4 +4334,34 @@ fn recalculate_epic_status_terminates_on_cycle() {
     // Must return without stack overflow
     let result = db.recalculate_epic_status(a.id);
     assert!(result.is_ok());
+}
+
+#[test]
+fn tips_state_defaults_on_fresh_db() {
+    let db = in_memory_db();
+    let (seen_up_to, show_mode) = db.get_tips_state().unwrap();
+    assert_eq!(seen_up_to, 0);
+    assert_eq!(show_mode, crate::tui::types::TipsShowMode::Always);
+}
+
+#[test]
+fn tips_state_round_trip() {
+    let db = in_memory_db();
+    db.save_tips_state(7, crate::tui::types::TipsShowMode::NewOnly)
+        .unwrap();
+    let (seen_up_to, show_mode) = db.get_tips_state().unwrap();
+    assert_eq!(seen_up_to, 7);
+    assert_eq!(show_mode, crate::tui::types::TipsShowMode::NewOnly);
+}
+
+#[test]
+fn tips_state_overwrite() {
+    let db = in_memory_db();
+    db.save_tips_state(3, crate::tui::types::TipsShowMode::NewOnly)
+        .unwrap();
+    db.save_tips_state(5, crate::tui::types::TipsShowMode::Never)
+        .unwrap();
+    let (seen_up_to, show_mode) = db.get_tips_state().unwrap();
+    assert_eq!(seen_up_to, 5);
+    assert_eq!(show_mode, crate::tui::types::TipsShowMode::Never);
 }
