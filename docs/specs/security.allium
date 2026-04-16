@@ -230,6 +230,9 @@ rule DispatchFixAgentViaMcp {
     when: McpDispatchFixAgent(repo, number, kind, local_repo)
 
     requires: alert = GetSecurityAlertViaMcp(repo, number, kind)
+    -- MCP uses agent_status rather than tmux_window/worktree as the guard.
+    -- This allows re-dispatch when a prior session ended (idle/findings_ready)
+    -- without requiring the agent fields to be cleared first.
     requires: alert.agent_status != reviewing
 
     ensures: alert.agent_status = reviewing
@@ -238,6 +241,8 @@ rule DispatchFixAgentViaMcp {
 
     @guidance
         -- local_repo is the filesystem path to the local clone.
+        -- Worktree path and branch name follow the same convention as DispatchFixAgent.
+        -- local_repo is accepted as-is; no validation against configured repos is performed.
         -- title, description, package, and fixed_version are read
         -- from the alert record in the DB.
         -- Returns error if the alert is not found in the DB.
