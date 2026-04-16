@@ -797,6 +797,17 @@ impl super::PrStore for Database {
         Ok(())
     }
 
+    fn get_review_pr(&self, repo: &str, number: i64) -> Result<Option<ReviewPr>> {
+        let conn = self.conn()?;
+        for table in &["review_prs", "my_prs"] {
+            let result = load_pr_by_key(&conn, table, repo, number)?;
+            if result.is_some() {
+                return Ok(result);
+            }
+        }
+        Ok(None)
+    }
+
     fn update_agent_status(&self, repo: &str, number: i64, status: Option<&str>) -> Result<String> {
         let conn = self.conn()?;
         for table in &["review_prs", "bot_prs"] {
@@ -848,6 +859,28 @@ impl super::AlertStore for Database {
             params![tmux_window, worktree, repo, number, kind.as_db_str()],
         )?;
         Ok(())
+    }
+
+    fn get_security_alert(
+        &self,
+        repo: &str,
+        number: i64,
+        kind: crate::models::AlertKind,
+    ) -> Result<Option<crate::models::SecurityAlert>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT repo, number, kind, severity, title, package,
+                    vulnerable_range, fixed_version, cvss_score, url,
+                    created_at, state, description, tmux_window, worktree, agent_status
+             FROM security_alerts
+             WHERE repo = ?1 AND number = ?2 AND kind = ?3",
+        )?;
+        let kind_str = kind.as_db_str();
+        let mut rows = stmt.query(rusqlite::params![repo, number, kind_str])?;
+        if let Some(row) = rows.next()? {
+            return Ok(Some(parse_security_alert_row(row)?));
+        }
+        Ok(None)
     }
 }
 
@@ -942,6 +975,72 @@ fn save_prs_to_table(conn: &rusqlite::Connection, table: &str, prs: &[ReviewPr])
     Ok(())
 }
 
+fn parse_review_pr_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReviewPr> {
+    let repo: String = row.get(0)?;
+    let number: i64 = row.get(1)?;
+    let title: String = row.get(2)?;
+    let author: String = row.get(3)?;
+    let url: String = row.get(4)?;
+    let is_draft: bool = row.get(5)?;
+    let created_at_str: String = row.get(6)?;
+    let updated_at_str: String = row.get(7)?;
+    let additions: i64 = row.get(8)?;
+    let deletions: i64 = row.get(9)?;
+    let decision_str: String = row.get(10)?;
+    let labels_json: String = row.get(11)?;
+    let body: String = row.get(12)?;
+    let head_ref: String = row.get(13)?;
+    let ci_status_str: String = row.get(14)?;
+    let reviewers_json: String = row.get(15)?;
+    let tmux_window: Option<String> = row.get(16)?;
+    let worktree: Option<String> = row.get(17)?;
+    let agent_status_str: Option<String> = row.get(18)?;
+
+    let created_at = DateTime::parse_from_rfc3339(&created_at_str)
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(|_| Utc::now());
+    let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(|_| Utc::now());
+    let review_decision =
+        ReviewDecision::from_db_str(&decision_str).unwrap_or(ReviewDecision::ReviewRequired);
+    let labels: Vec<String> = serde_json::from_str(&labels_json).unwrap_or_default();
+    let ci_status = CiStatus::from_db_str(&ci_status_str);
+    let reviewers: Vec<Reviewer> =
+        serde_json::from_str::<Vec<serde_json::Value>>(&reviewers_json)
+            .unwrap_or_default()
+            .iter()
+            .map(|v| Reviewer {
+                login: v["login"].as_str().unwrap_or("").to_string(),
+                decision: v["decision"].as_str().and_then(ReviewDecision::from_db_str),
+            })
+            .collect();
+
+    Ok(ReviewPr {
+        number,
+        title,
+        author,
+        repo,
+        url,
+        is_draft,
+        created_at,
+        updated_at,
+        additions,
+        deletions,
+        review_decision,
+        labels,
+        body,
+        head_ref,
+        ci_status,
+        reviewers,
+        tmux_window,
+        worktree,
+        agent_status: agent_status_str
+            .as_deref()
+            .and_then(ReviewAgentStatus::from_db_str),
+    })
+}
+
 fn load_prs_from_table(conn: &rusqlite::Connection, table: &str) -> Result<Vec<ReviewPr>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT repo, number, title, author, url, is_draft,
@@ -950,118 +1049,33 @@ fn load_prs_from_table(conn: &rusqlite::Connection, table: &str) -> Result<Vec<R
                 tmux_window, worktree, agent_status
          FROM {table}"
     ))?;
-    let rows = stmt.query_map([], |row| {
-        let repo: String = row.get(0)?;
-        let number: i64 = row.get(1)?;
-        let title: String = row.get(2)?;
-        let author: String = row.get(3)?;
-        let url: String = row.get(4)?;
-        let is_draft: bool = row.get(5)?;
-        let created_at_str: String = row.get(6)?;
-        let updated_at_str: String = row.get(7)?;
-        let additions: i64 = row.get(8)?;
-        let deletions: i64 = row.get(9)?;
-        let decision_str: String = row.get(10)?;
-        let labels_json: String = row.get(11)?;
-        let body: String = row.get(12)?;
-        let head_ref: String = row.get(13)?;
-        let ci_status_str: String = row.get(14)?;
-        let reviewers_json: String = row.get(15)?;
-        let tmux_window: Option<String> = row.get(16)?;
-        let worktree: Option<String> = row.get(17)?;
-        let agent_status_str: Option<String> = row.get(18)?;
-        Ok((
-            repo,
-            number,
-            title,
-            author,
-            url,
-            is_draft,
-            created_at_str,
-            updated_at_str,
-            additions,
-            deletions,
-            decision_str,
-            labels_json,
-            body,
-            head_ref,
-            ci_status_str,
-            reviewers_json,
-            tmux_window,
-            worktree,
-            agent_status_str,
-        ))
-    })?;
-
+    let rows = stmt.query_map([], parse_review_pr_row)?;
     let mut prs = Vec::new();
     for row in rows {
-        let (
-            repo,
-            number,
-            title,
-            author,
-            url,
-            is_draft,
-            created_at_str,
-            updated_at_str,
-            additions,
-            deletions,
-            decision_str,
-            labels_json,
-            body,
-            head_ref,
-            ci_status_str,
-            reviewers_json,
-            tmux_window,
-            worktree,
-            agent_status_str,
-        ) = row?;
-
-        let created_at = DateTime::parse_from_rfc3339(&created_at_str)
-            .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now());
-        let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
-            .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now());
-        let review_decision =
-            ReviewDecision::from_db_str(&decision_str).unwrap_or(ReviewDecision::ReviewRequired);
-        let labels: Vec<String> = serde_json::from_str(&labels_json).unwrap_or_default();
-        let ci_status = CiStatus::from_db_str(&ci_status_str);
-        let reviewers: Vec<Reviewer> =
-            serde_json::from_str::<Vec<serde_json::Value>>(&reviewers_json)
-                .unwrap_or_default()
-                .iter()
-                .map(|v| Reviewer {
-                    login: v["login"].as_str().unwrap_or("").to_string(),
-                    decision: v["decision"].as_str().and_then(ReviewDecision::from_db_str),
-                })
-                .collect();
-
-        prs.push(ReviewPr {
-            number,
-            title,
-            author,
-            repo,
-            url,
-            is_draft,
-            created_at,
-            updated_at,
-            additions,
-            deletions,
-            review_decision,
-            labels,
-            body,
-            head_ref,
-            ci_status,
-            reviewers,
-            tmux_window,
-            worktree,
-            agent_status: agent_status_str
-                .as_deref()
-                .and_then(ReviewAgentStatus::from_db_str),
-        });
+        prs.push(row?);
     }
     Ok(prs)
+}
+
+fn load_pr_by_key(
+    conn: &rusqlite::Connection,
+    table: &str,
+    repo: &str,
+    number: i64,
+) -> Result<Option<ReviewPr>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT repo, number, title, author, url, is_draft,
+                created_at, updated_at, additions, deletions,
+                review_decision, labels, body, head_ref, ci_status, reviewers,
+                tmux_window, worktree, agent_status
+         FROM {table}
+         WHERE repo = ?1 AND number = ?2"
+    ))?;
+    let mut rows = stmt.query(rusqlite::params![repo, number])?;
+    if let Some(row) = rows.next()? {
+        return Ok(Some(parse_review_pr_row(row)?));
+    }
+    Ok(None)
 }
 
 // ---------------------------------------------------------------------------
@@ -1135,85 +1149,69 @@ fn save_security_alerts_impl(
     Ok(())
 }
 
+fn parse_security_alert_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<crate::models::SecurityAlert> {
+    use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
+
+    let repo: String = row.get(0)?;
+    let number: i64 = row.get(1)?;
+    let kind_str: String = row.get(2)?;
+    let severity_str: String = row.get(3)?;
+    let title: String = row.get(4)?;
+    let package: Option<String> = row.get(5)?;
+    let vulnerable_range: Option<String> = row.get(6)?;
+    let fixed_version: Option<String> = row.get(7)?;
+    let cvss_score: Option<f64> = row.get(8)?;
+    let url: String = row.get(9)?;
+    let created_at_str: String = row.get(10)?;
+    let state: String = row.get(11)?;
+    let description: String = row.get(12)?;
+    let tmux_window: Option<String> = row.get(13)?;
+    let worktree: Option<String> = row.get(14)?;
+    let agent_status_str: Option<String> = row.get(15)?;
+
+    let kind = AlertKind::from_db_str(&kind_str).unwrap_or(AlertKind::Dependabot);
+    let severity = AlertSeverity::from_db_str(&severity_str).unwrap_or(AlertSeverity::Medium);
+    let created_at = DateTime::parse_from_rfc3339(&created_at_str)
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(|_| Utc::now());
+
+    Ok(SecurityAlert {
+        number,
+        repo,
+        severity,
+        kind,
+        title,
+        package,
+        vulnerable_range,
+        fixed_version,
+        cvss_score,
+        url,
+        created_at,
+        state,
+        description,
+        tmux_window,
+        worktree,
+        agent_status: agent_status_str
+            .as_deref()
+            .and_then(ReviewAgentStatus::from_db_str),
+    })
+}
+
 fn load_security_alerts_impl(
     conn: &rusqlite::Connection,
 ) -> Result<Vec<crate::models::SecurityAlert>> {
-    use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
-
     let mut stmt = conn.prepare(
         "SELECT repo, number, kind, severity, title, package,
                 vulnerable_range, fixed_version, cvss_score, url,
                 created_at, state, description, tmux_window, worktree, agent_status
          FROM security_alerts",
     )?;
-    let rows = stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, i64>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, String>(3)?,
-            row.get::<_, String>(4)?,
-            row.get::<_, Option<String>>(5)?,
-            row.get::<_, Option<String>>(6)?,
-            row.get::<_, Option<String>>(7)?,
-            row.get::<_, Option<f64>>(8)?,
-            row.get::<_, String>(9)?,
-            row.get::<_, String>(10)?,
-            row.get::<_, String>(11)?,
-            row.get::<_, String>(12)?,
-            row.get::<_, Option<String>>(13)?,
-            row.get::<_, Option<String>>(14)?,
-            row.get::<_, Option<String>>(15)?,
-        ))
-    })?;
-
+    let rows = stmt.query_map([], parse_security_alert_row)?;
     let mut alerts = Vec::new();
     for row in rows {
-        let (
-            repo,
-            number,
-            kind_str,
-            severity_str,
-            title,
-            package,
-            vulnerable_range,
-            fixed_version,
-            cvss_score,
-            url,
-            created_at_str,
-            state,
-            description,
-            tmux_window,
-            worktree,
-            agent_status_str,
-        ) = row?;
-
-        let kind = AlertKind::from_db_str(&kind_str).unwrap_or(AlertKind::Dependabot);
-        let severity = AlertSeverity::from_db_str(&severity_str).unwrap_or(AlertSeverity::Medium);
-        let created_at = DateTime::parse_from_rfc3339(&created_at_str)
-            .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now());
-
-        alerts.push(SecurityAlert {
-            number,
-            repo,
-            severity,
-            kind,
-            title,
-            package,
-            vulnerable_range,
-            fixed_version,
-            cvss_score,
-            url,
-            created_at,
-            state,
-            description,
-            tmux_window,
-            worktree,
-            agent_status: agent_status_str
-                .as_deref()
-                .and_then(ReviewAgentStatus::from_db_str),
-        });
+        alerts.push(row?);
     }
     Ok(alerts)
 }
