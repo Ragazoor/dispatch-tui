@@ -6,6 +6,7 @@ use super::{
 };
 use crate::models::{
     AlertSeverity, DispatchMode, ReviewDecision, SubStatus, TaskId, TaskStatus, TaskTag,
+    TipsShowMode,
 };
 
 impl App {
@@ -13,6 +14,11 @@ impl App {
     pub fn handle_key(&mut self, key: KeyEvent) -> Vec<Command> {
         if self.status.error_popup.is_some() {
             return self.update(Message::DismissError);
+        }
+
+        // Tips overlay captures all input when visible
+        if self.tips.is_some() {
+            return self.handle_key_tips(key);
         }
 
         match self.input.mode.clone() {
@@ -49,6 +55,37 @@ impl App {
             InputMode::ConfirmApproveBotPr(_) => self.handle_key_confirm_pr_op(key, true),
             InputMode::ConfirmMergeBotPr(_) => self.handle_key_confirm_pr_op(key, false),
             InputMode::ConfirmQuit => self.handle_key_confirm_quit(key),
+        }
+    }
+
+    fn handle_key_tips(&mut self, key: KeyEvent) -> Vec<Command> {
+        match key.code {
+            KeyCode::Char('l') | KeyCode::Right => self.update(Message::NextTip),
+            KeyCode::Char('h') | KeyCode::Left => self.update(Message::PrevTip),
+            KeyCode::Char('n') => {
+                let current_mode = self.tips.as_ref().map(|t| t.show_mode);
+                let new_mode = match current_mode {
+                    Some(TipsShowMode::NewOnly) => TipsShowMode::Always,
+                    _ => TipsShowMode::NewOnly,
+                };
+                let mut cmds = self.update(Message::SetTipsMode(new_mode));
+                let label = match new_mode {
+                    TipsShowMode::NewOnly => "Tips: will only show when there are new tips",
+                    TipsShowMode::Always => "Tips: will show on every startup",
+                    TipsShowMode::Never => "Tips: disabled",
+                };
+                cmds.extend(self.update(Message::StatusInfo(label.to_string())));
+                cmds
+            }
+            KeyCode::Char('x') => {
+                let mut cmds = self.update(Message::SetTipsMode(TipsShowMode::Never));
+                cmds.extend(
+                    self.update(Message::StatusInfo("Tips: disabled on startup".to_string())),
+                );
+                cmds
+            }
+            KeyCode::Char('q') | KeyCode::Esc => self.update(Message::CloseTips),
+            _ => vec![],
         }
     }
 

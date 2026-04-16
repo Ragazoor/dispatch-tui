@@ -16414,3 +16414,103 @@ fn close_tips_seen_up_to_respects_max_seen_id() {
     });
     assert_eq!(seen_up_to, Some(5), "seen_up_to should not go backwards");
 }
+
+// --- Tips input tests ---
+
+fn app_with_tips() -> App {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.update(Message::ShowTips {
+        tips: make_tips(),
+        starting_index: 1,
+        max_seen_id: 0,
+        show_mode: crate::models::TipsShowMode::Always,
+    });
+    app
+}
+
+#[test]
+fn tips_l_key_goes_next() {
+    let mut app = app_with_tips();
+    app.handle_key(make_key(KeyCode::Char('l')));
+    assert_eq!(app.tips.as_ref().unwrap().index, 2);
+}
+
+#[test]
+fn tips_right_arrow_goes_next() {
+    let mut app = app_with_tips();
+    app.handle_key(make_key(KeyCode::Right));
+    assert_eq!(app.tips.as_ref().unwrap().index, 2);
+}
+
+#[test]
+fn tips_h_key_goes_prev() {
+    let mut app = app_with_tips();
+    app.handle_key(make_key(KeyCode::Char('h')));
+    assert_eq!(app.tips.as_ref().unwrap().index, 0);
+}
+
+#[test]
+fn tips_left_arrow_goes_prev() {
+    let mut app = app_with_tips();
+    app.handle_key(make_key(KeyCode::Left));
+    assert_eq!(app.tips.as_ref().unwrap().index, 0);
+}
+
+#[test]
+fn tips_n_key_sets_new_only_mode() {
+    let mut app = app_with_tips();
+    app.handle_key(make_key(KeyCode::Char('n')));
+    assert_eq!(
+        app.tips.as_ref().unwrap().show_mode,
+        crate::models::TipsShowMode::NewOnly
+    );
+}
+
+#[test]
+fn tips_n_key_toggles_back_to_always() {
+    let mut app = app_with_tips();
+    // First press: Always → NewOnly
+    app.handle_key(make_key(KeyCode::Char('n')));
+    // Second press: NewOnly → Always
+    app.handle_key(make_key(KeyCode::Char('n')));
+    assert_eq!(
+        app.tips.as_ref().unwrap().show_mode,
+        crate::models::TipsShowMode::Always
+    );
+}
+
+#[test]
+fn tips_x_key_sets_never_mode() {
+    let mut app = app_with_tips();
+    app.handle_key(make_key(KeyCode::Char('x')));
+    assert_eq!(
+        app.tips.as_ref().unwrap().show_mode,
+        crate::models::TipsShowMode::Never
+    );
+}
+
+#[test]
+fn tips_q_key_closes_overlay() {
+    let mut app = app_with_tips();
+    app.handle_key(make_key(KeyCode::Char('q')));
+    assert!(app.tips.is_none());
+}
+
+#[test]
+fn tips_escape_closes_overlay() {
+    let mut app = app_with_tips();
+    app.handle_key(make_key(KeyCode::Esc));
+    assert!(app.tips.is_none());
+}
+
+#[test]
+fn tips_overlay_captures_input_not_board() {
+    // With tips open, pressing 'j' (board navigation) should NOT navigate the board.
+    // The overlay captures all input.
+    let mut app = app_with_tips();
+    let cmds = app.handle_key(make_key(KeyCode::Char('j')));
+    // No commands should be emitted for unhandled keys while tips is open
+    assert!(cmds.is_empty());
+    // Tips overlay is still open
+    assert!(app.tips.is_some());
+}
