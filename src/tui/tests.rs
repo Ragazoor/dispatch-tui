@@ -16464,6 +16464,14 @@ fn tips_n_key_sets_new_only_mode() {
         app.tips.as_ref().unwrap().show_mode,
         crate::models::TipsShowMode::NewOnly
     );
+    assert!(
+        app.status
+            .message
+            .as_deref()
+            .unwrap_or("")
+            .contains("Tips:"),
+        "n key should emit a Tips status message"
+    );
 }
 
 #[test]
@@ -16477,6 +16485,14 @@ fn tips_n_key_toggles_back_to_always() {
         app.tips.as_ref().unwrap().show_mode,
         crate::models::TipsShowMode::Always
     );
+    assert!(
+        app.status
+            .message
+            .as_deref()
+            .unwrap_or("")
+            .contains("Tips:"),
+        "n key should emit a Tips status message when toggling back"
+    );
 }
 
 #[test]
@@ -16486,6 +16502,14 @@ fn tips_x_key_sets_never_mode() {
     assert_eq!(
         app.tips.as_ref().unwrap().show_mode,
         crate::models::TipsShowMode::Never
+    );
+    assert!(
+        app.status
+            .message
+            .as_deref()
+            .unwrap_or("")
+            .contains("Tips:"),
+        "x key should emit a Tips status message"
     );
 }
 

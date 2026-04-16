@@ -68,12 +68,14 @@ impl App {
                     Some(TipsShowMode::NewOnly) => TipsShowMode::Always,
                     _ => TipsShowMode::NewOnly,
                 };
-                let mut cmds = self.update(Message::SetTipsMode(new_mode));
                 let label = match new_mode {
                     TipsShowMode::NewOnly => "Tips: will only show when there are new tips",
                     TipsShowMode::Always => "Tips: will show on every startup",
-                    TipsShowMode::Never => "Tips: disabled",
+                    TipsShowMode::Never => {
+                        unreachable!("n key only toggles between Always and NewOnly")
+                    }
                 };
+                let mut cmds = self.update(Message::SetTipsMode(new_mode));
                 cmds.extend(self.update(Message::StatusInfo(label.to_string())));
                 cmds
             }
