@@ -79,6 +79,38 @@ entity ReviewPr {
 }
 
 ------------------------------------------------------------
+-- Card Layout
+------------------------------------------------------------
+
+-- Each PR card renders two lines:
+--
+--   Line 1: [selection marker] [agent badge] #<number> <title>        [CI dot]
+--   Line 2:   ● <ci_state> · @<author> · +<additions>/-<deletions> · <age>
+--
+-- selection marker:  "* " when the PR is in multi-select, "" otherwise
+-- agent badge:       ◆ reviewing | ✔ findings_ready | ○ idle | "" none
+-- CI dot:            colored dot right-aligned on line 1 (see dep/CiBadge)
+-- ci_state prefix:   colored text label first on line 2 (see CiStatePrefix below)
+-- age is last as a trailing staleness signal
+
+-- Within each column, PRs are grouped by repo. Group headers render as a
+-- 2-line item: a blank spacer line followed by the repo name in bold bright
+-- style, providing visual breathing room between groups.
+
+------------------------------------------------------------
+-- CI State Prefix (visual)
+------------------------------------------------------------
+
+-- A colored text label shown as the first element on card line 2.
+
+visual CiStatePrefix(status: CiStatus) -> (Color, String) {
+    success => (green,     "● passing")
+    failure => (red,       "● failing")
+    pending => (yellow,    "● pending")
+    none    => (dark_gray, "● –")
+}
+
+------------------------------------------------------------
 -- Config
 ------------------------------------------------------------
 

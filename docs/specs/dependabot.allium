@@ -68,6 +68,8 @@ rule DependabotSortPriority(pr: rb/ReviewPr) -> Nat {
 -- Within each column, PRs are grouped by repo: a repo header row is emitted
 -- whenever the repo changes between consecutive PRs in sorted order. The
 -- header shows the last path segment of the repo slug (e.g. "app" for "acme/app").
+-- Each group header renders as a 2-line item: a blank spacer line followed by
+-- the repo name in bold bright style, providing visual breathing room between groups.
 
 ------------------------------------------------------------
 -- Card Layout
@@ -76,11 +78,14 @@ rule DependabotSortPriority(pr: rb/ReviewPr) -> Nat {
 -- Each PR card renders two lines:
 --
 --   Line 1: [selection marker] [agent badge] #<number> <title>        [CI dot]
---   Line 2:   @<author> · <age> · +<additions>/-<deletions>
+--   Line 2:   ● <ci_state> · +<additions>/-<deletions> · <age>
 --
 -- selection marker:  "* " when the PR is in the multi-select set, "" otherwise
 -- agent badge:       see AgentStatusBadge below
 -- CI dot:            see CiBadge below; right-aligned on line 1
+-- ci_state prefix:   see CiStatePrefix below; colored, first element on line 2
+-- author is omitted (always "dependabot" — redundant)
+-- age is last as a trailing staleness signal
 
 ------------------------------------------------------------
 -- CI Badge (visual)
@@ -99,6 +104,21 @@ visual CiBadge(status: rb/CiStatus) -> (Color, String) {
     failure => (red,       "●")
     pending => (yellow,    "●")
     none    => (dark_gray, "●")
+}
+
+------------------------------------------------------------
+-- CI State Prefix (visual)
+------------------------------------------------------------
+
+-- A colored text label shown as the first element on card line 2.
+-- Gives each card a colored anchor that conveys CI state at a glance,
+-- analogous to the colored indicator line on task cards.
+
+visual CiStatePrefix(status: rb/CiStatus) -> (Color, String) {
+    success => (green,     "● passing")
+    failure => (red,       "● failing")
+    pending => (yellow,    "● pending")
+    none    => (dark_gray, "● –")
 }
 
 ------------------------------------------------------------

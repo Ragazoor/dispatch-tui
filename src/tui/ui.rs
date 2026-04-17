@@ -29,6 +29,7 @@ const CYAN: Color = Color::Rgb(86, 182, 194);
 const RED_DIM: Color = Color::Rgb(224, 130, 130);
 const BLUE: Color = Color::Rgb(122, 162, 247);
 const FLASH_BG: Color = Color::Rgb(62, 52, 20);
+const DIM_META: Color = Color::Rgb(70, 74, 100);
 
 /// Column color per status
 pub(in crate::tui) fn column_color(status: TaskStatus) -> Color {
@@ -635,15 +636,13 @@ fn build_task_list_item<'a>(
 }
 
 /// Non-selectable section header injected between substatus groups.
-fn substatus_header_style() -> Style {
-    Style::default().fg(MUTED_LIGHT)
-}
-
 fn render_substatus_header(label: &str) -> ListItem<'static> {
-    ListItem::new(Line::from(Span::styled(
+    let blank = Line::raw("");
+    let header = Line::from(Span::styled(
         format!("  \u{2500}\u{2500} {label} "),
-        substatus_header_style(),
-    )))
+        Style::default().fg(FG).add_modifier(Modifier::BOLD),
+    ));
+    ListItem::new(vec![blank, header])
 }
 
 fn render_columns(
@@ -3135,7 +3134,6 @@ fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
             let is_selected = false;
             list_items.push(build_review_pr_item(
                 pr,
-                mode,
                 i,
                 is_focused && item_idx == selected_row,
                 app.pr_agent(pr).map(|h| h.status),
@@ -3166,23 +3164,14 @@ fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-fn build_review_pr_item(
+fn build_pr_line1(
     pr: &ReviewPr,
-    _mode: ReviewBoardMode,
-    col: usize,
+    color: Color,
+    is_selected: bool,
     is_cursor: bool,
     agent_status: Option<crate::models::ReviewAgentStatus>,
-    is_selected: bool,
     col_width: u16,
-) -> ListItem<'static> {
-    // Map to a ReviewDecision for color purposes
-    let decision_for_color =
-        ReviewDecision::from_column_index(col).unwrap_or(ReviewDecision::ReviewRequired);
-    let color = review_column_color(decision_for_color);
-    let now = Utc::now();
-    let age = format_age(pr.created_at, now);
-
-    // Line 1: selection marker + stripe + agent status badge + #number + title
+) -> Line<'static> {
     let select_prefix = if is_selected { "* " } else { "" };
     let stripe = if is_cursor { "\u{258c} " } else { "\u{258e} " };
     let agent_badge = match agent_status {
@@ -3192,12 +3181,9 @@ fn build_review_pr_item(
         None => "",
     };
     let header = format!("{select_prefix}{agent_badge}#{} {}", pr.number, pr.title);
-    // stripe(2) + header + ci_status(" " + "●")
-    // CI badge is always 1 display cell wide ("●"), so ci_span_width = " " + "●" = 2
-    let ci_span_width = 2;
-    let max_header = (col_width as usize).saturating_sub(2 + ci_span_width);
+    // stripe(2) + header + " ●"(2) — reserve width for the CI dot
+    let max_header = (col_width as usize).saturating_sub(4);
     let header_truncated = truncate(&header, max_header);
-
     let line1_style = if is_selected || is_cursor {
         Style::default()
             .fg(Color::White)
@@ -3205,40 +3191,48 @@ fn build_review_pr_item(
     } else {
         Style::default().fg(color)
     };
-
-    let ci_color = match pr.ci_status {
-        CiStatus::Success => Color::Green,
-        CiStatus::Failure => Color::Red,
-        CiStatus::Pending => Color::Yellow,
-        CiStatus::None => Color::DarkGray,
-    };
-
-    let line1 = Line::from(vec![
+    Line::from(vec![
         Span::styled(stripe, Style::default().fg(color)),
         Span::styled(header_truncated, line1_style),
-        Span::styled(
-            " \u{25cf}".to_string(), // ● BLACK CIRCLE
-            Style::default().fg(ci_color),
-        ),
-    ]);
+        Span::styled(" \u{25cf}", Style::default().fg(ci_dot_color(pr.ci_status))),
+    ])
+}
 
-    // Line 2: repo · author · age · +/-lines
+fn build_review_pr_item(
+    pr: &ReviewPr,
+    col: usize,
+    is_cursor: bool,
+    agent_status: Option<crate::models::ReviewAgentStatus>,
+    is_selected: bool,
+    col_width: u16,
+) -> ListItem<'static> {
+    let decision_for_color =
+        ReviewDecision::from_column_index(col).unwrap_or(ReviewDecision::ReviewRequired);
+    let color = review_column_color(decision_for_color);
+    let now = Utc::now();
+    let age = format_age(pr.created_at, now);
+
+    let line1 = build_pr_line1(pr, color, is_selected, is_cursor, agent_status, col_width);
+
+    // Line 2: ● ci_state · @author · +/-lines · age
     let staleness = Staleness::from_age(pr.created_at, now);
     let age_color = staleness_color(staleness);
 
-    let before_age = format!("  @{} \u{b7} ", pr.author);
-    let after_age = format!(" \u{b7} +{}/-{} ", pr.additions, pr.deletions);
+    let (ci_color, ci_label) = ci_state_prefix(pr.ci_status);
 
-    let meta_style = if is_cursor {
-        Style::default().fg(Color::Gray)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
+    let meta_style = Style::default().fg(DIM_META);
 
     let line2 = Line::from(vec![
-        Span::styled(before_age, meta_style),
+        Span::raw("  "),
+        Span::styled(ci_label, Style::default().fg(ci_color)),
+        Span::styled(
+            format!(
+                " \u{b7} @{} \u{b7} +{}/-{} \u{b7} ",
+                pr.author, pr.additions, pr.deletions
+            ),
+            meta_style,
+        ),
         Span::styled(age, Style::default().fg(age_color)),
-        Span::styled(after_age, meta_style),
     ]);
 
     let bg = if is_cursor {
@@ -3248,6 +3242,59 @@ fn build_review_pr_item(
     };
 
     ListItem::new(vec![line1, line2]).style(Style::default().bg(bg))
+}
+
+fn build_dependabot_pr_item(
+    pr: &ReviewPr,
+    decision: ReviewDecision,
+    is_cursor: bool,
+    agent_status: Option<crate::models::ReviewAgentStatus>,
+    is_selected: bool,
+    col_width: u16,
+) -> ListItem<'static> {
+    let color = review_column_color(decision);
+    let now = Utc::now();
+    let age = format_age(pr.created_at, now);
+
+    let line1 = build_pr_line1(pr, color, is_selected, is_cursor, agent_status, col_width);
+
+    // Line 2: ● ci_state · +/-lines · age (author omitted — always "dependabot")
+    let staleness = Staleness::from_age(pr.created_at, now);
+    let age_color = staleness_color(staleness);
+
+    let (ci_prefix_color, ci_label) = ci_state_prefix(pr.ci_status);
+    let meta_style = Style::default().fg(DIM_META);
+
+    let line2 = Line::from(vec![
+        Span::raw("  "),
+        Span::styled(ci_label, Style::default().fg(ci_prefix_color)),
+        Span::styled(
+            format!(" \u{b7} +{}/-{} \u{b7} ", pr.additions, pr.deletions),
+            meta_style,
+        ),
+        Span::styled(age, Style::default().fg(age_color)),
+    ]);
+
+    let bg = if is_cursor {
+        review_cursor_bg_color(decision)
+    } else {
+        Color::Reset
+    };
+
+    ListItem::new(vec![line1, line2]).style(Style::default().bg(bg))
+}
+
+fn ci_state_prefix(status: CiStatus) -> (Color, &'static str) {
+    match status {
+        CiStatus::Success => (Color::Green, "\u{25cf} passing"),
+        CiStatus::Failure => (Color::Red, "\u{25cf} failing"),
+        CiStatus::Pending => (Color::Yellow, "\u{25cf} pending"),
+        CiStatus::None => (Color::DarkGray, "\u{25cf} \u{2013}"),
+    }
+}
+
+fn ci_dot_color(status: CiStatus) -> Color {
+    ci_state_prefix(status).0
 }
 
 // ---------------------------------------------------------------------------
@@ -3572,10 +3619,9 @@ fn render_dependabot_columns(frame: &mut Frame, app: &mut App, area: Rect) {
             }
 
             let is_selected = selected_prs.contains(&pr.url);
-            list_items.push(build_review_pr_item(
+            list_items.push(build_dependabot_pr_item(
                 pr,
-                ReviewBoardMode::Reviewer,
-                i,
+                decision_for_color,
                 is_focused && item_idx == selected_row,
                 app.pr_agent(pr).map(|h| h.status),
                 is_selected,
@@ -3815,26 +3861,26 @@ fn build_security_alert_item(
         Span::styled(header_truncated, line1_style),
     ]);
 
-    // Line 2: repo · kind indicator + package + CVSS + age
+    // Line 2: ⬡ kind · package · CVSS · age
     let staleness = Staleness::from_age(alert.created_at, now);
     let age_color = staleness_color(staleness);
 
-    let kind_indicator = alert.kind.indicator();
+    let (kind_color, kind_label) = match alert.kind {
+        AlertKind::Dependabot => (YELLOW, "\u{2b21} Dependabot"),
+        AlertKind::CodeScanning => (CYAN, "\u{2b21} CodeScanning"),
+    };
     let pkg = alert.package.as_deref().unwrap_or("-");
     let cvss_str = alert
         .cvss_score
-        .map(|s| format!("CVSS:{s:.1}"))
+        .map(|s| format!(" \u{b7} CVSS:{s:.1}"))
         .unwrap_or_default();
-    let before_age = format!("  [{kind_indicator}] {pkg} {cvss_str} ");
 
-    let meta_style = if is_cursor {
-        Style::default().fg(Color::Gray)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
+    let meta_style = Style::default().fg(DIM_META);
 
     let line2 = Line::from(vec![
-        Span::styled(before_age, meta_style),
+        Span::raw("  "),
+        Span::styled(kind_label, Style::default().fg(kind_color)),
+        Span::styled(format!(" \u{b7} {pkg}{cvss_str} \u{b7} "), meta_style),
         Span::styled(age, Style::default().fg(age_color)),
     ]);
 
@@ -3999,6 +4045,7 @@ mod tests {
     use super::*;
     use crate::models::TaskTag;
     use crate::tui::types::TaskDraft;
+    use ratatui::buffer::Buffer;
     use std::time::Duration;
 
     fn make_test_app() -> App {
@@ -4098,17 +4145,334 @@ mod tests {
         );
     }
 
+    fn render_list_item_to_buf(item: ListItem<'static>, width: u16, height: u16) -> Buffer {
+        use ratatui::{backend::TestBackend, widgets::List, Terminal};
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                let list = List::new(vec![item]);
+                f.render_widget(list, f.area());
+            })
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    fn buf_row(buf: &Buffer, y: u16) -> String {
+        let area = buf.area();
+        (area.left()..area.right())
+            .map(|x| buf[(x, y)].symbol().to_owned())
+            .collect()
+    }
+
+    fn make_test_pr(
+        number: i64,
+        author: &str,
+        ci: crate::models::CiStatus,
+        additions: i64,
+        deletions: i64,
+    ) -> crate::models::ReviewPr {
+        crate::models::ReviewPr {
+            number,
+            title: format!("PR {number}"),
+            author: author.to_string(),
+            repo: "acme/app".to_string(),
+            url: format!("https://github.com/acme/app/pull/{number}"),
+            is_draft: false,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            additions,
+            deletions,
+            review_decision: crate::models::ReviewDecision::ReviewRequired,
+            labels: vec![],
+            body: String::new(),
+            head_ref: String::new(),
+            ci_status: ci,
+            reviewers: vec![],
+        }
+    }
+
+    fn make_test_alert(
+        number: i64,
+        kind: crate::models::AlertKind,
+        package: Option<&str>,
+        cvss: Option<f32>,
+    ) -> crate::models::SecurityAlert {
+        crate::models::SecurityAlert {
+            number,
+            repo: "acme/app".to_string(),
+            severity: crate::models::AlertSeverity::High,
+            kind,
+            title: format!("Alert {number}"),
+            package: package.map(str::to_string),
+            vulnerable_range: None,
+            fixed_version: None,
+            cvss_score: cvss.map(|v| v as f64),
+            url: format!("https://github.com/acme/app/security/alerts/{number}"),
+            created_at: chrono::Utc::now(),
+            state: "open".to_string(),
+            description: String::new(),
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // render_substatus_header
+    // ---------------------------------------------------------------------------
+
     #[test]
-    fn substatus_header_uses_muted_light_without_dim() {
-        let style = substatus_header_style();
-        assert_eq!(
-            style.fg,
-            Some(MUTED_LIGHT),
-            "substatus header should use MUTED_LIGHT, not the column color"
-        );
+    fn substatus_header_has_two_lines() {
+        let item = render_substatus_header("my-repo");
+        let buf = render_list_item_to_buf(item, 40, 2);
+        // Confirm both rows are allocated (height 2 means 2 rows rendered)
+        assert_eq!(buf.area().height, 2);
+    }
+
+    #[test]
+    fn substatus_header_first_line_is_blank() {
+        let item = render_substatus_header("my-repo");
+        let buf = render_list_item_to_buf(item, 40, 2);
+        let row0 = buf_row(&buf, 0);
         assert!(
-            !style.add_modifier.contains(Modifier::DIM),
-            "substatus header should not be dimmed"
+            row0.trim().is_empty(),
+            "first line should be blank spacer, got: {row0:?}"
+        );
+    }
+
+    #[test]
+    fn substatus_header_second_line_contains_label() {
+        let item = render_substatus_header("my-repo");
+        let buf = render_list_item_to_buf(item, 40, 2);
+        let row1 = buf_row(&buf, 1);
+        assert!(
+            row1.contains("my-repo"),
+            "second line should contain label, got: {row1:?}"
+        );
+    }
+
+    #[test]
+    fn substatus_header_second_line_is_bold_and_bright() {
+        let item = render_substatus_header("my-repo");
+        let buf = render_list_item_to_buf(item, 40, 2);
+        let area = buf.area();
+        let first_content_x = (area.left()..area.right())
+            .find(|&x| !buf[(x, 1)].symbol().trim().is_empty())
+            .expect("row 1 should have content");
+        let style = buf[(first_content_x, 1)].style();
+        assert!(
+            style.add_modifier.contains(Modifier::BOLD),
+            "header text should be BOLD"
+        );
+        assert_eq!(style.fg, Some(FG), "header text should use FG color");
+    }
+
+    // ---------------------------------------------------------------------------
+    // build_dependabot_pr_item
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn dependabot_card_has_no_author_on_line2() {
+        let pr = make_test_pr(
+            42,
+            "dependabot[bot]",
+            crate::models::CiStatus::Success,
+            10,
+            5,
+        );
+        let item = build_dependabot_pr_item(
+            &pr,
+            crate::models::ReviewDecision::ReviewRequired,
+            false,
+            None,
+            false,
+            60,
+        );
+        let buf = render_list_item_to_buf(item, 60, 2);
+        let row1 = buf_row(&buf, 1);
+        assert!(
+            !row1.contains('@'),
+            "dependabot line 2 should not contain @author, got: {row1:?}"
+        );
+    }
+
+    #[test]
+    fn dependabot_card_line2_contains_additions_and_deletions() {
+        let pr = make_test_pr(42, "dependabot[bot]", crate::models::CiStatus::None, 12, 3);
+        let item = build_dependabot_pr_item(
+            &pr,
+            crate::models::ReviewDecision::ReviewRequired,
+            false,
+            None,
+            false,
+            60,
+        );
+        let buf = render_list_item_to_buf(item, 60, 2);
+        let row1 = buf_row(&buf, 1);
+        assert!(row1.contains("+12"), "should show additions, got: {row1:?}");
+        assert!(row1.contains("-3"), "should show deletions, got: {row1:?}");
+    }
+
+    #[test]
+    fn dependabot_card_failing_ci_renders_red_on_line2() {
+        let pr = make_test_pr(
+            42,
+            "dependabot[bot]",
+            crate::models::CiStatus::Failure,
+            5,
+            2,
+        );
+        let item = build_dependabot_pr_item(
+            &pr,
+            crate::models::ReviewDecision::ReviewRequired,
+            false,
+            None,
+            false,
+            60,
+        );
+        let buf = render_list_item_to_buf(item, 60, 2);
+        let area = buf.area();
+        let has_red =
+            (area.left()..area.right()).any(|x| buf[(x, 1)].style().fg == Some(Color::Red));
+        assert!(has_red, "failing CI should render with red on line 2");
+    }
+
+    #[test]
+    fn dependabot_card_passing_ci_renders_green_on_line2() {
+        let pr = make_test_pr(
+            42,
+            "dependabot[bot]",
+            crate::models::CiStatus::Success,
+            5,
+            2,
+        );
+        let item = build_dependabot_pr_item(
+            &pr,
+            crate::models::ReviewDecision::ReviewRequired,
+            false,
+            None,
+            false,
+            60,
+        );
+        let buf = render_list_item_to_buf(item, 60, 2);
+        let area = buf.area();
+        let has_green =
+            (area.left()..area.right()).any(|x| buf[(x, 1)].style().fg == Some(Color::Green));
+        assert!(has_green, "passing CI should render with green on line 2");
+    }
+
+    // ---------------------------------------------------------------------------
+    // build_review_pr_item
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn review_pr_card_line2_contains_author() {
+        let pr = make_test_pr(7, "alice", crate::models::CiStatus::Success, 8, 2);
+        let item = build_review_pr_item(&pr, 0, false, None, false, 80);
+        let buf = render_list_item_to_buf(item, 80, 2);
+        let row1 = buf_row(&buf, 1);
+        assert!(
+            row1.contains("@alice"),
+            "review PR line 2 should show @author, got: {row1:?}"
+        );
+    }
+
+    #[test]
+    fn review_pr_card_line2_has_colored_ci_prefix() {
+        let pr = make_test_pr(7, "alice", crate::models::CiStatus::Failure, 8, 2);
+        let item = build_review_pr_item(&pr, 0, false, None, false, 80);
+        let buf = render_list_item_to_buf(item, 80, 2);
+        let area = buf.area();
+        let has_red =
+            (area.left()..area.right()).any(|x| buf[(x, 1)].style().fg == Some(Color::Red));
+        assert!(
+            has_red,
+            "review PR line 2 should have red for failing CI, got no red cell"
+        );
+    }
+
+    #[test]
+    fn review_pr_card_line2_ci_prefix_before_author() {
+        let pr = make_test_pr(7, "alice", crate::models::CiStatus::Success, 8, 2);
+        let item = build_review_pr_item(&pr, 0, false, None, false, 80);
+        let buf = render_list_item_to_buf(item, 80, 2);
+        let row1 = buf_row(&buf, 1);
+        let ci_pos = row1.find("passing").expect("should contain ci state text");
+        let author_pos = row1.find("@alice").expect("should contain @author");
+        assert!(
+            ci_pos < author_pos,
+            "CI prefix should appear before @author on line 2"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // build_security_alert_item
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn security_alert_card_line2_has_kind_prefix() {
+        let alert = make_test_alert(
+            3,
+            crate::models::AlertKind::CodeScanning,
+            Some("lodash"),
+            None,
+        );
+        let item = build_security_alert_item(&alert, crate::models::AlertSeverity::High, false, 80);
+        let buf = render_list_item_to_buf(item, 80, 2);
+        let row1 = buf_row(&buf, 1);
+        assert!(
+            row1.contains('\u{2B21}'),
+            "line 2 should contain ⬡ kind indicator, got: {row1:?}"
+        );
+    }
+
+    #[test]
+    fn security_alert_card_line2_kind_prefix_colored() {
+        let alert = make_test_alert(
+            3,
+            crate::models::AlertKind::CodeScanning,
+            Some("lodash"),
+            None,
+        );
+        let item = build_security_alert_item(&alert, crate::models::AlertSeverity::High, false, 80);
+        let buf = render_list_item_to_buf(item, 80, 2);
+        let area = buf.area();
+        let has_cyan = (area.left()..area.right()).any(|x| buf[(x, 1)].style().fg == Some(CYAN));
+        assert!(
+            has_cyan,
+            "CodeScanning kind should render with CYAN on line 2"
+        );
+    }
+
+    #[test]
+    fn security_alert_card_line2_package_present() {
+        let alert = make_test_alert(
+            3,
+            crate::models::AlertKind::Dependabot,
+            Some("lodash"),
+            None,
+        );
+        let item = build_security_alert_item(&alert, crate::models::AlertSeverity::High, false, 80);
+        let buf = render_list_item_to_buf(item, 80, 2);
+        let row1 = buf_row(&buf, 1);
+        assert!(
+            row1.contains("lodash"),
+            "line 2 should contain package name, got: {row1:?}"
+        );
+    }
+
+    #[test]
+    fn security_alert_card_line2_cvss_present_when_set() {
+        let alert = make_test_alert(
+            3,
+            crate::models::AlertKind::Dependabot,
+            Some("lodash"),
+            Some(8.1),
+        );
+        let item = build_security_alert_item(&alert, crate::models::AlertSeverity::High, false, 80);
+        let buf = render_list_item_to_buf(item, 80, 2);
+        let row1 = buf_row(&buf, 1);
+        assert!(
+            row1.contains("CVSS"),
+            "line 2 should contain CVSS when score is set, got: {row1:?}"
         );
     }
 

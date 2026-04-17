@@ -246,7 +246,10 @@ fn pr_fetch_failed_sets_error_state_and_preserves_prs() {
         Some("network timeout"),
         "Error message should be stored on fetch failure"
     );
-    assert!(!app.review_board_loading(), "loading flag should be cleared on failure");
+    assert!(
+        !app.review_board_loading(),
+        "loading flag should be cleared on failure"
+    );
     assert_eq!(
         app.review_prs().len(),
         1,

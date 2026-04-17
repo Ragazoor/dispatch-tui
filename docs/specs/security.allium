@@ -233,12 +233,14 @@ rule ReReviewAlert {
 -- Visual: KindBadge
 ------------------------------------------------------------
 
--- The alert kind is displayed as a bracketed indicator on each card's
--- metadata line, alongside the package name and CVSS score.
+-- The alert kind is displayed as a colored icon+label prefix on each card's
+-- metadata line. Line 2 order: ⬡ <kind> · <package> · CVSS:<score> · <age>
+-- Kind prefix comes first; age is last as a trailing staleness signal.
+-- Group headers render as a 2-line item: blank spacer + bold bright repo name.
 
-visual KindBadge(kind: AlertKind) -> String {
-    dependabot     => "D"
-    code_scanning  => "S"
+visual KindBadge(kind: AlertKind) -> (Color, String) {
+    dependabot     => (yellow, "⬡ Dependabot")
+    code_scanning  => (cyan,   "⬡ CodeScanning")
 }
 
 ------------------------------------------------------------

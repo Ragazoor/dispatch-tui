@@ -3447,14 +3447,12 @@ impl App {
             self.clamp_review_selection();
 
             // Clean up review agents whose PRs no longer appear in either list
-            let pr_keys: std::collections::HashSet<crate::models::PrRef> = [
-                PrListKind::Review,
-                PrListKind::Authored,
-            ]
-            .iter()
-            .flat_map(|k| self.review.list(*k).into_iter().flat_map(|l| l.prs.iter()))
-            .map(|pr| crate::models::PrRef::new(pr.repo.clone(), pr.number))
-            .collect();
+            let pr_keys: std::collections::HashSet<crate::models::PrRef> =
+                [PrListKind::Review, PrListKind::Authored]
+                    .iter()
+                    .flat_map(|k| self.review.list(*k).into_iter().flat_map(|l| l.prs.iter()))
+                    .map(|pr| crate::models::PrRef::new(pr.repo.clone(), pr.number))
+                    .collect();
 
             let gone: Vec<crate::models::PrRef> = self
                 .review
