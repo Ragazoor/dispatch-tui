@@ -307,6 +307,14 @@ impl App {
     pub fn review_detail_visible(&self) -> bool {
         self.review.detail_visible
     }
+    pub fn review_agent_handle(
+        &self,
+        repo: &str,
+        number: i64,
+    ) -> Option<&ReviewAgentHandle> {
+        let key = crate::models::PrRef::new(repo.to_string(), number);
+        self.review.review_agents.get(&key)
+    }
     pub fn review_repo_filter(&self) -> &HashSet<String> {
         &self.review.review.repo_filter
     }
