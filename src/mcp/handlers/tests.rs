@@ -54,6 +54,9 @@ fn create_task_fixture(state: &Arc<McpState>) -> crate::models::TaskId {
             None,
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap()
 }
@@ -228,6 +231,9 @@ async fn get_task_found() {
             None,
             crate::models::TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -394,6 +400,9 @@ async fn update_task_accepts_string_task_id() {
             None,
             crate::models::TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -428,6 +437,9 @@ async fn get_task_accepts_string_task_id() {
             None,
             crate::models::TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -462,6 +474,9 @@ async fn update_task_with_plan() {
             None,
             crate::models::TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -493,6 +508,9 @@ async fn update_task_title_only() {
             None,
             crate::models::TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -528,6 +546,9 @@ async fn update_task_status_optional() {
             None,
             crate::models::TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -559,6 +580,9 @@ async fn update_task_title_and_description() {
             None,
             crate::models::TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -590,6 +614,9 @@ async fn update_task_repo_path() {
             None,
             crate::models::TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -625,6 +652,9 @@ async fn update_task_no_fields_errors() {
             None,
             crate::models::TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -648,7 +678,17 @@ async fn patch_task_sets_multiple_fields() {
     let state = test_state();
     let task_id = state
         .db
-        .create_task("Test", "Desc", "/repo", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "Test",
+            "Desc",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
 
     let resp = call(
@@ -683,6 +723,9 @@ async fn update_task_without_plan_preserves_existing() {
             Some("/existing.md"),
             crate::models::TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -717,6 +760,9 @@ async fn update_task_sets_pr_fields() {
             None,
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -759,6 +805,9 @@ async fn list_tasks_returns_all_when_no_filter() {
             None,
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     state
@@ -770,6 +819,9 @@ async fn list_tasks_returns_all_when_no_filter() {
             None,
             TaskStatus::Running,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -798,6 +850,9 @@ async fn list_tasks_filters_by_single_status() {
             None,
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     state
@@ -809,6 +864,9 @@ async fn list_tasks_filters_by_single_status() {
             None,
             TaskStatus::Running,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -837,6 +895,9 @@ async fn list_tasks_filters_by_multiple_statuses() {
             None,
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     state
@@ -848,6 +909,9 @@ async fn list_tasks_filters_by_multiple_statuses() {
             None,
             TaskStatus::Running,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     state
@@ -859,6 +923,9 @@ async fn list_tasks_filters_by_multiple_statuses() {
             None,
             TaskStatus::Review,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -906,6 +973,9 @@ async fn claim_task_success() {
             None,
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -949,6 +1019,9 @@ async fn claim_task_rejects_running_task() {
             None,
             TaskStatus::Running,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -981,6 +1054,9 @@ async fn claim_task_rejects_different_repo() {
             None,
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -1391,6 +1467,9 @@ async fn claim_task_accepts_string_task_id() {
             None,
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -1539,11 +1618,31 @@ async fn get_epic_shows_subtask_summary() {
         .unwrap();
     let t1 = state
         .db
-        .create_task("Sub 1", "", "/repo", None, TaskStatus::Done, "main")
+        .create_task(
+            "Sub 1",
+            "",
+            "/repo",
+            None,
+            TaskStatus::Done,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     let t2 = state
         .db
-        .create_task("Sub 2", "", "/repo", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "Sub 2",
+            "",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     state.db.set_task_epic_id(t1, Some(epic.id)).unwrap();
     state.db.set_task_epic_id(t2, Some(epic.id)).unwrap();
@@ -1632,11 +1731,31 @@ async fn list_epics_shows_subtask_counts() {
     let epic = state.db.create_epic("Tracked", "", "/repo", None).unwrap();
     let t1 = state
         .db
-        .create_task("Done", "", "/repo", None, TaskStatus::Done, "main")
+        .create_task(
+            "Done",
+            "",
+            "/repo",
+            None,
+            TaskStatus::Done,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     let t2 = state
         .db
-        .create_task("Pending", "", "/repo", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "Pending",
+            "",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     state.db.set_task_epic_id(t1, Some(epic.id)).unwrap();
     state.db.set_task_epic_id(t2, Some(epic.id)).unwrap();
@@ -1830,7 +1949,17 @@ async fn claim_task_rejects_done_task() {
     let state = test_state();
     let task_id = state
         .db
-        .create_task("Done", "desc", "/repo", None, TaskStatus::Done, "main")
+        .create_task(
+            "Done",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Done,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
 
     let resp = call(
@@ -1854,7 +1983,17 @@ async fn claim_task_rejects_review_task() {
     let state = test_state();
     let task_id = state
         .db
-        .create_task("Review", "desc", "/repo", None, TaskStatus::Review, "main")
+        .create_task(
+            "Review",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Review,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
 
     let resp = call(
@@ -1880,7 +2019,17 @@ async fn claim_task_worktree_without_worktrees_dir() {
     // so the full path is used as the repo — should match when equal
     let task_id = state
         .db
-        .create_task("Direct", "desc", "/repo", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "Direct",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
 
     let resp = call(
@@ -1981,7 +2130,17 @@ async fn claim_task_updates_status_to_running() {
     let state = test_state();
     let task_id = state
         .db
-        .create_task("Claim", "desc", "/repo", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "Claim",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
 
     let resp = call(
@@ -2033,7 +2192,17 @@ async fn wrap_up_rejects_backlog_task() {
     let state = test_state();
     let task_id = state
         .db
-        .create_task("T", "d", "/repo", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "T",
+            "d",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
 
     let resp = call(
@@ -2072,6 +2241,9 @@ async fn wrap_up_accepts_running_blocked_task() {
             None,
             TaskStatus::Running,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     db.patch_task(
@@ -2116,7 +2288,17 @@ async fn wrap_up_accepts_running_active_task() {
     });
 
     let task_id = db
-        .create_task("T", "d", "/repo", None, TaskStatus::Running, "main")
+        .create_task(
+            "T",
+            "d",
+            "/repo",
+            None,
+            TaskStatus::Running,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     db.patch_task(
         task_id,
@@ -2145,7 +2327,17 @@ async fn wrap_up_task_no_worktree() {
     let state = test_state();
     let task_id = state
         .db
-        .create_task("T", "d", "/repo", None, TaskStatus::Review, "main")
+        .create_task(
+            "T",
+            "d",
+            "/repo",
+            None,
+            TaskStatus::Review,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
 
     let resp = call(
@@ -2165,7 +2357,17 @@ async fn wrap_up_invalid_action() {
     let state = test_state();
     let task_id = state
         .db
-        .create_task("T", "d", "/repo", None, TaskStatus::Review, "main")
+        .create_task(
+            "T",
+            "d",
+            "/repo",
+            None,
+            TaskStatus::Review,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     state
         .db
@@ -2204,7 +2406,17 @@ async fn wrap_up_rebase_returns_started() {
     });
 
     let task_id = db
-        .create_task("My Task", "desc", "/repo", None, TaskStatus::Review, "main")
+        .create_task(
+            "My Task",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Review,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     db.patch_task(
         task_id,
@@ -2252,6 +2464,9 @@ async fn wrap_up_pr_returns_started() {
             None,
             TaskStatus::Review,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     db.patch_task(
@@ -2286,7 +2501,17 @@ async fn update_task_sets_sub_status() {
     let state = test_state();
     let task_id = state
         .db
-        .create_task("T", "desc", "/repo", None, TaskStatus::Running, "main")
+        .create_task(
+            "T",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Running,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
 
     let resp = call(
@@ -2314,7 +2539,17 @@ async fn update_task_rejects_invalid_sub_status_for_status() {
     let state = test_state();
     let task_id = state
         .db
-        .create_task("T", "desc", "/repo", None, TaskStatus::Running, "main")
+        .create_task(
+            "T",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Running,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
 
     let resp = call(
@@ -2334,7 +2569,17 @@ async fn update_task_rejects_bogus_sub_status() {
     let state = test_state();
     let task_id = state
         .db
-        .create_task("T", "desc", "/repo", None, TaskStatus::Running, "main")
+        .create_task(
+            "T",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Running,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
 
     let resp = call(
@@ -2354,7 +2599,17 @@ async fn update_task_sub_status_with_status_change() {
     let state = test_state();
     let task_id = state
         .db
-        .create_task("T", "desc", "/repo", None, TaskStatus::Running, "main")
+        .create_task(
+            "T",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Running,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
 
     // Change status to review and set sub_status to approved in one call
@@ -2379,7 +2634,17 @@ async fn update_task_status_running_with_needs_input() {
     let state = test_state();
     let task_id = state
         .db
-        .create_task("T", "desc", "/repo", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "T",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
 
     // Set status=running and sub_status=needs_input in one call.
@@ -2406,7 +2671,17 @@ async fn update_task_sub_status_invalid_for_new_status() {
     let state = test_state();
     let task_id = state
         .db
-        .create_task("T", "desc", "/repo", None, TaskStatus::Running, "main")
+        .create_task(
+            "T",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Running,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
 
     // Change status to review but set sub_status to active (valid for running, not review)
@@ -2434,6 +2709,9 @@ async fn list_tasks_shows_sub_status() {
             None,
             TaskStatus::Running,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     state
@@ -2469,6 +2747,9 @@ async fn get_task_shows_sub_status() {
             None,
             TaskStatus::Review,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     state
@@ -2518,6 +2799,9 @@ async fn wrap_up_rebase_conflict_returns_error() {
             None,
             TaskStatus::Review,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     db.patch_task(
@@ -2566,6 +2850,9 @@ async fn wrap_up_rebase_not_on_main_returns_error() {
             None,
             TaskStatus::Review,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     db.patch_task(
@@ -2614,6 +2901,9 @@ async fn wrap_up_pr_push_fails_returns_error() {
             None,
             TaskStatus::Review,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     db.patch_task(
@@ -2648,7 +2938,17 @@ async fn update_task_status_recalculates_epic_status() {
     let epic = state.db.create_epic("E", "", "/repo", None).unwrap();
     let task_id = state
         .db
-        .create_task("T", "", "/repo", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "T",
+            "",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     state.db.set_task_epic_id(task_id, Some(epic.id)).unwrap();
 
@@ -2702,6 +3002,9 @@ async fn send_message_writes_file_and_sends_keys() {
             None,
             TaskStatus::Running,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     let receiver_id = db
@@ -2712,6 +3015,9 @@ async fn send_message_writes_file_and_sends_keys() {
             None,
             TaskStatus::Running,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     db.patch_task(
@@ -2774,7 +3080,17 @@ async fn send_message_target_not_found() {
 
     let sender_id = state
         .db
-        .create_task("Sender", "desc", "/repo", None, TaskStatus::Running, "main")
+        .create_task(
+            "Sender",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Running,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
 
     let resp = call(
@@ -2809,7 +3125,17 @@ async fn send_message_target_no_worktree() {
 
     let sender_id = state
         .db
-        .create_task("Sender", "desc", "/repo", None, TaskStatus::Running, "main")
+        .create_task(
+            "Sender",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Running,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     let receiver_id = state
         .db
@@ -2820,6 +3146,9 @@ async fn send_message_target_no_worktree() {
             None,
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -2855,7 +3184,17 @@ async fn send_message_target_no_tmux_window() {
 
     let sender_id = state
         .db
-        .create_task("Sender", "desc", "/repo", None, TaskStatus::Running, "main")
+        .create_task(
+            "Sender",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Running,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     let receiver_id = state
         .db
@@ -2866,6 +3205,9 @@ async fn send_message_target_no_tmux_window() {
             None,
             TaskStatus::Running,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     state
@@ -3212,6 +3554,9 @@ async fn list_tasks_filters_by_epic_id() {
             None,
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     state
@@ -3223,6 +3568,9 @@ async fn list_tasks_filters_by_epic_id() {
             None,
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     state.db.set_task_epic_id(t1, Some(epic.id)).unwrap();
@@ -3261,6 +3609,9 @@ async fn list_tasks_filters_by_status_and_epic_id() {
             None,
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     let t2 = state
@@ -3272,6 +3623,9 @@ async fn list_tasks_filters_by_status_and_epic_id() {
             None,
             TaskStatus::Running,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     state.db.set_task_epic_id(t1, Some(epic.id)).unwrap();
@@ -3310,6 +3664,9 @@ async fn list_tasks_epic_filter_no_match() {
             None,
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -3329,7 +3686,17 @@ async fn list_tasks_done_status_filter() {
     let state = test_state();
     state
         .db
-        .create_task("Done Task", "desc", "/repo", None, TaskStatus::Done, "main")
+        .create_task(
+            "Done Task",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Done,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     state
         .db
@@ -3340,6 +3707,9 @@ async fn list_tasks_done_status_filter() {
             None,
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -3382,6 +3752,9 @@ async fn wrap_up_rebase_sets_task_to_done() {
             None,
             TaskStatus::Review,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     db.patch_task(
@@ -3432,6 +3805,9 @@ async fn wrap_up_pr_sets_review_and_pr_url() {
             None,
             TaskStatus::Running,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     db.patch_task(
@@ -3492,6 +3868,9 @@ async fn wrap_up_pr_does_not_inject_review_command() {
             None,
             TaskStatus::Running,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     db.patch_task(
@@ -3550,6 +3929,9 @@ async fn wrap_up_rebase_recalculates_epic_status() {
             None,
             TaskStatus::Review,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     db.set_task_epic_id(task_id, Some(epic.id)).unwrap();
@@ -3596,7 +3978,17 @@ async fn wrap_up_accepts_string_task_id() {
     });
 
     let task_id = db
-        .create_task("T", "d", "/repo", None, TaskStatus::Review, "main")
+        .create_task(
+            "T",
+            "d",
+            "/repo",
+            None,
+            TaskStatus::Review,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     db.patch_task(
         task_id,
@@ -3640,6 +4032,9 @@ async fn get_task_shows_all_fields() {
             Some("/plan.md"),
             TaskStatus::Running,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     state.db.set_task_epic_id(task_id, Some(epic.id)).unwrap();
@@ -3693,6 +4088,9 @@ async fn get_task_without_epic_omits_epic_line() {
             None,
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -3728,6 +4126,9 @@ async fn list_tasks_shows_tag_and_plan_indicators() {
             Some("/plan.md"),
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     state
@@ -3765,6 +4166,9 @@ async fn list_tasks_shows_epic_indicator() {
             None,
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     state.db.set_task_epic_id(task_id, Some(epic.id)).unwrap();
@@ -3795,6 +4199,9 @@ async fn list_tasks_truncates_long_descriptions() {
             None,
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -3827,6 +4234,9 @@ async fn list_tasks_excludes_archived_by_default() {
             None,
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     state
@@ -3838,6 +4248,9 @@ async fn list_tasks_excludes_archived_by_default() {
             None,
             TaskStatus::Archived,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -3924,6 +4337,9 @@ async fn dispatch_next_no_backlog_returns_success_noop() {
             None,
             TaskStatus::Running,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     state.db.set_task_epic_id(task_id, Some(epic.id)).unwrap();
@@ -3976,6 +4392,9 @@ async fn dispatch_next_picks_first_backlog_subtask() {
             Some("docs/plan.md"),
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     let task2_id = db
@@ -3986,6 +4405,9 @@ async fn dispatch_next_picks_first_backlog_subtask() {
             None,
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     db.set_task_epic_id(task1_id, Some(epic.id)).unwrap();
@@ -4062,6 +4484,9 @@ async fn dispatch_next_respects_sort_order() {
             Some("docs/plan.md"),
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     let task2_id = db
@@ -4072,6 +4497,9 @@ async fn dispatch_next_respects_sort_order() {
             Some("docs/plan.md"),
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     db.set_task_epic_id(task1_id, Some(epic.id)).unwrap();
@@ -4141,6 +4569,9 @@ async fn dispatch_next_respects_tag_routing() {
             None,
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     db.set_task_epic_id(task_id, Some(epic.id)).unwrap();
@@ -4292,6 +4723,9 @@ async fn wrap_up_rebase_clears_tmux_window() {
             None,
             TaskStatus::Review,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     db.patch_task(
@@ -4345,6 +4779,9 @@ async fn wrap_up_rebase_conflict_sets_conflict_substatus() {
             None,
             TaskStatus::Review,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     db.patch_task(
@@ -4404,6 +4841,9 @@ async fn wrap_up_rebase_clears_conflict_substatus_on_non_conflict_error() {
             None,
             TaskStatus::Review,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     db.patch_task(
@@ -4496,7 +4936,17 @@ async fn update_task_with_base_branch_updates_it() {
 
     let task_id = state
         .db
-        .create_task("T", "d", "/repo", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "T",
+            "d",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
 
     let resp = call(
@@ -4531,7 +4981,17 @@ async fn dispatch_next_returns_disabled_when_auto_dispatch_off() {
     // Create a backlog subtask linked to the epic
     let task_id = state
         .db
-        .create_task("Sub", "desc", "/repo", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "Sub",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     state.db.set_task_epic_id(task_id, Some(epic.id)).unwrap();
 

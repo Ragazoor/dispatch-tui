@@ -299,6 +299,11 @@ impl TaskService {
             patch = patch.base_branch(bb.as_str());
         }
 
+        // Intentional TOCTOU: we read the current status here to validate sub_status,
+        // then write via patch_task below. A concurrent update between the two is
+        // theoretically possible but benign in practice — Dispatch is a single-process
+        // tokio runtime with cooperative scheduling, so no two MCP handlers run truly
+        // concurrently on the same task. SQLite serialises writes regardless.
         if let Some(ss) = params.sub_status {
             let effective_status = params.status.or_else(|| {
                 self.db
@@ -435,24 +440,11 @@ impl TaskService {
                 plan.as_deref(),
                 TaskStatus::Backlog,
                 base_branch,
+                params.epic_id.map(EpicId),
+                params.sort_order,
+                params.tag,
             )
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
-
-        if let Some(eid) = params.epic_id {
-            self.db
-                .set_task_epic_id(task_id, Some(EpicId(eid)))
-                .map_err(|e| ServiceError::Internal(format!("Failed to link task to epic: {e}")))?;
-        }
-        if let Some(so) = params.sort_order {
-            self.db
-                .patch_task(task_id, &TaskPatch::new().sort_order(Some(so)))
-                .map_err(|e| ServiceError::Internal(format!("Failed to set sort_order: {e}")))?;
-        }
-        if let Some(tag) = params.tag {
-            self.db
-                .patch_task(task_id, &TaskPatch::new().tag(Some(tag)))
-                .map_err(|e| ServiceError::Internal(format!("Failed to set tag: {e}")))?;
-        }
 
         self.get_task(task_id.0)
     }
@@ -1693,6 +1685,40 @@ mod tests {
             .unwrap();
 
         assert_eq!(task.epic_id, Some(epic.id));
+    }
+
+    #[test]
+    fn create_task_returning_sets_all_optional_fields_atomically() {
+        let db = test_db();
+        let tsvc = task_svc(&db);
+        let esvc = epic_svc(&db);
+
+        let epic = esvc
+            .create_epic(CreateEpicParams {
+                title: "E".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                sort_order: None,
+                parent_epic_id: None,
+            })
+            .unwrap();
+
+        let task = tsvc
+            .create_task_returning(CreateTaskParams {
+                title: "Atomic".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                plan_path: None,
+                epic_id: Some(epic.id.0),
+                sort_order: Some(3),
+                tag: Some(TaskTag::Feature),
+                base_branch: None,
+            })
+            .unwrap();
+
+        assert_eq!(task.epic_id, Some(epic.id));
+        assert_eq!(task.sort_order, Some(3));
+        assert_eq!(task.tag, Some(TaskTag::Feature));
     }
 
     // -- delete_task -------------------------------------------------------------

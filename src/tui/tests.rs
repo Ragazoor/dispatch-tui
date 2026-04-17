@@ -3222,6 +3222,9 @@ fn stress_db_with_many_tasks() {
             None,
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     }

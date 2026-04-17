@@ -237,6 +237,14 @@ async fn main() -> Result<()> {
                 return Ok(());
             }
 
+            let task_tag = tag
+                .as_deref()
+                .map(|t| {
+                    models::TaskTag::parse(t).ok_or_else(|| {
+                        anyhow::anyhow!("Invalid tag: {t}. Valid values: bug, feature, chore, epic")
+                    })
+                })
+                .transpose()?;
             let id = db.create_task(
                 &title,
                 &description,
@@ -244,13 +252,10 @@ async fn main() -> Result<()> {
                 Some(&plan_str),
                 models::TaskStatus::Backlog,
                 "main",
+                None,
+                None,
+                task_tag,
             )?;
-            if let Some(ref t) = tag {
-                let tag = models::TaskTag::parse(t).ok_or_else(|| {
-                    anyhow::anyhow!("Invalid tag: {t}. Valid values: bug, feature, chore, epic")
-                })?;
-                db.patch_task(id, &db::TaskPatch::new().tag(Some(tag)))?;
-            }
             println!("Created task #{}: \"{}\" [backlog]", id, title);
         }
         Commands::Setup { port, yes } => {

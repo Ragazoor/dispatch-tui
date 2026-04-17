@@ -92,7 +92,17 @@ fn create_task_returning(
     plan: Option<&str>,
     status: models::TaskStatus,
 ) -> anyhow::Result<models::Task> {
-    let id = db.create_task(title, description, repo_path, plan, status, "main")?;
+    let id = db.create_task(
+        title,
+        description,
+        repo_path,
+        plan,
+        status,
+        "main",
+        None,
+        None,
+        None,
+    )?;
     db.get_task(id)?
         .ok_or_else(|| anyhow::anyhow!("Task {id} vanished after insert"))
 }
@@ -228,6 +238,9 @@ fn exec_refresh_from_db_syncs_external_changes() {
             None,
             models::TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     assert!(app.tasks().is_empty());
@@ -248,6 +261,9 @@ fn exec_refresh_from_db_returns_commands_from_refresh() {
             None,
             models::TaskStatus::Running,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     // Load it into app

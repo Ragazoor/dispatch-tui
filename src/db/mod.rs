@@ -223,6 +223,7 @@ impl PrKind {
 
 /// Task CRUD, list, patch, status updates.
 pub trait TaskCrud: Send + Sync {
+    #[allow(clippy::too_many_arguments)]
     fn create_task(
         &self,
         title: &str,
@@ -231,6 +232,9 @@ pub trait TaskCrud: Send + Sync {
         plan: Option<&str>,
         status: TaskStatus,
         base_branch: &str,
+        epic_id: Option<EpicId>,
+        sort_order: Option<i64>,
+        tag: Option<crate::models::TaskTag>,
     ) -> Result<TaskId>;
     fn get_task(&self, id: TaskId) -> Result<Option<Task>>;
     fn list_all(&self) -> Result<Vec<Task>>;

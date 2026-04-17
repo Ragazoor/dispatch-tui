@@ -46,6 +46,9 @@ fn full_lifecycle() {
             Some("plan.md"),
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     let now = chrono::Utc::now();

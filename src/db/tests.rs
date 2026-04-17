@@ -13,7 +13,17 @@ fn create_task_returning(
     plan: Option<&str>,
     status: TaskStatus,
 ) -> anyhow::Result<Task> {
-    let id = db.create_task(title, description, repo_path, plan, status, "main")?;
+    let id = db.create_task(
+        title,
+        description,
+        repo_path,
+        plan,
+        status,
+        "main",
+        None,
+        None,
+        None,
+    )?;
     db.get_task(id)?
         .ok_or_else(|| anyhow::anyhow!("Task {id} vanished after insert"))
 }
@@ -29,6 +39,9 @@ fn create_and_get() {
             None,
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     let task = db.get_task(id).unwrap().expect("task should exist");
@@ -44,12 +57,42 @@ fn create_and_get() {
 #[test]
 fn list_all() {
     let db = in_memory_db();
-    db.create_task("Task A", "desc", "/a", None, TaskStatus::Backlog, "main")
-        .unwrap();
-    db.create_task("Task B", "desc", "/b", None, TaskStatus::Backlog, "main")
-        .unwrap();
-    db.create_task("Task C", "desc", "/c", None, TaskStatus::Backlog, "main")
-        .unwrap();
+    db.create_task(
+        "Task A",
+        "desc",
+        "/a",
+        None,
+        TaskStatus::Backlog,
+        "main",
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    db.create_task(
+        "Task B",
+        "desc",
+        "/b",
+        None,
+        TaskStatus::Backlog,
+        "main",
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    db.create_task(
+        "Task C",
+        "desc",
+        "/c",
+        None,
+        TaskStatus::Backlog,
+        "main",
+        None,
+        None,
+        None,
+    )
+    .unwrap();
     let tasks = db.list_all().unwrap();
     assert_eq!(tasks.len(), 3);
     assert_eq!(tasks[0].title, "Task A");
@@ -61,13 +104,43 @@ fn list_all() {
 fn list_by_status() {
     let db = in_memory_db();
     let id1 = db
-        .create_task("Task A", "desc", "/a", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "Task A",
+            "desc",
+            "/a",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     let id2 = db
-        .create_task("Task B", "desc", "/b", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "Task B",
+            "desc",
+            "/b",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
-    db.create_task("Task C", "desc", "/c", None, TaskStatus::Backlog, "main")
-        .unwrap();
+    db.create_task(
+        "Task C",
+        "desc",
+        "/c",
+        None,
+        TaskStatus::Backlog,
+        "main",
+        None,
+        None,
+        None,
+    )
+    .unwrap();
 
     db.patch_task(id1, &TaskPatch::new().status(TaskStatus::Running))
         .unwrap();
@@ -100,6 +173,9 @@ fn create_task_with_plan() {
             Some("docs/plan.md"),
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     let task = db.get_task(id).unwrap().unwrap();
@@ -117,6 +193,9 @@ fn create_task_without_plan() {
             None,
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     let task = db.get_task(id).unwrap().unwrap();
@@ -134,6 +213,9 @@ fn find_task_by_plan_returns_match() {
             Some("/plans/my-plan.md"),
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -152,6 +234,9 @@ fn find_task_by_plan_returns_none_when_no_match() {
         Some("/plans/other.md"),
         TaskStatus::Backlog,
         "main",
+        None,
+        None,
+        None,
     )
     .unwrap();
 
@@ -169,6 +254,9 @@ fn find_task_by_plan_ignores_tasks_without_plan() {
         None,
         TaskStatus::Backlog,
         "main",
+        None,
+        None,
+        None,
     )
     .unwrap();
 
@@ -591,7 +679,17 @@ fn create_task_returning_with_plan() {
 fn patch_task_applies_all_fields() {
     let db = in_memory_db();
     let id = db
-        .create_task("title", "desc", "/repo", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "title",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     let patch = TaskPatch::new()
         .status(TaskStatus::Running)
@@ -616,6 +714,9 @@ fn patch_task_none_fields_unchanged() {
             Some("plan.md"),
             TaskStatus::Running,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     let patch = TaskPatch::new();
@@ -630,7 +731,17 @@ fn patch_task_none_fields_unchanged() {
 fn patch_task_sets_tag() {
     let db = in_memory_db();
     let id = db
-        .create_task("title", "desc", "/repo", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "title",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     db.patch_task(id, &TaskPatch::new().tag(Some(TaskTag::Bug)))
         .unwrap();
@@ -642,7 +753,17 @@ fn patch_task_sets_tag() {
 fn patch_task_clears_tag() {
     let db = in_memory_db();
     let id = db
-        .create_task("title", "desc", "/repo", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "title",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     db.patch_task(id, &TaskPatch::new().tag(Some(TaskTag::Feature)))
         .unwrap();
@@ -655,7 +776,17 @@ fn patch_task_clears_tag() {
 fn has_other_tasks_with_worktree_returns_false_when_no_others() {
     let db = in_memory_db();
     let id = db
-        .create_task("Task A", "desc", "/repo", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "Task A",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     db.patch_task(
         id,
@@ -675,10 +806,30 @@ fn has_other_tasks_with_worktree_returns_false_when_no_others() {
 fn has_other_tasks_with_worktree_returns_true_when_shared() {
     let db = in_memory_db();
     let id1 = db
-        .create_task("Task A", "desc", "/repo", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "Task A",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     let id2 = db
-        .create_task("Task B", "desc", "/repo", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "Task B",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     db.patch_task(
         id1,
@@ -709,10 +860,30 @@ fn has_other_tasks_with_worktree_returns_true_when_shared() {
 fn has_other_tasks_with_worktree_ignores_done_tasks() {
     let db = in_memory_db();
     let id1 = db
-        .create_task("Task A", "desc", "/repo", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "Task A",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     let id2 = db
-        .create_task("Task B", "desc", "/repo", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "Task B",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     db.patch_task(
         id1,
@@ -747,6 +918,9 @@ fn patch_task_clears_plan() {
             Some("plan.md"),
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
     let patch = TaskPatch::new().plan_path(None);
@@ -759,7 +933,17 @@ fn patch_task_clears_plan() {
 fn patch_task_sets_dispatch_fields() {
     let db = in_memory_db();
     let id = db
-        .create_task("title", "desc", "/repo", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "title",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     let patch = TaskPatch::new()
         .worktree(Some("/repo/.worktrees/1-my-task"))
@@ -774,7 +958,17 @@ fn patch_task_sets_dispatch_fields() {
 fn patch_task_clears_dispatch_fields() {
     let db = in_memory_db();
     let id = db
-        .create_task("title", "desc", "/repo", None, TaskStatus::Running, "main")
+        .create_task(
+            "title",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Running,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     // Set dispatch fields first
     let patch = TaskPatch::new()
@@ -797,7 +991,17 @@ fn patch_task_clears_dispatch_fields() {
 fn patch_task_status_and_dispatch_together() {
     let db = in_memory_db();
     let id = db
-        .create_task("title", "desc", "/repo", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "title",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     let patch = TaskPatch::new()
         .status(TaskStatus::Running)
@@ -838,7 +1042,17 @@ fn patch_task_status_change_resets_sub_status_in_db() {
     // End-to-end: after a status-only patch, sub_status in DB reflects the new default
     let db = Database::open_in_memory().unwrap();
     let id = db
-        .create_task("T", "d", "/r", None, TaskStatus::Running, "main")
+        .create_task(
+            "T",
+            "d",
+            "/r",
+            None,
+            TaskStatus::Running,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     db.patch_task(id, &TaskPatch::default().sub_status(SubStatus::Stale))
         .unwrap();
@@ -855,7 +1069,17 @@ fn patch_task_status_change_resets_sub_status_in_db() {
 fn update_status_if_matching() {
     let db = in_memory_db();
     let id = db
-        .create_task("Task", "desc", "/repo", None, TaskStatus::Running, "main")
+        .create_task(
+            "Task",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Running,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
 
     let updated = db
@@ -871,7 +1095,17 @@ fn update_status_if_matching() {
 fn update_status_if_not_matching() {
     let db = in_memory_db();
     let id = db
-        .create_task("Task", "desc", "/repo", None, TaskStatus::Done, "main")
+        .create_task(
+            "Task",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Done,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
 
     let updated = db
@@ -932,10 +1166,30 @@ fn get_epic_nonexistent() {
 fn delete_epic_cascades_subtasks() {
     let db = in_memory_db();
     let epic = db.create_epic("Epic", "desc", "/repo", None).unwrap();
-    db.create_task("Sub 1", "desc", "/repo", None, TaskStatus::Backlog, "main")
-        .unwrap();
+    db.create_task(
+        "Sub 1",
+        "desc",
+        "/repo",
+        None,
+        TaskStatus::Backlog,
+        "main",
+        None,
+        None,
+        None,
+    )
+    .unwrap();
     let sub_id = db
-        .create_task("Sub 2", "desc", "/repo", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "Sub 2",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
 
     // Link sub 2 to epic
@@ -959,7 +1213,17 @@ fn delete_epic_with_sub_epics_succeeds() {
         .create_epic("Child", "", "/repo", Some(parent.id))
         .unwrap();
     let task_id = db
-        .create_task("T", "", "/repo", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "T",
+            "",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     db.set_task_epic_id(task_id, Some(child.id)).unwrap();
 
@@ -1022,7 +1286,17 @@ fn task_epic_id_roundtrip() {
     let db = in_memory_db();
     let epic = db.create_epic("Epic", "desc", "/repo", None).unwrap();
     let task_id = db
-        .create_task("Task", "desc", "/repo", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "Task",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
 
     db.set_task_epic_id(task_id, Some(epic.id)).unwrap();
@@ -1039,7 +1313,17 @@ fn list_tasks_for_epic() {
     let db = in_memory_db();
     let epic = db.create_epic("Epic", "desc", "/repo", None).unwrap();
     let id1 = db
-        .create_task("Sub A", "desc", "/repo", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "Sub A",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     let _id2 = db
         .create_task(
@@ -1049,6 +1333,9 @@ fn list_tasks_for_epic() {
             None,
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -1070,6 +1357,9 @@ fn task_roundtrip_with_pr_fields() {
             None,
             TaskStatus::Backlog,
             "main",
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -1090,7 +1380,17 @@ fn task_roundtrip_with_pr_fields() {
 fn task_pr_fields_default_to_none() {
     let db = in_memory_db();
     let id = db
-        .create_task("No PR", "desc", "/repo", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "No PR",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     let task = db.get_task(id).unwrap().unwrap();
     assert!(task.pr_url.is_none());
@@ -1100,7 +1400,17 @@ fn task_pr_fields_default_to_none() {
 fn patch_task_sets_pr_url() {
     let db = in_memory_db();
     let id = db
-        .create_task("t", "d", "/r", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "t",
+            "d",
+            "/r",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
 
     db.patch_task(
@@ -1153,7 +1463,17 @@ fn patch_epic_repo_path() {
 fn patch_task_sets_sort_order() {
     let db = Database::open_in_memory().unwrap();
     let id = db
-        .create_task("T", "d", "/r", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "T",
+            "d",
+            "/r",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     db.patch_task(id, &TaskPatch::new().sort_order(Some(500)))
         .unwrap();
@@ -1165,7 +1485,17 @@ fn patch_task_sets_sort_order() {
 fn patch_task_clears_sort_order() {
     let db = Database::open_in_memory().unwrap();
     let id = db
-        .create_task("T", "d", "/r", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "T",
+            "d",
+            "/r",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     db.patch_task(id, &TaskPatch::new().sort_order(Some(100)))
         .unwrap();
@@ -1179,7 +1509,17 @@ fn patch_task_clears_sort_order() {
 fn report_usage_first_insert() {
     let db = Database::open_in_memory().unwrap();
     let id = db
-        .create_task("T", "D", "/r", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "T",
+            "D",
+            "/r",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     db.report_usage(
         id,
@@ -1206,7 +1546,17 @@ fn report_usage_first_insert() {
 fn report_usage_accumulates() {
     let db = Database::open_in_memory().unwrap();
     let id = db
-        .create_task("T", "D", "/r", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "T",
+            "D",
+            "/r",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     db.report_usage(
         id,
@@ -1634,7 +1984,17 @@ fn save_review_prs_removes_stale_prs() {
 fn task_sub_status_persists() {
     let db = Database::open_in_memory().unwrap();
     let id = db
-        .create_task("Test", "desc", "/repo", None, TaskStatus::Running, "main")
+        .create_task(
+            "Test",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Running,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     db.patch_task(id, &TaskPatch::default().sub_status(SubStatus::Stale))
         .unwrap();
@@ -1646,7 +2006,17 @@ fn task_sub_status_persists() {
 fn task_sub_status_defaults_to_none() {
     let db = Database::open_in_memory().unwrap();
     let id = db
-        .create_task("Test", "desc", "/repo", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "Test",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     let task = db.get_task(id).unwrap().unwrap();
     assert_eq!(task.sub_status, SubStatus::None);
@@ -1772,7 +2142,17 @@ fn create_task_sets_default_sub_status_for_running() {
     // create_task with status=Running must produce sub_status=active, not 'none'
     let db = in_memory_db();
     let id = db
-        .create_task("T", "d", "/r", None, TaskStatus::Running, "main")
+        .create_task(
+            "T",
+            "d",
+            "/r",
+            None,
+            TaskStatus::Running,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     let task = db.get_task(id).unwrap().unwrap();
     assert_eq!(task.sub_status, SubStatus::Active);
@@ -1782,17 +2162,60 @@ fn create_task_sets_default_sub_status_for_running() {
 fn create_task_sets_default_sub_status_for_backlog() {
     let db = in_memory_db();
     let id = db
-        .create_task("T", "d", "/r", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "T",
+            "d",
+            "/r",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     let task = db.get_task(id).unwrap().unwrap();
     assert_eq!(task.sub_status, SubStatus::None);
 }
 
 #[test]
+fn create_task_with_epic_sort_tag_single_insert() {
+    let db = in_memory_db();
+    let epic = db.create_epic("E", "", "/repo", None).unwrap();
+    let id = db
+        .create_task(
+            "T",
+            "d",
+            "/r",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            Some(epic.id),
+            Some(7),
+            Some(TaskTag::Bug),
+        )
+        .unwrap();
+    let task = db.get_task(id).unwrap().unwrap();
+    assert_eq!(task.epic_id, Some(epic.id));
+    assert_eq!(task.sort_order, Some(7));
+    assert_eq!(task.tag, Some(TaskTag::Bug));
+}
+
+#[test]
 fn update_status_if_resets_sub_status_to_default() {
     let db = in_memory_db();
     let id = db
-        .create_task("T", "d", "/r", None, TaskStatus::Running, "main")
+        .create_task(
+            "T",
+            "d",
+            "/r",
+            None,
+            TaskStatus::Running,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     db.patch_task(id, &TaskPatch::default().sub_status(SubStatus::Stale))
         .unwrap();
@@ -1811,7 +2234,17 @@ fn update_status_if_resets_sub_status_to_default() {
 fn update_status_if_leaves_sub_status_unchanged_when_condition_fails() {
     let db = in_memory_db();
     let id = db
-        .create_task("T", "d", "/r", None, TaskStatus::Running, "main")
+        .create_task(
+            "T",
+            "d",
+            "/r",
+            None,
+            TaskStatus::Running,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     db.patch_task(id, &TaskPatch::default().sub_status(SubStatus::Active))
         .unwrap();
@@ -3414,7 +3847,17 @@ fn migration_v17_adds_conflict_sub_status() {
 fn delete_task_removes_task() {
     let db = in_memory_db();
     let id = db
-        .create_task("Doomed", "desc", "/repo", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "Doomed",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     assert!(db.get_task(id).unwrap().is_some());
 
@@ -4141,13 +4584,43 @@ fn list_all_tasks_with_epic_id_returns_only_tasks_with_epic() {
     let epic2_id = db.create_epic("E2", "", "/repo", None).unwrap().id;
 
     let t1 = db
-        .create_task("Task1", "", "/repo", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "Task1",
+            "",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     let t2 = db
-        .create_task("Task2", "", "/repo", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "Task2",
+            "",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     let _t3 = db
-        .create_task("Orphan", "", "/repo", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "Orphan",
+            "",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
 
     db.set_task_epic_id(t1, Some(epic1_id)).unwrap();
@@ -4225,7 +4698,17 @@ fn recalculate_parent_status_from_sub_epic() {
 
     // Add a task to the sub-epic and move it to running
     let task_id = db
-        .create_task("T", "desc", "/repo", None, TaskStatus::Backlog, "main")
+        .create_task(
+            "T",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     db.set_task_epic_id(task_id, Some(child.id)).unwrap();
     db.patch_task(

@@ -24,12 +24,27 @@ impl super::TaskCrud for Database {
         plan: Option<&str>,
         status: TaskStatus,
         base_branch: &str,
+        epic_id: Option<EpicId>,
+        sort_order: Option<i64>,
+        tag: Option<TaskTag>,
     ) -> Result<TaskId> {
         let conn = self.conn()?;
         let sub_status = SubStatus::default_for(status);
         conn.execute(
-            "INSERT INTO tasks (title, description, repo_path, plan_path, status, sub_status, base_branch) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![title, description, repo_path, plan, status.as_str(), sub_status.as_str(), base_branch],
+            "INSERT INTO tasks (title, description, repo_path, plan_path, status, sub_status, base_branch, epic_id, sort_order, tag) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                title,
+                description,
+                repo_path,
+                plan,
+                status.as_str(),
+                sub_status.as_str(),
+                base_branch,
+                epic_id.map(|e| e.0),
+                sort_order,
+                tag.map(|t| t.as_str()),
+            ],
         )
         .context("Failed to insert task")?;
         Ok(TaskId(conn.last_insert_rowid()))
