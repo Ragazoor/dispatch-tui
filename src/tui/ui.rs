@@ -4505,4 +4505,20 @@ mod tests {
         };
         assert_eq!(format_usage(&u), "$0.45 \u{00b7} 12k in / 2k out");
     }
+
+    #[test]
+    fn first_substatus_header_has_no_blank_line() {
+        let item = render_substatus_header("awaiting review", true);
+        assert_eq!(item.height(), 1, "first header should have 1 line (no blank)");
+    }
+
+    #[test]
+    fn subsequent_substatus_header_has_blank_line() {
+        let item = render_substatus_header("in review", false);
+        assert_eq!(
+            item.height(),
+            2,
+            "subsequent header should have 2 lines (blank + label)"
+        );
+    }
 }
