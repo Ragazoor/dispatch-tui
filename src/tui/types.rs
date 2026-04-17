@@ -172,6 +172,20 @@ impl std::str::FromStr for RepoFilterMode {
     }
 }
 
+pub(crate) fn repo_filter_matches(
+    filter: &HashSet<String>,
+    mode: RepoFilterMode,
+    repo: &str,
+) -> bool {
+    if filter.is_empty() {
+        return true;
+    }
+    match mode {
+        RepoFilterMode::Include => filter.contains(repo),
+        RepoFilterMode::Exclude => !filter.contains(repo),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Message
 // ---------------------------------------------------------------------------
@@ -997,13 +1011,7 @@ impl PrListState {
     }
 
     pub fn repo_matches(&self, repo: &str) -> bool {
-        if self.repo_filter.is_empty() {
-            return true;
-        }
-        match self.repo_filter_mode {
-            RepoFilterMode::Include => self.repo_filter.contains(repo),
-            RepoFilterMode::Exclude => !self.repo_filter.contains(repo),
-        }
+        repo_filter_matches(&self.repo_filter, self.repo_filter_mode, repo)
     }
 
     /// Whether this list needs a refresh given the interval.
@@ -1322,13 +1330,7 @@ impl SecurityBoardState {
     }
 
     pub fn repo_matches(&self, repo: &str) -> bool {
-        if self.repo_filter.is_empty() {
-            return true;
-        }
-        match self.repo_filter_mode {
-            RepoFilterMode::Include => self.repo_filter.contains(repo),
-            RepoFilterMode::Exclude => !self.repo_filter.contains(repo),
-        }
+        repo_filter_matches(&self.repo_filter, self.repo_filter_mode, repo)
     }
 
     /// Whether alerts need a refresh given the interval.
@@ -1788,5 +1790,52 @@ mod tests {
     fn review_board_list_authored_returns_some() {
         let state = ReviewBoardState::default();
         assert!(state.list(PrListKind::Authored).is_some());
+    }
+
+    // -- repo_filter_matches --
+
+    #[test]
+    fn repo_filter_matches_empty_filter_matches_any_repo() {
+        let filter = HashSet::new();
+        assert!(repo_filter_matches(
+            &filter,
+            RepoFilterMode::Include,
+            "org/any"
+        ));
+        assert!(repo_filter_matches(
+            &filter,
+            RepoFilterMode::Exclude,
+            "org/any"
+        ));
+    }
+
+    #[test]
+    fn repo_filter_matches_include_mode() {
+        let filter: HashSet<String> = ["org/a".to_string()].into();
+        assert!(repo_filter_matches(
+            &filter,
+            RepoFilterMode::Include,
+            "org/a"
+        ));
+        assert!(!repo_filter_matches(
+            &filter,
+            RepoFilterMode::Include,
+            "org/b"
+        ));
+    }
+
+    #[test]
+    fn repo_filter_matches_exclude_mode() {
+        let filter: HashSet<String> = ["org/a".to_string()].into();
+        assert!(!repo_filter_matches(
+            &filter,
+            RepoFilterMode::Exclude,
+            "org/a"
+        ));
+        assert!(repo_filter_matches(
+            &filter,
+            RepoFilterMode::Exclude,
+            "org/b"
+        ));
     }
 }

@@ -51,6 +51,9 @@ const REVIEW_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
 /// Interval between security board data refreshes (5 minutes).
 const SECURITY_POLL_INTERVAL: Duration = Duration::from_secs(300);
 
+/// Max character width for task titles shown in confirmation popups and status messages.
+pub(in crate::tui) const TITLE_DISPLAY_LENGTH: usize = 30;
+
 // ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
@@ -1514,7 +1517,7 @@ impl App {
 
             // Confirm before moving to Done
             if new_status == TaskStatus::Done {
-                let title = truncate_title(&task.title, 30);
+                let title = truncate_title(&task.title, TITLE_DISPLAY_LENGTH);
                 self.input.mode = InputMode::ConfirmDone(id);
                 self.set_status(format!("Move {title} to Done? [y/n]"));
                 return vec![];
@@ -2380,7 +2383,7 @@ impl App {
 
     fn handle_confirm_delete_start(&mut self) -> Vec<Command> {
         if let Some(task) = self.selected_task() {
-            let title = truncate_title(&task.title, 30);
+            let title = truncate_title(&task.title, TITLE_DISPLAY_LENGTH);
             let status = task.status.as_str();
             let warning = if task.worktree.is_some() {
                 " (has worktree)"
@@ -2914,7 +2917,7 @@ impl App {
             .as_deref()
             .and_then(crate::models::pr_number_from_url)
             .map_or("PR".to_string(), |n| format!("PR #{n}"));
-        let title = truncate_title(&task.title, 30);
+        let title = truncate_title(&task.title, TITLE_DISPLAY_LENGTH);
 
         self.input.mode = InputMode::ConfirmMergePr(id);
         self.set_status(format!("Merge {pr_label} for {title}? [y/n]"));
@@ -3898,7 +3901,7 @@ impl App {
 
     fn handle_confirm_delete_epic(&mut self) -> Vec<Command> {
         if let Some(ColumnItem::Epic(epic)) = self.selected_column_item() {
-            let title = truncate_title(&epic.title, 30);
+            let title = truncate_title(&epic.title, TITLE_DISPLAY_LENGTH);
             self.input.mode = InputMode::ConfirmDeleteEpic;
             self.set_status(format!("Delete epic {title} and subtasks? [y/n]"));
         }
