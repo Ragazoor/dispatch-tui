@@ -1,5 +1,4 @@
 use chrono::{DateTime, Utc};
-use std::time::{Duration, Instant};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -7,6 +6,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
     Frame,
 };
+use std::time::{Duration, Instant};
 
 use super::{
     App, ColumnItem, ColumnLayout, EpicStatsMap, InputMode, RepoFilterMode, ReviewBoardMode,
@@ -36,7 +36,11 @@ const DIM_META: Color = Color::Rgb(70, 74, 100);
 ///
 /// Thresholds are relative to `interval` so both boards stay consistent regardless of their
 /// different poll rates.
-pub fn refresh_status(last_fetch: Option<Instant>, loading: bool, interval: Duration) -> (String, Color) {
+pub fn refresh_status(
+    last_fetch: Option<Instant>,
+    loading: bool,
+    interval: Duration,
+) -> (String, Color) {
     if loading {
         return ("Refreshing...  [r] refresh".to_string(), Color::DarkGray);
     }
@@ -47,7 +51,11 @@ pub fn refresh_status(last_fetch: Option<Instant>, loading: bool, interval: Dura
     let elapsed_str = if elapsed.as_secs() < 60 {
         format!("{}s ago", elapsed.as_secs())
     } else {
-        format!("{}m {}s ago", elapsed.as_secs() / 60, elapsed.as_secs() % 60)
+        format!(
+            "{}m {}s ago",
+            elapsed.as_secs() / 60,
+            elapsed.as_secs() % 60
+        )
     };
     let text = format!("Updated {elapsed_str}  [r] refresh");
     let color = if elapsed >= interval * 4 {
@@ -1889,7 +1897,7 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
                     Span::styled("[t]", key),
                     Span::styled(" toggle kind filter", desc),
                 ]),
-                ]);
+            ]);
         }
         lines.extend(vec![
             Line::from(""),
@@ -2924,7 +2932,8 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
         } => (app.my_prs_last_fetch(), app.my_prs_loading()),
         _ => (app.review_last_fetch(), app.review_board_loading()),
     };
-    let (status_text, status_color) = refresh_status(last_fetch, loading, super::REVIEW_REFRESH_INTERVAL);
+    let (status_text, status_color) =
+        refresh_status(last_fetch, loading, super::REVIEW_REFRESH_INTERVAL);
     frame.render_widget(
         Paragraph::new(status_text).style(Style::default().fg(status_color)),
         chunks[2],
@@ -3411,7 +3420,11 @@ fn render_security_alerts_board(frame: &mut Frame, app: &mut App, area: Rect) {
     render_security_summary_row(frame, app, chunks[2]);
 
     // Refresh status row
-    let (status_text, status_color) = refresh_status(app.security_last_fetch(), app.security_loading(), super::SECURITY_POLL_INTERVAL);
+    let (status_text, status_color) = refresh_status(
+        app.security_last_fetch(),
+        app.security_loading(),
+        super::SECURITY_POLL_INTERVAL,
+    );
     frame.render_widget(
         Paragraph::new(status_text).style(Style::default().fg(status_color)),
         chunks[3],
@@ -3503,7 +3516,11 @@ fn render_dependabot_board(frame: &mut Frame, app: &mut App, area: Rect) {
     render_dependabot_summary_row(frame, app, chunks[2]);
 
     // Refresh status row
-    let (status_text, status_color) = refresh_status(app.bot_prs_last_fetch(), app.bot_prs_loading(), super::REVIEW_REFRESH_INTERVAL);
+    let (status_text, status_color) = refresh_status(
+        app.bot_prs_last_fetch(),
+        app.bot_prs_loading(),
+        super::REVIEW_REFRESH_INTERVAL,
+    );
     frame.render_widget(
         Paragraph::new(status_text).style(Style::default().fg(status_color)),
         chunks[3],
@@ -4557,7 +4574,11 @@ mod tests {
     #[test]
     fn first_substatus_header_has_no_blank_line() {
         let item = render_substatus_header("awaiting review", true);
-        assert_eq!(item.height(), 1, "first header should have 1 line (no blank)");
+        assert_eq!(
+            item.height(),
+            1,
+            "first header should have 1 line (no blank)"
+        );
     }
 
     #[test]

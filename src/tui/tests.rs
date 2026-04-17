@@ -16847,7 +16847,8 @@ fn security_board_r_refreshes_security_alerts_in_alerts_mode() {
 
     let cmds = app.handle_key(make_key(KeyCode::Char('r')));
     assert!(
-        cmds.iter().any(|c| matches!(c, Command::FetchSecurityAlerts)),
+        cmds.iter()
+            .any(|c| matches!(c, Command::FetchSecurityAlerts)),
         "r in Alerts mode should emit FetchSecurityAlerts"
     );
     assert!(
@@ -16864,7 +16865,8 @@ fn security_board_r_refreshes_bot_prs_in_dependabot_mode() {
 
     let cmds = app.handle_key(make_key(KeyCode::Char('r')));
     assert!(
-        cmds.iter().any(|c| matches!(c, Command::FetchPrs(PrListKind::Bot))),
+        cmds.iter()
+            .any(|c| matches!(c, Command::FetchPrs(PrListKind::Bot))),
         "r in Dependabot mode should emit FetchPrs(Bot)"
     );
     assert!(
@@ -16901,8 +16903,10 @@ fn refresh_status_loading_overrides_never_fetched() {
 fn refresh_status_fresh_seconds() {
     let last = Instant::now() - Duration::from_secs(1);
     let (text, color) = ui::refresh_status(Some(last), false, Duration::from_secs(30));
-    assert!(text.starts_with("Updated ") && text.contains("s ago") && text.ends_with("  [r] refresh"),
-        "expected 'Updated Xs ago  [r] refresh', got: {text}");
+    assert!(
+        text.starts_with("Updated ") && text.contains("s ago") && text.ends_with("  [r] refresh"),
+        "expected 'Updated Xs ago  [r] refresh', got: {text}"
+    );
     assert_eq!(color, Color::White);
 }
 
@@ -16920,8 +16924,10 @@ fn refresh_status_minutes_format() {
     // 60s elapsed → "1m 0s ago"
     let last = Instant::now() - Duration::from_secs(60);
     let (text, color) = ui::refresh_status(Some(last), false, Duration::from_secs(300));
-    assert!(text.contains("1m") && text.contains("s ago"),
-        "expected minutes format in: {text}");
+    assert!(
+        text.contains("1m") && text.contains("s ago"),
+        "expected minutes format in: {text}"
+    );
     assert_eq!(color, Color::White);
 }
 
