@@ -49,10 +49,10 @@ const STATUS_MESSAGE_TTL: Duration = Duration::from_secs(5);
 const PR_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Interval between review board data refreshes.
-const REVIEW_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
+pub(in crate::tui) const REVIEW_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Interval between security board data refreshes (5 minutes).
-const SECURITY_POLL_INTERVAL: Duration = Duration::from_secs(300);
+pub(in crate::tui) const SECURITY_POLL_INTERVAL: Duration = Duration::from_secs(300);
 
 /// Max character width for task titles shown in confirmation popups and status messages.
 pub(in crate::tui) const TITLE_DISPLAY_LENGTH: usize = 30;
@@ -298,6 +298,12 @@ impl App {
     pub fn review_board_loading(&self) -> bool {
         self.review.review.loading
     }
+    pub fn review_last_fetch(&self) -> Option<Instant> {
+        self.review.review.last_fetch
+    }
+    pub fn my_prs_last_fetch(&self) -> Option<Instant> {
+        self.review.authored.last_fetch
+    }
     pub fn last_review_error(&self) -> Option<&str> {
         self.review.review.last_error.as_deref()
     }
@@ -383,6 +389,12 @@ impl App {
 
     pub fn security_loading(&self) -> bool {
         self.security.loading
+    }
+    pub fn security_last_fetch(&self) -> Option<Instant> {
+        self.security.last_fetch
+    }
+    pub fn bot_prs_last_fetch(&self) -> Option<Instant> {
+        self.security.dependabot.prs.last_fetch
     }
 
     pub fn last_security_error(&self) -> Option<&str> {

@@ -888,28 +888,7 @@ impl App {
                     vec![]
                 }
             }
-            KeyCode::Char('r') => {
-                if let Some(alert) = self.selected_security_alert() {
-                    let repo = alert.repo.clone();
-                    let number = alert.number;
-                    let handle = self.alert_agent(alert).cloned();
-                    if let Some(h) = handle {
-                        if h.status == crate::models::ReviewAgentStatus::Idle {
-                            vec![Command::ReReview {
-                                repo,
-                                number,
-                                tmux_window: h.tmux_window,
-                            }]
-                        } else {
-                            vec![]
-                        }
-                    } else {
-                        vec![]
-                    }
-                } else {
-                    vec![]
-                }
-            }
+            KeyCode::Char('r') => self.update(Message::RefreshSecurityAlerts),
             KeyCode::Char('f') => self.update(Message::StartSecurityRepoFilter),
             KeyCode::Char('t') => self.update(Message::ToggleSecurityKindFilter),
             KeyCode::Char('?') => self.update(Message::ToggleHelp),
@@ -1016,28 +995,7 @@ impl App {
                     vec![]
                 }
             }
-            KeyCode::Char('r') => {
-                if let Some(pr) = self.selected_dependabot_pr() {
-                    let repo = pr.repo.clone();
-                    let number = pr.number;
-                    let handle = self.pr_agent(pr).cloned();
-                    if let Some(h) = handle {
-                        if h.status == crate::models::ReviewAgentStatus::Idle {
-                            vec![Command::ReReview {
-                                repo,
-                                number,
-                                tmux_window: h.tmux_window,
-                            }]
-                        } else {
-                            vec![]
-                        }
-                    } else {
-                        vec![]
-                    }
-                } else {
-                    vec![]
-                }
-            }
+            KeyCode::Char('r') => self.update(Message::RefreshBotPrs),
             KeyCode::Char('p') => {
                 if let Some(pr) = self.selected_dependabot_pr() {
                     let url = pr.url.clone();
@@ -1218,28 +1176,7 @@ impl App {
                 }
             }
 
-            KeyCode::Char('r') => {
-                if let Some(pr) = self.selected_review_pr() {
-                    let repo = pr.repo.clone();
-                    let number = pr.number;
-                    let handle = self.pr_agent(pr).cloned();
-                    if let Some(h) = handle {
-                        if h.status == crate::models::ReviewAgentStatus::Idle {
-                            vec![Command::ReReview {
-                                repo,
-                                number,
-                                tmux_window: h.tmux_window,
-                            }]
-                        } else {
-                            vec![]
-                        }
-                    } else {
-                        vec![]
-                    }
-                } else {
-                    vec![]
-                }
-            }
+            KeyCode::Char('r') => self.update(Message::RefreshReviewPrs),
             KeyCode::Char('f') => self.update(Message::StartReviewRepoFilter),
 
             KeyCode::Char('d') => {

@@ -3100,8 +3100,8 @@ fn render_help_overlay_in_review_board_shows_review_shortcuts() {
         "review help should mention open PR"
     );
     assert!(
-        buffer_contains(&buf, "dispatch review agent"),
-        "review help should mention dispatch review agent"
+        buffer_contains(&buf, "dispatch / resume agent"),
+        "review help should mention dispatch/resume agent"
     );
     assert!(
         !buffer_contains(&buf, "new task"),
@@ -6941,12 +6941,8 @@ fn review_board_renders_loading_state() {
 
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
-        buffer_contains(&buf, "Loading..."),
-        "Should show loading text while fetching"
-    );
-    assert!(
-        !buffer_contains(&buf, "No PRs found"),
-        "Should not show empty-state text while loading"
+        buffer_contains(&buf, "Refreshing..."),
+        "Refresh status row should show Refreshing... while fetching"
     );
 }
 
@@ -7002,8 +6998,8 @@ fn review_board_renders_empty_state_after_fetch() {
         "Should show empty state after fetch with no results"
     );
     assert!(
-        !buffer_contains(&buf, "Loading..."),
-        "Should not show loading text after fetch completes"
+        !buffer_contains(&buf, "Refreshing..."),
+        "Should not show Refreshing after fetch completes"
     );
 }
 
@@ -11585,16 +11581,6 @@ fn security_board_d_with_no_alert_is_noop() {
 }
 
 #[test]
-fn security_board_r_without_idle_agent_is_noop() {
-    let mut app = make_security_board_app();
-    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
-    assert!(
-        cmds.is_empty(),
-        "r without idle agent should do nothing (refresh removed)"
-    );
-}
-
-#[test]
 fn security_board_f_opens_repo_filter() {
     let mut app = make_security_board_app();
     app.handle_key(make_key(KeyCode::Char('f')));
@@ -11869,16 +11855,6 @@ fn review_board_p_with_no_prs_is_noop() {
     app.update(Message::SwitchToReviewBoard);
     let cmds = app.handle_key(make_key(KeyCode::Char('p')));
     assert!(cmds.is_empty());
-}
-
-#[test]
-fn review_board_r_without_idle_agent_is_noop() {
-    let mut app = make_review_board_app();
-    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
-    assert!(
-        cmds.is_empty(),
-        "r without idle agent should do nothing (refresh removed)"
-    );
 }
 
 #[test]
@@ -12435,70 +12411,6 @@ fn review_agent_dispatched_sets_agent_status_reviewing() {
 // ---------------------------------------------------------------------------
 // Review/Security board key binding tests for r and T
 // ---------------------------------------------------------------------------
-
-#[test]
-fn review_board_r_on_idle_agent_emits_re_review() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    let pr = make_review_pr_for_repo(
-        42,
-        "alice",
-        crate::models::ReviewDecision::ReviewRequired,
-        "acme/app",
-    );
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
-    app.review.review_agents.insert(
-        crate::models::PrRef::new("acme/app".to_string(), 42),
-        super::types::ReviewAgentHandle {
-            tmux_window: "dispatch:review-42".to_string(),
-            worktree: "/tmp/wt".to_string(),
-            status: crate::models::ReviewAgentStatus::Idle,
-        },
-    );
-
-    let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('r')));
-    assert!(cmds.iter().any(|c| matches!(c, Command::ReReview { .. })));
-}
-
-#[test]
-fn review_board_r_without_agent_does_nothing() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    let pr = make_review_pr_for_repo(
-        42,
-        "alice",
-        crate::models::ReviewDecision::ReviewRequired,
-        "acme/app",
-    );
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
-
-    let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('r')));
-    assert!(cmds.is_empty());
-}
-
-#[test]
-fn review_board_r_on_reviewing_agent_does_nothing() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    let pr = make_review_pr_for_repo(
-        42,
-        "alice",
-        crate::models::ReviewDecision::ReviewRequired,
-        "acme/app",
-    );
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
-    app.review.review_agents.insert(
-        crate::models::PrRef::new("acme/app".to_string(), 42),
-        super::types::ReviewAgentHandle {
-            tmux_window: "dispatch:review-42".to_string(),
-            worktree: "/tmp/wt".to_string(),
-            status: crate::models::ReviewAgentStatus::Reviewing,
-        },
-    );
-
-    let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('r')));
-    assert!(cmds.is_empty());
-}
 
 #[test]
 fn review_board_t_on_agent_emits_detach() {
@@ -14170,34 +14082,6 @@ fn security_board_capital_t_detaches_agent() {
 fn security_board_capital_t_no_window_is_noop() {
     let mut app = make_security_board_app();
     let cmds = app.handle_key(make_key(KeyCode::Char('T')));
-    assert!(cmds.is_empty());
-}
-
-#[test]
-fn security_board_r_with_idle_agent_emits_re_review() {
-    let mut app = make_security_board_app();
-    app.security.fix_agents.insert(
-        super::types::FixDispatchKey::new(
-            "org/alpha".to_string(),
-            1,
-            crate::models::AlertKind::Dependabot,
-        ),
-        super::types::FixAgentHandle {
-            tmux_window: "sec:alert-1".to_string(),
-            worktree: "/tmp/fix-wt".to_string(),
-            status: crate::models::ReviewAgentStatus::Idle,
-        },
-    );
-
-    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
-    assert!(cmds.iter().any(|c| matches!(c, Command::ReReview { .. })));
-}
-
-#[test]
-fn security_board_r_without_idle_agent_no_window_is_noop() {
-    let mut app = make_security_board_app();
-    // No agent status set, so not idle
-    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
     assert!(cmds.is_empty());
 }
 
@@ -16025,69 +15909,6 @@ fn security_dependabot_g_with_tmux_window_jumps() {
 }
 
 #[test]
-fn security_dependabot_r_idle_with_tmux_rerequests_review() {
-    let mut app = make_security_board_app();
-    let pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
-    let repo = pr.repo.clone();
-    let number = pr.number;
-    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
-    app.review.review_agents.insert(
-        crate::models::PrRef::new(repo.clone(), number),
-        super::types::ReviewAgentHandle {
-            tmux_window: "dispatch:review-10".to_string(),
-            worktree: "/tmp/wt".to_string(),
-            status: crate::models::ReviewAgentStatus::Idle,
-        },
-    );
-    app.update(Message::SwitchSecurityBoardMode(
-        SecurityBoardMode::Dependabot,
-    ));
-    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
-    assert!(
-        cmds.iter().any(|c| matches!(
-            c,
-            Command::ReReview { repo: r, number: n, tmux_window: w }
-            if r == &repo && *n == number && w == "dispatch:review-10"
-        )),
-        "expected ReReview command"
-    );
-}
-
-#[test]
-fn security_dependabot_r_not_idle_is_noop() {
-    let mut app = make_security_board_app();
-    let pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
-    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
-    // Agent has status Reviewing (not Idle) — 'r' should be a no-op
-    app.review.review_agents.insert(
-        crate::models::PrRef::new("acme/app".to_string(), 10),
-        super::types::ReviewAgentHandle {
-            tmux_window: "dispatch:review-10".to_string(),
-            worktree: "/tmp/wt".to_string(),
-            status: crate::models::ReviewAgentStatus::Reviewing,
-        },
-    );
-    app.update(Message::SwitchSecurityBoardMode(
-        SecurityBoardMode::Dependabot,
-    ));
-    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
-    assert!(cmds.is_empty());
-}
-
-#[test]
-fn security_dependabot_r_no_tmux_window_is_noop() {
-    let mut app = make_security_board_app();
-    let pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
-    // No agent handle in the map — 'r' should be a no-op
-    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
-    app.update(Message::SwitchSecurityBoardMode(
-        SecurityBoardMode::Dependabot,
-    ));
-    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
-    assert!(cmds.is_empty());
-}
-
-#[test]
 fn security_dependabot_T_with_tmux_detaches_agent() {
     let mut app = make_security_board_app();
     let pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
@@ -16956,4 +16777,186 @@ fn fix_agents_map_survives_alert_refresh() {
         "fix_agents map should survive an alert list refresh"
     );
     assert_eq!(app.security.fix_agents[&key].tmux_window, "fix-win-5");
+}
+
+// == r key: always refresh from GitHub ==
+
+#[test]
+fn review_board_r_refreshes_when_no_pr_selected() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.update(Message::SwitchToReviewBoard);
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
+    assert!(
+        cmds.iter().any(|c| matches!(c, Command::FetchPrs(_))),
+        "r with no PR selected should still trigger FetchPrs"
+    );
+}
+
+#[test]
+fn review_board_r_refreshes_when_pr_selected_no_agent() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
+    app.review.review.set_prs(vec![pr]);
+    app.update(Message::SwitchToReviewBoard);
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
+    assert!(
+        cmds.iter().any(|c| matches!(c, Command::FetchPrs(_))),
+        "r with PR selected but no agent should trigger FetchPrs"
+    );
+    assert!(
+        !cmds.iter().any(|c| matches!(c, Command::ReReview { .. })),
+        "r must not emit ReReview"
+    );
+}
+
+#[test]
+fn review_board_r_refreshes_even_when_agent_idle() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
+    app.review.review.set_prs(vec![pr]);
+    app.update(Message::SwitchToReviewBoard);
+
+    let key = crate::models::PrRef::new("acme/app".to_string(), 42);
+    app.review.review_agents.insert(
+        key,
+        super::types::ReviewAgentHandle {
+            tmux_window: "review:pr-42".to_string(),
+            worktree: "/repo/.worktrees/review-42".to_string(),
+            status: crate::models::ReviewAgentStatus::Idle,
+        },
+    );
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
+    assert!(
+        cmds.iter().any(|c| matches!(c, Command::FetchPrs(_))),
+        "r with idle agent should trigger FetchPrs, not ReReview"
+    );
+    assert!(
+        !cmds.iter().any(|c| matches!(c, Command::ReReview { .. })),
+        "r must not emit ReReview even when agent is idle"
+    );
+}
+
+#[test]
+fn security_board_r_refreshes_security_alerts_in_alerts_mode() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.update(Message::SwitchToSecurityBoard);
+    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Alerts));
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
+    assert!(
+        cmds.iter().any(|c| matches!(c, Command::FetchSecurityAlerts)),
+        "r in Alerts mode should emit FetchSecurityAlerts"
+    );
+    assert!(
+        !cmds.iter().any(|c| matches!(c, Command::ReReview { .. })),
+        "r in Alerts mode must not emit ReReview"
+    );
+}
+
+#[test]
+fn security_board_r_refreshes_bot_prs_in_dependabot_mode() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.update(Message::SwitchToSecurityBoard);
+    // Default mode is Dependabot
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
+    assert!(
+        cmds.iter().any(|c| matches!(c, Command::FetchPrs(PrListKind::Bot))),
+        "r in Dependabot mode should emit FetchPrs(Bot)"
+    );
+    assert!(
+        !cmds.iter().any(|c| matches!(c, Command::ReReview { .. })),
+        "r in Dependabot mode must not emit ReReview"
+    );
+}
+
+// == refresh_status: text and color helper ==
+
+#[test]
+fn refresh_status_never_fetched() {
+    let (text, color) = ui::refresh_status(None, false, Duration::from_secs(30));
+    assert_eq!(text, "Never fetched  [r] refresh");
+    assert_eq!(color, Color::DarkGray);
+}
+
+#[test]
+fn refresh_status_loading() {
+    let last = Instant::now() - Duration::from_secs(5);
+    let (text, color) = ui::refresh_status(Some(last), true, Duration::from_secs(30));
+    assert_eq!(text, "Refreshing...  [r] refresh");
+    assert_eq!(color, Color::DarkGray);
+}
+
+#[test]
+fn refresh_status_loading_overrides_never_fetched() {
+    let (text, color) = ui::refresh_status(None, true, Duration::from_secs(30));
+    assert_eq!(text, "Refreshing...  [r] refresh");
+    assert_eq!(color, Color::DarkGray);
+}
+
+#[test]
+fn refresh_status_fresh_seconds() {
+    let last = Instant::now() - Duration::from_secs(1);
+    let (text, color) = ui::refresh_status(Some(last), false, Duration::from_secs(30));
+    assert!(text.starts_with("Updated ") && text.contains("s ago") && text.ends_with("  [r] refresh"),
+        "expected 'Updated Xs ago  [r] refresh', got: {text}");
+    assert_eq!(color, Color::White);
+}
+
+#[test]
+fn refresh_status_fresh_just_below_minutes_threshold() {
+    // 59s elapsed, 30s interval: 59 < 2*30=60 → still White, seconds format
+    let last = Instant::now() - Duration::from_secs(59);
+    let (text, color) = ui::refresh_status(Some(last), false, Duration::from_secs(30));
+    assert!(text.contains("59s ago"), "expected '59s ago' in: {text}");
+    assert_eq!(color, Color::White);
+}
+
+#[test]
+fn refresh_status_minutes_format() {
+    // 60s elapsed → "1m 0s ago"
+    let last = Instant::now() - Duration::from_secs(60);
+    let (text, color) = ui::refresh_status(Some(last), false, Duration::from_secs(300));
+    assert!(text.contains("1m") && text.contains("s ago"),
+        "expected minutes format in: {text}");
+    assert_eq!(color, Color::White);
+}
+
+#[test]
+fn refresh_status_yellow_at_2x_interval() {
+    let interval = Duration::from_secs(30);
+    // exactly 2× interval → Yellow
+    let last = Instant::now() - interval * 2;
+    let (_, color) = ui::refresh_status(Some(last), false, interval);
+    assert_eq!(color, Color::Yellow);
+}
+
+#[test]
+fn refresh_status_white_just_below_2x_interval() {
+    let interval = Duration::from_secs(30);
+    // 1ms under 2× interval → still White
+    let last = Instant::now() - (interval * 2 - Duration::from_millis(100));
+    let (_, color) = ui::refresh_status(Some(last), false, interval);
+    assert_eq!(color, Color::White);
+}
+
+#[test]
+fn refresh_status_yellow_just_below_4x_interval() {
+    let interval = Duration::from_secs(30);
+    // 1ms under 4× interval → still Yellow
+    let last = Instant::now() - (interval * 4 - Duration::from_millis(100));
+    let (_, color) = ui::refresh_status(Some(last), false, interval);
+    assert_eq!(color, Color::Yellow);
+}
+
+#[test]
+fn refresh_status_red_at_4x_interval() {
+    let interval = Duration::from_secs(30);
+    // exactly 4× interval → Red
+    let last = Instant::now() - interval * 4;
+    let (_, color) = ui::refresh_status(Some(last), false, interval);
+    assert_eq!(color, Color::Red);
 }

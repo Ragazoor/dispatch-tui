@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use std::time::{Duration, Instant};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -30,6 +31,34 @@ const RED_DIM: Color = Color::Rgb(224, 130, 130);
 const BLUE: Color = Color::Rgb(122, 162, 247);
 const FLASH_BG: Color = Color::Rgb(62, 52, 20);
 const DIM_META: Color = Color::Rgb(70, 74, 100);
+
+/// Returns (text, color) for the 1-line refresh status row shown on Review and Security boards.
+///
+/// Thresholds are relative to `interval` so both boards stay consistent regardless of their
+/// different poll rates.
+pub fn refresh_status(last_fetch: Option<Instant>, loading: bool, interval: Duration) -> (String, Color) {
+    if loading {
+        return ("Refreshing...  [r] refresh".to_string(), Color::DarkGray);
+    }
+    let Some(last) = last_fetch else {
+        return ("Never fetched  [r] refresh".to_string(), Color::DarkGray);
+    };
+    let elapsed = last.elapsed();
+    let elapsed_str = if elapsed.as_secs() < 60 {
+        format!("{}s ago", elapsed.as_secs())
+    } else {
+        format!("{}m {}s ago", elapsed.as_secs() / 60, elapsed.as_secs() % 60)
+    };
+    let text = format!("Updated {elapsed_str}  [r] refresh");
+    let color = if elapsed >= interval * 4 {
+        Color::Red
+    } else if elapsed >= interval * 2 {
+        Color::Yellow
+    } else {
+        Color::White
+    };
+    (text, color)
+}
 
 /// Column color per status
 pub(in crate::tui) fn column_color(status: TaskStatus) -> Color {
@@ -1860,11 +1889,7 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
                     Span::styled("[t]", key),
                     Span::styled(" toggle kind filter", desc),
                 ]),
-                Line::from(vec![
-                    Span::styled("  [r]", key),
-                    Span::styled(" refresh from GitHub", desc),
-                ]),
-            ]);
+                ]);
         }
         lines.extend(vec![
             Line::from(""),
@@ -1908,10 +1933,10 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
             Line::from(""),
             Line::from(Span::styled("  Actions", header)),
             Line::from(vec![
-                Span::styled("  [r]", key),
-                Span::styled(" refresh from GitHub  ", desc),
-                Span::styled("[d]", key),
-                Span::styled(" dispatch review agent", desc),
+                Span::styled("  [d]", key),
+                Span::styled(" dispatch / resume agent  ", desc),
+                Span::styled("[T]", key),
+                Span::styled(" detach agent", desc),
             ]),
             Line::from(vec![
                 Span::styled("  [f]", key),
@@ -2821,7 +2846,7 @@ pub(in crate::tui) fn review_action_hints(
     match agent_status {
         Some(ReviewAgentStatus::Idle) => {
             push_hint("g", "go to");
-            push_hint("r", "re-review");
+            push_hint("d", "resume");
             push_hint("T", "detach");
         }
         Some(_) => {
@@ -2881,6 +2906,7 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
         .constraints([
             Constraint::Length(1),             // tab bar
             Constraint::Length(1),             // summary row
+            Constraint::Length(1),             // refresh status row
             Constraint::Min(1),                // board
             Constraint::Length(detail_height), // detail panel
             Constraint::Length(1),             // status bar
@@ -2890,15 +2916,22 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
     render_tab_bar(frame, app, chunks[0]);
     render_review_summary_row(frame, app, chunks[1]);
 
+    // Refresh status row
+    let (last_fetch, loading) = match app.view_mode() {
+        ViewMode::ReviewBoard {
+            mode: ReviewBoardMode::Author,
+            ..
+        } => (app.my_prs_last_fetch(), app.my_prs_loading()),
+        _ => (app.review_last_fetch(), app.review_board_loading()),
+    };
+    let (status_text, status_color) = refresh_status(last_fetch, loading, super::REVIEW_REFRESH_INTERVAL);
+    frame.render_widget(
+        Paragraph::new(status_text).style(Style::default().fg(status_color)),
+        chunks[2],
+    );
+
     let filtered = app.active_review_prs();
     if filtered.is_empty() {
-        let is_loading = match app.view_mode() {
-            ViewMode::ReviewBoard {
-                mode: ReviewBoardMode::Author,
-                ..
-            } => app.my_prs_loading(),
-            _ => app.review_board_loading(),
-        };
         let is_empty = match app.view_mode() {
             ViewMode::ReviewBoard {
                 mode: ReviewBoardMode::Author,
@@ -2906,30 +2939,28 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
             } => app.my_prs().is_empty(),
             _ => app.review_prs().is_empty(),
         };
-        let msg = if is_loading {
-            "Loading..."
-        } else if is_empty {
-            "No PRs found — refreshes automatically"
+        let msg = if is_empty {
+            "No PRs found"
         } else {
             "All PRs filtered out."
         };
         let p = Paragraph::new(msg)
             .alignment(Alignment::Center)
             .style(Style::default().fg(Color::DarkGray));
-        frame.render_widget(p, chunks[2]);
+        frame.render_widget(p, chunks[3]);
     } else {
-        render_review_columns(frame, app, chunks[2]);
+        render_review_columns(frame, app, chunks[3]);
     }
 
-    render_review_detail(frame, app, chunks[3]);
+    render_review_detail(frame, app, chunks[4]);
 
     // Status bar: transient message takes priority; fall back to persistent error
     if let Some(msg) = app.status.message.as_deref() {
         let status = Paragraph::new(msg.to_string()).style(Style::default().fg(Color::Yellow));
-        frame.render_widget(status, chunks[4]);
+        frame.render_widget(status, chunks[5]);
     } else if let Some(err) = app.last_review_error() {
         let status = Paragraph::new(format!("Error: {err}")).style(Style::default().fg(Color::Red));
-        frame.render_widget(status, chunks[4]);
+        frame.render_widget(status, chunks[5]);
     } else if app.has_bot_pr_selection() {
         let count = app.selected_bot_prs().len();
         let text = format!("{count} selected  [A] approve  [m] merge  [Esc] clear");
@@ -2938,7 +2969,7 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         );
-        frame.render_widget(status, chunks[4]);
+        frame.render_widget(status, chunks[5]);
     } else {
         let has_pr = app.selected_review_pr().is_some();
         let is_author_mode = matches!(
@@ -2956,7 +2987,7 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
             is_author_mode,
             agent_status,
         )));
-        frame.render_widget(hints, chunks[4]);
+        frame.render_widget(hints, chunks[5]);
     }
 
     // Filter overlay (on top of everything)
@@ -3368,6 +3399,7 @@ fn render_security_alerts_board(frame: &mut Frame, app: &mut App, area: Rect) {
             Constraint::Length(1),             // tab bar
             Constraint::Length(1),             // mode header
             Constraint::Length(1),             // summary row
+            Constraint::Length(1),             // refresh status row
             Constraint::Min(1),                // board
             Constraint::Length(detail_height), // detail panel
             Constraint::Length(1),             // status bar
@@ -3378,32 +3410,37 @@ fn render_security_alerts_board(frame: &mut Frame, app: &mut App, area: Rect) {
     render_security_mode_header(frame, SecurityBoardMode::Alerts, chunks[1]);
     render_security_summary_row(frame, app, chunks[2]);
 
+    // Refresh status row
+    let (status_text, status_color) = refresh_status(app.security_last_fetch(), app.security_loading(), super::SECURITY_POLL_INTERVAL);
+    frame.render_widget(
+        Paragraph::new(status_text).style(Style::default().fg(status_color)),
+        chunks[3],
+    );
+
     let filtered = app.filtered_security_alerts();
     if filtered.is_empty() {
-        let msg = if app.security_loading() {
-            "Loading..."
-        } else if app.filtered_security_alerts().is_empty() && !app.security.alerts.is_empty() {
+        let msg = if app.filtered_security_alerts().is_empty() && !app.security.alerts.is_empty() {
             "All alerts filtered out."
         } else {
-            "No security alerts found — refreshes automatically"
+            "No security alerts found"
         };
         let p = Paragraph::new(msg)
             .alignment(Alignment::Center)
             .style(Style::default().fg(Color::DarkGray));
-        frame.render_widget(p, chunks[3]);
+        frame.render_widget(p, chunks[4]);
     } else {
-        render_security_columns(frame, app, chunks[3]);
+        render_security_columns(frame, app, chunks[4]);
     }
 
-    render_security_detail(frame, app, chunks[4]);
+    render_security_detail(frame, app, chunks[5]);
 
     // Status bar
     if let Some(msg) = app.status.message.as_deref() {
         let status = Paragraph::new(msg.to_string()).style(Style::default().fg(Color::Yellow));
-        frame.render_widget(status, chunks[5]);
+        frame.render_widget(status, chunks[6]);
     } else if let Some(err) = app.last_security_error() {
         let status = Paragraph::new(format!("Error: {err}")).style(Style::default().fg(Color::Red));
-        frame.render_widget(status, chunks[5]);
+        frame.render_widget(status, chunks[6]);
     } else {
         let has_alert = app.selected_security_alert().is_some();
         let agent_status = app
@@ -3414,7 +3451,7 @@ fn render_security_alerts_board(frame: &mut Frame, app: &mut App, area: Rect) {
             has_alert,
             agent_status,
         )));
-        frame.render_widget(hints, chunks[5]);
+        frame.render_widget(hints, chunks[6]);
     }
 
     // Filter overlay
@@ -3454,6 +3491,7 @@ fn render_dependabot_board(frame: &mut Frame, app: &mut App, area: Rect) {
             Constraint::Length(1),             // tab bar
             Constraint::Length(1),             // mode header
             Constraint::Length(1),             // column summary row
+            Constraint::Length(1),             // refresh status row
             Constraint::Min(1),                // board
             Constraint::Length(detail_height), // detail panel (placeholder)
             Constraint::Length(1),             // status bar
@@ -3464,36 +3502,41 @@ fn render_dependabot_board(frame: &mut Frame, app: &mut App, area: Rect) {
     render_security_mode_header(frame, SecurityBoardMode::Dependabot, chunks[1]);
     render_dependabot_summary_row(frame, app, chunks[2]);
 
+    // Refresh status row
+    let (status_text, status_color) = refresh_status(app.bot_prs_last_fetch(), app.bot_prs_loading(), super::REVIEW_REFRESH_INTERVAL);
+    frame.render_widget(
+        Paragraph::new(status_text).style(Style::default().fg(status_color)),
+        chunks[3],
+    );
+
     let bot_prs = app.filtered_bot_prs();
     if bot_prs.is_empty() {
-        let msg = if app.bot_prs_loading() {
-            "Loading..."
-        } else if app.security.dependabot.prs.last_error.is_some() {
+        let msg = if app.security.dependabot.prs.last_error.is_some() {
             "Failed to load PRs."
         } else {
-            "No Dependabot PRs found — refreshes automatically"
+            "No Dependabot PRs found"
         };
         let p = Paragraph::new(msg)
             .alignment(Alignment::Center)
             .style(Style::default().fg(Color::DarkGray));
-        frame.render_widget(p, chunks[3]);
+        frame.render_widget(p, chunks[4]);
     } else {
-        render_dependabot_columns(frame, app, chunks[3]);
+        render_dependabot_columns(frame, app, chunks[4]);
     }
 
     // Detail panel placeholder (currently empty)
     let detail_block = Block::default()
         .borders(Borders::TOP)
         .border_style(Style::default().fg(BORDER));
-    frame.render_widget(detail_block, chunks[4]);
+    frame.render_widget(detail_block, chunks[5]);
 
     // Status bar
     if let Some(msg) = app.status.message.as_deref() {
         let status = Paragraph::new(msg.to_string()).style(Style::default().fg(Color::Yellow));
-        frame.render_widget(status, chunks[5]);
+        frame.render_widget(status, chunks[6]);
     } else if let Some(err) = app.security.dependabot.prs.last_error.as_deref() {
         let status = Paragraph::new(format!("Error: {err}")).style(Style::default().fg(Color::Red));
-        frame.render_widget(status, chunks[5]);
+        frame.render_widget(status, chunks[6]);
     } else {
         let has_selected = !app.selected_bot_prs().is_empty();
         let col = match app.view_mode() {
@@ -3521,7 +3564,7 @@ fn render_dependabot_board(frame: &mut Frame, app: &mut App, area: Rect) {
             selected_pr,
             pr_agent_status,
         )));
-        frame.render_widget(hints, chunks[5]);
+        frame.render_widget(hints, chunks[6]);
     }
 }
 
@@ -3682,7 +3725,7 @@ pub(in crate::tui) fn dependabot_action_hints(
         match agent_status {
             Some(ReviewAgentStatus::Idle) => {
                 push_hint(&mut spans, "g", "go to".into());
-                push_hint(&mut spans, "r", "re-review".into());
+                push_hint(&mut spans, "d", "resume".into());
                 push_hint(&mut spans, "T", "detach".into());
             }
             Some(_) => {
@@ -3718,7 +3761,7 @@ pub(in crate::tui) fn security_action_hints(
         match agent_status {
             Some(ReviewAgentStatus::Idle) => {
                 push_hint(&mut spans, "g", "go to".into());
-                push_hint(&mut spans, "r", "re-review".into());
+                push_hint(&mut spans, "d", "resume".into());
                 push_hint(&mut spans, "T", "detach".into());
             }
             Some(_) => {

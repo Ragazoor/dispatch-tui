@@ -158,13 +158,14 @@ rule ReReviewAlert {
     ensures: FixAgentReTriggered(alert: alert)
 
     @guidance
-        -- Triggered from the Alerts sub-view (r key on an alert with an idle
-        -- agent). Sends the shared "/review-pr {number}" command via
-        -- tmux send-keys to the existing tmux session — does NOT create a
+        -- Triggered from the Alerts sub-view (`d` key on an alert with an idle
+        -- agent). This mirrors the task board pattern: `d` dispatches a new
+        -- agent when none is active, and resumes the existing session when
+        -- agent_status = idle. Sends the shared "/review-pr {number}" command
+        -- via tmux send-keys to the existing tmux session — does NOT create a
         -- new worktree. (The same re-review command is used for fix agents
         -- and review agents; the fix agent treats it as a prompt to re-assess
         -- its work.) Sets agent_status to reviewing in both memory and DB.
-        -- Only available when agent_status == idle.
 }
 
 ------------------------------------------------------------
@@ -199,8 +200,8 @@ rule ReReviewAlert {
 --   q                 — quit the TUI
 --
 -- Actions on the selected alert:
---   d                 — dispatch a fix agent (DispatchFixAgent)
---   r                 — re-trigger review (ReReviewAlert); only when idle
+--   d                 — dispatch a fix agent (DispatchFixAgent), or resume session (agent_status = idle)
+--   r                 — force-refresh alert data from GitHub (always; no agent interaction)
 --   T                 — detach the fix agent (DetachFixAgent)
 --   g                 — jump to the alert's tmux window (if any)
 --   p                 — open the alert URL in the browser
@@ -249,6 +250,23 @@ visual KindBadge(kind: AlertKind) -> (Color, String) {
 
 -- Reuses the same badge convention as dependabot.allium / review-board.allium.
 -- See dependabot.allium AgentStatusBadge for the full mapping.
+
+------------------------------------------------------------
+-- Visual: Refresh Status Row
+------------------------------------------------------------
+
+visual RefreshStatusRow(last_fetch: Timestamp?, loading: Boolean, interval: Duration) -> (Color, String) {
+    -- Rendered as a 1-line row between the summary row and the board columns.
+    -- Shows the time since the last successful fetch, color-coded by staleness.
+    -- The [r] refresh hint lives exclusively here (not in the help bar).
+    loading = true        => (dark_gray, "Refreshing...  [r] refresh")
+    last_fetch = null     => (dark_gray, "Never fetched  [r] refresh")
+    elapsed < interval*2  => (white,     "Updated <elapsed>  [r] refresh")
+    elapsed < interval*4  => (yellow,    "Updated <elapsed>  [r] refresh")
+    _                     => (red,       "Updated <elapsed>  [r] refresh")
+    -- elapsed is formatted as "Xs ago" for < 60s, "Xm Ys ago" for >= 60s.
+    -- interval = config.security_poll_interval (300.seconds)
+}
 
 ------------------------------------------------------------
 -- Invariants

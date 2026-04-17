@@ -187,8 +187,8 @@ rule MergeBotPr {
 --       DispatchReviewAgent in review-board.allium).
 --   T : detach/kill the review agent. Same as DetachReviewAgent. Available
 --       only when tmux_window is non-null.
---   r : re-trigger review. Same as ReReview. Only when agent_status = idle
---       and tmux_window is non-null.
+--   r : force-refresh Dependabot PR data from GitHub (always; no agent interaction).
+--       Mirrors the Review Board pattern: r exclusively refreshes data.
 --   g : jump to the review agent tmux session. Shows "No active session"
 --       status when tmux_window is null.
 --   p : open the bot PR URL in the browser.
@@ -255,6 +255,23 @@ config {
     review_refresh_interval: Duration = 30.seconds
     staleness_fresh_max: Duration = 3.days
     staleness_aging_max: Duration = 7.days
+}
+
+------------------------------------------------------------
+-- Visual: Refresh Status Row
+------------------------------------------------------------
+
+visual RefreshStatusRow(last_fetch: Timestamp?, loading: Boolean, interval: Duration) -> (Color, String) {
+    -- Rendered as a 1-line row between the summary row and the board columns.
+    -- Shows the time since the last successful fetch, color-coded by staleness.
+    -- The [r] refresh hint lives exclusively here (not in the help bar).
+    loading = true        => (dark_gray, "Refreshing...  [r] refresh")
+    last_fetch = null     => (dark_gray, "Never fetched  [r] refresh")
+    elapsed < interval*2  => (white,     "Updated <elapsed>  [r] refresh")
+    elapsed < interval*4  => (yellow,    "Updated <elapsed>  [r] refresh")
+    _                     => (red,       "Updated <elapsed>  [r] refresh")
+    -- elapsed is formatted as "Xs ago" for < 60s, "Xm Ys ago" for >= 60s.
+    -- interval = config.review_refresh_interval (30.seconds)
 }
 
 ------------------------------------------------------------

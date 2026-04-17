@@ -25,7 +25,7 @@ value Reviewer {
 enum ReviewAgentStatus {
     reviewing       -- agent is actively analyzing in the review worktree
     findings_ready  -- agent has completed its review and posted findings
-    idle            -- agent is waiting; user can trigger re-review with r key
+    idle            -- agent is waiting; user can resume the session with d key
 }
 
 -- Review board sub-view selector. Only these two modes live on the Review
@@ -231,14 +231,15 @@ rule ReReview {
     ensures: ReviewAgentReTriggered(pr: pr)
 
     @guidance
-        -- Triggered from the Review Board (`r` key on a PR with an idle agent).
+        -- Triggered from the Review Board (`d` key on a PR with an idle agent).
+        -- This mirrors the task board pattern: `d` dispatches a new agent when
+        -- none is active, and resumes the existing session when agent_status = idle.
         -- Sends "/review-pr {number}" via tmux send-keys to the existing tmux
         -- window — does NOT create a new worktree. Updates agent_status to
         -- "reviewing" directly in the DB and emits Message::ReviewStatusUpdated
         -- so the TUI re-renders. The agent is expected to call
         -- update_review_status with "findings_ready" when done, then "idle"
-        -- when the user has finished their review. Only wired for
-        -- agent_status = idle; other states are ignored by the key handler.
+        -- when the user has finished their review.
 }
 
 -- == Author Mode Dispatch Filter ==
@@ -392,9 +393,9 @@ rule UpdateReviewStatusViaMcp {
 --   k / up                  move selection up one row
 --   Enter                   toggle the PR detail panel
 --   p                       open the selected PR in the browser
---   d                       dispatch a review agent (when no agent active)
+--   d                       dispatch a review agent (no agent), or resume session (agent_status = idle)
 --   g                       jump to the review agent's tmux window
---   r                       re-review (only when agent_status = idle)
+--   r                       force-refresh PR data from GitHub (always; no agent interaction)
 --   T                       detach the review agent (kill tmux window + clear fields)
 --   f                       open the repo filter overlay
 --   e                       edit GitHub search queries for the current mode
@@ -405,6 +406,21 @@ rule UpdateReviewStatusViaMcp {
 --   Tab                     switch to Security Board
 --   Esc                     clear bot-PR selection, else switch to Task Board
 --   q                       quit
+
+-- == Refresh Status Row ==
+
+visual RefreshStatusRow(last_fetch: Timestamp?, loading: Boolean, interval: Duration) -> (Color, String) {
+    -- Rendered as a 1-line row between the summary row and the board columns.
+    -- Shows the time since the last successful fetch, color-coded by staleness.
+    -- The [r] refresh hint lives exclusively here (not in the help bar).
+    loading = true        => (dark_gray, "Refreshing...  [r] refresh")
+    last_fetch = null     => (dark_gray, "Never fetched  [r] refresh")
+    elapsed < interval*2  => (white,     "Updated <elapsed>  [r] refresh")
+    elapsed < interval*4  => (yellow,    "Updated <elapsed>  [r] refresh")
+    _                     => (red,       "Updated <elapsed>  [r] refresh")
+    -- elapsed is formatted as "Xs ago" for < 60s, "Xm Ys ago" for >= 60s.
+    -- interval = core/config.review_refresh_interval (30.seconds)
+}
 
 -- == MCP Review Board Tools ==
 
