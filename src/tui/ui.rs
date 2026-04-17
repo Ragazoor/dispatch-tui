@@ -636,13 +636,18 @@ fn build_task_list_item<'a>(
 }
 
 /// Non-selectable section header injected between substatus groups.
-fn render_substatus_header(label: &str) -> ListItem<'static> {
-    let blank = Line::raw("");
+/// `first` — when true, omits the leading blank line so the top of the column
+/// doesn't have an awkward gap before the very first group.
+fn render_substatus_header(label: &str, first: bool) -> ListItem<'static> {
     let header = Line::from(Span::styled(
         format!("  \u{2500}\u{2500} {label} "),
         Style::default().fg(FG).add_modifier(Modifier::BOLD),
     ));
-    ListItem::new(vec![blank, header])
+    if first {
+        ListItem::new(vec![header])
+    } else {
+        ListItem::new(vec![Line::raw(""), header])
+    }
 }
 
 fn render_columns(
@@ -742,7 +747,7 @@ fn render_columns(
                             .unwrap_or_default()
                             .to_string(),
                     };
-                    list_items.push(render_substatus_header(&label));
+                    list_items.push(render_substatus_header(&label, list_items.is_empty()));
                 }
             }
 
@@ -3124,7 +3129,7 @@ fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
             if current_repo != Some(pr.repo.as_str()) {
                 current_repo = Some(pr.repo.as_str());
                 let repo_short = pr.repo.split('/').next_back().unwrap_or(&pr.repo);
-                list_items.push(render_substatus_header(repo_short));
+                list_items.push(render_substatus_header(repo_short, list_items.is_empty()));
             }
 
             if item_idx == selected_row {
@@ -3611,7 +3616,7 @@ fn render_dependabot_columns(frame: &mut Frame, app: &mut App, area: Rect) {
             if current_repo != Some(pr.repo.as_str()) {
                 current_repo = Some(pr.repo.as_str());
                 let repo_short = pr.repo.split('/').next_back().unwrap_or(&pr.repo);
-                list_items.push(render_substatus_header(repo_short));
+                list_items.push(render_substatus_header(repo_short, list_items.is_empty()));
             }
 
             if item_idx == selected_row {
@@ -3795,7 +3800,7 @@ fn render_security_columns(frame: &mut Frame, app: &mut App, area: Rect) {
             if current_repo != Some(alert.repo.as_str()) {
                 current_repo = Some(alert.repo.as_str());
                 let repo_short = alert.repo.split('/').next_back().unwrap_or(&alert.repo);
-                list_items.push(render_substatus_header(repo_short));
+                list_items.push(render_substatus_header(repo_short, list_items.is_empty()));
             }
 
             if item_idx == selected_row {
@@ -4221,7 +4226,7 @@ mod tests {
 
     #[test]
     fn substatus_header_has_two_lines() {
-        let item = render_substatus_header("my-repo");
+        let item = render_substatus_header("my-repo", false);
         let buf = render_list_item_to_buf(item, 40, 2);
         // Confirm both rows are allocated (height 2 means 2 rows rendered)
         assert_eq!(buf.area().height, 2);
@@ -4229,7 +4234,7 @@ mod tests {
 
     #[test]
     fn substatus_header_first_line_is_blank() {
-        let item = render_substatus_header("my-repo");
+        let item = render_substatus_header("my-repo", false);
         let buf = render_list_item_to_buf(item, 40, 2);
         let row0 = buf_row(&buf, 0);
         assert!(
@@ -4240,7 +4245,7 @@ mod tests {
 
     #[test]
     fn substatus_header_second_line_contains_label() {
-        let item = render_substatus_header("my-repo");
+        let item = render_substatus_header("my-repo", false);
         let buf = render_list_item_to_buf(item, 40, 2);
         let row1 = buf_row(&buf, 1);
         assert!(
@@ -4251,7 +4256,7 @@ mod tests {
 
     #[test]
     fn substatus_header_second_line_is_bold_and_bright() {
-        let item = render_substatus_header("my-repo");
+        let item = render_substatus_header("my-repo", false);
         let buf = render_list_item_to_buf(item, 40, 2);
         let area = buf.area();
         let first_content_x = (area.left()..area.right())
