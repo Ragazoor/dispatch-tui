@@ -299,6 +299,13 @@ pub trait PrStore: Send + Sync {
     fn load_pr_agent_states(
         &self,
     ) -> Result<std::collections::HashMap<crate::models::PrRef, crate::tui::types::ReviewAgentHandle>>;
+    /// Returns the agent status for a single PR if an agent is active, without loading all rows.
+    fn pr_agent_status(
+        &self,
+        table: &str,
+        repo: &str,
+        number: i64,
+    ) -> Result<Option<crate::models::ReviewAgentStatus>>;
 }
 
 /// Save/load security alerts and agent tracking on alerts.
@@ -329,6 +336,13 @@ pub trait AlertStore: Send + Sync {
             crate::tui::types::FixAgentHandle,
         >,
     >;
+    /// Returns the agent status for a single alert if an agent is active, without loading all rows.
+    fn alert_agent_status(
+        &self,
+        repo: &str,
+        number: i64,
+        kind: crate::models::AlertKind,
+    ) -> Result<Option<crate::models::ReviewAgentStatus>>;
 }
 
 /// Settings, filter presets, repo paths, and usage tracking.

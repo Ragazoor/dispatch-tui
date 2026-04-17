@@ -6734,7 +6734,6 @@ fn make_review_pr_for_repo(
 fn make_bot_pr(
     number: i64,
     decision: crate::models::ReviewDecision,
-    _agent_status: Option<crate::models::ReviewAgentStatus>,
     ci: crate::models::CiStatus,
 ) -> crate::models::ReviewPr {
     let mut pr = make_review_pr_for_repo(number, "app/dependabot", decision, "acme/app");
@@ -11964,7 +11963,6 @@ fn bot_prs_merged_kills_active_review_window() {
     let pr = make_bot_pr(
         42,
         ReviewDecision::Approved,
-        None,
         crate::models::CiStatus::Success,
     );
     app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
@@ -12008,7 +12006,6 @@ fn bot_prs_merged_noop_when_no_active_window() {
     let pr = make_bot_pr(
         42,
         ReviewDecision::Approved,
-        None,
         crate::models::CiStatus::Success,
     );
     app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
@@ -16200,13 +16197,11 @@ fn dependabot_in_review_column_findings_ready_sorts_before_reviewing() {
     let reviewing_pr = make_bot_pr(
         1,
         ReviewDecision::ReviewRequired,
-        None,
         crate::models::CiStatus::None,
     );
     let findings_ready_pr = make_bot_pr(
         2,
         ReviewDecision::ReviewRequired,
-        None,
         crate::models::CiStatus::None,
     );
 

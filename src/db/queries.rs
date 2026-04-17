@@ -882,6 +882,33 @@ impl super::PrStore for Database {
         }
         Ok(map)
     }
+
+    fn pr_agent_status(
+        &self,
+        table: &str,
+        repo: &str,
+        number: i64,
+    ) -> Result<Option<ReviewAgentStatus>> {
+        assert!(
+            matches!(table, "review_prs" | "my_prs" | "bot_prs"),
+            "invalid PR table: {table}"
+        );
+        let conn = self.conn()?;
+        let result: Option<Option<String>> = conn
+            .query_row(
+                &format!(
+                    "SELECT agent_status FROM {table} WHERE repo = ?1 AND number = ?2 AND tmux_window IS NOT NULL"
+                ),
+                params![repo, number],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("Failed to query pr_agent_status")?;
+        Ok(result
+            .flatten()
+            .as_deref()
+            .and_then(ReviewAgentStatus::from_db_str))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -987,6 +1014,27 @@ impl super::AlertStore for Database {
             );
         }
         Ok(map)
+    }
+
+    fn alert_agent_status(
+        &self,
+        repo: &str,
+        number: i64,
+        kind: crate::models::AlertKind,
+    ) -> Result<Option<ReviewAgentStatus>> {
+        let conn = self.conn()?;
+        let result: Option<Option<String>> = conn
+            .query_row(
+                "SELECT agent_status FROM security_alerts WHERE repo = ?1 AND number = ?2 AND kind = ?3 AND tmux_window IS NOT NULL",
+                params![repo, number, kind.as_db_str()],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("Failed to query alert_agent_status")?;
+        Ok(result
+            .flatten()
+            .as_deref()
+            .and_then(ReviewAgentStatus::from_db_str))
     }
 }
 

@@ -65,13 +65,20 @@ pub(super) struct DispatchFixAgentArgs {
 // Formatting helpers
 // ---------------------------------------------------------------------------
 
-fn format_review_pr(pr: &crate::models::ReviewPr) -> String {
+fn format_review_pr(
+    pr: &crate::models::ReviewPr,
+    agent_status: Option<ReviewAgentStatus>,
+) -> String {
     let draft = if pr.is_draft { " [draft]" } else { "" };
+    let agent = agent_status
+        .map(|s| format!(" [agent:{}]", s.as_db_str()))
+        .unwrap_or_default();
     format!(
-        "#{} {}{}\n  repo: {}\n  author: {} | decision: {} | ci: {}\n  url: {}",
+        "#{} {}{}{}\n  repo: {}\n  author: {} | decision: {} | ci: {}\n  url: {}",
         pr.number,
         pr.title,
         draft,
+        agent,
         pr.repo,
         pr.author,
         pr.review_decision.as_str(),
@@ -80,22 +87,42 @@ fn format_review_pr(pr: &crate::models::ReviewPr) -> String {
     )
 }
 
-fn format_security_alert(alert: &crate::models::SecurityAlert) -> String {
+fn format_security_alert(
+    alert: &crate::models::SecurityAlert,
+    agent_status: Option<ReviewAgentStatus>,
+) -> String {
     let pkg = alert
         .package
         .as_deref()
         .map(|p| format!(" pkg:{p}"))
         .unwrap_or_default();
+    let agent = agent_status
+        .map(|s| format!(" [agent:{}]", s.as_db_str()))
+        .unwrap_or_default();
     format!(
-        "#{} {}{}\n  repo: {} | severity: {} | kind: {}\n  url: {}",
+        "#{} {}{}{}\n  repo: {} | severity: {} | kind: {}\n  url: {}",
         alert.number,
         alert.title,
         pkg,
+        agent,
         alert.repo,
         alert.severity.as_str(),
         alert.kind.as_db_str(),
         alert.url,
     )
+}
+
+fn pr_agent_status_any_table(
+    db: &dyn crate::db::TaskStore,
+    repo: &str,
+    number: i64,
+) -> Option<ReviewAgentStatus> {
+    for table in &["review_prs", "my_prs", "bot_prs"] {
+        if let Ok(Some(status)) = db.pr_agent_status(table, repo, number) {
+            return Some(status);
+        }
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------
@@ -147,7 +174,13 @@ pub(super) fn handle_list_review_prs(
         );
     }
 
-    let lines: Vec<String> = prs.iter().map(format_review_pr).collect();
+    let lines: Vec<String> = prs
+        .iter()
+        .map(|pr| {
+            let status = pr_agent_status_any_table(&*state.db, &pr.repo, pr.number);
+            format_review_pr(pr, status)
+        })
+        .collect();
     JsonRpcResponse::ok(
         id,
         json!({"content": [{"type": "text", "text": lines.join("\n\n")}]}),
@@ -165,10 +198,13 @@ pub(super) fn handle_get_review_pr(
     };
 
     match state.db.get_review_pr(&parsed.repo, parsed.number) {
-        Ok(Some(pr)) => JsonRpcResponse::ok(
-            id,
-            json!({"content": [{"type": "text", "text": format_review_pr(&pr)}]}),
-        ),
+        Ok(Some(pr)) => {
+            let agent_status = pr_agent_status_any_table(&*state.db, &parsed.repo, parsed.number);
+            JsonRpcResponse::ok(
+                id,
+                json!({"content": [{"type": "text", "text": format_review_pr(&pr, agent_status)}]}),
+            )
+        }
         Ok(None) => JsonRpcResponse::err(
             id,
             -32602,
@@ -234,7 +270,17 @@ pub(super) fn handle_list_security_alerts(
         );
     }
 
-    let lines: Vec<String> = alerts.iter().map(format_security_alert).collect();
+    let lines: Vec<String> = alerts
+        .iter()
+        .map(|alert| {
+            let status = state
+                .db
+                .alert_agent_status(&alert.repo, alert.number, alert.kind)
+                .ok()
+                .flatten();
+            format_security_alert(alert, status)
+        })
+        .collect();
     JsonRpcResponse::ok(
         id,
         json!({"content": [{"type": "text", "text": lines.join("\n\n")}]}),
@@ -267,10 +313,17 @@ pub(super) fn handle_get_security_alert(
         .db
         .get_security_alert(&parsed.repo, parsed.number, kind)
     {
-        Ok(Some(alert)) => JsonRpcResponse::ok(
-            id,
-            json!({"content": [{"type": "text", "text": format_security_alert(&alert)}]}),
-        ),
+        Ok(Some(alert)) => {
+            let agent_status = state
+                .db
+                .alert_agent_status(&parsed.repo, parsed.number, kind)
+                .ok()
+                .flatten();
+            JsonRpcResponse::ok(
+                id,
+                json!({"content": [{"type": "text", "text": format_security_alert(&alert, agent_status)}]}),
+            )
+        }
         Ok(None) => JsonRpcResponse::err(
             id,
             -32602,
@@ -312,14 +365,15 @@ pub(super) async fn handle_dispatch_review_agent(
 
     // FindingsReady is intentionally excluded: it means the agent completed successfully
     // and re-dispatching is allowed (e.g. to do a fresh review pass).
-    let pr_key = crate::models::PrRef::new(parsed.repo.clone(), parsed.number);
-    let has_active_agent = state
-        .db
-        .load_pr_agent_states()
-        .ok()
-        .and_then(|m| m.get(&pr_key).cloned())
-        .map(|h| h.status == ReviewAgentStatus::Reviewing)
-        .unwrap_or(false);
+    let has_active_agent = ["review_prs", "my_prs", "bot_prs"].iter().any(|table| {
+        state
+            .db
+            .pr_agent_status(table, &parsed.repo, parsed.number)
+            .ok()
+            .flatten()
+            .map(|s| s == ReviewAgentStatus::Reviewing)
+            .unwrap_or(false)
+    });
     if has_active_agent {
         return JsonRpcResponse::err(
             id,
@@ -439,14 +493,12 @@ pub(super) async fn handle_dispatch_fix_agent(
 
     // FindingsReady is intentionally excluded: it means the agent completed successfully
     // and re-dispatching is allowed (e.g. to do a fresh fix pass).
-    let alert_key =
-        crate::tui::types::FixDispatchKey::new(parsed.repo.clone(), parsed.number, kind);
     let has_active_fix_agent = state
         .db
-        .load_alert_agent_states()
+        .alert_agent_status(&parsed.repo, parsed.number, kind)
         .ok()
-        .and_then(|m| m.get(&alert_key).cloned())
-        .map(|h| h.status == ReviewAgentStatus::Reviewing)
+        .flatten()
+        .map(|s| s == ReviewAgentStatus::Reviewing)
         .unwrap_or(false);
     if has_active_fix_agent {
         return JsonRpcResponse::err(

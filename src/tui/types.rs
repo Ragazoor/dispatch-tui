@@ -999,9 +999,7 @@ pub struct PrListState {
 }
 
 impl PrListState {
-    /// Replace the PR list, preserving agent fields (tmux_window, worktree,
-    /// agent_status) from the previous list when the new PR lacks them.
-    /// Also rebuilds the cached distinct repos list.
+    /// Replace the PR list and rebuild the cached distinct repos list.
     pub fn set_prs(&mut self, prs: Vec<crate::models::ReviewPr>) {
         self.repos = distinct_repos(&prs);
         self.prs = prs;
@@ -1308,7 +1306,6 @@ pub struct SecurityBoardState {
 
 impl SecurityBoardState {
     /// Set alerts and rebuild the cached distinct repos list.
-    /// Preserves agent fields (tmux_window, worktree) from old alerts.
     pub fn set_alerts(&mut self, alerts: Vec<SecurityAlert>) {
         self.repos = {
             let mut set = BTreeSet::new();
