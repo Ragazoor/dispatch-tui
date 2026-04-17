@@ -3623,10 +3623,22 @@ impl App {
         let key = crate::models::PrRef::new(github_repo.to_string(), number);
         self.review.review_agents.insert(key, handle);
 
-        if self.review.review.prs.iter().any(|pr| pr.repo == github_repo && pr.number == number) {
+        if self
+            .review
+            .review
+            .prs
+            .iter()
+            .any(|pr| pr.repo == github_repo && pr.number == number)
+        {
             return Some(crate::db::PrKind::Review);
         }
-        if self.review.authored.prs.iter().any(|pr| pr.repo == github_repo && pr.number == number) {
+        if self
+            .review
+            .authored
+            .prs
+            .iter()
+            .any(|pr| pr.repo == github_repo && pr.number == number)
+        {
             return Some(crate::db::PrKind::My);
         }
         if self
@@ -4380,7 +4392,9 @@ impl App {
             .remove(&PrRef::new(github_repo.clone(), number));
         let repo_short = github_repo.split('/').next_back().unwrap_or(&github_repo);
         self.set_status(format!("Review agent dispatched for {repo_short}#{number}"));
-        let Some(pr_kind) = self.find_and_set_pr_agent(&github_repo, number, &tmux_window, &worktree) else {
+        let Some(pr_kind) =
+            self.find_and_set_pr_agent(&github_repo, number, &tmux_window, &worktree)
+        else {
             self.set_status(format!(
                 "No PR record found for {github_repo}#{number} — agent tracking unavailable"
             ));

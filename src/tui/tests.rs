@@ -16210,7 +16210,9 @@ fn review_agent_dispatched_for_unknown_pr_skips_persist() {
         worktree: "/home/user/repo/.worktrees/review-999".to_string(),
     });
 
-    assert!(!cmds.iter().any(|c| matches!(c, Command::PersistReviewAgent { .. })));
+    assert!(!cmds
+        .iter()
+        .any(|c| matches!(c, Command::PersistReviewAgent { .. })));
 }
 
 // Regression note for: buffered editor keystrokes leaking into repo picker.

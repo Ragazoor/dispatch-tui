@@ -1738,8 +1738,14 @@ mod tests {
         let (id_line, section) = epic_preamble(Some(&ctx));
         assert!(id_line.contains("EpicId: 5"));
         assert!(section.contains("Auth Rework"));
-        assert!(section.contains("send_message"), "should guide agent to use send_message");
-        assert!(!section.contains("Sibling tasks:"), "should not enumerate sibling tasks");
+        assert!(
+            section.contains("send_message"),
+            "should guide agent to use send_message"
+        );
+        assert!(
+            !section.contains("Sibling tasks:"),
+            "should not enumerate sibling tasks"
+        );
     }
 
     // --- ProcessRunner-based tests ---
