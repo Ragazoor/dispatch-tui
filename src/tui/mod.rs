@@ -19,11 +19,14 @@ use crate::models::{
 // ---------------------------------------------------------------------------
 
 /// Column index for a bot PR in the Dependabot sub-view (3 columns: Backlog, In Review, Approved).
-fn bot_pr_column(pr: &crate::models::ReviewPr) -> usize {
+fn bot_pr_column(
+    pr: &crate::models::ReviewPr,
+    agent_status: Option<crate::models::ReviewAgentStatus>,
+) -> usize {
     if pr.review_decision == crate::models::ReviewDecision::Approved {
         2
     } else if matches!(
-        pr.agent_status,
+        agent_status,
         Some(
             crate::models::ReviewAgentStatus::Reviewing
                 | crate::models::ReviewAgentStatus::FindingsReady
@@ -461,6 +464,46 @@ impl App {
 
     pub fn set_security_alerts(&mut self, alerts: Vec<crate::models::SecurityAlert>) {
         self.security.set_alerts(alerts);
+    }
+
+    /// Restore PR agent handles loaded from the database on startup.
+    pub fn set_pr_agent_states(
+        &mut self,
+        states: std::collections::HashMap<
+            crate::models::PrRef,
+            crate::tui::types::ReviewAgentHandle,
+        >,
+    ) {
+        self.review.review_agents = states;
+    }
+
+    /// Restore fix agent handles loaded from the database on startup.
+    pub fn set_alert_agent_states(
+        &mut self,
+        states: std::collections::HashMap<
+            crate::tui::types::FixDispatchKey,
+            crate::tui::types::FixAgentHandle,
+        >,
+    ) {
+        self.security.fix_agents = states;
+    }
+
+    /// Look up the agent handle for a PR (review, authored, or dependabot).
+    pub fn pr_agent(
+        &self,
+        pr: &crate::models::ReviewPr,
+    ) -> Option<&crate::tui::types::ReviewAgentHandle> {
+        let key = crate::models::PrRef::new(pr.repo.clone(), pr.number);
+        self.review.review_agents.get(&key)
+    }
+
+    /// Look up the agent handle for a security alert.
+    pub fn alert_agent(
+        &self,
+        alert: &crate::models::SecurityAlert,
+    ) -> Option<&crate::tui::types::FixAgentHandle> {
+        let key = FixDispatchKey::new(alert.repo.clone(), alert.number, alert.kind);
+        self.security.fix_agents.get(&key)
     }
 
     pub fn set_repo_filter(&mut self, filter: HashSet<String>) {
@@ -3436,7 +3479,7 @@ impl App {
             }
             filtered
                 .iter()
-                .filter(|pr| bot_pr_column(pr) == col)
+                .filter(|pr| bot_pr_column(pr, self.pr_agent(pr).map(|h| h.status)) == col)
                 .count()
         });
         if let ViewMode::SecurityBoard {
@@ -3542,32 +3585,32 @@ impl App {
         tmux_window: &str,
         worktree: &str,
     ) -> crate::db::PrKind {
-        // Check review list — persists to the `review_prs` DB table
-        for pr in self.review.review.prs.iter_mut() {
-            if pr.repo == github_repo && pr.number == number {
-                pr.tmux_window = Some(tmux_window.to_string());
-                pr.worktree = Some(worktree.to_string());
-                pr.agent_status = Some(crate::models::ReviewAgentStatus::Reviewing);
-                return crate::db::PrKind::Review;
-            }
+        let handle = crate::tui::types::ReviewAgentHandle {
+            tmux_window: tmux_window.to_string(),
+            worktree: worktree.to_string(),
+            status: crate::models::ReviewAgentStatus::Reviewing,
+        };
+        let key = crate::models::PrRef::new(github_repo.to_string(), number);
+        self.review.review_agents.insert(key, handle);
+
+        // Determine which DB table to persist to based on which list contains the PR
+        if self
+            .review
+            .review
+            .prs
+            .iter()
+            .any(|pr| pr.repo == github_repo && pr.number == number)
+        {
+            return crate::db::PrKind::Review;
         }
-        // Check authored list — persists to the `my_prs` DB table
-        for pr in self.review.authored.prs.iter_mut() {
-            if pr.repo == github_repo && pr.number == number {
-                pr.tmux_window = Some(tmux_window.to_string());
-                pr.worktree = Some(worktree.to_string());
-                pr.agent_status = Some(crate::models::ReviewAgentStatus::Reviewing);
-                return crate::db::PrKind::My;
-            }
-        }
-        // Check security board dependabot list — persists to the `review_prs` DB table
-        for pr in self.security.dependabot.prs.prs.iter_mut() {
-            if pr.repo == github_repo && pr.number == number {
-                pr.tmux_window = Some(tmux_window.to_string());
-                pr.worktree = Some(worktree.to_string());
-                pr.agent_status = Some(crate::models::ReviewAgentStatus::Reviewing);
-                return crate::db::PrKind::Review;
-            }
+        if self
+            .review
+            .authored
+            .prs
+            .iter()
+            .any(|pr| pr.repo == github_repo && pr.number == number)
+        {
+            return crate::db::PrKind::My;
         }
         crate::db::PrKind::Review
     }
@@ -3662,7 +3705,7 @@ impl App {
         let mut prs = self.security.dependabot.prs.filtered();
         // Within the in_review column, findings_ready PRs sort above reviewing PRs
         // (InReviewSortPriority rule). Stable sort preserves relative order for equal keys.
-        prs.sort_by_key(|pr| match &pr.agent_status {
+        prs.sort_by_key(|pr| match self.pr_agent(pr).map(|h| h.status) {
             Some(crate::models::ReviewAgentStatus::FindingsReady) => 0,
             Some(crate::models::ReviewAgentStatus::Reviewing) => 1,
             _ => 2,
@@ -4350,32 +4393,14 @@ impl App {
     }
 
     /// Clean up any active review agent session for the given (repo, number) pair.
-    /// Searches all three PR lists. Only emits commands when there is actual agent
-    /// state to clear (tmux_window, worktree, or agent_status non-null).
+    /// Only emits commands when there is actual agent state to clear.
     fn cleanup_review_board_pr(&mut self, repo: String, number: i64) -> Vec<Command> {
         let mut cmds = Vec::new();
-        let mut matched = false;
-        for pr in self
-            .review
-            .review
-            .prs
-            .iter_mut()
-            .chain(self.review.authored.prs.iter_mut())
-            .chain(self.security.dependabot.prs.prs.iter_mut())
-        {
-            if pr.repo == repo
-                && pr.number == number
-                && (pr.tmux_window.is_some() || pr.worktree.is_some() || pr.agent_status.is_some())
-            {
-                matched = true;
-                if let Some(window) = pr.tmux_window.take() {
-                    cmds.push(Command::KillTmuxWindow { window });
-                }
-                pr.worktree = None;
-                pr.agent_status = None;
-            }
-        }
-        if matched {
+        let key = crate::models::PrRef::new(repo.clone(), number);
+        if let Some(handle) = self.review.review_agents.remove(&key) {
+            cmds.push(Command::KillTmuxWindow {
+                window: handle.tmux_window,
+            });
             cmds.push(Command::UpdateAgentStatus {
                 repo,
                 number,
@@ -4415,22 +4440,17 @@ impl App {
         number: i64,
         status: crate::models::ReviewAgentStatus,
     ) -> Vec<Command> {
-        // Update in-memory state across all PR lists
-        for pr in self
-            .review
-            .review
-            .prs
-            .iter_mut()
-            .chain(self.review.authored.prs.iter_mut())
-            .chain(self.security.dependabot.prs.prs.iter_mut())
-        {
-            if pr.repo == repo && pr.number == number {
-                pr.agent_status = Some(status);
-            }
+        // Update the review agent map (covers review, authored, and dependabot PRs)
+        let pr_key = crate::models::PrRef::new(repo.clone(), number);
+        if let Some(handle) = self.review.review_agents.get_mut(&pr_key) {
+            handle.status = status;
         }
-        for alert in self.security.alerts.iter_mut() {
-            if alert.repo == repo && alert.number == number {
-                alert.agent_status = Some(status);
+        // Update fix agent map (security alerts)
+        for key in self.security.fix_agents.keys().cloned().collect::<Vec<_>>() {
+            if key.repo == repo && key.number == number {
+                if let Some(handle) = self.security.fix_agents.get_mut(&key) {
+                    handle.status = status;
+                }
             }
         }
         // Insert flash on findings_ready
@@ -4448,21 +4468,11 @@ impl App {
 
     fn handle_detach_review_agent(&mut self, repo: String, number: i64) -> Vec<Command> {
         let mut cmds = Vec::new();
-        for pr in self
-            .review
-            .review
-            .prs
-            .iter_mut()
-            .chain(self.review.authored.prs.iter_mut())
-            .chain(self.security.dependabot.prs.prs.iter_mut())
-        {
-            if pr.repo == repo && pr.number == number {
-                if let Some(window) = pr.tmux_window.take() {
-                    cmds.push(Command::KillTmuxWindow { window });
-                }
-                pr.worktree = None;
-                pr.agent_status = None;
-            }
+        let key = crate::models::PrRef::new(repo.clone(), number);
+        if let Some(handle) = self.review.review_agents.remove(&key) {
+            cmds.push(Command::KillTmuxWindow {
+                window: handle.tmux_window,
+            });
         }
         cmds.push(Command::UpdateAgentStatus {
             repo,
@@ -4618,14 +4628,15 @@ impl App {
             .remove(&FixDispatchKey::new(github_repo.clone(), number, kind));
         let repo_short = github_repo.split('/').next_back().unwrap_or(&github_repo);
         self.set_status(format!("Fix agent dispatched for {repo_short}#{number}"));
-        for alert in self.security.alerts.iter_mut() {
-            if alert.repo == github_repo && alert.number == number && alert.kind == kind {
-                alert.tmux_window = Some(tmux_window.clone());
-                alert.worktree = Some(worktree.clone());
-                alert.agent_status = Some(crate::models::ReviewAgentStatus::Reviewing);
-                break;
-            }
-        }
+        let fix_key = FixDispatchKey::new(github_repo.clone(), number, kind);
+        self.security.fix_agents.insert(
+            fix_key,
+            crate::tui::types::FixAgentHandle {
+                tmux_window: tmux_window.clone(),
+                worktree: worktree.clone(),
+                status: crate::models::ReviewAgentStatus::Reviewing,
+            },
+        );
         vec![Command::PersistFixAgent {
             github_repo,
             number,
@@ -4655,14 +4666,11 @@ impl App {
         kind: crate::models::AlertKind,
     ) -> Vec<Command> {
         let mut cmds = Vec::new();
-        for alert in self.security.alerts.iter_mut() {
-            if alert.repo == repo && alert.number == number && alert.kind == kind {
-                if let Some(window) = alert.tmux_window.take() {
-                    cmds.push(Command::KillTmuxWindow { window });
-                }
-                alert.worktree = None;
-                alert.agent_status = None;
-            }
+        let key = FixDispatchKey::new(repo.clone(), number, kind);
+        if let Some(handle) = self.security.fix_agents.remove(&key) {
+            cmds.push(Command::KillTmuxWindow {
+                window: handle.tmux_window,
+            });
         }
         cmds.push(Command::UpdateAgentStatus {
             repo,

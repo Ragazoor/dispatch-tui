@@ -765,9 +765,6 @@ pub struct ReviewPr {
     pub head_ref: String,
     pub ci_status: CiStatus,
     pub reviewers: Vec<Reviewer>,
-    pub tmux_window: Option<String>,
-    pub worktree: Option<String>,
-    pub agent_status: Option<ReviewAgentStatus>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1193,9 +1190,6 @@ pub struct SecurityAlert {
     pub created_at: DateTime<Utc>,
     pub state: String,
     pub description: String,
-    pub tmux_window: Option<String>,
-    pub worktree: Option<String>,
-    pub agent_status: Option<ReviewAgentStatus>,
 }
 
 // ---------------------------------------------------------------------------

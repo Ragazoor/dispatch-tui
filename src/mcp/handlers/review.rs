@@ -66,18 +66,12 @@ pub(super) struct DispatchFixAgentArgs {
 // ---------------------------------------------------------------------------
 
 fn format_review_pr(pr: &crate::models::ReviewPr) -> String {
-    let agent = pr
-        .agent_status
-        .as_ref()
-        .map(|s| format!(" [agent:{}]", s.as_db_str()))
-        .unwrap_or_default();
     let draft = if pr.is_draft { " [draft]" } else { "" };
     format!(
-        "#{} {}{}{}\n  repo: {}\n  author: {} | decision: {} | ci: {}\n  url: {}",
+        "#{} {}{}\n  repo: {}\n  author: {} | decision: {} | ci: {}\n  url: {}",
         pr.number,
         pr.title,
         draft,
-        agent,
         pr.repo,
         pr.author,
         pr.review_decision.as_str(),
@@ -87,22 +81,16 @@ fn format_review_pr(pr: &crate::models::ReviewPr) -> String {
 }
 
 fn format_security_alert(alert: &crate::models::SecurityAlert) -> String {
-    let agent = alert
-        .agent_status
-        .as_ref()
-        .map(|s| format!(" [agent:{}]", s.as_db_str()))
-        .unwrap_or_default();
     let pkg = alert
         .package
         .as_deref()
         .map(|p| format!(" pkg:{p}"))
         .unwrap_or_default();
     format!(
-        "#{} {}{}{}\n  repo: {} | severity: {} | kind: {}\n  url: {}",
+        "#{} {}{}\n  repo: {} | severity: {} | kind: {}\n  url: {}",
         alert.number,
         alert.title,
         pkg,
-        agent,
         alert.repo,
         alert.severity.as_str(),
         alert.kind.as_db_str(),
@@ -324,7 +312,15 @@ pub(super) async fn handle_dispatch_review_agent(
 
     // FindingsReady is intentionally excluded: it means the agent completed successfully
     // and re-dispatching is allowed (e.g. to do a fresh review pass).
-    if pr.agent_status == Some(ReviewAgentStatus::Reviewing) {
+    let pr_key = crate::models::PrRef::new(parsed.repo.clone(), parsed.number);
+    let has_active_agent = state
+        .db
+        .load_pr_agent_states()
+        .ok()
+        .and_then(|m| m.get(&pr_key).cloned())
+        .map(|h| h.status == ReviewAgentStatus::Reviewing)
+        .unwrap_or(false);
+    if has_active_agent {
         return JsonRpcResponse::err(
             id,
             -32602,
@@ -443,7 +439,16 @@ pub(super) async fn handle_dispatch_fix_agent(
 
     // FindingsReady is intentionally excluded: it means the agent completed successfully
     // and re-dispatching is allowed (e.g. to do a fresh fix pass).
-    if alert.agent_status == Some(ReviewAgentStatus::Reviewing) {
+    let alert_key =
+        crate::tui::types::FixDispatchKey::new(parsed.repo.clone(), parsed.number, kind);
+    let has_active_fix_agent = state
+        .db
+        .load_alert_agent_states()
+        .ok()
+        .and_then(|m| m.get(&alert_key).cloned())
+        .map(|h| h.status == ReviewAgentStatus::Reviewing)
+        .unwrap_or(false);
+    if has_active_fix_agent {
         return JsonRpcResponse::err(
             id,
             -32602,

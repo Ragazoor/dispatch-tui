@@ -4208,9 +4208,6 @@ async fn update_review_status_updates_pr() {
         head_ref: String::new(),
         ci_status: CiStatus::None,
         reviewers: vec![],
-        tmux_window: None,
-        worktree: None,
-        agent_status: None,
     };
     state.db.save_prs(crate::db::PrKind::Review, &[pr]).unwrap();
     state
@@ -4235,11 +4232,10 @@ async fn update_review_status_updates_pr() {
     .await;
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
 
-    let loaded = state.db.load_prs(crate::db::PrKind::Review).unwrap();
-    assert_eq!(
-        loaded[0].agent_status,
-        Some(ReviewAgentStatus::FindingsReady)
-    );
+    let agents = state.db.load_pr_agent_states().unwrap();
+    let key = crate::models::PrRef::new("acme/app".to_string(), 42);
+    let handle = agents.get(&key).expect("agent handle should be present");
+    assert_eq!(handle.status, ReviewAgentStatus::FindingsReady);
 }
 
 #[tokio::test]
@@ -4650,9 +4646,6 @@ fn insert_my_pr_fixture(state: &Arc<McpState>, number: i64, repo: &str) {
         head_ref: "feature/branch".to_string(),
         ci_status: CiStatus::None,
         reviewers: vec![],
-        tmux_window: None,
-        worktree: None,
-        agent_status: None,
     };
     let mut existing = state.db.load_prs(PrKind::My).unwrap_or_default();
     existing.retain(|p| !(p.repo == repo && p.number == number));
@@ -4680,9 +4673,6 @@ fn insert_review_pr_fixture(state: &Arc<McpState>, number: i64, repo: &str) {
         head_ref: "feature/branch".to_string(),
         ci_status: CiStatus::None,
         reviewers: vec![],
-        tmux_window: None,
-        worktree: None,
-        agent_status: None,
     };
     // Load existing PRs and append to avoid batch-replace deleting prior inserts.
     let mut existing = state.db.load_prs(PrKind::Review).unwrap_or_default();
@@ -4712,9 +4702,6 @@ fn insert_security_alert_fixture(
         created_at: chrono::Utc::now(),
         state: "open".to_string(),
         description: "A vulnerability".to_string(),
-        tmux_window: None,
-        worktree: None,
-        agent_status: None,
     };
     // Load existing alerts and append to avoid batch-replace deleting prior inserts.
     let mut existing = state.db.load_security_alerts().unwrap_or_default();
@@ -4958,9 +4945,6 @@ async fn dispatch_review_agent_already_reviewing() {
         head_ref: "feature/branch".to_string(),
         ci_status: CiStatus::None,
         reviewers: vec![],
-        tmux_window: None,
-        worktree: None,
-        agent_status: None,
     };
     state.db.save_prs(PrKind::Review, &[pr]).unwrap();
     // Persist the agent tracking fields (save_prs does not write these).
@@ -5028,9 +5012,6 @@ async fn dispatch_fix_agent_already_reviewing() {
         created_at: chrono::Utc::now(),
         state: "open".to_string(),
         description: "A vuln".to_string(),
-        tmux_window: None,
-        worktree: None,
-        agent_status: None,
     };
     state.db.save_security_alerts(&[alert]).unwrap();
     // Persist the agent tracking fields (save_security_alerts does not write these).
@@ -5118,9 +5099,6 @@ async fn list_security_alerts_filters_by_severity() {
         created_at: chrono::Utc::now(),
         state: "open".to_string(),
         description: String::new(),
-        tmux_window: None,
-        worktree: None,
-        agent_status: None,
     };
     let critical_alert = SecurityAlert {
         number: 2,
@@ -5136,9 +5114,6 @@ async fn list_security_alerts_filters_by_severity() {
         created_at: chrono::Utc::now(),
         state: "open".to_string(),
         description: String::new(),
-        tmux_window: None,
-        worktree: None,
-        agent_status: None,
     };
     state
         .db
@@ -5226,13 +5201,14 @@ async fn dispatch_review_agent_success() {
         "expected dispatch confirmation: {text}"
     );
 
-    let pr = db.get_review_pr("acme/app", 42).unwrap().unwrap();
-    assert_eq!(
-        pr.agent_status,
-        Some(crate::models::ReviewAgentStatus::Reviewing)
-    );
-    assert!(pr.tmux_window.is_some());
-    assert!(pr.worktree.is_some());
+    let agents = db.load_pr_agent_states().unwrap();
+    let key = crate::models::PrRef::new("acme/app".to_string(), 42);
+    let handle = agents
+        .get(&key)
+        .expect("agent handle should be present after dispatch");
+    assert_eq!(handle.status, crate::models::ReviewAgentStatus::Reviewing);
+    assert!(!handle.tmux_window.is_empty());
+    assert!(!handle.worktree.is_empty());
 }
 
 #[tokio::test]
@@ -5275,9 +5251,6 @@ async fn dispatch_fix_agent_success() {
         created_at: chrono::Utc::now(),
         state: "open".to_string(),
         description: "Prototype pollution".to_string(),
-        tmux_window: None,
-        worktree: None,
-        agent_status: None,
     };
     db.save_security_alerts(&[alert]).unwrap();
 
@@ -5305,14 +5278,13 @@ async fn dispatch_fix_agent_success() {
         "expected dispatch confirmation: {text}"
     );
 
-    let alert = db
-        .get_security_alert("acme/api", 7, AlertKind::Dependabot)
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        alert.agent_status,
-        Some(crate::models::ReviewAgentStatus::Reviewing)
-    );
-    assert!(alert.tmux_window.is_some());
-    assert!(alert.worktree.is_some());
+    use crate::tui::types::FixDispatchKey;
+    let agents = db.load_alert_agent_states().unwrap();
+    let key = FixDispatchKey::new("acme/api".to_string(), 7, AlertKind::Dependabot);
+    let handle = agents
+        .get(&key)
+        .expect("agent handle should be present after dispatch");
+    assert_eq!(handle.status, crate::models::ReviewAgentStatus::Reviewing);
+    assert!(!handle.tmux_window.is_empty());
+    assert!(!handle.worktree.is_empty());
 }

@@ -2944,7 +2944,9 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
                 ..
             }
         );
-        let agent_status = app.selected_review_pr().and_then(|pr| pr.agent_status);
+        let agent_status = app
+            .selected_review_pr()
+            .and_then(|pr| app.pr_agent(pr).map(|h| h.status));
         let hints = Paragraph::new(Line::from(review_action_hints(
             has_pr,
             is_author_mode,
@@ -3136,7 +3138,7 @@ fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
                 mode,
                 i,
                 is_focused && item_idx == selected_row,
-                pr.agent_status,
+                app.pr_agent(pr).map(|h| h.status),
                 is_selected,
                 col_areas[i].width,
             ));
@@ -3352,7 +3354,9 @@ fn render_security_alerts_board(frame: &mut Frame, app: &mut App, area: Rect) {
         frame.render_widget(status, chunks[5]);
     } else {
         let has_alert = app.selected_security_alert().is_some();
-        let agent_status = app.selected_security_alert().and_then(|a| a.agent_status);
+        let agent_status = app
+            .selected_security_alert()
+            .and_then(|a| app.alert_agent(a).map(|h| h.status));
         let hints = Paragraph::new(Line::from(security_action_hints(
             app,
             has_alert,
@@ -3457,11 +3461,13 @@ fn render_dependabot_board(frame: &mut Frame, app: &mut App, area: Rect) {
         let selected_pr = app
             .filtered_bot_prs()
             .into_iter()
-            .filter(|pr| super::bot_pr_column(pr) == col)
+            .filter(|pr| super::bot_pr_column(pr, app.pr_agent(pr).map(|h| h.status)) == col)
             .nth(row);
+        let pr_agent_status = selected_pr.and_then(|pr| app.pr_agent(pr).map(|h| h.status));
         let hints = Paragraph::new(Line::from(dependabot_action_hints(
             has_selected,
             selected_pr,
+            pr_agent_status,
         )));
         frame.render_widget(hints, chunks[5]);
     }
@@ -3494,7 +3500,7 @@ fn render_dependabot_summary_row(frame: &mut Frame, app: &App, area: Rect) {
     for i in 0..col_count {
         let count = prs
             .iter()
-            .filter(|pr| super::bot_pr_column(pr) == i)
+            .filter(|pr| super::bot_pr_column(pr, app.pr_agent(pr).map(|h| h.status)) == i)
             .count();
         let is_focused = i == sel_col;
         let prefix = if is_focused { "\u{25b8} " } else { "\u{25e6} " };
@@ -3547,7 +3553,7 @@ fn render_dependabot_columns(frame: &mut Frame, app: &mut App, area: Rect) {
         let prs: Vec<&ReviewPr> = app
             .filtered_bot_prs()
             .into_iter()
-            .filter(|pr| super::bot_pr_column(pr) == i)
+            .filter(|pr| super::bot_pr_column(pr, app.pr_agent(pr).map(|h| h.status)) == i)
             .collect();
 
         let mut list_items: Vec<ListItem> = Vec::new();
@@ -3571,7 +3577,7 @@ fn render_dependabot_columns(frame: &mut Frame, app: &mut App, area: Rect) {
                 ReviewBoardMode::Reviewer,
                 i,
                 is_focused && item_idx == selected_row,
-                pr.agent_status,
+                app.pr_agent(pr).map(|h| h.status),
                 is_selected,
                 col_areas[i].width,
             ));
@@ -3606,6 +3612,7 @@ fn render_dependabot_columns(frame: &mut Frame, app: &mut App, area: Rect) {
 pub(in crate::tui) fn dependabot_action_hints(
     has_selected: bool,
     selected_pr: Option<&crate::models::ReviewPr>,
+    agent_status: Option<crate::models::ReviewAgentStatus>,
 ) -> Vec<Span<'static>> {
     use crate::models::ReviewAgentStatus;
     let key_color = Color::Cyan;
@@ -3619,9 +3626,9 @@ pub(in crate::tui) fn dependabot_action_hints(
         push_hint(&mut spans, "a", "approve".into());
         push_hint(&mut spans, "m", "merge".into());
         push_hint(&mut spans, "Esc", "clear".into());
-    } else if let Some(pr) = selected_pr {
+    } else if selected_pr.is_some() {
         push_hint(&mut spans, "Space", "select".into());
-        match pr.agent_status {
+        match agent_status {
             Some(ReviewAgentStatus::Idle) => {
                 push_hint(&mut spans, "g", "go to".into());
                 push_hint(&mut spans, "r", "re-review".into());

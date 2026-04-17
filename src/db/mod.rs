@@ -295,6 +295,10 @@ pub trait PrStore: Send + Sync {
     fn update_agent_status(&self, repo: &str, number: i64, status: Option<&str>) -> Result<String>;
     /// Look up a single PR by (repo, number) — checks review_prs then my_prs.
     fn get_review_pr(&self, repo: &str, number: i64) -> Result<Option<crate::models::ReviewPr>>;
+    /// Load all PR agent states (rows where tmux_window IS NOT NULL) from all PR tables.
+    fn load_pr_agent_states(
+        &self,
+    ) -> Result<std::collections::HashMap<crate::models::PrRef, crate::tui::types::ReviewAgentHandle>>;
 }
 
 /// Save/load security alerts and agent tracking on alerts.
@@ -316,6 +320,15 @@ pub trait AlertStore: Send + Sync {
         number: i64,
         kind: crate::models::AlertKind,
     ) -> Result<Option<crate::models::SecurityAlert>>;
+    /// Load all alert agent states (rows where tmux_window IS NOT NULL).
+    fn load_alert_agent_states(
+        &self,
+    ) -> Result<
+        std::collections::HashMap<
+            crate::tui::types::FixDispatchKey,
+            crate::tui::types::FixAgentHandle,
+        >,
+    >;
 }
 
 /// Settings, filter presets, repo paths, and usage tracking.

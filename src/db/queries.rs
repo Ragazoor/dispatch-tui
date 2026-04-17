@@ -842,6 +842,46 @@ impl super::PrStore for Database {
         }
         anyhow::bail!("No active agent found for {repo}#{number}");
     }
+
+    fn load_pr_agent_states(
+        &self,
+    ) -> Result<std::collections::HashMap<crate::models::PrRef, crate::tui::types::ReviewAgentHandle>>
+    {
+        let conn = self.conn()?;
+        let mut map = std::collections::HashMap::new();
+        for table in &["review_prs", "my_prs", "bot_prs"] {
+            let mut stmt = conn.prepare(&format!(
+                "SELECT repo, number, tmux_window, worktree, agent_status
+                 FROM {table}
+                 WHERE tmux_window IS NOT NULL"
+            ))?;
+            let rows = stmt.query_map([], |row| {
+                let repo: String = row.get(0)?;
+                let number: i64 = row.get(1)?;
+                let tmux_window: String = row.get(2)?;
+                let worktree: String = row.get(3).unwrap_or_default();
+                let agent_status_str: Option<String> = row.get(4)?;
+                Ok((repo, number, tmux_window, worktree, agent_status_str))
+            })?;
+            for row in rows {
+                let (repo, number, tmux_window, worktree, agent_status_str) = row?;
+                let status = agent_status_str
+                    .as_deref()
+                    .and_then(ReviewAgentStatus::from_db_str)
+                    .unwrap_or(ReviewAgentStatus::Reviewing);
+                let key = crate::models::PrRef::new(repo, number);
+                map.insert(
+                    key,
+                    crate::tui::types::ReviewAgentHandle {
+                        tmux_window,
+                        worktree,
+                        status,
+                    },
+                );
+            }
+        }
+        Ok(map)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -885,7 +925,7 @@ impl super::AlertStore for Database {
         let mut stmt = conn.prepare(
             "SELECT repo, number, kind, severity, title, package,
                     vulnerable_range, fixed_version, cvss_score, url,
-                    created_at, state, description, tmux_window, worktree, agent_status
+                    created_at, state, description
              FROM security_alerts
              WHERE repo = ?1 AND number = ?2 AND kind = ?3",
         )?;
@@ -895,6 +935,58 @@ impl super::AlertStore for Database {
             return Ok(Some(parse_security_alert_row(row)?));
         }
         Ok(None)
+    }
+
+    fn load_alert_agent_states(
+        &self,
+    ) -> Result<
+        std::collections::HashMap<
+            crate::tui::types::FixDispatchKey,
+            crate::tui::types::FixAgentHandle,
+        >,
+    > {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT repo, number, kind, tmux_window, worktree, agent_status
+             FROM security_alerts
+             WHERE tmux_window IS NOT NULL",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            let repo: String = row.get(0)?;
+            let number: i64 = row.get(1)?;
+            let kind_str: String = row.get(2)?;
+            let tmux_window: String = row.get(3)?;
+            let worktree: String = row.get(4).unwrap_or_default();
+            let agent_status_str: Option<String> = row.get(5)?;
+            Ok((
+                repo,
+                number,
+                kind_str,
+                tmux_window,
+                worktree,
+                agent_status_str,
+            ))
+        })?;
+        let mut map = std::collections::HashMap::new();
+        for row in rows {
+            let (repo, number, kind_str, tmux_window, worktree, agent_status_str) = row?;
+            let kind = crate::models::AlertKind::from_db_str(&kind_str)
+                .unwrap_or(crate::models::AlertKind::Dependabot);
+            let status = agent_status_str
+                .as_deref()
+                .and_then(ReviewAgentStatus::from_db_str)
+                .unwrap_or(ReviewAgentStatus::Reviewing);
+            let key = crate::tui::types::FixDispatchKey::new(repo, number, kind);
+            map.insert(
+                key,
+                crate::tui::types::FixAgentHandle {
+                    tmux_window,
+                    worktree,
+                    status,
+                },
+            );
+        }
+        Ok(map)
     }
 }
 
@@ -1006,10 +1098,6 @@ fn parse_review_pr_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReviewPr> {
     let head_ref: String = row.get(13)?;
     let ci_status_str: String = row.get(14)?;
     let reviewers_json: String = row.get(15)?;
-    let tmux_window: Option<String> = row.get(16)?;
-    let worktree: Option<String> = row.get(17)?;
-    let agent_status_str: Option<String> = row.get(18)?;
-
     let created_at = DateTime::parse_from_rfc3339(&created_at_str)
         .map(|dt| dt.with_timezone(&Utc))
         .unwrap_or_else(|_| Utc::now());
@@ -1046,11 +1134,6 @@ fn parse_review_pr_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReviewPr> {
         head_ref,
         ci_status,
         reviewers,
-        tmux_window,
-        worktree,
-        agent_status: agent_status_str
-            .as_deref()
-            .and_then(ReviewAgentStatus::from_db_str),
     })
 }
 
@@ -1058,8 +1141,7 @@ fn load_prs_from_table(conn: &rusqlite::Connection, table: &str) -> Result<Vec<R
     let mut stmt = conn.prepare(&format!(
         "SELECT repo, number, title, author, url, is_draft,
                 created_at, updated_at, additions, deletions,
-                review_decision, labels, body, head_ref, ci_status, reviewers,
-                tmux_window, worktree, agent_status
+                review_decision, labels, body, head_ref, ci_status, reviewers
          FROM {table}"
     ))?;
     let rows = stmt.query_map([], parse_review_pr_row)?;
@@ -1083,8 +1165,7 @@ fn load_pr_by_key(
     let mut stmt = conn.prepare(&format!(
         "SELECT repo, number, title, author, url, is_draft,
                 created_at, updated_at, additions, deletions,
-                review_decision, labels, body, head_ref, ci_status, reviewers,
-                tmux_window, worktree, agent_status
+                review_decision, labels, body, head_ref, ci_status, reviewers
          FROM {table}
          WHERE repo = ?1 AND number = ?2"
     ))?;
@@ -1184,9 +1265,6 @@ fn parse_security_alert_row(
     let created_at_str: String = row.get(10)?;
     let state: String = row.get(11)?;
     let description: String = row.get(12)?;
-    let tmux_window: Option<String> = row.get(13)?;
-    let worktree: Option<String> = row.get(14)?;
-    let agent_status_str: Option<String> = row.get(15)?;
 
     let kind = AlertKind::from_db_str(&kind_str).unwrap_or(AlertKind::Dependabot);
     let severity = AlertSeverity::from_db_str(&severity_str).unwrap_or(AlertSeverity::Medium);
@@ -1208,11 +1286,6 @@ fn parse_security_alert_row(
         created_at,
         state,
         description,
-        tmux_window,
-        worktree,
-        agent_status: agent_status_str
-            .as_deref()
-            .and_then(ReviewAgentStatus::from_db_str),
     })
 }
 
@@ -1222,7 +1295,7 @@ fn load_security_alerts_impl(
     let mut stmt = conn.prepare(
         "SELECT repo, number, kind, severity, title, package,
                 vulnerable_range, fixed_version, cvss_score, url,
-                created_at, state, description, tmux_window, worktree, agent_status
+                created_at, state, description
          FROM security_alerts",
     )?;
     let rows = stmt.query_map([], parse_security_alert_row)?;

@@ -170,6 +170,26 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
         }
     }
 
+    // Populate review agent handles from persisted DB state
+    match database.load_pr_agent_states() {
+        Ok(states) => app.set_pr_agent_states(states),
+        Err(e) => {
+            app.update(Message::StatusInfo(format!(
+                "Failed to load PR agent states: {e}"
+            )));
+        }
+    }
+
+    // Populate fix agent handles from persisted DB state
+    match database.load_alert_agent_states() {
+        Ok(states) => app.set_alert_agent_states(states),
+        Err(e) => {
+            app.update(Message::StatusInfo(format!(
+                "Failed to load alert agent states: {e}"
+            )));
+        }
+    }
+
     // Load tips and show popup if appropriate
     let tips = crate::tips::embedded_tips();
     let (seen_up_to, show_mode) = database

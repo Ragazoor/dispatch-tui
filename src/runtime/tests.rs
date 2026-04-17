@@ -871,9 +871,6 @@ fn startup_loads_cached_review_prs() {
         head_ref: String::new(),
         ci_status: CiStatus::None,
         reviewers: vec![],
-        tmux_window: None,
-        worktree: None,
-        agent_status: None,
     };
     rt.database
         .save_prs(crate::db::PrKind::Review, &[pr])
@@ -1363,9 +1360,6 @@ fn exec_persist_review_prs_saves_to_db() {
         head_ref: String::new(),
         ci_status: CiStatus::None,
         reviewers: vec![],
-        tmux_window: None,
-        worktree: None,
-        agent_status: None,
     };
     rt.exec_persist_prs(&mut app, PrListKind::Review, vec![pr]);
     assert_eq!(
@@ -1401,9 +1395,6 @@ fn exec_persist_my_prs_saves_to_db() {
         head_ref: String::new(),
         ci_status: CiStatus::None,
         reviewers: vec![],
-        tmux_window: None,
-        worktree: None,
-        agent_status: None,
     };
     rt.exec_persist_prs(&mut app, PrListKind::Authored, vec![pr]);
     assert_eq!(
@@ -1436,9 +1427,6 @@ fn exec_persist_bot_prs_saves_to_db() {
         head_ref: String::new(),
         ci_status: CiStatus::None,
         reviewers: vec![],
-        tmux_window: None,
-        worktree: None,
-        agent_status: None,
     };
     rt.exec_persist_prs(&mut app, PrListKind::Bot, vec![pr]);
     assert_eq!(
@@ -1468,9 +1456,6 @@ fn exec_persist_security_alerts_saves_to_db() {
         created_at: Utc::now(),
         state: "open".into(),
         description: "Prototype pollution".into(),
-        tmux_window: None,
-        worktree: None,
-        agent_status: None,
     };
     rt.exec_persist_security_alerts(&mut app, vec![alert]);
     assert!(app.error_popup().is_none());

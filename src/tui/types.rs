@@ -4,9 +4,9 @@ use std::time::{Duration, Instant};
 use ratatui::widgets::ListState;
 
 use crate::models::{
-    AlertKind, AlertSeverity, DispatchMode, Epic, EpicId, EpicSubstatus, PrRef, ReviewDecision,
-    SecurityAlert, SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage, TipsShowMode,
-    DEFAULT_BASE_BRANCH,
+    AlertKind, AlertSeverity, DispatchMode, Epic, EpicId, EpicSubstatus, PrRef, ReviewAgentStatus,
+    ReviewDecision, SecurityAlert, SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage,
+    TipsShowMode, DEFAULT_BASE_BRANCH,
 };
 
 // ---------------------------------------------------------------------------
@@ -120,6 +120,28 @@ impl FixDispatchKey {
     pub fn new(repo: String, number: i64, kind: AlertKind) -> Self {
         Self { repo, number, kind }
     }
+}
+
+// ---------------------------------------------------------------------------
+// ReviewAgentHandle — execution state for a dispatched review agent
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct ReviewAgentHandle {
+    pub tmux_window: String,
+    pub worktree: String,
+    pub status: ReviewAgentStatus,
+}
+
+// ---------------------------------------------------------------------------
+// FixAgentHandle — execution state for a dispatched fix agent
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct FixAgentHandle {
+    pub tmux_window: String,
+    pub worktree: String,
+    pub status: ReviewAgentStatus,
 }
 
 // ---------------------------------------------------------------------------
@@ -980,24 +1002,7 @@ impl PrListState {
     /// Replace the PR list, preserving agent fields (tmux_window, worktree,
     /// agent_status) from the previous list when the new PR lacks them.
     /// Also rebuilds the cached distinct repos list.
-    pub fn set_prs(&mut self, mut prs: Vec<crate::models::ReviewPr>) {
-        for new_pr in prs.iter_mut() {
-            if let Some(old_pr) = self
-                .prs
-                .iter()
-                .find(|p| p.repo == new_pr.repo && p.number == new_pr.number)
-            {
-                if new_pr.tmux_window.is_none() {
-                    new_pr.tmux_window = old_pr.tmux_window.clone();
-                }
-                if new_pr.worktree.is_none() {
-                    new_pr.worktree = old_pr.worktree.clone();
-                }
-                if new_pr.agent_status.is_none() {
-                    new_pr.agent_status = old_pr.agent_status;
-                }
-            }
-        }
+    pub fn set_prs(&mut self, prs: Vec<crate::models::ReviewPr>) {
         self.repos = distinct_repos(&prs);
         self.prs = prs;
     }
@@ -1033,6 +1038,7 @@ pub struct ReviewBoardState {
     pub detail_visible: bool,
     pub dispatch_pr_filter: bool,
     pub review_flash: HashMap<PrRef, Instant>,
+    pub review_agents: HashMap<PrRef, ReviewAgentHandle>,
 }
 
 impl ReviewBoardState {
@@ -1052,8 +1058,7 @@ impl ReviewBoardState {
         }
     }
 
-    /// Find a PR by github_repo + number across review and authored lists, set its agent
-    /// fields, and return the DB table name where the PR lives.
+    /// Insert a review agent handle and return the DB table kind for the PR.
     pub fn find_and_set_pr_agent(
         &mut self,
         github_repo: &str,
@@ -1061,14 +1066,23 @@ impl ReviewBoardState {
         tmux_window: &str,
         worktree: &str,
     ) -> crate::db::PrKind {
+        let handle = ReviewAgentHandle {
+            tmux_window: tmux_window.to_string(),
+            worktree: worktree.to_string(),
+            status: ReviewAgentStatus::Reviewing,
+        };
+        let key = PrRef::new(github_repo.to_string(), number);
+        self.review_agents.insert(key, handle);
+
         for kind in [PrListKind::Review, PrListKind::Authored] {
-            for pr in self.list_mut(kind).unwrap().prs.iter_mut() {
-                if pr.repo == github_repo && pr.number == number {
-                    pr.tmux_window = Some(tmux_window.to_string());
-                    pr.worktree = Some(worktree.to_string());
-                    pr.agent_status = Some(crate::models::ReviewAgentStatus::Reviewing);
-                    return kind.to_pr_kind();
-                }
+            if self
+                .list(kind)
+                .unwrap()
+                .prs
+                .iter()
+                .any(|pr| pr.repo == github_repo && pr.number == number)
+            {
+                return kind.to_pr_kind();
             }
         }
         crate::db::PrKind::Review
@@ -1289,27 +1303,13 @@ pub struct SecurityBoardState {
     pub kind_filter: Option<AlertKind>,
     pub review_flash: HashMap<PrRef, Instant>,
     pub dependabot: DependabotBoardState,
+    pub fix_agents: HashMap<FixDispatchKey, FixAgentHandle>,
 }
 
 impl SecurityBoardState {
     /// Set alerts and rebuild the cached distinct repos list.
     /// Preserves agent fields (tmux_window, worktree) from old alerts.
-    pub fn set_alerts(&mut self, mut alerts: Vec<SecurityAlert>) {
-        for new_alert in alerts.iter_mut() {
-            if let Some(old_alert) = self.alerts.iter().find(|a| {
-                a.repo == new_alert.repo && a.number == new_alert.number && a.kind == new_alert.kind
-            }) {
-                if new_alert.tmux_window.is_none() {
-                    new_alert.tmux_window = old_alert.tmux_window.clone();
-                }
-                if new_alert.worktree.is_none() {
-                    new_alert.worktree = old_alert.worktree.clone();
-                }
-                if new_alert.agent_status.is_none() {
-                    new_alert.agent_status = old_alert.agent_status;
-                }
-            }
-        }
+    pub fn set_alerts(&mut self, alerts: Vec<SecurityAlert>) {
         self.repos = {
             let mut set = BTreeSet::new();
             for a in &alerts {
@@ -1527,9 +1527,6 @@ mod tests {
             head_ref: String::new(),
             ci_status: CiStatus::None,
             reviewers: vec![],
-            tmux_window: None,
-            worktree: None,
-            agent_status: None,
         }
     }
 
@@ -1542,48 +1539,6 @@ mod tests {
         assert_eq!(state.prs.len(), 2);
         // repos should be sorted and deduplicated
         assert_eq!(state.repos, vec!["org/alpha", "org/beta"]);
-    }
-
-    #[test]
-    fn pr_list_state_set_prs_preserves_agent_fields() {
-        let mut state = PrListState::default();
-
-        let mut old = make_pr(1, "org/app");
-        old.tmux_window = Some("win-1".to_string());
-        old.worktree = Some("/tmp/wt".to_string());
-        old.agent_status = Some(crate::models::ReviewAgentStatus::Reviewing);
-        state.set_prs(vec![old]);
-
-        // Simulate a refresh: new PR has no agent fields
-        let fresh = make_pr(1, "org/app");
-        assert!(fresh.tmux_window.is_none());
-        state.set_prs(vec![fresh]);
-
-        assert_eq!(state.prs[0].tmux_window.as_deref(), Some("win-1"));
-        assert_eq!(state.prs[0].worktree.as_deref(), Some("/tmp/wt"));
-        assert_eq!(
-            state.prs[0].agent_status,
-            Some(crate::models::ReviewAgentStatus::Reviewing)
-        );
-    }
-
-    #[test]
-    fn pr_list_state_set_prs_does_not_overwrite_new_agent_fields() {
-        let mut state = PrListState::default();
-
-        let mut old = make_pr(1, "org/app");
-        old.tmux_window = Some("old-win".to_string());
-        state.set_prs(vec![old]);
-
-        let mut fresh = make_pr(1, "org/app");
-        fresh.tmux_window = Some("new-win".to_string());
-        state.set_prs(vec![fresh]);
-
-        assert_eq!(
-            state.prs[0].tmux_window.as_deref(),
-            Some("new-win"),
-            "new non-None agent fields should not be overwritten by old values"
-        );
     }
 
     // -- PrListState::filtered --
@@ -1743,12 +1698,11 @@ mod tests {
 
         let kind = state.find_and_set_pr_agent("org/app", 42, "win-42", "/tmp/wt");
         assert_eq!(kind, crate::db::PrKind::Review);
-        assert_eq!(state.review.prs[0].tmux_window.as_deref(), Some("win-42"));
-        assert_eq!(state.review.prs[0].worktree.as_deref(), Some("/tmp/wt"));
-        assert_eq!(
-            state.review.prs[0].agent_status,
-            Some(crate::models::ReviewAgentStatus::Reviewing)
-        );
+        let key = PrRef::new("org/app".to_string(), 42);
+        let handle = state.review_agents.get(&key).unwrap();
+        assert_eq!(handle.tmux_window, "win-42");
+        assert_eq!(handle.worktree, "/tmp/wt");
+        assert_eq!(handle.status, crate::models::ReviewAgentStatus::Reviewing);
     }
 
     #[test]
@@ -1758,7 +1712,9 @@ mod tests {
 
         let kind = state.find_and_set_pr_agent("org/lib", 99, "win-99", "/tmp/wt2");
         assert_eq!(kind, crate::db::PrKind::My);
-        assert_eq!(state.authored.prs[0].tmux_window.as_deref(), Some("win-99"));
+        let key = PrRef::new("org/lib".to_string(), 99);
+        let handle = state.review_agents.get(&key).unwrap();
+        assert_eq!(handle.tmux_window, "win-99");
     }
 
     #[test]

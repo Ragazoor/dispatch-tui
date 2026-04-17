@@ -5770,10 +5770,18 @@ fn pr_merged_kills_matching_review_board_window() {
     let mut app = App::new(vec![task], TEST_TIMEOUT);
 
     // Load a review PR that matches the task's PR URL
-    let mut review_pr = make_review_pr_for_repo(42, "alice", ReviewDecision::Approved, "org/repo");
-    review_pr.tmux_window = Some("review:pr-42".to_string());
-    review_pr.worktree = Some("/repo/.worktrees/review-42".to_string());
+    let review_pr = make_review_pr_for_repo(42, "alice", ReviewDecision::Approved, "org/repo");
     app.update(Message::PrsLoaded(PrListKind::Review, vec![review_pr]));
+
+    // Insert agent state into the map
+    app.review.review_agents.insert(
+        crate::models::PrRef::new("org/repo".to_string(), 42),
+        super::types::ReviewAgentHandle {
+            tmux_window: "review:pr-42".to_string(),
+            worktree: "/repo/.worktrees/review-42".to_string(),
+            status: crate::models::ReviewAgentStatus::Reviewing,
+        },
+    );
 
     let cmds = app.update(Message::PrMerged(TaskId(1)));
 
@@ -5789,10 +5797,9 @@ fn pr_merged_kills_matching_review_board_window() {
         ),
         "should clear review agent status"
     );
-    // Review PR state should be cleared in-memory
-    assert!(app.review.review.prs[0].tmux_window.is_none());
-    assert!(app.review.review.prs[0].worktree.is_none());
-    assert!(app.review.review.prs[0].agent_status.is_none());
+    // Agent handle should be removed from the map
+    let key = crate::models::PrRef::new("org/repo".to_string(), 42);
+    assert!(app.review.review_agents.get(&key).is_none());
 }
 
 #[test]
@@ -5802,10 +5809,18 @@ fn pr_merged_no_review_board_match_is_ok() {
     let mut app = App::new(vec![task], TEST_TIMEOUT);
 
     // Load a review PR with a DIFFERENT number — should not be cleaned up
-    let mut other_pr =
-        make_review_pr_for_repo(99, "bob", ReviewDecision::ReviewRequired, "org/repo");
-    other_pr.tmux_window = Some("review:pr-99".to_string());
+    let other_pr = make_review_pr_for_repo(99, "bob", ReviewDecision::ReviewRequired, "org/repo");
     app.update(Message::PrsLoaded(PrListKind::Review, vec![other_pr]));
+
+    // Insert agent state for the unrelated PR (not for #42)
+    app.review.review_agents.insert(
+        crate::models::PrRef::new("org/repo".to_string(), 99),
+        super::types::ReviewAgentHandle {
+            tmux_window: "review:pr-99".to_string(),
+            worktree: "/tmp/wt-99".to_string(),
+            status: crate::models::ReviewAgentStatus::Reviewing,
+        },
+    );
 
     let cmds = app.update(Message::PrMerged(TaskId(1)));
 
@@ -5863,9 +5878,18 @@ fn pr_merged_kills_both_task_and_review_windows() {
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
     let mut app = App::new(vec![task], TEST_TIMEOUT);
 
-    let mut review_pr = make_review_pr_for_repo(42, "alice", ReviewDecision::Approved, "org/repo");
-    review_pr.tmux_window = Some("review:pr-42".to_string());
+    let review_pr = make_review_pr_for_repo(42, "alice", ReviewDecision::Approved, "org/repo");
     app.update(Message::PrsLoaded(PrListKind::Review, vec![review_pr]));
+
+    // Insert agent state into the map (as would happen after dispatch)
+    app.review.review_agents.insert(
+        crate::models::PrRef::new("org/repo".to_string(), 42),
+        super::types::ReviewAgentHandle {
+            tmux_window: "review:pr-42".to_string(),
+            worktree: ".worktrees/review-org-repo-42".to_string(),
+            status: crate::models::ReviewAgentStatus::Reviewing,
+        },
+    );
 
     let cmds = app.update(Message::PrMerged(TaskId(1)));
 
@@ -6704,20 +6728,16 @@ fn make_review_pr_for_repo(
         head_ref: String::new(),
         ci_status: crate::models::CiStatus::None,
         reviewers: vec![],
-        tmux_window: None,
-        worktree: None,
-        agent_status: None,
     }
 }
 
 fn make_bot_pr(
     number: i64,
     decision: crate::models::ReviewDecision,
-    agent_status: Option<crate::models::ReviewAgentStatus>,
+    _agent_status: Option<crate::models::ReviewAgentStatus>,
     ci: crate::models::CiStatus,
 ) -> crate::models::ReviewPr {
     let mut pr = make_review_pr_for_repo(number, "app/dependabot", decision, "acme/app");
-    pr.agent_status = agent_status;
     pr.ci_status = ci;
     pr
 }
@@ -6741,9 +6761,6 @@ fn make_security_alert(
         created_at: chrono::Utc::now(),
         state: "open".to_string(),
         description: String::new(),
-        tmux_window: None,
-        worktree: None,
-        agent_status: None,
     }
 }
 
@@ -11944,15 +11961,24 @@ fn refresh_bot_prs_returns_fetch_bot_prs() {
 fn bot_prs_merged_kills_active_review_window() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
 
-    let mut pr = make_bot_pr(
+    let pr = make_bot_pr(
         42,
         ReviewDecision::Approved,
-        Some(crate::models::ReviewAgentStatus::Reviewing),
+        None,
         crate::models::CiStatus::Success,
     );
-    pr.tmux_window = Some("review:pr-42".to_string());
-    pr.worktree = Some("/repo/.worktrees/review-42".to_string());
     app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
+
+    // Insert agent state into the map
+    let key = crate::models::PrRef::new("acme/app".to_string(), 42);
+    app.review.review_agents.insert(
+        key.clone(),
+        super::types::ReviewAgentHandle {
+            tmux_window: "review:pr-42".to_string(),
+            worktree: "/repo/.worktrees/review-42".to_string(),
+            status: crate::models::ReviewAgentStatus::Reviewing,
+        },
+    );
 
     let cmds = app.update(Message::BotPrsMerged(vec![
         "https://github.com/acme/app/pull/42".to_string(),
@@ -11970,9 +11996,8 @@ fn bot_prs_merged_kills_active_review_window() {
         ),
         "should clear review agent status"
     );
-    assert!(app.security.dependabot.prs.prs[0].tmux_window.is_none());
-    assert!(app.security.dependabot.prs.prs[0].worktree.is_none());
-    assert!(app.security.dependabot.prs.prs[0].agent_status.is_none());
+    // Agent handle should be removed from the map
+    assert!(app.review.review_agents.get(&key).is_none());
 }
 
 #[test]
@@ -12202,9 +12227,16 @@ fn g_on_review_board_jumps_to_agent() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
 
-    let mut pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
-    pr.tmux_window = Some("dispatch:review-42".to_string());
+    let pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
     app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
+    app.review.review_agents.insert(
+        crate::models::PrRef::new("acme/app".to_string(), 42),
+        super::types::ReviewAgentHandle {
+            tmux_window: "dispatch:review-42".to_string(),
+            worktree: "/tmp/wt".to_string(),
+            status: crate::models::ReviewAgentStatus::Reviewing,
+        },
+    );
 
     let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('g')));
     assert!(cmds
@@ -12230,9 +12262,20 @@ fn g_on_security_board_jumps_to_agent() {
     app.update(Message::SwitchToSecurityBoard);
     app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Alerts));
 
-    let mut alert = make_security_alert(1, "acme/app", crate::models::AlertSeverity::Critical);
-    alert.tmux_window = Some("dispatch:fix-1".to_string());
+    let alert = make_security_alert(1, "acme/app", crate::models::AlertSeverity::Critical);
     app.update(Message::SecurityAlertsLoaded(vec![alert]));
+    app.security.fix_agents.insert(
+        super::types::FixDispatchKey::new(
+            "acme/app".to_string(),
+            1,
+            crate::models::AlertKind::Dependabot,
+        ),
+        super::types::FixAgentHandle {
+            tmux_window: "dispatch:fix-1".to_string(),
+            worktree: "/tmp/fix-wt".to_string(),
+            status: crate::models::ReviewAgentStatus::Reviewing,
+        },
+    );
 
     let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('g')));
     assert!(cmds
@@ -12268,17 +12311,27 @@ fn review_status_updated_sets_agent_status_on_pr() {
     );
     app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
 
+    // Pre-populate the agent map (status update only works if agent exists)
+    app.review.review_agents.insert(
+        crate::models::PrRef::new("acme/app".to_string(), 42),
+        super::types::ReviewAgentHandle {
+            tmux_window: "win-42".to_string(),
+            worktree: "/tmp/wt".to_string(),
+            status: crate::models::ReviewAgentStatus::Reviewing,
+        },
+    );
+
     app.update(Message::ReviewStatusUpdated {
         repo: "acme/app".to_string(),
         number: 42,
         status: crate::models::ReviewAgentStatus::FindingsReady,
     });
 
-    let prs = &app.review_prs();
-    let pr = prs.iter().find(|p| p.number == 42).unwrap();
+    let key = crate::models::PrRef::new("acme/app".to_string(), 42);
+    let handle = app.review.review_agents.get(&key).unwrap();
     assert_eq!(
-        pr.agent_status,
-        Some(crate::models::ReviewAgentStatus::FindingsReady)
+        handle.status,
+        crate::models::ReviewAgentStatus::FindingsReady
     );
 }
 
@@ -12286,9 +12339,23 @@ fn review_status_updated_sets_agent_status_on_pr() {
 fn review_status_updated_sets_agent_status_on_security_alert() {
     let mut app = make_app();
     app.update(Message::SwitchToSecurityBoard);
-    let mut alert = make_security_alert(1, "acme/app", crate::models::AlertSeverity::High);
-    alert.tmux_window = Some("dispatch:fix-1".to_string());
+    let alert = make_security_alert(1, "acme/app", crate::models::AlertSeverity::High);
     app.update(Message::SecurityAlertsLoaded(vec![alert]));
+
+    // Pre-populate the agent map
+    let fix_key = super::types::FixDispatchKey::new(
+        "acme/app".to_string(),
+        1,
+        crate::models::AlertKind::Dependabot,
+    );
+    app.security.fix_agents.insert(
+        fix_key.clone(),
+        super::types::FixAgentHandle {
+            tmux_window: "dispatch:fix-1".to_string(),
+            worktree: "/tmp/fix-wt".to_string(),
+            status: crate::models::ReviewAgentStatus::Reviewing,
+        },
+    );
 
     app.update(Message::ReviewStatusUpdated {
         repo: "acme/app".to_string(),
@@ -12296,28 +12363,32 @@ fn review_status_updated_sets_agent_status_on_security_alert() {
         status: crate::models::ReviewAgentStatus::Idle,
     });
 
-    let alerts = app.filtered_security_alerts();
-    let alert = alerts.iter().find(|a| a.number == 1).unwrap();
-    assert_eq!(
-        alert.agent_status,
-        Some(crate::models::ReviewAgentStatus::Idle)
-    );
+    let handle = app.security.fix_agents.get(&fix_key).unwrap();
+    assert_eq!(handle.status, crate::models::ReviewAgentStatus::Idle);
 }
 
 #[test]
 fn detach_review_agent_clears_fields_and_returns_commands() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
-    let mut pr = make_review_pr_for_repo(
+    let pr = make_review_pr_for_repo(
         42,
         "alice",
         crate::models::ReviewDecision::ReviewRequired,
         "acme/app",
     );
-    pr.tmux_window = Some("dispatch:review-42".to_string());
-    pr.worktree = Some("/tmp/wt".to_string());
-    pr.agent_status = Some(crate::models::ReviewAgentStatus::FindingsReady);
     app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
+
+    // Pre-populate the agent map
+    let key = crate::models::PrRef::new("acme/app".to_string(), 42);
+    app.review.review_agents.insert(
+        key.clone(),
+        super::types::ReviewAgentHandle {
+            tmux_window: "dispatch:review-42".to_string(),
+            worktree: "/tmp/wt".to_string(),
+            status: crate::models::ReviewAgentStatus::FindingsReady,
+        },
+    );
 
     let cmds = app.update(Message::DetachReviewAgent {
         repo: "acme/app".to_string(),
@@ -12332,11 +12403,8 @@ fn detach_review_agent_clears_fields_and_returns_commands() {
         .iter()
         .any(|c| matches!(c, Command::UpdateAgentStatus { .. })));
 
-    // In-memory PR should be cleared
-    let prs = &app.review_prs();
-    let pr = prs.iter().find(|p| p.number == 42).unwrap();
-    assert!(pr.tmux_window.is_none());
-    assert!(pr.agent_status.is_none());
+    // Agent handle should be removed from the map
+    assert!(app.review.review_agents.get(&key).is_none());
 }
 
 #[test]
@@ -12358,12 +12426,10 @@ fn review_agent_dispatched_sets_agent_status_reviewing() {
         worktree: "/tmp/worktree".to_string(),
     });
 
-    let prs = &app.review_prs();
-    let pr = prs.iter().find(|p| p.number == 99).unwrap();
-    assert_eq!(
-        pr.agent_status,
-        Some(crate::models::ReviewAgentStatus::Reviewing)
-    );
+    let key = crate::models::PrRef::new("org/my-repo".to_string(), 99);
+    let handle = app.review.review_agents.get(&key).unwrap();
+    assert_eq!(handle.status, crate::models::ReviewAgentStatus::Reviewing);
+    assert_eq!(handle.tmux_window, "review-my-repo-99");
 }
 
 // ---------------------------------------------------------------------------
@@ -12374,15 +12440,21 @@ fn review_agent_dispatched_sets_agent_status_reviewing() {
 fn review_board_r_on_idle_agent_emits_re_review() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
-    let mut pr = make_review_pr_for_repo(
+    let pr = make_review_pr_for_repo(
         42,
         "alice",
         crate::models::ReviewDecision::ReviewRequired,
         "acme/app",
     );
-    pr.tmux_window = Some("dispatch:review-42".to_string());
-    pr.agent_status = Some(crate::models::ReviewAgentStatus::Idle);
     app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
+    app.review.review_agents.insert(
+        crate::models::PrRef::new("acme/app".to_string(), 42),
+        super::types::ReviewAgentHandle {
+            tmux_window: "dispatch:review-42".to_string(),
+            worktree: "/tmp/wt".to_string(),
+            status: crate::models::ReviewAgentStatus::Idle,
+        },
+    );
 
     let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('r')));
     assert!(cmds.iter().any(|c| matches!(c, Command::ReReview { .. })));
@@ -12408,15 +12480,21 @@ fn review_board_r_without_agent_does_nothing() {
 fn review_board_r_on_reviewing_agent_does_nothing() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
-    let mut pr = make_review_pr_for_repo(
+    let pr = make_review_pr_for_repo(
         42,
         "alice",
         crate::models::ReviewDecision::ReviewRequired,
         "acme/app",
     );
-    pr.tmux_window = Some("dispatch:review-42".to_string());
-    pr.agent_status = Some(crate::models::ReviewAgentStatus::Reviewing);
     app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
+    app.review.review_agents.insert(
+        crate::models::PrRef::new("acme/app".to_string(), 42),
+        super::types::ReviewAgentHandle {
+            tmux_window: "dispatch:review-42".to_string(),
+            worktree: "/tmp/wt".to_string(),
+            status: crate::models::ReviewAgentStatus::Reviewing,
+        },
+    );
 
     let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('r')));
     assert!(cmds.is_empty());
@@ -12426,14 +12504,21 @@ fn review_board_r_on_reviewing_agent_does_nothing() {
 fn review_board_t_on_agent_emits_detach() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
-    let mut pr = make_review_pr_for_repo(
+    let pr = make_review_pr_for_repo(
         42,
         "alice",
         crate::models::ReviewDecision::ReviewRequired,
         "acme/app",
     );
-    pr.tmux_window = Some("dispatch:review-42".to_string());
     app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
+    app.review.review_agents.insert(
+        crate::models::PrRef::new("acme/app".to_string(), 42),
+        super::types::ReviewAgentHandle {
+            tmux_window: "dispatch:review-42".to_string(),
+            worktree: "/tmp/wt".to_string(),
+            status: crate::models::ReviewAgentStatus::Reviewing,
+        },
+    );
 
     let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('T')));
     // DetachReviewAgent is a Message, not a Command — so it's handled inline
@@ -14025,10 +14110,19 @@ fn handle_key_security_repo_filter_unknown_key_is_noop() {
 #[test]
 fn security_board_g_jumps_to_tmux_window() {
     let mut app = make_security_board_app();
-    // Give first alert a tmux window
-    if let Some(alert) = app.security.alerts.first_mut() {
-        alert.tmux_window = Some("sec:alert-1".to_string());
-    }
+    // Give first alert an agent handle in the fix_agents map
+    app.security.fix_agents.insert(
+        super::types::FixDispatchKey::new(
+            "org/alpha".to_string(),
+            1,
+            crate::models::AlertKind::Dependabot,
+        ),
+        super::types::FixAgentHandle {
+            tmux_window: "sec:alert-1".to_string(),
+            worktree: "/tmp/fix-wt".to_string(),
+            status: crate::models::ReviewAgentStatus::Reviewing,
+        },
+    );
 
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert!(cmds
@@ -14053,9 +14147,18 @@ fn security_board_g_no_window_shows_status() {
 #[test]
 fn security_board_capital_t_detaches_agent() {
     let mut app = make_security_board_app();
-    if let Some(alert) = app.security.alerts.first_mut() {
-        alert.tmux_window = Some("sec:alert-1".to_string());
-    }
+    app.security.fix_agents.insert(
+        super::types::FixDispatchKey::new(
+            "org/alpha".to_string(),
+            1,
+            crate::models::AlertKind::Dependabot,
+        ),
+        super::types::FixAgentHandle {
+            tmux_window: "sec:alert-1".to_string(),
+            worktree: "/tmp/fix-wt".to_string(),
+            status: crate::models::ReviewAgentStatus::Reviewing,
+        },
+    );
 
     let cmds = app.handle_key(make_key(KeyCode::Char('T')));
     assert!(cmds
@@ -14073,10 +14176,18 @@ fn security_board_capital_t_no_window_is_noop() {
 #[test]
 fn security_board_r_with_idle_agent_emits_re_review() {
     let mut app = make_security_board_app();
-    if let Some(alert) = app.security.alerts.first_mut() {
-        alert.agent_status = Some(crate::models::ReviewAgentStatus::Idle);
-        alert.tmux_window = Some("sec:alert-1".to_string());
-    }
+    app.security.fix_agents.insert(
+        super::types::FixDispatchKey::new(
+            "org/alpha".to_string(),
+            1,
+            crate::models::AlertKind::Dependabot,
+        ),
+        super::types::FixAgentHandle {
+            tmux_window: "sec:alert-1".to_string(),
+            worktree: "/tmp/fix-wt".to_string(),
+            status: crate::models::ReviewAgentStatus::Idle,
+        },
+    );
 
     let cmds = app.handle_key(make_key(KeyCode::Char('r')));
     assert!(cmds.iter().any(|c| matches!(c, Command::ReReview { .. })));
@@ -14093,9 +14204,14 @@ fn security_board_r_without_idle_agent_no_window_is_noop() {
 #[test]
 fn review_board_g_jumps_to_tmux_window() {
     let mut app = make_review_board_app();
-    if let Some(pr) = app.review.review.prs.first_mut() {
-        pr.tmux_window = Some("review:pr-1".to_string());
-    }
+    app.review.review_agents.insert(
+        crate::models::PrRef::new("acme/app".to_string(), 1),
+        super::types::ReviewAgentHandle {
+            tmux_window: "review:pr-1".to_string(),
+            worktree: "/tmp/wt".to_string(),
+            status: crate::models::ReviewAgentStatus::Reviewing,
+        },
+    );
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert!(cmds
         .iter()
@@ -14118,9 +14234,14 @@ fn review_board_g_no_window_shows_status() {
 #[test]
 fn review_board_capital_t_detaches_agent() {
     let mut app = make_review_board_app();
-    if let Some(pr) = app.review.review.prs.first_mut() {
-        pr.tmux_window = Some("review:pr-1".to_string());
-    }
+    app.review.review_agents.insert(
+        crate::models::PrRef::new("acme/app".to_string(), 1),
+        super::types::ReviewAgentHandle {
+            tmux_window: "review:pr-1".to_string(),
+            worktree: "/tmp/wt".to_string(),
+            status: crate::models::ReviewAgentStatus::Reviewing,
+        },
+    );
     let cmds = app.handle_key(make_key(KeyCode::Char('T')));
     assert!(cmds
         .iter()
@@ -15874,17 +15995,31 @@ fn security_dependabot_g_no_tmux_window_shows_status() {
 #[test]
 fn security_dependabot_g_with_tmux_window_jumps() {
     let mut app = make_security_board_app();
-    let mut pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
-    pr.tmux_window = Some("dispatch:review-10".to_string());
-    let window = pr.tmux_window.clone().unwrap();
+    let pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
     app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
+    app.review.review_agents.insert(
+        crate::models::PrRef::new("acme/app".to_string(), 10),
+        super::types::ReviewAgentHandle {
+            tmux_window: "dispatch:review-10".to_string(),
+            worktree: "/tmp/wt".to_string(),
+            status: crate::models::ReviewAgentStatus::Reviewing,
+        },
+    );
     app.update(Message::SwitchSecurityBoardMode(
         SecurityBoardMode::Dependabot,
     ));
+    // PR with Reviewing status is in column 1 (In Review); navigate there
+    if let ViewMode::SecurityBoard {
+        dependabot_selection,
+        ..
+    } = &mut app.board.view_mode
+    {
+        dependabot_selection.selected_column = 1;
+    }
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert!(
         cmds.iter()
-            .any(|c| matches!(c, Command::JumpToTmux { window: w } if w == &window)),
+            .any(|c| matches!(c, Command::JumpToTmux { window: w } if w == "dispatch:review-10")),
         "expected JumpToTmux command"
     );
 }
@@ -15892,13 +16027,18 @@ fn security_dependabot_g_with_tmux_window_jumps() {
 #[test]
 fn security_dependabot_r_idle_with_tmux_rerequests_review() {
     let mut app = make_security_board_app();
-    let mut pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
-    pr.tmux_window = Some("dispatch:review-10".to_string());
-    pr.agent_status = Some(crate::models::ReviewAgentStatus::Idle);
-    let window = pr.tmux_window.clone().unwrap();
+    let pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
     let repo = pr.repo.clone();
     let number = pr.number;
     app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
+    app.review.review_agents.insert(
+        crate::models::PrRef::new(repo.clone(), number),
+        super::types::ReviewAgentHandle {
+            tmux_window: "dispatch:review-10".to_string(),
+            worktree: "/tmp/wt".to_string(),
+            status: crate::models::ReviewAgentStatus::Idle,
+        },
+    );
     app.update(Message::SwitchSecurityBoardMode(
         SecurityBoardMode::Dependabot,
     ));
@@ -15907,7 +16047,7 @@ fn security_dependabot_r_idle_with_tmux_rerequests_review() {
         cmds.iter().any(|c| matches!(
             c,
             Command::ReReview { repo: r, number: n, tmux_window: w }
-            if r == &repo && *n == number && w == &window
+            if r == &repo && *n == number && w == "dispatch:review-10"
         )),
         "expected ReReview command"
     );
@@ -15916,10 +16056,17 @@ fn security_dependabot_r_idle_with_tmux_rerequests_review() {
 #[test]
 fn security_dependabot_r_not_idle_is_noop() {
     let mut app = make_security_board_app();
-    let mut pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
-    pr.tmux_window = Some("dispatch:review-10".to_string());
-    pr.agent_status = Some(crate::models::ReviewAgentStatus::Reviewing);
+    let pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
     app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
+    // Agent has status Reviewing (not Idle) — 'r' should be a no-op
+    app.review.review_agents.insert(
+        crate::models::PrRef::new("acme/app".to_string(), 10),
+        super::types::ReviewAgentHandle {
+            tmux_window: "dispatch:review-10".to_string(),
+            worktree: "/tmp/wt".to_string(),
+            status: crate::models::ReviewAgentStatus::Reviewing,
+        },
+    );
     app.update(Message::SwitchSecurityBoardMode(
         SecurityBoardMode::Dependabot,
     ));
@@ -15930,9 +16077,8 @@ fn security_dependabot_r_not_idle_is_noop() {
 #[test]
 fn security_dependabot_r_no_tmux_window_is_noop() {
     let mut app = make_security_board_app();
-    let mut pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
-    pr.agent_status = Some(crate::models::ReviewAgentStatus::Idle);
-    // no tmux_window set
+    let pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
+    // No agent handle in the map — 'r' should be a no-op
     app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
     app.update(Message::SwitchSecurityBoardMode(
         SecurityBoardMode::Dependabot,
@@ -15944,12 +16090,27 @@ fn security_dependabot_r_no_tmux_window_is_noop() {
 #[test]
 fn security_dependabot_T_with_tmux_detaches_agent() {
     let mut app = make_security_board_app();
-    let mut pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
-    pr.tmux_window = Some("dispatch:review-10".to_string());
+    let pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
     app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
+    app.review.review_agents.insert(
+        crate::models::PrRef::new("acme/app".to_string(), 10),
+        super::types::ReviewAgentHandle {
+            tmux_window: "dispatch:review-10".to_string(),
+            worktree: "/tmp/wt".to_string(),
+            status: crate::models::ReviewAgentStatus::Reviewing,
+        },
+    );
     app.update(Message::SwitchSecurityBoardMode(
         SecurityBoardMode::Dependabot,
     ));
+    // PR with Reviewing status is in column 1 (In Review); navigate there
+    if let ViewMode::SecurityBoard {
+        dependabot_selection,
+        ..
+    } = &mut app.board.view_mode
+    {
+        dependabot_selection.selected_column = 1;
+    }
     let cmds = app.handle_key(make_key(KeyCode::Char('T')));
     // DetachReviewAgent is a Message — handled inline, emits KillTmuxWindow + UpdateAgentStatus
     assert!(
@@ -15970,33 +16131,28 @@ fn security_dependabot_T_no_tmux_window_is_noop() {
 #[test]
 fn agent_status_preserved_on_dependabot_pr_refresh() {
     let mut app = make_security_board_app();
-    let mut pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
-    pr.tmux_window = Some("dispatch-review-acme-app-10".into());
-    pr.worktree = Some(".worktrees/review-acme-app-10".into());
-    pr.agent_status = Some(crate::models::ReviewAgentStatus::Reviewing);
-    let url = pr.url.clone();
+    let pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
     app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
+
+    // Insert agent state into the map (as would happen after dispatch)
+    let key = crate::models::PrRef::new("acme/app".to_string(), 10);
+    app.review.review_agents.insert(
+        key.clone(),
+        super::types::ReviewAgentHandle {
+            tmux_window: "dispatch-review-acme-app-10".to_string(),
+            worktree: ".worktrees/review-acme-app-10".to_string(),
+            status: crate::models::ReviewAgentStatus::Reviewing,
+        },
+    );
 
     // Simulate refresh with fresh PR data (no agent fields)
     let fresh_pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
     app.update(Message::PrsLoaded(PrListKind::Bot, vec![fresh_pr]));
 
-    let updated = app
-        .security
-        .dependabot
-        .prs
-        .prs
-        .iter()
-        .find(|p| p.url == url)
-        .unwrap();
-    assert_eq!(
-        updated.tmux_window.as_deref(),
-        Some("dispatch-review-acme-app-10")
-    );
-    assert_eq!(
-        updated.agent_status,
-        Some(crate::models::ReviewAgentStatus::Reviewing)
-    );
+    // Agent state survives the refresh because it is in the map, not on the PR struct
+    let handle = app.review.review_agents.get(&key).unwrap();
+    assert_eq!(handle.tmux_window, "dispatch-review-acme-app-10");
+    assert_eq!(handle.status, crate::models::ReviewAgentStatus::Reviewing);
 }
 
 #[test]
@@ -16012,12 +16168,10 @@ fn find_and_set_pr_agent_finds_dependabot_pr() {
         ".worktrees/review-acme-app-10",
     );
 
-    let pr = &app.security.dependabot.prs.prs[0];
-    assert_eq!(pr.tmux_window.as_deref(), Some("win-acme-app-10"));
-    assert_eq!(
-        pr.agent_status,
-        Some(crate::models::ReviewAgentStatus::Reviewing)
-    );
+    let key = crate::models::PrRef::new("acme/app".to_string(), 10);
+    let handle = app.review.review_agents.get(&key).unwrap();
+    assert_eq!(handle.tmux_window, "win-acme-app-10");
+    assert_eq!(handle.status, crate::models::ReviewAgentStatus::Reviewing);
 }
 
 // Regression note for: buffered editor keystrokes leaking into repo picker.
@@ -16042,18 +16196,17 @@ fn buffered_editor_keystrokes_do_not_leak_into_repo_picker() {}
 fn dependabot_in_review_column_findings_ready_sorts_before_reviewing() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
 
-    // Reviewing PR comes first in the input list
+    // Two PRs — both will have agent state set via the map
     let reviewing_pr = make_bot_pr(
         1,
         ReviewDecision::ReviewRequired,
-        Some(crate::models::ReviewAgentStatus::Reviewing),
+        None,
         crate::models::CiStatus::None,
     );
-    // FindingsReady PR comes second in the input list
     let findings_ready_pr = make_bot_pr(
         2,
         ReviewDecision::ReviewRequired,
-        Some(crate::models::ReviewAgentStatus::FindingsReady),
+        None,
         crate::models::CiStatus::None,
     );
 
@@ -16062,11 +16215,29 @@ fn dependabot_in_review_column_findings_ready_sorts_before_reviewing() {
         vec![reviewing_pr, findings_ready_pr],
     ));
 
+    // Insert agent state into the map — Reviewing for PR#1, FindingsReady for PR#2
+    app.review.review_agents.insert(
+        crate::models::PrRef::new("acme/app".to_string(), 1),
+        super::types::ReviewAgentHandle {
+            tmux_window: "win-1".to_string(),
+            worktree: ".worktrees/review-1".to_string(),
+            status: crate::models::ReviewAgentStatus::Reviewing,
+        },
+    );
+    app.review.review_agents.insert(
+        crate::models::PrRef::new("acme/app".to_string(), 2),
+        super::types::ReviewAgentHandle {
+            tmux_window: "win-2".to_string(),
+            worktree: ".worktrees/review-2".to_string(),
+            status: crate::models::ReviewAgentStatus::FindingsReady,
+        },
+    );
+
     // Filter to column 1 (in_review) — same logic as the column renderer
     let in_review: Vec<_> = app
         .filtered_bot_prs()
         .into_iter()
-        .filter(|pr| super::bot_pr_column(pr) == 1)
+        .filter(|pr| super::bot_pr_column(pr, app.pr_agent(pr).map(|h| h.status)) == 1)
         .collect();
 
     assert_eq!(
@@ -16075,12 +16246,12 @@ fn dependabot_in_review_column_findings_ready_sorts_before_reviewing() {
         "both PRs should be in the in_review column"
     );
     assert_eq!(
-        in_review[0].agent_status,
+        app.pr_agent(in_review[0]).map(|h| h.status),
         Some(crate::models::ReviewAgentStatus::FindingsReady),
         "FindingsReady should sort before Reviewing"
     );
     assert_eq!(
-        in_review[1].agent_status,
+        app.pr_agent(in_review[1]).map(|h| h.status),
         Some(crate::models::ReviewAgentStatus::Reviewing),
         "Reviewing should sort after FindingsReady"
     );
@@ -16688,4 +16859,62 @@ fn startup_always_no_new_tips_returns_some_index() {
 #[test]
 fn startup_always_empty_tips_returns_none() {
     assert!(determine_tips_start(&[], 0, crate::models::TipsShowMode::Always).is_none());
+}
+
+#[test]
+fn review_agents_map_survives_pr_refresh() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let pr = make_review_pr(10, "alice", crate::models::ReviewDecision::ReviewRequired);
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
+
+    let key = crate::models::PrRef::new("acme/app".to_string(), 10);
+    app.review.review_agents.insert(
+        key.clone(),
+        super::types::ReviewAgentHandle {
+            tmux_window: "win-10".to_string(),
+            worktree: ".worktrees/review-10".to_string(),
+            status: crate::models::ReviewAgentStatus::Reviewing,
+        },
+    );
+
+    // Refresh PR list — new PR has no agent fields
+    let refreshed_pr = make_review_pr(10, "alice", crate::models::ReviewDecision::ReviewRequired);
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![refreshed_pr]));
+
+    assert!(
+        app.review.review_agents.contains_key(&key),
+        "review_agents map should survive a PR list refresh"
+    );
+    assert_eq!(app.review.review_agents[&key].tmux_window, "win-10");
+}
+
+#[test]
+fn fix_agents_map_survives_alert_refresh() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let alert = make_security_alert(5, "org/repo", crate::models::AlertSeverity::High);
+    app.update(Message::SecurityAlertsLoaded(vec![alert]));
+
+    let key = super::types::FixDispatchKey::new(
+        "org/repo".to_string(),
+        5,
+        crate::models::AlertKind::Dependabot,
+    );
+    app.security.fix_agents.insert(
+        key.clone(),
+        super::types::FixAgentHandle {
+            tmux_window: "fix-win-5".to_string(),
+            worktree: ".worktrees/fix-5".to_string(),
+            status: crate::models::ReviewAgentStatus::Reviewing,
+        },
+    );
+
+    // Refresh alerts — new alerts have no agent fields
+    let refreshed_alert = make_security_alert(5, "org/repo", crate::models::AlertSeverity::High);
+    app.update(Message::SecurityAlertsLoaded(vec![refreshed_alert]));
+
+    assert!(
+        app.security.fix_agents.contains_key(&key),
+        "fix_agents map should survive an alert list refresh"
+    );
+    assert_eq!(app.security.fix_agents[&key].tmux_window, "fix-win-5");
 }

@@ -890,14 +890,15 @@ impl App {
             }
             KeyCode::Char('r') => {
                 if let Some(alert) = self.selected_security_alert() {
-                    if alert.agent_status == Some(crate::models::ReviewAgentStatus::Idle) {
-                        if let Some(window) = alert.tmux_window.clone() {
-                            let repo = alert.repo.clone();
-                            let number = alert.number;
+                    let repo = alert.repo.clone();
+                    let number = alert.number;
+                    let handle = self.alert_agent(alert).cloned();
+                    if let Some(h) = handle {
+                        if h.status == crate::models::ReviewAgentStatus::Idle {
                             vec![Command::ReReview {
                                 repo,
                                 number,
-                                tmux_window: window,
+                                tmux_window: h.tmux_window,
                             }]
                         } else {
                             vec![]
@@ -915,9 +916,10 @@ impl App {
 
             KeyCode::Char('g') => {
                 if let Some(alert) = self.selected_security_alert() {
-                    if let Some(window) = &alert.tmux_window {
+                    let handle = self.alert_agent(alert).cloned();
+                    if let Some(h) = handle {
                         vec![Command::JumpToTmux {
-                            window: window.clone(),
+                            window: h.tmux_window,
                         }]
                     } else {
                         self.update(Message::StatusInfo("No active session".to_string()))
@@ -929,10 +931,11 @@ impl App {
 
             KeyCode::Char('T') => {
                 if let Some(alert) = self.selected_security_alert() {
-                    if alert.tmux_window.is_some() {
-                        let repo = alert.repo.clone();
-                        let number = alert.number;
-                        let kind = alert.kind;
+                    let repo = alert.repo.clone();
+                    let number = alert.number;
+                    let kind = alert.kind;
+                    let has_agent = self.alert_agent(alert).is_some();
+                    if has_agent {
                         self.update(Message::DetachFixAgent { repo, number, kind })
                     } else {
                         vec![]
@@ -1015,14 +1018,15 @@ impl App {
             }
             KeyCode::Char('r') => {
                 if let Some(pr) = self.selected_dependabot_pr() {
-                    if pr.agent_status == Some(crate::models::ReviewAgentStatus::Idle) {
-                        if let Some(window) = pr.tmux_window.clone() {
-                            let repo = pr.repo.clone();
-                            let number = pr.number;
+                    let repo = pr.repo.clone();
+                    let number = pr.number;
+                    let handle = self.pr_agent(pr).cloned();
+                    if let Some(h) = handle {
+                        if h.status == crate::models::ReviewAgentStatus::Idle {
                             vec![Command::ReReview {
                                 repo,
                                 number,
-                                tmux_window: window,
+                                tmux_window: h.tmux_window,
                             }]
                         } else {
                             vec![]
@@ -1044,9 +1048,10 @@ impl App {
             }
             KeyCode::Char('g') => {
                 if let Some(pr) = self.selected_dependabot_pr() {
-                    if let Some(window) = &pr.tmux_window {
+                    let handle = self.pr_agent(pr).cloned();
+                    if let Some(h) = handle {
                         vec![Command::JumpToTmux {
-                            window: window.clone(),
+                            window: h.tmux_window,
                         }]
                     } else {
                         self.update(Message::StatusInfo("No active session".to_string()))
@@ -1057,9 +1062,10 @@ impl App {
             }
             KeyCode::Char('T') => {
                 if let Some(pr) = self.selected_dependabot_pr() {
-                    if pr.tmux_window.is_some() {
-                        let repo = pr.repo.clone();
-                        let number = pr.number;
+                    let repo = pr.repo.clone();
+                    let number = pr.number;
+                    let has_agent = self.pr_agent(pr).is_some();
+                    if has_agent {
                         self.update(Message::DetachReviewAgent { repo, number })
                     } else {
                         vec![]
@@ -1084,7 +1090,9 @@ impl App {
                 let count = self
                     .filtered_bot_prs()
                     .into_iter()
-                    .filter(|pr| super::bot_pr_column(pr) == col)
+                    .filter(|pr| {
+                        super::bot_pr_column(pr, self.pr_agent(pr).map(|h| h.status)) == col
+                    })
                     .count();
                 if let ViewMode::SecurityBoard {
                     dependabot_selection,
@@ -1156,7 +1164,7 @@ impl App {
         let row = dependabot_selection.selected_row[col];
         self.filtered_bot_prs()
             .into_iter()
-            .filter(|pr| super::bot_pr_column(pr) == col)
+            .filter(|pr| super::bot_pr_column(pr, self.pr_agent(pr).map(|h| h.status)) == col)
             .nth(row)
     }
 
@@ -1212,14 +1220,15 @@ impl App {
 
             KeyCode::Char('r') => {
                 if let Some(pr) = self.selected_review_pr() {
-                    if pr.agent_status == Some(crate::models::ReviewAgentStatus::Idle) {
-                        if let Some(window) = pr.tmux_window.clone() {
-                            let repo = pr.repo.clone();
-                            let number = pr.number;
+                    let repo = pr.repo.clone();
+                    let number = pr.number;
+                    let handle = self.pr_agent(pr).cloned();
+                    if let Some(h) = handle {
+                        if h.status == crate::models::ReviewAgentStatus::Idle {
                             vec![Command::ReReview {
                                 repo,
                                 number,
-                                tmux_window: window,
+                                tmux_window: h.tmux_window,
                             }]
                         } else {
                             vec![]
@@ -1281,9 +1290,10 @@ impl App {
 
             KeyCode::Char('g') => {
                 if let Some(pr) = self.selected_review_pr() {
-                    if let Some(window) = &pr.tmux_window {
+                    let handle = self.pr_agent(pr).cloned();
+                    if let Some(h) = handle {
                         vec![Command::JumpToTmux {
-                            window: window.clone(),
+                            window: h.tmux_window,
                         }]
                     } else {
                         self.update(Message::StatusInfo("No active session".to_string()))
@@ -1295,9 +1305,10 @@ impl App {
 
             KeyCode::Char('T') => {
                 if let Some(pr) = self.selected_review_pr() {
-                    if pr.tmux_window.is_some() {
-                        let repo = pr.repo.clone();
-                        let number = pr.number;
+                    let repo = pr.repo.clone();
+                    let number = pr.number;
+                    let has_agent = self.pr_agent(pr).is_some();
+                    if has_agent {
                         self.update(Message::DetachReviewAgent { repo, number })
                     } else {
                         vec![]
