@@ -43,6 +43,12 @@ pub fn embedded_tips() -> Vec<Tip> {
         ("003", include_str!("tips/003-split-pane.md")),
         ("004", include_str!("tips/004-help-overlay.md")),
         ("005", include_str!("tips/005-epic-brainstorm.md")),
+        ("006", include_str!("tips/006-task-tags.md")),
+        ("007", include_str!("tips/007-batch-select.md")),
+        ("008", include_str!("tips/008-reorder.md")),
+        ("009", include_str!("tips/009-jump-to-agent.md")),
+        ("010", include_str!("tips/010-wrap-up.md")),
+        ("011", include_str!("tips/011-security-board.md")),
     ];
 
     let mut tips: Vec<Tip> = raw
@@ -101,6 +107,30 @@ mod tests {
         // every tip has a non-empty title
         for tip in &tips {
             assert!(!tip.title.is_empty(), "tip {} has empty title", tip.id);
+        }
+    }
+
+    #[test]
+    fn embedded_tips_cover_the_expected_catalogue() {
+        let tips = embedded_tips();
+
+        // The catalogue is intentionally tracked: bumping this count is a deliberate choice.
+        assert_eq!(
+            tips.len(),
+            11,
+            "expected 11 tips in the embedded catalogue, found {}",
+            tips.len()
+        );
+
+        // ids are the contiguous range 1..=N with no gaps or duplicates
+        let ids: Vec<u32> = tips.iter().map(|t| t.id).collect();
+        let expected: Vec<u32> = (1..=tips.len() as u32).collect();
+        assert_eq!(ids, expected, "tip ids must be contiguous starting at 1");
+
+        // every tip has non-empty title AND body content
+        for tip in &tips {
+            assert!(!tip.title.is_empty(), "tip {} has empty title", tip.id);
+            assert!(!tip.body.trim().is_empty(), "tip {} has empty body", tip.id);
         }
     }
 }
