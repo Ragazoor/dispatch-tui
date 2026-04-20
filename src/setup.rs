@@ -723,8 +723,14 @@ mod tests {
         // and skip dispatch MCP tool calls to avoid clobbering review status
         // during wrap-up (get_task and wrap_up would otherwise set running).
         let s = hook_script();
-        assert!(s.contains("tool_name"), "hook must extract tool_name from PreToolUse input");
-        assert!(s.contains("mcp__dispatch__"), "hook must skip mcp__dispatch__ tools in PreToolUse");
+        assert!(
+            s.contains("tool_name"),
+            "hook must extract tool_name from PreToolUse input"
+        );
+        assert!(
+            s.contains("mcp__dispatch__"),
+            "hook must skip mcp__dispatch__ tools in PreToolUse"
+        );
     }
 
     #[test]
