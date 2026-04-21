@@ -4069,13 +4069,6 @@ fn render_security_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect)
         return;
     }
 
-    let mode_label = match app.security_kind_filter() {
-        None => "all kinds",
-        Some(AlertKind::Dependabot) => "dependabot only",
-        Some(AlertKind::CodeScanning) => "code scanning only",
-    };
-    let _filter_label = format!("Filter ({mode_label})");
-
     let height = (repos.len() as u16 + 4).min(area.height.saturating_sub(2));
     let width = 50.min(area.width.saturating_sub(4));
     let x = area.x + (area.width.saturating_sub(width)) / 2;
@@ -4084,8 +4077,12 @@ fn render_security_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect)
 
     frame.render_widget(Clear, popup_area);
 
+    let mode_str = match app.view_mode() {
+        ViewMode::SecurityBoard { .. } => app.security.repo_filter_mode.as_str(),
+        _ => "include",
+    };
     let block = Block::default()
-        .title(" Filter Repos ")
+        .title(format!(" Filter Repos ({mode_str}) "))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(CYAN));
@@ -4093,11 +4090,6 @@ fn render_security_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect)
     frame.render_widget(block, popup_area);
 
     let mut lines: Vec<Line> = Vec::new();
-
-    let mode_str = match app.view_mode() {
-        ViewMode::SecurityBoard { .. } => app.security.repo_filter_mode.as_str(),
-        _ => "include",
-    };
     lines.push(Line::from(Span::styled(
         format!(" Mode: {mode_str} [Tab] toggle"),
         Style::default().fg(MUTED_LIGHT),

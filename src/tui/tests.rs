@@ -17324,3 +17324,30 @@ fn bot_pr_filter_overlay_hidden_when_not_in_filter_mode() {
         "overlay must not appear when BotPrRepoFilter is not active"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Bug fix: security alerts repo filter overlay title shows include/exclude mode
+// ---------------------------------------------------------------------------
+
+#[test]
+fn security_repo_filter_overlay_title_shows_include_mode() {
+    let mut app = make_security_board_app(); // already in Alerts mode with repos loaded
+    app.update(Message::StartSecurityRepoFilter);
+    let buf = render_to_buffer(&mut app, 100, 30);
+    assert!(
+        buffer_contains(&buf, "include"),
+        "security repo filter overlay title must show 'include' when in include mode"
+    );
+}
+
+#[test]
+fn security_repo_filter_overlay_title_shows_exclude_mode() {
+    let mut app = make_security_board_app();
+    app.update(Message::StartSecurityRepoFilter);
+    app.update(Message::ToggleSecurityRepoFilterMode);
+    let buf = render_to_buffer(&mut app, 100, 30);
+    assert!(
+        buffer_contains(&buf, "exclude"),
+        "security repo filter overlay title must show 'exclude' after mode toggle"
+    );
+}
