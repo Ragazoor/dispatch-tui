@@ -17313,3 +17313,14 @@ fn bot_pr_filter_overlay_shows_exclude_after_toggle() {
         "filter overlay must show 'exclude' after mode toggle"
     );
 }
+
+#[test]
+fn bot_pr_filter_overlay_hidden_when_not_in_filter_mode() {
+    let mut app = make_two_bot_pr_app();
+    // Do NOT enter filter mode
+    let buf = render_to_buffer(&mut app, 100, 30);
+    assert!(
+        !buffer_contains(&buf, "Filter Repos"),
+        "overlay must not appear when BotPrRepoFilter is not active"
+    );
+}
