@@ -480,7 +480,7 @@ impl App {
             .nth(row)
             .map(|a| crate::models::PrRef::new(a.repo.clone(), a.number));
         if let Some(sel) = self.security_selection_mut() {
-            sel.anchor_alert = anchor;
+            sel.anchor_pr = anchor;
         }
     }
 
@@ -500,11 +500,11 @@ impl App {
 
     fn sync_security_selection(&mut self) {
         let anchor = match self.security_selection() {
-            Some(sel) => sel.anchor_alert.clone(),
+            Some(sel) => sel.anchor_pr.clone(),
             None => None,
         };
 
-        let Some(anchor_alert) = anchor else {
+        let Some(anchor_pr) = anchor else {
             return self.clamp_security_selection();
         };
 
@@ -515,7 +515,7 @@ impl App {
         'outer: for col in 0..crate::models::AlertSeverity::COLUMN_COUNT {
             let alerts = self.security_alerts_for_column(col);
             for (row, alert) in alerts.iter().enumerate() {
-                if alert.number == anchor_alert.number() && alert.repo == anchor_alert.repo() {
+                if anchor_pr.matches(alert.number, &alert.repo) {
                     found = Some((col, row));
                     break 'outer;
                 }
@@ -940,7 +940,7 @@ impl App {
     /// can restore the cursor to this item.
     /// Sets anchor to None when the cursor is on the select-all header.
     pub(in crate::tui) fn update_anchor_from_current(&mut self) {
-        // Collect what we need from immutable borrow first
+        // Read immutable fields before taking the mutable borrow below.
         let on_select_all = self.selection().on_select_all;
         if on_select_all {
             self.selection_mut().anchor = None;
@@ -978,10 +978,10 @@ impl App {
             return self.clamp_selection();
         };
 
-        // Search all columns for the anchor item
+        let stats = self.compute_epic_stats();
         let mut found: Option<(usize, usize)> = None;
         'outer: for (col, &status) in TaskStatus::ALL.iter().enumerate() {
-            let items = self.column_items_for_status(status);
+            let items = self.column_items_for_status_with_stats(status, Some(&stats));
             for (row, item) in items.into_iter().enumerate() {
                 let item_anchor = match item {
                     ColumnItem::Task(t) => ColumnAnchor::Task(t.id),
@@ -995,7 +995,6 @@ impl App {
         }
 
         if let Some((found_col, found_row)) = found {
-            // Clamp all non-anchor columns
             for (col, &status) in TaskStatus::ALL.iter().enumerate() {
                 if col == found_col {
                     continue;
@@ -1013,7 +1012,6 @@ impl App {
             sel.set_row(found_col, found_row);
             sel.on_select_all = false;
         } else {
-            // Anchor not found — fall back to index clamping
             self.clamp_selection();
         }
     }
@@ -3748,7 +3746,7 @@ impl App {
                 .collect();
             col_prs.sort_by(|a, b| a.repo.cmp(&b.repo));
             for (row, pr) in col_prs.iter().enumerate() {
-                if pr.number == anchor_pr.number() && pr.repo == anchor_pr.repo() {
+                if anchor_pr.matches(pr.number, &pr.repo) {
                     found = Some((col, row));
                     break 'outer;
                 }
@@ -3829,10 +3827,10 @@ impl App {
         };
         let filtered = self.filtered_bot_prs();
         let mut col_prs: Vec<_> = filtered
-            .iter()
+            .into_iter()
             .filter(|pr| bot_pr_column(pr, self.pr_agent(pr).map(|h| h.status)) == col)
             .collect();
-        col_prs.sort_by(|a, b| a.repo.cmp(&b.repo));
+        sort_prs_for_display(&mut col_prs);
         let anchor = col_prs
             .get(row)
             .map(|pr| crate::models::PrRef::new(pr.repo.clone(), pr.number));
@@ -3865,11 +3863,12 @@ impl App {
         'outer: for col in 0..col_count {
             let mut col_prs: Vec<_> = filtered
                 .iter()
+                .copied()
                 .filter(|pr| bot_pr_column(pr, self.pr_agent(pr).map(|h| h.status)) == col)
                 .collect();
-            col_prs.sort_by(|a, b| a.repo.cmp(&b.repo));
+            sort_prs_for_display(&mut col_prs);
             for (row, pr) in col_prs.iter().enumerate() {
-                if pr.number == anchor_pr.number() && pr.repo == anchor_pr.repo() {
+                if anchor_pr.matches(pr.number, &pr.repo) {
                     found = Some((col, row));
                     break 'outer;
                 }

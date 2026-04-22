@@ -1251,6 +1251,10 @@ impl PrRef {
     pub fn number(&self) -> i64 {
         self.number
     }
+
+    pub fn matches(&self, number: i64, repo: &str) -> bool {
+        self.number == number && self.repo == repo
+    }
 }
 
 impl std::fmt::Display for PrRef {

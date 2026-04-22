@@ -17792,7 +17792,7 @@ fn review_approve_no_pr_selected_is_noop() {
     assert!(matches!(app.input.mode, InputMode::Normal));
 }
 
-// ── selection preservation ──────────────────────────────────────────────────
+// --- selection preservation ---
 
 #[test]
 fn test_selection_preserved_when_task_above_cursor_moves() {

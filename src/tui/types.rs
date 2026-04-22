@@ -1182,13 +1182,6 @@ impl BoardSelection {
         }
     }
 
-    /// Update the anchor to track the currently-pointed-at column item.
-    pub fn set_anchor(&mut self, item: &ColumnItem<'_>) {
-        self.anchor = Some(match item {
-            ColumnItem::Task(t) => ColumnAnchor::Task(t.id),
-            ColumnItem::Epic(e) => ColumnAnchor::Epic(e.id),
-        });
-    }
 }
 
 impl Default for BoardSelection {
@@ -1255,7 +1248,7 @@ pub struct SecurityBoardSelection {
     pub(in crate::tui) selected_column: usize,
     pub(in crate::tui) selected_row: [usize; AlertSeverity::COLUMN_COUNT],
     pub(in crate::tui) list_states: [ListState; AlertSeverity::COLUMN_COUNT],
-    pub(in crate::tui) anchor_alert: Option<crate::models::PrRef>,
+    pub(in crate::tui) anchor_pr: Option<crate::models::PrRef>,
 }
 
 impl SecurityBoardSelection {
@@ -1264,7 +1257,7 @@ impl SecurityBoardSelection {
             selected_column: 0,
             selected_row: [0; AlertSeverity::COLUMN_COUNT],
             list_states: std::array::from_fn(|_| ListState::default()),
-            anchor_alert: None,
+            anchor_pr: None,
         }
     }
 
