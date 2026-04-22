@@ -3439,6 +3439,38 @@ fn render_security_alerts_board(frame: &mut Frame, app: &mut App, area: Rect) {
 
     render_tab_bar(frame, app, chunks[0]);
     render_security_mode_header(frame, SecurityBoardMode::Alerts, chunks[1]);
+
+    if app.security.unconfigured {
+        let prompt =
+            "No repositories configured — press [e] to set up security alert queries";
+        frame.render_widget(
+            Paragraph::new(prompt)
+                .alignment(Alignment::Center)
+                .style(Style::default().fg(Color::DarkGray)),
+            chunks[4],
+        );
+        // Status bar: show transient message or an unconfigured-specific hint line
+        if let Some(msg) = app.status.message.as_deref() {
+            frame.render_widget(
+                Paragraph::new(msg.to_string()).style(Style::default().fg(Color::Yellow)),
+                chunks[6],
+            );
+        } else {
+            let key_color = Color::Cyan;
+            let label_style = Style::default().fg(MUTED);
+            let mut hints: Vec<Span<'static>> = Vec::new();
+            push_hint_spans(&mut hints, "e", "edit queries", key_color, label_style);
+            push_hint_spans(&mut hints, "Tab", "tasks", key_color, label_style);
+            push_hint_spans(&mut hints, "q", "quit", key_color, label_style);
+            frame.render_widget(Paragraph::new(Line::from(hints)), chunks[6]);
+        }
+        // Filter overlay still available when unconfigured
+        if matches!(app.mode(), InputMode::SecurityRepoFilter) {
+            render_security_repo_filter_overlay(frame, app, area);
+        }
+        return;
+    }
+
     render_security_summary_row(frame, app, chunks[2]);
 
     // Refresh status row
@@ -3451,32 +3483,6 @@ fn render_security_alerts_board(frame: &mut Frame, app: &mut App, area: Rect) {
         Paragraph::new(status_text).style(Style::default().fg(status_color)),
         chunks[3],
     );
-
-    if app.security.unconfigured {
-        let prompt =
-            "No repositories configured — press [e] to set up security alert queries";
-        frame.render_widget(
-            Paragraph::new(prompt)
-                .alignment(Alignment::Center)
-                .style(Style::default().fg(Color::DarkGray)),
-            chunks[4],
-        );
-        // Status bar
-        if let Some(msg) = app.status.message.as_deref() {
-            frame.render_widget(
-                Paragraph::new(msg.to_string()).style(Style::default().fg(Color::Yellow)),
-                chunks[6],
-            );
-        } else {
-            let hints = Paragraph::new(Line::from(security_action_hints(app, false, None)));
-            frame.render_widget(hints, chunks[6]);
-        }
-        // Filter overlay still available when unconfigured
-        if matches!(app.mode(), InputMode::SecurityRepoFilter) {
-            render_security_repo_filter_overlay(frame, app, area);
-        }
-        return;
-    }
 
     let filtered = app.filtered_security_alerts();
     if filtered.is_empty() {
