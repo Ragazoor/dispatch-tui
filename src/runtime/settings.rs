@@ -141,10 +141,11 @@ impl TuiRuntime {
         terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
         key_rx: &mut mpsc::UnboundedReceiver<crossterm::event::KeyEvent>,
     ) -> Result<Vec<Command>> {
-        let (key, label) = match kind {
-            PrListKind::Review => ("github_queries_review", "Review PRs"),
-            PrListKind::Authored => ("github_queries_my_prs", "My PRs"),
-            PrListKind::Bot => ("github_queries_bot", "Dependabot / Renovate PRs"),
+        let key = kind.settings_key();
+        let label = match kind {
+            PrListKind::Review => "Review PRs",
+            PrListKind::Authored => "My PRs",
+            PrListKind::Bot => "Dependabot / Renovate PRs",
         };
 
         let current = self
