@@ -17998,21 +17998,26 @@ fn test_review_selection_preserved_on_refresh() {
     app.update(Message::SwitchToReviewBoard);
 
     let prs = vec![
-        make_review_pr(1, "alice", ReviewDecision::ReviewRequired), // col 0, row 0
-        make_review_pr(2, "alice", ReviewDecision::ReviewRequired), // col 0, row 1
+        make_review_pr(2, "alice", ReviewDecision::ReviewRequired), // col 0, row 0 — selected
+        make_review_pr(3, "alice", ReviewDecision::ReviewRequired), // col 0, row 1
     ];
     app.set_review_prs(prs);
-    app.navigate_review_row(1); // select PR 2
-
+    // Set anchor on PR 2 at row 0 (acme/app repo)
+    app.update_review_anchor_from_current();
     let selected = app.selected_review_pr().unwrap();
     assert_eq!(selected.number, 2);
 
-    // PR 1 moves to Approved — PR 2 shifts to row 0
+    // PR from "aaa/repo" is inserted — it sorts before "acme/app" so PR 2 moves to row 1.
+    // With clamping, cursor stays at row 0 → new PR (wrong).
+    // With anchor, cursor follows PR 2 to row 1 (correct).
+    let mut pr1 = make_review_pr(1, "alice", ReviewDecision::ReviewRequired);
+    pr1.repo = "aaa/repo".to_string();
     app.update(Message::PrsLoaded(
         PrListKind::Review,
         vec![
-            make_review_pr(1, "alice", ReviewDecision::Approved),
+            pr1,
             make_review_pr(2, "alice", ReviewDecision::ReviewRequired),
+            make_review_pr(3, "alice", ReviewDecision::ReviewRequired),
         ],
     ));
 
@@ -18027,23 +18032,29 @@ fn test_security_selection_preserved_on_refresh() {
     app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Alerts));
 
     let alerts = vec![
-        make_security_alert(1, "org/repo", crate::models::AlertSeverity::High), // col 1, row 0
-        make_security_alert(2, "org/repo", crate::models::AlertSeverity::High), // col 1, row 1
+        make_security_alert(2, "org/repo", crate::models::AlertSeverity::High), // col 1, row 0 — selected
+        make_security_alert(3, "org/repo", crate::models::AlertSeverity::High), // col 1, row 1
     ];
     app.set_security_alerts(alerts);
 
-    // Navigate to High column (col 1), then to row 1
+    // Navigate to High column (col 1) so alert 2 is selected at row 0
     if let Some(sel) = app.security_selection_mut() {
         sel.set_column(1);
     }
-    app.navigate_security_row(1); // select alert 2
-
+    // Set anchor on alert 2 at row 0 (org/repo)
+    app.update_security_anchor_from_current();
     let selected = app.selected_security_alert().unwrap();
     assert_eq!(selected.number, 2);
 
-    // Alert 1 dismissed — alert 2 shifts to row 0
+    // Alert from "aaa/repo" is inserted — it sorts before "org/repo" so alert 2 moves to row 1.
+    // With clamping, cursor stays at row 0 → new alert (wrong).
+    // With anchor, cursor follows alert 2 to row 1 (correct).
+    let mut alert1 = make_security_alert(1, "aaa/repo", crate::models::AlertSeverity::High);
+    alert1.repo = "aaa/repo".to_string();
     app.update(Message::SecurityAlertsLoaded(vec![
+        alert1,
         make_security_alert(2, "org/repo", crate::models::AlertSeverity::High),
+        make_security_alert(3, "org/repo", crate::models::AlertSeverity::High),
     ]));
 
     let selected = app.selected_security_alert().unwrap();

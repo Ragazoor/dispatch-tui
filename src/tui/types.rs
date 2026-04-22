@@ -1206,7 +1206,7 @@ pub struct ReviewBoardSelection {
     pub(in crate::tui) selected_column: usize,
     pub(in crate::tui) selected_row: [usize; ReviewDecision::COLUMN_COUNT],
     pub(in crate::tui) list_states: [ListState; ReviewDecision::COLUMN_COUNT],
-    pub(in crate::tui) anchor_pr: Option<i64>,
+    pub(in crate::tui) anchor_pr: Option<crate::models::PrRef>,
 }
 
 impl ReviewBoardSelection {
@@ -1255,7 +1255,7 @@ pub struct SecurityBoardSelection {
     pub(in crate::tui) selected_column: usize,
     pub(in crate::tui) selected_row: [usize; AlertSeverity::COLUMN_COUNT],
     pub(in crate::tui) list_states: [ListState; AlertSeverity::COLUMN_COUNT],
-    pub(in crate::tui) anchor_alert: Option<i64>,
+    pub(in crate::tui) anchor_alert: Option<crate::models::PrRef>,
 }
 
 impl SecurityBoardSelection {

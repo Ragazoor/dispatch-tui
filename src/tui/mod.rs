@@ -478,7 +478,7 @@ impl App {
             .security_alerts_for_column(col)
             .into_iter()
             .nth(row)
-            .map(|a| a.number);
+            .map(|a| crate::models::PrRef::new(a.repo.clone(), a.number));
         if let Some(sel) = self.security_selection_mut() {
             sel.anchor_alert = anchor;
         }
@@ -500,7 +500,7 @@ impl App {
 
     fn sync_security_selection(&mut self) {
         let anchor = match self.security_selection() {
-            Some(sel) => sel.anchor_alert,
+            Some(sel) => sel.anchor_alert.clone(),
             None => None,
         };
 
@@ -515,7 +515,7 @@ impl App {
         'outer: for col in 0..crate::models::AlertSeverity::COLUMN_COUNT {
             let alerts = self.security_alerts_for_column(col);
             for (row, alert) in alerts.iter().enumerate() {
-                if alert.number == anchor_alert {
+                if alert.number == anchor_alert.number() && alert.repo == anchor_alert.repo() {
                     found = Some((col, row));
                     break 'outer;
                 }
@@ -3723,7 +3723,7 @@ impl App {
 
     fn sync_review_selection(&mut self) {
         let anchor = match &self.board.view_mode {
-            ViewMode::ReviewBoard { selection, .. } => selection.anchor_pr,
+            ViewMode::ReviewBoard { selection, .. } => selection.anchor_pr.clone(),
             _ => None,
         };
 
@@ -3748,7 +3748,7 @@ impl App {
                 .collect();
             col_prs.sort_by(|a, b| a.repo.cmp(&b.repo));
             for (row, pr) in col_prs.iter().enumerate() {
-                if pr.number == anchor_pr {
+                if pr.number == anchor_pr.number() && pr.repo == anchor_pr.repo() {
                     found = Some((col, row));
                     break 'outer;
                 }
@@ -3833,7 +3833,9 @@ impl App {
             .filter(|pr| bot_pr_column(pr, self.pr_agent(pr).map(|h| h.status)) == col)
             .collect();
         col_prs.sort_by(|a, b| a.repo.cmp(&b.repo));
-        let anchor = col_prs.get(row).map(|pr| pr.number);
+        let anchor = col_prs
+            .get(row)
+            .map(|pr| crate::models::PrRef::new(pr.repo.clone(), pr.number));
         if let ViewMode::SecurityBoard {
             dependabot_selection,
             ..
@@ -3848,7 +3850,7 @@ impl App {
             ViewMode::SecurityBoard {
                 dependabot_selection,
                 ..
-            } => dependabot_selection.anchor_pr,
+            } => dependabot_selection.anchor_pr.clone(),
             _ => return,
         };
 
@@ -3867,7 +3869,7 @@ impl App {
                 .collect();
             col_prs.sort_by(|a, b| a.repo.cmp(&b.repo));
             for (row, pr) in col_prs.iter().enumerate() {
-                if pr.number == anchor_pr {
+                if pr.number == anchor_pr.number() && pr.repo == anchor_pr.repo() {
                     found = Some((col, row));
                     break 'outer;
                 }
@@ -4291,7 +4293,9 @@ impl App {
             .filter(|pr| mode.pr_column(pr) == col)
             .collect();
         col_prs.sort_by(|a, b| a.repo.cmp(&b.repo));
-        let anchor = col_prs.get(row).map(|pr| pr.number);
+        let anchor = col_prs
+            .get(row)
+            .map(|pr| crate::models::PrRef::new(pr.repo.clone(), pr.number));
         if let Some(sel) = self.review_selection_mut() {
             sel.anchor_pr = anchor;
         }
