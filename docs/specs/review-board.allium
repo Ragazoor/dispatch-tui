@@ -242,6 +242,52 @@ rule ReReview {
         -- when the user has finished their review.
 }
 
+-- == Approve Review PR ==
+
+rule ApproveReviewPr {
+    -- Triggered by pressing `a` while in Reviewer mode on the Review Board.
+    -- Submits an approval review for the selected PR via `gh pr review --approve`.
+    -- Guard: PR's review_decision must be review_required or waiting_for_response.
+    -- Blocked in Author mode (approve key is a no-op there).
+    --
+    -- On success: refreshes the review PR list and shows a status message.
+    -- On failure: shows an error status message; no list refresh.
+
+    trigger: KeyPress(key: 'a', mode: ReviewBoardMode.reviewer)
+    guard: selected_pr.review_decision in {review_required, waiting_for_response}
+    confirm: "Approve PR #<number>? (y/N)"
+    action: shell("gh pr review --approve <selected_pr.url>")
+    on_success:
+        refresh_prs(kind: review)
+        status("Approved PR <selected_pr.url>")
+    on_failure:
+        status("Failed to approve PR: <error>")
+}
+
+-- == Merge Review PR ==
+
+rule MergeReviewPr {
+    -- Triggered by pressing `m` while on the Review Board (either mode).
+    -- Merges the selected PR via `gh pr merge --squash`.
+    -- Guards:
+    --   (1) PR's review_decision must be approved.
+    --   (2) PR's ci_status must not be failure.
+    --
+    -- On success: refreshes the review PR list and shows a status message.
+    -- On failure: shows an error status message; no list refresh.
+
+    trigger: KeyPress(key: 'm', mode: ReviewBoardMode.any)
+    guard: selected_pr.review_decision == approved
+         AND selected_pr.ci_status != failure
+    confirm: "Merge PR #<number>? (y/N)"
+    action: shell("gh pr merge --squash <selected_pr.url>")
+    on_success:
+        refresh_prs(kind: current_mode)
+        status("Merged PR <selected_pr.url>")
+    on_failure:
+        status("Failed to merge PR: <error>")
+}
+
 -- == Author Mode Dispatch Filter ==
 
 rule DispatchFilterToggle {
@@ -401,6 +447,8 @@ rule UpdateReviewStatusViaMcp {
 --   e                       edit GitHub search queries for the current mode
 --   1                       switch to Reviewer mode
 --   2                       switch to Author mode
+--   a                       approve selected PR (Reviewer mode only; guard: review_required or waiting_for_response)
+--   m                       merge selected PR via squash (either mode; guard: approved AND ci != failure)
 --   D                       toggle dispatch-PR filter (Author mode only)
 --   ?                       toggle help
 --   Tab                     switch to Security Board
