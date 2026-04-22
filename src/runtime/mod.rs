@@ -285,6 +285,10 @@ impl Drop for InputPausedGuard<'_> {
 // ---------------------------------------------------------------------------
 
 struct TuiRuntime {
+    // Holds the widest TaskStore supertrait because execute_commands dispatches
+    // to helpers spanning all four sub-traits (TaskAndEpicStore, PrStore,
+    // AlertStore, SettingsStore). See CLAUDE.md §DB trait narrowing for the
+    // narrowing discipline applied in TaskService and EpicService.
     database: Arc<dyn db::TaskStore>,
     task_svc: crate::service::TaskService,
     epic_svc: crate::service::EpicService,
