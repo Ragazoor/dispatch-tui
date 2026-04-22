@@ -17380,3 +17380,20 @@ fn security_repo_filter_overlay_title_shows_exclude_mode() {
         "security repo filter overlay title must contain 'Filter Repos (exclude)' after mode toggle"
     );
 }
+
+#[test]
+fn security_alerts_unconfigured_message_sets_flag() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    assert!(!app.security.unconfigured);
+    app.update(Message::SecurityAlertsUnconfigured);
+    assert!(app.security.unconfigured);
+    assert!(!app.security.loading);
+}
+
+#[test]
+fn security_alerts_loaded_clears_unconfigured_flag() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.security.unconfigured = true;
+    app.update(Message::SecurityAlertsLoaded(vec![]));
+    assert!(!app.security.unconfigured);
+}

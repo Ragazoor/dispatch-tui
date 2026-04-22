@@ -1046,6 +1046,7 @@ impl App {
             msg @ (Message::SwitchToSecurityBoard
             | Message::SecurityAlertsLoaded(_)
             | Message::SecurityAlertsFetchFailed(_)
+            | Message::SecurityAlertsUnconfigured
             | Message::RefreshSecurityAlerts
             | Message::ToggleSecurityDetail
             | Message::ToggleSecurityKindFilter
@@ -1354,6 +1355,7 @@ impl App {
             Message::SecurityAlertsFetchFailed(err) => {
                 self.handle_security_alerts_fetch_failed(err)
             }
+            Message::SecurityAlertsUnconfigured => self.handle_security_alerts_unconfigured(),
             Message::RefreshSecurityAlerts => self.handle_refresh_security_alerts(),
             Message::ToggleSecurityDetail => self.handle_toggle_security_detail(),
             Message::ToggleSecurityKindFilter => self.handle_toggle_security_kind_filter(),
@@ -3415,6 +3417,7 @@ impl App {
         &mut self,
         alerts: Vec<crate::models::SecurityAlert>,
     ) -> Vec<Command> {
+        self.security.unconfigured = false;
         let cmds = vec![Command::PersistSecurityAlerts(alerts.clone())];
         self.security.set_alerts(alerts);
         self.security.loading = false;
@@ -4590,6 +4593,12 @@ impl App {
     fn handle_security_alerts_fetch_failed(&mut self, err: String) -> Vec<Command> {
         self.security.loading = false;
         self.security.last_error = Some(err);
+        vec![]
+    }
+
+    fn handle_security_alerts_unconfigured(&mut self) -> Vec<Command> {
+        self.security.unconfigured = true;
+        self.security.loading = false;
         vec![]
     }
 
