@@ -12312,6 +12312,95 @@ fn bot_prs_merged_noop_when_no_active_window() {
 }
 
 #[test]
+fn bot_pr_agent_survives_review_list_refresh() {
+    // A Dependabot PR has an active review agent.
+    // When the *Review* list refreshes (with unrelated PRs), the bot PR
+    // agent must NOT be cleaned up — it only lives in the Bot list.
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+
+    // Seed the bot PR list with PR #42
+    let bot_pr = make_bot_pr(42, ReviewDecision::ReviewRequired, crate::models::CiStatus::None);
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![bot_pr]));
+
+    // Insert an active review agent for the bot PR
+    let key = crate::models::PrRef::new("acme/app".to_string(), 42);
+    app.review.review_agents.insert(
+        key.clone(),
+        super::types::ReviewAgentHandle {
+            tmux_window: "review-acme_app-42".to_string(),
+            worktree: "/repo/.worktrees/review-42".to_string(),
+            status: crate::models::ReviewAgentStatus::FindingsReady,
+        },
+    );
+
+    // Refresh the Review list with a completely different PR — bot PR #42 is not in it
+    let review_pr = make_review_pr(99, "alice", ReviewDecision::ReviewRequired);
+    let cmds = app.update(Message::PrsLoaded(PrListKind::Review, vec![review_pr]));
+
+    // Agent must still be present
+    assert!(
+        app.review.review_agents.get(&key).is_some(),
+        "bot PR agent must not be removed by a Review list refresh"
+    );
+    // No KillTmuxWindow for the bot PR window
+    assert!(
+        !cmds.iter().any(|c| matches!(
+            c, Command::KillTmuxWindow { window } if window == "review-acme_app-42"
+        )),
+        "Review list refresh must not kill the bot PR tmux window"
+    );
+}
+
+#[test]
+fn bot_pr_agent_cleaned_up_when_bot_pr_disappears() {
+    // A Dependabot PR had an active review agent.
+    // When the *Bot* list refreshes and that PR is no longer present
+    // (e.g. it was merged/closed on GitHub), the agent must be cleaned up.
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+
+    // Seed the bot PR list with PR #42
+    let bot_pr = make_bot_pr(42, ReviewDecision::ReviewRequired, crate::models::CiStatus::None);
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![bot_pr]));
+
+    // Insert an active review agent for the bot PR
+    let key = crate::models::PrRef::new("acme/app".to_string(), 42);
+    app.review.review_agents.insert(
+        key.clone(),
+        super::types::ReviewAgentHandle {
+            tmux_window: "review-acme_app-42".to_string(),
+            worktree: "/repo/.worktrees/review-42".to_string(),
+            status: crate::models::ReviewAgentStatus::FindingsReady,
+        },
+    );
+
+    // Bot list refreshes and PR #42 is gone (replaced by a different PR)
+    let other_bot_pr = make_bot_pr(99, ReviewDecision::Approved, crate::models::CiStatus::Success);
+    let cmds = app.update(Message::PrsLoaded(PrListKind::Bot, vec![other_bot_pr]));
+
+    // Agent handle must have been removed
+    assert!(
+        app.review.review_agents.get(&key).is_none(),
+        "bot PR agent must be removed when the bot PR disappears from the Bot list"
+    );
+    // KillTmuxWindow must have been emitted
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c, Command::KillTmuxWindow { window } if window == "review-acme_app-42"
+        )),
+        "should kill the bot PR tmux window when bot PR disappears"
+    );
+    // UpdateAgentStatus(None) must have been emitted
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::UpdateAgentStatus { repo, number, status: None }
+            if repo == "acme/app" && *number == 42
+        )),
+        "should clear agent status in DB when bot PR disappears"
+    );
+}
+
+#[test]
 fn review_board_unknown_key_is_noop() {
     let mut app = make_review_board_app();
     let cmds = app.handle_key(make_key(KeyCode::Char('z')));
