@@ -1410,6 +1410,88 @@ fn exec_refresh_usage_from_db_syncs_to_app() {
 // -----------------------------------------------------------------------
 
 #[test]
+fn exec_persist_review_agent_saves_agent_to_db() {
+    use crate::models::{CiStatus, PrRef, ReviewDecision, ReviewPr};
+    use chrono::Utc;
+
+    let (rt, mut app) = test_runtime();
+    let pr = ReviewPr {
+        number: 1,
+        title: "Fix".into(),
+        author: "alice".into(),
+        repo: "acme/app".into(),
+        url: "https://github.com/acme/app/pull/1".into(),
+        is_draft: false,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        additions: 5,
+        deletions: 2,
+        review_decision: ReviewDecision::ReviewRequired,
+        labels: vec![],
+        body: String::new(),
+        head_ref: String::new(),
+        ci_status: CiStatus::None,
+        reviewers: vec![],
+    };
+    rt.database.save_prs(db::PrKind::Review, &[pr]).unwrap();
+
+    rt.exec_persist_review_agent(
+        &mut app,
+        db::PrKind::Review,
+        "acme/app".into(),
+        1,
+        "dispatch:review-1".into(),
+        "/tmp/worktree".into(),
+    );
+
+    let states = rt.database.load_pr_agent_states().unwrap();
+    let key = PrRef::new("acme/app".into(), 1);
+    assert!(states.contains_key(&key), "agent state not persisted");
+    assert_eq!(states[&key].tmux_window, "dispatch:review-1");
+    assert!(app.error_popup().is_none());
+}
+
+#[test]
+fn exec_persist_fix_agent_saves_agent_to_db() {
+    use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
+    use crate::tui::types::FixDispatchKey;
+    use chrono::Utc;
+
+    let (rt, mut app) = test_runtime();
+    let alert = SecurityAlert {
+        number: 1,
+        repo: "acme/app".into(),
+        severity: AlertSeverity::High,
+        kind: AlertKind::Dependabot,
+        title: "CVE-2024-1234".into(),
+        package: Some("lodash".into()),
+        vulnerable_range: Some("< 4.17.21".into()),
+        fixed_version: Some("4.17.21".into()),
+        cvss_score: Some(7.5),
+        url: "https://github.com/acme/app/security/dependabot/1".into(),
+        created_at: Utc::now(),
+        state: "open".into(),
+        description: "Prototype pollution".into(),
+    };
+    rt.database.save_security_alerts(&[alert]).unwrap();
+
+    rt.exec_persist_fix_agent(
+        &mut app,
+        "acme/app".into(),
+        1,
+        AlertKind::Dependabot,
+        "dispatch:fix-1".into(),
+        "/tmp/worktree".into(),
+    );
+
+    let states = rt.database.load_alert_agent_states().unwrap();
+    let key = FixDispatchKey::new("acme/app".into(), 1, AlertKind::Dependabot);
+    assert!(states.contains_key(&key), "fix agent state not persisted");
+    assert_eq!(states[&key].tmux_window, "dispatch:fix-1");
+    assert!(app.error_popup().is_none());
+}
+
+#[test]
 fn exec_persist_review_prs_saves_to_db() {
     use crate::models::{CiStatus, ReviewDecision, ReviewPr};
     use chrono::Utc;

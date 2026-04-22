@@ -551,33 +551,28 @@ async fn execute_commands(
                 number,
                 tmux_window,
                 worktree,
-            } => {
-                if let Err(e) =
-                    rt.database
-                        .set_pr_agent(pr_kind, &github_repo, number, &tmux_window, &worktree)
-                {
-                    let extra = app.update(Message::Error(format!(
-                        "Failed to persist review agent: {e}"
-                    )));
-                    queue.extend(extra);
-                }
-            }
+            } => queue.extend(rt.exec_persist_review_agent(
+                app,
+                pr_kind,
+                github_repo,
+                number,
+                tmux_window,
+                worktree,
+            )),
             Command::PersistFixAgent {
                 github_repo,
                 number,
                 kind,
                 tmux_window,
                 worktree,
-            } => {
-                if let Err(e) =
-                    rt.database
-                        .set_alert_agent(&github_repo, number, kind, &tmux_window, &worktree)
-                {
-                    let extra =
-                        app.update(Message::Error(format!("Failed to persist fix agent: {e}")));
-                    queue.extend(extra);
-                }
-            }
+            } => queue.extend(rt.exec_persist_fix_agent(
+                app,
+                github_repo,
+                number,
+                kind,
+                tmux_window,
+                worktree,
+            )),
             Command::InsertTask { draft, epic_id } => rt.exec_insert_task(app, draft, epic_id),
             Command::DeleteTask(id) => rt.exec_delete_task(app, id),
             Command::DispatchAgent { task, mode } => rt.exec_dispatch_agent(task, mode),

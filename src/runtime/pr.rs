@@ -203,6 +203,24 @@ impl TuiRuntime {
         });
     }
 
+    pub(super) fn exec_persist_review_agent(
+        &self,
+        app: &mut App,
+        pr_kind: db::PrKind,
+        github_repo: String,
+        number: i64,
+        tmux_window: String,
+        worktree: String,
+    ) -> Vec<Command> {
+        if let Err(e) =
+            self.database
+                .set_pr_agent(pr_kind, &github_repo, number, &tmux_window, &worktree)
+        {
+            return app.update(Message::Error(format!("Failed to persist review agent: {e}")));
+        }
+        vec![]
+    }
+
     pub(super) fn exec_merge_bot_pr(&self, url: String) {
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
