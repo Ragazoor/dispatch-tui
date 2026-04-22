@@ -431,16 +431,7 @@ impl super::SettingsStore for Database {
                  # Renovate PRs in a specific repo:\n\
                  # is:pr is:open author:app/renovate repo:myorg/myrepo -is:draft archived:false",
             ),
-            (
-                "github_queries_security",
-                "# Security alert repositories — one owner/repo per line.\n\
-                 # Lines starting with # and blank lines are ignored.\n\
-                 #\n\
-                 # Examples:\n\
-                 #   myorg/backend\n\
-                 #   myorg/frontend\n\
-                 #   myorg/infra",
-            ),
+            ("github_queries_security", ""),
         ];
         for (key, value) in defaults {
             conn.execute(

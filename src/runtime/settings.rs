@@ -213,6 +213,7 @@ impl TuiRuntime {
             return Ok(vec![]);
         };
 
+        // Strip comments and blank lines
         let repos: String = edited
             .lines()
             .map(str::trim)
