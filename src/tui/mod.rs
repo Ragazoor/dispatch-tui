@@ -469,6 +469,21 @@ impl App {
         }
     }
 
+    pub(in crate::tui) fn update_security_anchor_from_current(&mut self) {
+        let (col, row) = match self.security_selection() {
+            Some(sel) => (sel.selected_column, sel.selected_row[sel.selected_column]),
+            None => return,
+        };
+        let anchor = self
+            .security_alerts_for_column(col)
+            .into_iter()
+            .nth(row)
+            .map(|a| a.number);
+        if let Some(sel) = self.security_selection_mut() {
+            sel.anchor_alert = anchor;
+        }
+    }
+
     pub(in crate::tui) fn clamp_security_selection(&mut self) {
         let counts: [usize; crate::models::AlertSeverity::COLUMN_COUNT] =
             std::array::from_fn(|col| self.security_alerts_for_column(col).len());
@@ -480,6 +495,50 @@ impl App {
                     sel.selected_row[col] = count - 1;
                 }
             }
+        }
+    }
+
+    fn sync_security_selection(&mut self) {
+        let anchor = match self.security_selection() {
+            Some(sel) => sel.anchor_alert,
+            None => None,
+        };
+
+        let Some(anchor_alert) = anchor else {
+            return self.clamp_security_selection();
+        };
+
+        let counts: [usize; crate::models::AlertSeverity::COLUMN_COUNT] =
+            std::array::from_fn(|col| self.security_alerts_for_column(col).len());
+
+        let mut found: Option<(usize, usize)> = None;
+        'outer: for col in 0..crate::models::AlertSeverity::COLUMN_COUNT {
+            let alerts = self.security_alerts_for_column(col);
+            for (row, alert) in alerts.iter().enumerate() {
+                if alert.number == anchor_alert {
+                    found = Some((col, row));
+                    break 'outer;
+                }
+            }
+        }
+
+        if let Some((found_col, found_row)) = found {
+            if let Some(sel) = self.security_selection_mut() {
+                for (col, &count) in counts.iter().enumerate() {
+                    if col == found_col {
+                        continue;
+                    }
+                    if count == 0 {
+                        sel.selected_row[col] = 0;
+                    } else if sel.selected_row[col] >= count {
+                        sel.selected_row[col] = count - 1;
+                    }
+                }
+                sel.selected_column = found_col;
+                sel.selected_row[found_col] = found_row;
+            }
+        } else {
+            self.clamp_security_selection();
         }
     }
 
@@ -3532,7 +3591,7 @@ impl App {
         self.security.loading = false;
         self.security.last_fetch = Some(Instant::now());
         self.security.last_error = None;
-        self.clamp_security_selection();
+        self.sync_security_selection();
         cmds
     }
 
@@ -3567,7 +3626,7 @@ impl App {
             return vec![];
         };
         *mode = new_mode;
-        self.clamp_review_selection();
+        self.sync_review_selection();
         let mut cmds = vec![];
         if let ViewMode::ReviewBoard { mode, .. } = &self.board.view_mode {
             match mode {
@@ -3603,14 +3662,14 @@ impl App {
             self.security.dependabot.prs.loading = false;
             self.security.dependabot.prs.last_fetch = Some(Instant::now());
             self.security.dependabot.prs.last_error = None;
-            self.clamp_dependabot_selection();
+            self.sync_dependabot_selection();
         } else {
             let list = self.review.list_mut(kind).unwrap();
             list.set_prs(prs);
             list.loading = false;
             list.last_fetch = Some(Instant::now());
             list.last_error = None;
-            self.clamp_review_selection();
+            self.sync_review_selection();
 
             // Clean up review agents whose PRs no longer appear in either list
             let pr_keys: std::collections::HashSet<crate::models::PrRef> =
@@ -3662,6 +3721,70 @@ impl App {
         }
     }
 
+    fn sync_review_selection(&mut self) {
+        let anchor = match &self.board.view_mode {
+            ViewMode::ReviewBoard { selection, .. } => selection.anchor_pr,
+            _ => None,
+        };
+
+        let Some(anchor_pr) = anchor else {
+            return self.clamp_review_selection();
+        };
+
+        let mode = match &self.board.view_mode {
+            ViewMode::ReviewBoard { mode, .. } => *mode,
+            _ => return self.clamp_review_selection(),
+        };
+
+        let filtered = self.active_review_prs();
+        let col_count = mode.column_count();
+
+        // Search for anchor PR across all columns
+        let mut found: Option<(usize, usize)> = None;
+        'outer: for col in 0..col_count {
+            let mut col_prs: Vec<_> = filtered
+                .iter()
+                .filter(|pr| mode.pr_column(pr) == col)
+                .collect();
+            col_prs.sort_by(|a, b| a.repo.cmp(&b.repo));
+            for (row, pr) in col_prs.iter().enumerate() {
+                if pr.number == anchor_pr {
+                    found = Some((col, row));
+                    break 'outer;
+                }
+            }
+        }
+
+        let counts: [usize; ReviewDecision::COLUMN_COUNT] = std::array::from_fn(|col| {
+            if col >= col_count {
+                return 0;
+            }
+            filtered
+                .iter()
+                .filter(|pr| mode.pr_column(pr) == col)
+                .count()
+        });
+
+        if let Some((found_col, found_row)) = found {
+            if let Some(sel) = self.review_selection_mut() {
+                for (col, &count) in counts.iter().enumerate() {
+                    if col == found_col {
+                        continue;
+                    }
+                    if count == 0 {
+                        sel.selected_row[col] = 0;
+                    } else if sel.selected_row[col] >= count {
+                        sel.selected_row[col] = count - 1;
+                    }
+                }
+                sel.selected_column = found_col;
+                sel.selected_row[found_col] = found_row;
+            }
+        } else {
+            self.clamp_review_selection();
+        }
+    }
+
     fn clamp_dependabot_selection(&mut self) {
         // If the view is not SecurityBoard this is a silent no-op: the `if let` below
         // simply does not match, so the selection is left unchanged until the user
@@ -3690,6 +3813,98 @@ impl App {
                     dependabot_selection.selected_row[col] = count - 1;
                 }
             }
+        }
+    }
+
+    pub(in crate::tui) fn update_dependabot_anchor_from_current(&mut self) {
+        let (col, row) = match &self.board.view_mode {
+            ViewMode::SecurityBoard {
+                dependabot_selection,
+                ..
+            } => (
+                dependabot_selection.selected_column,
+                dependabot_selection.selected_row[dependabot_selection.selected_column],
+            ),
+            _ => return,
+        };
+        let filtered = self.filtered_bot_prs();
+        let mut col_prs: Vec<_> = filtered
+            .iter()
+            .filter(|pr| bot_pr_column(pr, self.pr_agent(pr).map(|h| h.status)) == col)
+            .collect();
+        col_prs.sort_by(|a, b| a.repo.cmp(&b.repo));
+        let anchor = col_prs.get(row).map(|pr| pr.number);
+        if let ViewMode::SecurityBoard {
+            dependabot_selection,
+            ..
+        } = &mut self.board.view_mode
+        {
+            dependabot_selection.anchor_pr = anchor;
+        }
+    }
+
+    fn sync_dependabot_selection(&mut self) {
+        let anchor = match &self.board.view_mode {
+            ViewMode::SecurityBoard {
+                dependabot_selection,
+                ..
+            } => dependabot_selection.anchor_pr,
+            _ => return,
+        };
+
+        let Some(anchor_pr) = anchor else {
+            return self.clamp_dependabot_selection();
+        };
+
+        let filtered = self.filtered_bot_prs();
+        let col_count = 3usize; // Backlog(0), In Review(1), Approved(2)
+
+        let mut found: Option<(usize, usize)> = None;
+        'outer: for col in 0..col_count {
+            let mut col_prs: Vec<_> = filtered
+                .iter()
+                .filter(|pr| bot_pr_column(pr, self.pr_agent(pr).map(|h| h.status)) == col)
+                .collect();
+            col_prs.sort_by(|a, b| a.repo.cmp(&b.repo));
+            for (row, pr) in col_prs.iter().enumerate() {
+                if pr.number == anchor_pr {
+                    found = Some((col, row));
+                    break 'outer;
+                }
+            }
+        }
+
+        let counts: [usize; ReviewDecision::COLUMN_COUNT] = std::array::from_fn(|col| {
+            if col >= col_count {
+                return 0;
+            }
+            filtered
+                .iter()
+                .filter(|pr| bot_pr_column(pr, self.pr_agent(pr).map(|h| h.status)) == col)
+                .count()
+        });
+
+        if let Some((found_col, found_row)) = found {
+            if let ViewMode::SecurityBoard {
+                dependabot_selection,
+                ..
+            } = &mut self.board.view_mode
+            {
+                for (col, &count) in counts.iter().enumerate() {
+                    if col == found_col {
+                        continue;
+                    }
+                    if count == 0 {
+                        dependabot_selection.selected_row[col] = 0;
+                    } else if dependabot_selection.selected_row[col] >= count {
+                        dependabot_selection.selected_row[col] = count - 1;
+                    }
+                }
+                dependabot_selection.selected_column = found_col;
+                dependabot_selection.selected_row[found_col] = found_row;
+            }
+        } else {
+            self.clamp_dependabot_selection();
         }
     }
 
@@ -4058,6 +4273,27 @@ impl App {
             let current = sel.selected_row[col] as isize;
             let new = (current + delta).clamp(0, (count - 1) as isize) as usize;
             sel.selected_row[col] = new;
+        }
+    }
+
+    pub(in crate::tui) fn update_review_anchor_from_current(&mut self) {
+        let (col, row) = match self.review_selection() {
+            Some(sel) => (sel.selected_column, sel.selected_row[sel.selected_column]),
+            None => return,
+        };
+        let mode = match &self.board.view_mode {
+            ViewMode::ReviewBoard { mode, .. } => *mode,
+            _ => return,
+        };
+        let mut col_prs: Vec<_> = self
+            .active_review_prs()
+            .into_iter()
+            .filter(|pr| mode.pr_column(pr) == col)
+            .collect();
+        col_prs.sort_by(|a, b| a.repo.cmp(&b.repo));
+        let anchor = col_prs.get(row).map(|pr| pr.number);
+        if let Some(sel) = self.review_selection_mut() {
+            sel.anchor_pr = anchor;
         }
     }
 
@@ -4455,7 +4691,7 @@ impl App {
 
     fn handle_close_review_repo_filter(&mut self) -> Vec<Command> {
         self.input.mode = InputMode::Normal;
-        self.clamp_review_selection();
+        self.sync_review_selection();
         vec![]
     }
 
@@ -4463,7 +4699,7 @@ impl App {
         if !self.review.review.repo_filter.remove(&repo) {
             self.review.review.repo_filter.insert(repo);
         }
-        self.clamp_review_selection();
+        self.sync_review_selection();
         vec![]
     }
 
@@ -4474,7 +4710,7 @@ impl App {
         } else {
             self.review.review.repo_filter = all_repos.iter().cloned().collect();
         }
-        self.clamp_review_selection();
+        self.sync_review_selection();
         vec![]
     }
 
@@ -4483,13 +4719,13 @@ impl App {
             RepoFilterMode::Include => RepoFilterMode::Exclude,
             RepoFilterMode::Exclude => RepoFilterMode::Include,
         };
-        self.clamp_review_selection();
+        self.sync_review_selection();
         vec![]
     }
 
     fn handle_toggle_dispatch_pr_filter(&mut self) -> Vec<Command> {
         self.review.dispatch_pr_filter = !self.review.dispatch_pr_filter;
-        self.clamp_review_selection();
+        self.sync_review_selection();
         vec![]
     }
 
@@ -4799,7 +5035,7 @@ impl App {
             }
             Some(crate::models::AlertKind::CodeScanning) => None,
         };
-        self.clamp_security_selection();
+        self.sync_security_selection();
         vec![]
     }
 
@@ -4810,7 +5046,7 @@ impl App {
 
     fn handle_close_security_repo_filter(&mut self) -> Vec<Command> {
         self.input.mode = InputMode::Normal;
-        self.clamp_security_selection();
+        self.sync_security_selection();
         vec![]
     }
 
@@ -4818,7 +5054,7 @@ impl App {
         if !self.security.repo_filter.remove(&repo) {
             self.security.repo_filter.insert(repo);
         }
-        self.clamp_security_selection();
+        self.sync_security_selection();
         vec![]
     }
 
@@ -4829,7 +5065,7 @@ impl App {
         } else {
             self.security.repo_filter = all_repos.into_iter().collect();
         }
-        self.clamp_security_selection();
+        self.sync_security_selection();
         vec![]
     }
 
@@ -4838,7 +5074,7 @@ impl App {
             RepoFilterMode::Include => RepoFilterMode::Exclude,
             RepoFilterMode::Exclude => RepoFilterMode::Include,
         };
-        self.clamp_security_selection();
+        self.sync_security_selection();
         vec![]
     }
 
@@ -4849,7 +5085,7 @@ impl App {
 
     fn handle_close_bot_pr_repo_filter(&mut self) -> Vec<Command> {
         self.input.mode = InputMode::Normal;
-        self.clamp_dependabot_selection();
+        self.sync_dependabot_selection();
         vec![]
     }
 
@@ -4857,7 +5093,7 @@ impl App {
         if !self.security.dependabot.prs.repo_filter.remove(&repo) {
             self.security.dependabot.prs.repo_filter.insert(repo);
         }
-        self.clamp_dependabot_selection();
+        self.sync_dependabot_selection();
         vec![]
     }
 
@@ -4868,7 +5104,7 @@ impl App {
         } else {
             self.security.dependabot.prs.repo_filter = all_repos.into_iter().collect();
         }
-        self.clamp_dependabot_selection();
+        self.sync_dependabot_selection();
         vec![]
     }
 
@@ -4878,7 +5114,7 @@ impl App {
                 RepoFilterMode::Include => RepoFilterMode::Exclude,
                 RepoFilterMode::Exclude => RepoFilterMode::Include,
             };
-        self.clamp_dependabot_selection();
+        self.sync_dependabot_selection();
         vec![]
     }
 

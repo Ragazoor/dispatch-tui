@@ -847,6 +847,7 @@ impl App {
                     let col = sel.selected_column;
                     sel.selected_column = col.saturating_sub(1);
                 }
+                self.update_security_anchor_from_current();
                 vec![]
             }
             KeyCode::Char('l') | KeyCode::Right => {
@@ -854,14 +855,17 @@ impl App {
                     let col = sel.selected_column;
                     sel.selected_column = (col + 1).min(AlertSeverity::COLUMN_COUNT - 1);
                 }
+                self.update_security_anchor_from_current();
                 vec![]
             }
             KeyCode::Char('j') | KeyCode::Down => {
                 self.navigate_security_row(1);
+                self.update_security_anchor_from_current();
                 vec![]
             }
             KeyCode::Char('k') | KeyCode::Up => {
                 self.navigate_security_row(-1);
+                self.update_security_anchor_from_current();
                 vec![]
             }
 
@@ -1067,6 +1071,7 @@ impl App {
                         dependabot_selection.selected_row[col] += 1;
                     }
                 }
+                self.update_dependabot_anchor_from_current();
                 vec![]
             }
             KeyCode::Char('k') | KeyCode::Up => {
@@ -1080,6 +1085,7 @@ impl App {
                         dependabot_selection.selected_row[col] -= 1;
                     }
                 }
+                self.update_dependabot_anchor_from_current();
                 vec![]
             }
             KeyCode::Char('h') | KeyCode::Left => {
@@ -1092,6 +1098,7 @@ impl App {
                         dependabot_selection.selected_column -= 1;
                     }
                 }
+                self.update_dependabot_anchor_from_current();
                 vec![]
             }
             KeyCode::Char('l') | KeyCode::Right => {
@@ -1106,6 +1113,7 @@ impl App {
                         dependabot_selection.selected_column += 1;
                     }
                 }
+                self.update_dependabot_anchor_from_current();
                 vec![]
             }
             KeyCode::Char('?') => self.update(Message::ToggleHelp),
@@ -1149,6 +1157,7 @@ impl App {
                     let col = sel.selected_column;
                     sel.selected_column = col.saturating_sub(1);
                 }
+                self.update_review_anchor_from_current();
                 vec![]
             }
             KeyCode::Char('l') | KeyCode::Right => {
@@ -1160,14 +1169,17 @@ impl App {
                     let col = sel.selected_column;
                     sel.selected_column = (col + 1).min(max_col);
                 }
+                self.update_review_anchor_from_current();
                 vec![]
             }
             KeyCode::Char('j') | KeyCode::Down => {
                 self.navigate_review_row(1);
+                self.update_review_anchor_from_current();
                 vec![]
             }
             KeyCode::Char('k') | KeyCode::Up => {
                 self.navigate_review_row(-1);
+                self.update_review_anchor_from_current();
                 vec![]
             }
 
