@@ -18041,7 +18041,10 @@ fn test_selection_falls_back_when_column_empties() {
     assert_eq!(app.selection().column(), 1);
 
     // Task 2 deleted — Running column empties, anchor not found
-    app.update(Message::RefreshTasks(vec![make_task(1, TaskStatus::Backlog)]));
+    app.update(Message::RefreshTasks(vec![make_task(
+        1,
+        TaskStatus::Backlog,
+    )]));
 
     // Cursor must be in a valid state: row 0 in the empty Running column
     assert_eq!(app.selection().column(), 1);

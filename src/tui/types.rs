@@ -1181,7 +1181,6 @@ impl BoardSelection {
             Some(self.selected_row[col])
         }
     }
-
 }
 
 impl Default for BoardSelection {

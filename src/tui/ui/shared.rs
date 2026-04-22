@@ -1,0 +1,278 @@
+use super::palette::{BORDER, FG, MUTED, MUTED_LIGHT, PURPLE};
+
+use crate::models::Staleness;
+use crate::tui::{App, RepoFilterMode, ReviewBoardMode, ViewMode};
+use ratatui::{
+    layout::{Alignment, Rect},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{ListItem, Paragraph},
+    Frame,
+};
+use std::time::{Duration, Instant};
+
+/// Returns (text, color) for the 1-line refresh status row shown on Review and Security boards.
+///
+/// Thresholds are relative to `interval` so both boards stay consistent regardless of their
+/// different poll rates.
+pub fn refresh_status(
+    last_fetch: Option<Instant>,
+    loading: bool,
+    interval: Duration,
+) -> (String, Color) {
+    if loading {
+        return ("Refreshing...  [r] refresh".to_string(), Color::DarkGray);
+    }
+    let Some(last) = last_fetch else {
+        return ("Never fetched  [r] refresh".to_string(), Color::DarkGray);
+    };
+    let elapsed = last.elapsed();
+    let elapsed_str = if elapsed.as_secs() < 60 {
+        format!("{}s ago", elapsed.as_secs())
+    } else {
+        format!(
+            "{}m {}s ago",
+            elapsed.as_secs() / 60,
+            elapsed.as_secs() % 60
+        )
+    };
+    let text = format!("Updated {elapsed_str}  [r] refresh");
+    let color = if elapsed >= interval * 4 {
+        Color::Red
+    } else if elapsed >= interval * 2 {
+        Color::Yellow
+    } else {
+        Color::White
+    };
+    (text, color)
+}
+
+/// Map a staleness tier to a terminal color.
+/// Uses indexed terminal colors (not palette constants) so these adapt to the
+/// user's terminal theme rather than being locked to Tokyo Night RGB values.
+pub(in crate::tui::ui) fn staleness_color(staleness: Staleness) -> Color {
+    match staleness {
+        Staleness::Fresh => Color::Green,
+        Staleness::Aging => Color::Yellow,
+        Staleness::Stale => Color::Red,
+    }
+}
+
+/// Truncate a string to at most `max` characters, appending "…" if truncated.
+pub fn truncate(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let truncated: String = s.chars().take(max.saturating_sub(1)).collect();
+        format!("{}…", truncated)
+    }
+}
+
+const LOADING_GLYPH: &str = " \u{21bb}";
+const FILTER_GLYPH: &str = " \u{25c6}";
+
+/// Format a tab label with optional count, filter, and loading indicators.
+fn tab_label(prefix: &str, name: &str, count: usize, filter: bool, loading: bool) -> String {
+    let count_part = if count > 0 {
+        format!(" ({count})")
+    } else {
+        String::new()
+    };
+    let filter_part = if filter { FILTER_GLYPH } else { "" };
+    let loading_part = if loading { LOADING_GLYPH } else { "" };
+    format!("{prefix}{name}{count_part}{filter_part}{loading_part} ")
+}
+
+fn review_tab_label(app: &App, prefix: &str) -> String {
+    tab_label(
+        prefix,
+        "Reviews",
+        app.review_prs().len(),
+        false,
+        app.review_board_loading(),
+    )
+}
+
+fn my_prs_tab_label(app: &App, prefix: &str) -> String {
+    tab_label(
+        prefix,
+        "My PRs",
+        app.my_prs().len(),
+        app.dispatch_pr_filter(),
+        app.my_prs_loading(),
+    )
+}
+
+fn security_tab_label(app: &App, prefix: &str) -> String {
+    tab_label(
+        prefix,
+        "Security",
+        app.filtered_security_alerts().len(),
+        false,
+        app.security_loading(),
+    )
+}
+
+pub(in crate::tui::ui) fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
+    let active_style = Style::default().fg(FG).add_modifier(Modifier::BOLD);
+    let inactive_style = Style::default().fg(MUTED);
+    let hint_style = Style::default().fg(MUTED);
+
+    let mut spans: Vec<Span> = Vec::new();
+
+    match app.view_mode() {
+        ViewMode::Epic { epic_id, .. } => {
+            let epic_title = app
+                .epics()
+                .iter()
+                .find(|e| e.id == *epic_id)
+                .map(|e| truncate(&e.title, 30))
+                .unwrap_or_else(|| "Epic".to_string());
+            spans.push(Span::styled(
+                format!(" \u{25b8} Epic: {epic_title} "),
+                active_style.fg(PURPLE),
+            ));
+            spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
+            spans.push(Span::styled(review_tab_label(app, " "), inactive_style));
+            spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
+            spans.push(Span::styled(security_tab_label(app, " "), inactive_style));
+        }
+        ViewMode::Board(_) => {
+            spans.push(Span::styled(" \u{25b8} Tasks ", active_style));
+            spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
+            spans.push(Span::styled(review_tab_label(app, " "), inactive_style));
+            spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
+            spans.push(Span::styled(security_tab_label(app, " "), inactive_style));
+        }
+        ViewMode::ReviewBoard { mode, .. } => {
+            spans.push(Span::styled(" Tasks ", inactive_style));
+            spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
+            let label = match mode {
+                ReviewBoardMode::Reviewer => review_tab_label(app, " \u{25b8} "),
+                ReviewBoardMode::Author => my_prs_tab_label(app, " \u{25b8} "),
+            };
+            spans.push(Span::styled(label, active_style));
+            spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
+            spans.push(Span::styled(security_tab_label(app, " "), inactive_style));
+        }
+        ViewMode::SecurityBoard { .. } => {
+            spans.push(Span::styled(" Tasks ", inactive_style));
+            spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
+            spans.push(Span::styled(review_tab_label(app, " "), inactive_style));
+            spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
+            spans.push(Span::styled(
+                security_tab_label(app, " \u{25b8} "),
+                active_style,
+            ));
+        }
+    }
+
+    let key_hint = Style::default()
+        .fg(MUTED_LIGHT)
+        .add_modifier(Modifier::BOLD);
+    match app.view_mode() {
+        ViewMode::ReviewBoard { .. } => {
+            spans.push(Span::styled("  [Tab]", key_hint));
+            spans.push(Span::styled(" security  ", hint_style));
+            spans.push(Span::styled("[S-Tab]", key_hint));
+            spans.push(Span::styled(" toggle", hint_style));
+        }
+        ViewMode::SecurityBoard { .. } => {
+            spans.push(Span::styled("  [Tab]", key_hint));
+            spans.push(Span::styled(" tasks  ", hint_style));
+            spans.push(Span::styled("[Esc]", key_hint));
+            spans.push(Span::styled(" back", hint_style));
+        }
+        _ => {
+            spans.push(Span::styled("  [Tab]", key_hint));
+        }
+    }
+
+    let line = Line::from(spans);
+    let paragraph = Paragraph::new(line);
+    frame.render_widget(paragraph, area);
+
+    // Right-aligned indicators (filter, notifications)
+    let mut right_parts: Vec<Span> = Vec::new();
+    // Auto dispatch indicator — only in epic view
+    if let ViewMode::Epic { epic_id, .. } = app.view_mode() {
+        if let Some(epic) = app.epics().iter().find(|e| e.id == *epic_id) {
+            let (label, style) = if epic.auto_dispatch {
+                ("auto dispatch [U]  ", Style::default().fg(Color::Green))
+            } else {
+                ("manual dispatch [U]  ", Style::default().fg(MUTED))
+            };
+            right_parts.push(Span::styled(label, style));
+        }
+    }
+    if !app.repo_filter().is_empty() {
+        let active = app.repo_filter().len();
+        let total = app.board.repo_paths.len();
+        let label = match app.repo_filter_mode() {
+            RepoFilterMode::Include => format!("[{active}/{total} repos]  "),
+            RepoFilterMode::Exclude => format!("[excl {active}/{total} repos]  "),
+        };
+        right_parts.push(Span::styled(label, Style::default().fg(MUTED)));
+    }
+    if app.notifications_enabled() {
+        right_parts.push(Span::styled(
+            "\u{1F514} [N]",
+            Style::default().fg(Color::Yellow),
+        ));
+    } else {
+        right_parts.push(Span::styled("\u{1F515} [N]", Style::default().fg(MUTED)));
+    }
+    if !right_parts.is_empty() {
+        let right_line = Line::from(right_parts);
+        let p = Paragraph::new(right_line).alignment(Alignment::Right);
+        frame.render_widget(p, area);
+    }
+}
+
+/// Non-selectable section header injected between substatus groups.
+/// `first` — when true, omits the leading blank line so the top of the column
+/// doesn't have an awkward gap before the very first group.
+pub(in crate::tui::ui) fn render_substatus_header(label: &str, first: bool) -> ListItem<'static> {
+    let header = Line::from(Span::styled(
+        format!("  \u{2500}\u{2500} {label} "),
+        Style::default().fg(FG).add_modifier(Modifier::BOLD),
+    ));
+    if first {
+        ListItem::new(vec![header])
+    } else {
+        ListItem::new(vec![Line::raw(""), header])
+    }
+}
+
+/// Push a keybinding hint as styled spans.
+///
+/// When the key is a single char matching the label's first letter (e.g. `d` / `dispatch`),
+/// renders the compact `[d]ispatch` form. Otherwise renders `[key] label`.
+pub(in crate::tui::ui) fn push_hint_spans(
+    spans: &mut Vec<Span<'static>>,
+    key: &str,
+    label: &str,
+    key_color: Color,
+    label_style: Style,
+) {
+    let mut key_chars = key.chars();
+    let key_char = key_chars.next();
+    let key_is_single = key_char.is_some() && key_chars.next().is_none();
+    let can_embed = key_is_single
+        && label
+            .chars()
+            .next()
+            .zip(key_char)
+            .is_some_and(|(l, k)| l.eq_ignore_ascii_case(&k));
+
+    spans.push(Span::styled(
+        format!("[{key}]"),
+        Style::default().fg(key_color).add_modifier(Modifier::BOLD),
+    ));
+    let label_text = if can_embed {
+        format!("{}  ", &label[1..])
+    } else {
+        format!(" {label}  ")
+    };
+    spans.push(Span::styled(label_text, label_style));
+}

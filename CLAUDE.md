@@ -129,7 +129,12 @@ A task with a plan always dispatches directly regardless of tag. Tags are select
 | `src/runtime.rs` | Async event loop (`tokio::select!`), bridges TUI ↔ MCP ↔ shell commands, executes `Command` side effects |
 | `src/tui/mod.rs` | `App` struct, `update()` message dispatcher, `column_items_for_status()` render helper |
 | `src/tui/input.rs` | Key event handlers, inline-mutation convention for UI-only state |
-| `src/tui/ui.rs` | Rendering logic (ratatui `Frame` drawing), pure functions |
+| `src/tui/ui/mod.rs` | Rendering entry point — re-exports `render()`, thin dispatcher |
+| `src/tui/ui/kanban.rs` | Kanban board rendering: task/epic cards, columns, overlays, action hints |
+| `src/tui/ui/review.rs` | Review board rendering: PR columns, detail panel, review action hints |
+| `src/tui/ui/security.rs` | Security board rendering: Dependabot and alert columns, detail panel |
+| `src/tui/ui/shared.rs` | Cross-board helpers: `render_tab_bar`, `refresh_status`, `truncate`, `push_hint_spans` |
+| `src/tui/ui/palette.rs` | Tokyo Night color palette constants |
 | `src/tui/types.rs` | `Message`, `Command`, `ViewMode`, `InputMode`, `AgentTracking` enums and structs |
 | `src/tui/tests.rs` | TUI unit tests |
 | `src/models.rs` | Domain types (`Task`, `Epic`, `TaskStatus`, `SubStatus`, `TaskTag`), `DispatchMode::for_task()` tag routing |
@@ -275,7 +280,7 @@ Avoid `#[allow(dead_code)]` — dead code should be removed, not suppressed. If 
 3. **Add `Command` variants** if the view triggers side effects (DB writes, shell commands).
 4. **Handle input** in `src/tui/input.rs` — add key handlers under a new match arm for your `ViewMode`.
 5. **Handle messages** in `src/tui/mod.rs` `update()` — process your new messages, return commands.
-6. **Render** in `src/tui/ui.rs` — add a rendering branch for your view mode.
+6. **Render** in the appropriate `src/tui/ui/` module (`kanban.rs`, `review.rs`, or `security.rs`) — add a rendering branch for your view mode in `kanban.rs::render()`.
 
 ### Adding a Database Migration
 
