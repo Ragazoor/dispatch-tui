@@ -216,7 +216,9 @@ impl TuiRuntime {
             self.database
                 .set_pr_agent(pr_kind, &github_repo, number, &tmux_window, &worktree)
         {
-            return app.update(Message::Error(format!("Failed to persist review agent: {e}")));
+            return app.update(Message::Error(format!(
+                "Failed to persist review agent: {e}"
+            )));
         }
         vec![]
     }

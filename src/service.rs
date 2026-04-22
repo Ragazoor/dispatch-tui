@@ -246,6 +246,17 @@ impl TaskService {
         Self { db }
     }
 
+    /// Updates a task from an MCP agent or external tool call.
+    ///
+    /// **Caller:** MCP handlers (`src/mcp/handlers/tasks.rs`).
+    ///
+    /// **Restrictions:** Cannot transition status to `Done` or `Archived` — those
+    /// transitions are reserved for human operators via the CLI. Supports the full
+    /// `UpdateTaskParams` builder (title, description, repo_path, pr_url, worktree,
+    /// tmux_window, base_branch, sub_status, epic_id, sort_order, tag, status).
+    ///
+    /// Use [`cli_update_task`](Self::cli_update_task) instead when writing CLI
+    /// subcommands that need to complete or archive tasks.
     pub fn update_task(&self, params: UpdateTaskParams) -> Result<TaskId, ServiceError> {
         if !params.has_any_field() {
             return Err(ServiceError::Validation(
@@ -367,8 +378,17 @@ impl TaskService {
         Ok(task_id)
     }
 
-    /// CLI update command: change task status with optional condition and sub_status.
-    /// Returns true if the update was applied (false if only_if condition didn't match).
+    /// Updates a task status from a CLI subcommand (human operator path).
+    ///
+    /// **Caller:** `src/main.rs` CLI subcommands (`dispatch update`, etc.).
+    ///
+    /// **Differences from [`update_task`](Self::update_task):**
+    /// - Can transition to any status including `Done` and `Archived`.
+    /// - Supports conditional update: `only_if` skips the write if the current
+    ///   status doesn't match, returning `Ok(false)` instead of an error.
+    /// - Accepts only status + sub_status — not the full field builder.
+    ///
+    /// Use `update_task` for agent/MCP call sites that must not complete tasks.
     pub fn cli_update_task(
         &self,
         task_id: TaskId,
