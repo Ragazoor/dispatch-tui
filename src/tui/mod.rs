@@ -1054,7 +1054,11 @@ impl App {
             | Message::ToggleReviewRepoFilter(_)
             | Message::ToggleAllReviewRepoFilter
             | Message::ToggleReviewRepoFilterMode
-            | Message::ToggleDispatchPrFilter) => self.dispatch_review(msg),
+            | Message::ToggleDispatchPrFilter
+            | Message::StartApproveReviewPr
+            | Message::ConfirmApproveReviewPr
+            | Message::StartMergeReviewPr
+            | Message::ConfirmMergeReviewPr) => self.dispatch_review(msg),
 
             // Security board, fix agents, task filters, filter presets
             msg @ (Message::SwitchToSecurityBoard
@@ -1098,11 +1102,7 @@ impl App {
             | Message::StartMergeBotPr
             | Message::ConfirmApproveBotPr
             | Message::ConfirmMergeBotPr
-            | Message::CancelPrOperation
-            | Message::StartApproveReviewPr
-            | Message::ConfirmApproveReviewPr
-            | Message::StartMergeReviewPr
-            | Message::ConfirmMergeReviewPr) => self.dispatch_security_and_filters(msg),
+            | Message::CancelPrOperation) => self.dispatch_security_and_filters(msg),
             Message::ShowTips {
                 tips,
                 starting_index,
@@ -1361,6 +1361,10 @@ impl App {
             Message::ToggleAllReviewRepoFilter => self.handle_toggle_all_review_repo_filter(),
             Message::ToggleReviewRepoFilterMode => self.handle_toggle_review_repo_filter_mode(),
             Message::ToggleDispatchPrFilter => self.handle_toggle_dispatch_pr_filter(),
+            Message::StartApproveReviewPr => vec![], // TODO: implement
+            Message::ConfirmApproveReviewPr => vec![], // TODO: implement
+            Message::StartMergeReviewPr => vec![], // TODO: implement
+            Message::ConfirmMergeReviewPr => vec![], // TODO: implement
             _ => unreachable!(),
         }
     }
@@ -1427,10 +1431,6 @@ impl App {
             Message::ConfirmApproveBotPr => self.handle_confirm_approve_bot_pr(),
             Message::ConfirmMergeBotPr => self.handle_confirm_merge_bot_pr(),
             Message::CancelPrOperation => self.handle_cancel_pr_operation(),
-            Message::StartApproveReviewPr => vec![], // TODO: implement
-            Message::ConfirmApproveReviewPr => vec![], // TODO: implement
-            Message::StartMergeReviewPr => vec![], // TODO: implement
-            Message::ConfirmMergeReviewPr => vec![], // TODO: implement
             _ => unreachable!(),
         }
     }
