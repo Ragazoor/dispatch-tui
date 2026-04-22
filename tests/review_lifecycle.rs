@@ -4,8 +4,13 @@
 use std::time::Duration;
 
 use chrono::Utc;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use dispatch_tui::models::{CiStatus, ReviewDecision, ReviewPr};
-use dispatch_tui::tui::{App, Command, Message, PrListKind, ReviewAgentRequest};
+use dispatch_tui::tui::{App, Command, InputMode, Message, PrListKind, ReviewAgentRequest};
+
+fn make_key(code: KeyCode) -> KeyEvent {
+    KeyEvent::new(code, KeyModifiers::empty())
+}
 
 fn make_app() -> App {
     App::new(vec![], Duration::from_secs(300))
@@ -254,5 +259,163 @@ fn pr_fetch_failed_sets_error_state_and_preserves_prs() {
         app.review_prs().len(),
         1,
         "Existing PRs should be preserved on failure — board does not go blank"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Approve review PR lifecycle
+// ---------------------------------------------------------------------------
+
+#[test]
+fn approve_review_pr_start_enters_confirm_mode() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    // ReviewRequired is column 0, matching the default review board selection
+    app.update(Message::PrsLoaded(
+        PrListKind::Review,
+        vec![make_pr(42, "org/app")],
+    ));
+
+    let cmds = app.update(Message::StartApproveReviewPr);
+    assert!(cmds.is_empty(), "StartApproveReviewPr emits no commands");
+    assert!(
+        matches!(app.mode(), InputMode::ConfirmApproveReviewPr(_)),
+        "expected ConfirmApproveReviewPr mode, got {:?}",
+        app.mode()
+    );
+}
+
+#[test]
+fn approve_review_pr_confirm_emits_command() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    let pr = make_pr(42, "org/app");
+    let url = pr.url.clone();
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
+    app.update(Message::StartApproveReviewPr);
+
+    let cmds = app.update(Message::ConfirmApproveReviewPr);
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, Command::ApproveReviewPr(u) if u == &url)),
+        "ConfirmApproveReviewPr should emit Command::ApproveReviewPr with the PR URL"
+    );
+    assert!(
+        matches!(app.mode(), InputMode::Normal),
+        "mode should reset to Normal after confirm"
+    );
+}
+
+#[test]
+fn approve_review_pr_success_triggers_refresh() {
+    // After exec_approve_review_pr succeeds, the runtime sends RefreshReviewPrs.
+    // Verify that message triggers a FetchPrs command to reload the board.
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+
+    let cmds = app.update(Message::RefreshReviewPrs);
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, Command::FetchPrs(PrListKind::Review))),
+        "RefreshReviewPrs should emit Command::FetchPrs(Review) to reload the board"
+    );
+}
+
+#[test]
+fn approve_review_pr_error_preserves_board_state() {
+    // When exec_approve_review_pr fails, the runtime sends StatusInfo (not RefreshReviewPrs).
+    // Verify the board retains its existing PRs and surfaces the error as a status message.
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::PrsLoaded(
+        PrListKind::Review,
+        vec![make_pr(42, "org/app")],
+    ));
+    assert_eq!(app.review_prs().len(), 1);
+
+    app.update(Message::StatusInfo(
+        "Failed to approve PR: not a reviewer".to_string(),
+    ));
+
+    assert_eq!(
+        app.review_prs().len(),
+        1,
+        "board PRs should be preserved after an approve error"
+    );
+    assert_eq!(
+        app.status_message(),
+        Some("Failed to approve PR: not a reviewer"),
+        "error should surface as a status message"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Merge review PR lifecycle
+// ---------------------------------------------------------------------------
+
+fn make_approved_pr(number: i64, repo: &str) -> ReviewPr {
+    let mut pr = make_pr(number, repo);
+    pr.review_decision = ReviewDecision::Approved;
+    pr
+}
+
+#[test]
+fn merge_review_pr_confirm_emits_command() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    let pr = make_approved_pr(42, "org/app");
+    let url = pr.url.clone();
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
+
+    // Approved is column 3 — navigate right from column 0
+    for _ in 0..3 {
+        app.handle_key(make_key(KeyCode::Right));
+    }
+
+    let cmds = app.update(Message::StartMergeReviewPr);
+    assert!(cmds.is_empty(), "StartMergeReviewPr emits no commands");
+    assert!(
+        matches!(app.mode(), InputMode::ConfirmMergeReviewPr(_)),
+        "expected ConfirmMergeReviewPr mode, got {:?}",
+        app.mode()
+    );
+
+    let cmds = app.update(Message::ConfirmMergeReviewPr);
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, Command::MergeReviewPr(u) if u == &url)),
+        "ConfirmMergeReviewPr should emit Command::MergeReviewPr with the PR URL"
+    );
+    assert!(
+        matches!(app.mode(), InputMode::Normal),
+        "mode should reset to Normal after confirm"
+    );
+}
+
+#[test]
+fn merge_review_pr_error_preserves_board_state() {
+    // When exec_merge_review_pr fails, the runtime sends StatusInfo (not RefreshReviewPrs).
+    // Verify the board retains its existing PRs and surfaces the error as a status message.
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::PrsLoaded(
+        PrListKind::Review,
+        vec![make_approved_pr(42, "org/app")],
+    ));
+    assert_eq!(app.review_prs().len(), 1);
+
+    app.update(Message::StatusInfo(
+        "Failed to merge PR: checks required".to_string(),
+    ));
+
+    assert_eq!(
+        app.review_prs().len(),
+        1,
+        "board PRs should be preserved after a merge error"
+    );
+    assert_eq!(
+        app.status_message(),
+        Some("Failed to merge PR: checks required"),
+        "error should surface as a status message"
     );
 }
