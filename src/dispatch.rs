@@ -1065,7 +1065,7 @@ pub fn dispatch_review_agent(
     let prompt = if req.is_dependabot {
         format!(
             "Review dependency update PR #{} in {}.\n\n\
-             Run `/anthropic-review-pr:review-pr {}` to review.\n\n\
+             Run the built in claude command`/review {}` to review.\n\n\
              After the review completes, call the `update_review_status` MCP tool:\n\
              update_review_status(repo=\"{}\", number={}, status=\"findings_ready\")\n\n\
              Wait for the user.",
