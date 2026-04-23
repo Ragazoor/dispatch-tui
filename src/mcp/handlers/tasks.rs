@@ -832,6 +832,18 @@ pub(super) fn handle_update_review_status(
         Ok(_table) => {
             state.notify();
             if parsed.status == crate::models::ReviewAgentStatus::FindingsReady {
+                // Move the workflow item to ActionRequired so the board reflects the new state
+                if let Some(kind) =
+                    find_workflow_kind_for(&state.db, &parsed.repo, parsed.number)
+                {
+                    let _ = state.db.upsert_pr_workflow(
+                        &parsed.repo,
+                        parsed.number,
+                        kind,
+                        "action_required",
+                        Some("findings_ready"),
+                    );
+                }
                 state.notify_review_ready(parsed.repo.clone(), parsed.number);
             }
             JsonRpcResponse::ok(
@@ -844,6 +856,20 @@ pub(super) fn handle_update_review_status(
         }
         Err(e) => JsonRpcResponse::err(id, -32602, format!("Failed: {e}")),
     }
+}
+
+fn find_workflow_kind_for(
+    db: &std::sync::Arc<dyn crate::db::TaskStore>,
+    repo: &str,
+    number: i64,
+) -> Option<crate::models::WorkflowItemKind> {
+    use crate::models::WorkflowItemKind::{CodeScanAlert, DependabotAlert, DependabotPr, ReviewerPr};
+    for kind in [ReviewerPr, DependabotPr, DependabotAlert, CodeScanAlert] {
+        if db.get_pr_workflow(repo, number, kind).ok().flatten().is_some() {
+            return Some(kind);
+        }
+    }
+    None
 }
 
 pub(super) fn handle_report_usage(

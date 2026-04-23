@@ -4700,6 +4700,80 @@ async fn update_review_status_invalid_status_errors() {
 }
 
 #[tokio::test]
+async fn update_review_status_findings_ready_sets_action_required() {
+    use crate::models::{CiStatus, ReviewDecision, ReviewPr, WorkflowItemKind};
+    use chrono::Utc;
+
+    let state = test_state();
+
+    // Insert a PR and set an active review agent so update_agent_status succeeds
+    let pr = ReviewPr {
+        number: 42,
+        title: "Test PR".to_string(),
+        author: "alice".to_string(),
+        repo: "org/repo".to_string(),
+        url: "https://github.com/org/repo/pull/42".to_string(),
+        is_draft: false,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        additions: 10,
+        deletions: 5,
+        review_decision: ReviewDecision::ReviewRequired,
+        labels: vec![],
+        body: String::new(),
+        head_ref: String::new(),
+        ci_status: CiStatus::None,
+        reviewers: vec![],
+    };
+    state.db.save_prs(crate::db::PrKind::Review, &[pr]).unwrap();
+    state
+        .db
+        .set_pr_agent(
+            crate::db::PrKind::Review,
+            "org/repo",
+            42,
+            "dispatch:review-42",
+            "/tmp/wt",
+        )
+        .unwrap();
+
+    // Pre-insert a workflow row in Ongoing/Reviewing
+    state
+        .db
+        .insert_pr_workflow_if_absent("org/repo", 42, WorkflowItemKind::ReviewerPr)
+        .unwrap();
+    state
+        .db
+        .upsert_pr_workflow(
+            "org/repo",
+            42,
+            WorkflowItemKind::ReviewerPr,
+            "ongoing",
+            Some("reviewing"),
+        )
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_review_status",
+            "arguments": { "repo": "org/repo", "number": 42, "status": "findings_ready" }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
+
+    let row = state
+        .db
+        .get_pr_workflow("org/repo", 42, WorkflowItemKind::ReviewerPr)
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.state, "action_required");
+    assert_eq!(row.sub_state.as_deref(), Some("findings_ready"));
+}
+
+#[tokio::test]
 async fn wrap_up_rebase_clears_tmux_window() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
