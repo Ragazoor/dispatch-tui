@@ -18731,3 +18731,40 @@ fn move_review_item_back_noop_at_backlog() {
         .unwrap_or(Backlog);
     assert_eq!(state, Backlog);
 }
+
+#[test]
+fn prs_loaded_upgrades_sub_state_to_ready_to_merge() {
+    use crate::models::{
+        CiStatus, ReviewDecision, ReviewWorkflowState, ReviewWorkflowSubState, WorkflowItemKind,
+    };
+    use crate::tui::types::{PrListKind, WorkflowKey};
+
+    let mut app = make_app();
+    let key = WorkflowKey::new("org/repo".into(), 1, WorkflowItemKind::ReviewerPr);
+
+    // Pre-populate as ActionRequired/FindingsReady
+    app.review.review_workflow_states.insert(
+        key.clone(),
+        (
+            ReviewWorkflowState::ActionRequired,
+            Some(ReviewWorkflowSubState::FindingsReady),
+        ),
+    );
+
+    // Load a PR that is approved with CI passing
+    let mut pr = make_review_pr_for_repo(1, "alice", ReviewDecision::Approved, "org/repo");
+    pr.ci_status = CiStatus::Success;
+
+    let cmds = app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
+
+    let (_, sub) = app.review.review_workflow_states[&key];
+    assert_eq!(sub, Some(ReviewWorkflowSubState::ReadyToMerge));
+    // Should emit PersistReviewWorkflow
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::PersistReviewWorkflow { .. }
+        )),
+        "Expected PersistReviewWorkflow command"
+    );
+}

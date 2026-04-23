@@ -38,6 +38,22 @@ fn bot_pr_column(
     }
 }
 
+/// Derive the sub-state for a PR in the ActionRequired workflow column based
+/// on GitHub signals (review decision + CI status). Falls back to `current`
+/// when no stronger signal is present.
+fn derive_review_sub_state(
+    pr: &crate::models::ReviewPr,
+    current: Option<crate::models::ReviewWorkflowSubState>,
+) -> crate::models::ReviewWorkflowSubState {
+    use crate::models::{CiStatus, ReviewDecision, ReviewWorkflowSubState::*};
+    match (pr.review_decision, pr.ci_status) {
+        (ReviewDecision::Approved, CiStatus::Success) => ReadyToMerge,
+        (ReviewDecision::Approved, CiStatus::Failure) => CiFailing,
+        (ReviewDecision::ChangesRequested, _) => ChangesRequested,
+        _ => current.unwrap_or(FindingsReady),
+    }
+}
+
 /// Sort a slice of bot-PR references for display within a column.
 ///
 /// Primary key: repo name (alphabetical). Secondary key: `updated_at` DESC
@@ -3629,6 +3645,10 @@ impl App {
         self.security.last_fetch = Some(Instant::now());
         self.security.last_error = None;
         self.sync_security_selection();
+        // TODO: derive sub-state upgrades for security alerts in ActionRequired
+        // when a fix PR is detected on GitHub. SecurityAlert does not currently
+        // carry fix-PR CI/review data — this would require a separate gh API call
+        // per alert or enrichment in the fetcher before this point.
         cmds
     }
 
@@ -3726,18 +3746,41 @@ impl App {
             self.security.dependabot.prs.last_fetch = Some(Instant::now());
             self.security.dependabot.prs.last_error = None;
             self.sync_dependabot_selection();
-            self.review.bot.set_prs(prs);
+            self.review.bot.set_prs(prs.clone());
             self.review.bot.loading = false;
             self.review.bot.last_fetch = Some(Instant::now());
             self.review.bot.last_error = None;
             self.sync_review_selection();
         } else {
             let list = self.review.list_mut(kind).unwrap();
-            list.set_prs(prs);
+            list.set_prs(prs.clone());
             list.loading = false;
             list.last_fetch = Some(Instant::now());
             list.last_error = None;
             self.sync_review_selection();
+        }
+        // Derive sub-state updates for items already in ActionRequired
+        let item_kind = match kind {
+            PrListKind::Bot => crate::models::WorkflowItemKind::DependabotPr,
+            PrListKind::Review => crate::models::WorkflowItemKind::ReviewerPr,
+        };
+        for pr in &prs {
+            let key = WorkflowKey::new(pr.repo.clone(), pr.number, item_kind);
+            if let Some((crate::models::ReviewWorkflowState::ActionRequired, sub)) =
+                self.review.review_workflow_states.get(&key).copied()
+            {
+                let new_sub = derive_review_sub_state(pr, sub);
+                if Some(new_sub) != sub {
+                    self.review
+                        .review_workflow_states
+                        .insert(key.clone(), (crate::models::ReviewWorkflowState::ActionRequired, Some(new_sub)));
+                    cmds.push(Command::PersistReviewWorkflow {
+                        key,
+                        state: crate::models::ReviewWorkflowState::ActionRequired,
+                        sub_state: Some(new_sub),
+                    });
+                }
+            }
         }
         cmds.extend(self.cleanup_stale_review_agents());
         cmds
