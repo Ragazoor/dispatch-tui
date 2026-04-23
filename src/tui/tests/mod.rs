@@ -18636,3 +18636,98 @@ fn move_security_item_forward_noop_when_not_in_security_board() {
     let cmds = app.update(Message::MoveSecurityItemForward);
     assert!(cmds.is_empty());
 }
+
+#[test]
+fn move_review_item_forward_advances_workflow_state() {
+    use crate::models::{ReviewWorkflowState::*, WorkflowItemKind};
+    use crate::tui::types::WorkflowKey;
+
+    // make_review_board_app: PR #1 (alice, ReviewRequired) is at col 0, row 0
+    let mut app = make_review_board_app();
+    let key = WorkflowKey::new("acme/app".into(), 1, WorkflowItemKind::ReviewerPr);
+
+    // Start at Backlog (default)
+    let cmds = app.update(Message::MoveReviewItemForward);
+    let (state, _) = app.review.review_workflow_states[&key];
+    assert_eq!(state, Ongoing);
+    assert!(cmds.iter().any(|c| matches!(c, Command::PersistReviewWorkflow { .. })));
+
+    // Ongoing → ActionRequired
+    let cmds = app.update(Message::MoveReviewItemForward);
+    let (state, _) = app.review.review_workflow_states[&key];
+    assert_eq!(state, ActionRequired);
+    assert!(cmds.iter().any(|c| matches!(c, Command::PersistReviewWorkflow { .. })));
+
+    // ActionRequired → Done
+    let cmds = app.update(Message::MoveReviewItemForward);
+    let (state, _) = app.review.review_workflow_states[&key];
+    assert_eq!(state, Done);
+    assert!(cmds.iter().any(|c| matches!(c, Command::PersistReviewWorkflow { .. })));
+}
+
+#[test]
+fn move_review_item_back_retreats_workflow_state() {
+    use crate::models::{ReviewWorkflowState::*, WorkflowItemKind};
+    use crate::tui::types::WorkflowKey;
+
+    let mut app = make_review_board_app();
+    let key = WorkflowKey::new("acme/app".into(), 1, WorkflowItemKind::ReviewerPr);
+
+    // Seed the state at Done
+    app.review.review_workflow_states.insert(key.clone(), (Done, None));
+
+    // Done → ActionRequired
+    app.update(Message::MoveReviewItemBack);
+    let (state, _) = app.review.review_workflow_states[&key];
+    assert_eq!(state, ActionRequired);
+
+    // ActionRequired → Ongoing
+    app.update(Message::MoveReviewItemBack);
+    let (state, _) = app.review.review_workflow_states[&key];
+    assert_eq!(state, Ongoing);
+
+    // Ongoing → Backlog
+    app.update(Message::MoveReviewItemBack);
+    let (state, _) = app.review.review_workflow_states[&key];
+    assert_eq!(state, Backlog);
+}
+
+#[test]
+fn move_review_item_forward_noop_at_done() {
+    use crate::models::{ReviewWorkflowState::*, WorkflowItemKind};
+    use crate::tui::types::WorkflowKey;
+
+    let mut app = make_review_board_app();
+    let key = WorkflowKey::new("acme/app".into(), 1, WorkflowItemKind::ReviewerPr);
+
+    // Seed the state at Done
+    app.review.review_workflow_states.insert(key.clone(), (Done, None));
+
+    // At Done, forward should emit no command
+    let cmds = app.update(Message::MoveReviewItemForward);
+    assert!(cmds.is_empty(), "Expected no commands when already at Done");
+    // State should remain Done
+    let (state, _) = app.review.review_workflow_states[&key];
+    assert_eq!(state, Done);
+}
+
+#[test]
+fn move_review_item_back_noop_at_backlog() {
+    use crate::models::{ReviewWorkflowState::*, WorkflowItemKind};
+    use crate::tui::types::WorkflowKey;
+
+    let mut app = make_review_board_app();
+    let key = WorkflowKey::new("acme/app".into(), 1, WorkflowItemKind::ReviewerPr);
+
+    // State starts at Backlog (default — no entry in map)
+    let cmds = app.update(Message::MoveReviewItemBack);
+    assert!(cmds.is_empty(), "Expected no commands when already at Backlog");
+    // State should remain Backlog (not inserted into the map)
+    let state = app
+        .review
+        .review_workflow_states
+        .get(&key)
+        .map(|(s, _)| *s)
+        .unwrap_or(Backlog);
+    assert_eq!(state, Backlog);
+}

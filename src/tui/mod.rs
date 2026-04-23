@@ -4318,6 +4318,10 @@ impl App {
             ActionRequired => Done,
             Done => Done,
         };
+        // Don't persist no-op (already at Done)
+        if next == current {
+            return vec![];
+        }
         self.review.review_workflow_states.insert(key.clone(), (next, None));
         vec![Command::PersistReviewWorkflow { key, state: next, sub_state: None }]
     }
@@ -4340,6 +4344,10 @@ impl App {
             ActionRequired => Ongoing,
             Done => ActionRequired,
         };
+        // Don't persist no-op (already at Backlog)
+        if prev == current {
+            return vec![];
+        }
         self.review.review_workflow_states.insert(key.clone(), (prev, None));
         vec![Command::PersistReviewWorkflow { key, state: prev, sub_state: None }]
     }
@@ -4362,6 +4370,10 @@ impl App {
             ActionRequired => Done,
             Done => Done,
         };
+        // Don't persist no-op (already at Done)
+        if next == current {
+            return vec![];
+        }
         self.security.security_workflow_states.insert(key.clone(), (next, None));
         vec![Command::PersistSecurityWorkflow { key, state: next, sub_state: None }]
     }
@@ -4384,6 +4396,10 @@ impl App {
             ActionRequired => Ongoing,
             Done => ActionRequired,
         };
+        // Don't persist no-op (already at Backlog)
+        if prev == current {
+            return vec![];
+        }
         self.security.security_workflow_states.insert(key.clone(), (prev, None));
         vec![Command::PersistSecurityWorkflow { key, state: prev, sub_state: None }]
     }
