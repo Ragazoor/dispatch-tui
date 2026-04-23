@@ -16246,6 +16246,45 @@ fn security_dependabot_d_emits_dispatch_review_agent_with_is_dependabot_true() {
 }
 
 #[test]
+fn dependabot_dispatch_selects_visually_highlighted_pr_when_repos_differ() {
+    // Regression test: render_dependabot_columns sorts by repo name, but
+    // selected_dependabot_pr used to skip the sort, causing .nth(row) to
+    // resolve to the wrong PR when insertion order differed from sorted order.
+    let mut app = make_security_board_app();
+
+    // Insert in reverse-alphabetical order so insertion order ≠ sort order.
+    let mut pr_bravo = make_review_pr(1, "dependabot[bot]", ReviewDecision::ReviewRequired);
+    pr_bravo.repo = "org/bravo".to_string();
+    let mut pr_alpha = make_review_pr(2, "dependabot[bot]", ReviewDecision::ReviewRequired);
+    pr_alpha.repo = "org/alpha".to_string();
+
+    app.board.repo_paths = vec![
+        "/repos/org/bravo".to_string(),
+        "/repos/org/alpha".to_string(),
+    ];
+    app.update(Message::PrsLoaded(
+        PrListKind::Bot,
+        vec![pr_bravo.clone(), pr_alpha.clone()],
+    ));
+    app.update(Message::SwitchSecurityBoardMode(
+        SecurityBoardMode::Dependabot,
+    ));
+
+    app.handle_key(make_key(KeyCode::Char('j')));
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::DispatchReviewAgent(req) if req.number == pr_bravo.number
+        )),
+        "expected dispatch for pr_bravo (number {}), got: {:?}",
+        pr_bravo.number,
+        cmds
+    );
+}
+
+#[test]
 fn render_repo_path_mode_shows_all_when_buffer_empty() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.board.repo_paths = vec!["/tmp".to_string(), "/var/log".to_string()];

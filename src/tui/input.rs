@@ -1134,10 +1134,7 @@ impl App {
         };
         let col = dependabot_selection.selected_column;
         let row = dependabot_selection.selected_row[col];
-        self.filtered_bot_prs()
-            .into_iter()
-            .filter(|pr| super::bot_pr_column(pr, self.pr_agent(pr).map(|h| h.status)) == col)
-            .nth(row)
+        self.bot_prs_for_column(col).into_iter().nth(row)
     }
 
     fn handle_key_review_board(&mut self, key: KeyEvent) -> Vec<Command> {

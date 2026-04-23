@@ -434,6 +434,16 @@ impl App {
         self.security.alerts_for_workflow_column(workflow_col)
     }
 
+    pub fn bot_prs_for_column(&self, col: usize) -> Vec<&crate::models::ReviewPr> {
+        let mut prs: Vec<_> = self
+            .filtered_bot_prs()
+            .into_iter()
+            .filter(|pr| bot_pr_column(pr, self.pr_agent(pr).map(|h| h.status)) == col)
+            .collect();
+        sort_prs_for_display(&mut prs);
+        prs
+    }
+
     /// Get the currently selected SecurityAlert, if in security board mode.
     pub fn selected_security_alert(&self) -> Option<&crate::models::SecurityAlert> {
         let sel = self.security_selection()?;
@@ -3827,12 +3837,7 @@ impl App {
             ),
             _ => return,
         };
-        let filtered = self.filtered_bot_prs();
-        let mut col_prs: Vec<_> = filtered
-            .into_iter()
-            .filter(|pr| bot_pr_column(pr, self.pr_agent(pr).map(|h| h.status)) == col)
-            .collect();
-        sort_prs_for_display(&mut col_prs);
+        let col_prs = self.bot_prs_for_column(col);
         let anchor = col_prs
             .get(row)
             .map(|pr| crate::models::PrRef::new(pr.repo.clone(), pr.number));
@@ -3858,17 +3863,11 @@ impl App {
             return self.clamp_dependabot_selection();
         };
 
-        let filtered = self.filtered_bot_prs();
         let col_count = 3usize; // Backlog(0), In Review(1), Approved(2)
 
         let mut found: Option<(usize, usize)> = None;
         'outer: for col in 0..col_count {
-            let mut col_prs: Vec<_> = filtered
-                .iter()
-                .copied()
-                .filter(|pr| bot_pr_column(pr, self.pr_agent(pr).map(|h| h.status)) == col)
-                .collect();
-            sort_prs_for_display(&mut col_prs);
+            let col_prs = self.bot_prs_for_column(col);
             for (row, pr) in col_prs.iter().enumerate() {
                 if anchor_pr.matches(pr.number, &pr.repo) {
                     found = Some((col, row));
@@ -3881,10 +3880,7 @@ impl App {
             if col >= col_count {
                 return 0;
             }
-            filtered
-                .iter()
-                .filter(|pr| bot_pr_column(pr, self.pr_agent(pr).map(|h| h.status)) == col)
-                .count()
+            self.bot_prs_for_column(col).len()
         });
 
         if let Some((found_col, found_row)) = found {
