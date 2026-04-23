@@ -84,7 +84,9 @@ enum GithubReviewDecision {
 enum CiStatus { none | pending | success | failure }
 
 -- Persistence table a PR row lives in (drives MCP lookups and cleanup writes).
-enum PrKind { review | my | bot }
+-- `my` is removed: Author mode is dropped in v2. Only review (reviewer PRs)
+-- and bot (Dependabot PRs) remain.
+enum PrKind { review | bot }
 
 ------------------------------------------------------------
 -- Entities and Variants

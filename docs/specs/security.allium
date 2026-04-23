@@ -336,7 +336,8 @@ rule MergeFixPr {
     -- have promoted sub_state to ready_to_merge).
 
     trigger: KeyPress(key: 'ctrl+m', mode: SecurityBoard)
-    guard: selected_alert.workflow_sub_state == ready_to_merge
+    guard: selected_alert.workflow_state == action_required
+         AND selected_alert.workflow_sub_state == ready_to_merge
     confirm: "Merge fix PR for alert #<number>? (y/N)"
     action: shell("gh pr merge --squash <fix_pr_url>")
     on_success:
