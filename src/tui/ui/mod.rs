@@ -18,5 +18,5 @@ pub(in crate::tui) use review::{
 };
 #[cfg(test)]
 pub(in crate::tui) use security::{
-    build_security_alert_item_for_test, dependabot_action_hints, security_action_hints,
+    build_security_alert_item_for_test, security_action_hints,
 };

@@ -181,9 +181,9 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
     // Refresh status row
     let (last_fetch, loading) = match app.view_mode() {
         ViewMode::ReviewBoard {
-            mode: ReviewBoardMode::Author,
+            mode: ReviewBoardMode::Dependabot,
             ..
-        } => (app.my_prs_last_fetch(), app.my_prs_loading()),
+        } => (app.review_bot_prs_last_fetch(), app.review_bot_prs_loading()),
         _ => (app.review_last_fetch(), app.review_board_loading()),
     };
     let (status_text, status_color) =
@@ -197,9 +197,9 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
     if filtered.is_empty() {
         let is_empty = match app.view_mode() {
             ViewMode::ReviewBoard {
-                mode: ReviewBoardMode::Author,
+                mode: ReviewBoardMode::Dependabot,
                 ..
-            } => app.my_prs().is_empty(),
+            } => app.review_bot_prs().is_empty(),
             _ => app.review_prs().is_empty(),
         };
         let msg = if is_empty {
@@ -235,13 +235,7 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
         frame.render_widget(status, chunks[5]);
     } else {
         let has_pr = app.selected_review_pr().is_some();
-        let is_author_mode = matches!(
-            app.view_mode(),
-            ViewMode::ReviewBoard {
-                mode: ReviewBoardMode::Author,
-                ..
-            }
-        );
+        let is_author_mode = false; // Author mode removed in v2
         let agent_status = app
             .selected_review_pr()
             .and_then(|pr| app.pr_agent(pr).map(|h| h.status));
@@ -359,14 +353,17 @@ fn render_review_detail(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_review_summary_row(frame: &mut Frame, app: &App, area: Rect) {
+    use crate::models::ReviewWorkflowState;
     let sel = app.review_selection();
     let selected_col = sel.map(|s| s.column()).unwrap_or(0);
     let filtered = app.active_review_prs();
-    let mode = match app.view_mode() {
-        ViewMode::ReviewBoard { mode, .. } => *mode,
-        _ => ReviewBoardMode::Reviewer,
-    };
-    let col_count = mode.column_count();
+    let col_count = ReviewBoardMode::column_count();
+    let workflow_states = [
+        ReviewWorkflowState::Backlog,
+        ReviewWorkflowState::Ongoing,
+        ReviewWorkflowState::ActionRequired,
+        ReviewWorkflowState::Done,
+    ];
 
     let segments = Layout::default()
         .direction(Direction::Horizontal)
@@ -374,10 +371,11 @@ fn render_review_summary_row(frame: &mut Frame, app: &App, area: Rect) {
         .split(area);
 
     for i in 0..col_count {
-        let count = filtered.iter().filter(|pr| mode.pr_column(pr) == i).count();
+        let count = filtered.iter().filter(|pr| pr.review_decision.column_index() == i).count();
         let is_focused = i == selected_col;
         let prefix = if is_focused { "\u{25b8} " } else { "\u{25e6} " };
-        let label = format!("{prefix}{} ({count})", mode.column_label(i));
+        let col_label = workflow_states.get(i).map(|s| ReviewBoardMode::column_label(*s)).unwrap_or("");
+        let label = format!("{prefix}{col_label} ({count})");
 
         // Map column index to ReviewDecision for coloring
         let decision_for_color =
@@ -397,11 +395,7 @@ fn render_review_summary_row(frame: &mut Frame, app: &App, area: Rect) {
 
 fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
     let sel_col = app.review_selection().map(|s| s.column()).unwrap_or(0);
-    let mode = match app.view_mode() {
-        ViewMode::ReviewBoard { mode, .. } => *mode,
-        _ => ReviewBoardMode::Reviewer,
-    };
-    let col_count = mode.column_count();
+    let col_count = ReviewBoardMode::column_count();
 
     let col_areas = Layout::default()
         .direction(Direction::Horizontal)

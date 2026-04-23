@@ -318,8 +318,8 @@ impl App {
     pub fn review_last_fetch(&self) -> Option<Instant> {
         self.review.review.last_fetch
     }
-    pub fn my_prs_last_fetch(&self) -> Option<Instant> {
-        self.review.authored.last_fetch
+    pub fn review_bot_prs_last_fetch(&self) -> Option<Instant> {
+        self.review.bot.last_fetch
     }
     pub fn last_review_error(&self) -> Option<&str> {
         self.review.review.last_error.as_deref()
@@ -340,14 +340,11 @@ impl App {
     pub fn review_repo_filter_mode(&self) -> RepoFilterMode {
         self.review.review.repo_filter_mode
     }
-    pub fn my_prs(&self) -> &[crate::models::ReviewPr] {
-        &self.review.authored.prs
+    pub fn review_bot_prs(&self) -> &[crate::models::ReviewPr] {
+        &self.review.bot.prs
     }
-    pub fn my_prs_loading(&self) -> bool {
-        self.review.authored.loading
-    }
-    pub fn dispatch_pr_filter(&self) -> bool {
-        self.review.dispatch_pr_filter
+    pub fn review_bot_prs_loading(&self) -> bool {
+        self.review.bot.loading
     }
     pub fn bot_prs(&self) -> &[crate::models::ReviewPr] {
         &self.security.dependabot.prs.prs
@@ -1303,6 +1300,20 @@ impl App {
                     vec![]
                 }
             }
+            // TODO Task 6: implement workflow state handlers
+            Message::WorkflowStatesLoaded(_) => vec![],
+            Message::MoveReviewItemForward => vec![],
+            Message::MoveReviewItemBack => vec![],
+            Message::MoveSecurityItemForward => vec![],
+            Message::MoveSecurityItemBack => vec![],
+            Message::ReviewWorkflowUpdated { key, state, sub_state } => {
+                self.review.review_workflow_states.insert(key, (state, sub_state));
+                vec![]
+            }
+            Message::SecurityWorkflowUpdated { key, state, sub_state } => {
+                self.security.security_workflow_states.insert(key, (state, sub_state));
+                vec![]
+            }
         }
     }
 
@@ -2168,12 +2179,12 @@ impl App {
             cmds.push(Command::FetchPrs(PrListKind::Review));
         }
 
-        // Also refresh my PRs data if stale (> 30s)
-        if self.review.authored.needs_fetch(REVIEW_REFRESH_INTERVAL)
-            && !self.review.authored.loading
+        // Also refresh bot PRs data if stale (> 30s)
+        if self.review.bot.needs_fetch(REVIEW_REFRESH_INTERVAL)
+            && !self.review.bot.loading
         {
-            self.review.authored.loading = true;
-            cmds.push(Command::FetchPrs(PrListKind::Authored));
+            self.review.bot.loading = true;
+            cmds.push(Command::FetchPrs(PrListKind::Bot));
         }
 
         // Refresh security alerts if stale (> 5m)
@@ -3634,12 +3645,12 @@ impl App {
         let mut cmds = vec![];
         if let ViewMode::ReviewBoard { mode, .. } = &self.board.view_mode {
             match mode {
-                ReviewBoardMode::Author => {
-                    if self.review.authored.needs_fetch(REVIEW_REFRESH_INTERVAL)
-                        && !self.review.authored.loading
+                ReviewBoardMode::Dependabot => {
+                    if self.review.bot.needs_fetch(REVIEW_REFRESH_INTERVAL)
+                        && !self.review.bot.loading
                     {
-                        self.review.authored.loading = true;
-                        cmds.push(Command::FetchPrs(PrListKind::Authored));
+                        self.review.bot.loading = true;
+                        cmds.push(Command::FetchPrs(PrListKind::Bot));
                     }
                 }
                 ReviewBoardMode::Reviewer => {
@@ -3656,9 +3667,9 @@ impl App {
     }
 
     /// Remove review agents whose PR is no longer present in any of the three PR
-    /// lists (reviewer, authored, bot). Called after any list refreshes.
+    /// lists (reviewer, bot, dependabot). Called after any list refreshes.
     fn cleanup_stale_review_agents(&mut self) -> Vec<Command> {
-        let pr_keys: HashSet<crate::models::PrRef> = [PrListKind::Review, PrListKind::Authored]
+        let pr_keys: HashSet<crate::models::PrRef> = [PrListKind::Review, PrListKind::Bot]
             .iter()
             .flat_map(|k| self.review.list(*k).into_iter().flat_map(|l| l.prs.iter()))
             .chain(self.security.dependabot.prs.prs.iter())
@@ -3687,11 +3698,17 @@ impl App {
     ) -> Vec<Command> {
         let mut cmds = vec![Command::PersistPrs(kind, prs.clone())];
         if kind == PrListKind::Bot {
-            self.security.dependabot.prs.set_prs(prs);
+            // Bot PRs feed both the review board Dependabot mode and the security board
+            self.security.dependabot.prs.set_prs(prs.clone());
             self.security.dependabot.prs.loading = false;
             self.security.dependabot.prs.last_fetch = Some(Instant::now());
             self.security.dependabot.prs.last_error = None;
             self.sync_dependabot_selection();
+            self.review.bot.set_prs(prs);
+            self.review.bot.loading = false;
+            self.review.bot.last_fetch = Some(Instant::now());
+            self.review.bot.last_error = None;
+            self.sync_review_selection();
         } else {
             let list = self.review.list_mut(kind).unwrap();
             list.set_prs(prs);
@@ -3710,14 +3727,14 @@ impl App {
             _ => ReviewBoardMode::Reviewer,
         };
         let filtered = self.active_review_prs();
-        let col_count = mode.column_count();
+        let col_count = ReviewBoardMode::column_count();
         let counts: [usize; ReviewDecision::COLUMN_COUNT] = std::array::from_fn(|col| {
             if col >= col_count {
                 return 0;
             }
             filtered
                 .iter()
-                .filter(|pr| mode.pr_column(pr) == col)
+                .filter(|pr| pr.review_decision.column_index() == col)
                 .count()
         });
         if let Some(sel) = self.review_selection_mut() {
@@ -3747,14 +3764,14 @@ impl App {
         };
 
         let filtered = self.active_review_prs();
-        let col_count = mode.column_count();
+        let col_count = ReviewBoardMode::column_count();
 
         // Search for anchor PR across all columns
         let mut found: Option<(usize, usize)> = None;
         'outer: for col in 0..col_count {
             let mut col_prs: Vec<_> = filtered
                 .iter()
-                .filter(|pr| mode.pr_column(pr) == col)
+                .filter(|pr| pr.review_decision.column_index() == col)
                 .collect();
             col_prs.sort_by(|a, b| a.repo.cmp(&b.repo));
             for (row, pr) in col_prs.iter().enumerate() {
@@ -3771,7 +3788,7 @@ impl App {
             }
             filtered
                 .iter()
-                .filter(|pr| mode.pr_column(pr) == col)
+                .filter(|pr| pr.review_decision.column_index() == col)
                 .count()
         });
 
@@ -4014,12 +4031,12 @@ impl App {
         }
         if self
             .review
-            .authored
+            .bot
             .prs
             .iter()
             .any(|pr| pr.repo == github_repo && pr.number == number)
         {
-            return Some(crate::db::PrKind::My);
+            return Some(crate::db::PrKind::Bot);
         }
         if self
             .security
@@ -4176,16 +4193,8 @@ impl App {
         self.review.review.filtered()
     }
 
-    pub fn filtered_my_prs(&self) -> Vec<&crate::models::ReviewPr> {
-        let base = self.review.authored.filtered();
-        if self.review.dispatch_pr_filter {
-            let dispatch_urls = self.dispatch_pr_urls();
-            base.into_iter()
-                .filter(|pr| dispatch_urls.contains(&pr.url))
-                .collect()
-        } else {
-            base
-        }
+    pub fn filtered_review_bot_prs(&self) -> Vec<&crate::models::ReviewPr> {
+        self.review.bot.filtered()
     }
 
     pub fn filtered_bot_prs(&self) -> Vec<&crate::models::ReviewPr> {
@@ -4204,9 +4213,9 @@ impl App {
     pub fn active_review_prs(&self) -> Vec<&crate::models::ReviewPr> {
         match &self.board.view_mode {
             ViewMode::ReviewBoard {
-                mode: ReviewBoardMode::Author,
+                mode: ReviewBoardMode::Dependabot,
                 ..
-            } => self.filtered_my_prs(),
+            } => self.filtered_review_bot_prs(),
             _ => self.filtered_review_prs(),
         }
     }
@@ -4215,9 +4224,9 @@ impl App {
     pub fn active_review_repos(&self) -> &[String] {
         match &self.board.view_mode {
             ViewMode::ReviewBoard {
-                mode: ReviewBoardMode::Author,
+                mode: ReviewBoardMode::Dependabot,
                 ..
-            } => &self.review.authored.repos,
+            } => &self.review.bot.repos,
             _ => &self.review.review.repos,
         }
     }
@@ -4242,7 +4251,7 @@ impl App {
         let mut prs: Vec<_> = self
             .active_review_prs()
             .into_iter()
-            .filter(|pr| mode.pr_column(pr) == col)
+            .filter(|pr| pr.review_decision.column_index() == col)
             .collect();
         prs.sort_by(|a, b| a.repo.cmp(&b.repo));
         prs
@@ -4287,7 +4296,7 @@ impl App {
         let mut col_prs: Vec<_> = self
             .active_review_prs()
             .into_iter()
-            .filter(|pr| mode.pr_column(pr) == col)
+            .filter(|pr| pr.review_decision.column_index() == col)
             .collect();
         col_prs.sort_by(|a, b| a.repo.cmp(&b.repo));
         let anchor = col_prs
@@ -4725,8 +4734,7 @@ impl App {
     }
 
     fn handle_toggle_dispatch_pr_filter(&mut self) -> Vec<Command> {
-        self.review.dispatch_pr_filter = !self.review.dispatch_pr_filter;
-        self.sync_review_selection();
+        // dispatch_pr_filter removed in v2 layout
         vec![]
     }
 
@@ -4900,9 +4908,9 @@ impl App {
     fn handle_refresh_review_prs(&mut self) -> Vec<Command> {
         let kind = match &self.board.view_mode {
             ViewMode::ReviewBoard {
-                mode: ReviewBoardMode::Author,
+                mode: ReviewBoardMode::Dependabot,
                 ..
-            } => PrListKind::Authored,
+            } => PrListKind::Bot,
             _ => PrListKind::Review,
         };
         self.review.list_mut(kind).unwrap().loading = true;

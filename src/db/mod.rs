@@ -385,6 +385,7 @@ impl<T: TaskCrud + EpicCrud> TaskAndEpicStore for T {}
 // PrWorkflowRow — a row from the pr_workflow_states table
 // ---------------------------------------------------------------------------
 
+#[derive(Debug, Clone)]
 pub struct PrWorkflowRow {
     pub repo: String,
     pub number: i64,

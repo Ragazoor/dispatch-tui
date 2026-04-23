@@ -759,6 +759,11 @@ async fn execute_commands(
                     tracing::warn!("Failed to save tips state: {e:#}");
                 }
             }
+            Command::PersistReviewWorkflow { .. }
+            | Command::PersistSecurityWorkflow { .. }
+            | Command::PruneDonePrWorkflows => {
+                // TODO Task 7: implement workflow state persistence
+            }
         }
     }
 

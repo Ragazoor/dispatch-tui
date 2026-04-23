@@ -3,7 +3,7 @@ source: src/tui/tests/snapshots.rs
 expression: rendered
 ---
  Tasks  │  ▸ Reviews (3)  │  Security   [Tab] security  [S-Tab] toggle                                            🔕  [N]
-▸ Needs Review (2)            ◦ Waiting for Response (0)    ◦ Changes Requested (0)       ◦ Approved (1)
+▸ Backlog (2)                 ◦ Ongoing (0)                 ◦ Action Required (0)         ◦ Done (1)
 Updated 0s ago  [r] refresh
   ── app                                                                                    ── app
 ▌ #1 PR 1 ●                                                                               ▎ #2 PR 2 ●

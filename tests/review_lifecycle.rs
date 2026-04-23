@@ -53,8 +53,8 @@ fn tick_triggers_fetch_when_review_list_stale() {
     );
     assert!(
         cmds.iter()
-            .any(|c| matches!(c, Command::FetchPrs(PrListKind::Authored))),
-        "Tick should emit FetchPrs(Authored) when list is stale"
+            .any(|c| matches!(c, Command::FetchPrs(PrListKind::Bot))),
+        "Tick should emit FetchPrs(Bot) when bot PR list is stale"
     );
 }
 

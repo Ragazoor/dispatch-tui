@@ -1159,7 +1159,7 @@ impl App {
             }
             KeyCode::Char('l') | KeyCode::Right => {
                 let max_col = match &self.board.view_mode {
-                    ViewMode::ReviewBoard { mode, .. } => mode.column_count() - 1,
+                    ViewMode::ReviewBoard { .. } => ReviewBoardMode::column_count() - 1,
                     _ => ReviewDecision::COLUMN_COUNT - 1,
                 };
                 if let Some(sel) = self.review_selection_mut() {
@@ -1208,20 +1208,6 @@ impl App {
                 }
             }
 
-            KeyCode::Char('D') => {
-                if matches!(
-                    self.board.view_mode,
-                    ViewMode::ReviewBoard {
-                        mode: ReviewBoardMode::Author,
-                        ..
-                    }
-                ) {
-                    self.update(Message::ToggleDispatchPrFilter)
-                } else {
-                    vec![]
-                }
-            }
-
             KeyCode::Char('?') => self.update(Message::ToggleHelp),
 
             KeyCode::Char('1') => {
@@ -1229,14 +1215,14 @@ impl App {
             }
 
             KeyCode::Char('2') => {
-                self.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Author))
+                self.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Dependabot))
             }
 
             KeyCode::Char('e') => {
                 if let ViewMode::ReviewBoard { mode, .. } = self.board.view_mode {
                     let kind = match mode {
                         ReviewBoardMode::Reviewer => PrListKind::Review,
-                        ReviewBoardMode::Author => PrListKind::Authored,
+                        ReviewBoardMode::Dependabot => PrListKind::Bot,
                     };
                     vec![Command::EditGithubQueries(kind)]
                 } else {

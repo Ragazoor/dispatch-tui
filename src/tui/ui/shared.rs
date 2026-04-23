@@ -93,13 +93,13 @@ fn review_tab_label(app: &App, prefix: &str) -> String {
     )
 }
 
-fn my_prs_tab_label(app: &App, prefix: &str) -> String {
+fn bot_prs_tab_label(app: &App, prefix: &str) -> String {
     tab_label(
         prefix,
-        "My PRs",
-        app.my_prs().len(),
-        app.dispatch_pr_filter(),
-        app.my_prs_loading(),
+        "Dependabot",
+        app.review_bot_prs().len(),
+        false,
+        app.review_bot_prs_loading(),
     )
 }
 
@@ -149,7 +149,7 @@ pub(in crate::tui::ui) fn render_tab_bar(frame: &mut Frame, app: &App, area: Rec
             spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
             let label = match mode {
                 ReviewBoardMode::Reviewer => review_tab_label(app, " \u{25b8} "),
-                ReviewBoardMode::Author => my_prs_tab_label(app, " \u{25b8} "),
+                ReviewBoardMode::Dependabot => bot_prs_tab_label(app, " \u{25b8} "),
             };
             spans.push(Span::styled(label, active_style));
             spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));

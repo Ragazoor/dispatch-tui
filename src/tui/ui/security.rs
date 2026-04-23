@@ -586,8 +586,7 @@ pub(in crate::tui) fn build_security_alert_item_for_test(
     col_width: u16,
     is_running: bool,
 ) -> String {
-    use ratatui::text::Text;
-    let item = build_security_alert_item(alert, is_cursor, col_width, is_running);
+    let _item = build_security_alert_item(alert, is_cursor, col_width, is_running);
     // Extract text via rendering to Text — ListItem wraps a Text internally.
     // We reconstruct text by converting via the widget's Text representation.
     // Simplest: build the same lines as the function and concatenate spans.

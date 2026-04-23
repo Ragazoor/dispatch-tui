@@ -215,13 +215,13 @@ fn tick_produces_capture_for_running_tasks_with_window() {
     task4.tmux_window = Some("main:task-4".to_string());
     let mut app = App::new(vec![task4], TEST_TIMEOUT);
     let cmds = app.update(Message::Tick);
-    // Should have CaptureTmux + FetchReviewPrs + FetchMyPrs + FetchSecurityAlerts + RefreshFromDb
+    // Should have CaptureTmux + FetchReviewPrs + FetchBotPrs + FetchSecurityAlerts + RefreshFromDb
     assert_eq!(cmds.len(), 5);
     assert!(
         matches!(&cmds[0], Command::CaptureTmux { id: TaskId(4), window } if window == "main:task-4")
     );
     assert!(matches!(&cmds[1], Command::FetchPrs(PrListKind::Review)));
-    assert!(matches!(&cmds[2], Command::FetchPrs(PrListKind::Authored)));
+    assert!(matches!(&cmds[2], Command::FetchPrs(PrListKind::Bot)));
     assert!(matches!(&cmds[3], Command::FetchSecurityAlerts));
     assert!(matches!(&cmds[4], Command::RefreshFromDb));
 }
@@ -240,13 +240,13 @@ fn tick_captures_review_task_with_live_window() {
 }
 
 #[test]
-fn tick_fetches_my_prs_when_stale() {
+fn tick_fetches_bot_prs_when_stale() {
     let mut app = make_app();
-    assert!(app.review.authored.last_fetch.is_none());
+    assert!(app.review.bot.last_fetch.is_none());
     let cmds = app.update(Message::Tick);
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::FetchPrs(PrListKind::Authored))));
+        .any(|c| matches!(c, Command::FetchPrs(PrListKind::Bot))));
 }
 
 #[test]
@@ -3145,25 +3145,20 @@ fn review_board_status_bar_shows_approve_hint_in_reviewer_mode() {
 }
 
 #[test]
-fn review_board_status_bar_no_approve_hint_in_author_mode() {
+fn review_board_status_bar_approve_hint_in_reviewer_mode() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     let pr = make_review_pr(1, "alice", ReviewDecision::Approved);
-    app.update(Message::PrsLoaded(PrListKind::Authored, vec![pr]));
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
     app.update(Message::SwitchToReviewBoard);
-    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Author));
+    // Stay in Reviewer mode (default)
     if let Some(sel) = app.review_selection_mut() {
         sel.set_column(3); // Approved is column 3
     }
     let buf = render_to_buffer(&mut app, 200, 30);
-    // Approve hint should not appear in author mode
-    assert!(
-        !buffer_contains(&buf, "[a]pprove"),
-        "status bar should NOT show approve hint in author mode"
-    );
-    // The merge hint "[m]erge" should still appear
+    // The merge hint "[m]erge" should appear in reviewer mode
     assert!(
         buffer_contains(&buf, "[m]erge"),
-        "status bar should show merge hint in author mode"
+        "status bar should show merge hint in reviewer mode"
     );
 }
 
@@ -7189,7 +7184,7 @@ fn review_board_renders_pr_titles() {
 
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
-        buffer_contains(&buf, "Needs Review"),
+        buffer_contains(&buf, "Backlog"),
         "Should show column header"
     );
     assert!(buffer_contains(&buf, "PR 42"), "Should show PR title");
@@ -9701,20 +9696,20 @@ fn review_board_default_mode_is_reviewer() {
 }
 
 #[test]
-fn my_prs_loaded_updates_state() {
+fn bot_prs_loaded_updates_state() {
     let mut app = make_app();
     let prs = vec![make_review_pr(101, "me", ReviewDecision::ReviewRequired)];
-    app.update(Message::PrsLoaded(PrListKind::Authored, prs));
-    assert_eq!(app.my_prs().len(), 1);
-    assert_eq!(app.my_prs()[0].number, 101);
-    assert!(!app.my_prs_loading());
+    app.update(Message::PrsLoaded(PrListKind::Bot, prs));
+    assert_eq!(app.review.bot.prs.len(), 1);
+    assert_eq!(app.review.bot.prs[0].number, 101);
+    assert!(!app.review_bot_prs_loading());
 }
 
 #[test]
 fn review_board_key_1_switches_to_reviewer() {
     let mut app = make_review_board_app();
-    // Switch to Author first
-    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Author));
+    // Switch to Dependabot first
+    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Dependabot));
     app.handle_key(make_key(KeyCode::Char('1')));
     assert!(matches!(
         app.board.view_mode,
@@ -9726,13 +9721,13 @@ fn review_board_key_1_switches_to_reviewer() {
 }
 
 #[test]
-fn review_board_key_2_switches_to_author() {
+fn review_board_key_2_switches_to_dependabot() {
     let mut app = make_review_board_app();
     app.handle_key(make_key(KeyCode::Char('2')));
     assert!(matches!(
         app.board.view_mode,
         ViewMode::ReviewBoard {
-            mode: ReviewBoardMode::Author,
+            mode: ReviewBoardMode::Dependabot,
             ..
         }
     ));
@@ -9754,19 +9749,19 @@ fn review_board_backtab_does_nothing() {
 }
 
 #[test]
-fn switch_to_author_fetches_my_prs() {
+fn switch_to_dependabot_fetches_bot_prs() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
-    let cmds = app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Author));
+    let cmds = app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Dependabot));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::FetchPrs(PrListKind::Authored))));
+        .any(|c| matches!(c, Command::FetchPrs(PrListKind::Bot))));
 }
 
 #[test]
 fn switch_review_board_mode_outside_review_board_is_noop() {
     let mut app = make_app();
-    let cmds = app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Author));
+    let cmds = app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Dependabot));
     assert!(cmds.is_empty());
     assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
 }
@@ -9780,15 +9775,15 @@ fn active_review_prs_returns_reviewer_prs_in_reviewer_mode() {
         ReviewDecision::ReviewRequired,
     )]);
     app.review
-        .authored
-        .set_prs(vec![make_review_pr(2, "me", ReviewDecision::Approved)]);
+        .bot
+        .set_prs(vec![make_review_pr(2, "bot", ReviewDecision::Approved)]);
     app.update(Message::SwitchToReviewBoard);
     assert_eq!(app.active_review_prs().len(), 1);
     assert_eq!(app.active_review_prs()[0].number, 1);
 }
 
 #[test]
-fn active_review_prs_returns_my_prs_in_author_mode() {
+fn active_review_prs_returns_bot_prs_in_dependabot_mode() {
     let mut app = make_app();
     app.review.review.set_prs(vec![make_review_pr(
         1,
@@ -9796,10 +9791,10 @@ fn active_review_prs_returns_my_prs_in_author_mode() {
         ReviewDecision::ReviewRequired,
     )]);
     app.review
-        .authored
-        .set_prs(vec![make_review_pr(2, "me", ReviewDecision::Approved)]);
+        .bot
+        .set_prs(vec![make_review_pr(2, "bot", ReviewDecision::Approved)]);
     app.update(Message::SwitchToReviewBoard);
-    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Author));
+    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Dependabot));
     assert_eq!(app.active_review_prs().len(), 1);
     assert_eq!(app.active_review_prs()[0].number, 2);
 }
@@ -9892,56 +9887,24 @@ fn is_detached_returns_false_for_conflict() {
     assert!(!task.is_detached());
 }
 
-// --- dispatch PR filter ---
+// --- dispatch PR filter (removed in v2, 'D' key is now no-op in review board) ---
 
 #[test]
-fn dispatch_pr_filter_toggles_on_d_in_author_mode() {
+fn review_board_key_d_is_noop() {
+    // 'D' was dispatch_pr_filter toggle; now it's a no-op in all review board modes
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.update(Message::SwitchToReviewBoard);
-    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Author)); // switch to Author
-    assert!(!app.dispatch_pr_filter());
-
-    app.handle_key(make_key(KeyCode::Char('D')));
-    assert!(
-        app.dispatch_pr_filter(),
-        "D should toggle dispatch filter on"
-    );
-
-    app.handle_key(make_key(KeyCode::Char('D')));
-    assert!(!app.dispatch_pr_filter(), "D again should toggle it off");
+    let cmds = app.handle_key(make_key(KeyCode::Char('D')));
+    assert!(cmds.is_empty(), "D should be a no-op in reviewer mode");
 }
 
 #[test]
-fn dispatch_pr_filter_noop_in_reviewer_mode() {
+fn review_board_dependabot_mode_key_d_is_noop() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.update(Message::SwitchToReviewBoard);
-    // Default is Reviewer mode
-    app.handle_key(make_key(KeyCode::Char('D')));
-    assert!(
-        !app.dispatch_pr_filter(),
-        "D should be noop in Reviewer mode"
-    );
-}
-
-#[test]
-fn dispatch_pr_filter_filters_my_prs() {
-    let mut task = make_task(1, TaskStatus::Review);
-    task.pr_url = Some("https://github.com/acme/app/pull/42".to_string());
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
-
-    // Add two PRs: one matching a dispatch task, one not
-    let matching_pr = make_review_pr(42, "me", ReviewDecision::ReviewRequired);
-    let other_pr = make_review_pr(99, "me", ReviewDecision::ReviewRequired);
-    app.review.authored.prs = vec![matching_pr, other_pr];
-
-    // Without filter: both visible
-    assert_eq!(app.filtered_my_prs().len(), 2);
-
-    // With filter: only the matching one
-    app.review.dispatch_pr_filter = true;
-    let filtered = app.filtered_my_prs();
-    assert_eq!(filtered.len(), 1);
-    assert_eq!(filtered[0].number, 42);
+    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Dependabot));
+    let cmds = app.handle_key(make_key(KeyCode::Char('D')));
+    assert!(cmds.is_empty(), "D should be a no-op in dependabot mode");
 }
 
 // ---------------------------------------------------------------------------
@@ -11038,20 +11001,20 @@ fn render_tab_bar_review_board_shows_pr_count() {
 }
 
 #[test]
-fn render_tab_bar_review_board_my_prs_tab() {
+fn render_tab_bar_review_board_dependabot_tab() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
     app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
     app.update(Message::PrsLoaded(
-        PrListKind::Authored,
-        vec![make_review_pr(1, "me", ReviewDecision::Approved)],
+        PrListKind::Bot,
+        vec![make_review_pr(1, "dependabot", ReviewDecision::Approved)],
     ));
-    // Switch to Author mode so My PRs tab is active
-    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Author));
+    // Switch to Dependabot mode
+    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Dependabot));
     let buf = render_to_buffer(&mut app, 100, 30);
     assert!(
-        buffer_contains(&buf, "My PRs (1)"),
-        "tab bar in review board mode should show 'My PRs (1)' when 1 author PR loaded"
+        buffer_contains(&buf, "Dependabot (1)"),
+        "tab bar in dependabot mode should show 'Dependabot (1)' when 1 bot PR loaded"
     );
 }
 
@@ -11143,54 +11106,55 @@ fn tab_bar_security_board_highlights_keys() {
 }
 
 // ---------------------------------------------------------------------------
-// Review board Author and Dependabot mode rendering tests
+// Review board Dependabot mode rendering tests
 // ---------------------------------------------------------------------------
 
 #[test]
-fn render_review_board_author_shows_my_pr_titles() {
+fn render_review_board_dependabot_shows_bot_pr_titles() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
     app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
     app.update(Message::PrsLoaded(
-        PrListKind::Authored,
-        vec![make_review_pr(42, "me", ReviewDecision::ReviewRequired)],
+        PrListKind::Bot,
+        vec![make_review_pr(42, "dependabot", ReviewDecision::ReviewRequired)],
     ));
-    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Author)); // Reviewer → Author
+    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Dependabot));
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
         buffer_contains(&buf, "PR 42"),
-        "author mode should show 'PR 42' for the loaded my-PR"
+        "dependabot mode should show 'PR 42' for the loaded bot PR"
     );
 }
 
 #[test]
-fn render_review_board_author_shows_column_headers() {
+fn render_review_board_dependabot_shows_column_headers() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
     app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
     app.update(Message::PrsLoaded(
-        PrListKind::Authored,
-        vec![make_review_pr(42, "me", ReviewDecision::ReviewRequired)],
+        PrListKind::Bot,
+        vec![make_review_pr(42, "dependabot", ReviewDecision::ReviewRequired)],
     ));
-    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Author)); // Reviewer → Author
+    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Dependabot));
     let buf = render_to_buffer(&mut app, 120, 30);
+    // In v2 layout the column headers are Backlog/Ongoing/Action Required/Done
     assert!(
-        buffer_contains(&buf, "Needs Review"),
-        "author mode should show 'Needs Review' column header"
+        buffer_contains(&buf, "Backlog"),
+        "dependabot mode should show 'Backlog' column header"
     );
 }
 
 #[test]
-fn render_review_board_author_empty_shows_no_prs() {
+fn render_review_board_dependabot_empty_shows_no_prs() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
     app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
-    app.update(Message::PrsLoaded(PrListKind::Authored, vec![]));
-    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Author)); // Reviewer → Author
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![]));
+    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Dependabot));
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
         buffer_contains(&buf, "No PRs found"),
-        "author mode with no my-PRs should show 'No PRs found'"
+        "dependabot mode with no bot PRs should show 'No PRs found'"
     );
 }
 
@@ -11225,7 +11189,7 @@ fn render_review_board_reviewer_mode_does_not_show_bot_error() {
 }
 
 #[test]
-fn render_review_board_author_mode_shows_review_error_not_bot_error() {
+fn render_review_board_reviewer_mode_shows_review_error_not_bot_error() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
     app.update(Message::PrsFetchFailed(
@@ -11236,11 +11200,11 @@ fn render_review_board_author_mode_shows_review_error_not_bot_error() {
         PrListKind::Bot,
         "bot error should not appear".to_string(),
     ));
-    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Author)); // Reviewer → Author
+    // Stay in Reviewer mode
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
         !buffer_contains(&buf, "bot error should not appear"),
-        "Author mode must not show the bot error"
+        "Reviewer mode must not show the bot error"
     );
 }
 
@@ -12171,17 +12135,17 @@ fn review_board_e_edits_github_queries() {
 }
 
 #[test]
-fn e_in_review_board_author_emits_edit_authored_queries() {
+fn e_in_review_board_dependabot_emits_edit_bot_queries() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.board.view_mode = ViewMode::ReviewBoard {
-        mode: ReviewBoardMode::Author,
+        mode: ReviewBoardMode::Dependabot,
         selection: ReviewBoardSelection::default(),
         saved_board: BoardSelection::default(),
     };
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::EditGithubQueries(PrListKind::Authored))));
+        .any(|c| matches!(c, Command::EditGithubQueries(PrListKind::Bot))));
 }
 
 #[test]
@@ -12224,13 +12188,13 @@ fn refresh_review_prs_returns_fetch_command() {
 }
 
 #[test]
-fn refresh_review_prs_in_author_mode_returns_fetch_my_prs() {
+fn refresh_review_prs_in_dependabot_mode_returns_fetch_bot_prs() {
     let mut app = make_review_board_app();
-    app.handle_key(make_key(KeyCode::Char('2'))); // switch to Author mode
+    app.handle_key(make_key(KeyCode::Char('2'))); // switch to Dependabot mode
     let cmds = app.update(Message::RefreshReviewPrs);
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::FetchPrs(PrListKind::Authored))));
+        .any(|c| matches!(c, Command::FetchPrs(PrListKind::Bot))));
 }
 
 #[test]
@@ -12423,27 +12387,27 @@ fn review_board_unknown_key_is_noop() {
 }
 
 #[test]
-fn review_board_d_capital_toggles_dispatch_filter_in_author_mode() {
+fn review_board_key_2_switches_to_dependabot_mode_via_handle_key() {
     let mut app = make_review_board_app();
-    // Switch to Author mode
+    // Key '2' now switches to Dependabot mode
     app.handle_key(make_key(KeyCode::Char('2')));
     assert!(matches!(
         app.board.view_mode,
         ViewMode::ReviewBoard {
-            mode: ReviewBoardMode::Author,
+            mode: ReviewBoardMode::Dependabot,
             ..
         }
     ));
-    assert!(!app.dispatch_pr_filter());
-    app.handle_key(make_key(KeyCode::Char('D')));
-    assert!(app.dispatch_pr_filter());
 }
 
 #[test]
-fn review_board_d_capital_is_noop_in_reviewer_mode() {
+fn review_board_d_capital_is_noop_in_all_modes() {
     let mut app = make_review_board_app();
     let cmds = app.handle_key(make_key(KeyCode::Char('D')));
-    assert!(cmds.is_empty());
+    assert!(cmds.is_empty(), "D is noop in Reviewer mode");
+    app.handle_key(make_key(KeyCode::Char('2'))); // Dependabot
+    let cmds2 = app.handle_key(make_key(KeyCode::Char('D')));
+    assert!(cmds2.is_empty(), "D is noop in Dependabot mode");
 }
 
 // ---------------------------------------------------------------------------
@@ -17860,14 +17824,14 @@ fn make_reviewer_app_with_pr(
     (app, url)
 }
 
-fn make_author_app_with_pr(decision: ReviewDecision, ci: crate::models::CiStatus) -> (App, String) {
-    let mut pr = make_review_pr(42, "alice", decision);
+fn make_dependabot_app_with_pr(decision: ReviewDecision, ci: crate::models::CiStatus) -> (App, String) {
+    let mut pr = make_review_pr(42, "dependabot", decision);
     pr.ci_status = ci;
     let url = pr.url.clone();
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.update(Message::SwitchToReviewBoard);
-    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Author));
-    app.update(Message::PrsLoaded(PrListKind::Authored, vec![pr]));
+    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Dependabot));
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
     let col = decision.column_index();
     if let Some(sel) = app.review_selection_mut() {
         sel.set_column(col);
@@ -17918,15 +17882,15 @@ fn review_approve_reviewer_mode_already_approved_is_blocked() {
 }
 
 #[test]
-fn review_approve_author_mode_is_noop() {
-    let (mut app, _url) = make_author_app_with_pr(
+fn review_approve_dependabot_mode_is_noop() {
+    let (mut app, _url) = make_dependabot_app_with_pr(
         ReviewDecision::ReviewRequired,
         crate::models::CiStatus::None,
     );
     app.handle_key(make_key(KeyCode::Char('a')));
     assert!(
         matches!(app.input.mode, InputMode::Normal),
-        "approve key should do nothing in author mode"
+        "approve key should do nothing in dependabot mode (not reviewer)"
     );
 }
 
@@ -17975,13 +17939,13 @@ fn review_merge_reviewer_mode_approved_ci_success_enters_confirm() {
 }
 
 #[test]
-fn review_merge_author_mode_approved_ci_none_enters_confirm() {
+fn review_merge_dependabot_mode_approved_ci_none_enters_confirm() {
     let (mut app, _url) =
-        make_author_app_with_pr(ReviewDecision::Approved, crate::models::CiStatus::None);
+        make_dependabot_app_with_pr(ReviewDecision::Approved, crate::models::CiStatus::None);
     app.handle_key(make_key(KeyCode::Char('m')));
     assert!(
         matches!(app.input.mode, InputMode::ConfirmMergeReviewPr(_)),
-        "merge should enter confirm mode in author mode when Approved"
+        "merge should enter confirm mode in dependabot mode when Approved"
     );
 }
 
@@ -18562,4 +18526,15 @@ fn security_navigation_left_clamps_at_zero() {
     }
     let col = app.security_selection().unwrap().column();
     assert_eq!(col, 0);
+}
+
+#[test]
+fn review_board_mode_column_labels_v2() {
+    use crate::tui::types::ReviewBoardMode;
+    use crate::models::ReviewWorkflowState::*;
+
+    assert_eq!(ReviewBoardMode::column_label(Backlog), "Backlog");
+    assert_eq!(ReviewBoardMode::column_label(Ongoing), "Ongoing");
+    assert_eq!(ReviewBoardMode::column_label(ActionRequired), "Action Required");
+    assert_eq!(ReviewBoardMode::column_label(Done), "Done");
 }

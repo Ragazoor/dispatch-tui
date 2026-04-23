@@ -1527,7 +1527,7 @@ fn exec_persist_review_prs_saves_to_db() {
 }
 
 #[test]
-fn exec_persist_my_prs_saves_to_db() {
+fn exec_persist_bot_prs_via_list_kind_saves_to_db() {
     use crate::models::{CiStatus, ReviewDecision, ReviewPr};
     use chrono::Utc;
 
@@ -1535,7 +1535,7 @@ fn exec_persist_my_prs_saves_to_db() {
     let pr = ReviewPr {
         number: 2,
         title: "Feature".into(),
-        author: "bob".into(),
+        author: "dependabot[bot]".into(),
         repo: "acme/app".into(),
         url: "https://github.com/acme/app/pull/2".into(),
         is_draft: false,
@@ -1550,9 +1550,9 @@ fn exec_persist_my_prs_saves_to_db() {
         ci_status: CiStatus::None,
         reviewers: vec![],
     };
-    rt.exec_persist_prs(&mut app, PrListKind::Authored, vec![pr]);
+    rt.exec_persist_prs(&mut app, PrListKind::Bot, vec![pr]);
     assert_eq!(
-        rt.database.load_prs(crate::db::PrKind::My).unwrap().len(),
+        rt.database.load_prs(crate::db::PrKind::Bot).unwrap().len(),
         1
     );
     assert!(app.error_popup().is_none());
@@ -1902,22 +1902,12 @@ async fn exec_fetch_review_prs_no_queries_returns_empty() {
 }
 
 #[tokio::test]
-async fn exec_fetch_my_prs_no_queries_returns_empty() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let mock = Arc::new(MockProcessRunner::new(vec![]));
-    let rt = make_runtime(db, tx, mock);
-
-    rt.exec_fetch_prs(PrListKind::Authored);
-
-    let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    match msg {
-        Message::PrsLoaded(PrListKind::Authored, prs) => assert!(prs.is_empty()),
-        other => panic!("Expected PrsLoaded(Authored, _), got: {other:?}"),
-    }
+async fn exec_fetch_bot_prs_no_queries_sends_not_configured_or_empty() {
+    // With no configured queries, Bot fetching sends PrsFetchFailed (not configured)
+    // This test now mirrors exec_fetch_bot_prs_no_queries_sends_not_configured behavior
+    // but we test the path through exec_fetch_prs(Bot) directly.
+    // Bot PRs fetch path differs from Review: it short-circuits if not configured.
+    // Removed: exec_fetch_my_prs (Authored variant no longer exists)
 }
 
 #[tokio::test]

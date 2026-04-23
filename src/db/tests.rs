@@ -5017,7 +5017,6 @@ fn pr_workflow_list_returns_all_rows() {
 #[test]
 fn pr_workflow_prune_removes_done_older_than_threshold() {
     let db = in_memory_db();
-    use crate::models::WorkflowItemKind::*;
 
     // Insert a done row with an old timestamp
     let conn = db.conn().unwrap();

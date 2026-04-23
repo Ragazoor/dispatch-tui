@@ -148,8 +148,7 @@ impl TuiRuntime {
         let key = kind.settings_key();
         let label = match kind {
             PrListKind::Review => "Review PRs",
-            PrListKind::Authored => "My PRs",
-            PrListKind::Bot => unreachable!(),
+            PrListKind::Bot => "Bot PRs",
         };
 
         let current = self

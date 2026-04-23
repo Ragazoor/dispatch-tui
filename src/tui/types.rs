@@ -52,26 +52,23 @@ pub enum MoveDirection {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReviewBoardMode {
     Reviewer,
-    Author,
+    Dependabot,
 }
 
 impl ReviewBoardMode {
-    pub fn column_count(&self) -> usize {
+    pub fn column_count() -> usize {
         4
     }
 
-    pub fn column_label(&self, col: usize) -> &'static str {
-        match col {
-            0 => "Needs Review",
-            1 => "Waiting for Response",
-            2 => "Changes Requested",
-            3 => "Approved",
-            _ => "",
-        }
+    pub fn column_label(state: crate::models::ReviewWorkflowState) -> &'static str {
+        state.column_label()
     }
 
-    pub fn pr_column(&self, pr: &crate::models::ReviewPr) -> usize {
-        pr.review_decision.column_index()
+    pub fn workflow_item_kind(self) -> crate::models::WorkflowItemKind {
+        match self {
+            Self::Reviewer => crate::models::WorkflowItemKind::ReviewerPr,
+            Self::Dependabot => crate::models::WorkflowItemKind::DependabotPr,
+        }
     }
 }
 
@@ -118,6 +115,24 @@ pub struct FixDispatchKey {
 
 impl FixDispatchKey {
     pub fn new(repo: String, number: i64, kind: AlertKind) -> Self {
+        Self { repo, number, kind }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// WorkflowKey — composite key into pr_workflow_states
+// ---------------------------------------------------------------------------
+
+/// Composite key into pr_workflow_states.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct WorkflowKey {
+    pub repo: String,
+    pub number: i64,
+    pub kind: crate::models::WorkflowItemKind,
+}
+
+impl WorkflowKey {
+    pub fn new(repo: String, number: i64, kind: crate::models::WorkflowItemKind) -> Self {
         Self { repo, number, kind }
     }
 }
@@ -498,6 +513,25 @@ pub enum Message {
     PrevTip,
     SetTipsMode(TipsShowMode),
     CloseTips,
+    // Workflow state loaded from DB on startup
+    WorkflowStatesLoaded(Vec<crate::db::PrWorkflowRow>),
+    // Manual column movement — review board
+    MoveReviewItemForward,
+    MoveReviewItemBack,
+    // Manual column movement — security board
+    MoveSecurityItemForward,
+    MoveSecurityItemBack,
+    // Workflow state transition (from runtime after persisting)
+    ReviewWorkflowUpdated {
+        key: WorkflowKey,
+        state: crate::models::ReviewWorkflowState,
+        sub_state: Option<crate::models::ReviewWorkflowSubState>,
+    },
+    SecurityWorkflowUpdated {
+        key: WorkflowKey,
+        state: crate::models::SecurityWorkflowState,
+        sub_state: Option<crate::models::SecurityWorkflowSubState>,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -679,6 +713,20 @@ pub enum Command {
         seen_up_to: u32,
         show_mode: TipsShowMode,
     },
+    // Persist a review workflow state change
+    PersistReviewWorkflow {
+        key: WorkflowKey,
+        state: crate::models::ReviewWorkflowState,
+        sub_state: Option<crate::models::ReviewWorkflowSubState>,
+    },
+    // Persist a security workflow state change
+    PersistSecurityWorkflow {
+        key: WorkflowKey,
+        state: crate::models::SecurityWorkflowState,
+        sub_state: Option<crate::models::SecurityWorkflowSubState>,
+    },
+    // Prune Done rows older than 7 days (run on startup)
+    PruneDonePrWorkflows,
 }
 
 // ---------------------------------------------------------------------------
@@ -964,7 +1012,6 @@ impl FilterState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PrListKind {
     Review,
-    Authored,
     Bot,
 }
 
@@ -973,7 +1020,6 @@ impl PrListKind {
     pub fn settings_key(self) -> &'static str {
         match self {
             Self::Review => "github_queries_review",
-            Self::Authored => "github_queries_my_prs",
             Self::Bot => "github_queries_bot",
         }
     }
@@ -986,7 +1032,6 @@ impl PrListKind {
     pub fn to_pr_kind(self) -> crate::db::PrKind {
         match self {
             Self::Review => crate::db::PrKind::Review,
-            Self::Authored => crate::db::PrKind::My,
             Self::Bot => crate::db::PrKind::Bot,
         }
     }
@@ -995,7 +1040,6 @@ impl PrListKind {
     pub fn label(self) -> &'static str {
         match self {
             Self::Review => "review",
-            Self::Authored => "my",
             Self::Bot => "bot",
         }
     }
@@ -1050,27 +1094,29 @@ impl PrListState {
 #[derive(Debug, Default)]
 pub struct ReviewBoardState {
     pub review: PrListState,
-    pub authored: PrListState,
+    pub bot: PrListState,
     pub detail_visible: bool,
-    pub dispatch_pr_filter: bool,
     pub review_flash: HashMap<PrRef, Instant>,
     pub review_agents: HashMap<PrRef, ReviewAgentHandle>,
+    /// Column placement authority: (repo, number, kind) → (state, sub_state)
+    pub review_workflow_states: HashMap<WorkflowKey, (
+        crate::models::ReviewWorkflowState,
+        Option<crate::models::ReviewWorkflowSubState>,
+    )>,
 }
 
 impl ReviewBoardState {
     pub fn list(&self, kind: PrListKind) -> Option<&PrListState> {
         match kind {
             PrListKind::Review => Some(&self.review),
-            PrListKind::Authored => Some(&self.authored),
-            PrListKind::Bot => None,
+            PrListKind::Bot => Some(&self.bot),
         }
     }
 
     pub fn list_mut(&mut self, kind: PrListKind) -> Option<&mut PrListState> {
         match kind {
             PrListKind::Review => Some(&mut self.review),
-            PrListKind::Authored => Some(&mut self.authored),
-            PrListKind::Bot => None,
+            PrListKind::Bot => Some(&mut self.bot),
         }
     }
 
@@ -1091,7 +1137,7 @@ impl ReviewBoardState {
         let key = PrRef::new(github_repo.to_string(), number);
         self.review_agents.insert(key, handle);
 
-        for kind in [PrListKind::Review, PrListKind::Authored] {
+        for kind in [PrListKind::Review, PrListKind::Bot] {
             if self
                 .list(kind)
                 .unwrap()
@@ -1328,6 +1374,10 @@ pub struct SecurityBoardState {
     pub review_flash: HashMap<PrRef, Instant>,
     pub dependabot: DependabotBoardState,
     pub fix_agents: HashMap<FixDispatchKey, FixAgentHandle>,
+    pub security_workflow_states: HashMap<WorkflowKey, (
+        crate::models::SecurityWorkflowState,
+        Option<crate::models::SecurityWorkflowSubState>,
+    )>,
 }
 
 impl SecurityBoardState {
@@ -1716,21 +1766,18 @@ mod tests {
     #[test]
     fn pr_list_kind_settings_key() {
         assert_eq!(PrListKind::Review.settings_key(), "github_queries_review");
-        assert_eq!(PrListKind::Authored.settings_key(), "github_queries_my_prs");
         assert_eq!(PrListKind::Bot.settings_key(), "github_queries_bot");
     }
 
     #[test]
     fn pr_list_kind_table_name() {
         assert_eq!(PrListKind::Review.table_name(), "review_prs");
-        assert_eq!(PrListKind::Authored.table_name(), "my_prs");
         assert_eq!(PrListKind::Bot.table_name(), "bot_prs");
     }
 
     #[test]
     fn pr_list_kind_label() {
         assert_eq!(PrListKind::Review.label(), "review");
-        assert_eq!(PrListKind::Authored.label(), "my");
         assert_eq!(PrListKind::Bot.label(), "bot");
     }
 
@@ -1741,11 +1788,11 @@ mod tests {
         let mut state = ReviewBoardState::default();
         state.review.set_prs(vec![make_pr(1, "org/a")]);
         state
-            .authored
+            .bot
             .set_prs(vec![make_pr(2, "org/b"), make_pr(3, "org/c")]);
 
         assert_eq!(state.list(PrListKind::Review).unwrap().prs.len(), 1);
-        assert_eq!(state.list(PrListKind::Authored).unwrap().prs.len(), 2);
+        assert_eq!(state.list(PrListKind::Bot).unwrap().prs.len(), 2);
     }
 
     #[test]
@@ -1753,7 +1800,7 @@ mod tests {
         let mut state = ReviewBoardState::default();
         state.list_mut(PrListKind::Review).unwrap().loading = true;
         assert!(state.review.loading);
-        assert!(!state.authored.loading);
+        assert!(!state.bot.loading);
     }
 
     // -- ReviewBoardState::find_and_set_pr_agent --
@@ -1773,12 +1820,12 @@ mod tests {
     }
 
     #[test]
-    fn find_and_set_pr_agent_sets_fields_in_authored_list() {
+    fn find_and_set_pr_agent_sets_fields_in_bot_list() {
         let mut state = ReviewBoardState::default();
-        state.authored.set_prs(vec![make_pr(99, "org/lib")]);
+        state.bot.set_prs(vec![make_pr(99, "org/lib")]);
 
         let kind = state.find_and_set_pr_agent("org/lib", 99, "win-99", "/tmp/wt2");
-        assert_eq!(kind, Some(crate::db::PrKind::My));
+        assert_eq!(kind, Some(crate::db::PrKind::Bot));
         let key = PrRef::new("org/lib".to_string(), 99);
         let handle = state.review_agents.get(&key).unwrap();
         assert_eq!(handle.tmux_window, "win-99");
@@ -1792,27 +1839,21 @@ mod tests {
     }
 
     #[test]
-    fn review_board_list_bot_returns_none() {
+    fn review_board_list_bot_returns_some() {
         let state = ReviewBoardState::default();
-        assert!(state.list(PrListKind::Bot).is_none());
+        assert!(state.list(PrListKind::Bot).is_some());
     }
 
     #[test]
-    fn review_board_list_mut_bot_returns_none() {
+    fn review_board_list_mut_bot_returns_some() {
         let mut state = ReviewBoardState::default();
-        assert!(state.list_mut(PrListKind::Bot).is_none());
+        assert!(state.list_mut(PrListKind::Bot).is_some());
     }
 
     #[test]
     fn review_board_list_review_returns_some() {
         let state = ReviewBoardState::default();
         assert!(state.list(PrListKind::Review).is_some());
-    }
-
-    #[test]
-    fn review_board_list_authored_returns_some() {
-        let state = ReviewBoardState::default();
-        assert!(state.list(PrListKind::Authored).is_some());
     }
 
     // -- repo_filter_matches --
