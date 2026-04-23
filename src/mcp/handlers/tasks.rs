@@ -864,12 +864,9 @@ fn find_workflow_kind_for(
     number: i64,
 ) -> Option<crate::models::WorkflowItemKind> {
     use crate::models::WorkflowItemKind::{CodeScanAlert, DependabotAlert, DependabotPr, ReviewerPr};
-    for kind in [ReviewerPr, DependabotPr, DependabotAlert, CodeScanAlert] {
-        if db.get_pr_workflow(repo, number, kind).ok().flatten().is_some() {
-            return Some(kind);
-        }
-    }
-    None
+    [ReviewerPr, DependabotPr, DependabotAlert, CodeScanAlert]
+        .into_iter()
+        .find(|&kind| db.get_pr_workflow(repo, number, kind).ok().flatten().is_some())
 }
 
 pub(super) fn handle_report_usage(
