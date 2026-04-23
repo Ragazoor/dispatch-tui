@@ -3722,10 +3722,6 @@ impl App {
     }
 
     fn clamp_review_selection(&mut self) {
-        let mode = match &self.board.view_mode {
-            ViewMode::ReviewBoard { mode, .. } => *mode,
-            _ => ReviewBoardMode::Reviewer,
-        };
         let filtered = self.active_review_prs();
         let col_count = ReviewBoardMode::column_count();
         let counts: [usize; ReviewDecision::COLUMN_COUNT] = std::array::from_fn(|col| {
@@ -3756,11 +3752,6 @@ impl App {
 
         let Some(anchor_pr) = anchor else {
             return self.clamp_review_selection();
-        };
-
-        let mode = match &self.board.view_mode {
-            ViewMode::ReviewBoard { mode, .. } => *mode,
-            _ => return self.clamp_review_selection(),
         };
 
         let filtered = self.active_review_prs();
@@ -4244,10 +4235,6 @@ impl App {
 
     /// Return PRs for a given column index, using the current mode's column mapping.
     pub fn active_prs_for_column(&self, col: usize) -> Vec<&crate::models::ReviewPr> {
-        let mode = match &self.board.view_mode {
-            ViewMode::ReviewBoard { mode, .. } => *mode,
-            _ => ReviewBoardMode::Reviewer,
-        };
         let mut prs: Vec<_> = self
             .active_review_prs()
             .into_iter()
@@ -4288,10 +4275,6 @@ impl App {
         let (col, row) = match self.review_selection() {
             Some(sel) => (sel.selected_column, sel.selected_row[sel.selected_column]),
             None => return,
-        };
-        let mode = match &self.board.view_mode {
-            ViewMode::ReviewBoard { mode, .. } => *mode,
-            _ => return,
         };
         let mut col_prs: Vec<_> = self
             .active_review_prs()
