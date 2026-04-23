@@ -780,6 +780,258 @@ impl std::fmt::Display for ReviewAgentStatus {
 }
 
 // ---------------------------------------------------------------------------
+// ReviewWorkflowState + ReviewWorkflowSubState
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ReviewWorkflowState {
+    Backlog,
+    Ongoing,
+    ActionRequired,
+    Done,
+}
+
+impl ReviewWorkflowState {
+    pub fn as_db_str(self) -> &'static str {
+        match self {
+            Self::Backlog => "backlog",
+            Self::Ongoing => "ongoing",
+            Self::ActionRequired => "action_required",
+            Self::Done => "done",
+        }
+    }
+
+    pub fn from_db_str(s: &str) -> Option<Self> {
+        match s {
+            "backlog" => Some(Self::Backlog),
+            "ongoing" => Some(Self::Ongoing),
+            "action_required" => Some(Self::ActionRequired),
+            "done" => Some(Self::Done),
+            _ => None,
+        }
+    }
+
+    pub fn column_index(self) -> usize {
+        match self {
+            Self::Backlog => 0,
+            Self::Ongoing => 1,
+            Self::ActionRequired => 2,
+            Self::Done => 3,
+        }
+    }
+
+    pub fn column_label(self) -> &'static str {
+        match self {
+            Self::Backlog => "Backlog",
+            Self::Ongoing => "Ongoing",
+            Self::ActionRequired => "Action Required",
+            Self::Done => "Done",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ReviewWorkflowSubState {
+    // Ongoing sub-states
+    Reviewing,
+    Idle,
+    Stale,
+    // ActionRequired sub-states
+    FindingsReady,
+    ChangesRequested,
+    AwaitingResponse,
+    CiFailing,
+    ReadyToMerge,
+}
+
+impl ReviewWorkflowSubState {
+    pub fn as_db_str(self) -> &'static str {
+        match self {
+            Self::Reviewing => "reviewing",
+            Self::Idle => "idle",
+            Self::Stale => "stale",
+            Self::FindingsReady => "findings_ready",
+            Self::ChangesRequested => "changes_requested",
+            Self::AwaitingResponse => "awaiting_response",
+            Self::CiFailing => "ci_failing",
+            Self::ReadyToMerge => "ready_to_merge",
+        }
+    }
+
+    pub fn from_db_str(s: &str) -> Option<Self> {
+        match s {
+            "reviewing" => Some(Self::Reviewing),
+            "idle" => Some(Self::Idle),
+            "stale" => Some(Self::Stale),
+            "findings_ready" => Some(Self::FindingsReady),
+            "changes_requested" => Some(Self::ChangesRequested),
+            "awaiting_response" => Some(Self::AwaitingResponse),
+            "ci_failing" => Some(Self::CiFailing),
+            "ready_to_merge" => Some(Self::ReadyToMerge),
+            _ => None,
+        }
+    }
+
+    pub fn section_label(self) -> &'static str {
+        match self {
+            Self::Reviewing => "reviewing",
+            Self::Idle => "idle",
+            Self::Stale => "stale",
+            Self::FindingsReady => "findings ready",
+            Self::ChangesRequested => "changes requested",
+            Self::AwaitingResponse => "awaiting response",
+            Self::CiFailing => "ci failing",
+            Self::ReadyToMerge => "ready to merge",
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SecurityWorkflowState + SecurityWorkflowSubState
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SecurityWorkflowState {
+    Backlog,
+    Ongoing,
+    ActionRequired,
+    Done,
+}
+
+impl SecurityWorkflowState {
+    pub fn as_db_str(self) -> &'static str {
+        match self {
+            Self::Backlog => "backlog",
+            Self::Ongoing => "ongoing",
+            Self::ActionRequired => "action_required",
+            Self::Done => "done",
+        }
+    }
+
+    pub fn from_db_str(s: &str) -> Option<Self> {
+        match s {
+            "backlog" => Some(Self::Backlog),
+            "ongoing" => Some(Self::Ongoing),
+            "action_required" => Some(Self::ActionRequired),
+            "done" => Some(Self::Done),
+            _ => None,
+        }
+    }
+
+    pub fn column_index(self) -> usize {
+        match self {
+            Self::Backlog => 0,
+            Self::Ongoing => 1,
+            Self::ActionRequired => 2,
+            Self::Done => 3,
+        }
+    }
+
+    pub fn column_label(self) -> &'static str {
+        match self {
+            Self::Backlog => "Backlog",
+            Self::Ongoing => "Ongoing",
+            Self::ActionRequired => "Action Required",
+            Self::Done => "Done",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SecurityWorkflowSubState {
+    // Ongoing sub-states
+    Investigating,
+    Idle,
+    Stale,
+    // ActionRequired — no fix PR
+    FindingsReady,
+    NeedsManualFix,
+    // ActionRequired — fix PR exists
+    PrOpen,
+    ChangesRequested,
+    CiFailing,
+    ReadyToMerge,
+}
+
+impl SecurityWorkflowSubState {
+    pub fn as_db_str(self) -> &'static str {
+        match self {
+            Self::Investigating => "investigating",
+            Self::Idle => "idle",
+            Self::Stale => "stale",
+            Self::FindingsReady => "findings_ready",
+            Self::NeedsManualFix => "needs_manual_fix",
+            Self::PrOpen => "pr_open",
+            Self::ChangesRequested => "changes_requested",
+            Self::CiFailing => "ci_failing",
+            Self::ReadyToMerge => "ready_to_merge",
+        }
+    }
+
+    pub fn from_db_str(s: &str) -> Option<Self> {
+        match s {
+            "investigating" => Some(Self::Investigating),
+            "idle" => Some(Self::Idle),
+            "stale" => Some(Self::Stale),
+            "findings_ready" => Some(Self::FindingsReady),
+            "needs_manual_fix" => Some(Self::NeedsManualFix),
+            "pr_open" => Some(Self::PrOpen),
+            "changes_requested" => Some(Self::ChangesRequested),
+            "ci_failing" => Some(Self::CiFailing),
+            "ready_to_merge" => Some(Self::ReadyToMerge),
+            _ => None,
+        }
+    }
+
+    pub fn section_label(self) -> &'static str {
+        match self {
+            Self::Investigating => "investigating",
+            Self::Idle => "idle",
+            Self::Stale => "stale",
+            Self::FindingsReady => "findings ready",
+            Self::NeedsManualFix => "needs manual fix",
+            Self::PrOpen => "pr open",
+            Self::ChangesRequested => "changes requested",
+            Self::CiFailing => "ci failing",
+            Self::ReadyToMerge => "ready to merge",
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// WorkflowItemKind — identifies which board/table a pr_workflow_states row belongs to
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum WorkflowItemKind {
+    ReviewerPr,
+    DependabotPr,
+    DependabotAlert,
+    CodeScanAlert,
+}
+
+impl WorkflowItemKind {
+    pub fn as_db_str(self) -> &'static str {
+        match self {
+            Self::ReviewerPr => "reviewer_pr",
+            Self::DependabotPr => "dependabot_pr",
+            Self::DependabotAlert => "dependabot_alert",
+            Self::CodeScanAlert => "code_scan_alert",
+        }
+    }
+
+    pub fn from_db_str(s: &str) -> Option<Self> {
+        match s {
+            "reviewer_pr" => Some(Self::ReviewerPr),
+            "dependabot_pr" => Some(Self::DependabotPr),
+            "dependabot_alert" => Some(Self::DependabotAlert),
+            "code_scan_alert" => Some(Self::CodeScanAlert),
+            _ => None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // ReviewPr — a PR the user is expected to review
 // ---------------------------------------------------------------------------
 
@@ -2623,6 +2875,88 @@ mod security_tests {
         assert_eq!(ReviewAgentStatus::Reviewing.to_string(), "reviewing");
         assert_eq!(ReviewAgentStatus::FindingsReady.to_string(), "ready");
         assert_eq!(ReviewAgentStatus::Idle.to_string(), "idle");
+    }
+
+    // --- ReviewWorkflowState + ReviewWorkflowSubState ---
+
+    #[test]
+    fn review_workflow_state_roundtrip() {
+        use ReviewWorkflowState::*;
+        for (s, expected) in [
+            (Backlog, "backlog"),
+            (Ongoing, "ongoing"),
+            (ActionRequired, "action_required"),
+            (Done, "done"),
+        ] {
+            assert_eq!(s.as_db_str(), expected);
+            assert_eq!(ReviewWorkflowState::from_db_str(expected), Some(s));
+        }
+        assert_eq!(ReviewWorkflowState::from_db_str("bogus"), None);
+    }
+
+    #[test]
+    fn review_workflow_sub_state_roundtrip() {
+        use ReviewWorkflowSubState::*;
+        for s in [
+            Reviewing, Idle, Stale, FindingsReady, ChangesRequested, AwaitingResponse,
+            CiFailing, ReadyToMerge,
+        ] {
+            let db_str = s.as_db_str();
+            assert_eq!(ReviewWorkflowSubState::from_db_str(db_str), Some(s));
+        }
+    }
+
+    #[test]
+    fn review_workflow_state_column_index_is_sequential() {
+        use ReviewWorkflowState::*;
+        assert_eq!(Backlog.column_index(), 0);
+        assert_eq!(Ongoing.column_index(), 1);
+        assert_eq!(ActionRequired.column_index(), 2);
+        assert_eq!(Done.column_index(), 3);
+    }
+
+    // --- SecurityWorkflowState + SecurityWorkflowSubState ---
+
+    #[test]
+    fn security_workflow_state_roundtrip() {
+        use SecurityWorkflowState::*;
+        for (s, expected) in [
+            (Backlog, "backlog"),
+            (Ongoing, "ongoing"),
+            (ActionRequired, "action_required"),
+            (Done, "done"),
+        ] {
+            assert_eq!(s.as_db_str(), expected);
+            assert_eq!(SecurityWorkflowState::from_db_str(expected), Some(s));
+        }
+    }
+
+    #[test]
+    fn security_workflow_sub_state_roundtrip() {
+        use SecurityWorkflowSubState::*;
+        for s in [
+            Investigating, Idle, Stale, FindingsReady, NeedsManualFix, PrOpen,
+            ChangesRequested, CiFailing, ReadyToMerge,
+        ] {
+            let db_str = s.as_db_str();
+            assert_eq!(SecurityWorkflowSubState::from_db_str(db_str), Some(s));
+        }
+    }
+
+    // --- WorkflowItemKind ---
+
+    #[test]
+    fn workflow_item_kind_roundtrip() {
+        use WorkflowItemKind::*;
+        for (k, expected) in [
+            (ReviewerPr, "reviewer_pr"),
+            (DependabotPr, "dependabot_pr"),
+            (DependabotAlert, "dependabot_alert"),
+            (CodeScanAlert, "code_scan_alert"),
+        ] {
+            assert_eq!(k.as_db_str(), expected);
+            assert_eq!(WorkflowItemKind::from_db_str(expected), Some(k));
+        }
     }
 
     // --- PrRef ---
