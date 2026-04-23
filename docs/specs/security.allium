@@ -1,10 +1,14 @@
 -- allium: 3
 -- security.allium
 --
--- Scope: Security Board — Alerts sub-view
--- Includes: SecurityAlert entity, alert severity/kind enums, fix agent lifecycle,
---           column placement, filtering, visual badges
--- Excludes: Dependabot PR board (see dependabot.allium), review agent mechanics (see review-board.allium)
+-- Scope: Security Board — unified view of Dependabot and Code Scanning alerts
+-- Includes: SecurityAlert entity, alert severity/kind enums, fix agent
+--           lifecycle, workflow state model (column placement), manual column
+--           movement, merge flow, filtering, visual badges
+-- Excludes: Dependabot PR surfacing on the Review Board (see dependabot.allium
+--           for card layout and approve/merge details used there), review
+--           agent mechanics (see review-board.allium). Dependabot PRs are no
+--           longer shown on the Security Board.
 
 use "./core.allium" as core
 use "./review-board.allium" as rb
@@ -17,11 +21,42 @@ enum AlertSeverity { critical | high | medium | low }
     -- GitHub's "moderate" severity maps to medium during parsing.
 
 enum AlertKind { dependabot | code_scanning }
+    -- Rendered as a per-card badge ([DEP] / [SCAN]). Both kinds coexist on a
+    -- single unified Security Board; the kind no longer partitions the view.
 
-enum SecurityBoardMode { dependabot | alerts }
-    -- The Security Board has two sub-views, toggled with 1/2 keys.
-    -- This spec covers the alerts sub-view only (see dependabot.allium
-    -- for the dependabot sub-view).
+-- Persisted workflow state driving column placement. This is local state,
+-- not a mirror of any GitHub field. State changes only via explicit user
+-- actions (dispatch, manual move, merge) or local events (MCP updates from
+-- the fix agent, tmux session ending, fix PR detected on agent branch,
+-- alert dismissed / fixed on GitHub). GitHub polling may update sub_state
+-- within Action Required; it never changes the parent workflow_state.
+enum SecurityWorkflowState {
+    backlog
+    ongoing
+    action_required
+    done
+}
+
+-- Sub-state within a workflow column. Different columns permit different
+-- sub-state values; see invariants below. The `pr_*` sub-states apply only
+-- when a fix PR has been created by the agent; the `needs_manual_fix`
+-- sub-state applies when the agent could not produce a fix.
+enum SecurityWorkflowSubState {
+    -- Ongoing
+    investigating       -- fix agent is running (tmux window alive)
+    idle                -- session ended, no output produced
+    stale               -- agent has been inactive too long
+
+    -- Action Required — no fix PR yet
+    findings_ready      -- agent posted findings, no PR created
+    needs_manual_fix    -- agent could not produce a fix; human must decide
+
+    -- Action Required — fix PR exists
+    pr_open             -- fix PR detected on agent branch, awaiting review
+    changes_requested   -- reviewer requested changes on the fix PR
+    ci_failing          -- CI is failing on the fix PR
+    ready_to_merge      -- fix PR approved AND ci passing
+}
 
 ------------------------------------------------------------
 -- Entities
@@ -42,15 +77,27 @@ entity SecurityAlert {
     state: String                          -- alert state from GitHub; fetched alerts are always "open"
     description: String                    -- advisory description text (may be empty)
 
-    -- Fix agent session fields. On detach, all three are cleared in the in-memory
-    -- state; the persisted row retains tmux_window and worktree (only agent_status
-    -- is cleared at the DB level). See FixAgentSessionUnit for the in-memory rule.
+    -- Fix agent session fields. On detach, all three are cleared in the
+    -- in-memory state; the persisted row retains tmux_window and worktree
+    -- (only agent_status is cleared at the DB level). See
+    -- FixAgentSessionUnit for the in-memory rule.
     tmux_window: core/TmuxWindow?
     worktree: core/Worktree?
     agent_status: rb/ReviewAgentStatus?
 
+    -- Display-only workflow fields, joined from pr_workflow_states on
+    -- (repo, number, kind). These are NOT persisted on security_alerts;
+    -- the source of truth is the pr_workflow_states table keyed by
+    -- (repo, number, kind where kind in {dependabot_alert, code_scan_alert}).
+    -- The alert row itself is never mutated by workflow transitions.
+    workflow_state: SecurityWorkflowState
+    workflow_sub_state: SecurityWorkflowSubState?
+
     -- Derived
     has_agent: agent_status != null
+    -- The circle indicator on a card reflects tmux_window presence. It is
+    -- omitted entirely in the Backlog column.
+    session_alive: tmux_window != null
 }
 
 ------------------------------------------------------------
@@ -69,21 +116,26 @@ config {
 -- Workflow Columns
 ------------------------------------------------------------
 
--- SecurityAlerts (Alerts sub-view) are placed in 3 workflow columns,
--- ordered left to right. Column assignment is derived from the in-memory
--- fix agent state for the alert:
+-- The Security Board has 4 workflow columns. Column placement is driven by
+-- alert.workflow_state (derived from pr_workflow_states):
 --
---   column 0: backlog      — no fix agent, or fix agent status = idle
---   column 1: in_progress  — fix agent status = reviewing
---   column 2: review       — fix agent status = findings_ready
+--   # | Label            | workflow_state
+--   --+------------------+------------------
+--   0 | Backlog          | backlog
+--   1 | Ongoing          | ongoing
+--   2 | Action Required  | action_required
+--   3 | Done             | done
 --
--- Within each column, alerts are sorted alphabetically by repo name.
--- (The fetch pipeline pre-orders alerts globally by severity then CVSS
--- descending, but the per-column view re-sorts by repo for stable grouping
--- of alerts from the same repository.)
+-- Within Ongoing and Action Required, alerts are grouped under sub-state
+-- section headers (e.g. "— investigating", "— ready to merge"). Within each
+-- sub-state section, alerts are grouped by repo and ordered by severity
+-- descending, then CVSS score descending. Backlog alerts group by repo and
+-- use the same severity/CVSS ordering. Done shows a flat list.
 --
--- Severity is no longer the primary organiser: it is demoted to a per-card
--- signal (see SeverityBadge and card stripe color below).
+-- Severity is NOT a column organiser — it is demoted to a per-card visual
+-- signal (stripe colour + [CRIT]/[HIGH]/[MED]/[LOW] badge). Kind is shown
+-- as a per-card badge ([DEP]/[SCAN]); the former 1/2 sub-view switch is
+-- removed, so Dependabot and Code Scanning alerts share one board.
 
 ------------------------------------------------------------
 -- Rules
@@ -96,7 +148,7 @@ rule DispatchFixAgent {
 
     -- The TUI deduplicates in-flight dispatches by (github_repo, number, kind)
     -- rather than gating on the alert's agent fields directly. If tmux window
-    -- {fix-{repo_short}-{number}} already exists, dispatch focuses it instead
+    -- fix-{repo_short}-{number} already exists, dispatch focuses it instead
     -- of creating a new session. See DispatchFixAgentViaMcp for the MCP-side
     -- guard (which checks agent_status != reviewing).
 
@@ -108,23 +160,30 @@ rule DispatchFixAgent {
         name: "fix-" + repo_short + "-" + alert.number
     )
     ensures: alert.agent_status = reviewing
+    ensures: alert.workflow_state = ongoing
+    ensures: alert.workflow_sub_state = investigating
     ensures: FixAgentLaunched(alert: alert)
 
     @guidance
-        -- Triggered from the Alerts sub-view (d key on a selected alert).
+        -- Triggered from the Security Board (`d` key on a selected alert).
         -- Creates an isolated worktree named fix-vuln-{number} on a new branch
         -- fix/vuln-{number} based on origin/{default_branch}. A tmux window
-        -- named fix-{repo_short}-{number} is created in the worktree, where
-        -- repo_short is the final path segment of the local repo path.
+        -- named fix-{repo_short}-{number} is created in the worktree.
         -- The agent receives a kind-specific prompt:
-        --   Dependabot: instructions to upgrade the affected package.
+        --   Dependabot:   instructions to upgrade the affected package.
         --   CodeScanning: instructions to fix the flagged code at the reported location.
-        -- The agent calls update_review_status MCP tool with "findings_ready"
-        -- when done, then the user reviews and the agent transitions to "idle".
+        -- The agent calls update_review_status with "findings_ready" when done;
+        -- the MCP handler promotes workflow_state to action_required.
+        --
+        -- Dispatch writes both the live agent handle fields (on
+        -- security_alerts) and the persisted workflow state (on
+        -- pr_workflow_states, keyed by repo + number + kind). The
+        -- pr_workflow_states row is created if absent and updated if present.
+        --
         -- The local repo_path is resolved by matching the alert's github_repo
         -- short name against known configured repo paths. When no match exists,
         -- the user is prompted to enter a path manually (InputDispatchRepoPath
-        -- input mode). Only one path is chosen — the first match wins.
+        -- input mode).
 }
 
 -- == Fix Agent Detach ==
@@ -139,16 +198,34 @@ rule DetachFixAgent {
     ensures: alert.agent_status = null
 
     @guidance
-        -- Triggered from the Alerts sub-view (T key on a selected alert with
+        -- Triggered from the Security Board (T key on a selected alert with
         -- an active fix agent). Kills the tmux window and clears tmux_window,
         -- worktree, and agent_status in the in-memory SecurityAlert.
         -- Database persistence: only agent_status is cleared to NULL in the
         -- security_alerts row (via update_agent_status, which requires
         -- tmux_window IS NOT NULL in the DB row to locate the record).
-        -- tmux_window and worktree remain populated in the persisted row;
-        -- subsequent GitHub fetches preserve those DB values by upserting
-        -- only the alert metadata columns. The in-memory view is the source
-        -- of truth for FixAgentSessionUnit.
+        -- Detach does NOT change workflow_state. If the alert was in
+        -- Ongoing/investigating, it falls back to Ongoing/idle (see
+        -- TmuxSessionEndedSecurity below).
+}
+
+-- == Tmux Session Ended ==
+
+rule TmuxSessionEndedSecurity {
+    -- Fires when the fix-agent tmux window is observed to no longer exist.
+    -- Clears the handle fields. If the alert is currently Ongoing/investigating,
+    -- sub_state falls to idle. Parent workflow_state is unchanged.
+    when: TmuxWindowGoneAlert(alert)
+
+    requires: alert.tmux_window != null
+        or alert.agent_status != null
+
+    ensures: alert.tmux_window = null
+    ensures: alert.worktree = null
+    ensures: alert.agent_status = null
+    ensures:
+        if alert.workflow_state = ongoing and alert.workflow_sub_state = investigating:
+            alert.workflow_sub_state = idle
 }
 
 -- == Fix Agent Re-Review ==
@@ -160,17 +237,118 @@ rule ReReviewAlert {
     requires: alert.tmux_window != null
 
     ensures: alert.agent_status = reviewing
+    ensures: alert.workflow_state = ongoing
+    ensures: alert.workflow_sub_state = investigating
     ensures: FixAgentReTriggered(alert: alert)
 
     @guidance
-        -- Triggered from the Alerts sub-view (`d` key on an alert with an idle
+        -- Triggered from the Security Board (`d` key on an alert with an idle
         -- agent). This mirrors the task board pattern: `d` dispatches a new
         -- agent when none is active, and resumes the existing session when
         -- agent_status = idle. Sends the shared "/review-pr {number}" command
-        -- via tmux send-keys to the existing tmux session — does NOT create a
-        -- new worktree. (The same re-review command is used for fix agents
-        -- and review agents; the fix agent treats it as a prompt to re-assess
-        -- its work.) Sets agent_status to reviewing in both memory and DB.
+        -- via tmux send-keys to the existing tmux session — does NOT create
+        -- a new worktree.
+}
+
+-- == Fix PR Detected ==
+
+rule FixPrDetected {
+    -- Fires when the poller sees a PR open on the agent's fix/vuln-{number}
+    -- branch. Promotes the alert's workflow to action_required / pr_open if
+    -- it isn't already in a pr_* sub-state. Does not touch the agent handle.
+    when: FixPrOpenedForAlert(alert)
+
+    requires: alert.workflow_state in {ongoing, action_required}
+    requires: alert.workflow_sub_state not in
+        {pr_open, changes_requested, ci_failing, ready_to_merge}
+
+    ensures: alert.workflow_state = action_required
+    ensures: alert.workflow_sub_state = pr_open
+}
+
+-- == Manual Column Movement ==
+
+rule MoveSecurityItemForward {
+    -- Triggered by pressing `m` on the Security Board. Advances the selected
+    -- alert one workflow column to the right:
+    --   backlog          -> ongoing
+    --   ongoing          -> action_required
+    --   action_required  -> done
+    --   done             -> (no-op)
+    --
+    -- Manual movement does NOT launch an agent or create a fix PR. Sub-state
+    -- is reset to the entry sub-state of the destination column:
+    --   ongoing          -> investigating if tmux alive, else idle
+    --   action_required  -> findings_ready (no fix PR context on a manual move)
+    --   done             -> null
+    when: MoveSecurityItemForward(alert)
+
+    requires: alert.workflow_state != done
+
+    ensures:
+        if alert.workflow_state = backlog:
+            alert.workflow_state = ongoing
+            alert.workflow_sub_state = if alert.session_alive: investigating else: idle
+        else if alert.workflow_state = ongoing:
+            alert.workflow_state = action_required
+            alert.workflow_sub_state = findings_ready
+        else:
+            alert.workflow_state = done
+            alert.workflow_sub_state = null
+
+    @guidance
+        -- Bound to `m`. Ctrl+M is reserved for merge (see MergeFixPr).
+}
+
+rule MoveSecurityItemBack {
+    -- Triggered by pressing `M` (shift+m) on the Security Board. Retreats
+    -- the selected alert one workflow column to the left:
+    --   done             -> action_required
+    --   action_required  -> ongoing
+    --   ongoing          -> backlog
+    --   backlog          -> (no-op)
+    when: MoveSecurityItemBack(alert)
+
+    requires: alert.workflow_state != backlog
+
+    ensures:
+        if alert.workflow_state = done:
+            alert.workflow_state = action_required
+            alert.workflow_sub_state = findings_ready
+        else if alert.workflow_state = action_required:
+            alert.workflow_state = ongoing
+            alert.workflow_sub_state = if alert.session_alive: investigating else: idle
+        else:
+            alert.workflow_state = backlog
+            alert.workflow_sub_state = null
+}
+
+-- == Merge Fix PR ==
+
+rule MergeFixPr {
+    -- Triggered by pressing Ctrl+M on the Security Board when the selected
+    -- alert's fix PR is ready to merge. Merges the agent's fix PR via
+    -- `gh pr merge --squash`, marks the alert workflow Done, and cleans up
+    -- the agent session.
+    --
+    -- Guard: workflow_sub_state = ready_to_merge. This implies the fix PR
+    -- exists, is approved, and has passing CI (otherwise polling would not
+    -- have promoted sub_state to ready_to_merge).
+
+    trigger: KeyPress(key: 'ctrl+m', mode: SecurityBoard)
+    guard: selected_alert.workflow_sub_state == ready_to_merge
+    confirm: "Merge fix PR for alert #<number>? (y/N)"
+    action: shell("gh pr merge --squash <fix_pr_url>")
+    on_success:
+        selected_alert.tmux_window = null
+        selected_alert.worktree = null
+        selected_alert.agent_status = null
+        selected_alert.workflow_state = done
+        selected_alert.workflow_sub_state = null
+        refresh_security_alerts
+        status("Merged fix PR for #<number>")
+    on_failure:
+        status("Failed to merge fix PR: <error>")
 }
 
 ------------------------------------------------------------
@@ -185,32 +363,35 @@ rule ReReviewAlert {
 --   Enter or Esc closes the overlay.
 --   The filter applies to the displayed alert list immediately.
 --
--- Kind filter (t key):
---   Cycles through: None -> Dependabot -> CodeScanning -> None.
---   When set, only alerts of the matching kind are shown.
+-- No kind filter. Dependabot and Code Scanning alerts coexist and are
+-- distinguished via the per-card [DEP] / [SCAN] badge.
 
 ------------------------------------------------------------
--- Key bindings (Alerts sub-view)
+-- Key bindings (Security Board)
 ------------------------------------------------------------
 
 -- Navigation:
---   h/Left, l/Right   — change workflow column (Backlog / In Progress / Review)
+--   h/Left, l/Right   — change workflow column (Backlog / Ongoing / Action Required / Done)
 --   j/Down, k/Up      — move within the current column
 --   Enter             — toggle the alert detail pane
 --
 -- View switching:
---   1                 — switch to Dependabot sub-view
---   2                 — stay on Alerts sub-view
---   Tab / Esc         — return to the task board
+--   Tab               — advance to Task Board (task -> review -> security -> task)
+--   Esc               — return to Task Board
 --   q                 — quit the TUI
 --
 -- Actions on the selected alert:
---   d                 — dispatch a fix agent (DispatchFixAgent), or resume session (agent_status = idle)
---   r                 — force-refresh alert data from GitHub (always; no agent interaction)
+--   d                 — dispatch a fix agent (DispatchFixAgent), or resume
+--                       session (agent_status = idle)
+--   m                 — move selection forward one workflow column
+--   M                 — move selection back one workflow column
+--   ctrl+m            — merge the fix PR (guard: sub_state = ready_to_merge)
+--   r                 — force-refresh alert data from GitHub
 --   e                 — edit the security alert repositories (EditSecurityQueries)
 --   T                 — detach the fix agent (DetachFixAgent)
 --   g                 — jump to the alert's tmux window (if any)
 --   p                 — open the alert URL in the browser
+--   f                 — open the repo filter overlay
 --   ?                 — toggle the help overlay
 
 ------------------------------------------------------------
@@ -224,17 +405,21 @@ rule ReReviewAlert {
 --     config.repos_per_page repositories, and for each repo pulls at most
 --     alerts_per_repo open vulnerabilityAlerts. Pagination continues for
 --     up to config.max_graphql_pages requests.
---     Only Dependabot vulnerabilityAlerts are fetched — CodeScanning
---     alerts exist in the type system (see AlertKind) but no fetching
---     path populates them. GitHub severity values map via AlertSeverity.parse,
+--     Only Dependabot vulnerabilityAlerts are fetched today — CodeScanning
+--     alerts exist in the type system (see AlertKind) but no fetching path
+--     populates them. GitHub severity values map via AlertSeverity.parse,
 --     treating "moderate" as medium.
 --     Results returned from fetch are sorted globally by severity (critical
 --     first, then high, medium, low), then by CVSS score descending within
 --     each severity (null scores treated as 0.0). The per-column view on
---     the board re-sorts alphabetically by repo (see Column Placement).
+--     the board regroups by sub-state and repo for display.
 --     Alerts are persisted to SQLite with agent fields (tmux_window,
---     worktree, agent_status) preserved across fetches. The board
---     auto-refreshes at config.security_poll_interval.
+--     worktree, agent_status) preserved across fetches. Workflow state is
+--     stored in pr_workflow_states and joined on (repo, number, kind) for
+--     display. The board auto-refreshes at config.security_poll_interval.
+--     Fetched alerts that are not yet present in pr_workflow_states are
+--     inserted at workflow_state = backlog via INSERT ... ON CONFLICT DO
+--     NOTHING, so existing workflow state is never overwritten by a poll.
 
 ------------------------------------------------------------
 -- Visual: Card Layout
@@ -242,10 +427,11 @@ rule ReReviewAlert {
 
 -- Each alert card renders as 2 lines:
 --
--- Line 1:  <stripe> [◉ ] #<number> <title>
+-- Line 1:  <stripe> [circle] #<number> <title>
 --   stripe  — severity-colored left-border character (▌ cursor, ▎ normal)
 --             color follows SeverityStripeColor below
---   ◉       — cyan running badge; shown only when fix agent status = reviewing
+--   circle  — ◉ (cyan) when tmux_window != null, ○ (muted) otherwise.
+--             OMITTED entirely in the Backlog column.
 --   #number — alert number
 --   title   — truncated to column width
 --
@@ -268,17 +454,20 @@ visual SeverityBadge(severity: AlertSeverity) -> (Color, String) {
 }
 
 visual KindBadge(kind: AlertKind) -> (Color, String) {
-    dependabot     => (yellow, "⬡ Dependabot")
-    code_scanning  => (cyan,   "⬡ CodeScanning")
+    dependabot     => (yellow, "[DEP] ")
+    code_scanning  => (cyan,   "[SCAN]")
 }
 
 ------------------------------------------------------------
--- Visual: Agent Status Badge
+-- Visual: Session Circle
 ------------------------------------------------------------
 
--- Running badge (◉) appears inline on card Line 1, in cyan, when
--- fix agent status = reviewing. No badge is shown for idle or absent agents.
--- This follows the same ◉ running convention as the task board.
+-- The ◉/○ indicator is a session-liveness signal, not an agent-status
+-- signal. ◉ (cyan) appears when the alert's tmux_window is non-null; ○
+-- (muted) appears when the tmux window is gone but workflow state retains
+-- history (e.g. Action Required / findings_ready with no live session).
+-- The circle is OMITTED in the Backlog column. This matches the task
+-- board convention.
 
 ------------------------------------------------------------
 -- Visual: Refresh Status Row
@@ -304,13 +493,34 @@ visual RefreshStatusRow(last_fetch: Timestamp?, loading: Boolean, interval: Dura
 @invariant FixAgentSessionUnit
     -- In the in-memory SecurityAlert, the fix agent session fields
     -- (tmux_window, worktree, agent_status) are treated as a unit
-    -- representing "fix agent session active". DetachFixAgent clears
-    -- all three together in memory, and DispatchFixAgent sets all three
-    -- together (agent_status = reviewing, worktree set, tmux_window set).
-    -- Note: the DB layer may transiently diverge from this invariant on
-    -- detach (only agent_status is NULLed in the security_alerts row);
-    -- the invariant governs the in-memory entity that drives the UI and
+    -- representing "fix agent session active". DetachFixAgent and
+    -- TmuxSessionEndedSecurity clear all three together in memory, and
+    -- DispatchFixAgent / ReReviewAlert set them together.
+    -- These fields are independent of workflow_state: detaching an agent
+    -- does not move the alert out of its current workflow column. Note:
+    -- the DB layer may transiently diverge from this invariant on detach
+    -- (only agent_status is NULLed in the security_alerts row); the
+    -- invariant governs the in-memory entity that drives the UI and
     -- dispatch decisions.
+
+@invariant SecurityWorkflowDrivesColumn
+    -- Column placement on the Security Board is determined solely by
+    -- workflow_state (joined from pr_workflow_states). GitHub-sourced
+    -- fields (severity, kind, fixed_version, alert state) never move an
+    -- alert between columns. Workflow state changes come from: user
+    -- actions (dispatch, m, M, ctrl+m), local events (tmux session ended,
+    -- fix PR detected on agent branch, alert dismissed on GitHub), and
+    -- MCP updates from the fix agent.
+
+@invariant SecurityBacklogHasNoSubState
+    -- workflow_state = backlog implies workflow_sub_state = null.
+    -- workflow_state = done implies workflow_sub_state = null.
+    -- Ongoing and action_required always have a non-null sub_state.
+
+@invariant SecurityCircleReflectsTmux
+    -- The ◉/○ indicator on a card reflects tmux_window presence. It is
+    -- omitted entirely in the Backlog column. agent_status does not drive
+    -- the indicator.
 
 -- == MCP Security Board Tools ==
 
@@ -319,14 +529,15 @@ rule ListSecurityAlertsViaMcp {
     -- All params optional; combinable.
     returns: Vec<SecurityAlert>
     @guidance
-        -- Reads from the security_alerts table (persisted alert snapshot).
+        -- Reads from the security_alerts table joined to pr_workflow_states
+        -- for workflow_state and workflow_sub_state.
         -- repo: exact match on SecurityAlert.repo.
         -- severity: one of critical | high | medium | low.
         -- kind: one of dependabot | code_scanning.
         -- Invalid severity or kind strings produce a -32602 error.
-        -- Returns formatted text blocks describing each matching alert.
-        -- When no alerts match, returns a single "No alerts found" line
-        -- rather than an empty list.
+        -- Returns formatted text blocks describing each matching alert
+        -- including workflow_state and workflow_sub_state.
+        -- When no alerts match, returns a single "No alerts found" line.
 }
 
 rule GetSecurityAlertViaMcp {
@@ -349,21 +560,24 @@ rule DispatchFixAgentViaMcp {
     ensures: alert.agent_status = reviewing
     ensures: alert.tmux_window set
     ensures: alert.worktree set
+    ensures: alert.workflow_state = ongoing
+    ensures: alert.workflow_sub_state = investigating
 
     @guidance
         -- local_repo is the filesystem path to the local clone.
-        -- Worktree path and branch name follow the same convention as DispatchFixAgent.
-        -- local_repo is accepted as-is; no validation against configured repos is performed.
-        -- title, description, package, and fixed_version are read
-        -- from the alert record in the DB.
+        -- Worktree path and branch name follow the same convention as
+        -- DispatchFixAgent. local_repo is accepted as-is; no validation
+        -- against configured repos is performed.
+        -- title, description, package, and fixed_version are read from
+        -- the alert record in the DB.
         -- Returns error if the alert is not found in the DB.
         -- Returns error if alert.agent_status is already "reviewing".
-        -- On success, persists tmux_window, worktree, and agent_status
-        -- to the DB and triggers a TUI refresh.
+        -- On success, persists tmux_window, worktree, agent_status and
+        -- workflow state to the DB and triggers a TUI refresh.
 }
 
 rule EditSecurityQueries {
-    when: UserAction([e]) and SecurityBoardMode = Alerts
+    when: UserAction([e]) and ViewMode = SecurityBoard
     opens: $EDITOR with github_queries_security setting
     on_save: strips comments and blank lines, persists, triggers RefreshSecurityAlerts
     on_cancel: no change
@@ -383,3 +597,26 @@ rule selection_preservation:
 
     If the anchor alert is found: the cursor moves to the alert's new workflow column and row.
     If the anchor alert is not present: the cursor clamps to the nearest valid position.
+
+-- == Alert Disappears from GitHub ==
+
+rule AlertDismissedOrFixed {
+    -- When a previously-fetched alert no longer appears in a successful
+    -- fetch (dismissed or auto-resolved by a merged fix), its workflow row
+    -- is marked Done and retained for 7 days before pruning. Any live agent
+    -- session is also cleaned up.
+    when: SecurityAlertsLoaded(alerts)
+
+    for known in persisted_alerts:
+        if known.repo_number_kind ∉ fetched_keys:
+            ensures: known.tmux_window = null
+            ensures: known.worktree = null
+            ensures: known.agent_status = null
+            ensures: known.workflow_state = done
+            ensures: known.workflow_sub_state = null
+
+    @guidance
+        -- Pruning of Done rows older than 7 days runs as part of the same
+        -- post-fetch pass. pr_workflow_states rows with state = 'done' and
+        -- updated_at older than 7.days are deleted.
+}
