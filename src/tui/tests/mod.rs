@@ -931,7 +931,7 @@ fn x_key_enters_confirm_archive_mode() {
     app.selection_mut().set_column(0); // Backlog has tasks
     let cmds = app.handle_key(make_key(KeyCode::Char('x')));
     assert!(cmds.is_empty());
-    assert_eq!(app.input.mode, InputMode::ConfirmArchive);
+    assert!(matches!(app.input.mode, InputMode::ConfirmArchive(Some(_))));
     assert_eq!(app.status.message.as_deref(), Some("Archive task? [y/n]"));
 }
 
@@ -957,6 +957,61 @@ fn confirm_archive_n_cancels() {
     // Task 1 still in Backlog
     let task = app.board.tasks.iter().find(|t| t.id == TaskId(1)).unwrap();
     assert_eq!(task.status, TaskStatus::Backlog);
+}
+
+// Regression test: archive must archive the task that was under the cursor when
+// 'x' was pressed, not whichever task happens to be under the cursor when 'y'
+// is pressed (the cursor can drift between the two key presses due to a
+// background refresh calling sync_board_selection after the anchor is lost).
+#[test]
+fn archive_targets_task_at_x_press_not_at_y_press() {
+    let mut app = App::new(
+        vec![
+            make_task(1, TaskStatus::Done),
+            make_task(2, TaskStatus::Done),
+            make_task(3, TaskStatus::Done),
+        ],
+        TEST_TIMEOUT,
+    );
+    // Navigate to Done column (index 3) and move down to task 2 (row 1).
+    app.selection_mut().set_column(3);
+    app.update(Message::NavigateRow(1));
+    assert_eq!(app.selection().row(3), 1);
+
+    // Press 'x' — cursor is on task 2.
+    app.handle_key(make_key(KeyCode::Char('x')));
+
+    // Simulate a background refresh where task 2 (the one we wanted to archive)
+    // was archived externally.  sync_board_selection cannot find the anchor
+    // (task 2 is now Archived and excluded from visible columns), so it clamps.
+    // The Done column now contains only task 3 at row 0 — the cursor drifts
+    // there.
+    let mut t2_archived = make_task(2, TaskStatus::Done);
+    t2_archived.status = TaskStatus::Archived;
+    let refreshed = vec![
+        make_task(1, TaskStatus::Done),
+        t2_archived,
+        make_task(3, TaskStatus::Done),
+    ];
+    app.update(Message::RefreshTasks(refreshed));
+    // After the refresh the Done column is [task 1, task 3]; the cursor clamped
+    // to row 1 (task 3, the last visible item).
+    assert_eq!(
+        app.selected_column(),
+        3,
+        "cursor should still be in Done column"
+    );
+
+    // Press 'y'.  Task 2 was already archived externally, so archiving it again
+    // is a no-op.  What must NOT happen is task 3 being archived instead —
+    // that would mean the handler used the (drifted) cursor row instead of the
+    // task ID that was captured when 'x' was pressed.
+    app.handle_key(make_key(KeyCode::Char('y')));
+    assert_ne!(
+        app.find_task(TaskId(3)).unwrap().status,
+        TaskStatus::Archived,
+        "task 3 should NOT be archived — cursor drifted to it after 'x'"
+    );
 }
 
 #[test]
@@ -2539,7 +2594,7 @@ fn full_archive_flow() {
 
     // Press x to archive
     app.handle_key(make_key(KeyCode::Char('x')));
-    assert_eq!(app.input.mode, InputMode::ConfirmArchive);
+    assert!(matches!(app.input.mode, InputMode::ConfirmArchive(Some(_))));
 
     // Confirm
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
@@ -2736,7 +2791,7 @@ fn x_key_with_selection_shows_count_in_confirm() {
     app.update(Message::ToggleSelect(TaskId(2)));
 
     app.handle_key(make_key(KeyCode::Char('x')));
-    assert_eq!(app.input.mode, InputMode::ConfirmArchive);
+    assert!(matches!(app.input.mode, InputMode::ConfirmArchive(None)));
     assert_eq!(
         app.status.message.as_deref(),
         Some("Archive 2 items? [y/n]")
@@ -2755,7 +2810,7 @@ fn confirm_archive_with_selection_dispatches_batch() {
 
     app.update(Message::ToggleSelect(TaskId(1)));
     app.update(Message::ToggleSelect(TaskId(2)));
-    app.input.mode = InputMode::ConfirmArchive;
+    app.input.mode = InputMode::ConfirmArchive(None);
 
     app.handle_key(make_key(KeyCode::Char('y')));
 
@@ -4981,7 +5036,7 @@ fn archive_panel_unrecognized_key_is_noop() {
 fn confirm_archive_uppercase_y_archives() {
     let mut app = make_app();
     app.selection_mut().set_column(0);
-    app.input.mode = InputMode::ConfirmArchive;
+    app.input.mode = InputMode::ConfirmArchive(Some(TaskId(1)));
     app.handle_key(make_key(KeyCode::Char('Y')));
     assert_eq!(app.input.mode, InputMode::Normal);
     let task = app.board.tasks.iter().find(|t| t.id == TaskId(1)).unwrap();
@@ -4992,7 +5047,7 @@ fn confirm_archive_uppercase_y_archives() {
 fn confirm_archive_esc_cancels() {
     let mut app = make_app();
     app.selection_mut().set_column(0);
-    app.input.mode = InputMode::ConfirmArchive;
+    app.input.mode = InputMode::ConfirmArchive(Some(TaskId(1)));
     app.status.message = Some("Archive task? [y/n]".to_string());
     let cmds = app.handle_key(make_key(KeyCode::Esc));
     assert_eq!(app.input.mode, InputMode::Normal);
@@ -8423,7 +8478,7 @@ fn handle_key_confirm_archive_yes() {
     // Select task 1 (backlog)
     app.selection_mut().set_column(0);
     app.selection_mut().set_row(0, 0);
-    app.input.mode = InputMode::ConfirmArchive;
+    app.input.mode = InputMode::ConfirmArchive(Some(TaskId(1)));
 
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert_eq!(*app.mode(), InputMode::Normal);
@@ -8435,7 +8490,7 @@ fn handle_key_confirm_archive_yes() {
 #[test]
 fn handle_key_confirm_archive_cancel() {
     let mut app = make_app();
-    app.input.mode = InputMode::ConfirmArchive;
+    app.input.mode = InputMode::ConfirmArchive(Some(TaskId(1)));
 
     app.handle_key(make_key(KeyCode::Esc));
     assert_eq!(*app.mode(), InputMode::Normal);
@@ -9011,7 +9066,7 @@ fn x_key_with_epic_selection_shows_count_in_confirm() {
     app.update(Message::ToggleSelectEpic(EpicId(20)));
 
     app.handle_key(make_key(KeyCode::Char('x')));
-    assert_eq!(app.input.mode, InputMode::ConfirmArchive);
+    assert!(matches!(app.input.mode, InputMode::ConfirmArchive(None)));
     assert_eq!(
         app.status.message.as_deref(),
         Some("Archive 2 items? [y/n]")
@@ -9026,7 +9081,7 @@ fn batch_archive_mixed_tasks_and_epics() {
     app.update(Message::ToggleSelectEpic(EpicId(10)));
 
     app.handle_key(make_key(KeyCode::Char('x')));
-    assert_eq!(app.input.mode, InputMode::ConfirmArchive);
+    assert!(matches!(app.input.mode, InputMode::ConfirmArchive(None)));
     assert_eq!(
         app.status.message.as_deref(),
         Some("Archive 2 items? [y/n]")
@@ -9049,7 +9104,7 @@ fn confirm_archive_y_archives_selected_epics() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     app.update(Message::ToggleSelectEpic(EpicId(10)));
-    app.input.mode = InputMode::ConfirmArchive;
+    app.input.mode = InputMode::ConfirmArchive(None);
 
     app.handle_key(make_key(KeyCode::Char('y')));
     assert!(app.board.epics.is_empty());
@@ -10213,7 +10268,7 @@ fn render_status_bar_confirm_retry() {
 #[test]
 fn render_status_bar_confirm_archive() {
     let mut app = make_app();
-    app.input.mode = InputMode::ConfirmArchive;
+    app.input.mode = InputMode::ConfirmArchive(Some(TaskId(1)));
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
         buffer_contains(&buf, "Archive task?"),
@@ -15071,7 +15126,7 @@ fn handle_key_confirm_retry_routes_correctly() {
 #[test]
 fn handle_key_confirm_archive_routes_correctly() {
     let mut app = make_app();
-    app.input.mode = InputMode::ConfirmArchive;
+    app.input.mode = InputMode::ConfirmArchive(None);
     // 'n' cancels
     let cmds = app.handle_key(make_key(KeyCode::Char('n')));
     assert!(cmds.is_empty());

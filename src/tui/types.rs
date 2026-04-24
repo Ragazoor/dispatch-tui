@@ -783,7 +783,9 @@ pub enum InputMode {
     ConfirmDelete,
     QuickDispatch,
     ConfirmRetry(TaskId),
-    ConfirmArchive,
+    /// `Some(id)` = single-task archive (ID captured when 'x' was pressed).
+    /// `None` = batch archive (uses the current multi-selection set).
+    ConfirmArchive(Option<TaskId>),
     ConfirmDone(TaskId),
     ConfirmMergePr(TaskId),
     ConfirmWrapUp(TaskId),

@@ -34,7 +34,7 @@ impl App {
             InputMode::InputTag => self.handle_key_tag(key),
             InputMode::QuickDispatch => self.handle_key_quick_dispatch(key),
             InputMode::ConfirmRetry(id) => self.handle_key_confirm_retry(key, id),
-            InputMode::ConfirmArchive => self.handle_key_confirm_archive(key),
+            InputMode::ConfirmArchive(task_id) => self.handle_key_confirm_archive(key, task_id),
             InputMode::ConfirmDeleteEpic => self.handle_key_confirm_delete_epic(key),
             InputMode::ConfirmArchiveEpic => self.handle_key_confirm_archive_epic(key),
 
@@ -267,15 +267,16 @@ impl App {
             KeyCode::Char('x') => {
                 if self.has_selection() {
                     let count = self.select.tasks.len() + self.select.epics.len();
-                    self.input.mode = InputMode::ConfirmArchive;
+                    self.input.mode = InputMode::ConfirmArchive(None);
                     self.set_status(format!("Archive {} items? [y/n]", count));
                     vec![]
                 } else {
                     match self.selected_column_item() {
                         Some(ColumnItem::Epic(_)) => self.update(Message::ConfirmArchiveEpic),
                         _ => {
-                            if self.selected_task().is_some() {
-                                self.input.mode = InputMode::ConfirmArchive;
+                            if let Some(task) = self.selected_task() {
+                                let id = task.id;
+                                self.input.mode = InputMode::ConfirmArchive(Some(id));
                                 self.set_status("Archive task? [y/n]".to_string());
                             }
                             vec![]
@@ -615,7 +616,7 @@ impl App {
         }
     }
 
-    fn handle_key_confirm_archive(&mut self, key: KeyEvent) -> Vec<Command> {
+    fn handle_key_confirm_archive(&mut self, key: KeyEvent, task_id: Option<TaskId>) -> Vec<Command> {
         self.confirm_dialog(key, |s| {
             if s.has_selection() {
                 let mut cmds = Vec::new();
@@ -628,8 +629,10 @@ impl App {
                     cmds.extend(s.update(Message::BatchArchiveEpics(ids)));
                 }
                 cmds
+            } else if let Some(id) = task_id {
+                s.update(Message::ArchiveTask(id))
             } else {
-                s.with_selected_task(|s, id| s.update(Message::ArchiveTask(id)))
+                vec![]
             }
         })
     }
