@@ -413,7 +413,8 @@ rule MergeFixPr {
 --     Results returned from fetch are sorted globally by severity (critical
 --     first, then high, medium, low), then by CVSS score descending within
 --     each severity (null scores treated as 0.0). The per-column view on
---     the board regroups by sub-state and repo for display.
+--     the board regroups by sub-state; within each sub-state group alerts are
+--     ordered by severity descending then CVSS score descending then repo then number.
 --     Alerts are persisted to SQLite with agent fields (tmux_window,
 --     worktree, agent_status) preserved across fetches. Workflow state is
 --     stored in pr_workflow_states and joined on (repo, number, kind) for
