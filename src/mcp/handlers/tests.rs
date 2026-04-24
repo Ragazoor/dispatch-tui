@@ -6017,7 +6017,7 @@ async fn dispatch_task_unknown_task_id_returns_error() {
     )
     .await;
 
-    assert!(resp.error.is_some(), "expected error for unknown task_id 9999");
+    assert_error(&resp, "not found");
 }
 
 #[tokio::test]

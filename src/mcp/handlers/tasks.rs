@@ -764,12 +764,7 @@ pub(super) async fn handle_dispatch_task(
                 )),
             )
         }
-        Err(e) => {
-            return service_err_to_response(
-                id,
-                crate::service::ServiceError::Internal(e.to_string()),
-            )
-        }
+        Err(e) => return JsonRpcResponse::err(id, -32603, format!("db error: {e:#}")),
     };
 
     if task.status != TaskStatus::Backlog {
