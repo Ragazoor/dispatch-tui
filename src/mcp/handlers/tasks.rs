@@ -758,10 +758,7 @@ pub(super) async fn handle_dispatch_task(
         Ok(None) => {
             return service_err_to_response(
                 id,
-                crate::service::ServiceError::NotFound(format!(
-                    "task #{} not found",
-                    task_id.0
-                )),
+                crate::service::ServiceError::NotFound(format!("task #{} not found", task_id.0)),
             )
         }
         Err(e) => return JsonRpcResponse::err(id, -32603, format!("db error: {e:#}")),
@@ -773,8 +770,7 @@ pub(super) async fn handle_dispatch_task(
             -32602,
             format!(
                 "task #{} is not in backlog (current: {})",
-                task_id.0,
-                task.status
+                task_id.0, task.status
             ),
         );
     }

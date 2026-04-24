@@ -5965,7 +5965,10 @@ async fn dispatch_task_dispatches_backlog_task() {
     // dispatch_task is synchronous — no sleep needed
     let task = db.get_task(task_id).unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Running);
-    assert!(task.worktree.is_some(), "worktree should be set after dispatch");
+    assert!(
+        task.worktree.is_some(),
+        "worktree should be set after dispatch"
+    );
     assert!(
         task.tmux_window.is_some(),
         "tmux_window should be set after dispatch"
