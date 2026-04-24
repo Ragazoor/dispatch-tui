@@ -300,6 +300,19 @@ mcp_tools! {
             "required": ["epic_id"]
         };
 
+    async "dispatch_task" => tasks::handle_dispatch_task,
+        "Dispatch a backlog task by ID. Creates a worktree from the task's base branch and launches a tmux session. Waits for the dispatch to complete and returns success with worktree path and tmux window, or an error if the task is not in backlog status or the dispatch fails.",
+        {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "integer",
+                    "description": "The task ID to dispatch"
+                }
+            },
+            "required": ["task_id"]
+        };
+
     sync "report_usage" => tasks::handle_report_usage,
         "Report token usage and cost for a task session. Accumulates across sessions.",
         {

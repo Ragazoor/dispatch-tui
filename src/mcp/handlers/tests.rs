@@ -1328,6 +1328,12 @@ fn tool_schemas_match_arg_structs() {
             json!({"epic_id": 1}),
         ),
         (
+            "dispatch_task",
+            BTreeSet::from(["task_id"]),
+            BTreeSet::from(["task_id"]),
+            json!({"task_id": 1}),
+        ),
+        (
             "update_review_status",
             BTreeSet::from(["repo", "number", "status"]),
             BTreeSet::from(["repo", "number", "status"]),
@@ -1449,6 +1455,9 @@ fn tool_schemas_match_arg_structs() {
             }
             "dispatch_fix_agent" => {
                 serde_json::from_value::<DispatchFixAgentArgs>(payload.clone()).unwrap();
+            }
+            "dispatch_task" => {
+                serde_json::from_value::<super::tasks::DispatchTaskArgs>(payload.clone()).unwrap();
             }
             other => panic!("No deserialization check for tool: {other}"),
         }

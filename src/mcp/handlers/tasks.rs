@@ -129,6 +129,12 @@ pub(super) struct DispatchNextArgs {
     pub(super) epic_id: i64,
 }
 
+#[derive(Deserialize)]
+pub(super) struct DispatchTaskArgs {
+    #[serde(deserialize_with = "deserialize_flexible_i64")]
+    pub(super) task_id: i64,
+}
+
 // ---------------------------------------------------------------------------
 // Response formatting (presentation layer)
 // ---------------------------------------------------------------------------
@@ -627,6 +633,19 @@ pub(super) async fn handle_wrap_up(
     }
 }
 
+fn do_dispatch(
+    task: &crate::models::Task,
+    db: &dyn crate::db::TaskStore,
+    runner: &dyn crate::process::ProcessRunner,
+) -> anyhow::Result<crate::models::DispatchResult> {
+    let epic_ctx = dispatch::EpicContext::from_db(task, db);
+    match DispatchMode::for_task(task) {
+        DispatchMode::Dispatch => dispatch::dispatch_agent(task, runner, epic_ctx.as_ref()),
+        DispatchMode::Brainstorm => dispatch::brainstorm_agent(task, runner, epic_ctx.as_ref()),
+        DispatchMode::Plan => dispatch::plan_agent(task, runner, epic_ctx.as_ref()),
+    }
+}
+
 pub(super) async fn handle_dispatch_next(
     state: &McpState,
     id: Option<Value>,
@@ -681,16 +700,7 @@ pub(super) async fn handle_dispatch_next(
     let notify_tx = state.notify_tx.clone();
 
     tokio::task::spawn_blocking(move || {
-        let epic_ctx = dispatch::EpicContext::from_db(&next_task, &*db);
-        let result = match DispatchMode::for_task(&next_task) {
-            DispatchMode::Dispatch => {
-                dispatch::dispatch_agent(&next_task, &*runner, epic_ctx.as_ref())
-            }
-            DispatchMode::Brainstorm => {
-                dispatch::brainstorm_agent(&next_task, &*runner, epic_ctx.as_ref())
-            }
-            DispatchMode::Plan => dispatch::plan_agent(&next_task, &*runner, epic_ctx.as_ref()),
-        };
+        let result = do_dispatch(&next_task, &*db, &*runner);
 
         match result {
             Ok(dispatch_result) => {
@@ -730,6 +740,81 @@ pub(super) async fn handle_dispatch_next(
             next_id.0, next_title
         )}]}),
     )
+}
+
+pub(super) async fn handle_dispatch_task(
+    state: &McpState,
+    id: Option<Value>,
+    args: Value,
+) -> JsonRpcResponse {
+    let parsed = match parse_args::<DispatchTaskArgs>(&id, args) {
+        Ok(a) => a,
+        Err(resp) => return resp,
+    };
+    let task_id = crate::models::TaskId(parsed.task_id);
+
+    let task = match state.db.get_task(task_id) {
+        Ok(Some(t)) => t,
+        Ok(None) => {
+            return service_err_to_response(
+                id,
+                crate::service::ServiceError::NotFound(format!(
+                    "task #{} not found",
+                    task_id.0
+                )),
+            )
+        }
+        Err(e) => {
+            return service_err_to_response(
+                id,
+                crate::service::ServiceError::Internal(e.to_string()),
+            )
+        }
+    };
+
+    if task.status != TaskStatus::Backlog {
+        return JsonRpcResponse::err(
+            id,
+            -32602,
+            format!(
+                "task #{} is not in backlog (current: {})",
+                task_id.0,
+                task.status
+            ),
+        );
+    }
+
+    let db = state.db.clone();
+    let runner = state.runner.clone();
+    let notify_tx = state.notify_tx.clone();
+    let epic_id = task.epic_id;
+
+    let result = tokio::task::spawn_blocking(move || do_dispatch(&task, &*db, &*runner)).await;
+
+    match result {
+        Ok(Ok(dr)) => {
+            let patch = db::TaskPatch::new()
+                .status(TaskStatus::Running)
+                .worktree(Some(&dr.worktree_path))
+                .tmux_window(Some(&dr.tmux_window));
+            let _ = state.db.patch_task(task_id, &patch);
+            if let Some(eid) = epic_id {
+                let _ = state.db.recalculate_epic_status(eid);
+            }
+            if let Some(tx) = notify_tx {
+                let _ = tx.send(crate::mcp::McpEvent::Refresh);
+            }
+            JsonRpcResponse::ok(
+                id,
+                json!({"content": [{"type": "text", "text": format!(
+                    "dispatched task #{} — worktree: {}, tmux: {}",
+                    task_id.0, dr.worktree_path, dr.tmux_window
+                )}]}),
+            )
+        }
+        Ok(Err(e)) => JsonRpcResponse::err(id, -32603, format!("dispatch failed: {e:#}")),
+        Err(e) => JsonRpcResponse::err(id, -32603, format!("dispatch join error: {e}")),
+    }
 }
 
 pub(super) fn handle_send_message(
