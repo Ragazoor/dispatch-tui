@@ -107,7 +107,7 @@ impl App {
         }
 
         match key.code {
-            KeyCode::Tab => self.update(Message::SwitchToReviewBoard),
+            KeyCode::Tab => self.update(Message::TabCycle),
 
             KeyCode::Char('q') => {
                 if matches!(self.board.view_mode, ViewMode::Epic { .. }) {

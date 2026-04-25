@@ -7252,32 +7252,33 @@ fn switch_to_review_board_sets_loading() {
 }
 
 #[test]
-fn tab_switches_to_review_board() {
+fn tab_from_board_without_feed_epics_is_noop() {
+    // Tab from Board is a no-op when there are no feed epics (no FetchPrs emitted).
     let mut app = make_app();
     let cmds = app.handle_key(make_key(KeyCode::Tab));
-    assert!(matches!(app.board.view_mode, ViewMode::ReviewBoard { .. }));
-    assert!(cmds
+    assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
+    assert!(!cmds
         .iter()
         .any(|c| matches!(c, Command::FetchPrs(PrListKind::Review))));
 }
 
 #[test]
-fn tab_in_review_board_switches_back() {
+fn tab_in_review_board_goes_to_security_board() {
     let mut app = make_app();
-    app.handle_key(make_key(KeyCode::Tab)); // to review board
-    app.handle_key(make_key(KeyCode::Tab)); // to security board
+    app.update(Message::SwitchToReviewBoard);
+    app.handle_key(make_key(KeyCode::Tab)); // ReviewBoard → SecurityBoard
     assert!(matches!(
         app.board.view_mode,
         ViewMode::SecurityBoard { .. }
     ));
-    app.handle_key(make_key(KeyCode::Tab)); // back to task board
+    app.handle_key(make_key(KeyCode::Tab)); // SecurityBoard → Board
     assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
 }
 
 #[test]
 fn esc_in_review_board_switches_back() {
     let mut app = make_app();
-    app.handle_key(make_key(KeyCode::Tab)); // to review board
+    app.update(Message::SwitchToReviewBoard);
     app.handle_key(make_key(KeyCode::Esc)); // back
     assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
 }
@@ -7294,7 +7295,7 @@ fn review_board_navigation() {
             make_review_pr(3, "carol", ReviewDecision::ChangesRequested),
         ],
     ));
-    app.handle_key(make_key(KeyCode::Tab)); // to review board
+    app.update(Message::SwitchToReviewBoard);
     assert_eq!(app.review_selection().unwrap().column(), 0);
 
     app.handle_key(make_key(KeyCode::Char('l'))); // move right
@@ -8889,24 +8890,23 @@ fn handle_key_normal_open_pr_url_missing() {
 }
 
 #[test]
-fn handle_key_normal_tab_switches_to_review_board() {
+fn handle_key_normal_tab_is_noop_without_feed_epics() {
+    // Tab from Board is a no-op when there are no feed epics.
     let mut app = make_app();
     app.handle_key(make_key(KeyCode::Tab));
-    assert!(matches!(app.board.view_mode, ViewMode::ReviewBoard { .. }));
+    assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
 }
 
 #[test]
-fn handle_key_review_board_tab_switches_back() {
+fn handle_key_review_board_tab_switches_to_security_board() {
     let mut app = make_app();
-    app.handle_key(make_key(KeyCode::Tab)); // to review board
+    app.update(Message::SwitchToReviewBoard);
     assert!(matches!(app.board.view_mode, ViewMode::ReviewBoard { .. }));
-    app.handle_key(make_key(KeyCode::Tab)); // to security board
+    app.handle_key(make_key(KeyCode::Tab)); // ReviewBoard → SecurityBoard
     assert!(matches!(
         app.board.view_mode,
         ViewMode::SecurityBoard { .. }
     ));
-    app.handle_key(make_key(KeyCode::Tab)); // back to task board
-    assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
 }
 
 #[test]

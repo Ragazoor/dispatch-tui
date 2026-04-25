@@ -1,8 +1,8 @@
 use crossterm::event::KeyCode;
 
 use super::super::{App, Command, InputMode, Message, ViewMode};
-use super::{make_app, make_key};
-use crate::models::{TaskId, TaskStatus};
+use super::{make_app, make_epic, make_feed_epic, make_key};
+use crate::models::{EpicId, TaskId, TaskStatus};
 
 /// Drives an `App` through a sequence of key events, collecting all `Command`s emitted.
 struct Scenario {
@@ -123,7 +123,8 @@ fn scenario_quick_dispatch_without_repo_path_shows_no_dispatch_command() {
 }
 
 #[test]
-fn scenario_tab_switches_kanban_to_review_board() {
+fn scenario_tab_from_board_without_feed_epics_is_noop_for_board_switch() {
+    // Without feed epics, Tab from Board is a no-op (no longer switches to ReviewBoard).
     let mut s = Scenario::new();
     assert!(
         matches!(s.app.board.view_mode, ViewMode::Board(_)),
@@ -131,31 +132,24 @@ fn scenario_tab_switches_kanban_to_review_board() {
     );
     s.key(KeyCode::Tab);
     assert!(
-        matches!(s.app.board.view_mode, ViewMode::ReviewBoard { .. }),
-        "Tab from kanban should switch to ReviewBoard, got {:?}",
+        matches!(s.app.board.view_mode, ViewMode::Board(_)),
+        "Tab from Board with no feed epics should stay on Board, got {:?}",
         s.app.board.view_mode
     );
 }
 
 #[test]
-fn scenario_tab_cycles_through_all_three_boards() {
+fn scenario_tab_from_review_board_goes_to_security_board() {
     let mut s = Scenario::new();
-    s.key(KeyCode::Tab);
+    s.app.update(Message::SwitchToReviewBoard);
     assert!(
         matches!(s.app.board.view_mode, ViewMode::ReviewBoard { .. }),
-        "first Tab: expected ReviewBoard, got {:?}",
-        s.app.board.view_mode
+        "should be on ReviewBoard"
     );
     s.key(KeyCode::Tab);
     assert!(
         matches!(s.app.board.view_mode, ViewMode::SecurityBoard { .. }),
-        "second Tab: expected SecurityBoard, got {:?}",
-        s.app.board.view_mode
-    );
-    s.key(KeyCode::Tab);
-    assert!(
-        matches!(s.app.board.view_mode, ViewMode::Board(_)),
-        "third Tab: expected Board (kanban), got {:?}",
+        "Tab from ReviewBoard should go to SecurityBoard, got {:?}",
         s.app.board.view_mode
     );
 }
@@ -206,5 +200,78 @@ fn scenario_move_key_advances_selected_task_to_next_column() {
             .iter()
             .any(|c| matches!(c, Command::PersistTask(_))),
         "move should emit PersistTask command"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Tab key feed-epic cycling
+// ---------------------------------------------------------------------------
+
+#[test]
+fn scenario_tab_from_board_with_no_feed_epics_is_noop() {
+    let mut s = Scenario::new();
+    // make_app() has no epics at all
+    s.key(KeyCode::Tab);
+    assert!(
+        matches!(s.app.board.view_mode, ViewMode::Board(_)),
+        "Tab with no feed epics should stay on Board, got {:?}",
+        s.app.board.view_mode
+    );
+}
+
+#[test]
+fn scenario_tab_from_board_enters_first_feed_epic() {
+    let mut app = make_app();
+    app.board.epics = vec![make_feed_epic(1, "Reviews", 1), make_feed_epic(2, "Security", 2)];
+    let mut s = Scenario::with_app(app);
+    s.key(KeyCode::Tab);
+    assert!(
+        matches!(s.app.board.view_mode, ViewMode::Epic { epic_id, .. } if epic_id == EpicId(1)),
+        "Tab from Board should enter first feed epic (id=1), got {:?}",
+        s.app.board.view_mode
+    );
+}
+
+#[test]
+fn scenario_tab_from_middle_feed_epic_goes_to_next() {
+    let mut app = make_app();
+    app.board.epics = vec![make_feed_epic(1, "Reviews", 1), make_feed_epic(2, "Security", 2)];
+    app.update(Message::EnterEpic(EpicId(1)));
+    let mut s = Scenario::with_app(app);
+    s.key(KeyCode::Tab);
+    assert!(
+        matches!(s.app.board.view_mode, ViewMode::Epic { epic_id, .. } if epic_id == EpicId(2)),
+        "Tab from first feed epic should go to second, got {:?}",
+        s.app.board.view_mode
+    );
+}
+
+#[test]
+fn scenario_tab_from_last_feed_epic_returns_to_board() {
+    let mut app = make_app();
+    app.board.epics = vec![make_feed_epic(1, "Reviews", 1), make_feed_epic(2, "Security", 2)];
+    app.update(Message::EnterEpic(EpicId(2)));
+    let mut s = Scenario::with_app(app);
+    s.key(KeyCode::Tab);
+    assert!(
+        matches!(s.app.board.view_mode, ViewMode::Board(_)),
+        "Tab from last feed epic should return to Board, got {:?}",
+        s.app.board.view_mode
+    );
+}
+
+#[test]
+fn scenario_tab_from_non_feed_epic_is_noop() {
+    let mut app = make_app();
+    // A regular epic with no feed_command — Tab should do nothing
+    let regular_epic = make_epic(99);
+    app.board.epics = vec![regular_epic, make_feed_epic(1, "Reviews", 1)];
+    app.update(Message::EnterEpic(EpicId(99)));
+    let mut s = Scenario::with_app(app);
+    s.key(KeyCode::Tab);
+    assert!(
+        matches!(s.app.board.view_mode, ViewMode::Epic { epic_id, .. } if epic_id == EpicId(99)),
+        "Tab from a non-feed epic should be a no-op, got {:?}",
+        s.app.board.view_mode
     );
 }

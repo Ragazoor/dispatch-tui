@@ -1147,6 +1147,7 @@ impl App {
             | Message::OpenInBrowser { .. }
             | Message::FocusChanged(_)
             | Message::TmuxOutput { .. }
+            | Message::TabCycle
             | Message::WindowGone(_)) => self.dispatch_board(msg),
 
             // Task lifecycle, dispatch, selection, wrap-up
@@ -1466,6 +1467,7 @@ impl App {
                 activity_ts,
             } => self.handle_tmux_output(id, output, activity_ts),
             Message::WindowGone(id) => self.handle_window_gone(id),
+            Message::TabCycle => self.handle_tab_cycle(),
             _ => unreachable!(),
         }
     }
@@ -4633,6 +4635,37 @@ impl App {
                 vec![Command::DispatchEpic { epic: epic.clone() }]
             }
         }
+    }
+
+    fn handle_tab_cycle(&mut self) -> Vec<Command> {
+        let feed_ids: Vec<EpicId> = self
+            .board
+            .epics
+            .iter()
+            .filter(|e| e.feed_command.is_some())
+            .map(|e| e.id)
+            .collect();
+
+        match self.board.view_mode.clone() {
+            ViewMode::Board(_) => {
+                if let Some(&first_id) = feed_ids.first() {
+                    return self.handle_enter_epic(first_id);
+                }
+            }
+            ViewMode::Epic { epic_id, .. } => {
+                if let Some(pos) = feed_ids.iter().position(|&id| id == epic_id) {
+                    if let Some(&next_id) = feed_ids.get(pos + 1) {
+                        self.handle_exit_epic();
+                        return self.handle_enter_epic(next_id);
+                    } else {
+                        return self.handle_exit_epic();
+                    }
+                }
+                // Not a feed epic — no-op
+            }
+            _ => {}
+        }
+        vec![]
     }
 
     fn handle_enter_epic(&mut self, epic_id: EpicId) -> Vec<Command> {

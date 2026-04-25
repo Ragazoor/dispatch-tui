@@ -410,6 +410,7 @@ pub enum Message {
     ConfirmDone,
     CancelDone,
     ToggleNotifications,
+    TabCycle,
     // Review board
     SwitchToReviewBoard,
     SwitchToTaskBoard,
