@@ -126,4 +126,4 @@ Dispatch agents can coordinate with each other through the MCP server:
 
 ## License
 
-MIT
+[MIT](LICENSE)
