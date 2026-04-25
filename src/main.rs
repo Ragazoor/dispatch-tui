@@ -140,9 +140,7 @@ fn load_dependabot_queries(db: &db::Database) -> Vec<String> {
         .or_else(|| {
             let old = db.get_setting_string("github_queries_bot").ok().flatten();
             old.and_then(|o| migrate_bot_queries_to_dependabot_config(Some(o.as_str())))
-                .map(|cfg| {
-                    dispatch_tui::github::format_dependabot_config(&cfg)
-                })
+                .map(|cfg| dispatch_tui::github::format_dependabot_config(&cfg))
         })
         .unwrap_or_default();
 

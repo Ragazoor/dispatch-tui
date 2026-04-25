@@ -452,10 +452,14 @@ fn fetch_reviews_no_settings_prints_empty_array() {
         .args(["--db", db.path().to_str().unwrap(), "fetch-reviews"])
         .output()
         .unwrap();
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
-    let items: Vec<serde_json::Value> = serde_json::from_str(stdout.trim())
-        .expect("output must be valid JSON array");
+    let items: Vec<serde_json::Value> =
+        serde_json::from_str(stdout.trim()).expect("output must be valid JSON array");
     assert!(items.is_empty(), "expected empty array, got: {stdout}");
 }
 
@@ -470,10 +474,14 @@ fn fetch_security_no_settings_prints_empty_array() {
         .args(["--db", db.path().to_str().unwrap(), "fetch-security"])
         .output()
         .unwrap();
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
-    let items: Vec<serde_json::Value> = serde_json::from_str(stdout.trim())
-        .expect("output must be valid JSON array");
+    let items: Vec<serde_json::Value> =
+        serde_json::from_str(stdout.trim()).expect("output must be valid JSON array");
     assert!(items.is_empty(), "expected empty array, got: {stdout}");
 }
 

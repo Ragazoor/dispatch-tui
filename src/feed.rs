@@ -7,8 +7,7 @@ use tokio::sync::mpsc;
 use crate::db::TaskAndEpicStore;
 use crate::mcp::McpEvent;
 use crate::models::{
-    AlertKind, AlertSeverity, EpicId, FeedItem, ReviewDecision, ReviewPr, SecurityAlert,
-    TaskStatus,
+    AlertKind, AlertSeverity, EpicId, FeedItem, ReviewDecision, ReviewPr, SecurityAlert, TaskStatus,
 };
 
 /// Map a reviewer PR to a FeedItem for feed output.
@@ -240,15 +239,36 @@ mod tests {
 
     #[test]
     fn review_pr_external_id_format() {
-        let pr = make_pr(42, "acme/app", "Fix bug", "", "https://gh/pr/42", ReviewDecision::ReviewRequired);
+        let pr = make_pr(
+            42,
+            "acme/app",
+            "Fix bug",
+            "",
+            "https://gh/pr/42",
+            ReviewDecision::ReviewRequired,
+        );
         let item = review_pr_to_feed_item(&pr);
         assert_eq!(item.external_id, "pr:acme/app#42");
     }
 
     #[test]
     fn review_pr_external_id_is_stable() {
-        let pr1 = make_pr(7, "org/repo", "T", "", "https://gh", ReviewDecision::Approved);
-        let pr2 = make_pr(7, "org/repo", "T", "", "https://gh", ReviewDecision::Approved);
+        let pr1 = make_pr(
+            7,
+            "org/repo",
+            "T",
+            "",
+            "https://gh",
+            ReviewDecision::Approved,
+        );
+        let pr2 = make_pr(
+            7,
+            "org/repo",
+            "T",
+            "",
+            "https://gh",
+            ReviewDecision::Approved,
+        );
         assert_eq!(
             review_pr_to_feed_item(&pr1).external_id,
             review_pr_to_feed_item(&pr2).external_id
@@ -257,7 +277,14 @@ mod tests {
 
     #[test]
     fn review_pr_title_format() {
-        let pr = make_pr(10, "a/b", "My PR", "", "https://gh", ReviewDecision::ReviewRequired);
+        let pr = make_pr(
+            10,
+            "a/b",
+            "My PR",
+            "",
+            "https://gh",
+            ReviewDecision::ReviewRequired,
+        );
         let item = review_pr_to_feed_item(&pr);
         assert_eq!(item.title, "#10 My PR");
     }
@@ -265,14 +292,28 @@ mod tests {
     #[test]
     fn review_pr_description_truncated_to_500() {
         let long_body: String = "x".repeat(600);
-        let pr = make_pr(1, "a/b", "T", &long_body, "https://gh", ReviewDecision::ReviewRequired);
+        let pr = make_pr(
+            1,
+            "a/b",
+            "T",
+            &long_body,
+            "https://gh",
+            ReviewDecision::ReviewRequired,
+        );
         let item = review_pr_to_feed_item(&pr);
         assert_eq!(item.description.chars().count(), 500);
     }
 
     #[test]
     fn review_pr_url_preserved() {
-        let pr = make_pr(1, "a/b", "T", "", "https://github.com/a/b/pull/1", ReviewDecision::ReviewRequired);
+        let pr = make_pr(
+            1,
+            "a/b",
+            "T",
+            "",
+            "https://github.com/a/b/pull/1",
+            ReviewDecision::ReviewRequired,
+        );
         let item = review_pr_to_feed_item(&pr);
         assert_eq!(item.url, "https://github.com/a/b/pull/1");
     }
@@ -299,7 +340,14 @@ mod tests {
 
     #[test]
     fn bot_pr_external_id_uses_dep_prefix() {
-        let pr = make_pr(5, "acme/lib", "Bump lodash", "", "https://gh", ReviewDecision::ReviewRequired);
+        let pr = make_pr(
+            5,
+            "acme/lib",
+            "Bump lodash",
+            "",
+            "https://gh",
+            ReviewDecision::ReviewRequired,
+        );
         let item = bot_pr_to_feed_item(&pr);
         assert_eq!(item.external_id, "dep:acme/lib#5");
     }
@@ -308,14 +356,30 @@ mod tests {
 
     #[test]
     fn alert_dependabot_external_id() {
-        let alert = make_alert(3, "acme/app", AlertKind::Dependabot, AlertSeverity::High, "vuln", "", "https://gh");
+        let alert = make_alert(
+            3,
+            "acme/app",
+            AlertKind::Dependabot,
+            AlertSeverity::High,
+            "vuln",
+            "",
+            "https://gh",
+        );
         let item = alert_to_feed_item(&alert);
         assert_eq!(item.external_id, "dependabot:acme/app#3");
     }
 
     #[test]
     fn alert_code_scanning_external_id() {
-        let alert = make_alert(9, "acme/app", AlertKind::CodeScanning, AlertSeverity::Low, "issue", "", "https://gh");
+        let alert = make_alert(
+            9,
+            "acme/app",
+            AlertKind::CodeScanning,
+            AlertSeverity::Low,
+            "issue",
+            "",
+            "https://gh",
+        );
         let item = alert_to_feed_item(&alert);
         assert_eq!(item.external_id, "code-scanning:acme/app#9");
     }
@@ -329,7 +393,15 @@ mod tests {
             (AlertSeverity::Low, "[LOW]"),
         ];
         for (severity, badge) in cases {
-            let alert = make_alert(1, "a/b", AlertKind::Dependabot, severity, "some vuln", "", "https://gh");
+            let alert = make_alert(
+                1,
+                "a/b",
+                AlertKind::Dependabot,
+                severity,
+                "some vuln",
+                "",
+                "https://gh",
+            );
             let item = alert_to_feed_item(&alert);
             assert!(
                 item.title.starts_with(badge),
@@ -341,7 +413,15 @@ mod tests {
 
     #[test]
     fn alert_description_and_url_preserved() {
-        let alert = make_alert(1, "a/b", AlertKind::Dependabot, AlertSeverity::High, "t", "detailed desc", "https://alerts/1");
+        let alert = make_alert(
+            1,
+            "a/b",
+            AlertKind::Dependabot,
+            AlertSeverity::High,
+            "t",
+            "detailed desc",
+            "https://alerts/1",
+        );
         let item = alert_to_feed_item(&alert);
         assert_eq!(item.description, "detailed desc");
         assert_eq!(item.url, "https://alerts/1");
@@ -349,7 +429,15 @@ mod tests {
 
     #[test]
     fn alert_status_is_always_backlog() {
-        let alert = make_alert(1, "a/b", AlertKind::CodeScanning, AlertSeverity::Critical, "t", "", "https://gh");
+        let alert = make_alert(
+            1,
+            "a/b",
+            AlertKind::CodeScanning,
+            AlertSeverity::Critical,
+            "t",
+            "",
+            "https://gh",
+        );
         let item = alert_to_feed_item(&alert);
         assert_eq!(item.status, TaskStatus::Backlog);
     }
