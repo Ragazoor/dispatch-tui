@@ -309,7 +309,6 @@ impl TuiRuntime {
         updated.repo_path = applied.repo_path;
         app.update(Message::EpicEdited(updated))
     }
-
 }
 
 /// Extract the saved text from an [`EditorOutcome`], returning `None` if

@@ -210,7 +210,6 @@ fn navigate_row_clamps() {
     assert_eq!(app.selection().row(0), 1); // clamps to last item index
 }
 
-
 #[test]
 fn tick_captures_review_task_with_live_window() {
     let mut task = make_task(5, TaskStatus::Review);
@@ -223,7 +222,6 @@ fn tick_captures_review_task_with_live_window() {
         .iter()
         .any(|c| matches!(c, Command::CaptureTmux { id: TaskId(5), .. })));
 }
-
 
 #[test]
 fn task_created_adds_to_list() {
@@ -407,7 +405,6 @@ fn repo_path_nonexistent_shows_error() {
     let msg = app.status.message.as_ref().unwrap().as_str();
     assert!(msg.contains("does not exist"), "got: {msg}");
 }
-
 
 #[test]
 fn repo_path_nonempty_used_as_is() {
@@ -3340,8 +3337,6 @@ fn make_feed_epic(id: i64, title: &str, sort_order: i64) -> Epic {
     }
 }
 
-
-
 // --- tasks_for_current_view ---
 
 #[test]
@@ -6030,10 +6025,6 @@ fn pr_merged_preserves_worktree() {
     assert!(!cmds.iter().any(|c| matches!(c, Command::Cleanup { .. })));
 }
 
-
-
-
-
 #[test]
 fn card_shows_pr_badge() {
     let mut task = make_task(1, TaskStatus::Review);
@@ -6837,17 +6828,6 @@ fn dispatch_epic_all_done_shows_message() {
 // ---------------------------------------------------------------------------
 // Review board tests
 // ---------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
 
 #[test]
 fn handle_refresh_usage_stores_by_task_id() {
@@ -8786,10 +8766,6 @@ fn quick_dispatch_enter_selects_cursor_repo() {
     assert_eq!(app.input.mode, InputMode::Normal);
 }
 
-
-
-
-
 #[test]
 fn repo_cursor_resets_on_quick_dispatch_entry() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
@@ -8825,14 +8801,6 @@ fn repo_filter_space_toggles_cursor_repo() {
     );
     assert!(!app.filter.repos.contains("/repo-a"));
 }
-
-
-
-
-
-
-
-
 
 // --- detach-aware section headers ---
 
@@ -8924,8 +8892,6 @@ fn is_detached_returns_false_for_conflict() {
 }
 
 // --- dispatch PR filter (removed in v2, 'D' key is now no-op in review board) ---
-
-
 
 // ---------------------------------------------------------------------------
 // CardIndicator rendering tests
@@ -9325,7 +9291,6 @@ fn render_status_bar_confirm_epic_wrap_up() {
     );
 }
 
-
 #[test]
 fn render_status_bar_confirm_edit_task() {
     let mut app = make_app();
@@ -9336,8 +9301,6 @@ fn render_status_bar_confirm_edit_task() {
         "ConfirmEditTask should show 'Edit task?'"
     );
 }
-
-
 
 #[test]
 fn render_status_bar_status_message_overrides() {
@@ -9921,9 +9884,6 @@ fn render_tab_bar_board_mode_shows_tasks_label() {
     );
 }
 
-
-
-
 // ---------------------------------------------------------------------------
 // Tab bar key hint highlighting
 // ---------------------------------------------------------------------------
@@ -9963,8 +9923,6 @@ fn tab_bar_board_mode_highlights_tab_key() {
         "[Tab] should use MUTED_LIGHT color"
     );
 }
-
-
 
 // ---------------------------------------------------------------------------
 // Merge PR tests
@@ -10406,11 +10364,6 @@ fn archive_q_quits() {
 // ---------------------------------------------------------------------------
 // ReviewAgentStatus lifecycle tests
 // ---------------------------------------------------------------------------
-
-
-
-
-
 
 /// Extract the foreground color of the first `[` bracket in the given row.
 fn first_bracket_fg(buf: &Buffer, row: u16) -> Option<Color> {
@@ -11366,8 +11319,6 @@ fn handle_key_text_input_enter_submits_typed_text() {
         .any(|c| matches!(c, Command::InsertTask { .. })));
 }
 
-
-
 #[test]
 fn handle_key_epic_repo_path_enter_selects_cursor() {
     let mut app = make_app();
@@ -11640,19 +11591,9 @@ fn handle_key_confirm_merge_pr_other_cancels() {
 // Input handler coverage: review repo filter
 // =====================================================================
 
-
-
-
-
-
 // =====================================================================
 // Input handler coverage: security repo filter
 // =====================================================================
-
-
-
-
-
 
 // =====================================================================
 // Input handler coverage: tag input mode completeness
@@ -11918,7 +11859,6 @@ fn handle_key_input_repo_path_routes_to_text_input() {
     assert_eq!(app.input.mode, InputMode::Normal);
 }
 
-
 /// InputEpicTitle mode routes to the text input handler.
 #[test]
 fn handle_key_input_epic_title_routes_to_text_input() {
@@ -12109,8 +12049,6 @@ fn handle_key_repo_filter_routes_correctly() {
     assert_eq!(app.input.mode, InputMode::Normal);
 }
 
-
-
 /// InputPresetName mode routes to the preset name handler.
 #[test]
 fn handle_key_input_preset_name_routes_correctly() {
@@ -12141,8 +12079,6 @@ fn handle_key_confirm_delete_repo_path_routes_correctly() {
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::RepoFilter);
 }
-
-
 
 /// ConfirmQuit mode routes correctly.
 #[test]
@@ -12646,7 +12582,6 @@ fn inactive_duration_near_zero_after_mark_active() {
     assert!(duration < Duration::from_secs(1));
 }
 
-
 #[test]
 fn epic_view_header_shows_auto_dispatch_indicator() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
@@ -12869,7 +12804,6 @@ fn render_repo_path_mode_shows_filtered_list_when_typing() {
     );
 }
 
-
 #[test]
 fn render_repo_path_mode_shows_all_when_buffer_empty() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
@@ -12904,11 +12838,6 @@ fn typing_resets_repo_cursor_to_zero() {
     assert_eq!(app.input.repo_cursor, 0);
 }
 
-
-
-
-
-
 // Regression note for: buffered editor keystrokes leaking into repo picker.
 //
 // Root cause: InputPausedGuard::drop() (runtime.rs) restores the terminal and
@@ -12926,7 +12855,6 @@ fn typing_resets_repo_cursor_to_zero() {
 #[test]
 #[ignore = "requires a real TTY and interactive editor session; run manually to verify"]
 fn buffered_editor_keystrokes_do_not_leak_into_repo_picker() {}
-
 
 // ---------------------------------------------------------------------------
 // Epic-in-epic: TUI navigation tests
@@ -13532,8 +13460,6 @@ fn startup_always_empty_tips_returns_none() {
     assert!(determine_tips_start(&[], 0, crate::models::TipsShowMode::Always).is_none());
 }
 
-
-
 // == refresh_status: text and color helper ==
 
 #[test]
@@ -13625,10 +13551,6 @@ fn refresh_status_red_at_4x_interval() {
     let (_, color) = ui::refresh_status(Some(last), false, interval);
     assert_eq!(color, Color::Red);
 }
-
-
-
-
 
 // --- selection preservation ---
 
@@ -13833,12 +13755,9 @@ fn test_selection_survives_flatten_toggle() {
     assert_eq!(pre_id, post_id);
 }
 
-
-
 // ---------------------------------------------------------------------------
 // Security board: workflow column redesign (task #305)
 // ---------------------------------------------------------------------------
-
 
 // -- SecurityWorkflowColumn enum --
 
@@ -13872,25 +13791,4 @@ fn workflow_column_count_is_three() {
 
 // -- Column assignment: workflow_column_for_alert --
 
-
-
-
-
 // -- Column filtering: alerts_for_workflow_column --
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

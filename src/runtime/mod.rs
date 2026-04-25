@@ -249,8 +249,6 @@ impl TuiRuntime {
         format!("DB error {action}: {e}")
     }
 
-
-
     fn create_task(
         &self,
         app: &mut App,
