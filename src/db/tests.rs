@@ -1893,8 +1893,14 @@ fn save_review_prs_preserves_agent_fields() {
     db.save_prs(super::PrKind::Review, &[pr]).unwrap();
 
     // Simulate agent dispatch via the proper set_pr_agent method
-    db.set_pr_agent(super::PrKind::Review, "acme/app", 42, "dispatch:review-42", "/tmp/wt")
-        .unwrap();
+    db.set_pr_agent(
+        super::PrKind::Review,
+        "acme/app",
+        42,
+        "dispatch:review-42",
+        "/tmp/wt",
+    )
+    .unwrap();
 
     // Now save a refreshed version of the same PR (as if GitHub API returned it)
     let refreshed_pr = ReviewPr {
@@ -1924,9 +1930,7 @@ fn save_review_prs_preserves_agent_fields() {
     assert_eq!(loaded[0].review_decision, ReviewDecision::Approved);
 
     // Agent status should still be present after refresh
-    let status = db
-        .pr_agent_status("review_prs", "acme/app", 42)
-        .unwrap();
+    let status = db.pr_agent_status("review_prs", "acme/app", 42).unwrap();
     assert!(status.is_some(), "agent status should be preserved");
 }
 
@@ -2832,8 +2836,14 @@ fn save_security_alerts_preserves_agent_fields() {
     db.save_security_alerts(&[alert]).unwrap();
 
     // Simulate agent dispatch via the proper set_alert_agent method
-    db.set_alert_agent("acme/app", 1, AlertKind::Dependabot, "dispatch:fix-1", "/tmp/wt")
-        .unwrap();
+    db.set_alert_agent(
+        "acme/app",
+        1,
+        AlertKind::Dependabot,
+        "dispatch:fix-1",
+        "/tmp/wt",
+    )
+    .unwrap();
 
     // Refresh with updated alert data
     let refreshed = SecurityAlert {
@@ -3486,9 +3496,7 @@ fn set_pr_agent_updates_fields() {
     )
     .unwrap();
 
-    let status = db
-        .pr_agent_status("review_prs", "acme/app", 42)
-        .unwrap();
+    let status = db.pr_agent_status("review_prs", "acme/app", 42).unwrap();
     assert_eq!(
         status,
         Some(crate::models::ReviewAgentStatus::Reviewing),

@@ -83,7 +83,6 @@ fn tab_label(prefix: &str, name: &str, count: usize, filter: bool, loading: bool
     format!("{prefix}{name}{count_part}{filter_part}{loading_part} ")
 }
 
-
 pub(in crate::tui::ui) fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
     let active_style = Style::default().fg(FG).add_modifier(Modifier::BOLD);
     let inactive_style = Style::default().fg(MUTED);
