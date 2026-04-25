@@ -93,26 +93,6 @@ Key patterns that aren't obvious from reading the code:
 - **Integration tests**: Use `Database::open_in_memory()` with a real SQLite instance — no mocking the database layer.
 - **Command queue draining**: `execute_commands` (`src/runtime.rs`) loads the initial `Vec<Command>` into a `VecDeque` and drains it iteratively. Any handler that produces additional commands (e.g. error-path `app.update()` calls that return extra commands) extends the queue with `queue.extend(extra)`, so a single message can cascade into multiple commands without recursive calls.
 
-### Review Board
-
-The Review Board (`ViewMode::ReviewBoard`) shows GitHub PRs across three modes, toggled with `1`/`2`/`3`:
-
-| Mode | What it shows |
-|------|---------------|
-| `Reviewer` | PRs where you are a requested reviewer |
-| `Author` | PRs you authored |
-| `Dependabot` | Dependabot PRs across configured repos |
-
-Each mode has 4 columns representing PR review states. The board auto-refreshes via `REVIEW_REFRESH_INTERVAL`. Dispatching a review agent from a PR opens a worktree for the review.
-
-### Security Board
-
-The Security Board (`ViewMode::SecurityBoard`) shows GitHub security alerts fetched via `gh api`. Alerts are categorized by kind (`AlertKind::Dependabot`, `AlertKind::CodeScanning`). The Alerts sub-view displays alerts in 3 **workflow** columns (`Backlog`, `In Progress`, `Review`) — column placement is derived from the alert's fix agent state, not severity. Severity is shown per-card via a colored stripe and a `[CRIT]`/`[HIGH]`/`[MED]`/`[LOW]` badge. A `◉` running badge appears on cards in the `In Progress` column. Filtered by `RepoFilterMode`. Auto-refreshes via `SECURITY_POLL_INTERVAL`. Dispatching a fix agent from an alert creates a worktree to address the vulnerability.
-
-### Board Switching
-
-Switch boards with `Tab` (task → review → security → task). Each board preserves its own selection state independently.
-
 ### Error Handling
 
 The codebase uses three error types at different layers:
@@ -140,8 +120,6 @@ A task with a plan always dispatches directly regardless of tag. Tags are select
 - **Tick interval** (2s): `TICK_INTERVAL` in `runtime.rs` — captures tmux output, checks staleness.
 - **Status TTL** (5s): `STATUS_MESSAGE_TTL` in `tui/mod.rs` — transient status bar messages auto-clear.
 - **PR poll** (30s): `PR_POLL_INTERVAL` in `tui/mod.rs` — polls PR status for tasks in review.
-- **Review refresh** (30s): `REVIEW_REFRESH_INTERVAL` in `tui/mod.rs` — refreshes Review Board PR data.
-- **Security poll** (5m): `SECURITY_POLL_INTERVAL` in `tui/mod.rs` — polls GitHub security alerts.
 
 ## Module Map
 
@@ -154,8 +132,6 @@ A task with a plan always dispatches directly regardless of tag. Tags are select
 | `src/tui/input.rs` | Key event handlers, inline-mutation convention for UI-only state |
 | `src/tui/ui/mod.rs` | Rendering entry point — re-exports `render()`, thin dispatcher |
 | `src/tui/ui/kanban.rs` | Kanban board rendering: task/epic cards, columns, overlays, action hints |
-| `src/tui/ui/review.rs` | Review board rendering: PR columns, detail panel, review action hints |
-| `src/tui/ui/security.rs` | Security board rendering: Dependabot and alert columns, detail panel |
 | `src/tui/ui/shared.rs` | Cross-board helpers: `render_tab_bar`, `refresh_status`, `truncate`, `push_hint_spans` |
 | `src/tui/ui/palette.rs` | Tokyo Night color palette constants |
 | `src/tui/types.rs` | `Message`, `Command`, `ViewMode`, `InputMode`, `AgentTracking` enums and structs |

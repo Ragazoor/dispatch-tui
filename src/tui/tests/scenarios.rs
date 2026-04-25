@@ -124,7 +124,7 @@ fn scenario_quick_dispatch_without_repo_path_shows_no_dispatch_command() {
 
 #[test]
 fn scenario_tab_from_board_without_feed_epics_is_noop_for_board_switch() {
-    // Without feed epics, Tab from Board is a no-op (no longer switches to ReviewBoard).
+    // Without feed epics, Tab from Board is a no-op — nothing to cycle to.
     let mut s = Scenario::new();
     assert!(
         matches!(s.app.board.view_mode, ViewMode::Board(_)),
