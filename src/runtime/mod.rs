@@ -238,7 +238,6 @@ mod agents;
 mod editor;
 mod epics;
 mod pr;
-mod security;
 mod settings;
 mod split;
 mod tasks;
@@ -335,9 +334,6 @@ async fn run_loop(
                     mcp::McpEvent::Refresh => rt.exec_refresh_from_db(app),
                     mcp::McpEvent::MessageSent { to_task_id } => {
                         app.update(Message::MessageReceived(to_task_id));
-                        rt.exec_refresh_from_db(app)
-                    }
-                    mcp::McpEvent::ReviewReady { repo: _, number: _ } => {
                         rt.exec_refresh_from_db(app)
                     }
                 }

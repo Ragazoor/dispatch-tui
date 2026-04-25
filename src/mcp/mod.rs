@@ -16,8 +16,6 @@ pub enum McpEvent {
     Refresh,
     /// A message was sent to an agent — flash the target task's card.
     MessageSent { to_task_id: TaskId },
-    /// A review/fix agent reported findings ready — flash the PR/alert card.
-    ReviewReady { repo: String, number: i64 },
 }
 
 pub struct McpState {
@@ -38,12 +36,6 @@ impl McpState {
     pub fn notify_message_sent(&self, to_task_id: TaskId) {
         if let Some(tx) = &self.notify_tx {
             let _ = tx.send(McpEvent::MessageSent { to_task_id });
-        }
-    }
-
-    pub fn notify_review_ready(&self, repo: String, number: i64) {
-        if let Some(tx) = &self.notify_tx {
-            let _ = tx.send(McpEvent::ReviewReady { repo, number });
         }
     }
 }

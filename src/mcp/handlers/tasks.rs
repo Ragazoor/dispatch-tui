@@ -918,7 +918,6 @@ pub(super) fn handle_update_review_status(
                         Some(crate::models::ReviewWorkflowSubState::FindingsReady.as_db_str()),
                     );
                 }
-                state.notify_review_ready(parsed.repo.clone(), parsed.number);
             }
             JsonRpcResponse::ok(
                 id,
