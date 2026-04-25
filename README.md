@@ -16,7 +16,7 @@ A terminal kanban board for dispatching and monitoring Claude Code agents — ea
 
 <table>
 <tr>
-<td><img src="docs/images/task_view.png" width="480"/><br/><b>Kanban board</b> — all tasks at a glance</td>
+<td><img src="docs/images/task_not_flat_view.png" width="480"/><br/><b>Mixed view</b> — epics and tasks side by side</td>
 <td><img src="docs/images/epic_view.png" width="480"/><br/><b>Epics</b> — subtasks dispatched in sequence</td>
 </tr>
 </table>
