@@ -2,24 +2,19 @@
 
 A terminal kanban board for dispatching and monitoring Claude Code agents — each in its own git worktree and tmux window.
 
-![Dispatch kanban board](docs/images/task_view.png)
-
 ## What you get
 
 - **Kanban board** — track agents from Backlog → Running → Review → Done, auto-updated as they work
-- **Isolated worktrees** — each agent gets its own git branch, keeping your working tree clean
+
+  ![Kanban board with epics](docs/images/task_not_flat_view.png)
+
 - **Epics** — chain agents in sequence: a planner writes the spec, the rest implement it
+
+  ![Epic view](docs/images/epic_view.png)
+
+- **Isolated worktrees** — each agent gets its own git branch, keeping your working tree clean
 - **Split pane** — press `S` to watch an agent work side-by-side with the board
 - **Agent coordination** — agents create subtasks, message each other, and trigger the next task in a chain
-
-## Screenshots
-
-<table>
-<tr>
-<td><img src="docs/images/task_not_flat_view.png" width="480"/><br/><b>Mixed view</b> — epics and tasks side by side</td>
-<td><img src="docs/images/epic_view.png" width="480"/><br/><b>Epics</b> — subtasks dispatched in sequence</td>
-</tr>
-</table>
 
 ## Prerequisites
 
