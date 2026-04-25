@@ -55,6 +55,10 @@ fn teardown_tmux_for_tui(original_name: Option<&str>, runner: &dyn ProcessRunner
 // ---------------------------------------------------------------------------
 
 pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Result<()> {
+    if std::env::var("TMUX").is_err() {
+        anyhow::bail!("dispatch tui must be run inside a tmux session (TMUX is not set)");
+    }
+
     // 1. Open database and load initial tasks
     let database = Arc::new(db::Database::open(db_path)?);
     let tasks = database.list_all()?;

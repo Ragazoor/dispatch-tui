@@ -476,3 +476,26 @@ fn fetch_security_no_settings_prints_empty_array() {
         .expect("output must be valid JSON array");
     assert!(items.is_empty(), "expected empty array, got: {stdout}");
 }
+
+// ---------------------------------------------------------------------------
+// tui — tmux guard
+// ---------------------------------------------------------------------------
+
+#[test]
+fn tui_fails_without_tmux() {
+    let db = NamedTempFile::new().unwrap();
+    let out = binary()
+        .args(["--db", db.path().to_str().unwrap(), "tui"])
+        .env_remove("TMUX")
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "Expected failure when TMUX is not set"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.to_lowercase().contains("tmux"),
+        "Expected error mentioning tmux, got: {stderr}"
+    );
+}
