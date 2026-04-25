@@ -4646,6 +4646,7 @@ impl App {
             .map(|e| e.id)
             .collect();
 
+        // Clone to release the borrow before calling &mut self methods below.
         match self.board.view_mode.clone() {
             ViewMode::Board(_) => {
                 if let Some(&first_id) = feed_ids.first() {
@@ -4655,7 +4656,7 @@ impl App {
             ViewMode::Epic { epic_id, .. } => {
                 if let Some(pos) = feed_ids.iter().position(|&id| id == epic_id) {
                     if let Some(&next_id) = feed_ids.get(pos + 1) {
-                        self.handle_exit_epic();
+                        let _ = self.handle_exit_epic(); // always vec![], exit before entering next
                         return self.handle_enter_epic(next_id);
                     } else {
                         return self.handle_exit_epic();
