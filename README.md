@@ -19,6 +19,15 @@ A terminal kanban board for dispatching and monitoring Claude Code agents — ea
 </tr>
 </table>
 
+## Why Dispatch?
+
+Most agent managers are session managers — they open a terminal and let you watch agents run. Dispatch is a workflow tool: tasks move through a kanban board, agents report their own status back via MCP hooks, and epics let one planning agent decompose work that a sequence of agents then implement.
+
+- **Structured work, not just open terminals** — every agent has a task, a status, and optionally a plan
+- **Agents drive the board** — hooks fire when an agent starts, finishes, or waits for input; no manual status updates
+- **Epics as orchestration** — a planner writes a spec, dispatch queues the subtasks, agents implement them in order
+- **MCP server built in** — agents can create tasks, message each other, and trigger the next task in a chain
+
 ## Prerequisites
 
 | Dependency | Required | Install |
@@ -58,6 +67,8 @@ tmux new-session -s dev
 ```bash
 dispatch tui
 ```
+
+You're ready — press `n` to create your first task and `d` to dispatch it.
 
 ## Usage
 
@@ -112,3 +123,7 @@ Dispatch agents can coordinate with each other through the MCP server:
 
 - **[Reference](docs/reference.md)** — key bindings, configuration, CLI usage, troubleshooting
 - **[CLAUDE.md](CLAUDE.md)** — architecture, testing patterns, contribution guidelines
+
+## License
+
+MIT
