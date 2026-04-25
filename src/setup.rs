@@ -639,7 +639,12 @@ mod tests {
         seed_feed_epics(&db).unwrap();
         seed_feed_epics(&db).unwrap();
         let epics = db.list_epics().unwrap();
-        assert_eq!(epics.len(), 2, "expected exactly 2 epics, got {}", epics.len());
+        assert_eq!(
+            epics.len(),
+            2,
+            "expected exactly 2 epics, got {}",
+            epics.len()
+        );
     }
 
     // -- MCP config merging --

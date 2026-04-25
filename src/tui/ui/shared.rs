@@ -108,7 +108,11 @@ pub(in crate::tui::ui) fn render_tab_bar(frame: &mut Frame, app: &App, area: Rec
     let inactive_style = Style::default().fg(MUTED);
     let hint_style = Style::default().fg(MUTED);
 
-    let feed_epics: Vec<&Epic> = app.epics().iter().filter(|e| e.feed_command.is_some()).collect();
+    let feed_epics: Vec<&Epic> = app
+        .epics()
+        .iter()
+        .filter(|e| e.feed_command.is_some())
+        .collect();
 
     // Determine which feed epic index (if any) is active.
     let active_feed_idx: Option<usize> = match app.view_mode() {
@@ -155,14 +159,20 @@ pub(in crate::tui::ui) fn render_tab_bar(frame: &mut Frame, app: &App, area: Rec
             match app.view_mode() {
                 ViewMode::ReviewBoard { mode, .. } => match mode {
                     ReviewBoardMode::Reviewer => review_tab_label(app, " \u{25b8} ", &epic.title),
-                    ReviewBoardMode::Dependabot => bot_prs_tab_label(app, " \u{25b8} ", "Dependabot"),
+                    ReviewBoardMode::Dependabot => {
+                        bot_prs_tab_label(app, " \u{25b8} ", "Dependabot")
+                    }
                 },
                 _ => tab_label(" \u{25b8} ", &epic.title, 0, false, false),
             }
         } else {
             tab_label(" ", &epic.title, 0, false, false)
         };
-        let style = if is_active { active_style } else { inactive_style };
+        let style = if is_active {
+            active_style
+        } else {
+            inactive_style
+        };
         spans.push(Span::styled(label, style));
     }
 
@@ -172,7 +182,10 @@ pub(in crate::tui::ui) fn render_tab_bar(frame: &mut Frame, app: &App, area: Rec
     match app.view_mode() {
         ViewMode::ReviewBoard { .. } => {
             let next_idx = active_feed_idx.map(|i| i + 1).unwrap_or(1);
-            let next_name = feed_epics.get(next_idx).map(|e| e.title.as_str()).unwrap_or("");
+            let next_name = feed_epics
+                .get(next_idx)
+                .map(|e| e.title.as_str())
+                .unwrap_or("");
             spans.push(Span::styled("  [Tab]", key_hint));
             if !next_name.is_empty() {
                 spans.push(Span::styled(format!(" {next_name}  "), hint_style));
@@ -191,7 +204,10 @@ pub(in crate::tui::ui) fn render_tab_bar(frame: &mut Frame, app: &App, area: Rec
         _ => {
             let next_tab_name = match active_feed_idx {
                 None => feed_epics.first().map(|e| e.title.as_str()).unwrap_or(""),
-                Some(i) => feed_epics.get(i + 1).map(|e| e.title.as_str()).unwrap_or("Tasks"),
+                Some(i) => feed_epics
+                    .get(i + 1)
+                    .map(|e| e.title.as_str())
+                    .unwrap_or("Tasks"),
             };
             spans.push(Span::styled("  [Tab]", key_hint));
             if !next_tab_name.is_empty() {

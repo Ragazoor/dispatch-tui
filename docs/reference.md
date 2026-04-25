@@ -9,7 +9,7 @@
 | `h` / `l` / `←` / `→` | Move between columns |
 | `j` / `k` / `↓` / `↑` | Move between tasks |
 | `Enter` | Toggle detail panel |
-| `Tab` | Cycle boards: Task → Review → Security |
+| `Tab` | Cycle through feed epics |
 | `?` | Toggle help overlay |
 | `q` | Quit (or exit epic view) |
 
@@ -47,20 +47,6 @@
 | `J` / `K` | Reorder subtasks (determines dispatch order) |
 | `q` | Exit epic view |
 
-### Review Board (`Tab`)
-
-| Key | Action |
-|-----|--------|
-| `h` / `l` / `j` / `k` | Navigate PRs |
-| `Enter` | Toggle PR detail |
-| `p` | Open PR in browser |
-| `d` | Dispatch review agent |
-| `r` | Refresh |
-| `f` | Filter by repo |
-| `Shift+Tab` | Cycle board mode (Review PRs / My PRs / Bot PRs) |
-| `Tab` | Next board (Security) |
-| `Esc` | Return to kanban |
-
 ## How Dispatch Works
 
 Press `d` on a Backlog task:
@@ -71,39 +57,6 @@ Press `d` on a Backlog task:
 4. Launches `claude` with the task description and completion instructions
 
 The agent reports progress via the MCP server running on `localhost:3142`. When it finishes, it moves the task to Review. Closing a tmux window does **not** delete the worktree — press `d` again on a Running task to resume.
-
-## Review Board
-
-Press `Tab` to switch to the Review Board, which shows GitHub PRs where you are a requested reviewer. Data is fetched via `gh api graphql` and refreshed every 60 seconds.
-
-Three columns: **Needs Review** → **Changes Requested** → **Approved**
-
-Press `e` to edit the GitHub search queries for the current tab in `$EDITOR`. Each line is a separate GitHub search query. Queries are stored per-category (Review PRs, My PRs, Bot PRs) and persist across sessions. The editor opens in a separate tmux window so the board stays navigable while you edit; save and quit to return.
-
-**Bot PRs tip:** The default bot queries have no org scope, so results may be dominated by public repos. Add `org:your-org` to scope them (e.g. `is:pr is:open author:app/dependabot -is:draft archived:false org:my-org`).
-
-Requires `gh` CLI authenticated:
-
-```bash
-gh auth login
-```
-
-## Security Board
-
-Press `Tab` from the Review Board to switch to the Security Board, which shows Dependabot and code scanning alerts across your repos.
-
-Columns are grouped by severity: **Critical** → **High** → **Medium** → **Low**
-
-| Key | Action |
-|-----|--------|
-| `h` / `l` / `j` / `k` | Navigate alerts |
-| `Enter` | Toggle alert detail |
-| `p` | Open alert in browser |
-| `d` | Dispatch agent to fix the alert |
-| `r` | Refresh |
-| `f` | Filter by repo |
-| `t` | Toggle alert kind (Dependabot / code scanning) |
-| `Tab` / `Esc` | Return to kanban |
 
 ## CLI Usage
 
@@ -183,9 +136,6 @@ Verify the dispatch plugin is installed: `ls ~/.claude/plugins/local/dispatch/ho
 
 **Skills not available (`/wrap-up`, `/queue-plan`)**
 The dispatch plugin may not be installed. Run `dispatch setup` to install it.
-
-**Review Board shows no PRs**
-Run `gh auth login` and ensure you have open PRs where you are a requested reviewer.
 
 **Agent window disappeared but task is still Running**
 Press `d` on the Running task to reopen a tmux window in the existing worktree and resume the agent.

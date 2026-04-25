@@ -513,6 +513,8 @@ impl App {
         &self.security.repos
     }
 
+    // Used only by board tests; removed by epic #29 Pkg D alongside the security board.
+    #[allow(dead_code)]
     pub(in crate::tui) fn navigate_security_row(&mut self, delta: isize) {
         let (col, count) = match self.security_selection() {
             Some(sel) => {
@@ -532,6 +534,8 @@ impl App {
         }
     }
 
+    // Used only by board tests; removed by epic #29 Pkg D alongside the security board.
+    #[allow(dead_code)]
     pub(in crate::tui) fn update_security_anchor_from_current(&mut self) {
         let (col, row) = match self.security_selection() {
             Some(sel) => (sel.selected_column, sel.selected_row[sel.selected_column]),
@@ -4534,6 +4538,8 @@ impl App {
         }]
     }
 
+    // Used only by board tests; removed by epic #29 Pkg D alongside the review board.
+    #[allow(dead_code)]
     pub(in crate::tui) fn navigate_review_row(&mut self, delta: isize) {
         let (col, count) = match self.review_selection() {
             Some(sel) => {
@@ -4553,6 +4559,8 @@ impl App {
         }
     }
 
+    // Used only by board tests; removed by epic #29 Pkg D alongside the review board.
+    #[allow(dead_code)]
     pub(in crate::tui) fn update_review_anchor_from_current(&mut self) {
         let (col, row) = match self.review_selection() {
             Some(sel) => (sel.selected_column, sel.selected_row[sel.selected_column]),

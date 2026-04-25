@@ -139,19 +139,59 @@ fn scenario_tab_from_board_without_feed_epics_is_noop_for_board_switch() {
 }
 
 #[test]
-fn scenario_tab_from_review_board_goes_to_security_board() {
-    let mut s = Scenario::new();
-    s.app.update(Message::SwitchToReviewBoard);
-    assert!(
-        matches!(s.app.board.view_mode, ViewMode::ReviewBoard { .. }),
-        "should be on ReviewBoard"
-    );
-    s.key(KeyCode::Tab);
-    assert!(
-        matches!(s.app.board.view_mode, ViewMode::SecurityBoard { .. }),
-        "Tab from ReviewBoard should go to SecurityBoard, got {:?}",
-        s.app.board.view_mode
-    );
+fn scenario_any_key_in_review_board_returns_to_task_board() {
+    // Pkg B: review board is no longer user-reachable. Any key forces back
+    // to the kanban as a defensive belt-and-braces in case stale state
+    // somehow leaves the app in ViewMode::ReviewBoard.
+    for code in [
+        KeyCode::Tab,
+        KeyCode::Char('h'),
+        KeyCode::Char('j'),
+        KeyCode::Char('k'),
+        KeyCode::Char('l'),
+        KeyCode::Enter,
+    ] {
+        let mut s = Scenario::new();
+        s.app.update(Message::SwitchToReviewBoard);
+        assert!(
+            matches!(s.app.board.view_mode, ViewMode::ReviewBoard { .. }),
+            "should be on ReviewBoard before key"
+        );
+        s.key(code);
+        assert!(
+            matches!(s.app.board.view_mode, ViewMode::Board(_)),
+            "{:?} on ReviewBoard should return to Board, got {:?}",
+            code,
+            s.app.board.view_mode
+        );
+    }
+}
+
+#[test]
+fn scenario_any_key_in_security_board_returns_to_task_board() {
+    // Pkg B: security board is no longer user-reachable.
+    for code in [
+        KeyCode::Tab,
+        KeyCode::Char('h'),
+        KeyCode::Char('j'),
+        KeyCode::Char('k'),
+        KeyCode::Char('l'),
+        KeyCode::Enter,
+    ] {
+        let mut s = Scenario::new();
+        s.app.update(Message::SwitchToSecurityBoard);
+        assert!(
+            matches!(s.app.board.view_mode, ViewMode::SecurityBoard { .. }),
+            "should be on SecurityBoard before key"
+        );
+        s.key(code);
+        assert!(
+            matches!(s.app.board.view_mode, ViewMode::Board(_)),
+            "{:?} on SecurityBoard should return to Board, got {:?}",
+            code,
+            s.app.board.view_mode
+        );
+    }
 }
 
 #[test]
@@ -222,7 +262,10 @@ fn scenario_tab_from_board_with_no_feed_epics_is_noop() {
 #[test]
 fn scenario_tab_from_board_enters_first_feed_epic() {
     let mut app = make_app();
-    app.board.epics = vec![make_feed_epic(1, "Reviews", 1), make_feed_epic(2, "Security", 2)];
+    app.board.epics = vec![
+        make_feed_epic(1, "Reviews", 1),
+        make_feed_epic(2, "Security", 2),
+    ];
     let mut s = Scenario::with_app(app);
     s.key(KeyCode::Tab);
     assert!(
@@ -235,7 +278,10 @@ fn scenario_tab_from_board_enters_first_feed_epic() {
 #[test]
 fn scenario_tab_from_middle_feed_epic_goes_to_next() {
     let mut app = make_app();
-    app.board.epics = vec![make_feed_epic(1, "Reviews", 1), make_feed_epic(2, "Security", 2)];
+    app.board.epics = vec![
+        make_feed_epic(1, "Reviews", 1),
+        make_feed_epic(2, "Security", 2),
+    ];
     app.update(Message::EnterEpic(EpicId(1)));
     let mut s = Scenario::with_app(app);
     s.key(KeyCode::Tab);
@@ -249,7 +295,10 @@ fn scenario_tab_from_middle_feed_epic_goes_to_next() {
 #[test]
 fn scenario_tab_from_last_feed_epic_returns_to_board() {
     let mut app = make_app();
-    app.board.epics = vec![make_feed_epic(1, "Reviews", 1), make_feed_epic(2, "Security", 2)];
+    app.board.epics = vec![
+        make_feed_epic(1, "Reviews", 1),
+        make_feed_epic(2, "Security", 2),
+    ];
     app.update(Message::EnterEpic(EpicId(2)));
     let mut s = Scenario::with_app(app);
     s.key(KeyCode::Tab);

@@ -7261,20 +7261,6 @@ fn tab_from_board_without_feed_epics_is_noop() {
         .iter()
         .any(|c| matches!(c, Command::FetchPrs(PrListKind::Review))));
 }
-
-#[test]
-fn tab_in_review_board_goes_to_security_board() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    app.handle_key(make_key(KeyCode::Tab)); // ReviewBoard → SecurityBoard
-    assert!(matches!(
-        app.board.view_mode,
-        ViewMode::SecurityBoard { .. }
-    ));
-    app.handle_key(make_key(KeyCode::Tab)); // SecurityBoard → Board
-    assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
-}
-
 #[test]
 fn esc_in_review_board_switches_back() {
     let mut app = make_app();
@@ -7282,69 +7268,6 @@ fn esc_in_review_board_switches_back() {
     app.handle_key(make_key(KeyCode::Esc)); // back
     assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
 }
-
-#[test]
-fn review_board_navigation() {
-    let mut app = make_app();
-    // Load some PRs
-    app.update(Message::PrsLoaded(
-        PrListKind::Review,
-        vec![
-            make_review_pr(1, "alice", ReviewDecision::ReviewRequired),
-            make_review_pr(2, "bob", ReviewDecision::ReviewRequired),
-            make_review_pr(3, "carol", ReviewDecision::ChangesRequested),
-        ],
-    ));
-    app.update(Message::SwitchToReviewBoard);
-    assert_eq!(app.review_selection().unwrap().column(), 0);
-
-    app.handle_key(make_key(KeyCode::Char('l'))); // move right
-    assert_eq!(app.review_selection().unwrap().column(), 1);
-
-    app.handle_key(make_key(KeyCode::Char('l'))); // move right
-    assert_eq!(app.review_selection().unwrap().column(), 2);
-
-    app.handle_key(make_key(KeyCode::Char('l'))); // move right
-    assert_eq!(app.review_selection().unwrap().column(), 3);
-
-    app.handle_key(make_key(KeyCode::Char('l'))); // clamp at 3
-    assert_eq!(app.review_selection().unwrap().column(), 3);
-}
-
-#[test]
-fn review_board_enter_toggles_detail() {
-    let mut app = make_app();
-    app.review.review.set_prs(vec![make_review_pr(
-        1,
-        "alice",
-        ReviewDecision::ReviewRequired,
-    )]);
-    app.update(Message::SwitchToReviewBoard);
-    assert!(!app.review.detail_visible);
-
-    app.handle_key(make_key(KeyCode::Enter));
-    assert!(app.review.detail_visible);
-
-    app.handle_key(make_key(KeyCode::Enter));
-    assert!(!app.review.detail_visible);
-}
-
-#[test]
-fn review_board_p_opens_browser() {
-    let mut app = make_app();
-    app.review.review.set_prs(vec![make_review_pr(
-        1,
-        "alice",
-        ReviewDecision::ReviewRequired,
-    )]);
-    app.update(Message::SwitchToReviewBoard);
-
-    let cmds = app.handle_key(make_key(KeyCode::Char('p')));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::OpenInBrowser { .. })));
-}
-
 #[test]
 fn review_board_renders_pr_titles() {
     let mut app = make_app();
@@ -8896,19 +8819,6 @@ fn handle_key_normal_tab_is_noop_without_feed_epics() {
     app.handle_key(make_key(KeyCode::Tab));
     assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
 }
-
-#[test]
-fn handle_key_review_board_tab_switches_to_security_board() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    assert!(matches!(app.board.view_mode, ViewMode::ReviewBoard { .. }));
-    app.handle_key(make_key(KeyCode::Tab)); // ReviewBoard → SecurityBoard
-    assert!(matches!(
-        app.board.view_mode,
-        ViewMode::SecurityBoard { .. }
-    ));
-}
-
 #[test]
 fn handle_key_epic_text_input_char_and_enter() {
     let mut app = make_app();
@@ -9419,58 +9329,6 @@ fn quick_dispatch_enter_selects_cursor_repo() {
     );
     assert_eq!(app.input.mode, InputMode::Normal);
 }
-
-#[test]
-fn review_board_d_dispatches_review_agent_when_path_known() {
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/home/user/Code/repo".to_string()];
-    let mut pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
-    pr.repo = "org/repo".to_string();
-    pr.head_ref = "fix-bug".to_string();
-    app.review.review.set_prs(vec![pr]);
-    app.update(Message::SwitchToReviewBoard);
-
-    let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('d')));
-    assert!(cmds.iter().any(
-        |c| matches!(c, Command::DispatchReviewAgent(req) if req.repo == "/home/user/Code/repo")
-    ));
-}
-
-#[test]
-fn review_board_d_enters_repo_input_when_path_unknown() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    let pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
-    app.review.review.set_prs(vec![pr]);
-    app.update(Message::SwitchToReviewBoard);
-
-    let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('d')));
-    assert!(cmds.is_empty());
-    assert_eq!(app.input.mode, InputMode::InputDispatchRepoPath);
-    assert!(app.input.pending_dispatch.is_some());
-}
-
-#[test]
-fn submit_dispatch_repo_path_dispatches_review_agent() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    let pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
-    app.review.review.set_prs(vec![pr]);
-    app.update(Message::SwitchToReviewBoard);
-
-    // Trigger dispatch — no known paths, enters input mode
-    app.handle_key(KeyEvent::from(KeyCode::Char('d')));
-    assert_eq!(app.input.mode, InputMode::InputDispatchRepoPath);
-
-    // Submit a repo path
-    let cmds = app.update(Message::SubmitDispatchRepoPath("/tmp".to_string()));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::DispatchReviewAgent(req) if req.repo == "/tmp")));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::SaveRepoPath(p) if p == "/tmp")));
-    assert_eq!(app.input.mode, InputMode::Normal);
-}
-
 #[test]
 fn fix_agent_dispatch_enters_repo_input_when_path_unknown() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
@@ -9507,21 +9365,6 @@ fn fix_agent_dispatch_resolves_known_path() {
         |c| matches!(c, Command::DispatchFixAgent(req) if req.repo == "/home/user/Code/my-repo")
     ));
 }
-
-#[test]
-fn cancel_dispatch_repo_path_clears_pending() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    let pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
-    app.review.review.set_prs(vec![pr]);
-    app.update(Message::SwitchToReviewBoard);
-    app.handle_key(KeyEvent::from(KeyCode::Char('d')));
-    assert_eq!(app.input.mode, InputMode::InputDispatchRepoPath);
-
-    app.update(Message::CancelInput);
-    assert_eq!(app.input.mode, InputMode::Normal);
-    assert!(app.input.pending_dispatch.is_none());
-}
-
 #[test]
 fn submit_dispatch_repo_path_dispatches_fix_agent() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
@@ -9548,75 +9391,6 @@ fn submit_dispatch_repo_path_dispatches_fix_agent() {
         .any(|c| matches!(c, Command::SaveRepoPath(p) if p == "/tmp")));
     assert_eq!(app.input.mode, InputMode::Normal);
 }
-
-#[test]
-fn dispatch_repo_path_cursor_navigation() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    app.board.repo_paths = vec!["/a".into(), "/b".into(), "/c".into()];
-    let pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
-    app.review.review.set_prs(vec![pr]);
-    app.update(Message::SwitchToReviewBoard);
-
-    // Enter dispatch repo path mode
-    app.handle_key(KeyEvent::from(KeyCode::Char('d')));
-    assert_eq!(app.input.mode, InputMode::InputDispatchRepoPath);
-    assert_eq!(app.input.repo_cursor, 0);
-
-    // Navigate down with arrow keys
-    app.handle_key(KeyEvent::from(KeyCode::Down));
-    assert_eq!(app.input.repo_cursor, 1);
-
-    // Navigate down again
-    app.handle_key(KeyEvent::from(KeyCode::Down));
-    assert_eq!(app.input.repo_cursor, 2);
-
-    // Navigate up
-    app.handle_key(KeyEvent::from(KeyCode::Up));
-    assert_eq!(app.input.repo_cursor, 1);
-}
-
-#[test]
-fn dispatch_repo_path_enter_selects_cursor_item() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    app.board.repo_paths = vec!["/tmp".into(), "/var".into()];
-    let pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
-    app.review.review.set_prs(vec![pr]);
-    app.update(Message::SwitchToReviewBoard);
-
-    // Enter dispatch repo path mode
-    app.handle_key(KeyEvent::from(KeyCode::Char('d')));
-    assert_eq!(app.input.mode, InputMode::InputDispatchRepoPath);
-
-    // Navigate to second item
-    app.handle_key(KeyEvent::from(KeyCode::Down));
-    assert_eq!(app.input.repo_cursor, 1);
-
-    // Press Enter to select
-    let cmds = app.handle_key(KeyEvent::from(KeyCode::Enter));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::DispatchReviewAgent(req) if req.repo == "/var")));
-    assert_eq!(app.input.mode, InputMode::Normal);
-}
-
-#[test]
-fn dispatch_repo_path_empty_submit_no_paths_stays_in_mode() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    let pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
-    app.review.review.set_prs(vec![pr]);
-    app.update(Message::SwitchToReviewBoard);
-
-    // Enter dispatch repo path mode (no saved paths)
-    app.handle_key(KeyEvent::from(KeyCode::Char('d')));
-    assert_eq!(app.input.mode, InputMode::InputDispatchRepoPath);
-
-    // Submit empty — should stay in mode since no paths available
-    let cmds = app.update(Message::SubmitDispatchRepoPath(String::new()));
-    assert!(cmds.is_empty());
-    // Mode should NOT have changed to Normal — user needs to type a path or cancel
-    assert_eq!(app.input.mode, InputMode::InputDispatchRepoPath);
-}
-
 #[test]
 fn review_agent_dispatched_sets_status() {
     let mut app = make_app();
@@ -9711,21 +9485,6 @@ fn review_repo_filter_hides_prs() {
     assert_eq!(app.filtered_review_prs().len(), 1);
     assert_eq!(app.filtered_review_prs()[0].repo, "org/repo-a");
 }
-
-#[test]
-fn review_repo_filter_f_opens_filter() {
-    let mut app = make_app();
-    app.review.review.set_prs(vec![make_review_pr(
-        1,
-        "alice",
-        ReviewDecision::ReviewRequired,
-    )]);
-    app.update(Message::SwitchToReviewBoard);
-
-    app.handle_key(KeyEvent::from(KeyCode::Char('f')));
-    assert_eq!(app.input.mode, InputMode::ReviewRepoFilter);
-}
-
 #[test]
 fn review_repo_filter_esc_closes() {
     let mut app = make_app();
@@ -9879,50 +9638,6 @@ fn bot_prs_loaded_updates_state() {
     assert_eq!(app.review.bot.prs[0].number, 101);
     assert!(!app.review_bot_prs_loading());
 }
-
-#[test]
-fn review_board_key_1_switches_to_reviewer() {
-    let mut app = make_review_board_app();
-    // Switch to Dependabot first
-    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Dependabot));
-    app.handle_key(make_key(KeyCode::Char('1')));
-    assert!(matches!(
-        app.board.view_mode,
-        ViewMode::ReviewBoard {
-            mode: ReviewBoardMode::Reviewer,
-            ..
-        }
-    ));
-}
-
-#[test]
-fn review_board_key_2_switches_to_dependabot() {
-    let mut app = make_review_board_app();
-    app.handle_key(make_key(KeyCode::Char('2')));
-    assert!(matches!(
-        app.board.view_mode,
-        ViewMode::ReviewBoard {
-            mode: ReviewBoardMode::Dependabot,
-            ..
-        }
-    ));
-}
-
-#[test]
-fn review_board_backtab_does_nothing() {
-    let mut app = make_review_board_app();
-    let initial_mode = match &app.board.view_mode {
-        ViewMode::ReviewBoard { mode, .. } => *mode,
-        _ => panic!("not review board"),
-    };
-    app.handle_key(make_key(KeyCode::BackTab));
-    let after_mode = match &app.board.view_mode {
-        ViewMode::ReviewBoard { mode, .. } => *mode,
-        _ => panic!("not review board"),
-    };
-    assert_eq!(initial_mode, after_mode);
-}
-
 #[test]
 fn switch_to_dependabot_fetches_bot_prs() {
     let mut app = make_app();
@@ -11916,14 +11631,6 @@ fn make_security_board_app() -> App {
     ]));
     app
 }
-
-#[test]
-fn security_board_q_quits() {
-    let mut app = make_security_board_app();
-    app.handle_key(make_key(KeyCode::Char('q')));
-    assert_eq!(app.input.mode, InputMode::ConfirmQuit);
-}
-
 #[test]
 fn security_board_tab_switches_to_task_board() {
     let mut app = make_security_board_app();
@@ -11937,100 +11644,6 @@ fn security_board_esc_switches_to_task_board() {
     app.handle_key(make_key(KeyCode::Esc));
     assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
 }
-
-#[test]
-fn security_board_h_navigates_column_left() {
-    let mut app = make_security_board_app();
-    // Move to column 1 first, then h should go back to 0
-    if let Some(sel) = app.security_selection_mut() {
-        sel.set_column(1);
-    }
-    app.handle_key(make_key(KeyCode::Char('h')));
-    assert_eq!(app.security_selection().unwrap().column(), 0);
-}
-
-#[test]
-fn security_board_l_navigates_column_right() {
-    let mut app = make_security_board_app();
-    assert_eq!(app.security_selection().unwrap().column(), 0);
-    app.handle_key(make_key(KeyCode::Char('l')));
-    assert_eq!(app.security_selection().unwrap().column(), 1);
-}
-
-#[test]
-fn security_board_left_arrow_navigates_column() {
-    let mut app = make_security_board_app();
-    if let Some(sel) = app.security_selection_mut() {
-        sel.set_column(1);
-    }
-    app.handle_key(make_key(KeyCode::Left));
-    assert_eq!(app.security_selection().unwrap().column(), 0);
-}
-
-#[test]
-fn security_board_right_arrow_navigates_column() {
-    let mut app = make_security_board_app();
-    app.handle_key(make_key(KeyCode::Right));
-    assert_eq!(app.security_selection().unwrap().column(), 1);
-}
-
-#[test]
-fn security_board_column_clamps_at_zero() {
-    let mut app = make_security_board_app();
-    assert_eq!(app.security_selection().unwrap().column(), 0);
-    app.handle_key(make_key(KeyCode::Char('h')));
-    assert_eq!(app.security_selection().unwrap().column(), 0);
-}
-
-#[test]
-fn security_board_column_clamps_at_max() {
-    let mut app = make_security_board_app();
-    let max_col = crate::models::SecurityWorkflowState::COLUMN_COUNT - 1;
-    if let Some(sel) = app.security_selection_mut() {
-        sel.set_column(max_col);
-    }
-    app.handle_key(make_key(KeyCode::Char('l')));
-    assert_eq!(app.security_selection().unwrap().column(), max_col);
-}
-
-#[test]
-fn security_board_j_navigates_row_down() {
-    let mut app = make_security_board_app();
-    // Column 0 (Critical) has 2 alerts
-    assert_eq!(app.security_selection().unwrap().row(0), 0);
-    app.handle_key(make_key(KeyCode::Char('j')));
-    assert_eq!(app.security_selection().unwrap().row(0), 1);
-}
-
-#[test]
-fn security_board_k_navigates_row_up() {
-    let mut app = make_security_board_app();
-    if let Some(sel) = app.security_selection_mut() {
-        sel.set_row(0, 1);
-    }
-    app.handle_key(make_key(KeyCode::Char('k')));
-    assert_eq!(app.security_selection().unwrap().row(0), 0);
-}
-
-#[test]
-fn security_board_enter_toggles_detail() {
-    let mut app = make_security_board_app();
-    assert!(!app.security_detail_visible());
-    app.handle_key(make_key(KeyCode::Enter));
-    assert!(app.security_detail_visible());
-    app.handle_key(make_key(KeyCode::Enter));
-    assert!(!app.security_detail_visible());
-}
-
-#[test]
-fn security_board_p_opens_alert_in_browser() {
-    let mut app = make_security_board_app();
-    let cmds = app.handle_key(make_key(KeyCode::Char('p')));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::OpenInBrowser { url } if url.contains("security"))));
-}
-
 #[test]
 fn security_board_p_with_no_alert_is_noop() {
     let mut app = make_app();
@@ -12039,27 +11652,6 @@ fn security_board_p_with_no_alert_is_noop() {
     let cmds = app.handle_key(make_key(KeyCode::Char('p')));
     assert!(cmds.is_empty());
 }
-
-#[test]
-fn security_board_d_dispatches_fix_agent() {
-    let mut app = make_security_board_app();
-    // Set repo_paths so resolve_repo_path matches "org/alpha"
-    app.board.repo_paths = vec!["/path/to/alpha".to_string()];
-    // Move to Critical column row 0, which has alert from "org/alpha"
-    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::DispatchFixAgent(..))));
-}
-
-#[test]
-fn security_board_d_falls_back_to_repo_input_when_no_match() {
-    let mut app = make_security_board_app();
-    // No matching repo path — should prompt for repo path input
-    app.handle_key(make_key(KeyCode::Char('d')));
-    assert_eq!(app.input.mode, InputMode::InputDispatchRepoPath);
-}
-
 #[test]
 fn security_board_d_with_no_alert_is_noop() {
     let mut app = make_app();
@@ -12067,21 +11659,6 @@ fn security_board_d_with_no_alert_is_noop() {
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
 }
-
-#[test]
-fn security_board_f_opens_repo_filter() {
-    let mut app = make_security_board_app();
-    app.handle_key(make_key(KeyCode::Char('f')));
-    assert_eq!(app.input.mode, InputMode::SecurityRepoFilter);
-}
-
-#[test]
-fn security_board_question_mark_toggles_help() {
-    let mut app = make_security_board_app();
-    app.handle_key(make_key(KeyCode::Char('?')));
-    assert_eq!(app.input.mode, InputMode::Help);
-}
-
 #[test]
 fn security_board_unknown_key_is_noop() {
     let mut app = make_security_board_app();
@@ -12109,35 +11686,6 @@ fn security_repo_filter_esc_closes() {
     app.handle_key(make_key(KeyCode::Esc));
     assert_eq!(app.input.mode, InputMode::Normal);
 }
-
-#[test]
-fn security_repo_filter_tab_toggles_mode() {
-    let mut app = make_security_board_app();
-    app.handle_key(make_key(KeyCode::Char('f'))); // Enter filter
-    assert_eq!(app.input.mode, InputMode::SecurityRepoFilter);
-    app.handle_key(make_key(KeyCode::Tab));
-    // Mode should have toggled (include -> exclude or vice versa)
-    assert_eq!(app.input.mode, InputMode::SecurityRepoFilter);
-}
-
-#[test]
-fn security_repo_filter_a_toggles_all() {
-    let mut app = make_security_board_app();
-    app.handle_key(make_key(KeyCode::Char('f')));
-    app.handle_key(make_key(KeyCode::Char('a')));
-    // After toggling all, the filter should have entries
-    assert_eq!(app.input.mode, InputMode::SecurityRepoFilter);
-}
-
-#[test]
-fn security_repo_filter_digit_toggles_repo() {
-    let mut app = make_security_board_app();
-    app.handle_key(make_key(KeyCode::Char('f')));
-    // Press '1' to toggle the first repo
-    app.handle_key(make_key(KeyCode::Char('1')));
-    assert_eq!(app.input.mode, InputMode::SecurityRepoFilter);
-}
-
 // ---------------------------------------------------------------------------
 // Review board input handler tests
 // ---------------------------------------------------------------------------
@@ -12156,114 +11704,12 @@ fn make_review_board_app() -> App {
     ));
     app
 }
-
-#[test]
-fn review_board_q_quits() {
-    let mut app = make_review_board_app();
-    app.handle_key(make_key(KeyCode::Char('q')));
-    assert_eq!(app.input.mode, InputMode::ConfirmQuit);
-}
-
-#[test]
-fn review_board_tab_switches_to_security_board() {
-    let mut app = make_review_board_app();
-    app.handle_key(make_key(KeyCode::Tab));
-    assert!(matches!(
-        app.board.view_mode,
-        ViewMode::SecurityBoard { .. }
-    ));
-}
-
 #[test]
 fn review_board_esc_switches_to_task_board() {
     let mut app = make_review_board_app();
     app.handle_key(make_key(KeyCode::Esc));
     assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
 }
-
-#[test]
-fn review_board_h_navigates_column_left() {
-    let mut app = make_review_board_app();
-    if let Some(sel) = app.review_selection_mut() {
-        sel.set_column(1);
-    }
-    app.handle_key(make_key(KeyCode::Char('h')));
-    assert_eq!(app.review_selection().unwrap().column(), 0);
-}
-
-#[test]
-fn review_board_l_navigates_column_right() {
-    let mut app = make_review_board_app();
-    assert_eq!(app.review_selection().unwrap().column(), 0);
-    app.handle_key(make_key(KeyCode::Char('l')));
-    assert_eq!(app.review_selection().unwrap().column(), 1);
-}
-
-#[test]
-fn review_board_left_right_arrows_navigate_columns() {
-    let mut app = make_review_board_app();
-    app.handle_key(make_key(KeyCode::Right));
-    assert_eq!(app.review_selection().unwrap().column(), 1);
-    app.handle_key(make_key(KeyCode::Left));
-    assert_eq!(app.review_selection().unwrap().column(), 0);
-}
-
-#[test]
-fn review_board_column_clamps_at_zero() {
-    let mut app = make_review_board_app();
-    assert_eq!(app.review_selection().unwrap().column(), 0);
-    app.handle_key(make_key(KeyCode::Char('h')));
-    assert_eq!(app.review_selection().unwrap().column(), 0);
-}
-
-#[test]
-fn review_board_column_clamps_at_max() {
-    let mut app = make_review_board_app();
-    let max_col = ReviewDecision::COLUMN_COUNT - 1;
-    if let Some(sel) = app.review_selection_mut() {
-        sel.set_column(max_col);
-    }
-    app.handle_key(make_key(KeyCode::Char('l')));
-    assert_eq!(app.review_selection().unwrap().column(), max_col);
-}
-
-#[test]
-fn review_board_j_navigates_row_down() {
-    let mut app = make_review_board_app();
-    // Column 0 (ReviewRequired) has 2 PRs
-    assert_eq!(app.review_selection().unwrap().row(0), 0);
-    app.handle_key(make_key(KeyCode::Char('j')));
-    assert_eq!(app.review_selection().unwrap().row(0), 1);
-}
-
-#[test]
-fn review_board_k_navigates_row_up() {
-    let mut app = make_review_board_app();
-    if let Some(sel) = app.review_selection_mut() {
-        sel.set_row(0, 1);
-    }
-    app.handle_key(make_key(KeyCode::Char('k')));
-    assert_eq!(app.review_selection().unwrap().row(0), 0);
-}
-
-#[test]
-fn review_board_down_up_arrows_navigate_rows() {
-    let mut app = make_review_board_app();
-    app.handle_key(make_key(KeyCode::Down));
-    assert_eq!(app.review_selection().unwrap().row(0), 1);
-    app.handle_key(make_key(KeyCode::Up));
-    assert_eq!(app.review_selection().unwrap().row(0), 0);
-}
-
-#[test]
-fn review_board_p_opens_pr_in_browser() {
-    let mut app = make_review_board_app();
-    let cmds = app.handle_key(make_key(KeyCode::Char('p')));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::OpenInBrowser { url } if url.contains("pull"))));
-}
-
 #[test]
 fn review_board_p_with_no_prs_is_noop() {
     let mut app = make_app();
@@ -12271,33 +11717,6 @@ fn review_board_p_with_no_prs_is_noop() {
     let cmds = app.handle_key(make_key(KeyCode::Char('p')));
     assert!(cmds.is_empty());
 }
-
-#[test]
-fn review_board_f_opens_repo_filter() {
-    let mut app = make_review_board_app();
-    app.handle_key(make_key(KeyCode::Char('f')));
-    assert_eq!(app.input.mode, InputMode::ReviewRepoFilter);
-}
-
-#[test]
-fn review_board_d_dispatches_review_agent() {
-    let mut app = make_review_board_app();
-    // Set repo_paths so resolve_repo_path matches "acme/app"
-    app.board.repo_paths = vec!["/path/to/app".to_string()];
-    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::DispatchReviewAgent(_))));
-}
-
-#[test]
-fn review_board_d_falls_back_to_repo_input_when_no_match() {
-    let mut app = make_review_board_app();
-    // No matching repo path
-    app.handle_key(make_key(KeyCode::Char('d')));
-    assert_eq!(app.input.mode, InputMode::InputDispatchRepoPath);
-}
-
 #[test]
 fn review_board_d_with_no_prs_is_noop() {
     let mut app = make_app();
@@ -12305,54 +11724,6 @@ fn review_board_d_with_no_prs_is_noop() {
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
 }
-
-#[test]
-fn review_board_question_mark_toggles_help() {
-    let mut app = make_review_board_app();
-    app.handle_key(make_key(KeyCode::Char('?')));
-    assert_eq!(app.input.mode, InputMode::Help);
-}
-
-#[test]
-fn review_board_e_edits_github_queries() {
-    let mut app = make_review_board_app();
-    let cmds = app.handle_key(make_key(KeyCode::Char('e')));
-    assert!(cmds.iter().any(|c| matches!(
-        c,
-        Command::PopOutEditor(EditKind::GithubQueries(PrListKind::Review))
-    )));
-}
-
-#[test]
-fn e_in_review_board_dependabot_emits_edit_bot_queries() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    app.board.view_mode = ViewMode::ReviewBoard {
-        mode: ReviewBoardMode::Dependabot,
-        selection: ReviewBoardSelection::default(),
-        saved_board: BoardSelection::default(),
-    };
-    let cmds = app.handle_key(make_key(KeyCode::Char('e')));
-    assert!(cmds.iter().any(|c| matches!(
-        c,
-        Command::PopOutEditor(EditKind::GithubQueries(PrListKind::Bot))
-    )));
-}
-
-#[test]
-fn e_in_security_alerts_emits_edit_security_queries() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    app.board.view_mode = ViewMode::SecurityBoard {
-        mode: SecurityBoardMode::Alerts,
-        selection: SecurityBoardSelection::default(),
-        dependabot_selection: ReviewBoardSelection::default(),
-        saved_board: BoardSelection::default(),
-    };
-    let cmds = app.handle_key(make_key(KeyCode::Char('e')));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::PopOutEditor(EditKind::SecurityQueries))));
-}
-
 #[test]
 fn refresh_review_prs_returns_fetch_command() {
     let mut app = make_review_board_app();
@@ -12361,17 +11732,6 @@ fn refresh_review_prs_returns_fetch_command() {
         .iter()
         .any(|c| matches!(c, Command::FetchPrs(PrListKind::Review))));
 }
-
-#[test]
-fn refresh_review_prs_in_dependabot_mode_returns_fetch_bot_prs() {
-    let mut app = make_review_board_app();
-    app.handle_key(make_key(KeyCode::Char('2'))); // switch to Dependabot mode
-    let cmds = app.update(Message::RefreshReviewPrs);
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::FetchPrs(PrListKind::Bot))));
-}
-
 #[test]
 fn refresh_bot_prs_returns_fetch_bot_prs() {
     let mut app = make_review_board_app();
@@ -12560,21 +11920,6 @@ fn review_board_unknown_key_is_noop() {
     let cmds = app.handle_key(make_key(KeyCode::Char('z')));
     assert!(cmds.is_empty());
 }
-
-#[test]
-fn review_board_key_2_switches_to_dependabot_mode_via_handle_key() {
-    let mut app = make_review_board_app();
-    // Key '2' now switches to Dependabot mode
-    app.handle_key(make_key(KeyCode::Char('2')));
-    assert!(matches!(
-        app.board.view_mode,
-        ViewMode::ReviewBoard {
-            mode: ReviewBoardMode::Dependabot,
-            ..
-        }
-    ));
-}
-
 #[test]
 fn review_board_d_capital_is_noop_in_all_modes() {
     let mut app = make_review_board_app();
@@ -12596,32 +11941,6 @@ fn review_repo_filter_enter_closes() {
     app.handle_key(make_key(KeyCode::Enter));
     assert_eq!(app.input.mode, InputMode::Normal);
 }
-
-#[test]
-fn review_repo_filter_tab_toggles_mode() {
-    let mut app = make_review_board_app();
-    app.handle_key(make_key(KeyCode::Char('f'))); // Enter filter
-    assert_eq!(app.input.mode, InputMode::ReviewRepoFilter);
-    app.handle_key(make_key(KeyCode::Tab));
-    assert_eq!(app.input.mode, InputMode::ReviewRepoFilter);
-}
-
-#[test]
-fn review_repo_filter_a_toggles_all() {
-    let mut app = make_review_board_app();
-    app.handle_key(make_key(KeyCode::Char('f')));
-    app.handle_key(make_key(KeyCode::Char('a')));
-    assert_eq!(app.input.mode, InputMode::ReviewRepoFilter);
-}
-
-#[test]
-fn review_repo_filter_digit_toggles_repo() {
-    let mut app = make_review_board_app();
-    app.handle_key(make_key(KeyCode::Char('f')));
-    app.handle_key(make_key(KeyCode::Char('1')));
-    assert_eq!(app.input.mode, InputMode::ReviewRepoFilter);
-}
-
 // ---------------------------------------------------------------------------
 // Confirm epic wrap-up input handler tests
 // ---------------------------------------------------------------------------
@@ -12744,29 +12063,6 @@ fn archive_q_quits() {
     app.handle_key(make_key(KeyCode::Char('q')));
     assert_eq!(app.input.mode, InputMode::ConfirmQuit);
 }
-
-#[test]
-fn g_on_review_board_jumps_to_agent() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-
-    let pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
-    app.review.review_agents.insert(
-        crate::models::PrRef::new("acme/app".to_string(), 42),
-        super::types::ReviewAgentHandle {
-            tmux_window: "dispatch:review-42".to_string(),
-            worktree: "/tmp/wt".to_string(),
-            status: crate::models::ReviewAgentStatus::Reviewing,
-        },
-    );
-
-    let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('g')));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::JumpToTmux { window } if window == "dispatch:review-42")));
-}
-
 #[test]
 fn g_on_review_board_without_agent_shows_status() {
     let mut app = make_app();
@@ -12778,48 +12074,6 @@ fn g_on_review_board_without_agent_shows_status() {
     let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('g')));
     assert!(cmds.is_empty()); // StatusInfo is handled inline via self.update(), returns empty
 }
-
-#[test]
-fn g_on_security_board_jumps_to_agent() {
-    let mut app = make_app();
-    app.update(Message::SwitchToSecurityBoard);
-    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Alerts));
-
-    let alert = make_security_alert(1, "acme/app", crate::models::AlertSeverity::Critical);
-    app.update(Message::SecurityAlertsLoaded(vec![alert]));
-    app.security.fix_agents.insert(
-        super::types::FixDispatchKey::new(
-            "acme/app".to_string(),
-            1,
-            crate::models::AlertKind::Dependabot,
-        ),
-        super::types::FixAgentHandle {
-            tmux_window: "dispatch:fix-1".to_string(),
-            worktree: "/tmp/fix-wt".to_string(),
-            status: crate::models::ReviewAgentStatus::Reviewing,
-        },
-    );
-    // Put alert in Ongoing column (col 1) via workflow state
-    let key = super::types::WorkflowKey::new(
-        "acme/app".to_string(),
-        1,
-        crate::models::WorkflowItemKind::DependabotAlert,
-    );
-    app.security
-        .security_workflow_states
-        .insert(key, (crate::models::SecurityWorkflowState::Ongoing, None));
-
-    // Alert is now in Ongoing column (col 1); navigate there
-    if let Some(sel) = app.security_selection_mut() {
-        sel.set_column(1);
-    }
-
-    let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('g')));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::JumpToTmux { window } if window == "dispatch:fix-1")));
-}
-
 #[test]
 fn g_on_security_board_without_agent_shows_status() {
     let mut app = make_app();
@@ -12972,35 +12226,6 @@ fn review_agent_dispatched_sets_agent_status_reviewing() {
 // ---------------------------------------------------------------------------
 // Review/Security board key binding tests for r and T
 // ---------------------------------------------------------------------------
-
-#[test]
-fn review_board_t_on_agent_emits_detach() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    let pr = make_review_pr_for_repo(
-        42,
-        "alice",
-        crate::models::ReviewDecision::ReviewRequired,
-        "acme/app",
-    );
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
-    app.review.review_agents.insert(
-        crate::models::PrRef::new("acme/app".to_string(), 42),
-        super::types::ReviewAgentHandle {
-            tmux_window: "dispatch:review-42".to_string(),
-            worktree: "/tmp/wt".to_string(),
-            status: crate::models::ReviewAgentStatus::Reviewing,
-        },
-    );
-
-    let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('T')));
-    // DetachReviewAgent is a Message, not a Command — so it's handled inline
-    // and should produce KillTmuxWindow + UpdateAgentStatus commands
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::KillTmuxWindow { .. })));
-}
-
 #[test]
 fn review_board_t_without_agent_does_nothing() {
     let mut app = make_app();
@@ -14597,168 +13822,18 @@ fn handle_key_security_repo_filter_unknown_key_is_noop() {
     let cmds = app.handle_key(make_key(KeyCode::Char('z')));
     assert!(cmds.is_empty());
 }
-
-// =====================================================================
-// Input handler coverage: security board gap tests (g, T, r)
-// =====================================================================
-
-#[test]
-fn security_board_g_jumps_to_tmux_window() {
-    let mut app = make_security_board_app();
-    // Give first alert an agent handle in the fix_agents map
-    app.security.fix_agents.insert(
-        super::types::FixDispatchKey::new(
-            "org/alpha".to_string(),
-            1,
-            crate::models::AlertKind::Dependabot,
-        ),
-        super::types::FixAgentHandle {
-            tmux_window: "sec:alert-1".to_string(),
-            worktree: "/tmp/fix-wt".to_string(),
-            status: crate::models::ReviewAgentStatus::Reviewing,
-        },
-    );
-    // Put alert in Ongoing column (col 1) via workflow state
-    let key = super::types::WorkflowKey::new(
-        "org/alpha".to_string(),
-        1,
-        crate::models::WorkflowItemKind::DependabotAlert,
-    );
-    app.security
-        .security_workflow_states
-        .insert(key, (crate::models::SecurityWorkflowState::Ongoing, None));
-
-    // Alert is now in Ongoing column (col 1); navigate there
-    if let Some(sel) = app.security_selection_mut() {
-        sel.set_column(1);
-    }
-
-    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::JumpToTmux { window } if window == "sec:alert-1")));
-}
-
-#[test]
-fn security_board_g_no_window_shows_status() {
-    let mut app = make_security_board_app();
-    // Alerts have no tmux window by default
-    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
-    assert!(cmds.is_empty());
-    assert!(app
-        .status
-        .message
-        .as_deref()
-        .unwrap_or("")
-        .contains("No active session"));
-}
-
-#[test]
-fn security_board_capital_t_detaches_agent() {
-    let mut app = make_security_board_app();
-    app.security.fix_agents.insert(
-        super::types::FixDispatchKey::new(
-            "org/alpha".to_string(),
-            1,
-            crate::models::AlertKind::Dependabot,
-        ),
-        super::types::FixAgentHandle {
-            tmux_window: "sec:alert-1".to_string(),
-            worktree: "/tmp/fix-wt".to_string(),
-            status: crate::models::ReviewAgentStatus::Reviewing,
-        },
-    );
-    // Put alert in Ongoing column (col 1) via workflow state
-    let key = super::types::WorkflowKey::new(
-        "org/alpha".to_string(),
-        1,
-        crate::models::WorkflowItemKind::DependabotAlert,
-    );
-    app.security
-        .security_workflow_states
-        .insert(key, (crate::models::SecurityWorkflowState::Ongoing, None));
-
-    // Alert is now in Ongoing column (col 1); navigate there
-    if let Some(sel) = app.security_selection_mut() {
-        sel.set_column(1);
-    }
-
-    let cmds = app.handle_key(make_key(KeyCode::Char('T')));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::UpdateAgentStatus { .. })));
-}
-
 #[test]
 fn security_board_capital_t_no_window_is_noop() {
     let mut app = make_security_board_app();
     let cmds = app.handle_key(make_key(KeyCode::Char('T')));
     assert!(cmds.is_empty());
 }
-
-#[test]
-fn review_board_g_jumps_to_tmux_window() {
-    let mut app = make_review_board_app();
-    app.review.review_agents.insert(
-        crate::models::PrRef::new("acme/app".to_string(), 1),
-        super::types::ReviewAgentHandle {
-            tmux_window: "review:pr-1".to_string(),
-            worktree: "/tmp/wt".to_string(),
-            status: crate::models::ReviewAgentStatus::Reviewing,
-        },
-    );
-    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::JumpToTmux { window } if window == "review:pr-1")));
-}
-
-#[test]
-fn review_board_g_no_window_shows_status() {
-    let mut app = make_review_board_app();
-    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
-    assert!(cmds.is_empty());
-    assert!(app
-        .status
-        .message
-        .as_deref()
-        .unwrap_or("")
-        .contains("No active session"));
-}
-
-#[test]
-fn review_board_capital_t_detaches_agent() {
-    let mut app = make_review_board_app();
-    app.review.review_agents.insert(
-        crate::models::PrRef::new("acme/app".to_string(), 1),
-        super::types::ReviewAgentHandle {
-            tmux_window: "review:pr-1".to_string(),
-            worktree: "/tmp/wt".to_string(),
-            status: crate::models::ReviewAgentStatus::Reviewing,
-        },
-    );
-    let cmds = app.handle_key(make_key(KeyCode::Char('T')));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::UpdateAgentStatus { .. })));
-}
-
 #[test]
 fn review_board_capital_t_no_window_is_noop() {
     let mut app = make_review_board_app();
     let cmds = app.handle_key(make_key(KeyCode::Char('T')));
     assert!(cmds.is_empty());
 }
-
-#[test]
-fn review_board_enter_toggles_detail_via_handle_key() {
-    let mut app = make_review_board_app();
-    app.handle_key(make_key(KeyCode::Enter));
-    assert!(app.review.detail_visible);
-    app.handle_key(make_key(KeyCode::Enter));
-    assert!(!app.review.detail_visible);
-}
-
 // =====================================================================
 // Input handler coverage: tag input mode completeness
 // =====================================================================
@@ -15028,24 +14103,6 @@ fn handle_key_normal_board_unknown_key_is_noop() {
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::Normal);
 }
-
-/// In Normal mode on the ReviewBoard view, keys route to the review board handler.
-#[test]
-fn handle_key_normal_review_board_routes_correctly() {
-    let mut app = make_app();
-    app.board.view_mode = ViewMode::ReviewBoard {
-        mode: ReviewBoardMode::Reviewer,
-        selection: ReviewBoardSelection::new(),
-        saved_board: BoardSelection::new(),
-    };
-    // Tab should switch to security board (may emit refresh commands)
-    app.handle_key(make_key(KeyCode::Tab));
-    assert!(matches!(
-        app.board.view_mode,
-        ViewMode::SecurityBoard { .. }
-    ));
-}
-
 /// In Normal mode on the SecurityBoard view, keys route to the security board handler.
 #[test]
 fn handle_key_normal_security_board_routes_correctly() {
@@ -17136,67 +16193,6 @@ fn fix_agents_map_survives_alert_refresh() {
     );
     assert_eq!(app.security.fix_agents[&key].tmux_window, "fix-win-5");
 }
-
-// == r key: always refresh from GitHub ==
-
-#[test]
-fn review_board_r_refreshes_when_no_pr_selected() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    app.update(Message::SwitchToReviewBoard);
-
-    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
-    assert!(
-        cmds.iter().any(|c| matches!(c, Command::FetchPrs(_))),
-        "r with no PR selected should still trigger FetchPrs"
-    );
-}
-
-#[test]
-fn review_board_r_refreshes_when_pr_selected_no_agent() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    let pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
-    app.review.review.set_prs(vec![pr]);
-    app.update(Message::SwitchToReviewBoard);
-
-    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
-    assert!(
-        cmds.iter().any(|c| matches!(c, Command::FetchPrs(_))),
-        "r with PR selected but no agent should trigger FetchPrs"
-    );
-    assert!(
-        !cmds.iter().any(|c| matches!(c, Command::ReReview { .. })),
-        "r must not emit ReReview"
-    );
-}
-
-#[test]
-fn review_board_r_refreshes_even_when_agent_idle() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    let pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
-    app.review.review.set_prs(vec![pr]);
-    app.update(Message::SwitchToReviewBoard);
-
-    let key = crate::models::PrRef::new("acme/app".to_string(), 42);
-    app.review.review_agents.insert(
-        key,
-        super::types::ReviewAgentHandle {
-            tmux_window: "review:pr-42".to_string(),
-            worktree: "/repo/.worktrees/review-42".to_string(),
-            status: crate::models::ReviewAgentStatus::Idle,
-        },
-    );
-
-    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
-    assert!(
-        cmds.iter().any(|c| matches!(c, Command::FetchPrs(_))),
-        "r with idle agent should trigger FetchPrs, not ReReview"
-    );
-    assert!(
-        !cmds.iter().any(|c| matches!(c, Command::ReReview { .. })),
-        "r must not emit ReReview even when agent is idle"
-    );
-}
-
 #[test]
 fn review_board_reviewing_agent_shows_circle_badge() {
     use super::types::WorkflowKey;
@@ -17330,25 +16326,6 @@ fn review_board_idle_agent_shows_open_circle_badge() {
         "expected ○ (U+25CB) for Idle agent"
     );
 }
-
-#[test]
-fn security_board_r_refreshes_security_alerts_in_alerts_mode() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    app.update(Message::SwitchToSecurityBoard);
-    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Alerts));
-
-    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
-    assert!(
-        cmds.iter()
-            .any(|c| matches!(c, Command::FetchSecurityAlerts)),
-        "r in Alerts mode should emit FetchSecurityAlerts"
-    );
-    assert!(
-        !cmds.iter().any(|c| matches!(c, Command::ReReview { .. })),
-        "r in Alerts mode must not emit ReReview"
-    );
-}
-
 // == refresh_status: text and color helper ==
 
 #[test]
@@ -17737,49 +16714,6 @@ fn make_dependabot_app_with_pr(
     // PRs default to Backlog (col 0) — stay there to select the PR.
     (app, url)
 }
-
-#[test]
-fn review_approve_reviewer_mode_review_required_enters_confirm() {
-    let (mut app, _url) = make_reviewer_app_with_pr(
-        ReviewDecision::ReviewRequired,
-        crate::models::CiStatus::None,
-    );
-    app.handle_key(make_key(KeyCode::Char('a')));
-    assert!(
-        matches!(app.input.mode, InputMode::ConfirmApproveReviewPr(_)),
-        "expected ConfirmApproveReviewPr, got {:?}",
-        app.input.mode
-    );
-}
-
-#[test]
-fn review_approve_reviewer_mode_waiting_for_response_enters_confirm() {
-    let (mut app, _url) = make_reviewer_app_with_pr(
-        ReviewDecision::WaitingForResponse,
-        crate::models::CiStatus::None,
-    );
-    app.handle_key(make_key(KeyCode::Char('a')));
-    assert!(matches!(
-        app.input.mode,
-        InputMode::ConfirmApproveReviewPr(_)
-    ));
-}
-
-#[test]
-fn review_approve_reviewer_mode_already_approved_is_blocked() {
-    let (mut app, _url) =
-        make_reviewer_app_with_pr(ReviewDecision::Approved, crate::models::CiStatus::None);
-    app.handle_key(make_key(KeyCode::Char('a')));
-    assert!(
-        matches!(app.input.mode, InputMode::Normal),
-        "approve should be blocked when PR is already approved"
-    );
-    assert!(
-        app.status.message.is_some(),
-        "should show a status message when approve is blocked"
-    );
-}
-
 #[test]
 fn review_approve_dependabot_mode_is_noop() {
     let (mut app, _url) = make_dependabot_app_with_pr(
@@ -17792,96 +16726,6 @@ fn review_approve_dependabot_mode_is_noop() {
         "approve key should do nothing in dependabot mode (not reviewer)"
     );
 }
-
-#[test]
-fn review_approve_confirm_y_emits_approve_command() {
-    let (mut app, url) = make_reviewer_app_with_pr(
-        ReviewDecision::ReviewRequired,
-        crate::models::CiStatus::None,
-    );
-    app.handle_key(make_key(KeyCode::Char('a')));
-    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
-    assert!(
-        cmds.iter()
-            .any(|c| matches!(c, Command::ApproveReviewPr(u) if u == &url)),
-        "y should emit ApproveReviewPr command"
-    );
-    assert!(
-        matches!(app.input.mode, InputMode::Normal),
-        "mode should reset to Normal after confirm"
-    );
-}
-
-#[test]
-fn review_approve_confirm_n_cancels() {
-    let (mut app, _url) = make_reviewer_app_with_pr(
-        ReviewDecision::ReviewRequired,
-        crate::models::CiStatus::None,
-    );
-    app.handle_key(make_key(KeyCode::Char('a')));
-    app.handle_key(make_key(KeyCode::Char('n')));
-    assert!(
-        matches!(app.input.mode, InputMode::Normal),
-        "n should cancel and reset mode"
-    );
-}
-
-#[test]
-fn review_merge_reviewer_mode_approved_ci_success_enters_confirm() {
-    use crate::models::{ReviewWorkflowState, ReviewWorkflowSubState, WorkflowItemKind};
-    use crate::tui::types::WorkflowKey;
-
-    let (mut app, _url) =
-        make_reviewer_app_with_pr(ReviewDecision::Approved, crate::models::CiStatus::Success);
-    // ctrl+m only merges when ReadyToMerge sub_state is set
-    let key = WorkflowKey::new("acme/app".into(), 42, WorkflowItemKind::ReviewerPr);
-    app.review.review_workflow_states.insert(
-        key,
-        (
-            ReviewWorkflowState::ActionRequired,
-            Some(ReviewWorkflowSubState::ReadyToMerge),
-        ),
-    );
-    // PR moves to ActionRequired (col 2) — navigate cursor there
-    if let Some(sel) = app.review_selection_mut() {
-        sel.set_column(2);
-        sel.set_row(2, 0);
-    }
-    app.handle_key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::CONTROL));
-    assert!(
-        matches!(app.input.mode, InputMode::ConfirmMergeReviewPr(_)),
-        "ctrl+m should enter confirm mode when Approved + CI success + ReadyToMerge"
-    );
-}
-
-#[test]
-fn review_merge_dependabot_mode_approved_ci_none_enters_confirm() {
-    use crate::models::{ReviewWorkflowState, ReviewWorkflowSubState, WorkflowItemKind};
-    use crate::tui::types::WorkflowKey;
-
-    let (mut app, _url) =
-        make_dependabot_app_with_pr(ReviewDecision::Approved, crate::models::CiStatus::None);
-    // ctrl+m only merges when ReadyToMerge sub_state is set
-    let key = WorkflowKey::new("acme/app".into(), 42, WorkflowItemKind::DependabotPr);
-    app.review.review_workflow_states.insert(
-        key,
-        (
-            ReviewWorkflowState::ActionRequired,
-            Some(ReviewWorkflowSubState::ReadyToMerge),
-        ),
-    );
-    // PR moves to ActionRequired (col 2) — navigate cursor there
-    if let Some(sel) = app.review_selection_mut() {
-        sel.set_column(2);
-        sel.set_row(2, 0);
-    }
-    app.handle_key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::CONTROL));
-    assert!(
-        matches!(app.input.mode, InputMode::ConfirmMergeReviewPr(_)),
-        "ctrl+m should enter confirm mode in dependabot mode when Approved + ReadyToMerge"
-    );
-}
-
 #[test]
 fn review_merge_blocked_when_not_ready_to_merge() {
     // ctrl+m does nothing when ReadyToMerge sub_state is not set
@@ -17896,62 +16740,6 @@ fn review_merge_blocked_when_not_ready_to_merge() {
     );
     assert!(cmds.is_empty());
 }
-
-#[test]
-fn review_merge_confirm_y_emits_merge_command() {
-    use crate::models::{ReviewWorkflowState, ReviewWorkflowSubState, WorkflowItemKind};
-    use crate::tui::types::WorkflowKey;
-
-    let (mut app, url) =
-        make_reviewer_app_with_pr(ReviewDecision::Approved, crate::models::CiStatus::Success);
-    let key = WorkflowKey::new("acme/app".into(), 42, WorkflowItemKind::ReviewerPr);
-    app.review.review_workflow_states.insert(
-        key,
-        (
-            ReviewWorkflowState::ActionRequired,
-            Some(ReviewWorkflowSubState::ReadyToMerge),
-        ),
-    );
-    // PR moves to ActionRequired (col 2) — navigate cursor there
-    if let Some(sel) = app.review_selection_mut() {
-        sel.set_column(2);
-        sel.set_row(2, 0);
-    }
-    app.handle_key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::CONTROL));
-    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
-    assert!(
-        cmds.iter()
-            .any(|c| matches!(c, Command::MergeReviewPr(u) if u == &url)),
-        "y should emit MergeReviewPr command"
-    );
-    assert!(matches!(app.input.mode, InputMode::Normal));
-}
-
-#[test]
-fn review_merge_confirm_n_cancels() {
-    use crate::models::{ReviewWorkflowState, ReviewWorkflowSubState, WorkflowItemKind};
-    use crate::tui::types::WorkflowKey;
-
-    let (mut app, _url) =
-        make_reviewer_app_with_pr(ReviewDecision::Approved, crate::models::CiStatus::Success);
-    let key = WorkflowKey::new("acme/app".into(), 42, WorkflowItemKind::ReviewerPr);
-    app.review.review_workflow_states.insert(
-        key,
-        (
-            ReviewWorkflowState::ActionRequired,
-            Some(ReviewWorkflowSubState::ReadyToMerge),
-        ),
-    );
-    // PR moves to ActionRequired (col 2) — navigate cursor there
-    if let Some(sel) = app.review_selection_mut() {
-        sel.set_column(2);
-        sel.set_row(2, 0);
-    }
-    app.handle_key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::CONTROL));
-    app.handle_key(make_key(KeyCode::Char('n')));
-    assert!(matches!(app.input.mode, InputMode::Normal));
-}
-
 #[test]
 fn review_approve_no_pr_selected_is_noop() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
@@ -18445,43 +17233,6 @@ fn card_severity_badge_low() {
         "low severity badge should appear on card"
     );
 }
-
-// -- Navigation bounds --
-
-#[test]
-fn security_navigation_right_clamps_at_workflow_column_count() {
-    use crate::models::SecurityWorkflowState;
-    let mut app = make_app();
-    app.update(Message::SwitchToSecurityBoard);
-    // Switch to unified Alerts mode so navigation goes to the right handler.
-    app.handle_key(make_key(KeyCode::Char('2')));
-    app.update(Message::SecurityAlertsLoaded(vec![make_security_alert(
-        1,
-        "org/repo",
-        crate::models::AlertSeverity::Critical,
-    )]));
-    // Mash right 10 times — should stop at COLUMN_COUNT - 1 = 3
-    for _ in 0..10 {
-        app.handle_key(make_key(KeyCode::Right));
-    }
-    let col = app.security_selection().unwrap().column();
-    assert_eq!(col, SecurityWorkflowState::COLUMN_COUNT - 1);
-}
-
-#[test]
-fn security_navigation_left_clamps_at_zero() {
-    let mut app = make_app();
-    app.update(Message::SwitchToSecurityBoard);
-    // Switch to unified Alerts mode so navigation goes to the right handler.
-    app.handle_key(make_key(KeyCode::Char('2')));
-    // Mash left 10 times from column 0
-    for _ in 0..10 {
-        app.handle_key(make_key(KeyCode::Left));
-    }
-    let col = app.security_selection().unwrap().column();
-    assert_eq!(col, 0);
-}
-
 #[test]
 fn review_board_mode_column_labels_v2() {
     use crate::models::ReviewWorkflowState::*;
@@ -18872,47 +17623,6 @@ fn prs_loaded_upgrades_sub_state_to_ready_to_merge() {
         "Expected PersistReviewWorkflow command"
     );
 }
-
-// ---------------------------------------------------------------------------
-// Key binding tests for review board m/M/ctrl+m
-// ---------------------------------------------------------------------------
-
-#[test]
-fn review_board_m_emits_move_forward() {
-    let mut app = make_review_board_app();
-    let cmds = app.handle_key(make_key(KeyCode::Char('m')));
-    assert!(
-        cmds.iter()
-            .any(|c| matches!(c, Command::PersistReviewWorkflow { .. })),
-        "m key on review board should emit PersistReviewWorkflow (MoveReviewItemForward)"
-    );
-}
-
-#[test]
-fn review_board_shift_m_emits_move_back() {
-    use crate::models::{ReviewWorkflowState, WorkflowItemKind};
-    use crate::tui::types::WorkflowKey;
-
-    let mut app = make_review_board_app();
-    // Seed PR #1 at Ongoing so moving back is meaningful
-    let key = WorkflowKey::new("acme/app".into(), 1, WorkflowItemKind::ReviewerPr);
-    app.review
-        .review_workflow_states
-        .insert(key.clone(), (ReviewWorkflowState::Ongoing, None));
-    // Navigate cursor to col 1 where PR #1 now lives
-    if let Some(sel) = app.review_selection_mut() {
-        sel.set_column(1);
-        sel.set_row(1, 0);
-    }
-
-    let cmds = app.handle_key(KeyEvent::new(KeyCode::Char('M'), KeyModifiers::NONE));
-    assert!(
-        cmds.iter()
-            .any(|c| matches!(c, Command::PersistReviewWorkflow { .. })),
-        "M key on review board should emit PersistReviewWorkflow (MoveReviewItemBack)"
-    );
-}
-
 #[test]
 fn review_board_ctrl_m_noop_when_not_ready_to_merge() {
     let mut app = make_review_board_app();
@@ -18928,83 +17638,6 @@ fn review_board_ctrl_m_noop_when_not_ready_to_merge() {
         "ctrl+m with no ReadyToMerge should return empty commands"
     );
 }
-
-#[test]
-fn review_board_ctrl_m_starts_merge_when_ready_to_merge() {
-    use crate::models::{
-        ReviewDecision, ReviewWorkflowState, ReviewWorkflowSubState, WorkflowItemKind,
-    };
-    use crate::tui::types::WorkflowKey;
-
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    // Load an approved PR (ci_status None is fine — not Failure)
-    let pr = make_review_pr(1, "alice", ReviewDecision::Approved);
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
-
-    // Seed PR #1 with ReadyToMerge sub_state (ActionRequired column = col 2)
-    let key = WorkflowKey::new("acme/app".into(), 1, WorkflowItemKind::ReviewerPr);
-    app.review.review_workflow_states.insert(
-        key,
-        (
-            ReviewWorkflowState::ActionRequired,
-            Some(ReviewWorkflowSubState::ReadyToMerge),
-        ),
-    );
-
-    // Navigate cursor to col 2 (ActionRequired) row 0 where PR #1 now lives
-    if let Some(sel) = app.review_selection_mut() {
-        sel.set_column(2);
-        sel.set_row(2, 0);
-    }
-
-    let _cmds = app.handle_key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::CONTROL));
-    assert!(
-        matches!(app.input.mode, InputMode::ConfirmMergeReviewPr(_)),
-        "ctrl+m should enter ConfirmMergeReviewPr when sub_state == ReadyToMerge"
-    );
-}
-
-// ---------------------------------------------------------------------------
-// Key binding tests for security board m/M/ctrl+m
-// ---------------------------------------------------------------------------
-
-#[test]
-fn security_board_m_emits_move_forward() {
-    let mut app = make_security_board_app();
-    let cmds = app.handle_key(make_key(KeyCode::Char('m')));
-    assert!(
-        cmds.iter()
-            .any(|c| matches!(c, Command::PersistSecurityWorkflow { .. })),
-        "m key on security board should emit PersistSecurityWorkflow (MoveSecurityItemForward)"
-    );
-}
-
-#[test]
-fn security_board_shift_m_emits_move_back() {
-    use crate::models::{SecurityWorkflowState, WorkflowItemKind};
-    use crate::tui::types::WorkflowKey;
-
-    let mut app = make_security_board_app();
-    // Seed alert #1 at Ongoing so moving back is meaningful
-    let key = WorkflowKey::new("org/alpha".into(), 1, WorkflowItemKind::DependabotAlert);
-    app.security
-        .security_workflow_states
-        .insert(key, (SecurityWorkflowState::Ongoing, None));
-    // Navigate cursor to col 1 (Ongoing column)
-    if let Some(sel) = app.security_selection_mut() {
-        sel.set_column(1);
-        sel.set_row(1, 0);
-    }
-
-    let cmds = app.handle_key(KeyEvent::new(KeyCode::Char('M'), KeyModifiers::NONE));
-    assert!(
-        cmds.iter()
-            .any(|c| matches!(c, Command::PersistSecurityWorkflow { .. })),
-        "M key on security board should emit PersistSecurityWorkflow (MoveSecurityItemBack)"
-    );
-}
-
 #[test]
 fn security_board_digit_1_is_noop() {
     // After removing mode switching, '1' should not switch modes
