@@ -98,6 +98,7 @@ entity Task {
     tag: TaskTag?
     sort_order: Integer?
     base_branch: String = "main" -- the branch this task rebases onto / targets for PRs
+    external_id: String?  -- stable identifier for tasks sourced from a feed epic (see feeds.allium); null for hand-created tasks. Unique per (epic, external_id) when set.
     created_at: Timestamp
     updated_at: Timestamp
 
@@ -138,11 +139,14 @@ entity Epic {
     sort_order: Integer?
     auto_dispatch: Boolean = true
     parent: Epic?         -- null for root epics; set for nested sub-epics
+    feed_command: String?           -- shell command that emits FeedItem JSON (see feeds.allium); null for non-feed epics
+    feed_interval_secs: Integer?    -- per-epic poll cadence in seconds; null falls back to config.default_feed_interval
     created_at: Timestamp
     updated_at: Timestamp
 
     has_plan: plan_path != null
     is_root: parent = null
+    is_feed: feed_command != null
 
     subtasks: Task with epic = this
     active_subtasks: subtasks where status != archived
@@ -232,8 +236,7 @@ config {
     status_message_expiry: Duration = 5.seconds
     notifications_enabled: Boolean = false
     pr_poll_interval: Duration = 30.seconds
-    review_refresh_interval: Duration = 30.seconds   -- how often the Review Board auto-refreshes PR data
-    security_poll_interval: Duration = 5.minutes     -- how often the Security Board polls GitHub for alerts
+    default_feed_interval: Duration = 30.seconds   -- default cadence for feed epics with no explicit feed_interval_secs (see feeds.allium)
     mcp_port: Integer = 3142                         -- MCP server port (override via DISPATCH_PORT env var)
     -- Fallback when the repo has no origin/HEAD symbolic-ref.
     -- Runtime code inspects `git symbolic-ref refs/remotes/origin/HEAD`

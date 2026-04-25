@@ -1,0 +1,150 @@
+-- allium: 3
+-- feeds.allium
+--
+-- Scope: Programmable feed epics — generic mechanism for surfacing external
+--        items (PRs, security alerts, anything emitting JSON) as tasks under
+--        an Epic.
+-- Includes: FeedItem schema, upsert semantics, status preservation, polling
+--           cadence, error handling.
+-- Excludes: Specific feed scripts (`dispatch fetch-reviews`, `dispatch
+--           fetch-security`); those are runtime artefacts. The legacy
+--           Review Board and Security Board UIs are removed entirely —
+--           their behaviour is subsumed by feed epics.
+
+use "./core.allium" as core
+
+------------------------------------------------------------
+-- FeedItem
+------------------------------------------------------------
+
+-- A FeedItem is the wire format that a feed_command emits. The runner
+-- spawns the command, parses stdout as a JSON array of FeedItem, and
+-- upserts each item as a Task under the owning Epic.
+--
+-- The command is responsible for whatever upstream fetching is needed
+-- (e.g. calling `gh api`, scraping a dashboard). The dispatch runtime is
+-- only responsible for invocation, parsing, and persistence.
+
+concept FeedItem {
+    external_id: String       -- stable, unique-per-feed identifier (e.g. "pr:acme/app#42")
+    title: String
+    description: String
+    url: String = ""          -- optional external URL; empty string when absent
+    status: core/TaskStatus   -- desired column for newly-inserted tasks
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- == Polling ==
+
+rule FeedTick {
+    when: TickInterval
+
+    -- The FeedRunner walks every Epic with feed_command != null. For each
+    -- such epic, if the elapsed time since its last successful or attempted
+    -- run is at least the resolved interval, the command is spawned.
+    --
+    -- Resolved interval =
+    --   epic.feed_interval_secs (when set) else config.default_feed_interval
+
+    ensures:
+        for epic in Epic where epic.is_feed:
+            let interval =
+                epic.feed_interval_secs
+                    ? Duration.seconds(epic.feed_interval_secs)
+                    : core/config.default_feed_interval
+            if elapsed_since_last_run(epic) >= interval:
+                Spawn(epic.feed_command)
+
+    @guidance
+        -- Each epic's last_run timestamp is bumped after every spawn
+        -- attempt — successful or not. This prevents a misconfigured
+        -- command from being retried on every tick.
+        -- Implementation: src/feed.rs::FeedRunner.
+}
+
+-- == Upsert semantics ==
+
+rule UpsertFeedTasks {
+    when: FeedCommand emitted items: FeedItem[] for epic
+
+    -- Items are matched against existing tasks by (epic_id, external_id).
+    --
+    --   - New (no match): a Task is inserted with the FeedItem's title,
+    --     description, repo_path = epic.repo_path, status = item.status,
+    --     sub_status = SubStatus.default_for(item.status), external_id =
+    --     item.external_id, base_branch = "main", epic = epic.
+    --
+    --   - Match: title and description on the existing Task are updated
+    --     to the new values; status is NOT touched. updated_at is bumped.
+    --
+    -- Tasks present locally that are NOT in the latest emission are left
+    -- alone. The dispatch runtime does not delete tasks based on a feed —
+    -- removal is an explicit user action.
+
+    ensures:
+        for item in items:
+            let existing = Task.find(epic = epic, external_id = item.external_id)
+            if existing = null:
+                Task.created(
+                    title: item.title,
+                    description: item.description,
+                    repo_path: epic.repo_path,
+                    status: item.status,
+                    sub_status: core/SubStatus.default_for(item.status),
+                    external_id: item.external_id,
+                    epic: epic,
+                    base_branch: "main"
+                )
+            else:
+                existing.title = item.title
+                existing.description = item.description
+                -- existing.status, existing.sub_status preserved
+
+    @guidance
+        -- Status preservation is intentional: once a user starts working
+        -- on a feed-derived task (moves it to running, opens a PR, etc.),
+        -- subsequent feed refreshes must not yank the card back to its
+        -- original column.
+        -- The ON CONFLICT clause is conditional on external_id NOT NULL —
+        -- non-feed tasks (external_id = null) never collide.
+        -- Implementation: src/db/queries.rs::upsert_feed_tasks.
+}
+
+-- == Failure handling ==
+
+rule FeedCommandFailure {
+    when: FeedCommand fails for epic
+
+    -- Failures fall into three buckets, all handled identically from the
+    -- user's perspective: the failure is logged at warn level and the
+    -- epic's last_run is bumped so we don't retry until the next interval.
+    --
+    --   1. Spawn error (binary not found, permission denied, etc.)
+    --   2. Non-zero exit status
+    --   3. Stdout is not a valid JSON array of FeedItem
+    --
+    -- The TUI is NOT notified of feed errors. Tasks already in the epic
+    -- are unaffected.
+
+    ensures:
+        log_warn(epic.id, epic.title, error)
+        epic.last_run = now()
+
+    @guidance
+        -- Implementation: src/feed.rs::FeedRunner.tick — see the three
+        -- match arms wrapping spawn, status, and serde_json::from_slice.
+        -- A future improvement is surfacing repeated failures in the TUI
+        -- as an epic-level health badge, but that is out of scope here.
+}
+
+------------------------------------------------------------
+-- Notifications
+------------------------------------------------------------
+
+-- After a successful upsert (regardless of whether any tasks actually
+-- changed), the runner sends McpEvent::Refresh on the notification
+-- channel so the TUI reloads the affected epic. Failed runs do NOT send
+-- a refresh.
