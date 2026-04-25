@@ -178,7 +178,7 @@ impl FeedRunner {
 mod tests {
     use super::*;
     use crate::db::{Database, EpicCrud, EpicPatch};
-    use crate::models::{CiStatus, Reviewer};
+    use crate::models::CiStatus;
     use std::sync::Arc;
 
     fn make_pr(
