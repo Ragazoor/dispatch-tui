@@ -33,8 +33,8 @@ fn epic_action_hints_not_done() {
         .map(|s| s.content.as_ref())
         .collect();
     assert!(keys.contains(&"[Enter]"), "epic shows detail");
-    assert!(keys.contains(&"[m]"), "epic shows status forward");
-    assert!(keys.contains(&"[M]"), "epic shows status backward");
+    assert!(keys.contains(&"[L]"), "epic shows status forward");
+    assert!(keys.contains(&"[H]"), "epic shows status backward");
     assert!(keys.contains(&"[x]"), "epic shows archive");
     assert!(keys.contains(&"[q]"), "epic shows quit");
 }
@@ -49,8 +49,8 @@ fn epic_action_hints_done() {
         .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
         .map(|s| s.content.as_ref())
         .collect();
-    assert!(keys.contains(&"[m]"), "done epic shows status forward");
-    assert!(keys.contains(&"[M]"), "done epic shows status backward");
+    assert!(keys.contains(&"[L]"), "done epic shows status forward");
+    assert!(keys.contains(&"[H]"), "done epic shows status backward");
 }
 
 #[test]
@@ -473,9 +473,9 @@ fn move_epic_status_backward() {
 }
 
 #[test]
-fn m_key_on_epic_moves_status_forward() {
+fn shift_l_key_on_epic_moves_status_forward() {
     let mut app = make_app_with_epic_selected();
-    let cmds = app.handle_key(make_key(KeyCode::Char('m')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('L')));
     assert_eq!(app.board.epics[0].status, TaskStatus::Running);
     assert!(cmds
         .iter()
@@ -483,16 +483,16 @@ fn m_key_on_epic_moves_status_forward() {
 }
 
 #[test]
-fn shift_m_key_on_backlog_epic_stays_backlog() {
+fn shift_h_key_on_backlog_epic_stays_backlog() {
     let mut app = make_app_with_epic_selected();
-    let cmds = app.handle_key(make_key(KeyCode::Char('M')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('H')));
     // Already at Backlog, can't go backward
     assert_eq!(app.board.epics[0].status, TaskStatus::Backlog);
     assert!(cmds.is_empty());
 }
 
 #[test]
-fn shift_m_on_done_epic_moves_to_review() {
+fn shift_h_on_done_epic_moves_to_review() {
     let mut app = App::new(
         vec![{
             let mut t = make_task(1, TaskStatus::Done);
@@ -507,7 +507,7 @@ fn shift_m_on_done_epic_moves_to_review() {
     // Done epic → column 3
     app.selection_mut().set_column(3);
     app.selection_mut().set_row(3, 0);
-    let cmds = app.handle_key(make_key(KeyCode::Char('M')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('H')));
     assert_eq!(app.board.epics[0].status, TaskStatus::Review);
     assert!(cmds.iter().any(|c| matches!(
         c,
@@ -1199,14 +1199,14 @@ fn x_key_with_epic_selection_shows_count_in_confirm() {
 }
 
 #[test]
-fn m_on_epic_moves_status_forward() {
+fn shift_l_on_epic_moves_status_forward() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     // Cursor on Backlog column, row 0 (the epic)
     app.selection_mut().set_column(0);
     app.selection_mut().set_row(0, 0);
 
-    let cmds = app.handle_key(make_key(KeyCode::Char('m')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('L')));
     assert_eq!(app.board.epics[0].status, TaskStatus::Running);
     assert!(cmds.iter().any(|c| matches!(
         c,
@@ -1672,26 +1672,26 @@ fn handle_key_normal_dispatch_in_epic_view_with_no_items() {
 }
 
 #[test]
-fn handle_key_normal_m_on_epic_moves_status() {
+fn handle_key_normal_shift_l_on_epic_moves_status() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     app.selection_mut().set_column(0);
     app.selection_mut().set_row(0, 0);
-    let cmds = app.handle_key(make_key(KeyCode::Char('m')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('L')));
     assert!(cmds
         .iter()
         .any(|c| matches!(c, Command::PersistEpic { .. })));
 }
 
 #[test]
-fn handle_key_normal_uppercase_m_on_epic_moves_backward() {
+fn handle_key_normal_shift_h_on_epic_moves_backward() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
     app.board.epics = vec![epic];
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 0);
-    let cmds = app.handle_key(make_key(KeyCode::Char('M')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('H')));
     assert!(cmds
         .iter()
         .any(|c| matches!(c, Command::PersistEpic { .. })));

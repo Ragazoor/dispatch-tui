@@ -359,18 +359,18 @@ fn g_key_on_empty_column_is_noop() {
 }
 
 #[test]
-fn m_key_on_empty_column_is_noop() {
+fn shift_l_key_on_empty_column_is_noop() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.selection_mut().set_column(0);
-    let cmds = app.handle_key(make_key(KeyCode::Char('m')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('L')));
     assert!(cmds.is_empty());
 }
 
 #[test]
-fn shift_m_key_on_empty_column_is_noop() {
+fn shift_h_key_on_empty_column_is_noop() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.selection_mut().set_column(0);
-    let cmds = app.handle_key(make_key(KeyCode::Char('M')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('H')));
     assert!(cmds.is_empty());
 }
 
@@ -464,7 +464,7 @@ fn batch_move_forward_moves_all_selected() {
     app.update(Message::ToggleSelect(TaskId(2)));
 
     // Press m to batch move forward
-    let cmds = app.handle_key(make_key(KeyCode::Char('m')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('L')));
 
     // Both should now be Running
     assert_eq!(
@@ -489,7 +489,7 @@ fn batch_move_clears_selection() {
     app.update(Message::ToggleSelect(TaskId(1)));
     app.update(Message::ToggleSelect(TaskId(2)));
 
-    app.handle_key(make_key(KeyCode::Char('m')));
+    app.handle_key(make_key(KeyCode::Char('L')));
 
     assert!(app.select.tasks.is_empty());
 }
@@ -508,7 +508,7 @@ fn batch_move_backward() {
     app.update(Message::ToggleSelect(TaskId(1)));
     app.update(Message::ToggleSelect(TaskId(2)));
 
-    app.handle_key(make_key(KeyCode::Char('M')));
+    app.handle_key(make_key(KeyCode::Char('H')));
 
     assert_eq!(app.find_task(TaskId(1)).unwrap().status, TaskStatus::Review);
     assert_eq!(app.find_task(TaskId(2)).unwrap().status, TaskStatus::Review);
@@ -522,7 +522,7 @@ fn single_task_operations_work_without_selection() {
     assert!(app.select.tasks.is_empty());
 
     // Single move should still work
-    let cmds = app.handle_key(make_key(KeyCode::Char('m')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('L')));
     assert_eq!(
         app.find_task(TaskId(1)).unwrap().status,
         TaskStatus::Running
@@ -643,7 +643,7 @@ fn move_review_to_done_enters_confirm_mode() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Review)], TEST_TIMEOUT);
     app.selection_mut().set_column(2); // Review column
 
-    let cmds = app.handle_key(make_key(KeyCode::Char('m')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('L')));
     assert!(cmds.is_empty());
     assert!(matches!(app.input.mode, InputMode::ConfirmDone(TaskId(1))));
     assert!(app.status.message.as_deref().unwrap().contains("Done"));
@@ -654,7 +654,7 @@ fn move_backlog_to_running_no_confirmation() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
     app.selection_mut().set_column(0); // Backlog column
 
-    let cmds = app.handle_key(make_key(KeyCode::Char('m')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('L')));
     assert_eq!(app.input.mode, InputMode::Normal);
     let task = app.board.tasks.iter().find(|t| t.id == TaskId(1)).unwrap();
     assert_eq!(task.status, TaskStatus::Running);
@@ -1251,7 +1251,7 @@ fn move_task_backward_resets_substatus() {
 }
 
 #[test]
-fn m_with_mixed_selection_moves_tasks_only() {
+fn shift_l_with_mixed_selection_moves_tasks_only() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     app.update(Message::ToggleSelect(TaskId(1)));
@@ -1260,7 +1260,7 @@ fn m_with_mixed_selection_moves_tasks_only() {
     app.selection_mut().set_column(0);
     app.selection_mut().set_row(0, 0);
 
-    app.handle_key(make_key(KeyCode::Char('m')));
+    app.handle_key(make_key(KeyCode::Char('L')));
     // Task should move forward
     assert_eq!(
         app.find_task(TaskId(1)).unwrap().status,

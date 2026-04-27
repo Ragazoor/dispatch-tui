@@ -99,16 +99,6 @@ fn archive_targets_task_at_x_press_not_at_y_press() {
 }
 
 #[test]
-fn shift_h_toggles_archive() {
-    let mut app = make_app();
-    assert!(!app.archive.visible);
-    app.handle_key(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::SHIFT));
-    assert!(app.archive.visible);
-    app.handle_key(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::SHIFT));
-    assert!(!app.archive.visible);
-}
-
-#[test]
 fn archive_task_sets_status_and_emits_persist() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Done)], TEST_TIMEOUT);
     let cmds = app.update(Message::ArchiveTask(TaskId(1)));
@@ -185,15 +175,6 @@ fn archive_panel_j_k_navigation() {
 
     app.handle_key(make_key(KeyCode::Char('k')));
     assert_eq!(app.archive.selected_row, 1);
-}
-
-#[test]
-fn archive_panel_h_closes() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Archived)], TEST_TIMEOUT);
-    app.archive.visible = true;
-
-    app.handle_key(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::SHIFT));
-    assert!(!app.archive.visible);
 }
 
 #[test]
@@ -275,7 +256,7 @@ fn full_archive_flow() {
     assert!(cmds.iter().any(|c| matches!(c, Command::Cleanup { .. })));
 
     // Toggle archive panel
-    app.handle_key(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::SHIFT));
+    app.update(Message::ToggleArchive);
     assert!(app.archive.visible);
 
     // Should see 1 archived task
@@ -731,14 +712,6 @@ fn handle_key_confirm_archive_cancel() {
 }
 
 #[test]
-fn handle_key_normal_toggle_archive() {
-    let mut app = make_app();
-    assert!(!app.archive.visible);
-    app.handle_key(make_key(KeyCode::Char('H')));
-    assert!(app.archive.visible);
-}
-
-#[test]
 fn batch_archive_selected_epics() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10), make_epic(20)];
@@ -951,14 +924,6 @@ fn handle_key_archive_e_enters_confirm_edit() {
         *app.mode(),
         InputMode::ConfirmEditTask(TaskId(100))
     ));
-}
-
-#[test]
-fn handle_key_archive_h_closes() {
-    let mut app = make_app();
-    app.archive.visible = true;
-    app.handle_key(make_key(KeyCode::Char('H')));
-    assert!(!app.archive.visible);
 }
 
 #[test]

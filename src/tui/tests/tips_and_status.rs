@@ -34,12 +34,12 @@ fn batch_move_multiple_steps() {
     app.update(Message::ToggleSelect(TaskId(2)));
 
     // Move Backlog -> Running (clears selection)
-    app.handle_key(make_key(KeyCode::Char('m')));
+    app.handle_key(make_key(KeyCode::Char('L')));
 
     // Re-select and move Running -> Review
     app.update(Message::ToggleSelect(TaskId(1)));
     app.update(Message::ToggleSelect(TaskId(2)));
-    app.handle_key(make_key(KeyCode::Char('m')));
+    app.handle_key(make_key(KeyCode::Char('L')));
 
     assert_eq!(app.find_task(TaskId(1)).unwrap().status, TaskStatus::Review);
     assert_eq!(app.find_task(TaskId(2)).unwrap().status, TaskStatus::Review);

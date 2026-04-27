@@ -1408,7 +1408,7 @@ fn handle_key_normal_move_forward_via_handle_key() {
     let mut app = make_app();
     app.selection_mut().set_column(0);
     app.selection_mut().set_row(0, 0);
-    let cmds = app.handle_key(make_key(KeyCode::Char('m')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('L')));
     // Task 1 should move from Backlog to Running
     assert!(cmds
         .iter()
@@ -1421,7 +1421,7 @@ fn handle_key_normal_move_backward_via_handle_key() {
     // Select running task (column 1)
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 0);
-    let cmds = app.handle_key(make_key(KeyCode::Char('M')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('H')));
     // Task 3 should move from Running to Backlog
     assert!(cmds
         .iter()

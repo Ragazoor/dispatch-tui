@@ -27,8 +27,8 @@ fn action_hints_backlog_task() {
         "should have dispatch/brainstorm hint"
     );
     assert!(keys.contains(&"[e]"), "should have edit hint");
-    assert!(keys.contains(&"[m]"), "should have move hint");
-    assert!(!keys.contains(&"[M]"), "backlog has no back movement");
+    assert!(keys.contains(&"[L]"), "should have move hint");
+    assert!(!keys.contains(&"[H]"), "backlog has no back movement");
     assert!(keys.contains(&"[x]"), "should have archive hint");
     assert!(keys.contains(&"[n]"), "should have new hint");
     assert!(keys.contains(&"[q]"), "should have quit hint");
@@ -133,9 +133,9 @@ fn action_hints_done_task() {
         .map(|s| s.content.as_ref())
         .collect();
     assert!(keys.contains(&"[e]"), "done has edit");
-    assert!(keys.contains(&"[M]"), "done has back");
+    assert!(keys.contains(&"[H]"), "done has back");
     assert!(keys.contains(&"[x]"), "done has archive");
-    assert!(!keys.contains(&"[m]"), "done has no forward move");
+    assert!(!keys.contains(&"[L]"), "done has no forward move");
     assert!(!keys.contains(&"[d]"), "done has no dispatch");
 }
 

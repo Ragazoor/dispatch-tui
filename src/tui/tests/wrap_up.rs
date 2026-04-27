@@ -155,7 +155,7 @@ fn batch_move_with_review_tasks_enters_confirm_done() {
     app.update(Message::ToggleSelect(TaskId(1)));
     app.update(Message::ToggleSelect(TaskId(2)));
 
-    let cmds = app.handle_key(make_key(KeyCode::Char('m')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('L')));
     assert!(cmds.is_empty());
     assert!(app.status.message.as_deref().unwrap().contains("2 tasks"));
     assert!(app.status.message.as_deref().unwrap().contains("Done"));
