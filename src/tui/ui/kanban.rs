@@ -873,7 +873,9 @@ fn build_project_list_item<'a>(
         Style::default().fg(MUTED),
     ));
 
-    ListItem::new(vec![name_line, meta_line])
+    let rule_color = if is_cursor { stripe_color } else { MUTED };
+    let rule_line = card_rule_line(rule_color, col_width);
+    ListItem::new(vec![rule_line, name_line, meta_line])
 }
 
 fn render_projects_column(frame: &mut Frame, app: &mut App, area: Rect) {
