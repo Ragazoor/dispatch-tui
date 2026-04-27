@@ -16,11 +16,14 @@ pub struct EditorFields {
 }
 
 use crate::models::{Epic, Task};
+use crate::service::FieldUpdate;
 
 pub struct EpicEditorFields {
     pub title: String,
     pub description: String,
     pub repo_path: String,
+    pub feed_command: String,        // "" → Clear, non-empty → Set
+    pub feed_interval_secs: String,  // "" or non-integer → None (don't touch)
 }
 
 /// Parse `--- SECTION ---` delimited text into a map of section name → content.
@@ -63,9 +66,14 @@ pub fn parse_description_editor_output(input: &str) -> String {
 }
 
 pub fn format_epic_for_editor(epic: &Epic) -> String {
+    let feed_cmd = epic.feed_command.as_deref().unwrap_or("");
+    let feed_interval = epic
+        .feed_interval_secs
+        .map(|n| n.to_string())
+        .unwrap_or_default();
     format!(
-        "--- TITLE ---\n{}\n--- DESCRIPTION ---\n{}\n--- REPO_PATH ---\n{}\n",
-        epic.title, epic.description, epic.repo_path
+        "--- TITLE ---\n{}\n--- DESCRIPTION ---\n{}\n--- REPO_PATH ---\n{}\n--- FEED_COMMAND ---\n{}\n--- FEED_INTERVAL_SECS ---\n{}\n",
+        epic.title, epic.description, epic.repo_path, feed_cmd, feed_interval
     )
 }
 
@@ -75,6 +83,8 @@ pub fn parse_epic_editor_output(input: &str) -> EpicEditorFields {
         title: s.remove("TITLE").unwrap_or_default(),
         description: s.remove("DESCRIPTION").unwrap_or_default(),
         repo_path: s.remove("REPO_PATH").unwrap_or_default(),
+        feed_command: s.remove("FEED_COMMAND").unwrap_or_default(),
+        feed_interval_secs: s.remove("FEED_INTERVAL_SECS").unwrap_or_default(),
     }
 }
 
@@ -153,6 +163,8 @@ pub struct EpicEditApplied {
     pub title: String,
     pub description: String,
     pub repo_path: String,
+    pub feed_command: FieldUpdate,
+    pub feed_interval_secs: Option<i64>,
 }
 
 /// Apply parsed epic editor fields on top of the epic's existing values.
@@ -174,6 +186,12 @@ pub fn apply_epic_editor_fields(epic: &Epic, fields: EpicEditorFields) -> EpicEd
         } else {
             fields.repo_path
         },
+        feed_command: if fields.feed_command.is_empty() {
+            FieldUpdate::Clear
+        } else {
+            FieldUpdate::Set(fields.feed_command)
+        },
+        feed_interval_secs: fields.feed_interval_secs.parse::<i64>().ok(),
     }
 }
 
@@ -576,6 +594,8 @@ mod tests {
         assert_eq!(applied.title, epic.title);
         assert_eq!(applied.description, epic.description);
         assert_eq!(applied.repo_path, epic.repo_path);
+        assert_eq!(applied.feed_command, FieldUpdate::Clear);
+        assert_eq!(applied.feed_interval_secs, None);
     }
 
     #[test]
@@ -585,10 +605,129 @@ mod tests {
             title: String::new(),
             description: "new desc".into(),
             repo_path: String::new(),
+            feed_command: String::new(),
+            feed_interval_secs: String::new(),
         };
         let applied = apply_epic_editor_fields(&epic, fields);
         assert_eq!(applied.title, "E title");
         assert_eq!(applied.description, "new desc");
         assert_eq!(applied.repo_path, "/repo");
+        assert_eq!(applied.feed_command, FieldUpdate::Clear);
+        assert_eq!(applied.feed_interval_secs, None);
+    }
+
+    #[test]
+    fn epic_editor_includes_feed_command_section() {
+        let mut epic = make_epic("T", "D", "/repo");
+        epic.feed_command = Some("scripts/fetch-dependabot.sh".into());
+        let content = format_epic_for_editor(&epic);
+        assert!(content.contains("--- FEED_COMMAND ---"));
+        assert!(content.contains("scripts/fetch-dependabot.sh"));
+    }
+
+    #[test]
+    fn epic_editor_includes_feed_interval_section() {
+        let mut epic = make_epic("T", "D", "/repo");
+        epic.feed_interval_secs = Some(300);
+        let content = format_epic_for_editor(&epic);
+        assert!(content.contains("--- FEED_INTERVAL_SECS ---"));
+        assert!(content.contains("300"));
+    }
+
+    #[test]
+    fn epic_editor_roundtrip_feed_command_set() {
+        let mut epic = make_epic("T", "D", "/repo");
+        epic.feed_command = Some("my-script.sh".into());
+        let content = format_epic_for_editor(&epic);
+        let fields = parse_epic_editor_output(&content);
+        assert_eq!(fields.feed_command, "my-script.sh");
+    }
+
+    #[test]
+    fn epic_editor_roundtrip_feed_command_empty() {
+        let epic = make_epic("T", "D", "/repo");
+        let content = format_epic_for_editor(&epic);
+        let fields = parse_epic_editor_output(&content);
+        assert_eq!(fields.feed_command, "");
+    }
+
+    #[test]
+    fn epic_editor_roundtrip_feed_interval_set() {
+        let mut epic = make_epic("T", "D", "/repo");
+        epic.feed_interval_secs = Some(120);
+        let content = format_epic_for_editor(&epic);
+        let fields = parse_epic_editor_output(&content);
+        assert_eq!(fields.feed_interval_secs, "120");
+    }
+
+    #[test]
+    fn apply_epic_feed_command_set() {
+        let epic = make_epic("T", "D", "/repo");
+        let fields = EpicEditorFields {
+            title: "T".into(),
+            description: "D".into(),
+            repo_path: "/repo".into(),
+            feed_command: "my-script.sh".into(),
+            feed_interval_secs: "".into(),
+        };
+        let applied = apply_epic_editor_fields(&epic, fields);
+        assert_eq!(applied.feed_command, crate::service::FieldUpdate::Set("my-script.sh".into()));
+        assert_eq!(applied.feed_interval_secs, None);
+    }
+
+    #[test]
+    fn apply_epic_feed_command_clear() {
+        let mut epic = make_epic("T", "D", "/repo");
+        epic.feed_command = Some("old-script.sh".into());
+        let fields = EpicEditorFields {
+            title: "T".into(),
+            description: "D".into(),
+            repo_path: "/repo".into(),
+            feed_command: "".into(),
+            feed_interval_secs: "".into(),
+        };
+        let applied = apply_epic_editor_fields(&epic, fields);
+        assert_eq!(applied.feed_command, crate::service::FieldUpdate::Clear);
+    }
+
+    #[test]
+    fn apply_epic_feed_interval_valid() {
+        let epic = make_epic("T", "D", "/repo");
+        let fields = EpicEditorFields {
+            title: "T".into(),
+            description: "D".into(),
+            repo_path: "/repo".into(),
+            feed_command: "".into(),
+            feed_interval_secs: "300".into(),
+        };
+        let applied = apply_epic_editor_fields(&epic, fields);
+        assert_eq!(applied.feed_interval_secs, Some(300));
+    }
+
+    #[test]
+    fn apply_epic_feed_interval_invalid_preserves_none() {
+        let epic = make_epic("T", "D", "/repo");
+        let fields = EpicEditorFields {
+            title: "T".into(),
+            description: "D".into(),
+            repo_path: "/repo".into(),
+            feed_command: "".into(),
+            feed_interval_secs: "not-a-number".into(),
+        };
+        let applied = apply_epic_editor_fields(&epic, fields);
+        assert_eq!(applied.feed_interval_secs, None);
+    }
+
+    #[test]
+    fn apply_epic_editor_fields_full_roundtrip() {
+        let mut epic = make_epic("E title", "E desc", "/repo");
+        epic.feed_command = Some("scripts/fetch-dependabot.sh".into());
+        epic.feed_interval_secs = Some(60);
+        let content = format_epic_for_editor(&epic);
+        let fields = parse_epic_editor_output(&content);
+        let applied = apply_epic_editor_fields(&epic, fields);
+        assert_eq!(applied.title, "E title");
+        assert_eq!(applied.feed_command, crate::service::FieldUpdate::Set("scripts/fetch-dependabot.sh".into()));
+        assert_eq!(applied.feed_interval_secs, Some(60));
     }
 }
