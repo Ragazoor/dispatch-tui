@@ -82,45 +82,47 @@ fn quit_enters_confirm_mode() {
 #[test]
 fn navigate_column_clamps() {
     let mut app = make_app();
+    // Projects column (0) is the leftmost; can't go further left.
     app.selection_mut().set_column(0);
     app.update(Message::NavigateColumn(-1));
     assert_eq!(app.selection().column(), 0); // can't go below 0
 
-    // From archive column (COLUMN_COUNT), pressing right stays clamped
-    app.selection_mut().set_column(TaskStatus::COLUMN_COUNT);
+    // From archive column (COLUMN_COUNT+1 = 5), pressing right stays clamped.
+    app.selection_mut().set_column(TaskStatus::COLUMN_COUNT + 1);
     app.update(Message::NavigateColumn(1));
-    assert_eq!(app.selection().column(), TaskStatus::COLUMN_COUNT); // can't go above max
+    assert_eq!(app.selection().column(), TaskStatus::COLUMN_COUNT + 1); // can't go above max
 }
 
 #[test]
 fn navigate_column_moves_through_visual_columns() {
     let mut app = make_app();
-    assert_eq!(app.selected_column(), 0); // Backlog
+    // Board starts at Backlog (nav col 1); Projects is col 0 (left edge).
+    assert_eq!(app.selected_column(), 1); // Backlog
     app.update(Message::NavigateColumn(1));
-    assert_eq!(app.selected_column(), 1); // Active
+    assert_eq!(app.selected_column(), 2); // Running
     app.update(Message::NavigateColumn(1));
-    assert_eq!(app.selected_column(), 2); // Blocked
+    assert_eq!(app.selected_column(), 3); // Review
     app.update(Message::NavigateColumn(1));
-    assert_eq!(app.selected_column(), 3); // Stale
+    assert_eq!(app.selected_column(), 4); // Done
 }
 
 #[test]
 fn navigate_column_clamps_at_visual_column_max() {
     let mut app = make_app();
-    // From Done (col 3) pressing right enters archive (col 4), not a clamp
-    app.selection_mut().set_column(TaskStatus::COLUMN_COUNT - 1);
+    // From Done (nav col 4 = COLUMN_COUNT) pressing right enters archive (nav col 5), not a clamp.
+    app.selection_mut().set_column(TaskStatus::COLUMN_COUNT);
     app.update(Message::NavigateColumn(1));
-    assert_eq!(app.selected_column(), TaskStatus::COLUMN_COUNT); // archive column
-                                                                 // From archive (col 4), pressing right is clamped
+    assert_eq!(app.selected_column(), TaskStatus::COLUMN_COUNT + 1); // archive column
+    // From archive (nav col 5), pressing right is clamped.
     app.update(Message::NavigateColumn(1));
-    assert_eq!(app.selected_column(), TaskStatus::COLUMN_COUNT); // stays at archive
+    assert_eq!(app.selected_column(), TaskStatus::COLUMN_COUNT + 1); // stays at archive
 }
 
 #[test]
 fn navigate_row_clamps() {
     let mut app = make_app();
-    // Backlog has 2 tasks (id 1, 2). Selected row starts at 0.
-    app.selection_mut().set_column(0);
+    // Backlog is nav col 1. Selected row starts at 0.
+    app.selection_mut().set_column(1);
     app.update(Message::NavigateRow(-1));
     // Navigating up from row 0 now moves to the select-all toggle
     assert!(app.on_select_all());
@@ -129,7 +131,7 @@ fn navigate_row_clamps() {
     app.update(Message::NavigateRow(1));
     assert!(!app.on_select_all());
     app.update(Message::NavigateRow(10));
-    assert_eq!(app.selection().row(0), 1); // clamps to last item index
+    assert_eq!(app.selection().row(1), 1); // clamps to last item index
 }
 
 #[test]
@@ -243,7 +245,7 @@ fn g_key_with_live_window_jumps() {
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some("task-4".to_string());
     let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
-    app.selection_mut().set_column(1); // Running column
+    app.selection_mut().set_column(2); // Running = nav col 2
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert!(matches!(&cmds[0], Command::JumpToTmux { window } if window == "task-4"));
 }
@@ -251,7 +253,7 @@ fn g_key_with_live_window_jumps() {
 #[test]
 fn g_key_without_window_shows_message() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
-    app.selection_mut().set_column(0);
+    app.selection_mut().set_column(1); // Backlog = nav col 1
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert!(cmds.is_empty());
     assert!(app
@@ -335,14 +337,14 @@ fn resumed_sets_status_to_running() {
 #[test]
 fn refresh_tasks_replaces_and_clamps() {
     let mut app = make_app();
-    app.selection_mut().set_row(0, 1); // row 1 of Backlog (has 2 items)
+    app.selection_mut().set_row(1, 1); // row 1 of Backlog (nav col 1, has 2 items)
     app.update(Message::RefreshTasks(vec![make_task(
         10,
         TaskStatus::Backlog,
     )]));
     assert_eq!(app.board.tasks.len(), 1);
     assert_eq!(app.board.tasks[0].id, TaskId(10));
-    assert_eq!(app.selection().row(0), 0); // clamped from 1 to 0
+    assert_eq!(app.selection().row(1), 0); // clamped from 1 to 0
 }
 
 #[test]
@@ -647,7 +649,7 @@ fn help_overlay_hidden_in_normal_mode() {
 #[test]
 fn move_review_to_done_enters_confirm_mode() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Review)], 1, TEST_TIMEOUT);
-    app.selection_mut().set_column(2); // Review column
+    app.selection_mut().set_column(3); // Review = nav col 3
 
     let cmds = app.handle_key(make_key(KeyCode::Char('L')));
     assert!(cmds.is_empty());
@@ -658,7 +660,7 @@ fn move_review_to_done_enters_confirm_mode() {
 #[test]
 fn move_backlog_to_running_no_confirmation() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
-    app.selection_mut().set_column(0); // Backlog column
+    app.selection_mut().set_column(1); // Backlog = nav col 1
 
     let cmds = app.handle_key(make_key(KeyCode::Char('L')));
     assert_eq!(app.input.mode, InputMode::Normal);
@@ -1264,8 +1266,8 @@ fn shift_l_with_mixed_selection_moves_tasks_only() {
     app.update(Message::ToggleSelect(TaskId(1)));
     app.update(Message::ToggleSelectEpic(EpicId(10)));
     // Cursor on the task (row 0) so 'm' triggers batch move, not epic move
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 0);
+    app.selection_mut().set_column(1); // Backlog = nav col 1
+    app.selection_mut().set_row(1, 0);
 
     app.handle_key(make_key(KeyCode::Char('L')));
     // Task should move forward
@@ -1831,18 +1833,20 @@ fn test_selection_preserved_when_task_above_cursor_moves() {
         1,
         TEST_TIMEOUT,
     );
+    // App starts at Backlog (nav col 1); navigate down to row 1.
     app.update(Message::NavigateRow(1));
-    assert_eq!(app.selection().row(0), 1);
+    assert_eq!(app.selection().row(1), 1);
 
-    // Task 1 moves out; Task 2 becomes row 0
+    // Task 1 moves out; Task 2 follows to row 0.
     app.update(Message::RefreshTasks(vec![
         make_task(1, TaskStatus::Running),
         make_task(2, TaskStatus::Backlog),
         make_task(3, TaskStatus::Backlog),
     ]));
 
-    assert_eq!(app.selection().column(), 0);
-    assert_eq!(app.selection().row(0), 0);
+    // Anchor follows task 2 — stays in Backlog (nav col 1) at row 0.
+    assert_eq!(app.selection().column(), 1);
+    assert_eq!(app.selection().row(1), 0);
     let items = app.column_items_for_status(TaskStatus::Backlog);
     assert!(matches!(items[0], ColumnItem::Task(t) if t.id == TaskId(2)));
 }
@@ -1857,8 +1861,9 @@ fn test_selection_follows_task_to_new_column() {
         1,
         TEST_TIMEOUT,
     );
-    assert_eq!(app.selection().column(), 0);
-    assert_eq!(app.selection().row(0), 0);
+    // App starts at Backlog (nav col 1).
+    assert_eq!(app.selection().column(), 1);
+    assert_eq!(app.selection().row(1), 0);
 
     // Task 1 dispatched to Running
     app.update(Message::RefreshTasks(vec![
@@ -1866,8 +1871,8 @@ fn test_selection_follows_task_to_new_column() {
         make_task(2, TaskStatus::Backlog),
     ]));
 
-    assert_eq!(app.selection().column(), 1); // Running = column 1
-    assert_eq!(app.selection().row(1), 0);
+    assert_eq!(app.selection().column(), 2); // Running = nav col 2
+    assert_eq!(app.selection().row(2), 0);
     let items = app.column_items_for_status(TaskStatus::Running);
     assert!(matches!(items[0], ColumnItem::Task(t) if t.id == TaskId(1)));
 }
@@ -1883,9 +1888,10 @@ fn test_selection_falls_back_when_task_deleted() {
         1,
         TEST_TIMEOUT,
     );
+    // App starts at Backlog (nav col 1); navigate down to row 2 (Task 3).
     app.update(Message::NavigateRow(1));
     app.update(Message::NavigateRow(1));
-    assert_eq!(app.selection().row(0), 2); // Task 3
+    assert_eq!(app.selection().row(1), 2); // Task 3
 
     // Task 3 deleted
     app.update(Message::RefreshTasks(vec![
@@ -1893,8 +1899,8 @@ fn test_selection_falls_back_when_task_deleted() {
         make_task(2, TaskStatus::Backlog),
     ]));
 
-    assert_eq!(app.selection().column(), 0);
-    assert_eq!(app.selection().row(0), 1); // clamped to last valid row
+    assert_eq!(app.selection().column(), 1);
+    assert_eq!(app.selection().row(1), 1); // clamped to last valid row
 }
 
 #[test]
@@ -1908,8 +1914,9 @@ fn test_selection_preserved_on_same_data_refresh() {
         1,
         TEST_TIMEOUT,
     );
+    // App starts at Backlog (nav col 1); navigate down to row 1.
     app.update(Message::NavigateRow(1));
-    assert_eq!(app.selection().row(0), 1);
+    assert_eq!(app.selection().row(1), 1);
 
     app.update(Message::RefreshTasks(vec![
         make_task(1, TaskStatus::Backlog),
@@ -1917,7 +1924,7 @@ fn test_selection_preserved_on_same_data_refresh() {
         make_task(3, TaskStatus::Backlog),
     ]));
 
-    assert_eq!(app.selection().row(0), 1);
+    assert_eq!(app.selection().row(1), 1);
     let items = app.column_items_for_status(TaskStatus::Backlog);
     assert!(matches!(items[1], ColumnItem::Task(t) if t.id == TaskId(2)));
 }
@@ -1932,8 +1939,9 @@ fn test_selection_falls_back_when_column_empties() {
         1,
         TEST_TIMEOUT,
     );
-    app.update(Message::NavigateColumn(1)); // move to Running
-    assert_eq!(app.selection().column(), 1);
+    // App starts at Backlog (nav col 1); navigate right to Running (nav col 2).
+    app.update(Message::NavigateColumn(1));
+    assert_eq!(app.selection().column(), 2);
 
     // Task 2 deleted — Running column empties, anchor not found
     app.update(Message::RefreshTasks(vec![make_task(
@@ -1942,8 +1950,8 @@ fn test_selection_falls_back_when_column_empties() {
     )]));
 
     // Cursor must be in a valid state: row 0 in the empty Running column
-    assert_eq!(app.selection().column(), 1);
-    assert_eq!(app.selection().row(1), 0);
+    assert_eq!(app.selection().column(), 2);
+    assert_eq!(app.selection().row(2), 0);
 }
 
 // --- Archive column navigation ---
@@ -1951,16 +1959,16 @@ fn test_selection_falls_back_when_column_empties() {
 #[test]
 fn navigate_right_from_done_shows_archive() {
     let mut app = make_app();
-    // Navigate to Done column (col 3)
+    // Navigate to Done column (nav col 4 = COLUMN_COUNT, starting from col 1)
     for _ in 0..3 {
         app.update(Message::NavigateColumn(1));
     }
-    assert_eq!(app.selected_column(), 3);
+    assert_eq!(app.selected_column(), 4);
     assert!(!app.show_archived());
 
-    // Navigate right from Done → archive column
+    // Navigate right from Done → archive column (nav col 5)
     app.update(Message::NavigateColumn(1));
-    assert_eq!(app.selected_column(), 4);
+    assert_eq!(app.selected_column(), 5);
     assert!(app.show_archived());
 }
 
@@ -1978,7 +1986,7 @@ fn navigate_right_from_done_resets_archive_selection() {
     app.archive.selected_row = 1;
     *app.archive.list_state.selected_mut() = Some(1);
 
-    // Navigate to Done then into archive
+    // Navigate from Backlog (col 1) to archive (col 5): 4 steps
     for _ in 0..4 {
         app.update(Message::NavigateColumn(1));
     }
@@ -1989,41 +1997,42 @@ fn navigate_right_from_done_resets_archive_selection() {
 #[test]
 fn navigate_left_from_archive_hides_it_and_goes_to_done() {
     let mut app = make_app();
-    // Enter archive column
+    // Enter archive column (col 5) from Backlog (col 1): 4 steps
     for _ in 0..4 {
         app.update(Message::NavigateColumn(1));
     }
     assert!(app.show_archived());
 
-    // Navigate left
+    // Navigate left → Done (col 4)
     app.update(Message::NavigateColumn(-1));
-    assert_eq!(app.selected_column(), 3);
+    assert_eq!(app.selected_column(), 4);
     assert!(!app.show_archived());
 }
 
 #[test]
 fn pressing_right_at_archive_column_stays_clamped() {
     let mut app = make_app();
-    for _ in 0..5 {
+    // Navigate from col 1 to col 5 (4 steps), then 2 more (should clamp at 5)
+    for _ in 0..6 {
         app.update(Message::NavigateColumn(1));
     }
-    // Should clamp at 4
-    assert_eq!(app.selected_column(), 4);
+    // Should clamp at 5
+    assert_eq!(app.selected_column(), 5);
     assert!(app.show_archived());
 }
 
 #[test]
 fn h_key_in_archive_returns_to_done() {
     let mut app = make_app();
-    // Enter archive column
+    // Enter archive column (col 5): 4 steps from col 1
     for _ in 0..4 {
         app.update(Message::NavigateColumn(1));
     }
     assert!(app.show_archived());
 
-    // Press h
+    // Press h → Done (col 4)
     app.handle_key(make_key(KeyCode::Char('h')));
-    assert_eq!(app.selected_column(), 3);
+    assert_eq!(app.selected_column(), 4);
     assert!(!app.show_archived());
 }
 
@@ -2036,7 +2045,7 @@ fn left_arrow_in_archive_returns_to_done() {
     assert!(app.show_archived());
 
     app.handle_key(make_key(KeyCode::Left));
-    assert_eq!(app.selected_column(), 3);
+    assert_eq!(app.selected_column(), 4);
     assert!(!app.show_archived());
 }
 
@@ -2049,22 +2058,22 @@ fn esc_key_in_archive_returns_to_done() {
     assert!(app.show_archived());
 
     app.handle_key(make_key(KeyCode::Esc));
-    assert_eq!(app.selected_column(), 3);
+    assert_eq!(app.selected_column(), 4);
     assert!(!app.show_archived());
 }
 
 #[test]
 fn navigate_left_from_done_does_not_show_archive() {
     let mut app = make_app();
-    // Navigate to Done column (col 3)
+    // Navigate to Done column (nav col 4): 3 steps from col 1
     for _ in 0..3 {
         app.update(Message::NavigateColumn(1));
     }
-    assert_eq!(app.selected_column(), 3);
+    assert_eq!(app.selected_column(), 4);
 
-    // Navigate left (back to Review) — archive must NOT appear
+    // Navigate left (back to Review, col 3) — archive must NOT appear
     app.update(Message::NavigateColumn(-1));
-    assert_eq!(app.selected_column(), 2);
+    assert_eq!(app.selected_column(), 3);
     assert!(!app.show_archived());
 }
 
@@ -2091,4 +2100,45 @@ fn board_selection_task_col_row_uses_offset() {
     assert_eq!(sel.row(1), 10);
     sel.set_row(4, 5); // Done = nav col 4 → array index 3
     assert_eq!(sel.row(4), 5);
+}
+
+// --- New [0,5] column-range navigation tests ---
+
+#[test]
+fn navigate_left_from_backlog_enters_projects() {
+    let mut app = make_app();
+    // Board starts at Backlog (col 1).
+    assert_eq!(app.selected_column(), 1);
+    app.update(Message::NavigateColumn(-1)); // col 1 → col 0 (Projects)
+    assert_eq!(app.selected_column(), 0);
+}
+
+#[test]
+fn navigate_right_from_done_enters_archive() {
+    let mut app = make_app();
+    // Board starts at Backlog (col 1). Navigate to Done (col 4): 3 steps.
+    for _ in 0..3 { app.update(Message::NavigateColumn(1)); }
+    assert_eq!(app.selected_column(), 4);
+    app.update(Message::NavigateColumn(1)); // col 4 → col 5 (Archive)
+    assert_eq!(app.selected_column(), 5);
+}
+
+#[test]
+fn navigate_left_at_projects_is_noop() {
+    let mut app = make_app();
+    // Board starts at Backlog (col 1). Go to Projects (col 0) first.
+    app.update(Message::NavigateColumn(-1));
+    assert_eq!(app.selected_column(), 0);
+    app.update(Message::NavigateColumn(-1)); // clamp at 0
+    assert_eq!(app.selected_column(), 0);
+}
+
+#[test]
+fn navigate_right_at_archive_is_noop() {
+    let mut app = make_app();
+    // Board starts at Backlog (col 1). Navigate to Archive (col 5): 4 steps.
+    for _ in 0..4 { app.update(Message::NavigateColumn(1)); }
+    assert_eq!(app.selected_column(), 5);
+    app.update(Message::NavigateColumn(1)); // clamp at 5
+    assert_eq!(app.selected_column(), 5);
 }

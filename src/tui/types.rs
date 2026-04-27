@@ -351,8 +351,6 @@ pub enum Message {
     // Project messages
     ProjectsUpdated(Vec<Project>),
     SelectProject(ProjectId),
-    OpenProjectsPanel,
-    CloseProjectsPanel,
 }
 
 // ---------------------------------------------------------------------------
@@ -851,6 +849,11 @@ impl BoardSelection {
         }
     }
 
+    /// Main board starts at Backlog (nav col 1), to the right of the Projects edge column.
+    pub fn new_for_board() -> Self {
+        Self { selected_column: 1, ..Self::new() }
+    }
+
     pub fn new_for_epic() -> Self {
         Self { selected_column: 1, ..Self::new() }
     }
@@ -916,7 +919,7 @@ pub enum ViewMode {
 
 impl Default for ViewMode {
     fn default() -> Self {
-        ViewMode::Board(BoardSelection::new())
+        ViewMode::Board(BoardSelection::new_for_board())
     }
 }
 

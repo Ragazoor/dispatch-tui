@@ -114,7 +114,7 @@ fn tasks_for_current_view_epic_shows_only_subtasks() {
 
     app.board.view_mode = ViewMode::Epic {
         epic_id: EpicId(10),
-        selection: BoardSelection::new(),
+        selection: BoardSelection::new_for_epic(),
         parent: Box::new(ViewMode::Board(BoardSelection::new())),
     };
 
@@ -200,7 +200,7 @@ fn flattened_epic_view_shows_only_that_subtree() {
     app.board.flattened = true;
     app.board.view_mode = ViewMode::Epic {
         epic_id: EpicId(10),
-        selection: BoardSelection::new(),
+        selection: BoardSelection::new_for_epic(),
         parent: Box::new(ViewMode::Board(BoardSelection::new())),
     };
 
@@ -239,8 +239,8 @@ fn toggle_flattened_clamps_selection_when_epic_disappears() {
     app.board.tasks = vec![subtask];
 
     // Select the (only) item in the backlog column: the epic card at row 0.
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 0);
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
 
     // Toggle flatten: epic card disappears, subtask appears in its place.
     // Count stays 1 so row 0 is still valid, but now points at the task.
@@ -252,7 +252,7 @@ fn toggle_flattened_clamps_selection_when_epic_disappears() {
     // put two tasks in backlog, select row 1, then flatten off. After
     // un-flattening, the column has one epic + whatever standalone tasks
     // (none). Row must be clamped to 0.
-    app.selection_mut().set_row(0, 5);
+    app.selection_mut().set_row(1, 5);
     app.update(Message::ToggleFlattened);
     assert!(!app.board.flattened);
     let count = app.column_items_for_status(TaskStatus::Backlog).len();
@@ -292,8 +292,8 @@ fn enter_on_epic_toggles_detail() {
     let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     // Epic is at row 0 in Backlog column (no standalone tasks)
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 0);
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
 
     assert!(!app.board.detail_visible);
     app.handle_key(make_key(KeyCode::Enter));
@@ -311,8 +311,8 @@ fn enter_on_epic_toggles_detail() {
 fn e_on_epic_opens_editor() {
     let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 0);
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
 
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
     assert!(matches!(&cmds[0], Command::PopOutEditor(EditKind::EpicEdit(e)) if e.id == EpicId(10)));
@@ -382,7 +382,7 @@ fn column_items_epic_view_no_epics() {
     let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.view_mode = ViewMode::Epic {
         epic_id: EpicId(10),
-        selection: BoardSelection::new(),
+        selection: BoardSelection::new_for_epic(),
         parent: Box::new(ViewMode::Board(BoardSelection::new())),
     };
     app.board.epics = vec![make_epic(10)];
@@ -397,8 +397,8 @@ fn selected_column_item_returns_epic() {
     app.board.epics = vec![make_epic(10)];
 
     // Same priority (5), task (id=1) at row 0, epic (id=10) at row 1
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 1);
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 1);
 
     match app.selected_column_item() {
         Some(ColumnItem::Epic(e)) => assert_eq!(e.id, EpicId(10)),
@@ -505,9 +505,9 @@ fn shift_h_on_done_epic_moves_to_review() {
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Done;
     app.board.epics = vec![epic];
-    // Done epic → column 3
-    app.selection_mut().set_column(3);
-    app.selection_mut().set_row(3, 0);
+    // Done epic → column 4
+    app.selection_mut().set_column(4);
+    app.selection_mut().set_row(4, 0);
     let cmds = app.handle_key(make_key(KeyCode::Char('H')));
     assert_eq!(app.board.epics[0].status, TaskStatus::Review);
     assert!(cmds.iter().any(|c| matches!(
@@ -547,7 +547,7 @@ fn e_key_in_epic_view_edits_epic() {
     app.board.epics = vec![make_epic(10)];
     app.board.view_mode = ViewMode::Epic {
         epic_id: EpicId(10),
-        selection: BoardSelection::new(),
+        selection: BoardSelection::new_for_epic(),
         parent: Box::new(ViewMode::Board(BoardSelection::new())),
     };
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
@@ -564,9 +564,9 @@ fn e_key_on_task_in_epic_view_edits_task_not_epic() {
     app.board.tasks = vec![subtask];
     app.update(Message::EnterEpic(EpicId(10)));
 
-    // Cursor on the subtask in the Backlog column (col 0, row 0)
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 0);
+    // Cursor on the subtask in the Backlog column (col 1, row 0)
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
 
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
     assert!(cmds.is_empty());
@@ -588,7 +588,7 @@ fn esc_in_epic_view_exits_to_board() {
     let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.view_mode = ViewMode::Epic {
         epic_id: EpicId(10),
-        selection: BoardSelection::new(),
+        selection: BoardSelection::new_for_epic(),
         parent: Box::new(ViewMode::Board(BoardSelection::new())),
     };
     app.handle_key(make_key(KeyCode::Esc));
@@ -784,8 +784,8 @@ fn epic_repo_path_digit_with_nonempty_buffer_appends() {
 fn make_app_confirm_delete_epic() -> App {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 1); // cursor on epic (same priority as task, sorts after by id)
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 1); // cursor on epic (same priority as task, sorts after by id)
     app.input.mode = InputMode::ConfirmDeleteEpic;
     app.status.message = Some("Delete epic \"Epic 10\" and subtasks? [y/n]".to_string());
     app
@@ -795,8 +795,8 @@ fn make_app_confirm_delete_epic() -> App {
 fn confirm_delete_epic_enters_mode_with_title() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 1); // cursor on epic (same priority as task, sorts after by id)
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 1); // cursor on epic (same priority as task, sorts after by id)
     app.update(Message::ConfirmDeleteEpic);
     assert_eq!(app.input.mode, InputMode::ConfirmDeleteEpic);
     assert_eq!(
@@ -841,7 +841,7 @@ fn confirm_delete_epic_other_key_cancels() {
 #[test]
 fn confirm_delete_epic_no_epic_selected_is_noop() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
-    app.selection_mut().set_column(0); // cursor on task, not epic
+    app.selection_mut().set_column(1); // cursor on task, not epic
     app.input.mode = InputMode::ConfirmDeleteEpic;
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert_eq!(app.input.mode, InputMode::Normal);
@@ -861,8 +861,8 @@ fn g_key_on_epic_enters_epic_view() {
     subtask.tmux_window = Some("win-1".to_string());
     app.board.tasks = vec![subtask];
 
-    app.selection_mut().set_column(2);
-    app.selection_mut().set_row(2, 0);
+    app.selection_mut().set_column(3);
+    app.selection_mut().set_row(3, 0);
 
     app.handle_key(make_key(KeyCode::Char('g')));
     assert!(matches!(app.board.view_mode, ViewMode::Epic { epic_id, .. } if epic_id == EpicId(10)));
@@ -880,8 +880,8 @@ fn shift_g_on_epic_jumps_to_review_subtask() {
     subtask.tmux_window = Some("win-1".to_string());
     app.board.tasks = vec![subtask];
 
-    app.selection_mut().set_column(2);
-    app.selection_mut().set_row(2, 0);
+    app.selection_mut().set_column(3);
+    app.selection_mut().set_row(3, 0);
 
     let cmds = app.handle_key(make_key(KeyCode::Char('G')));
     assert!(matches!(&cmds[0], Command::JumpToTmux { window } if window == "win-1"));
@@ -893,8 +893,8 @@ fn shift_g_on_epic_no_session_shows_status() {
     let epic = make_epic(10);
     app.board.epics = vec![epic];
 
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 0);
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
 
     let _cmds = app.handle_key(make_key(KeyCode::Char('G')));
     // Should NOT enter epic view — shows status info instead
@@ -914,8 +914,8 @@ fn shift_g_on_epic_jumps_to_blocked_running_subtask() {
     subtask.tmux_window = Some("win-blocked".to_string());
     app.board.tasks = vec![subtask];
 
-    app.selection_mut().set_column(1);
-    app.selection_mut().set_row(1, 0);
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
 
     let cmds = app.handle_key(make_key(KeyCode::Char('G')));
     assert!(matches!(&cmds[0], Command::JumpToTmux { window } if window == "win-blocked"));
@@ -934,8 +934,8 @@ fn shift_g_on_epic_skips_active_running_subtask() {
     subtask.tmux_window = Some("win-running".to_string());
     app.board.tasks = vec![subtask];
 
-    app.selection_mut().set_column(1);
-    app.selection_mut().set_row(1, 0);
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
 
     let _cmds = app.handle_key(make_key(KeyCode::Char('G')));
     // Active running subtask is skipped, no session found => status info
@@ -960,8 +960,8 @@ fn shift_g_on_epic_prefers_blocked_running_over_review() {
 
     app.board.tasks = vec![review_task, running_task];
 
-    app.selection_mut().set_column(1);
-    app.selection_mut().set_row(1, 0);
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
 
     let cmds = app.handle_key(make_key(KeyCode::Char('G')));
     assert!(matches!(&cmds[0], Command::JumpToTmux { window } if window == "win-running"));
@@ -985,8 +985,8 @@ fn shift_g_on_epic_active_running_falls_through_to_review() {
 
     app.board.tasks = vec![review_task, running_task];
 
-    app.selection_mut().set_column(1);
-    app.selection_mut().set_row(1, 0);
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
 
     let cmds = app.handle_key(make_key(KeyCode::Char('G')));
     assert!(matches!(&cmds[0], Command::JumpToTmux { window } if window == "win-review"));
@@ -1013,8 +1013,8 @@ fn shift_g_on_epic_picks_lowest_sort_order() {
 
     app.board.tasks = vec![task_high, task_low];
 
-    app.selection_mut().set_column(1);
-    app.selection_mut().set_row(1, 0);
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
 
     let cmds = app.handle_key(make_key(KeyCode::Char('G')));
     assert!(matches!(&cmds[0], Command::JumpToTmux { window } if window == "win-low"));
@@ -1102,8 +1102,8 @@ fn space_toggles_epic_selection() {
     let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     // Epic is at row 0 in Backlog column (no standalone tasks)
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 0);
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
 
     app.handle_key(make_key(KeyCode::Char(' ')));
     assert!(app.select.epics.contains(&EpicId(10)));
@@ -1113,8 +1113,8 @@ fn space_toggles_epic_selection() {
 fn space_on_epic_toggle_off() {
     let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 0);
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
 
     // Select
     app.handle_key(make_key(KeyCode::Char(' ')));
@@ -1204,8 +1204,8 @@ fn shift_l_on_epic_moves_status_forward() {
     let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     // Cursor on Backlog column, row 0 (the epic)
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 0);
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
 
     let cmds = app.handle_key(make_key(KeyCode::Char('L')));
     assert_eq!(app.board.epics[0].status, TaskStatus::Running);
@@ -1416,7 +1416,7 @@ fn render_epic_banner_shows_title() {
     app.board.epics = vec![epic];
     app.board.view_mode = ViewMode::Epic {
         epic_id: EpicId(10),
-        selection: BoardSelection::new(),
+        selection: BoardSelection::new_for_epic(),
         parent: Box::new(ViewMode::Board(BoardSelection::new())),
     };
     let buf = render_to_buffer(&mut app, 120, 30);
@@ -1450,11 +1450,11 @@ fn render_detail_task_with_epic_reference() {
     // Switch to Epic view so the subtask is visible (Board view hides epic subtasks)
     app.board.view_mode = ViewMode::Epic {
         epic_id: EpicId(10),
-        selection: BoardSelection::new(),
+        selection: BoardSelection::new_for_epic(),
         parent: Box::new(ViewMode::Board(BoardSelection::new())),
     };
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 0);
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
     app.board.detail_visible = true;
     let buf = render_to_buffer(&mut app, 160, 30);
     assert!(
@@ -1470,8 +1470,8 @@ fn render_detail_epic_shows_title_and_id() {
     epic.title = "Platform Migration".to_string();
     app.board.epics = vec![epic];
     // Epic is the only item in Backlog column (no standalone tasks)
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 0);
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
     app.board.detail_visible = true;
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
@@ -1490,8 +1490,8 @@ fn render_detail_epic_with_plan_shows_path() {
     let mut epic = make_epic(10);
     epic.plan_path = Some("docs/plans/migration.md".to_string());
     app.board.epics = vec![epic];
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 0);
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
     app.board.detail_visible = true;
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
@@ -1515,9 +1515,9 @@ fn render_detail_epic_shows_subtask_list() {
     app.board.tasks = vec![t1, t2];
 
     // Epic is in Backlog; subtasks are in other columns so won't appear as
-    // standalone items in column 0. The epic itself is the first item.
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 0);
+    // standalone items in column 1 (Backlog). The epic itself is the first item.
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
     app.board.detail_visible = true;
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
@@ -1542,8 +1542,8 @@ fn render_detail_epic_subtask_conflict_shows_warning() {
     t1.sub_status = SubStatus::Conflict;
     app.board.tasks = vec![t1];
 
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 0);
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
     app.board.detail_visible = true;
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
@@ -1560,7 +1560,7 @@ fn render_tab_bar_epic_mode_shows_epic_title() {
     app.board.epics = vec![epic];
     app.board.view_mode = ViewMode::Epic {
         epic_id: EpicId(10),
-        selection: BoardSelection::new(),
+        selection: BoardSelection::new_for_epic(),
         parent: Box::new(ViewMode::Board(BoardSelection::new())),
     };
     let buf = render_to_buffer(&mut app, 100, 30);
@@ -1578,7 +1578,7 @@ fn render_tab_bar_epic_mode_replaces_tasks_tab() {
     app.board.epics = vec![epic];
     app.board.view_mode = ViewMode::Epic {
         epic_id: EpicId(10),
-        selection: BoardSelection::new(),
+        selection: BoardSelection::new_for_epic(),
         parent: Box::new(ViewMode::Board(BoardSelection::new())),
     };
     let buf = render_to_buffer(&mut app, 100, 30);
@@ -1676,8 +1676,8 @@ fn handle_key_normal_dispatch_in_epic_view_with_no_items() {
 fn handle_key_normal_shift_l_on_epic_moves_status() {
     let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 0);
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
     let cmds = app.handle_key(make_key(KeyCode::Char('L')));
     assert!(cmds
         .iter()
@@ -1690,8 +1690,8 @@ fn handle_key_normal_shift_h_on_epic_moves_backward() {
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
     app.board.epics = vec![epic];
-    app.selection_mut().set_column(1);
-    app.selection_mut().set_row(1, 0);
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
     let cmds = app.handle_key(make_key(KeyCode::Char('H')));
     assert!(cmds
         .iter()
@@ -1744,7 +1744,7 @@ fn handle_key_normal_epic_view_routes_correctly() {
     let mut app = make_app();
     app.board.view_mode = ViewMode::Epic {
         epic_id: EpicId(1),
-        selection: BoardSelection::new(),
+        selection: BoardSelection::new_for_epic(),
         parent: Box::new(ViewMode::Board(BoardSelection::new())),
     };
     // 'q' in epic view exits to board (doesn't quit)
@@ -1891,10 +1891,10 @@ fn epic_view_breadcrumb_shows_parent_and_child_title() {
     // Nested: viewing child epic, parent is another epic view
     app.board.view_mode = ViewMode::Epic {
         epic_id: child_epic.id,
-        selection: BoardSelection::new(),
+        selection: BoardSelection::new_for_epic(),
         parent: Box::new(ViewMode::Epic {
             epic_id: parent_epic.id,
-            selection: BoardSelection::new(),
+            selection: BoardSelection::new_for_epic(),
             parent: Box::new(ViewMode::Board(BoardSelection::new())),
         }),
     };
@@ -1922,7 +1922,7 @@ fn epic_view_no_breadcrumb_when_parent_is_board() {
     app.board.epics = vec![epic.clone()];
     app.board.view_mode = ViewMode::Epic {
         epic_id: epic.id,
-        selection: BoardSelection::new(),
+        selection: BoardSelection::new_for_epic(),
         parent: Box::new(ViewMode::Board(BoardSelection::new())),
     };
 
@@ -1939,7 +1939,7 @@ fn create_epic_in_epic_view_inherits_parent() {
     let parent_id = EpicId(42);
     app.board.view_mode = ViewMode::Epic {
         epic_id: parent_id,
-        selection: BoardSelection::new(),
+        selection: BoardSelection::new_for_epic(),
         parent: Box::new(ViewMode::Board(BoardSelection::new())),
     };
 
@@ -1988,13 +1988,13 @@ fn breadcrumb_shows_three_levels() {
 
     app.board.view_mode = ViewMode::Epic {
         epic_id: EpicId(3),
-        selection: BoardSelection::new(),
+        selection: BoardSelection::new_for_epic(),
         parent: Box::new(ViewMode::Epic {
             epic_id: EpicId(2),
-            selection: BoardSelection::new(),
+            selection: BoardSelection::new_for_epic(),
             parent: Box::new(ViewMode::Epic {
                 epic_id: EpicId(1),
-                selection: BoardSelection::new(),
+                selection: BoardSelection::new_for_epic(),
                 parent: Box::new(ViewMode::Board(BoardSelection::new())),
             }),
         }),
@@ -2031,7 +2031,7 @@ fn test_epic_anchor_preserved_on_refresh() {
         app.update(Message::NavigateRow(1));
     }
     assert!(matches!(
-        app.column_items_for_status(TaskStatus::Backlog)[app.selection().row(0)],
+        app.column_items_for_status(TaskStatus::Backlog)[app.selection().row(1)],
         ColumnItem::Epic(_)
     ));
 
@@ -2041,7 +2041,7 @@ fn test_epic_anchor_preserved_on_refresh() {
 
     // Still on the epic
     assert!(matches!(
-        app.column_items_for_status(TaskStatus::Backlog)[app.selection().row(0)],
+        app.column_items_for_status(TaskStatus::Backlog)[app.selection().row(1)],
         ColumnItem::Epic(_)
     ));
 }

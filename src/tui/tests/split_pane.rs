@@ -83,7 +83,7 @@ fn g_in_split_mode_on_already_pinned_task_does_nothing() {
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%42".to_string());
     app.board.split.pinned_task_id = Some(TaskId(4)); // same task already pinned
-    app.selection_mut().set_column(1);
+    app.selection_mut().set_column(2);
     let cmds = app.handle_key(make_key(KeyCode::Char('G')));
     assert!(
         cmds.is_empty(),
@@ -99,7 +99,7 @@ fn g_in_split_mode_emits_swap_command() {
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%42".to_string());
     // No pinned task — different from already-pinned case
-    app.selection_mut().set_column(1);
+    app.selection_mut().set_column(2);
     let cmds = app.handle_key(make_key(KeyCode::Char('G')));
     assert_eq!(cmds.len(), 1);
     assert!(matches!(
@@ -118,7 +118,7 @@ fn g_outside_split_mode_is_noop() {
     task.tmux_window = Some("task-4".to_string());
     let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
     // split NOT active
-    app.selection_mut().set_column(1);
+    app.selection_mut().set_column(2);
     let cmds = app.handle_key(make_key(KeyCode::Char('G')));
     assert!(cmds.is_empty(), "G outside split mode must be a no-op");
 }
@@ -129,7 +129,7 @@ fn g_in_split_mode_on_task_without_window_shows_status() {
     let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%42".to_string());
-    app.selection_mut().set_column(1);
+    app.selection_mut().set_column(2);
     let _cmds = app.handle_key(make_key(KeyCode::Char('G')));
     assert!(
         app.status
@@ -148,7 +148,7 @@ fn g_in_split_mode_emits_jump_command() {
     let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%42".to_string());
-    app.selection_mut().set_column(1);
+    app.selection_mut().set_column(2);
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert_eq!(cmds.len(), 1);
     assert!(matches!(
@@ -162,7 +162,7 @@ fn g_without_split_mode_emits_jump_command() {
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some("task-4".to_string());
     let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
-    app.selection_mut().set_column(1); // Running column
+    app.selection_mut().set_column(2); // Running column
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert!(matches!(
         &cmds[0],
@@ -180,7 +180,7 @@ fn g_on_pinned_split_task_emits_focus_split_pane() {
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%42".to_string());
     app.board.split.pinned_task_id = Some(TaskId(4));
-    app.selection_mut().set_column(1); // Running column
+    app.selection_mut().set_column(2); // Running column
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert_eq!(cmds.len(), 1);
     assert!(
@@ -203,8 +203,8 @@ fn g_on_non_pinned_task_in_split_mode_still_jumps_to_window() {
     app.board.split.right_pane_id = Some("%42".to_string());
     app.board.split.pinned_task_id = Some(TaskId(3)); // task3 is pinned, not task4
                                                       // Navigate to Running column and select task4 (row 1, second in column)
-    app.selection_mut().set_column(1);
-    app.selection_mut().set_row(1, 1);
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 1);
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert_eq!(cmds.len(), 1);
     assert!(
@@ -269,7 +269,7 @@ fn toggle_split_with_selected_tmux_task_emits_enter_with_task() {
     let mut task = make_task(3, TaskStatus::Running);
     task.tmux_window = Some("task-3".to_string());
     let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
-    app.selection_mut().set_column(1); // Running column
+    app.selection_mut().set_column(2); // Running column
     let cmds = app.handle_key(make_key(KeyCode::Char('S')));
     assert_eq!(cmds.len(), 1);
     assert!(matches!(
@@ -283,7 +283,7 @@ fn toggle_split_with_selected_tmux_task_emits_enter_with_task() {
 fn toggle_split_without_tmux_task_emits_plain_enter() {
     let task = make_task(3, TaskStatus::Running);
     let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
-    app.selection_mut().set_column(1); // Running column, task has no tmux_window
+    app.selection_mut().set_column(2); // Running column, task has no tmux_window
     let cmds = app.handle_key(make_key(KeyCode::Char('S')));
     assert_eq!(cmds.len(), 1);
     assert!(matches!(&cmds[0], Command::EnterSplitMode));

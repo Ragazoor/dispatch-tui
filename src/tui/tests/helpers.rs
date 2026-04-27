@@ -137,16 +137,16 @@ pub(in crate::tui) fn make_app_with_epic_selected() -> App {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     // Same priority (5), task (id=1) at row 0, epic (id=10) at row 1
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 1);
+    app.selection_mut().set_column(1); // Backlog = nav col 1
+    app.selection_mut().set_row(1, 1);
     app
 }
 
 pub(in crate::tui) fn make_app_confirm_archive_epic() -> App {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 1); // cursor on epic (same priority as task, sorts after by id)
+    app.selection_mut().set_column(1); // Backlog = nav col 1
+    app.selection_mut().set_row(1, 1); // cursor on epic (same priority as task, sorts after by id)
     app.input.mode = InputMode::ConfirmArchiveEpic;
     app.status.message = Some("Archive epic and all subtasks? [y/n]".to_string());
     app

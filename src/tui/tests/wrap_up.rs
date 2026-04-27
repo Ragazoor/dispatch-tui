@@ -88,7 +88,7 @@ fn finish_failed_without_conflict_does_not_set_flag() {
 #[test]
 fn confirm_done_y_moves_task() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Review)], 1, TEST_TIMEOUT);
-    app.selection_mut().set_column(2);
+    app.selection_mut().set_column(3);
 
     app.input.mode = InputMode::ConfirmDone(TaskId(1));
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
@@ -101,7 +101,7 @@ fn confirm_done_y_moves_task() {
 #[test]
 fn confirm_done_n_cancels() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Review)], 1, TEST_TIMEOUT);
-    app.selection_mut().set_column(2);
+    app.selection_mut().set_column(3);
 
     app.input.mode = InputMode::ConfirmDone(TaskId(1));
     let cmds = app.handle_key(make_key(KeyCode::Char('n')));
@@ -123,7 +123,7 @@ fn confirm_done_kills_tmux_but_preserves_worktree() {
         1,
         TEST_TIMEOUT,
     );
-    app.selection_mut().set_column(2);
+    app.selection_mut().set_column(3);
 
     // Enter confirm mode and confirm
     app.update(Message::MoveTask {
@@ -156,7 +156,7 @@ fn batch_move_with_review_tasks_enters_confirm_done() {
         1,
         TEST_TIMEOUT,
     );
-    app.selection_mut().set_column(2);
+    app.selection_mut().set_column(3);
     app.update(Message::ToggleSelect(TaskId(1)));
     app.update(Message::ToggleSelect(TaskId(2)));
 
@@ -176,7 +176,7 @@ fn batch_confirm_done_moves_all_review_tasks() {
         1,
         TEST_TIMEOUT,
     );
-    app.selection_mut().set_column(2);
+    app.selection_mut().set_column(3);
     app.update(Message::ToggleSelect(TaskId(1)));
     app.update(Message::ToggleSelect(TaskId(2)));
 
@@ -318,7 +318,7 @@ fn wrap_up_available_on_running_blocked() {
     let id = TaskId(3); // Running
     app.find_task_mut(id).unwrap().sub_status = SubStatus::NeedsInput;
     app.find_task_mut(id).unwrap().worktree = Some("/tmp/wt".to_string());
-    app.selection_mut().set_column(2); // Blocked column
+    app.selection_mut().set_column(3); // Blocked column
     app.update(Message::StartWrapUp(id));
     assert!(matches!(app.mode(), InputMode::ConfirmWrapUp(_)));
 }
@@ -339,8 +339,8 @@ fn w_key_on_epic_starts_epic_wrap_up() {
     epic.status = TaskStatus::Review;
     app.board.epics = vec![epic];
     // Epic is in Review column (column 2)
-    app.selection_mut().set_column(2);
-    app.selection_mut().set_row(2, 0);
+    app.selection_mut().set_column(3);
+    app.selection_mut().set_row(3, 0);
 
     app.handle_key(make_key(KeyCode::Char('W')));
 
@@ -777,8 +777,8 @@ fn handle_key_normal_wrap_up_task() {
     task.tmux_window = Some("main:10-test".to_string());
     let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
     // Select the review column
-    app.selection_mut().set_column(2);
-    app.selection_mut().set_row(2, 0);
+    app.selection_mut().set_column(3);
+    app.selection_mut().set_row(3, 0);
     app.handle_key(make_key(KeyCode::Char('W')));
     assert!(matches!(*app.mode(), InputMode::ConfirmWrapUp(TaskId(10))));
 }
@@ -793,8 +793,8 @@ fn handle_key_normal_wrap_up_epic() {
     epic.status = TaskStatus::Review;
     app.board.epics = vec![epic];
     // Epic is in Review column
-    app.selection_mut().set_column(2);
-    app.selection_mut().set_row(2, 0);
+    app.selection_mut().set_column(3);
+    app.selection_mut().set_row(3, 0);
     app.handle_key(make_key(KeyCode::Char('W')));
     assert!(matches!(
         *app.mode(),
@@ -806,7 +806,7 @@ fn handle_key_normal_wrap_up_epic() {
 fn handle_key_normal_wrap_up_on_empty_is_noop() {
     let mut app = make_app();
     // Navigate to an empty column (Review has no tasks by default)
-    app.selection_mut().set_column(2);
+    app.selection_mut().set_column(3);
     let cmds = app.handle_key(make_key(KeyCode::Char('W')));
     assert!(cmds.is_empty());
 }
@@ -817,8 +817,8 @@ fn handle_key_normal_start_merge_pr() {
     task.pr_url = Some("https://github.com/example/repo/pull/42".to_string());
     task.sub_status = SubStatus::Approved;
     let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
-    app.selection_mut().set_column(2); // Review column
-    app.selection_mut().set_row(2, 0);
+    app.selection_mut().set_column(3); // Review column
+    app.selection_mut().set_row(3, 0);
     app.handle_key(make_key(KeyCode::Char('P')));
     assert!(matches!(*app.mode(), InputMode::ConfirmMergePr(TaskId(10))));
 }

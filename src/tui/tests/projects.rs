@@ -60,8 +60,8 @@ fn select_project_clamps_cursor() {
         make_task_with_project(4, TaskStatus::Backlog, 2),
     ];
     let mut app = App::new(tasks, 1, TEST_TIMEOUT);
-    // Move cursor to row 2 in column 0 (Backlog)
-    app.selection_mut().set_row(0, 2);
+    // Move cursor to row 2 in column 1 (Backlog)
+    app.selection_mut().set_row(1, 2);
     app.update_anchor_from_current();
 
     app.update(Message::SelectProject(2));
@@ -99,7 +99,7 @@ fn two_project_app() -> App {
 #[test]
 fn h_from_backlog_opens_projects_panel() {
     let mut app = two_project_app();
-    assert_eq!(app.selected_column(), 0);
+    assert_eq!(app.selected_column(), 1);
     assert!(!app.projects_panel_visible());
 
     app.handle_key(make_key(KeyCode::Char('h')));
@@ -116,9 +116,9 @@ fn left_from_backlog_opens_projects_panel() {
 #[test]
 fn h_not_at_column0_does_not_open_panel() {
     let mut app = two_project_app();
-    // Move to column 1 (Running)
+    // Move to column 2 (Running)
     app.update(Message::NavigateColumn(1));
-    assert_eq!(app.selected_column(), 1);
+    assert_eq!(app.selected_column(), 2);
     app.handle_key(make_key(KeyCode::Char('h')));
     assert!(!app.projects_panel_visible());
 }
