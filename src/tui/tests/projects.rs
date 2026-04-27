@@ -205,13 +205,35 @@ fn k_does_not_underflow_at_row0() {
 }
 
 #[test]
-fn l_selects_project_and_stays_in_projects_column() {
+fn l_closes_projects_panel() {
+    let mut app = two_project_app();
+    app.handle_key(make_key(KeyCode::Char('h')));
+    assert!(app.projects_panel_visible());
+
+    app.handle_key(make_key(KeyCode::Char('l')));
+    assert!(!app.projects_panel_visible());
+    assert_eq!(app.selected_column(), 1, "focus should return to Backlog");
+}
+
+#[test]
+fn right_closes_projects_panel() {
+    let mut app = two_project_app();
+    app.handle_key(make_key(KeyCode::Char('h')));
+    assert!(app.projects_panel_visible());
+
+    app.handle_key(make_key(KeyCode::Right));
+    assert!(!app.projects_panel_visible());
+    assert_eq!(app.selected_column(), 1, "focus should return to Backlog");
+}
+
+#[test]
+fn enter_selects_project_and_stays_in_col0() {
     let mut app = two_project_app();
     app.handle_key(make_key(KeyCode::Char('h')));
     // Navigate to row 1 (Backend, id=2)
     app.handle_key(make_key(KeyCode::Char('j')));
-    app.handle_key(make_key(KeyCode::Char('l')));
-    // l/Enter activates the project but focus stays at col 0 per spec
+    app.handle_key(make_key(KeyCode::Enter));
+    // Enter activates the project but focus stays at col 0 per spec
     assert!(app.projects_panel_visible());
     assert_eq!(app.active_project(), 2);
 }

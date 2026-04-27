@@ -819,7 +819,10 @@ impl App {
                 self.projects_panel.list_state.select(Some(prev));
                 vec![]
             }
-            KeyCode::Char('l') | KeyCode::Enter => {
+            KeyCode::Char('l') | KeyCode::Right => {
+                self.update(Message::NavigateColumn(1))
+            }
+            KeyCode::Enter => {
                 if let Some(id) = self.selected_project().map(|p| p.id) {
                     return self.update(Message::SelectProject(id));
                 }
