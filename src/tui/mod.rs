@@ -28,6 +28,12 @@ const PR_POLL_INTERVAL: Duration = Duration::from_secs(30);
 /// Max character width for task titles shown in confirmation popups and status messages.
 pub(in crate::tui) const TITLE_DISPLAY_LENGTH: usize = 30;
 
+/// Returns true for the two edge navigation columns (Projects=0 and Archive=5) that
+/// don't hold regular task data and must be excluded from task-operation hotkeys.
+pub(in crate::tui) fn is_edge_column(col: usize) -> bool {
+    col == 0 || col == TaskStatus::COLUMN_COUNT + 1
+}
+
 // ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
@@ -586,7 +592,7 @@ impl App {
             return None;
         }
         let col = self.selection().column();
-        if col == 0 || col == TaskStatus::COLUMN_COUNT + 1 {
+        if is_edge_column(col) {
             return None;
         }
         let status = TaskStatus::from_column_index(col - 1)?;
@@ -1129,7 +1135,7 @@ impl App {
 
     fn handle_reorder_item(&mut self, direction: isize) -> Vec<Command> {
         let col = self.selection().column();
-        if col == 0 || col == TaskStatus::COLUMN_COUNT + 1 {
+        if is_edge_column(col) {
             return vec![];
         }
         let Some(status) = TaskStatus::from_column_index(col - 1) else {
@@ -1890,7 +1896,7 @@ impl App {
 
     fn handle_select_all_column(&mut self) -> Vec<Command> {
         let col = self.selection().column();
-        if col == 0 || col == TaskStatus::COLUMN_COUNT + 1 {
+        if is_edge_column(col) {
             return vec![];
         }
         let Some(status) = TaskStatus::from_column_index(col - 1) else {

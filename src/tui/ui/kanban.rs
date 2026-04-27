@@ -12,7 +12,8 @@ use crate::models::{
     TaskUsage,
 };
 use crate::tui::{
-    App, ColumnItem, ColumnLayout, EpicStatsMap, InputMode, RepoFilterMode, ViewMode,
+    is_edge_column, App, ColumnItem, ColumnLayout, EpicStatsMap, InputMode, RepoFilterMode,
+    ViewMode,
 };
 use chrono::{DateTime, Utc};
 use ratatui::{
@@ -151,7 +152,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 /// When an edge column (Projects=0 or Archive=5) is focused, 5 segments are shown.
 /// When a task column (1–4) is focused, 4 segments are shown (task columns only).
 fn column_layout_constraints(selected_col: usize) -> Vec<Constraint> {
-    let n = if selected_col == 0 || selected_col == TaskStatus::COLUMN_COUNT + 1 {
+    let n = if is_edge_column(selected_col) {
         5u32
     } else {
         4u32
@@ -587,7 +588,7 @@ fn render_columns(
     let mut area_idx = 0usize;
 
     if sel == 0 {
-        render_projects_column(frame, app, column_areas[area_idx], now);
+        render_projects_column(frame, app, column_areas[area_idx]);
         area_idx += 1;
     }
 
@@ -861,7 +862,7 @@ fn build_project_list_item<'a>(
     ListItem::new(vec![name_line, meta_line])
 }
 
-fn render_projects_column(frame: &mut Frame, app: &mut App, area: Rect, _now: DateTime<Utc>) {
+fn render_projects_column(frame: &mut Frame, app: &mut App, area: Rect) {
     let sel_row = app.selected_project_row();
     let active_project = app.active_project();
 
