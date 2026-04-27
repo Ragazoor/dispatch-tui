@@ -351,7 +351,6 @@ impl App {
                     let archive_col = TaskStatus::COLUMN_COUNT + 1;
                     let next = (self.selection().row(archive_col) + 1).min(count - 1);
                     self.selection_mut().set_row(archive_col, next);
-                    self.archive.selected_row = next;
                     *self.archive.list_state.selected_mut() = Some(next);
                 }
                 vec![]
@@ -360,7 +359,6 @@ impl App {
                 let archive_col = TaskStatus::COLUMN_COUNT + 1;
                 let prev = self.selection().row(archive_col).saturating_sub(1);
                 self.selection_mut().set_row(archive_col, prev);
-                self.archive.selected_row = prev;
                 *self.archive.list_state.selected_mut() = Some(prev);
                 vec![]
             }
@@ -369,7 +367,7 @@ impl App {
             }
             KeyCode::Char('x') => {
                 let archived = self.archived_tasks();
-                if let Some(task) = archived.get(self.archive.selected_row) {
+                if let Some(task) = archived.get(self.selected_archive_row()) {
                     let title = super::truncate_title(&task.title, 30);
                     self.input.mode = InputMode::ConfirmDelete;
                     self.set_status(format!("Delete {title}? [y/n]"));
@@ -378,7 +376,7 @@ impl App {
             }
             KeyCode::Char('e') => {
                 let archived = self.archived_tasks();
-                if let Some(task) = archived.get(self.archive.selected_row) {
+                if let Some(task) = archived.get(self.selected_archive_row()) {
                     let title = super::truncate_title(&task.title, 30);
                     self.input.mode = InputMode::ConfirmEditTask(task.id);
                     self.set_status(format!("Edit {title}? [y/n]"));
@@ -568,7 +566,7 @@ impl App {
 
     fn confirm_delete_archived(&mut self) -> Vec<Command> {
         self.archived_tasks()
-            .get(self.archive.selected_row)
+            .get(self.selected_archive_row())
             .map(|t| t.id)
             .map(|id| self.update(Message::DeleteTask(id)))
             .unwrap_or_default()
@@ -823,15 +821,11 @@ impl App {
             }
             KeyCode::Char('l') | KeyCode::Enter => {
                 if let Some(id) = self.selected_project().map(|p| p.id) {
-                    let mut cmds = self.update(Message::SelectProject(id));
-                    // Close the panel by navigating right to Backlog (col 1)
-                    cmds.extend(self.update(Message::NavigateColumn(1)));
-                    return cmds;
+                    return self.update(Message::SelectProject(id));
                 }
                 vec![]
             }
             KeyCode::Char('h') | KeyCode::Left | KeyCode::Esc => {
-                // Close projects panel by navigating right to Backlog (col 1)
                 self.update(Message::NavigateColumn(1))
             }
             KeyCode::Char('n') => {

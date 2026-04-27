@@ -163,20 +163,20 @@ fn archive_panel_j_k_navigation() {
         TEST_TIMEOUT,
     );
     app.selection_mut().set_column(5);
-    assert_eq!(app.archive.selected_row, 0);
+    assert_eq!(app.selected_archive_row(), 0);
 
     app.handle_key(make_key(KeyCode::Char('j')));
-    assert_eq!(app.archive.selected_row, 1);
+    assert_eq!(app.selected_archive_row(), 1);
 
     app.handle_key(make_key(KeyCode::Char('j')));
-    assert_eq!(app.archive.selected_row, 2);
+    assert_eq!(app.selected_archive_row(), 2);
 
     // Clamp at end
     app.handle_key(make_key(KeyCode::Char('j')));
-    assert_eq!(app.archive.selected_row, 2);
+    assert_eq!(app.selected_archive_row(), 2);
 
     app.handle_key(make_key(KeyCode::Char('k')));
-    assert_eq!(app.archive.selected_row, 1);
+    assert_eq!(app.selected_archive_row(), 1);
 }
 
 #[test]
@@ -557,9 +557,9 @@ fn archive_panel_down_arrow_navigates() {
         TEST_TIMEOUT,
     );
     app.selection_mut().set_column(5);
-    assert_eq!(app.archive.selected_row, 0);
+    assert_eq!(app.selected_archive_row(), 0);
     app.handle_key(make_key(KeyCode::Down));
-    assert_eq!(app.archive.selected_row, 1);
+    assert_eq!(app.selected_archive_row(), 1);
 }
 
 #[test]
@@ -573,9 +573,9 @@ fn archive_panel_up_arrow_navigates() {
         TEST_TIMEOUT,
     );
     app.selection_mut().set_column(5);
-    app.archive.selected_row = 1;
+    app.selection_mut().set_row(TaskStatus::COLUMN_COUNT + 1, 1);
     app.handle_key(make_key(KeyCode::Up));
-    assert_eq!(app.archive.selected_row, 0);
+    assert_eq!(app.selected_archive_row(), 0);
 }
 
 #[test]
@@ -826,7 +826,7 @@ fn archive_e_enters_edit_confirm() {
     let mut app = make_app();
     app.update(Message::ArchiveTask(TaskId(1)));
     app.selection_mut().set_column(5);
-    app.archive.selected_row = 0;
+    app.selection_mut().set_row(TaskStatus::COLUMN_COUNT + 1, 0);
     app.handle_key(make_key(KeyCode::Char('e')));
     assert!(matches!(app.input.mode, InputMode::ConfirmEditTask(_)));
 }
@@ -851,10 +851,10 @@ fn handle_key_archive_j_navigates_down() {
     app.board.tasks.push(t1);
     app.board.tasks.push(t2);
     app.selection_mut().set_column(5);
-    app.archive.selected_row = 0;
+    app.selection_mut().set_row(TaskStatus::COLUMN_COUNT + 1, 0);
 
     app.handle_key(make_key(KeyCode::Char('j')));
-    assert_eq!(app.archive.selected_row, 1);
+    assert_eq!(app.selected_archive_row(), 1);
 }
 
 #[test]
@@ -867,10 +867,10 @@ fn handle_key_archive_k_navigates_up() {
     app.board.tasks.push(t1);
     app.board.tasks.push(t2);
     app.selection_mut().set_column(5);
-    app.archive.selected_row = 1;
+    app.selection_mut().set_row(TaskStatus::COLUMN_COUNT + 1, 1);
 
     app.handle_key(make_key(KeyCode::Char('k')));
-    assert_eq!(app.archive.selected_row, 0);
+    assert_eq!(app.selected_archive_row(), 0);
 }
 
 #[test]
@@ -879,10 +879,10 @@ fn handle_key_archive_k_clamps_at_zero() {
     let t = make_task(100, TaskStatus::Archived);
     app.board.tasks.push(t);
     app.selection_mut().set_column(5);
-    app.archive.selected_row = 0;
+    app.selection_mut().set_row(TaskStatus::COLUMN_COUNT + 1, 0);
 
     app.handle_key(make_key(KeyCode::Char('k')));
-    assert_eq!(app.archive.selected_row, 0);
+    assert_eq!(app.selected_archive_row(), 0);
 }
 
 #[test]
@@ -893,10 +893,10 @@ fn handle_key_archive_down_arrow_navigates() {
     app.board.tasks.push(t1);
     app.board.tasks.push(t2);
     app.selection_mut().set_column(5);
-    app.archive.selected_row = 0;
+    app.selection_mut().set_row(TaskStatus::COLUMN_COUNT + 1, 0);
 
     app.handle_key(make_key(KeyCode::Down));
-    assert_eq!(app.archive.selected_row, 1);
+    assert_eq!(app.selected_archive_row(), 1);
 }
 
 #[test]
@@ -907,10 +907,10 @@ fn handle_key_archive_up_arrow_navigates() {
     app.board.tasks.push(t1);
     app.board.tasks.push(t2);
     app.selection_mut().set_column(5);
-    app.archive.selected_row = 1;
+    app.selection_mut().set_row(TaskStatus::COLUMN_COUNT + 1, 1);
 
     app.handle_key(make_key(KeyCode::Up));
-    assert_eq!(app.archive.selected_row, 0);
+    assert_eq!(app.selected_archive_row(), 0);
 }
 
 #[test]
@@ -919,7 +919,7 @@ fn handle_key_archive_x_enters_confirm_delete() {
     let t = make_task(100, TaskStatus::Archived);
     app.board.tasks.push(t);
     app.selection_mut().set_column(5);
-    app.archive.selected_row = 0;
+    app.selection_mut().set_row(TaskStatus::COLUMN_COUNT + 1, 0);
 
     app.handle_key(make_key(KeyCode::Char('x')));
     assert_eq!(*app.mode(), InputMode::ConfirmDelete);
@@ -931,7 +931,7 @@ fn handle_key_archive_e_enters_confirm_edit() {
     let t = make_task(100, TaskStatus::Archived);
     app.board.tasks.push(t);
     app.selection_mut().set_column(5);
-    app.archive.selected_row = 0;
+    app.selection_mut().set_row(TaskStatus::COLUMN_COUNT + 1, 0);
 
     app.handle_key(make_key(KeyCode::Char('e')));
     assert!(matches!(

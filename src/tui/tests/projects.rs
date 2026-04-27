@@ -205,13 +205,14 @@ fn k_does_not_underflow_at_row0() {
 }
 
 #[test]
-fn l_selects_project_and_closes_panel() {
+fn l_selects_project_and_stays_in_projects_column() {
     let mut app = two_project_app();
     app.handle_key(make_key(KeyCode::Char('h')));
     // Navigate to row 1 (Backend, id=2)
     app.handle_key(make_key(KeyCode::Char('j')));
     app.handle_key(make_key(KeyCode::Char('l')));
-    assert!(!app.projects_panel_visible());
+    // l/Enter activates the project but focus stays at col 0 per spec
+    assert!(app.projects_panel_visible());
     assert_eq!(app.active_project(), 2);
 }
 

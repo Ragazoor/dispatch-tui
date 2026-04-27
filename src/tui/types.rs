@@ -724,7 +724,6 @@ impl Default for InputState {
 
 #[derive(Debug, Clone, Default)]
 pub struct ArchiveState {
-    pub selected_row: usize,
     pub list_state: ListState,
 }
 

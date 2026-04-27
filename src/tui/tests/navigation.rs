@@ -1983,7 +1983,7 @@ fn navigate_right_from_done_resets_archive_selection() {
         TEST_TIMEOUT,
     );
     // Pre-position archive selection at row 1
-    app.archive.selected_row = 1;
+    app.selection_mut().set_row(TaskStatus::COLUMN_COUNT + 1, 1);
     *app.archive.list_state.selected_mut() = Some(1);
 
     // Navigate from Backlog (col 1) to archive (col 5): 4 steps
@@ -1991,7 +1991,7 @@ fn navigate_right_from_done_resets_archive_selection() {
         app.update(Message::NavigateColumn(1));
     }
     // Selection should reset to 0
-    assert_eq!(app.archive.selected_row, 0);
+    assert_eq!(app.selected_archive_row(), 0);
 }
 
 #[test]
