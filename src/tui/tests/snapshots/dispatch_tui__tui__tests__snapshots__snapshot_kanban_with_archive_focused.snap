@@ -1,0 +1,44 @@
+---
+source: src/tui/tests/snapshots.rs
+expression: rendered
+---
+[Default]   ▸ Tasks   [Tab]                                                                                       🔕  [N]
+       ◦ backlog 2             ◦ running 1             ◦ review 0               ◦ done 1               ▸ Archive 1
+  ▎ #1 Task 1             ── active                                       ▎ #4 Task 4            Archive (1)
+   ◦ <1h                  ▎ #3 Task 3                                      ✓ <1h                  ▌ #10 archived task
+  ▎ #2 Task 2              ◉ running                                                               ◦ <1h
+   ◦ <1h
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+
+
+
+
+
+[x] delete  [e] edit  [H] close  [q] quit

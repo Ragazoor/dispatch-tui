@@ -154,3 +154,39 @@ fn snapshot_tab_bar_with_feed_epics_feed_active() {
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);
 }
+
+#[test]
+fn snapshot_kanban_with_projects_focused() {
+    use super::super::types::Message;
+    use super::make_app;
+    let mut app = make_app();
+    // Add a project so the Projects column has content
+    app.board.projects.push(crate::models::Project {
+        id: 1,
+        name: "Default".to_string(),
+        is_default: true,
+        sort_order: 0,
+    });
+    // Navigate to Projects (col 0) — make_app starts at col 1 (Backlog)
+    app.update(Message::NavigateColumn(-1));
+    assert_eq!(app.selected_column(), 0);
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
+fn snapshot_kanban_with_archive_focused() {
+    use super::super::types::Message;
+    use super::make_app_with_archived_task;
+    let mut app = make_app_with_archived_task();
+    // Navigate to Archive (col 5 = COLUMN_COUNT + 1) — make_app starts at col 1 (Backlog)
+    for _ in 0..4 {
+        app.update(Message::NavigateColumn(1));
+    }
+    assert_eq!(
+        app.selected_column(),
+        crate::models::TaskStatus::COLUMN_COUNT + 1
+    );
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
