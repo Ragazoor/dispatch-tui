@@ -1916,3 +1916,47 @@ fn apply_tmux_focus_warning_returns_status_info_when_disabled() {
     let result = apply_tmux_focus_warning(&mock);
     assert!(matches!(result, Some(Message::StatusInfo(_))));
 }
+
+mod resolve_initial_project_tests {
+    use super::*;
+    use crate::models::{Project, ProjectId};
+
+    fn make_project(id: ProjectId, is_default: bool) -> Project {
+        Project {
+            id,
+            name: format!("p{id}"),
+            sort_order: id,
+            is_default,
+        }
+    }
+
+    #[test]
+    fn falls_back_to_default_when_no_saved_setting() {
+        let projects = vec![make_project(1, true), make_project(2, false)];
+        assert_eq!(resolve_initial_project(&projects, None), 1);
+    }
+
+    #[test]
+    fn uses_saved_project_when_it_exists() {
+        let projects = vec![make_project(1, true), make_project(2, false)];
+        assert_eq!(resolve_initial_project(&projects, Some("2".to_string())), 2);
+    }
+
+    #[test]
+    fn falls_back_to_default_when_saved_project_deleted() {
+        let projects = vec![make_project(1, true), make_project(2, false)];
+        assert_eq!(
+            resolve_initial_project(&projects, Some("99".to_string())),
+            1
+        );
+    }
+
+    #[test]
+    fn falls_back_to_default_when_saved_value_invalid() {
+        let projects = vec![make_project(1, true), make_project(2, false)];
+        assert_eq!(
+            resolve_initial_project(&projects, Some("not_a_number".to_string())),
+            1
+        );
+    }
+}
