@@ -703,142 +703,166 @@ impl App {
     /// Process a message and return a list of side-effect commands.
     pub fn update(&mut self, msg: Message) -> Vec<Command> {
         match msg {
-            // Board navigation, view toggles, system events
-            msg @ (Message::Tick
-            | Message::TerminalResized
-            | Message::Quit
-            | Message::NavigateColumn(_)
-            | Message::NavigateRow(_)
-            | Message::MoveTask { .. }
-            | Message::ReorderItem(_)
-            | Message::ToggleDetail
-            | Message::ToggleFlattened
-            | Message::ToggleHelp
-            | Message::ToggleNotifications
-            | Message::ToggleArchive
-            | Message::ToggleSplitMode
-            | Message::SwapSplitPane(_)
-            | Message::SplitPaneOpened { .. }
-            | Message::SplitPaneClosed
-            | Message::RefreshTasks(_)
-            | Message::RefreshUsage(_)
-            | Message::Error(_)
-            | Message::DismissError
-            | Message::StatusInfo(_)
-            | Message::RepoPathsUpdated(_)
-            | Message::MessageReceived(_)
-            | Message::OpenInBrowser { .. }
-            | Message::FocusChanged(_)
-            | Message::TmuxOutput { .. }
-            | Message::TabCycle
-            | Message::WindowGone(_)) => self.dispatch_board(msg),
+            // ── Board navigation, view toggles, system events ──
+            Message::Tick => self.handle_tick(),
+            Message::TerminalResized => vec![],
+            Message::Quit => self.handle_quit(),
+            Message::NavigateColumn(delta) => self.handle_navigate_column(delta),
+            Message::NavigateRow(delta) => self.handle_navigate_row(delta),
+            Message::MoveTask { id, direction } => self.handle_move_task(id, direction),
+            Message::ReorderItem(dir) => self.handle_reorder_item(dir),
+            Message::ToggleDetail => self.handle_toggle_detail(),
+            Message::ToggleFlattened => self.handle_toggle_flattened(),
+            Message::ToggleHelp => self.handle_toggle_help(),
+            Message::ToggleNotifications => self.handle_toggle_notifications(),
+            Message::ToggleArchive => self.handle_toggle_archive(),
+            Message::ToggleSplitMode => self.handle_toggle_split_mode(),
+            Message::SwapSplitPane(task_id) => self.handle_swap_split_pane(task_id),
+            Message::SplitPaneOpened { pane_id, task_id } => {
+                self.handle_split_pane_opened(pane_id, task_id)
+            }
+            Message::SplitPaneClosed => self.handle_split_pane_closed(),
+            Message::FocusChanged(focused) => self.handle_focus_changed(focused),
+            Message::RefreshTasks(tasks) => self.handle_refresh_tasks(tasks),
+            Message::RefreshUsage(usage) => self.handle_refresh_usage(usage),
+            Message::Error(text) => self.handle_error(text),
+            Message::DismissError => self.handle_dismiss_error(),
+            Message::StatusInfo(text) => self.handle_status_info(text),
+            Message::RepoPathsUpdated(paths) => self.handle_repo_paths_updated(paths),
+            Message::MessageReceived(id) => self.handle_message_received(id),
+            Message::OpenInBrowser { url } => self.handle_open_in_browser(url),
+            Message::TmuxOutput {
+                id,
+                output,
+                activity_ts,
+            } => self.handle_tmux_output(id, output, activity_ts),
+            Message::WindowGone(id) => self.handle_window_gone(id),
+            Message::TabCycle => self.handle_tab_cycle(),
 
-            // Task lifecycle, dispatch, selection, wrap-up
-            msg @ (Message::DispatchTask(..)
-            | Message::Dispatched { .. }
-            | Message::TaskCreated { .. }
-            | Message::DeleteTask(_)
-            | Message::ResumeTask(_)
-            | Message::Resumed { .. }
-            | Message::DispatchFailed(_)
-            | Message::MarkDispatching(_)
-            | Message::TaskEdited(_)
-            | Message::StaleAgent(_)
-            | Message::AgentCrashed(_)
-            | Message::KillAndRetry(_)
-            | Message::RetryResume(_)
-            | Message::RetryFresh(_)
-            | Message::ArchiveTask(_)
-            | Message::QuickDispatch { .. }
-            | Message::StartQuickDispatchSelection
-            | Message::SelectQuickDispatchRepo(_)
-            | Message::FinishComplete(_)
-            | Message::FinishFailed { .. }
-            | Message::ConfirmDone
-            | Message::CancelDone
-            | Message::StartWrapUp(_)
-            | Message::WrapUpRebase
-            | Message::WrapUpPr
-            | Message::CancelWrapUp
-            | Message::DetachTmux(_)
-            | Message::BatchDetachTmux(_)
-            | Message::ConfirmDetachTmux
-            | Message::ToggleSelect(_)
-            | Message::ClearSelection
-            | Message::SelectAllColumn
-            | Message::BatchMoveTasks { .. }
-            | Message::BatchArchiveTasks(_)) => self.dispatch_task(msg),
+            // ── Task lifecycle, dispatch, selection, wrap-up ──
+            Message::DispatchTask(id, mode) => self.handle_dispatch_task(id, mode),
+            Message::Dispatched {
+                id,
+                worktree,
+                tmux_window,
+                switch_focus,
+            } => self.handle_dispatched(id, worktree, tmux_window, switch_focus),
+            Message::TaskCreated { task } => self.handle_task_created(task),
+            Message::DeleteTask(id) => self.handle_delete_task(id),
+            Message::ResumeTask(id) => self.handle_resume_task(id),
+            Message::Resumed { id, tmux_window } => self.handle_resumed(id, tmux_window),
+            Message::DispatchFailed(id) => self.handle_dispatch_failed(id),
+            Message::MarkDispatching(id) => self.handle_mark_dispatching(id),
+            Message::TaskEdited(edit) => self.handle_task_edited(edit),
+            Message::StaleAgent(id) => self.handle_stale_agent(id),
+            Message::AgentCrashed(id) => self.handle_agent_crashed(id),
+            Message::KillAndRetry(id) => self.handle_kill_and_retry(id),
+            Message::RetryResume(id) => self.handle_retry_resume(id),
+            Message::RetryFresh(id) => self.handle_retry_fresh(id),
+            Message::ArchiveTask(id) => self.handle_archive_task(id),
+            Message::QuickDispatch { repo_path, epic_id } => {
+                self.handle_quick_dispatch(repo_path, epic_id)
+            }
+            Message::StartQuickDispatchSelection => self.handle_start_quick_dispatch_selection(),
+            Message::SelectQuickDispatchRepo(idx) => self.handle_select_quick_dispatch_repo(idx),
+            Message::FinishComplete(id) => self.handle_finish_complete(id),
+            Message::FinishFailed {
+                id,
+                error,
+                is_conflict,
+            } => self.handle_finish_failed(id, error, is_conflict),
+            Message::ConfirmDone => self.handle_confirm_done(),
+            Message::CancelDone => self.handle_cancel_done(),
+            Message::StartWrapUp(id) => self.handle_start_wrap_up(id),
+            Message::WrapUpRebase => self.handle_wrap_up_rebase(),
+            Message::WrapUpPr => self.handle_wrap_up_pr(),
+            Message::CancelWrapUp => self.handle_cancel_wrap_up(),
+            Message::DetachTmux(id) => self.handle_detach_tmux(vec![id]),
+            Message::BatchDetachTmux(ids) => self.handle_detach_tmux(ids),
+            Message::ConfirmDetachTmux => self.handle_confirm_detach_tmux(),
+            Message::ToggleSelect(id) => self.handle_toggle_select(id),
+            Message::ClearSelection => self.handle_clear_selection(),
+            Message::SelectAllColumn => self.handle_select_all_column(),
+            Message::BatchMoveTasks { ids, direction } => {
+                self.handle_batch_move_tasks(ids, direction)
+            }
+            Message::BatchArchiveTasks(ids) => self.handle_batch_archive_tasks(ids),
 
-            // Form input, text entry, creation flows
-            msg @ (Message::StartNewTask
-            | Message::CopyTask
-            | Message::CancelInput
-            | Message::ConfirmDeleteStart
-            | Message::ConfirmDeleteYes
-            | Message::CancelDelete
-            | Message::SubmitTitle(_)
-            | Message::SubmitDescription(_)
-            | Message::DescriptionEditorResult(_)
-            | Message::EditorResult { .. }
-            | Message::SubmitRepoPath(_)
-            | Message::SubmitTag(_)
-            | Message::SubmitBaseBranch(_)
-            | Message::InputChar(_)
-            | Message::InputBackspace
-            | Message::CancelRetry) => self.dispatch_input(msg),
+            // ── Form input, text entry, creation flows ──
+            Message::StartNewTask => self.handle_start_new_task(),
+            Message::CopyTask => self.handle_copy_task(),
+            Message::CancelInput => self.handle_cancel_input(),
+            Message::ConfirmDeleteStart => self.handle_confirm_delete_start(),
+            Message::ConfirmDeleteYes => self.handle_confirm_delete_yes(),
+            Message::CancelDelete => self.handle_cancel_delete(),
+            Message::SubmitTitle(value) => self.handle_submit_title(value),
+            Message::SubmitDescription(value) => self.handle_submit_description(value),
+            Message::DescriptionEditorResult(value) => self.handle_description_editor_result(value),
+            Message::EditorResult { kind, outcome } => self.handle_editor_result(kind, outcome),
+            Message::SubmitRepoPath(value) => self.handle_submit_repo_path(value),
+            Message::SubmitTag(tag) => self.handle_submit_tag(tag),
+            Message::SubmitBaseBranch(value) => self.handle_submit_base_branch(value),
+            Message::InputChar(c) => self.handle_input_char(c),
+            Message::InputBackspace => self.handle_input_backspace(),
+            Message::CancelRetry => self.handle_cancel_retry(),
 
-            // Epic CRUD, lifecycle, wrap-up
-            msg @ (Message::DispatchEpic(_)
-            | Message::EnterEpic(_)
-            | Message::ExitEpic
-            | Message::RefreshEpics(_)
-            | Message::EpicCreated(_)
-            | Message::EditEpic(_)
-            | Message::EpicEdited(_)
-            | Message::DeleteEpic(_)
-            | Message::ConfirmDeleteEpic
-            | Message::MoveEpicStatus(_, _)
-            | Message::ArchiveEpic(_)
-            | Message::ConfirmArchiveEpic
-            | Message::StartNewEpic
-            | Message::SubmitEpicTitle(_)
-            | Message::SubmitEpicDescription(_)
-            | Message::SubmitEpicRepoPath(_)
-            | Message::StartEpicWrapUp(_)
-            | Message::EpicWrapUpRebase
-            | Message::EpicWrapUpPr
-            | Message::CancelEpicWrapUp
-            | Message::CancelMergeQueue
-            | Message::ToggleSelectEpic(_)
-            | Message::BatchArchiveEpics(_)
-            | Message::ToggleEpicAutoDispatch(_)) => self.dispatch_epic(msg),
+            // ── Epic CRUD, lifecycle, wrap-up ──
+            Message::DispatchEpic(id) => self.handle_dispatch_epic(id),
+            Message::EnterEpic(epic_id) => self.handle_enter_epic(epic_id),
+            Message::ExitEpic => self.handle_exit_epic(),
+            Message::RefreshEpics(epics) => self.handle_refresh_epics(epics),
+            Message::EpicCreated(epic) => self.handle_epic_created(epic),
+            Message::EditEpic(id) => self.handle_edit_epic(id),
+            Message::EpicEdited(epic) => self.handle_epic_edited(epic),
+            Message::DeleteEpic(id) => self.handle_delete_epic(id),
+            Message::ConfirmDeleteEpic => self.handle_confirm_delete_epic(),
+            Message::MoveEpicStatus(id, dir) => self.handle_move_epic_status(id, dir),
+            Message::ArchiveEpic(id) => self.handle_archive_epic(id),
+            Message::ConfirmArchiveEpic => self.handle_confirm_archive_epic(),
+            Message::StartNewEpic => self.handle_start_new_epic(),
+            Message::SubmitEpicTitle(v) => self.handle_submit_epic_title(v),
+            Message::SubmitEpicDescription(v) => self.handle_submit_epic_description(v),
+            Message::SubmitEpicRepoPath(v) => self.handle_submit_epic_repo_path(v),
+            Message::StartEpicWrapUp(id) => self.handle_start_epic_wrap_up(id),
+            Message::EpicWrapUpRebase => self.handle_epic_wrap_up(MergeAction::Rebase),
+            Message::EpicWrapUpPr => self.handle_epic_wrap_up(MergeAction::Pr),
+            Message::CancelEpicWrapUp => self.handle_cancel_epic_wrap_up(),
+            Message::CancelMergeQueue => self.handle_cancel_merge_queue(),
+            Message::ToggleSelectEpic(id) => self.handle_toggle_select_epic(id),
+            Message::BatchArchiveEpics(ids) => self.handle_batch_archive_epics(ids),
+            Message::ToggleEpicAutoDispatch(id) => self.handle_toggle_epic_auto_dispatch(id),
 
-            // PR flow
-            msg @ (Message::PrCreated { .. }
-            | Message::PrFailed { .. }
-            | Message::PrMerged(_)
-            | Message::StartMergePr(_)
-            | Message::ConfirmMergePr
-            | Message::CancelMergePr
-            | Message::MergePrFailed { .. }
-            | Message::PrReviewState { .. }) => self.dispatch_review(msg),
+            // ── PR flow: creation, merge, review state ──
+            Message::PrCreated { id, pr_url } => self.handle_pr_created(id, pr_url),
+            Message::PrFailed { id, error } => self.handle_pr_failed(id, error),
+            Message::PrMerged(id) => self.handle_pr_merged(id),
+            Message::StartMergePr(id) => self.handle_start_merge_pr(id),
+            Message::ConfirmMergePr => self.handle_confirm_merge_pr(),
+            Message::CancelMergePr => self.handle_cancel_merge_pr(),
+            Message::MergePrFailed { id, error } => self.handle_merge_pr_failed(id, error),
+            Message::PrReviewState {
+                id,
+                review_decision,
+            } => self.handle_pr_review_state(id, review_decision),
 
-            // Task repo filters and filter presets
-            msg @ (Message::StartRepoFilter
-            | Message::CloseRepoFilter
-            | Message::ToggleRepoFilter(_)
-            | Message::ToggleAllRepoFilter
-            | Message::ToggleRepoFilterMode
-            | Message::MoveRepoCursor(_)
-            | Message::StartSavePreset
-            | Message::SaveFilterPreset(_)
-            | Message::LoadFilterPreset(_)
-            | Message::StartDeletePreset
-            | Message::DeleteFilterPreset(_)
-            | Message::StartDeleteRepoPath
-            | Message::DeleteRepoPath(_)
-            | Message::CancelPresetInput
-            | Message::FilterPresetsLoaded(_)) => self.dispatch_security_and_filters(msg),
+            // ── Task repo filters and filter presets ──
+            Message::StartRepoFilter => self.handle_start_repo_filter(),
+            Message::CloseRepoFilter => self.handle_close_repo_filter(),
+            Message::ToggleRepoFilter(path) => self.handle_toggle_repo_filter(path),
+            Message::ToggleAllRepoFilter => self.handle_toggle_all_repo_filter(),
+            Message::ToggleRepoFilterMode => self.handle_toggle_repo_filter_mode(),
+            Message::MoveRepoCursor(delta) => self.handle_move_repo_cursor(delta),
+            Message::StartSavePreset => self.handle_start_save_preset(),
+            Message::SaveFilterPreset(name) => self.handle_save_filter_preset(name),
+            Message::LoadFilterPreset(name) => self.handle_load_filter_preset(name),
+            Message::StartDeletePreset => self.handle_start_delete_preset(),
+            Message::DeleteFilterPreset(name) => self.handle_delete_filter_preset(name),
+            Message::StartDeleteRepoPath => self.handle_start_delete_repo_path(),
+            Message::DeleteRepoPath(path) => self.handle_delete_repo_path(path),
+            Message::CancelPresetInput => self.handle_cancel_preset_input(),
+            Message::FilterPresetsLoaded(presets) => self.handle_filter_presets_loaded(presets),
+
+            // ── Tips overlay ──
             Message::ShowTips {
                 tips,
                 starting_index,
@@ -891,199 +915,6 @@ impl App {
                     vec![]
                 }
             }
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // Sub-dispatchers
-    // -----------------------------------------------------------------------
-
-    /// Board navigation, view toggles, and system events.
-    fn dispatch_board(&mut self, msg: Message) -> Vec<Command> {
-        match msg {
-            Message::Tick => self.handle_tick(),
-            Message::TerminalResized => vec![],
-            Message::Quit => self.handle_quit(),
-            Message::NavigateColumn(delta) => self.handle_navigate_column(delta),
-            Message::NavigateRow(delta) => self.handle_navigate_row(delta),
-            Message::MoveTask { id, direction } => self.handle_move_task(id, direction),
-            Message::ReorderItem(dir) => self.handle_reorder_item(dir),
-            Message::ToggleDetail => self.handle_toggle_detail(),
-            Message::ToggleFlattened => self.handle_toggle_flattened(),
-            Message::ToggleHelp => self.handle_toggle_help(),
-            Message::ToggleNotifications => self.handle_toggle_notifications(),
-            Message::ToggleArchive => self.handle_toggle_archive(),
-            Message::ToggleSplitMode => self.handle_toggle_split_mode(),
-            Message::SwapSplitPane(task_id) => self.handle_swap_split_pane(task_id),
-            Message::SplitPaneOpened { pane_id, task_id } => {
-                self.handle_split_pane_opened(pane_id, task_id)
-            }
-            Message::SplitPaneClosed => self.handle_split_pane_closed(),
-            Message::FocusChanged(focused) => self.handle_focus_changed(focused),
-            Message::RefreshTasks(tasks) => self.handle_refresh_tasks(tasks),
-            Message::RefreshUsage(usage) => self.handle_refresh_usage(usage),
-            Message::Error(msg) => self.handle_error(msg),
-            Message::DismissError => self.handle_dismiss_error(),
-            Message::StatusInfo(msg) => self.handle_status_info(msg),
-            Message::RepoPathsUpdated(paths) => self.handle_repo_paths_updated(paths),
-            Message::MessageReceived(id) => self.handle_message_received(id),
-            Message::OpenInBrowser { url } => self.handle_open_in_browser(url),
-            Message::TmuxOutput {
-                id,
-                output,
-                activity_ts,
-            } => self.handle_tmux_output(id, output, activity_ts),
-            Message::WindowGone(id) => self.handle_window_gone(id),
-            Message::TabCycle => self.handle_tab_cycle(),
-            _ => unreachable!(),
-        }
-    }
-
-    /// Task lifecycle: dispatch, resume, failure recovery, selection, wrap-up.
-    fn dispatch_task(&mut self, msg: Message) -> Vec<Command> {
-        match msg {
-            Message::DispatchTask(id, mode) => self.handle_dispatch_task(id, mode),
-            Message::Dispatched {
-                id,
-                worktree,
-                tmux_window,
-                switch_focus,
-            } => self.handle_dispatched(id, worktree, tmux_window, switch_focus),
-            Message::TaskCreated { task } => self.handle_task_created(task),
-            Message::DeleteTask(id) => self.handle_delete_task(id),
-            Message::ResumeTask(id) => self.handle_resume_task(id),
-            Message::Resumed { id, tmux_window } => self.handle_resumed(id, tmux_window),
-            Message::DispatchFailed(id) => self.handle_dispatch_failed(id),
-            Message::MarkDispatching(id) => self.handle_mark_dispatching(id),
-            Message::TaskEdited(edit) => self.handle_task_edited(edit),
-            Message::StaleAgent(id) => self.handle_stale_agent(id),
-            Message::AgentCrashed(id) => self.handle_agent_crashed(id),
-            Message::KillAndRetry(id) => self.handle_kill_and_retry(id),
-            Message::RetryResume(id) => self.handle_retry_resume(id),
-            Message::RetryFresh(id) => self.handle_retry_fresh(id),
-            Message::ArchiveTask(id) => self.handle_archive_task(id),
-            Message::QuickDispatch { repo_path, epic_id } => {
-                self.handle_quick_dispatch(repo_path, epic_id)
-            }
-            Message::StartQuickDispatchSelection => self.handle_start_quick_dispatch_selection(),
-            Message::SelectQuickDispatchRepo(idx) => self.handle_select_quick_dispatch_repo(idx),
-            Message::FinishComplete(id) => self.handle_finish_complete(id),
-            Message::FinishFailed {
-                id,
-                error,
-                is_conflict,
-            } => self.handle_finish_failed(id, error, is_conflict),
-            Message::ConfirmDone => self.handle_confirm_done(),
-            Message::CancelDone => self.handle_cancel_done(),
-            Message::StartWrapUp(id) => self.handle_start_wrap_up(id),
-            Message::WrapUpRebase => self.handle_wrap_up_rebase(),
-            Message::WrapUpPr => self.handle_wrap_up_pr(),
-            Message::CancelWrapUp => self.handle_cancel_wrap_up(),
-            Message::DetachTmux(id) => self.handle_detach_tmux(vec![id]),
-            Message::BatchDetachTmux(ids) => self.handle_detach_tmux(ids),
-            Message::ConfirmDetachTmux => self.handle_confirm_detach_tmux(),
-            Message::ToggleSelect(id) => self.handle_toggle_select(id),
-            Message::ClearSelection => self.handle_clear_selection(),
-            Message::SelectAllColumn => self.handle_select_all_column(),
-            Message::BatchMoveTasks { ids, direction } => {
-                self.handle_batch_move_tasks(ids, direction)
-            }
-            Message::BatchArchiveTasks(ids) => self.handle_batch_archive_tasks(ids),
-            _ => unreachable!(),
-        }
-    }
-
-    /// Form input: text entry, task creation flows, confirmations.
-    fn dispatch_input(&mut self, msg: Message) -> Vec<Command> {
-        match msg {
-            Message::StartNewTask => self.handle_start_new_task(),
-            Message::CopyTask => self.handle_copy_task(),
-            Message::CancelInput => self.handle_cancel_input(),
-            Message::ConfirmDeleteStart => self.handle_confirm_delete_start(),
-            Message::ConfirmDeleteYes => self.handle_confirm_delete_yes(),
-            Message::CancelDelete => self.handle_cancel_delete(),
-            Message::SubmitTitle(value) => self.handle_submit_title(value),
-            Message::SubmitDescription(value) => self.handle_submit_description(value),
-            Message::DescriptionEditorResult(value) => self.handle_description_editor_result(value),
-            Message::EditorResult { kind, outcome } => self.handle_editor_result(kind, outcome),
-            Message::SubmitRepoPath(value) => self.handle_submit_repo_path(value),
-            Message::SubmitTag(tag) => self.handle_submit_tag(tag),
-            Message::SubmitBaseBranch(value) => self.handle_submit_base_branch(value),
-            Message::InputChar(c) => self.handle_input_char(c),
-            Message::InputBackspace => self.handle_input_backspace(),
-            Message::CancelRetry => self.handle_cancel_retry(),
-            _ => unreachable!(),
-        }
-    }
-
-    /// Epic CRUD, lifecycle, and wrap-up.
-    fn dispatch_epic(&mut self, msg: Message) -> Vec<Command> {
-        match msg {
-            Message::DispatchEpic(id) => self.handle_dispatch_epic(id),
-            Message::EnterEpic(epic_id) => self.handle_enter_epic(epic_id),
-            Message::ExitEpic => self.handle_exit_epic(),
-            Message::RefreshEpics(epics) => self.handle_refresh_epics(epics),
-            Message::EpicCreated(epic) => self.handle_epic_created(epic),
-            Message::EditEpic(id) => self.handle_edit_epic(id),
-            Message::EpicEdited(epic) => self.handle_epic_edited(epic),
-            Message::DeleteEpic(id) => self.handle_delete_epic(id),
-            Message::ConfirmDeleteEpic => self.handle_confirm_delete_epic(),
-            Message::MoveEpicStatus(id, dir) => self.handle_move_epic_status(id, dir),
-            Message::ArchiveEpic(id) => self.handle_archive_epic(id),
-            Message::ConfirmArchiveEpic => self.handle_confirm_archive_epic(),
-            Message::StartNewEpic => self.handle_start_new_epic(),
-            Message::SubmitEpicTitle(v) => self.handle_submit_epic_title(v),
-            Message::SubmitEpicDescription(v) => self.handle_submit_epic_description(v),
-            Message::SubmitEpicRepoPath(v) => self.handle_submit_epic_repo_path(v),
-            Message::StartEpicWrapUp(id) => self.handle_start_epic_wrap_up(id),
-            Message::EpicWrapUpRebase => self.handle_epic_wrap_up(MergeAction::Rebase),
-            Message::EpicWrapUpPr => self.handle_epic_wrap_up(MergeAction::Pr),
-            Message::CancelEpicWrapUp => self.handle_cancel_epic_wrap_up(),
-            Message::CancelMergeQueue => self.handle_cancel_merge_queue(),
-            Message::ToggleSelectEpic(id) => self.handle_toggle_select_epic(id),
-            Message::BatchArchiveEpics(ids) => self.handle_batch_archive_epics(ids),
-            Message::ToggleEpicAutoDispatch(id) => self.handle_toggle_epic_auto_dispatch(id),
-            _ => unreachable!(),
-        }
-    }
-
-    /// PR flow: creation, merge, review state.
-    fn dispatch_review(&mut self, msg: Message) -> Vec<Command> {
-        match msg {
-            Message::PrCreated { id, pr_url } => self.handle_pr_created(id, pr_url),
-            Message::PrFailed { id, error } => self.handle_pr_failed(id, error),
-            Message::PrMerged(id) => self.handle_pr_merged(id),
-            Message::StartMergePr(id) => self.handle_start_merge_pr(id),
-            Message::ConfirmMergePr => self.handle_confirm_merge_pr(),
-            Message::CancelMergePr => self.handle_cancel_merge_pr(),
-            Message::MergePrFailed { id, error } => self.handle_merge_pr_failed(id, error),
-            Message::PrReviewState {
-                id,
-                review_decision,
-            } => self.handle_pr_review_state(id, review_decision),
-            _ => unreachable!(),
-        }
-    }
-
-    /// Task repo filters and filter presets.
-    fn dispatch_security_and_filters(&mut self, msg: Message) -> Vec<Command> {
-        match msg {
-            Message::StartRepoFilter => self.handle_start_repo_filter(),
-            Message::CloseRepoFilter => self.handle_close_repo_filter(),
-            Message::ToggleRepoFilter(path) => self.handle_toggle_repo_filter(path),
-            Message::ToggleAllRepoFilter => self.handle_toggle_all_repo_filter(),
-            Message::ToggleRepoFilterMode => self.handle_toggle_repo_filter_mode(),
-            Message::MoveRepoCursor(delta) => self.handle_move_repo_cursor(delta),
-            Message::StartSavePreset => self.handle_start_save_preset(),
-            Message::SaveFilterPreset(name) => self.handle_save_filter_preset(name),
-            Message::LoadFilterPreset(name) => self.handle_load_filter_preset(name),
-            Message::StartDeletePreset => self.handle_start_delete_preset(),
-            Message::DeleteFilterPreset(name) => self.handle_delete_filter_preset(name),
-            Message::StartDeleteRepoPath => self.handle_start_delete_repo_path(),
-            Message::DeleteRepoPath(path) => self.handle_delete_repo_path(path),
-            Message::CancelPresetInput => self.handle_cancel_preset_input(),
-            Message::FilterPresetsLoaded(presets) => self.handle_filter_presets_loaded(presets),
-            _ => unreachable!(),
         }
     }
 

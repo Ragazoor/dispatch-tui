@@ -475,10 +475,20 @@ pub(super) async fn handle_wrap_up(
         Err(e) => return service_err_to_response(id, e),
     };
 
-    let worktree = task
-        .worktree
-        .clone()
-        .expect("validate_wrap_up guarantees worktree is Some");
+    // Defence in depth: `validate_wrap_up` (via `is_wrappable`) guarantees the
+    // worktree is `Some` today, but a future change to the validator could
+    // silently break that contract. Returning an internal JSON-RPC error keeps
+    // a violation from panicking the runtime.
+    let worktree = match task.worktree.clone() {
+        Some(w) => w,
+        None => {
+            return JsonRpcResponse::err(
+                id,
+                -32603,
+                "internal: validate_wrap_up returned task without worktree".to_string(),
+            );
+        }
+    };
 
     let branch = match dispatch::branch_from_worktree(&worktree) {
         Some(b) => b,

@@ -237,6 +237,64 @@ pub struct ListTasksFilter {
 // TaskService
 // ---------------------------------------------------------------------------
 
+/// Build a `TaskPatch` from `UpdateTaskParams`. The expanded repo path and
+/// the (already-validated) sub_status are passed in separately because they
+/// require either tilde-expansion or a database-bound check before being
+/// committed to the patch.
+fn build_task_patch<'a>(
+    params: &'a UpdateTaskParams,
+    expanded_repo_path: Option<&'a str>,
+    sub_status: Option<SubStatus>,
+) -> TaskPatch<'a> {
+    let mut patch = TaskPatch::new();
+    if let Some(s) = params.status {
+        patch = patch.status(s);
+    }
+    if let Some(p) = params.plan_path.as_deref() {
+        patch = patch.plan_path(Some(p));
+    }
+    if let Some(t) = params.title.as_deref() {
+        patch = patch.title(t);
+    }
+    if let Some(d) = params.description.as_deref() {
+        patch = patch.description(d);
+    }
+    if let Some(r) = expanded_repo_path {
+        patch = patch.repo_path(r);
+    }
+    if let Some(so) = params.sort_order {
+        patch = patch.sort_order(Some(so));
+    }
+    if let Some(update) = params.pr_url.as_ref() {
+        patch = match update {
+            FieldUpdate::Set(url) => patch.pr_url(Some(url.as_str())),
+            FieldUpdate::Clear => patch.pr_url(None),
+        };
+    }
+    if let Some(tag) = params.tag {
+        patch = patch.tag(Some(tag));
+    }
+    if let Some(update) = params.worktree.as_ref() {
+        patch = match update {
+            FieldUpdate::Set(wt) => patch.worktree(Some(wt.as_str())),
+            FieldUpdate::Clear => patch.worktree(None),
+        };
+    }
+    if let Some(update) = params.tmux_window.as_ref() {
+        patch = match update {
+            FieldUpdate::Set(tw) => patch.tmux_window(Some(tw.as_str())),
+            FieldUpdate::Clear => patch.tmux_window(None),
+        };
+    }
+    if let Some(bb) = params.base_branch.as_deref() {
+        patch = patch.base_branch(bb);
+    }
+    if let Some(ss) = sub_status {
+        patch = patch.sub_status(ss);
+    }
+    patch
+}
+
 pub struct TaskService {
     pub db: Arc<dyn db::TaskAndEpicStore>,
 }
@@ -264,118 +322,87 @@ impl TaskService {
             ));
         }
 
-        let expanded_repo_path = params.repo_path.as_deref().map(crate::models::expand_tilde);
-
-        let mut patch = TaskPatch::new();
-        if let Some(s) = params.status {
-            patch = patch.status(s);
-        }
-        if let Some(ref p) = params.plan_path {
-            patch = patch.plan_path(Some(p.as_str()));
-        }
-        if let Some(ref t) = params.title {
-            patch = patch.title(t);
-        }
-        if let Some(ref d) = params.description {
-            patch = patch.description(d);
-        }
-        if let Some(ref r) = expanded_repo_path {
-            patch = patch.repo_path(r);
-        }
-        if let Some(so) = params.sort_order {
-            patch = patch.sort_order(Some(so));
-        }
-        if let Some(ref update) = params.pr_url {
-            match update {
-                FieldUpdate::Set(url) => patch = patch.pr_url(Some(url.as_str())),
-                FieldUpdate::Clear => patch = patch.pr_url(None),
-            }
-        }
-        if let Some(tag) = params.tag {
-            patch = patch.tag(Some(tag));
-        }
-        if let Some(ref update) = params.worktree {
-            match update {
-                FieldUpdate::Set(wt) => patch = patch.worktree(Some(wt.as_str())),
-                FieldUpdate::Clear => patch = patch.worktree(None),
-            }
-        }
-        if let Some(ref update) = params.tmux_window {
-            match update {
-                FieldUpdate::Set(tw) => patch = patch.tmux_window(Some(tw.as_str())),
-                FieldUpdate::Clear => patch = patch.tmux_window(None),
-            }
-        }
-        if let Some(ref bb) = params.base_branch {
-            patch = patch.base_branch(bb.as_str());
-        }
-
-        // Intentional TOCTOU: we read the current status here to validate sub_status,
-        // then write via patch_task below. A concurrent update between the two is
-        // theoretically possible but benign in practice — Dispatch is a single-process
-        // tokio runtime with cooperative scheduling, so no two MCP handlers run truly
-        // concurrently on the same task. SQLite serialises writes regardless.
-        if let Some(ss) = params.sub_status {
-            let effective_status = params.status.or_else(|| {
-                self.db
-                    .get_task(TaskId(params.task_id))
-                    .ok()
-                    .flatten()
-                    .map(|t| t.status)
-            });
-            if let Some(eff) = effective_status {
-                if !ss.is_valid_for(eff) {
-                    return Err(ServiceError::Validation(format!(
-                        "sub_status '{}' is not valid for status '{}'",
-                        ss.as_str(),
-                        eff.as_str()
-                    )));
-                }
-            }
-            patch = patch.sub_status(ss);
-        }
-
         let task_id = TaskId(params.task_id);
+        let expanded_repo_path = params.repo_path.as_deref().map(crate::models::expand_tilde);
+        let validated_sub_status = self.validate_sub_status(task_id, &params)?;
+        let patch = build_task_patch(&params, expanded_repo_path.as_deref(), validated_sub_status);
+
         self.db
             .patch_task(task_id, &patch)
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
 
-        // Update epic linkage if requested
         if let Some(new_epic_id) = params.epic_id {
-            // Recalculate old epic before reassignment
-            if let Ok(Some(task)) = self.db.get_task(task_id) {
-                if let Some(old_epic_id) = task.epic_id {
-                    if let Err(err) = self.db.recalculate_epic_status(old_epic_id) {
-                        tracing::warn!(
-                            "failed to recalculate epic status for epic {}: {err}",
-                            old_epic_id.0
-                        );
-                    }
-                }
-            }
+            let old_epic_id = self
+                .db
+                .get_task(task_id)
+                .ok()
+                .flatten()
+                .and_then(|t| t.epic_id);
             self.db
                 .set_task_epic_id(task_id, Some(EpicId(new_epic_id)))
                 .map_err(|e| ServiceError::Internal(format!("Failed to link task to epic: {e}")))?;
-            if let Err(err) = self.db.recalculate_epic_status(EpicId(new_epic_id)) {
-                tracing::warn!("failed to recalculate epic status for epic {new_epic_id}: {err}");
+            if let Some(old) = old_epic_id {
+                self.recalculate_epic(old);
             }
+            self.recalculate_epic(EpicId(new_epic_id));
         }
 
-        // Recalculate parent epic status if subtask status changed
         if params.status.is_some() {
-            if let Ok(Some(task)) = self.db.get_task(task_id) {
-                if let Some(epic_id) = task.epic_id {
-                    if let Err(err) = self.db.recalculate_epic_status(epic_id) {
-                        tracing::warn!(
-                            "failed to recalculate epic status for epic {}: {err}",
-                            epic_id.0
-                        );
-                    }
-                }
-            }
+            self.recalculate_epic_for_task(task_id);
         }
 
         Ok(task_id)
+    }
+
+    /// Validate `params.sub_status` against the task's effective (current or
+    /// requested) status. Returns the sub_status to write, if any.
+    ///
+    /// Intentional TOCTOU: we read the current status here to validate the
+    /// sub_status, then write via patch_task in `update_task` afterwards. A
+    /// concurrent update between the two is theoretically possible but benign
+    /// in practice — Dispatch is a single-process tokio runtime with
+    /// cooperative scheduling, so no two MCP handlers run truly concurrently
+    /// on the same task. SQLite serialises writes regardless.
+    fn validate_sub_status(
+        &self,
+        task_id: TaskId,
+        params: &UpdateTaskParams,
+    ) -> Result<Option<SubStatus>, ServiceError> {
+        let Some(ss) = params.sub_status else {
+            return Ok(None);
+        };
+        let effective_status = params
+            .status
+            .or_else(|| self.db.get_task(task_id).ok().flatten().map(|t| t.status));
+        if let Some(eff) = effective_status {
+            if !ss.is_valid_for(eff) {
+                return Err(ServiceError::Validation(format!(
+                    "sub_status '{}' is not valid for status '{}'",
+                    ss.as_str(),
+                    eff.as_str()
+                )));
+            }
+        }
+        Ok(Some(ss))
+    }
+
+    /// Recalculate the given epic, logging any database error.
+    fn recalculate_epic(&self, epic_id: EpicId) {
+        if let Err(err) = self.db.recalculate_epic_status(epic_id) {
+            tracing::warn!(
+                "failed to recalculate epic status for epic {}: {err}",
+                epic_id.0
+            );
+        }
+    }
+
+    /// Recalculate the parent epic of the given task, if it has one.
+    fn recalculate_epic_for_task(&self, task_id: TaskId) {
+        if let Ok(Some(task)) = self.db.get_task(task_id) {
+            if let Some(epic_id) = task.epic_id {
+                self.recalculate_epic(epic_id);
+            }
+        }
     }
 
     /// Updates a task status from a CLI subcommand (human operator path).
@@ -421,16 +448,7 @@ impl TaskService {
         };
 
         if updated {
-            if let Ok(Some(task)) = self.db.get_task(task_id) {
-                if let Some(epic_id) = task.epic_id {
-                    if let Err(err) = self.db.recalculate_epic_status(epic_id) {
-                        tracing::warn!(
-                            "failed to recalculate epic status for epic {}: {err}",
-                            epic_id.0
-                        );
-                    }
-                }
-            }
+            self.recalculate_epic_for_task(task_id);
         }
 
         Ok(updated)
@@ -1280,6 +1298,115 @@ mod tests {
 
         let task = task_svc.get_task(id.0).unwrap();
         assert_eq!(task.epic_id, Some(epic.id));
+    }
+
+    #[test]
+    fn update_task_status_recalculates_parent_epic() {
+        // Status-change branch of recalculate_epic_for_task: an epic that
+        // contains a single task should follow the task's status.
+        let db = test_db();
+        let task_svc = task_svc(&db);
+        let epic_svc = epic_svc(&db);
+
+        let epic = epic_svc
+            .create_epic(CreateEpicParams {
+                title: "E".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                sort_order: None,
+                parent_epic_id: None,
+                feed_command: None,
+                feed_interval_secs: None,
+            })
+            .unwrap();
+
+        let id = task_svc
+            .create_task(CreateTaskParams {
+                title: "T".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                plan_path: None,
+                epic_id: Some(epic.id.0),
+                sort_order: None,
+                tag: None,
+                base_branch: None,
+            })
+            .unwrap();
+
+        task_svc
+            .update_task(UpdateTaskParams::for_task(id.0).status(TaskStatus::Running))
+            .unwrap();
+
+        let refreshed = epic_svc.get_epic(epic.id.0).unwrap();
+        assert_eq!(refreshed.status, TaskStatus::Running);
+    }
+
+    #[test]
+    fn update_task_relink_recalculates_old_and_new_epic() {
+        // Linkage-change branch of recalculate_epic_for_task: moving a Running
+        // task between two epics should leave the old epic empty (Backlog) and
+        // the new epic Running.
+        let db = test_db();
+        let task_svc = task_svc(&db);
+        let epic_svc = epic_svc(&db);
+
+        let epic_a = epic_svc
+            .create_epic(CreateEpicParams {
+                title: "A".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                sort_order: None,
+                parent_epic_id: None,
+                feed_command: None,
+                feed_interval_secs: None,
+            })
+            .unwrap();
+        let epic_b = epic_svc
+            .create_epic(CreateEpicParams {
+                title: "B".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                sort_order: None,
+                parent_epic_id: None,
+                feed_command: None,
+                feed_interval_secs: None,
+            })
+            .unwrap();
+
+        let id = task_svc
+            .create_task(CreateTaskParams {
+                title: "T".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                plan_path: None,
+                epic_id: Some(epic_a.id.0),
+                sort_order: None,
+                tag: None,
+                base_branch: None,
+            })
+            .unwrap();
+        task_svc
+            .update_task(UpdateTaskParams::for_task(id.0).status(TaskStatus::Running))
+            .unwrap();
+
+        // Sanity: epic A is now Running.
+        assert_eq!(
+            epic_svc.get_epic(epic_a.id.0).unwrap().status,
+            TaskStatus::Running
+        );
+
+        task_svc
+            .update_task(UpdateTaskParams::for_task(id.0).epic_id(epic_b.id.0))
+            .unwrap();
+
+        assert_eq!(
+            epic_svc.get_epic(epic_a.id.0).unwrap().status,
+            TaskStatus::Backlog
+        );
+        assert_eq!(
+            epic_svc.get_epic(epic_b.id.0).unwrap().status,
+            TaskStatus::Running
+        );
     }
 
     // -- EpicService ----------------------------------------------------------
