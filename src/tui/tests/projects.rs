@@ -529,3 +529,17 @@ fn refresh_preserves_archive_column() {
         app.selected_column()
     );
 }
+
+#[test]
+fn select_project_emits_persist_string_setting() {
+    let mut app = two_project_app();
+    let cmds = app.update(Message::SelectProject(2));
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::PersistStringSetting { key, value }
+            if key == "last_project" && value == "2"
+        )),
+        "expected PersistStringSetting(last_project=2) but got {cmds:?}"
+    );
+}

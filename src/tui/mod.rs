@@ -1005,7 +1005,10 @@ impl App {
                 if let Some(idx) = self.board.projects.iter().position(|p| p.id == project_id) {
                     self.projects_panel.list_state.select(Some(idx));
                 }
-                vec![]
+                vec![Command::PersistStringSetting {
+                    key: "last_project".into(),
+                    value: project_id.to_string(),
+                }]
             }
         }
     }
