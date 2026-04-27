@@ -158,23 +158,29 @@ fn esc_closes_projects_panel() {
 }
 
 #[test]
-fn h_closes_projects_panel() {
+fn h_in_projects_panel_is_noop() {
     let mut app = two_project_app();
     app.handle_key(make_key(KeyCode::Char('h')));
-    assert!(app.projects_panel_visible());
+    assert!(app.projects_panel_visible(), "precondition: panel open");
 
     app.handle_key(make_key(KeyCode::Char('h')));
-    assert!(!app.projects_panel_visible());
+    assert!(
+        app.projects_panel_visible(),
+        "h in projects panel should be a no-op, panel should remain open"
+    );
 }
 
 #[test]
-fn left_closes_projects_panel() {
+fn left_in_projects_panel_is_noop() {
     let mut app = two_project_app();
     app.handle_key(make_key(KeyCode::Char('h')));
-    assert!(app.projects_panel_visible());
+    assert!(app.projects_panel_visible(), "precondition: panel open");
 
     app.handle_key(make_key(KeyCode::Left));
-    assert!(!app.projects_panel_visible());
+    assert!(
+        app.projects_panel_visible(),
+        "Left in projects panel should be a no-op, panel should remain open"
+    );
 }
 
 #[test]
@@ -486,6 +492,22 @@ fn refresh_preserves_projects_panel() {
         app.projects_panel_visible(),
         "projects panel should stay open after refresh, but cursor moved to col {}",
         app.selected_column()
+    );
+}
+
+#[test]
+fn l_in_archive_is_noop() {
+    let mut app = make_app_with_archived_task();
+    app.update(Message::NavigateColumn(1));
+    app.update(Message::NavigateColumn(1));
+    app.update(Message::NavigateColumn(1));
+    app.update(Message::NavigateColumn(1));
+    assert!(app.show_archived(), "precondition: archive column open");
+
+    app.handle_key(make_key(KeyCode::Char('l')));
+    assert!(
+        app.show_archived(),
+        "l in archive should be a no-op, column should remain open"
     );
 }
 
