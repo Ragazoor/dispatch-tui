@@ -5,7 +5,8 @@ use crate::tui::types::{Command, InputMode};
 use crate::tui::{App, Message};
 
 use super::helpers::{
-    buffer_contains, make_app, make_key, make_task, render_to_buffer, TEST_TIMEOUT,
+    buffer_contains, make_app, make_app_with_archived_task, make_key, make_task, render_to_buffer,
+    TEST_TIMEOUT,
 };
 
 fn make_task_with_project(id: i64, status: TaskStatus, project_id: i64) -> Task {
@@ -469,5 +470,40 @@ fn selecting_project_keeps_focus_in_col_0() {
         app.selected_column(),
         0,
         "focus should stay in Projects column after SelectProject"
+    );
+}
+
+#[test]
+fn refresh_preserves_projects_panel() {
+    let mut app = two_project_app();
+    app.handle_key(make_key(KeyCode::Char('h')));
+    assert!(app.projects_panel_visible(), "precondition: projects panel open");
+
+    let tasks = app.board.tasks.clone();
+    app.update(Message::RefreshTasks(tasks));
+
+    assert!(
+        app.projects_panel_visible(),
+        "projects panel should stay open after refresh, but cursor moved to col {}",
+        app.selected_column()
+    );
+}
+
+#[test]
+fn refresh_preserves_archive_column() {
+    let mut app = make_app_with_archived_task();
+    app.update(Message::NavigateColumn(1));
+    app.update(Message::NavigateColumn(1));
+    app.update(Message::NavigateColumn(1));
+    app.update(Message::NavigateColumn(1));
+    assert!(app.show_archived(), "precondition: archive column open");
+
+    let tasks = app.board.tasks.clone();
+    app.update(Message::RefreshTasks(tasks));
+
+    assert!(
+        app.show_archived(),
+        "archive column should stay open after refresh, but cursor moved to col {}",
+        app.selected_column()
     );
 }

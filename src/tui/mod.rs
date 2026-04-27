@@ -669,6 +669,29 @@ impl App {
     /// position (following it across columns if needed).
     /// Falls back to index clamping if the anchor is not found.
     pub fn sync_board_selection(&mut self) {
+        let current_col = self.selection().column();
+
+        // If the cursor is on an edge column (Projects=0 or Archive=COLUMN_COUNT+1),
+        // preserve the column and only clamp rows — don't jump to the task anchor.
+        if current_col == 0 || current_col == TaskStatus::COLUMN_COUNT + 1 {
+            self.clamp_selection();
+            if current_col == 0 {
+                let len = self.board.projects.len();
+                let row = self.selection().row(0);
+                let clamped = if len == 0 { 0 } else { row.min(len - 1) };
+                self.selection_mut().set_row(0, clamped);
+                self.projects_panel.list_state.select(Some(clamped));
+            } else {
+                let count = self.archived_tasks().len();
+                let archive_col = TaskStatus::COLUMN_COUNT + 1;
+                let row = self.selection().row(archive_col);
+                let clamped = if count == 0 { 0 } else { row.min(count - 1) };
+                self.selection_mut().set_row(archive_col, clamped);
+                self.archive.list_state.select(Some(clamped));
+            }
+            return;
+        }
+
         let anchor = match &self.board.view_mode {
             ViewMode::Board(sel) | ViewMode::Epic { selection: sel, .. } => sel.anchor,
         };
