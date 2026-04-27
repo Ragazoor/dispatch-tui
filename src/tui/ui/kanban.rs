@@ -160,6 +160,33 @@ fn column_layout_constraints(selected_col: usize) -> Vec<Constraint> {
     vec![Constraint::Ratio(1, n); n as usize]
 }
 
+/// Layout constraints for the kanban board: content columns interleaved with
+/// 1-char separator columns. Separators are at odd indices, content at even.
+fn board_column_constraints(selected_col: usize) -> Vec<Constraint> {
+    let n = if is_edge_column(selected_col) {
+        5u32
+    } else {
+        4u32
+    };
+    let mut constraints = Vec::with_capacity((n * 2 - 1) as usize);
+    for i in 0..n {
+        if i > 0 {
+            constraints.push(Constraint::Length(1));
+        }
+        constraints.push(Constraint::Ratio(1, n));
+    }
+    constraints
+}
+
+fn render_column_separator(frame: &mut Frame, area: Rect) {
+    let buf = frame.buffer_mut();
+    for y in area.top()..area.bottom() {
+        buf[(area.x, y)]
+            .set_symbol("\u{2502}") // │
+            .set_style(Style::default().fg(BORDER));
+    }
+}
+
 fn render_summary(frame: &mut Frame, app: &App, epic_stats: &EpicStatsMap, area: Rect) {
     let sel = app.selected_column();
     let constraints = column_layout_constraints(sel);
@@ -591,17 +618,26 @@ fn render_columns(
     };
 
     let sel = app.selected_column();
-    let constraints = column_layout_constraints(sel);
-    let column_areas = Layout::default()
+    let all_areas = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints(constraints)
+        .constraints(board_column_constraints(sel))
         .split(board_area);
 
-    let mut area_idx = 0usize;
+    // Odd indices are 1-char separator areas; even indices are content columns.
+    for i in (1..all_areas.len()).step_by(2) {
+        render_column_separator(frame, all_areas[i]);
+    }
+
+    // Content column areas at even indices: 0, 2, 4, ...
+    let content_areas: Vec<Rect> = (0..all_areas.len())
+        .step_by(2)
+        .map(|i| all_areas[i])
+        .collect();
+    let mut content_idx = 0usize;
 
     if sel == 0 {
-        render_projects_column(frame, app, column_areas[area_idx]);
-        area_idx += 1;
+        render_projects_column(frame, app, content_areas[content_idx]);
+        content_idx += 1;
     }
 
     for (task_col_idx, &status) in TaskStatus::ALL.iter().enumerate() {
@@ -609,17 +645,17 @@ fn render_columns(
         render_task_column(
             frame,
             app,
-            column_areas[area_idx],
+            content_areas[content_idx],
             now,
             status,
             nav_col,
             epic_stats,
         );
-        area_idx += 1;
+        content_idx += 1;
     }
 
     if sel == TaskStatus::COLUMN_COUNT + 1 {
-        render_archive_column(frame, app, column_areas[area_idx], now);
+        render_archive_column(frame, app, content_areas[content_idx], now);
     }
 }
 
