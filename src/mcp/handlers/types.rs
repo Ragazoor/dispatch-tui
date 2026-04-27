@@ -141,7 +141,11 @@ pub(super) fn resolve_project_id(
     match opt_project_id {
         Some(pid) => Ok(pid),
         None => db.get_default_project().map(|p| p.id).map_err(|e| {
-            JsonRpcResponse::err(id.clone(), -32603, format!("Failed to get default project: {e}"))
+            JsonRpcResponse::err(
+                id.clone(),
+                -32603,
+                format!("Failed to get default project: {e}"),
+            )
         }),
     }
 }

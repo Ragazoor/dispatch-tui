@@ -5435,7 +5435,10 @@ fn delete_project_and_move_items_removes_row_and_reassigns() {
     // Project row is gone
     assert_eq!(db.list_projects().unwrap().len(), before);
     // Items moved to default
-    assert_eq!(db.get_task(task.id).unwrap().unwrap().project_id, default.id);
+    assert_eq!(
+        db.get_task(task.id).unwrap().unwrap().project_id,
+        default.id
+    );
     assert_eq!(
         db.get_epic(epic.id).unwrap().unwrap().project_id,
         default.id

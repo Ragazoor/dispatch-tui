@@ -1,6 +1,6 @@
 use super::palette::{
-    ARCHIVE_COL_BG, ARCHIVE_STRIPE, BLUE, BORDER, CYAN, FG, FLASH_BG, GREEN,
-    MUTED, MUTED_LIGHT, PROJECTS_COL_BG, PROJECTS_CURSOR_BG, PURPLE, YELLOW,
+    ARCHIVE_COL_BG, ARCHIVE_STRIPE, BLUE, BORDER, CYAN, FG, FLASH_BG, GREEN, MUTED, MUTED_LIGHT,
+    PROJECTS_COL_BG, PROJECTS_CURSOR_BG, PURPLE, YELLOW,
 };
 use super::shared::{
     push_hint_spans, render_substatus_header, render_tab_bar, staleness_color, truncate,
@@ -57,7 +57,6 @@ pub(in crate::tui) fn column_bg_color(status: TaskStatus) -> Color {
         TaskStatus::Archived => Color::Rgb(28, 30, 44),
     }
 }
-
 
 /// Unicode status icon for the metadata line of each card.
 fn status_icon(status: TaskStatus) -> &'static str {
@@ -597,7 +596,15 @@ fn render_columns(
     // Task columns 1–4
     for (task_col_idx, &status) in TaskStatus::ALL.iter().enumerate() {
         let nav_col = task_col_idx + 1;
-        render_task_column(frame, app, column_areas[area_idx], now, status, nav_col, epic_stats);
+        render_task_column(
+            frame,
+            app,
+            column_areas[area_idx],
+            now,
+            status,
+            nav_col,
+            epic_stats,
+        );
         area_idx += 1;
     }
 
@@ -688,11 +695,7 @@ fn render_task_column(
         let block = Block::default().style(Style::default().bg(column_bg_color(status)));
         let inner = block.inner(col_area);
         frame.render_widget(block, col_area);
-        frame.render_stateful_widget(
-            List::new(list_items),
-            inner,
-            &mut sel.list_states[col_idx],
-        );
+        frame.render_stateful_widget(List::new(list_items), inner, &mut sel.list_states[col_idx]);
     } else {
         frame.render_stateful_widget(
             List::new(list_items),
@@ -715,7 +718,15 @@ fn render_archive_column(frame: &mut Frame, app: &mut App, area: Rect, now: Date
         .enumerate()
         .map(|(idx, task)| {
             let is_cursor = idx == sel_row;
-            build_task_list_item(task, TaskStatus::Archived, app, now, is_cursor, color, area.width)
+            build_task_list_item(
+                task,
+                TaskStatus::Archived,
+                app,
+                now,
+                is_cursor,
+                color,
+                area.width,
+            )
         })
         .collect();
 
