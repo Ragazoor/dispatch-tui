@@ -700,18 +700,20 @@ fn render_task_column(
         };
     }
 
-    if is_focused {
-        let block = Block::default().style(Style::default().bg(column_bg_color(status)));
-        let inner = block.inner(col_area);
-        frame.render_widget(block, col_area);
-        frame.render_stateful_widget(List::new(list_items), inner, &mut sel.list_states[col_idx]);
+    let border_color = if is_focused { color } else { MUTED };
+    let block = if is_focused {
+        Block::default()
+            .borders(Borders::TOP)
+            .border_style(Style::default().fg(border_color))
+            .style(Style::default().bg(column_bg_color(status)))
     } else {
-        frame.render_stateful_widget(
-            List::new(list_items),
-            col_area,
-            &mut sel.list_states[col_idx],
-        );
-    }
+        Block::default()
+            .borders(Borders::TOP)
+            .border_style(Style::default().fg(border_color))
+    };
+    let inner = block.inner(col_area);
+    frame.render_widget(block, col_area);
+    frame.render_stateful_widget(List::new(list_items), inner, &mut sel.list_states[col_idx]);
 }
 
 fn render_archive_column(frame: &mut Frame, app: &mut App, area: Rect, now: DateTime<Utc>) {
@@ -742,7 +744,9 @@ fn render_archive_column(frame: &mut Frame, app: &mut App, area: Rect, now: Date
     let title = format!(" Archive ({}) ", archived.len());
     let block = Block::default()
         .title(title)
-        .title_style(Style::default().fg(color).add_modifier(Modifier::BOLD));
+        .title_style(Style::default().fg(color).add_modifier(Modifier::BOLD))
+        .borders(Borders::TOP)
+        .border_style(Style::default().fg(ARCHIVE_STRIPE));
     let list = List::new(items).block(block);
     frame.render_stateful_widget(list, area, &mut app.archive.list_state);
 }
@@ -913,7 +917,9 @@ fn render_projects_column(frame: &mut Frame, app: &mut App, area: Rect) {
     let title = format!(" Projects ({}) ", app.projects().len());
     let block = Block::default()
         .title(title)
-        .title_style(Style::default().fg(PURPLE).add_modifier(Modifier::BOLD));
+        .title_style(Style::default().fg(PURPLE).add_modifier(Modifier::BOLD))
+        .borders(Borders::TOP)
+        .border_style(Style::default().fg(PURPLE));
     let list = List::new(items).block(block);
     frame.render_stateful_widget(list, area, &mut app.projects_panel.list_state);
 }
