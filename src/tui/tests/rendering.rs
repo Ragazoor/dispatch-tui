@@ -1,0 +1,1496 @@
+#![allow(unused_imports)]
+
+use super::*;
+use crate::models::{
+    DispatchMode, Epic, EpicId, SubStatus, TaskId, TaskStatus, TaskTag, DEFAULT_QUICK_TASK_TITLE,
+};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::{
+    backend::TestBackend,
+    buffer::Buffer,
+    style::{Color, Modifier},
+    Terminal,
+};
+use std::time::{Duration, Instant};
+
+#[test]
+fn action_hints_backlog_task() {
+    let task = make_task(1, TaskStatus::Backlog);
+    let hints = ui::action_hints(Some(&task), Color::Rgb(122, 162, 247));
+    let keys: Vec<&str> = hints
+        .iter()
+        .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
+        .map(|s| s.content.as_ref())
+        .collect();
+    assert!(
+        keys.contains(&"[d]"),
+        "should have dispatch/brainstorm hint"
+    );
+    assert!(keys.contains(&"[e]"), "should have edit hint");
+    assert!(keys.contains(&"[m]"), "should have move hint");
+    assert!(!keys.contains(&"[M]"), "backlog has no back movement");
+    assert!(keys.contains(&"[x]"), "should have archive hint");
+    assert!(keys.contains(&"[n]"), "should have new hint");
+    assert!(keys.contains(&"[q]"), "should have quit hint");
+    let text: String = hints.iter().map(|s| s.content.as_ref()).collect();
+    assert!(
+        text.contains("brainstorm"),
+        "backlog dispatch means brainstorm"
+    );
+}
+
+#[test]
+fn action_hints_backlog_task_with_plan() {
+    let mut task = make_task(3, TaskStatus::Backlog);
+    task.plan_path = Some("plan.md".into());
+    let hints = ui::action_hints(Some(&task), Color::Rgb(122, 162, 247));
+    let keys: Vec<&str> = hints
+        .iter()
+        .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
+        .map(|s| s.content.as_ref())
+        .collect();
+    assert!(keys.contains(&"[d]"), "should have dispatch hint");
+    let text: String = hints.iter().map(|s| s.content.as_ref()).collect();
+    assert!(
+        text.contains("ispatch"),
+        "backlog with plan dispatch means dispatch"
+    );
+}
+
+#[test]
+fn action_hints_running_with_window() {
+    let mut task = make_task(4, TaskStatus::Running);
+    task.tmux_window = Some("win-4".to_string());
+    let hints = ui::action_hints(Some(&task), Color::Rgb(122, 162, 247));
+    let keys: Vec<&str> = hints
+        .iter()
+        .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
+        .map(|s| s.content.as_ref())
+        .collect();
+    assert!(keys.contains(&"[g]"), "should have go-to-session hint");
+    assert!(
+        !keys.contains(&"[d]"),
+        "should not have dispatch/resume when window exists"
+    );
+}
+
+#[test]
+fn action_hints_running_with_worktree_no_window() {
+    let mut task = make_task(4, TaskStatus::Running);
+    task.worktree = Some("/tmp/wt".to_string());
+    let hints = ui::action_hints(Some(&task), Color::Rgb(122, 162, 247));
+    let keys: Vec<&str> = hints
+        .iter()
+        .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
+        .map(|s| s.content.as_ref())
+        .collect();
+    assert!(keys.contains(&"[d]"), "should have resume hint");
+    assert!(!keys.contains(&"[g]"), "no go-to-session without window");
+    let text: String = hints.iter().map(|s| s.content.as_ref()).collect();
+    assert!(text.contains("resume"), "d means resume here");
+}
+
+#[test]
+fn action_hints_running_no_worktree_no_window() {
+    let task = make_task(4, TaskStatus::Running);
+    let hints = ui::action_hints(Some(&task), Color::Rgb(122, 162, 247));
+    let keys: Vec<&str> = hints
+        .iter()
+        .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
+        .map(|s| s.content.as_ref())
+        .collect();
+    assert!(
+        !keys.contains(&"[d]"),
+        "no dispatch/resume without worktree"
+    );
+    assert!(!keys.contains(&"[g]"), "no go-to-session without window");
+    assert!(keys.contains(&"[e]"), "still has edit");
+}
+
+#[test]
+fn action_hints_review_with_window() {
+    let mut task = make_task(6, TaskStatus::Review);
+    task.tmux_window = Some("win-6".to_string());
+    let hints = ui::action_hints(Some(&task), Color::Rgb(122, 162, 247));
+    let keys: Vec<&str> = hints
+        .iter()
+        .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
+        .map(|s| s.content.as_ref())
+        .collect();
+    assert!(
+        keys.contains(&"[g]"),
+        "review with window shows go-to-session"
+    );
+}
+
+#[test]
+fn action_hints_done_task() {
+    let task = make_task(5, TaskStatus::Done);
+    let hints = ui::action_hints(Some(&task), Color::Rgb(122, 162, 247));
+    let keys: Vec<&str> = hints
+        .iter()
+        .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
+        .map(|s| s.content.as_ref())
+        .collect();
+    assert!(keys.contains(&"[e]"), "done has edit");
+    assert!(keys.contains(&"[M]"), "done has back");
+    assert!(keys.contains(&"[x]"), "done has archive");
+    assert!(!keys.contains(&"[m]"), "done has no forward move");
+    assert!(!keys.contains(&"[d]"), "done has no dispatch");
+}
+
+#[test]
+fn action_hints_no_task() {
+    let hints = ui::action_hints(None, Color::Rgb(122, 162, 247));
+    let keys: Vec<&str> = hints
+        .iter()
+        .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
+        .map(|s| s.content.as_ref())
+        .collect();
+    assert!(keys.contains(&"[n]"), "no-task shows new");
+    assert!(keys.contains(&"[q]"), "no-task shows quit");
+    assert!(!keys.contains(&"[d]"), "no-task has no dispatch");
+    assert!(!keys.contains(&"[e]"), "no-task has no edit");
+}
+
+#[test]
+fn action_hints_backlog_shows_enter_detail() {
+    let task = make_task(1, TaskStatus::Backlog);
+    let hints = ui::action_hints(Some(&task), Color::Rgb(122, 162, 247));
+    let keys = hint_keys(&hints);
+    assert!(keys.contains(&"[Enter]"), "should show Enter/detail hint");
+}
+
+#[test]
+fn action_hints_shows_filter_help() {
+    let task = make_task(1, TaskStatus::Backlog);
+    let hints = ui::action_hints(Some(&task), Color::Rgb(122, 162, 247));
+    let keys = hint_keys(&hints);
+    assert!(keys.contains(&"[f]"), "should show filter hint");
+    assert!(keys.contains(&"[?]"), "should show help hint");
+}
+
+#[test]
+fn action_hints_shows_copy_and_split() {
+    let task = make_task(1, TaskStatus::Backlog);
+    let hints = ui::action_hints(Some(&task), Color::Rgb(122, 162, 247));
+    let keys = hint_keys(&hints);
+    assert!(keys.contains(&"[c]"), "should show copy hint");
+    assert!(keys.contains(&"[S]"), "should show split hint");
+}
+
+#[test]
+fn render_empty_board_shows_all_column_headers() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let buf = render_to_buffer(&mut app, 100, 20);
+    assert!(buffer_contains(&buf, "backlog"));
+    assert!(buffer_contains(&buf, "running"));
+    assert!(buffer_contains(&buf, "review"));
+    assert!(buffer_contains(&buf, "done"));
+}
+
+#[test]
+fn render_shows_task_titles_in_columns() {
+    let tasks = vec![
+        make_task(1, TaskStatus::Backlog),
+        make_task(2, TaskStatus::Running),
+        make_task(3, TaskStatus::Review),
+    ];
+    let mut app = App::new(tasks, TEST_TIMEOUT);
+    let buf = render_to_buffer(&mut app, 120, 20);
+    assert!(buffer_contains(&buf, "Task 1"));
+    assert!(buffer_contains(&buf, "Task 2"));
+    assert!(buffer_contains(&buf, "Task 3"));
+}
+
+#[test]
+fn render_error_popup_shows_message() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.update(Message::Error("Something went wrong".to_string()));
+    let buf = render_to_buffer(&mut app, 100, 20);
+    assert!(buffer_contains(&buf, "Something went wrong"));
+}
+
+#[test]
+fn render_crashed_task_shows_label() {
+    let mut task = make_task(1, TaskStatus::Running);
+    task.tmux_window = Some("win-1".to_string());
+    task.sub_status = SubStatus::Crashed;
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let buf = render_to_buffer(&mut app, 120, 20);
+    assert!(buffer_contains(&buf, "crashed"));
+}
+
+#[test]
+fn render_stale_task_shows_label() {
+    let mut task = make_task(1, TaskStatus::Running);
+    task.tmux_window = Some("win-1".to_string());
+    task.sub_status = SubStatus::Stale;
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let buf = render_to_buffer(&mut app, 120, 20);
+    assert!(buffer_contains(&buf, "stale"));
+}
+
+#[test]
+fn running_card_with_worktree_no_window_shows_detached() {
+    let mut task = make_task(1, TaskStatus::Running);
+    task.worktree = Some("/repo/.worktrees/1-fix".to_string());
+    task.tmux_window = None;
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let buf = render_to_buffer(&mut app, 120, 20);
+    assert!(buffer_contains(&buf, "○ detached"), "expected '○ detached'");
+}
+
+#[test]
+fn running_card_with_window_shows_running_not_detached() {
+    let mut task = make_task(1, TaskStatus::Running);
+    task.worktree = Some("/repo/.worktrees/1-fix".to_string());
+    task.tmux_window = Some("1-fix".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let buf = render_to_buffer(&mut app, 120, 20);
+    assert!(buffer_contains(&buf, "◉ running"), "expected '◉ running'");
+    assert!(
+        !buffer_contains(&buf, "detached"),
+        "should not show detached"
+    );
+}
+
+#[test]
+fn review_card_with_pr_detached_shows_circle_prefix() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.sub_status = SubStatus::AwaitingReview;
+    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
+    task.worktree = Some("/repo/.worktrees/1-fix".to_string());
+    task.tmux_window = None;
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let buf = render_to_buffer(&mut app, 120, 20);
+    assert!(buffer_contains(&buf, "○ PR #42"), "expected '○ PR #42'");
+}
+
+#[test]
+fn review_card_with_pr_attached_shows_filled_circle() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.sub_status = SubStatus::AwaitingReview;
+    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
+    task.worktree = Some("/repo/.worktrees/1-fix".to_string());
+    task.tmux_window = Some("1-fix".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let buf = render_to_buffer(&mut app, 120, 20);
+    assert!(buffer_contains(&buf, "● PR #42"), "expected '● PR #42'");
+}
+
+#[test]
+fn render_does_not_panic_on_small_terminal() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
+    // Very small terminal — should not panic
+    let _ = render_to_buffer(&mut app, 20, 5);
+}
+
+#[test]
+fn render_input_mode_shows_prompt() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.update(Message::StartNewTask);
+    let buf = render_to_buffer(&mut app, 100, 20);
+    assert!(buffer_contains(&buf, "Title"));
+}
+
+#[test]
+fn truncate_respects_max_length() {
+    assert_eq!(ui::truncate("short", 10), "short");
+    assert_eq!(
+        ui::truncate("hello world this is long", 10).chars().count(),
+        10
+    );
+    assert!(ui::truncate("hello world this is long", 10).ends_with('…'));
+}
+
+#[test]
+fn render_v2_task_card_shows_stripe() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
+    let buf = render_to_buffer(&mut app, 120, 20);
+    // Cursor card uses thicker stripe ▌ (U+258C), non-cursor uses ▎ (U+258E)
+    assert!(
+        buffer_contains(&buf, "\u{258c}") || buffer_contains(&buf, "\u{258e}"),
+        "task card should have stripe character"
+    );
+}
+
+#[test]
+fn render_v2_backlog_task_shows_status_icon() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
+    let buf = render_to_buffer(&mut app, 120, 20);
+    assert!(
+        buffer_contains(&buf, "\u{25e6}"),
+        "backlog task should show \u{25e6} icon"
+    );
+}
+
+#[test]
+fn render_v2_running_task_shows_status_icon() {
+    let mut task = make_task(1, TaskStatus::Running);
+    task.tmux_window = Some("win-1".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let buf = render_to_buffer(&mut app, 120, 20);
+    assert!(
+        buffer_contains(&buf, "\u{25c9}"),
+        "running task should show \u{25c9} icon"
+    );
+}
+
+#[test]
+fn render_v2_focused_column_shows_arrow() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let buf = render_to_buffer(&mut app, 120, 20);
+    // Default focus is on first column (Backlog), should show \u{25b8}
+    assert!(
+        buffer_contains(&buf, "\u{25b8}"),
+        "focused column should show \u{25b8} indicator"
+    );
+}
+
+#[test]
+fn render_v2_unfocused_columns_show_dot() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let buf = render_to_buffer(&mut app, 120, 20);
+    // Unfocused columns should show \u{25e6}
+    assert!(
+        buffer_contains(&buf, "\u{25e6}"),
+        "unfocused columns should show \u{25e6} indicator"
+    );
+}
+
+#[test]
+fn render_v2_detail_panel_shows_inline_metadata() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
+    app.update(Message::ToggleDetail);
+    let buf = render_to_buffer(&mut app, 120, 20);
+    // The compact detail panel shows "title \u{00b7} #id \u{00b7} status \u{00b7} repo" on one line
+    // Check for the middle-dot separator which is new in v2
+    assert!(
+        buffer_contains(&buf, "\u{00b7}"),
+        "detail panel should use \u{00b7} separator"
+    );
+    assert!(
+        buffer_contains(&buf, "#1"),
+        "detail panel should show task ID with # prefix"
+    );
+}
+
+#[test]
+fn render_v2_done_task_shows_checkmark() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Done)], TEST_TIMEOUT);
+    // Navigate to Done column (index 3)
+    for _ in 0..3 {
+        app.update(Message::NavigateColumn(1));
+    }
+    let buf = render_to_buffer(&mut app, 120, 20);
+    assert!(
+        buffer_contains(&buf, "\u{2713}"),
+        "done task should show \u{2713} icon"
+    );
+}
+
+#[test]
+fn render_columns_appear_left_to_right() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let buf = render_to_buffer(&mut app, 120, 30);
+
+    // Find the leftmost x-position where each header appears
+    let headers = ["backlog", "running", "review", "done"];
+    let mut positions: Vec<Option<u16>> = Vec::new();
+    for header in &headers {
+        let mut found = None;
+        for y in 0..2u16 {
+            for x in 0..120u16 {
+                let remaining = (120 - x) as usize;
+                if remaining < header.len() {
+                    continue;
+                }
+                let segment: String = (0..header.len() as u16)
+                    .map(|dx| buf[(x + dx, y)].symbol().to_string())
+                    .collect();
+                if segment == *header {
+                    found = Some(x);
+                    break;
+                }
+            }
+            if found.is_some() {
+                break;
+            }
+        }
+        positions.push(found);
+    }
+
+    // All headers must render
+    for (i, header) in headers.iter().enumerate() {
+        assert!(
+            positions[i].is_some(),
+            "column header '{header}' not found in rendered output"
+        );
+    }
+
+    // Verify strict left-to-right ordering
+    let xs: Vec<u16> = positions.into_iter().flatten().collect();
+    for pair in xs.windows(2) {
+        assert!(
+            pair[0] < pair[1],
+            "columns must be ordered left to right, got positions: {xs:?}"
+        );
+    }
+}
+
+#[test]
+fn render_columns_fill_terminal_width() {
+    // Regression test: columns must use the full terminal width, not leave a gap on the right.
+    // A previous bug reserved a 34-char right sidebar in the column content area.
+    let mut app = App::new(vec![make_task(1, TaskStatus::Done)], TEST_TIMEOUT);
+    let width: u16 = 120;
+    let buf = render_to_buffer(&mut app, width, 20);
+
+    // Find the rightmost x-position where "done" header text appears
+    let header = "done";
+    let mut header_x = None;
+    'outer: for y in 0..3u16 {
+        for x in (0..width).rev() {
+            let remaining = (width - x) as usize;
+            if remaining < header.len() {
+                continue;
+            }
+            let segment: String = (0..header.len() as u16)
+                .map(|dx| buf[(x + dx, y)].symbol().to_string())
+                .collect();
+            if segment == header {
+                header_x = Some(x);
+                break 'outer;
+            }
+        }
+    }
+    let done_col_x = header_x.expect("'done' column header not found");
+
+    // The "done" column header should be centered in the last quarter of the terminal.
+    // With 4 columns at width=120, each column is 30 chars wide, so the last column
+    // starts at x=90. The header should be somewhere after x=90.
+    // If the old bug exists (34-char sidebar), each column is only ~21 chars and the
+    // header would be well before x=90.
+    let expected_min_x = width * 3 / 4;
+    assert!(
+        done_col_x >= expected_min_x,
+        "last column header 'done' at x={done_col_x}, expected >= {expected_min_x} — \
+         columns are not filling the terminal width"
+    );
+}
+
+#[test]
+fn render_help_overlay_shows_keybindings_help() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.update(Message::ToggleHelp);
+    let buf = render_to_buffer(&mut app, 100, 30);
+    assert!(
+        buffer_contains(&buf, "Navigation"),
+        "help overlay should show Navigation section"
+    );
+    assert!(
+        buffer_contains(&buf, "Actions"),
+        "help overlay should show Actions section"
+    );
+}
+
+#[test]
+fn render_1x1_terminal_does_not_panic() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Running)], TEST_TIMEOUT);
+    let _ = render_to_buffer(&mut app, 1, 1);
+}
+
+#[test]
+fn stress_large_task_list_navigation() {
+    let tasks: Vec<_> = (1..=1000)
+        .map(|i| make_task(i, TaskStatus::Backlog))
+        .collect();
+    let mut app = App::new(tasks, TEST_TIMEOUT);
+
+    assert_eq!(app.board.tasks.len(), 1000);
+
+    // Navigate through all rows
+    for _ in 0..999 {
+        app.update(Message::NavigateRow(1));
+    }
+    assert_eq!(app.selected_row()[0], 999);
+
+    // Navigate back
+    for _ in 0..999 {
+        app.update(Message::NavigateRow(-1));
+    }
+    assert_eq!(app.selected_row()[0], 0);
+}
+
+#[test]
+fn stress_large_task_list_rendering() {
+    let mut tasks: Vec<_> = (1..=200)
+        .map(|i| make_task(i, TaskStatus::Backlog))
+        .collect();
+    // Spread tasks across all columns
+    for (i, task) in tasks.iter_mut().enumerate() {
+        task.status = match i % 4 {
+            0 => TaskStatus::Backlog,
+            1 => TaskStatus::Running,
+            2 => TaskStatus::Review,
+            _ => TaskStatus::Done,
+        };
+    }
+    let mut app = App::new(tasks, TEST_TIMEOUT);
+
+    // Render at various sizes — must not panic
+    for width in [40, 80, 120, 200] {
+        for height in [10, 24, 50] {
+            let _ = render_to_buffer(&mut app, width, height);
+        }
+    }
+}
+
+#[test]
+fn stress_rapid_status_transitions() {
+    let tasks = vec![make_task(1, TaskStatus::Backlog)];
+    let mut app = App::new(tasks, TEST_TIMEOUT);
+
+    // Rapidly move task through all statuses and back.
+    // Moving forward will stop at Review because Done requires confirmation.
+    for _ in 0..100 {
+        app.update(Message::MoveTask {
+            id: TaskId(1),
+            direction: MoveDirection::Forward,
+        });
+    }
+    // Should be at Review (blocked by Done confirmation)
+    assert_eq!(app.board.tasks[0].status, TaskStatus::Review);
+    assert!(matches!(app.input.mode, InputMode::ConfirmDone(TaskId(1))));
+
+    // Confirm the Done transition
+    app.update(Message::ConfirmDone);
+    assert_eq!(app.board.tasks[0].status, TaskStatus::Done);
+
+    for _ in 0..100 {
+        app.update(Message::MoveTask {
+            id: TaskId(1),
+            direction: MoveDirection::Backward,
+        });
+    }
+    // Should be at Backlog (clamped)
+    assert_eq!(app.board.tasks[0].status, TaskStatus::Backlog);
+}
+
+#[test]
+fn stress_db_with_many_tasks() {
+    let db = crate::db::Database::open_in_memory().unwrap();
+    use crate::db::TaskCrud;
+    for i in 0..500 {
+        db.create_task(
+            &format!("Task {i}"),
+            "stress test",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    }
+    let tasks = db.list_all().unwrap();
+    assert_eq!(tasks.len(), 500);
+
+    // Create app from DB tasks and verify navigation works
+    let mut app = App::new(tasks, TEST_TIMEOUT);
+    for _ in 0..499 {
+        app.update(Message::NavigateRow(1));
+    }
+    assert_eq!(app.selected_row()[0], 499);
+}
+
+#[test]
+fn split_focused_defaults_to_true() {
+    let app = make_app();
+    assert!(app.split_focused());
+}
+
+#[test]
+fn focus_changed_updates_split_focused_when_split_active() {
+    let mut app = make_app();
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some("pane1".to_string());
+
+    let cmds = app.update(Message::FocusChanged(false));
+    assert!(cmds.is_empty());
+    assert!(!app.split_focused());
+
+    let cmds = app.update(Message::FocusChanged(true));
+    assert!(cmds.is_empty());
+    assert!(app.split_focused());
+}
+
+#[test]
+fn render_shows_border_when_split_active_and_focused() {
+    let mut app = make_app();
+    app.board.split.active = true;
+    app.board.split.focused = true;
+    app.board.split.right_pane_id = Some("pane1".to_string());
+
+    let buf = render_to_buffer(&mut app, 80, 24);
+    // Top-left corner should be a border character (┌)
+    assert_eq!(
+        buf[(0, 0)].symbol(),
+        "┌",
+        "Expected border corner when split active"
+    );
+}
+
+#[test]
+fn render_no_border_when_split_inactive() {
+    let mut app = make_app();
+    assert!(!app.split_active());
+
+    let buf = render_to_buffer(&mut app, 80, 24);
+    // Top-left corner should NOT be a border character
+    assert_ne!(
+        buf[(0, 0)].symbol(),
+        "┌",
+        "No border expected when split inactive"
+    );
+}
+
+#[test]
+fn help_overlay_renders_when_active() {
+    let mut app = make_app();
+    app.input.mode = InputMode::Help;
+
+    let buf = render_to_buffer(&mut app, 80, 35);
+    assert!(buffer_contains(&buf, "Navigation"));
+    assert!(buffer_contains(&buf, "Actions"));
+    assert!(buffer_contains(&buf, "General"));
+}
+
+#[test]
+fn truncate_title_short() {
+    assert_eq!(super::truncate_title("Fix bug", 30), "\"Fix bug\"");
+}
+
+#[test]
+fn truncate_title_exact_limit() {
+    let title = "a".repeat(30);
+    assert_eq!(super::truncate_title(&title, 30), format!("\"{}\"", title));
+}
+
+#[test]
+fn truncate_title_over_limit() {
+    let title = "Refactor the authentication middleware system";
+    assert_eq!(
+        super::truncate_title(title, 30),
+        "\"Refactor the authentication...\""
+    );
+}
+
+#[test]
+fn truncate_title_multibyte_chars() {
+    // Multi-byte UTF-8 characters must not panic on truncation
+    let title = "Fix the caf\u{00e9} rendering bug now";
+    // 31 chars, should truncate at char boundary not byte boundary
+    assert!(super::truncate_title(title, 10).ends_with("...\""));
+}
+
+#[test]
+fn focused_column_has_tinted_background() {
+    let mut app = App::new(
+        vec![
+            make_task(1, TaskStatus::Backlog),
+            make_task(2, TaskStatus::Running),
+        ],
+        TEST_TIMEOUT,
+    );
+    // Use wider terminal so 8 columns have enough room for content.
+    // Columns use Ratio constraints (3/18, 2/18, ...) so they aren't equal width.
+    let buf = render_to_buffer(&mut app, 240, 30);
+
+    // Focused column (Backlog, col 0) should have a tinted bg.
+    // Check a row well below the cursor card to avoid cursor highlight.
+    let expected_bg = Color::Rgb(28, 30, 44);
+    let cell = &buf[(1, 15)];
+    // Backlog is 3/18 of 240 = 40px. Check well past that at x=120 (middle of board).
+    let cell2 = &buf[(120, 15)];
+
+    assert_eq!(
+        cell.bg, expected_bg,
+        "Focused column should have tinted background"
+    );
+    assert_ne!(
+        cell2.bg, expected_bg,
+        "Unfocused column should NOT have tinted background"
+    );
+}
+
+#[test]
+fn on_select_all_defaults_to_false() {
+    let app = make_app();
+    assert!(!app.on_select_all());
+}
+
+#[test]
+fn select_all_column_selects_all_tasks_in_column() {
+    let mut app = make_app();
+    // Cursor is on Backlog (column 0) which has tasks 1, 2
+    app.update(Message::SelectAllColumn);
+    assert!(app.select.tasks.contains(&TaskId(1)));
+    assert!(app.select.tasks.contains(&TaskId(2)));
+    assert_eq!(app.select.tasks.len(), 2);
+}
+
+#[test]
+fn select_all_column_deselects_when_all_selected() {
+    let mut app = make_app();
+    app.update(Message::SelectAllColumn);
+    assert_eq!(app.select.tasks.len(), 2);
+
+    app.update(Message::SelectAllColumn);
+    assert!(app.select.tasks.is_empty());
+}
+
+#[test]
+fn select_all_column_selects_remaining_when_partially_selected() {
+    let mut app = make_app();
+    app.update(Message::ToggleSelect(TaskId(1)));
+    assert_eq!(app.select.tasks.len(), 1);
+
+    app.update(Message::SelectAllColumn);
+    assert!(app.select.tasks.contains(&TaskId(1)));
+    assert!(app.select.tasks.contains(&TaskId(2)));
+    assert_eq!(app.select.tasks.len(), 2);
+}
+
+#[test]
+fn select_all_column_noop_on_empty_column() {
+    let mut app = make_app();
+    // Navigate to Review column (empty in make_app)
+    app.update(Message::NavigateColumn(2));
+    app.update(Message::SelectAllColumn);
+    assert!(app.select.tasks.is_empty());
+}
+
+#[test]
+fn select_all_column_only_affects_current_column() {
+    let mut app = make_app();
+    // TaskId(3) is in Running column, pre-select it
+    app.update(Message::ToggleSelect(TaskId(3)));
+    // SelectAllColumn selects all in current (Backlog) column
+    app.update(Message::SelectAllColumn);
+    assert!(app.select.tasks.contains(&TaskId(1)));
+    assert!(app.select.tasks.contains(&TaskId(2)));
+    assert!(app.select.tasks.contains(&TaskId(3)));
+    assert_eq!(app.select.tasks.len(), 3);
+}
+
+#[test]
+fn select_all_deselect_only_affects_current_column() {
+    let mut app = make_app();
+    app.update(Message::ToggleSelect(TaskId(3)));
+    app.update(Message::SelectAllColumn);
+    assert_eq!(app.select.tasks.len(), 3);
+
+    app.update(Message::SelectAllColumn);
+    assert_eq!(app.select.tasks.len(), 1);
+    assert!(app.select.tasks.contains(&TaskId(3)));
+}
+
+#[test]
+fn key_a_selects_all_in_column() {
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Char('a')));
+    assert!(app.select.tasks.contains(&TaskId(1)));
+    assert!(app.select.tasks.contains(&TaskId(2)));
+}
+
+#[test]
+fn navigate_up_from_row_zero_enters_select_all_toggle() {
+    let mut app = make_app();
+    assert!(!app.on_select_all());
+    app.handle_key(make_key(KeyCode::Char('k')));
+    assert!(app.on_select_all());
+}
+
+#[test]
+fn column_switch_preserves_on_select_all() {
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Char('k')));
+    assert!(app.on_select_all());
+    app.handle_key(make_key(KeyCode::Char('l')));
+    assert!(app.on_select_all());
+}
+
+#[test]
+fn enter_on_toggle_triggers_select_all() {
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Char('k')));
+    app.handle_key(make_key(KeyCode::Enter));
+    assert!(app.select.tasks.contains(&TaskId(1)));
+    assert!(app.select.tasks.contains(&TaskId(2)));
+}
+
+#[test]
+fn space_is_noop_when_on_select_all() {
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Char('k')));
+    app.handle_key(make_key(KeyCode::Char(' ')));
+    assert!(app.select.tasks.is_empty());
+}
+
+#[test]
+fn render_shows_select_all_toggle_in_focused_column() {
+    let mut app = make_app();
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(buffer_contains(&buf, "[ ]"));
+    assert!(!buffer_contains(&buf, "Select [a]ll"));
+}
+
+#[test]
+fn render_shows_checked_toggle_when_all_selected() {
+    let mut app = make_app();
+    app.update(Message::SelectAllColumn);
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(buffer_contains(&buf, "[x]"));
+}
+
+#[test]
+fn render_shows_unchecked_toggle_when_not_all_selected() {
+    let mut app = make_app();
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(buffer_contains(&buf, "[ ]"));
+}
+
+#[test]
+fn action_hints_include_select_all() {
+    let app = make_app();
+    let task = app.selected_task();
+    let spans = ui::action_hints(task, Color::Blue);
+    let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+    assert!(
+        text.contains("select all"),
+        "action hints should include 'select all'"
+    );
+}
+
+#[test]
+fn card_shows_pr_badge() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    // Navigate to Review column (index 2)
+    for _ in 0..2 {
+        app.update(Message::NavigateColumn(1));
+    }
+
+    let buf = render_to_buffer(&mut app, 120, 20);
+    assert!(
+        buffer_contains(&buf, "PR #42"),
+        "Card should show PR #42 badge"
+    );
+}
+
+#[test]
+fn card_shows_merged_pr_badge() {
+    let mut task = make_task(1, TaskStatus::Done);
+    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    // Navigate to Done column (visual index 7)
+    for _ in 0..7 {
+        app.update(Message::NavigateColumn(1));
+    }
+
+    let buf = render_to_buffer(&mut app, 120, 20);
+    assert!(
+        buffer_contains(&buf, "PR #42 merged"),
+        "Done card should show merged PR badge"
+    );
+}
+
+#[test]
+fn reorder_task_down_swaps_sort_order() {
+    let mut app = make_app();
+    let t1 = make_task(1, TaskStatus::Backlog);
+    let t2 = make_task(2, TaskStatus::Backlog);
+    app.board.tasks = vec![t1, t2];
+
+    // Cursor on first task (row 0, column 0 = Backlog)
+    let cmds = app.update(Message::ReorderItem(1));
+
+    // After reorder, task 1 should have a higher sort value than task 2
+    let t1 = app.find_task(TaskId(1)).unwrap();
+    let t2 = app.find_task(TaskId(2)).unwrap();
+    let eff1 = t1.sort_order.unwrap_or(t1.id.0);
+    let eff2 = t2.sort_order.unwrap_or(t2.id.0);
+    assert!(
+        eff1 > eff2,
+        "task 1 ({eff1}) should be after task 2 ({eff2}) after move down"
+    );
+    // Should emit PersistTask for both
+    assert_eq!(
+        cmds.iter()
+            .filter(|c| matches!(c, Command::PersistTask(_)))
+            .count(),
+        2
+    );
+    // Cursor should have moved down
+    assert_eq!(app.selection().row(0), 1);
+}
+
+#[test]
+fn reorder_task_up_at_top_is_noop() {
+    let mut app = make_app();
+    let t1 = make_task(1, TaskStatus::Backlog);
+    app.board.tasks = vec![t1];
+
+    let cmds = app.update(Message::ReorderItem(-1));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn reorder_task_down_at_bottom_is_noop() {
+    let mut app = make_app();
+    let t1 = make_task(1, TaskStatus::Backlog);
+    app.board.tasks = vec![t1];
+
+    let cmds = app.update(Message::ReorderItem(1));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn reorder_task_up_swaps_sort_order() {
+    let mut app = make_app();
+    let t1 = make_task(1, TaskStatus::Backlog);
+    let t2 = make_task(2, TaskStatus::Backlog);
+    app.board.tasks = vec![t1, t2];
+
+    // Move cursor to row 1 (second task), then reorder up
+    app.selection_mut().set_row(0, 1);
+    let cmds = app.update(Message::ReorderItem(-1));
+
+    // After reorder, task 2 should have a lower sort value than task 1
+    let t1 = app.find_task(TaskId(1)).unwrap();
+    let t2 = app.find_task(TaskId(2)).unwrap();
+    let eff1 = t1.sort_order.unwrap_or(t1.id.0);
+    let eff2 = t2.sort_order.unwrap_or(t2.id.0);
+    assert!(
+        eff2 < eff1,
+        "task 2 ({eff2}) should be before task 1 ({eff1}) after move up"
+    );
+    assert_eq!(
+        cmds.iter()
+            .filter(|c| matches!(c, Command::PersistTask(_)))
+            .count(),
+        2
+    );
+    // Cursor should have moved up
+    assert_eq!(app.selection().row(0), 0);
+}
+
+#[test]
+fn render_shows_subcolumn_headers() {
+    // make_app() has one Running task (SubStatus::Active) → Running column shows "── active" header
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Running), {
+            let mut t = make_task(2, TaskStatus::Running);
+            t.sub_status = SubStatus::Stale;
+            t
+        }],
+        TEST_TIMEOUT,
+    );
+    let buf = render_to_buffer(&mut app, 160, 30);
+    assert!(
+        buffer_contains(&buf, "active"),
+        "section header 'active' not found"
+    );
+    assert!(
+        buffer_contains(&buf, "stale"),
+        "section header 'stale' not found"
+    );
+}
+
+#[test]
+fn render_shows_parent_status_headers() {
+    let mut app = make_app();
+    let buf = render_to_buffer(&mut app, 160, 30);
+    assert!(
+        buffer_contains(&buf, "backlog"),
+        "parent header 'backlog' not found"
+    );
+    assert!(
+        buffer_contains(&buf, "running"),
+        "parent header 'running' not found"
+    );
+    assert!(
+        buffer_contains(&buf, "review"),
+        "parent header 'review' not found"
+    );
+    assert!(
+        buffer_contains(&buf, "done"),
+        "parent header 'done' not found"
+    );
+}
+
+#[test]
+fn render_detail_shows_sub_status() {
+    let mut task = make_task(1, TaskStatus::Running);
+    task.sub_status = SubStatus::Active;
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    // Navigate to the Active visual column (index 1)
+    app.update(Message::NavigateColumn(1));
+    // Open the detail panel
+    app.update(Message::ToggleDetail);
+    let buf = render_to_buffer(&mut app, 160, 30);
+    assert!(
+        buffer_contains(&buf, "(active)"),
+        "detail panel should show sub-status '(active)'"
+    );
+}
+
+#[test]
+fn render_card_conflict_shows_rebase_conflict() {
+    let mut task = make_task(1, TaskStatus::Running);
+    task.sub_status = SubStatus::Conflict;
+    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+    task.tmux_window = Some("task-1".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.update(Message::NavigateColumn(1)); // Running column
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "rebase conflict"),
+        "Conflict task should show 'rebase conflict'"
+    );
+}
+
+#[test]
+fn render_card_detached_shows_detached() {
+    let mut task = make_task(1, TaskStatus::Running);
+    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+    task.tmux_window = None; // detached: worktree present but no tmux
+    task.sub_status = SubStatus::Active;
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.update(Message::NavigateColumn(1)); // Running column
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "detached"),
+        "Task with worktree but no tmux_window should show 'detached'"
+    );
+}
+
+#[test]
+fn render_card_detached_review_shows_pr_label() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+    task.tmux_window = None; // detached
+    task.pr_url = Some("https://github.com/acme/app/pull/42".to_string());
+    task.sub_status = SubStatus::AwaitingReview;
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.update(Message::NavigateColumn(1)); // move to Running
+    app.update(Message::NavigateColumn(1)); // move to Review
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "PR #42"),
+        "Detached review task with pr_url should show 'PR #42'"
+    );
+}
+
+#[test]
+fn render_card_blocked_shows_blocked() {
+    let mut task = make_task(1, TaskStatus::Running);
+    task.sub_status = SubStatus::NeedsInput;
+    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+    task.tmux_window = Some("task-1".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.update(Message::NavigateColumn(1)); // Running column
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "blocked"),
+        "Running task with NeedsInput sub_status should show 'blocked'"
+    );
+}
+
+#[test]
+fn render_card_running_shows_running() {
+    let mut task = make_task(1, TaskStatus::Running);
+    task.sub_status = SubStatus::Active;
+    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+    task.tmux_window = Some("task-1".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.update(Message::NavigateColumn(1)); // Running column
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "running"),
+        "Active running task should show 'running'"
+    );
+}
+
+#[test]
+fn render_card_review_pr_shows_pr_number() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+    task.tmux_window = Some("task-1".to_string());
+    task.pr_url = Some("https://github.com/acme/app/pull/99".to_string());
+    task.sub_status = SubStatus::AwaitingReview;
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.update(Message::NavigateColumn(1)); // move to Running
+    app.update(Message::NavigateColumn(1)); // move to Review
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "PR #99"),
+        "Review task with pr_url and tmux should show 'PR #99'"
+    );
+}
+
+#[test]
+fn render_card_done_merged_shows_merged() {
+    let mut task = make_task(1, TaskStatus::Done);
+    task.pr_url = Some("https://github.com/acme/app/pull/77".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.update(Message::NavigateColumn(1)); // Running
+    app.update(Message::NavigateColumn(1)); // Review
+    app.update(Message::NavigateColumn(1)); // Done
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "PR #77 merged"),
+        "Done task with pr_url should show 'PR #77 merged'"
+    );
+}
+
+#[test]
+fn render_card_idle_with_plan_shows_triangle() {
+    let mut task = make_task(1, TaskStatus::Backlog);
+    task.plan_path = Some("docs/plans/plan.md".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    // Already in Backlog column (0)
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "\u{25b8}"),
+        "Backlog task with plan should show '▸' (U+25B8)"
+    );
+}
+
+#[test]
+fn render_card_idle_with_bug_tag() {
+    let mut task = make_task(1, TaskStatus::Backlog);
+    task.tag = Some(TaskTag::Bug);
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "[bug]"),
+        "Backlog task with Bug tag should show '[bug]'"
+    );
+}
+
+#[test]
+fn render_card_idle_with_feature_tag() {
+    let mut task = make_task(1, TaskStatus::Backlog);
+    task.tag = Some(TaskTag::Feature);
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "[feat]"),
+        "Backlog task with Feature tag should show '[feat]'"
+    );
+}
+
+#[test]
+fn render_card_message_flash_shows_envelope() {
+    let mut task = make_task(1, TaskStatus::Running);
+    task.sub_status = SubStatus::Active;
+    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+    task.tmux_window = Some("task-1".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.agents.message_flash.insert(TaskId(1), Instant::now());
+    app.update(Message::NavigateColumn(1)); // Running column
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "\u{2709}"),
+        "Running task with message_flash set should show '\u{2709}' (envelope)"
+    );
+}
+
+#[test]
+fn render_detail_task_with_tag_shows_tag() {
+    let mut task = make_task(1, TaskStatus::Backlog);
+    task.tag = Some(TaskTag::Bug);
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.board.detail_visible = true;
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "[bug]"),
+        "detail panel should show '[bug]' tag for a task with tag=Bug"
+    );
+}
+
+#[test]
+fn render_detail_task_with_pr_url() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.pr_url = Some("https://github.com/acme/app/pull/42".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    // Navigate to Review column (index 2)
+    app.update(Message::NavigateColumn(2));
+    app.board.detail_visible = true;
+    let buf = render_to_buffer(&mut app, 160, 30);
+    assert!(
+        buffer_contains(&buf, "PR: https://github.com/acme/app/pull/42"),
+        "detail panel should show the PR URL"
+    );
+}
+
+#[test]
+fn render_detail_task_with_usage_shows_cost() {
+    use crate::models::TaskUsage;
+    let task = make_task(1, TaskStatus::Running);
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    // Navigate to Running column (index 1)
+    app.update(Message::NavigateColumn(1));
+    app.board.detail_visible = true;
+    app.board.usage.insert(
+        TaskId(1),
+        TaskUsage {
+            task_id: TaskId(1),
+            cost_usd: 1.23,
+            input_tokens: 50_000,
+            output_tokens: 10_000,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            updated_at: chrono::Utc::now(),
+        },
+    );
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "$1.23"),
+        "detail panel should show usage cost '$1.23'"
+    );
+}
+
+#[test]
+fn render_detail_no_selection_shows_message() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.board.detail_visible = true;
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "No task selected"),
+        "detail panel should show 'No task selected' when there are no items"
+    );
+}
+
+#[test]
+fn task_card_title_truncated_in_narrow_terminal() {
+    let mut task = make_task(1, TaskStatus::Backlog);
+    task.title = "This is a very long task title that should be truncated".to_string();
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+
+    // Narrow terminal: 4 columns per status column (80 / 4 statuses = 20 each)
+    let buf = render_to_buffer(&mut app, 80, 10);
+
+    // Full title should NOT appear — it's too long for the column
+    assert!(
+        !buffer_contains(
+            &buf,
+            "This is a very long task title that should be truncated"
+        ),
+        "full title should be truncated in narrow terminal"
+    );
+    // Truncated title with ellipsis should appear
+    assert!(
+        buffer_contains(&buf, "…"),
+        "truncated title should contain ellipsis"
+    );
+}
+
+#[test]
+fn task_card_short_title_not_truncated_in_wide_terminal() {
+    let mut task = make_task(1, TaskStatus::Backlog);
+    task.title = "Short".to_string();
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+
+    // Wide terminal: plenty of room
+    let buf = render_to_buffer(&mut app, 200, 10);
+    assert!(
+        buffer_contains(&buf, "Short"),
+        "short title should appear in full"
+    );
+}
+
+#[test]
+fn task_card_title_adapts_to_terminal_width() {
+    let mut task = make_task(1, TaskStatus::Backlog);
+    task.title = "Medium length title here".to_string();
+    let mut app_narrow = App::new(vec![task.clone()], TEST_TIMEOUT);
+    let mut app_wide = App::new(vec![task], TEST_TIMEOUT);
+
+    let buf_narrow = render_to_buffer(&mut app_narrow, 60, 10);
+    let buf_wide = render_to_buffer(&mut app_wide, 200, 10);
+
+    // In narrow terminal, should be truncated
+    assert!(
+        !buffer_contains(&buf_narrow, "Medium length title here"),
+        "title should be truncated in narrow terminal"
+    );
+    // In wide terminal, should appear in full
+    assert!(
+        buffer_contains(&buf_wide, "Medium length title here"),
+        "title should appear in full in wide terminal"
+    );
+}
+
+#[test]
+fn handle_key_normal_reorder_j_down() {
+    let mut app = make_app();
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 0);
+    let cmds = app.handle_key(make_key(KeyCode::Char('J')));
+    // Reorder should produce a persist command
+    assert!(cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
+}
+
+#[test]
+fn handle_key_normal_reorder_k_up() {
+    let mut app = make_app();
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 1);
+    let cmds = app.handle_key(make_key(KeyCode::Char('K')));
+    assert!(cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
+}
+
+#[test]
+fn handle_key_normal_enter_on_select_all_row() {
+    let mut app = make_app();
+    // Navigate up past first item to land on "select all" virtual row
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 0);
+    // Manually set on_select_all
+    app.selection_mut().on_select_all = true;
+
+    app.handle_key(make_key(KeyCode::Enter));
+    // Should have toggled select all — tasks should be selected
+    assert!(
+        !app.select.tasks.is_empty()
+            || !app.select.epics.is_empty()
+            || app.selection().on_select_all
+    );
+}
+
+#[test]
+fn backlog_column_color_is_blue() {
+    let backlog = ui::column_color(TaskStatus::Backlog);
+    // Backlog should use a distinct blue, not the generic MUTED grey.
+    assert_ne!(
+        backlog,
+        Color::Rgb(86, 95, 137),
+        "Backlog column color should not be MUTED grey"
+    );
+    assert_eq!(
+        backlog,
+        Color::Rgb(122, 162, 247),
+        "Backlog column color should be Tokyo Night blue"
+    );
+}
+
+#[test]
+fn focused_backlog_header_renders_in_blue() {
+    let mut app = make_app();
+    assert_eq!(app.selected_column(), 0);
+
+    let buf = render_to_buffer(&mut app, 100, 20);
+    let area = buf.area();
+    let blue = Color::Rgb(122, 162, 247);
+    let target = "backlog";
+    let mut found = false;
+    for y in area.top()..area.bottom() {
+        for x in area.left()..area.right().saturating_sub(target.len() as u16 - 1) {
+            let matches = target
+                .bytes()
+                .enumerate()
+                .all(|(i, ch)| buf[(x + i as u16, y)].symbol().as_bytes().first() == Some(&ch));
+            if matches {
+                let fg = buf[(x, y)].fg;
+                if fg == blue {
+                    found = true;
+                }
+                break;
+            }
+        }
+        if found {
+            break;
+        }
+    }
+    assert!(
+        found,
+        "Focused Backlog header should render with blue foreground color"
+    );
+}
+
+#[test]
+fn render_adapts_to_smaller_terminal_after_resize() {
+    let mut app = make_app();
+
+    // Render at a large size (pre-split)
+    let buf_large = render_to_buffer(&mut app, 160, 40);
+    // Render at a smaller size (post-split, e.g. half width)
+    let buf_small = render_to_buffer(&mut app, 80, 40);
+
+    // The smaller render should use the full width of the smaller terminal
+    assert_eq!(buf_small.area().width, 80);
+    assert_eq!(buf_large.area().width, 160);
+    // Both should contain a task title — layout adapted, content still renders
+    assert!(
+        buffer_contains(&buf_small, "Task 1"),
+        "task should render at smaller width"
+    );
+}
+
+#[test]
+fn render_repo_path_mode_shows_filtered_list_when_typing() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.board.repo_paths = vec!["/tmp".to_string(), "/var/log".to_string()];
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.task_draft = Some(TaskDraft {
+        title: "T".to_string(),
+        ..Default::default()
+    });
+    app.input.buffer = "tmp".to_string(); // filter active
+
+    let buf = render_to_buffer(&mut app, 80, 20);
+    assert!(buffer_contains(&buf, "/tmp"), "matching path should appear");
+    assert!(
+        !buffer_contains(&buf, "/var/log"),
+        "non-matching path should be hidden"
+    );
+}
+
+#[test]
+fn render_repo_path_mode_shows_all_when_buffer_empty() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.board.repo_paths = vec!["/tmp".to_string(), "/var/log".to_string()];
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.task_draft = Some(TaskDraft {
+        title: "T".to_string(),
+        ..Default::default()
+    });
+    // buffer is empty — all paths shown
+
+    let buf = render_to_buffer(&mut app, 80, 20);
+    assert!(buffer_contains(&buf, "/tmp"));
+    assert!(buffer_contains(&buf, "/var/log"));
+}
+
+#[test]
+fn test_on_select_all_preserved_on_refresh() {
+    let mut app = make_app();
+    // Navigate up from row 0 to select-all header
+    app.update(Message::NavigateRow(-1));
+    assert!(app.selection().on_select_all);
+
+    app.update(Message::RefreshTasks(vec![
+        make_task(1, TaskStatus::Backlog),
+        make_task(2, TaskStatus::Backlog),
+    ]));
+
+    assert!(app.selection().on_select_all);
+    assert_eq!(app.selection().anchor, None);
+}
