@@ -1,4 +1,7 @@
-use super::palette::{BLUE, BORDER, CYAN, FG, FLASH_BG, GREEN, MUTED, MUTED_LIGHT, PURPLE, YELLOW};
+use super::palette::{
+    ARCHIVE_COL_BG, ARCHIVE_CURSOR_BG, ARCHIVE_STRIPE, BLUE, BORDER, CYAN, FG, FLASH_BG, GREEN,
+    MUTED, MUTED_LIGHT, PROJECTS_COL_BG, PROJECTS_CURSOR_BG, PURPLE, YELLOW,
+};
 use super::shared::{
     push_hint_spans, render_substatus_header, render_tab_bar, staleness_color, truncate,
 };
@@ -51,6 +54,30 @@ pub(in crate::tui) fn column_bg_color(status: TaskStatus) -> Color {
         TaskStatus::Review => Color::Rgb(34, 28, 44),
         TaskStatus::Done => Color::Rgb(27, 36, 30),
         TaskStatus::Archived => Color::Rgb(28, 30, 44),
+    }
+}
+
+/// Stripe color for an edge navigation column (col 0 = Projects, col 5 = Archive).
+pub(in crate::tui) fn edge_column_stripe(col: usize) -> Color {
+    match col {
+        0 => PURPLE,
+        _ => ARCHIVE_STRIPE,
+    }
+}
+
+/// Column background tint for edge columns (col 0 or 5).
+pub(in crate::tui) fn edge_column_bg(col: usize) -> Color {
+    match col {
+        0 => PROJECTS_COL_BG,
+        _ => ARCHIVE_COL_BG,
+    }
+}
+
+/// Cursor highlight background for edge columns.
+pub(in crate::tui) fn edge_cursor_bg(col: usize) -> Color {
+    match col {
+        0 => PROJECTS_CURSOR_BG,
+        _ => ARCHIVE_CURSOR_BG,
     }
 }
 
