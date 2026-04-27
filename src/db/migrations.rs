@@ -51,6 +51,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (36, migrate_v36_tips_state),
     (37, migrate_v37_pr_workflow_states),
     (38, migrate_v38_feed_epic_columns),
+    (39, migrate_v39_add_projects),
 ];
 
 fn migrate_v1_add_plan_column(conn: &Connection) -> Result<()> {
@@ -817,6 +818,25 @@ fn migrate_v38_feed_epic_columns(conn: &Connection) -> Result<()> {
              WHERE external_id IS NOT NULL;",
     )
     .context("Failed to add feed columns (migration v38)")
+}
+
+fn migrate_v39_add_projects(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "BEGIN;
+        CREATE TABLE IF NOT EXISTS projects (
+            id         INTEGER PRIMARY KEY,
+            name       TEXT NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            is_default INTEGER NOT NULL DEFAULT 0
+        );
+        INSERT INTO projects (name, sort_order, is_default) VALUES ('Default', 0, 1);
+        ALTER TABLE tasks ADD COLUMN project_id INTEGER NOT NULL DEFAULT 1;
+        ALTER TABLE epics ADD COLUMN project_id INTEGER NOT NULL DEFAULT 1;
+        CREATE INDEX idx_tasks_project_id ON tasks(project_id);
+        CREATE INDEX idx_epics_project_id ON epics(project_id);
+        COMMIT;",
+    )
+    .context("Failed to add projects table (migration v39)")
 }
 
 fn migrate_v36_tips_state(conn: &Connection) -> Result<()> {

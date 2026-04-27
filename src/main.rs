@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use tracing::Level;
 use tracing_subscriber::EnvFilter;
 
-use dispatch_tui::db::{SettingsStore, TaskCrud};
+use dispatch_tui::db::{ProjectCrud, SettingsStore, TaskCrud};
 use dispatch_tui::process::RealProcessRunner;
 use dispatch_tui::{db, feed, github, models, plan, runtime, service};
 
@@ -278,6 +278,7 @@ async fn main() -> Result<()> {
                 return Ok(());
             }
 
+            let default_project_id = db.get_default_project()?.id;
             let task_tag = tag
                 .as_deref()
                 .map(|t| {
@@ -296,6 +297,7 @@ async fn main() -> Result<()> {
                 None,
                 None,
                 task_tag,
+                default_project_id,
             )?;
             println!("Created task #{}: \"{}\" [backlog]", id, title);
         }

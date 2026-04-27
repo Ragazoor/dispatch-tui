@@ -474,7 +474,7 @@ mod tests {
             runner,
             editor_session: Arc::new(Mutex::new(None)),
         };
-        let app = App::new(vec![], Duration::from_secs(300));
+        let app = App::new(vec![], 1, Duration::from_secs(300));
         (rt, app)
     }
 
@@ -514,6 +514,7 @@ mod tests {
                 None,
                 None,
                 None,
+                1,
             )
             .unwrap();
         db.get_task(id).unwrap().unwrap()
@@ -536,7 +537,7 @@ mod tests {
             runner,
             editor_session: Arc::new(Mutex::new(None)),
         };
-        let mut app = App::new(vec![task.clone()], Duration::from_secs(300));
+        let mut app = App::new(vec![task.clone()], 1, Duration::from_secs(300));
 
         let edited_text = "--- TITLE ---\nNew title\n\
             --- DESCRIPTION ---\nNew description\n\
@@ -580,7 +581,7 @@ mod tests {
             runner,
             editor_session: Arc::new(Mutex::new(None)),
         };
-        let mut app = App::new(vec![task.clone()], Duration::from_secs(300));
+        let mut app = App::new(vec![task.clone()], 1, Duration::from_secs(300));
 
         rt.exec_finalize_editor_result(
             &mut app,

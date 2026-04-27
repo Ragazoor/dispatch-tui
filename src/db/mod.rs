@@ -9,8 +9,8 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use crate::models::{
-    Epic, EpicId, FeedItem, SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage, TipsShowMode,
-    UsageReport,
+    Epic, EpicId, FeedItem, Project, ProjectId, SubStatus, Task, TaskId, TaskStatus, TaskTag,
+    TaskUsage, TipsShowMode, UsageReport,
 };
 
 // ---------------------------------------------------------------------------
@@ -36,6 +36,7 @@ pub struct TaskPatch<'a> {
     pub sort_order: Option<Option<i64>>,
     pub base_branch: Option<&'a str>,
     pub external_id: Option<Option<&'a str>>,
+    pub project_id: Option<ProjectId>,
 }
 
 impl<'a> TaskPatch<'a> {
@@ -108,6 +109,11 @@ impl<'a> TaskPatch<'a> {
         self
     }
 
+    pub fn project_id(mut self, id: ProjectId) -> Self {
+        self.project_id = Some(id);
+        self
+    }
+
     pub fn has_changes(&self) -> bool {
         self.status.is_some()
             || self.plan_path.is_some()
@@ -122,6 +128,7 @@ impl<'a> TaskPatch<'a> {
             || self.sort_order.is_some()
             || self.base_branch.is_some()
             || self.external_id.is_some()
+            || self.project_id.is_some()
     }
 }
 
@@ -152,6 +159,7 @@ pub struct EpicPatch<'a> {
     pub auto_dispatch: Option<bool>,
     pub feed_command: Option<Option<&'a str>>,
     pub feed_interval_secs: Option<Option<i64>>,
+    pub project_id: Option<ProjectId>,
 }
 
 impl<'a> EpicPatch<'a> {
@@ -204,6 +212,11 @@ impl<'a> EpicPatch<'a> {
         self
     }
 
+    pub fn project_id(mut self, id: ProjectId) -> Self {
+        self.project_id = Some(id);
+        self
+    }
+
     pub fn has_changes(&self) -> bool {
         self.title.is_some()
             || self.description.is_some()
@@ -214,6 +227,7 @@ impl<'a> EpicPatch<'a> {
             || self.auto_dispatch.is_some()
             || self.feed_command.is_some()
             || self.feed_interval_secs.is_some()
+            || self.project_id.is_some()
     }
 }
 
@@ -256,6 +270,7 @@ pub trait TaskCrud: Send + Sync {
         epic_id: Option<EpicId>,
         sort_order: Option<i64>,
         tag: Option<crate::models::TaskTag>,
+        project_id: ProjectId,
     ) -> Result<TaskId>;
     fn get_task(&self, id: TaskId) -> Result<Option<Task>>;
     fn list_all(&self) -> Result<Vec<Task>>;
@@ -291,6 +306,7 @@ pub trait EpicCrud: Send + Sync {
         description: &str,
         repo_path: &str,
         parent_epic_id: Option<EpicId>,
+        project_id: ProjectId,
     ) -> Result<Epic>;
     fn get_epic(&self, id: EpicId) -> Result<Option<Epic>>;
     fn list_epics(&self) -> Result<Vec<Epic>>;
@@ -450,15 +466,34 @@ pub trait PrWorkflowStore: Send + Sync {
 }
 
 // ---------------------------------------------------------------------------
+// ProjectCrud — CRUD for the projects table
+// ---------------------------------------------------------------------------
+
+pub trait ProjectCrud: Send + Sync {
+    fn create_project(&self, name: &str, sort_order: i64) -> Result<Project>;
+    fn list_projects(&self) -> Result<Vec<Project>>;
+    fn get_default_project(&self) -> Result<Project>;
+    fn rename_project(&self, id: ProjectId, name: &str) -> Result<()>;
+    /// Move all tasks and epics from `from` to `to`, then delete the `from` project.
+    /// The entire operation runs in a single transaction.
+    fn delete_project_and_move_items(&self, id: ProjectId, default_id: ProjectId) -> Result<()>;
+    fn reorder_project(&self, id: ProjectId, new_sort_order: i64) -> Result<()>;
+}
+
+// ---------------------------------------------------------------------------
 // TaskStore — supertrait combining all sub-traits
 // ---------------------------------------------------------------------------
 
 pub trait TaskStore:
-    TaskAndEpicStore + PrStore + AlertStore + SettingsStore + PrWorkflowStore
+    TaskAndEpicStore + PrStore + AlertStore + SettingsStore + PrWorkflowStore + ProjectCrud
 {
 }
 
-impl<T: TaskAndEpicStore + PrStore + AlertStore + SettingsStore + PrWorkflowStore> TaskStore for T {}
+impl<
+        T: TaskAndEpicStore + PrStore + AlertStore + SettingsStore + PrWorkflowStore + ProjectCrud,
+    > TaskStore for T
+{
+}
 
 // ---------------------------------------------------------------------------
 // Database

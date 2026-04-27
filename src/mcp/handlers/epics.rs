@@ -7,7 +7,7 @@ use crate::service::{CreateEpicParams, EpicService, ServiceError, UpdateEpicPara
 
 use super::types::{
     deserialize_flexible_i64, deserialize_optional_flexible_i64, parse_args,
-    service_err_to_response, JsonRpcResponse,
+    resolve_project_id, service_err_to_response, JsonRpcResponse,
 };
 
 // ---------------------------------------------------------------------------
@@ -24,6 +24,8 @@ pub(super) struct CreateEpicArgs {
     pub(super) sort_order: Option<i64>,
     #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
     pub(super) parent_epic_id: Option<i64>,
+    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
+    pub(super) project_id: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -65,6 +67,11 @@ pub(super) fn handle_create_epic(
     };
     tracing::info!(title = %parsed.title, "MCP create_epic");
 
+    let project_id = match resolve_project_id(&id, parsed.project_id, &*state.db) {
+        Ok(pid) => pid,
+        Err(resp) => return resp,
+    };
+
     let svc = EpicService::new(state.db.clone());
     match svc.create_epic(CreateEpicParams {
         title: parsed.title,
@@ -74,6 +81,7 @@ pub(super) fn handle_create_epic(
         parent_epic_id: parsed.parent_epic_id.map(EpicId),
         feed_command: None,
         feed_interval_secs: None,
+        project_id,
     }) {
         Ok(epic) => {
             state.notify();

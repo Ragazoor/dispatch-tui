@@ -44,6 +44,15 @@ impl App {
             InputMode::ConfirmDeletePreset => self.handle_key_confirm_delete_preset(key),
             InputMode::ConfirmDeleteRepoPath => self.handle_key_confirm_delete_repo_path(key),
             InputMode::ConfirmQuit => self.handle_key_confirm_quit(key),
+            InputMode::InputProjectName { editing_id } => {
+                self.handle_key_input_project_name(key, editing_id)
+            }
+            InputMode::ConfirmDeleteProject1 { id } => {
+                self.handle_key_confirm_delete_project1(key, id)
+            }
+            InputMode::ConfirmDeleteProject2 { id, item_count } => {
+                self.handle_key_confirm_delete_project2(key, id, item_count)
+            }
         }
     }
 
@@ -85,6 +94,11 @@ impl App {
             return self.handle_key_archive(key);
         }
 
+        // Projects panel intercepts all input when visible (except in Epic view).
+        if self.projects_panel.visible {
+            return self.handle_key_projects_panel(key);
+        }
+
         match key.code {
             KeyCode::Tab => self.update(Message::TabCycle),
 
@@ -94,6 +108,15 @@ impl App {
                 } else {
                     self.update(Message::Quit)
                 }
+            }
+
+            // In Board view at column 0, h/Left opens the projects panel instead of
+            // navigating left (there is nothing to the left of Backlog).
+            KeyCode::Char('h') | KeyCode::Left
+                if matches!(self.board.view_mode, ViewMode::Board(_))
+                    && self.selection().column() == 0 =>
+            {
+                self.update(Message::OpenProjectsPanel)
             }
 
             KeyCode::Char('h') | KeyCode::Left => self.update(Message::NavigateColumn(-1)),
@@ -776,6 +799,159 @@ impl App {
             KeyCode::Char('r') => self.update(Message::EpicWrapUpRebase),
             KeyCode::Char('p') => self.update(Message::EpicWrapUpPr),
             KeyCode::Esc => self.update(Message::CancelEpicWrapUp),
+            _ => vec![],
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Projects panel input handlers
+    // -----------------------------------------------------------------------
+
+    fn handle_key_projects_panel(&mut self, key: KeyEvent) -> Vec<Command> {
+        match key.code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                let len = self.board.projects.len();
+                if len > 0 {
+                    let next = (self.projects_panel.selected_index() + 1).min(len - 1);
+                    self.projects_panel.list_state.select(Some(next));
+                }
+                vec![]
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                let prev = self.projects_panel.selected_index().saturating_sub(1);
+                self.projects_panel.list_state.select(Some(prev));
+                vec![]
+            }
+            KeyCode::Char('l') | KeyCode::Enter => {
+                if let Some(id) = self.selected_project().map(|p| p.id) {
+                    self.projects_panel.visible = false;
+                    return self.update(Message::SelectProject(id));
+                }
+                vec![]
+            }
+            KeyCode::Char('h') | KeyCode::Left | KeyCode::Esc => {
+                self.projects_panel.visible = false;
+                vec![]
+            }
+            KeyCode::Char('n') => {
+                self.input.mode = InputMode::InputProjectName { editing_id: None };
+                self.input.buffer.clear();
+                vec![]
+            }
+            KeyCode::Char('r') => {
+                if let Some(project) = self.selected_project().cloned() {
+                    self.input.mode = InputMode::InputProjectName {
+                        editing_id: Some(project.id),
+                    };
+                    self.input.buffer = project.name;
+                }
+                vec![]
+            }
+            KeyCode::Char('d') => {
+                if let Some(project) = self.selected_project().cloned() {
+                    if !project.is_default {
+                        self.input.mode = InputMode::ConfirmDeleteProject1 { id: project.id };
+                    } else {
+                        return self.update(Message::StatusInfo(
+                            "Cannot delete the default project".to_string(),
+                        ));
+                    }
+                }
+                vec![]
+            }
+            KeyCode::Char('J') => {
+                if let Some(id) = self.selected_project().map(|p| p.id) {
+                    return vec![Command::ReorderProject { id, delta: 1 }];
+                }
+                vec![]
+            }
+            KeyCode::Char('K') => {
+                if let Some(id) = self.selected_project().map(|p| p.id) {
+                    return vec![Command::ReorderProject { id, delta: -1 }];
+                }
+                vec![]
+            }
+            _ => vec![],
+        }
+    }
+
+    fn handle_key_input_project_name(
+        &mut self,
+        key: KeyEvent,
+        editing_id: Option<i64>,
+    ) -> Vec<Command> {
+        match key.code {
+            KeyCode::Enter => {
+                let name = self.input.buffer.trim().to_string();
+                self.input.mode = InputMode::Normal;
+                self.input.buffer.clear();
+                if name.is_empty() {
+                    return vec![];
+                }
+                match editing_id {
+                    None => vec![Command::CreateProject { name }],
+                    Some(id) => vec![Command::RenameProject { id, name }],
+                }
+            }
+            KeyCode::Esc => {
+                self.input.mode = InputMode::Normal;
+                self.input.buffer.clear();
+                vec![]
+            }
+            KeyCode::Backspace => {
+                self.input.buffer.pop();
+                vec![]
+            }
+            KeyCode::Char(c) => {
+                self.input.buffer.push(c);
+                vec![]
+            }
+            _ => vec![],
+        }
+    }
+
+    fn handle_key_confirm_delete_project1(&mut self, key: KeyEvent, id: i64) -> Vec<Command> {
+        match key.code {
+            KeyCode::Char('y') => {
+                let item_count = self
+                    .board
+                    .tasks
+                    .iter()
+                    .filter(|t| t.project_id == id)
+                    .count() as u64
+                    + self
+                        .board
+                        .epics
+                        .iter()
+                        .filter(|e| e.project_id == id)
+                        .count() as u64;
+                self.input.mode = InputMode::ConfirmDeleteProject2 { id, item_count };
+                vec![]
+            }
+            KeyCode::Char('n') | KeyCode::Esc => {
+                self.input.mode = InputMode::Normal;
+                vec![]
+            }
+            _ => vec![],
+        }
+    }
+
+    fn handle_key_confirm_delete_project2(
+        &mut self,
+        key: KeyEvent,
+        id: i64,
+        _item_count: u64, // read by the renderer via InputMode::ConfirmDeleteProject2 { item_count }
+    ) -> Vec<Command> {
+        match key.code {
+            KeyCode::Char('y') => {
+                self.input.mode = InputMode::Normal;
+                self.projects_panel.visible = false;
+                vec![Command::DeleteProject { id }]
+            }
+            KeyCode::Char('n') | KeyCode::Esc => {
+                self.input.mode = InputMode::Normal;
+                vec![]
+            }
             _ => vec![],
         }
     }

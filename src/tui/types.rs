@@ -4,8 +4,8 @@ use std::time::{Duration, Instant};
 use ratatui::widgets::ListState;
 
 use crate::models::{
-    AlertKind, DispatchMode, Epic, EpicId, EpicSubstatus, SubStatus, Task, TaskId, TaskStatus,
-    TaskTag, TaskUsage, TipsShowMode, DEFAULT_BASE_BRANCH,
+    AlertKind, DispatchMode, Epic, EpicId, EpicSubstatus, Project, ProjectId, SubStatus, Task,
+    TaskId, TaskStatus, TaskTag, TaskUsage, TipsShowMode, DEFAULT_BASE_BRANCH,
 };
 
 // ---------------------------------------------------------------------------
@@ -348,6 +348,11 @@ pub enum Message {
     PrevTip,
     SetTipsMode(TipsShowMode),
     CloseTips,
+    // Project messages
+    ProjectsUpdated(Vec<Project>),
+    SelectProject(ProjectId),
+    OpenProjectsPanel,
+    CloseProjectsPanel,
 }
 
 // ---------------------------------------------------------------------------
@@ -499,6 +504,22 @@ pub enum Command {
         seen_up_to: u32,
         show_mode: TipsShowMode,
     },
+    // Project commands
+    CreateProject {
+        name: String,
+    },
+    RenameProject {
+        id: ProjectId,
+        name: String,
+    },
+    DeleteProject {
+        id: ProjectId,
+    },
+    /// +1 = move down (higher sort_order), -1 = move up (lower sort_order)
+    ReorderProject {
+        id: ProjectId,
+        delta: i8,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -538,6 +559,18 @@ pub enum InputMode {
     ConfirmEditTask(TaskId),
     ConfirmQuit,
     InputBaseBranch,
+    // Project panel input modes
+    InputProjectName {
+        /// None = create new project, Some(id) = rename existing
+        editing_id: Option<ProjectId>,
+    },
+    ConfirmDeleteProject1 {
+        id: ProjectId,
+    },
+    ConfirmDeleteProject2 {
+        id: ProjectId,
+        item_count: u64,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -572,6 +605,7 @@ impl Default for TaskDraft {
 pub struct BoardState {
     pub(in crate::tui) tasks: Vec<Task>,
     pub(in crate::tui) epics: Vec<Epic>,
+    pub(in crate::tui) projects: Vec<Project>,
     pub(in crate::tui) view_mode: ViewMode,
     pub(in crate::tui) detail_visible: bool,
     pub(in crate::tui) repo_paths: Vec<String>,
@@ -695,6 +729,22 @@ pub struct ArchiveState {
     pub visible: bool,
     pub selected_row: usize,
     pub list_state: ListState,
+}
+
+// ---------------------------------------------------------------------------
+// ProjectsPanelState — projects panel (leftmost hidden column)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Default)]
+pub struct ProjectsPanelState {
+    pub visible: bool,
+    pub list_state: ListState,
+}
+
+impl ProjectsPanelState {
+    pub fn selected_index(&self) -> usize {
+        self.list_state.selected().unwrap_or(0)
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 #[test]
 fn toggle_flattened_message_flips_state() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     assert!(!app.board.flattened);
     app.update(Message::ToggleFlattened);
     assert!(app.board.flattened);
@@ -56,7 +56,7 @@ fn epic_action_hints_done() {
 #[test]
 fn action_hints_no_ctrl_g_outside_epic() {
     let task = make_task(1, TaskStatus::Backlog);
-    let hints = ui::action_hints(Some(&task), Color::Rgb(122, 162, 247));
+    let hints = ui::action_hints(Some(&task), 0, Color::Rgb(122, 162, 247));
     let keys = hint_keys(&hints);
     assert!(
         !keys.contains(&"[^g]"),
@@ -75,7 +75,7 @@ fn epic_action_hints_shows_filter_help() {
 
 #[test]
 fn description_editor_result_for_epic() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputEpicDescription;
     app.input.epic_draft = Some(EpicDraft {
         title: "E".to_string(),
@@ -93,7 +93,7 @@ fn description_editor_result_for_epic() {
 
 #[test]
 fn tasks_for_current_view_board_excludes_epic_tasks() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let standalone = make_task(1, TaskStatus::Backlog);
     let mut subtask = make_task(2, TaskStatus::Backlog);
     subtask.epic_id = Some(EpicId(10));
@@ -106,7 +106,7 @@ fn tasks_for_current_view_board_excludes_epic_tasks() {
 
 #[test]
 fn tasks_for_current_view_epic_shows_only_subtasks() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let standalone = make_task(1, TaskStatus::Backlog);
     let mut subtask = make_task(2, TaskStatus::Running);
     subtask.epic_id = Some(EpicId(10));
@@ -125,7 +125,7 @@ fn tasks_for_current_view_epic_shows_only_subtasks() {
 
 #[test]
 fn flattened_board_shows_all_tasks_including_subtasks() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let standalone = make_task(1, TaskStatus::Backlog);
     let mut subtask = make_task(2, TaskStatus::Backlog);
     subtask.epic_id = Some(EpicId(10));
@@ -141,7 +141,7 @@ fn flattened_board_shows_all_tasks_including_subtasks() {
 
 #[test]
 fn flattened_board_is_recursive_through_nested_epics() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     // Epic tree: root(10) -> child(20)
     let mut child_epic = make_epic(20);
     child_epic.parent_epic_id = Some(EpicId(10));
@@ -167,7 +167,7 @@ fn flattened_board_is_recursive_through_nested_epics() {
 
 #[test]
 fn flattened_board_hides_all_epic_cards() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let mut child = make_epic(20);
     child.parent_epic_id = Some(EpicId(10));
     app.board.epics = vec![make_epic(10), child];
@@ -189,7 +189,7 @@ fn flattened_board_hides_all_epic_cards() {
 
 #[test]
 fn flattened_epic_view_shows_only_that_subtree() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     // Two root epics with tasks under each
     app.board.epics = vec![make_epic(10), make_epic(20)];
     let mut a = make_task(1, TaskStatus::Backlog);
@@ -212,7 +212,7 @@ fn flattened_epic_view_shows_only_that_subtree() {
 
 #[test]
 fn shift_f_key_toggles_flattened() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     assert!(!app.board.flattened);
     app.handle_key(KeyEvent::new(KeyCode::Char('F'), KeyModifiers::SHIFT));
     assert!(app.board.flattened);
@@ -222,7 +222,7 @@ fn shift_f_key_toggles_flattened() {
 
 #[test]
 fn shift_f_toggles_flattened_inside_epic_view() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     app.update(Message::EnterEpic(EpicId(10)));
     app.handle_key(KeyEvent::new(KeyCode::Char('F'), KeyModifiers::SHIFT));
@@ -231,7 +231,7 @@ fn shift_f_toggles_flattened_inside_epic_view() {
 
 #[test]
 fn toggle_flattened_clamps_selection_when_epic_disappears() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     // Board with one root epic and one subtask inside. No standalone tasks.
     app.board.epics = vec![make_epic(10)];
     let mut subtask = make_task(1, TaskStatus::Backlog);
@@ -262,7 +262,7 @@ fn toggle_flattened_clamps_selection_when_epic_disappears() {
 
 #[test]
 fn flattened_survives_enter_and_exit_epic() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     app.update(Message::ToggleFlattened);
     assert!(app.board.flattened);
@@ -276,7 +276,7 @@ fn flattened_survives_enter_and_exit_epic() {
 
 #[test]
 fn flattened_survives_refresh_tasks() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.update(Message::ToggleFlattened);
     assert!(app.board.flattened);
 
@@ -289,7 +289,7 @@ fn flattened_survives_refresh_tasks() {
 
 #[test]
 fn enter_on_epic_toggles_detail() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     // Epic is at row 0 in Backlog column (no standalone tasks)
     app.selection_mut().set_column(0);
@@ -309,7 +309,7 @@ fn enter_on_epic_toggles_detail() {
 
 #[test]
 fn e_on_epic_opens_editor() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     app.selection_mut().set_column(0);
     app.selection_mut().set_row(0, 0);
@@ -320,7 +320,7 @@ fn e_on_epic_opens_editor() {
 
 #[test]
 fn enter_epic_switches_to_epic_view() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     app.selection_mut().set_column(2);
 
@@ -342,7 +342,7 @@ fn enter_epic_switches_to_epic_view() {
 
 #[test]
 fn exit_epic_restores_board_selection() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.selection_mut().set_column(3);
 
     app.update(Message::EnterEpic(EpicId(10)));
@@ -360,14 +360,14 @@ fn exit_epic_restores_board_selection() {
 
 #[test]
 fn exit_epic_when_on_board_is_noop() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.update(Message::ExitEpic);
     assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
 }
 
 #[test]
 fn column_items_board_view_includes_epics() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)]; // epic with no subtasks = Backlog
 
     let items = app.column_items_for_status(TaskStatus::Backlog);
@@ -379,7 +379,7 @@ fn column_items_board_view_includes_epics() {
 
 #[test]
 fn column_items_epic_view_no_epics() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.view_mode = ViewMode::Epic {
         epic_id: EpicId(10),
         selection: BoardSelection::new(),
@@ -393,7 +393,7 @@ fn column_items_epic_view_no_epics() {
 
 #[test]
 fn selected_column_item_returns_epic() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
 
     // Same priority (5), task (id=1) at row 0, epic (id=10) at row 1
@@ -415,7 +415,7 @@ fn start_new_epic_sets_input_mode() {
 
 #[test]
 fn epic_created_adds_to_state() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let epic = make_epic(1);
     app.update(Message::EpicCreated(epic));
     assert_eq!(app.board.epics.len(), 1);
@@ -423,7 +423,7 @@ fn epic_created_adds_to_state() {
 
 #[test]
 fn delete_epic_removes_from_state_and_tasks() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     let mut subtask = make_task(1, TaskStatus::Backlog);
     subtask.epic_id = Some(EpicId(10));
@@ -440,7 +440,7 @@ fn delete_epic_removes_from_state_and_tasks() {
 
 #[test]
 fn move_epic_status_forward() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)]; // starts as Backlog
     let cmds = app.update(Message::MoveEpicStatus(EpicId(10), MoveDirection::Forward));
     assert_eq!(app.board.epics[0].status, TaskStatus::Running);
@@ -456,7 +456,7 @@ fn move_epic_status_forward() {
 
 #[test]
 fn move_epic_status_backward() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Done;
     app.board.epics = vec![epic];
@@ -499,6 +499,7 @@ fn shift_h_on_done_epic_moves_to_review() {
             t.epic_id = Some(EpicId(10));
             t
         }],
+        1,
         TEST_TIMEOUT,
     );
     let mut epic = make_epic(10);
@@ -542,7 +543,7 @@ fn g_key_on_epic_from_board_enters_epic_view() {
 
 #[test]
 fn e_key_in_epic_view_edits_epic() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     app.board.view_mode = ViewMode::Epic {
         epic_id: EpicId(10),
@@ -556,7 +557,7 @@ fn e_key_in_epic_view_edits_epic() {
 
 #[test]
 fn e_key_on_task_in_epic_view_edits_task_not_epic() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     let mut subtask = make_task(1, TaskStatus::Backlog);
     subtask.epic_id = Some(EpicId(10));
@@ -584,7 +585,7 @@ fn e_key_on_task_in_epic_view_edits_task_not_epic() {
 
 #[test]
 fn esc_in_epic_view_exits_to_board() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.view_mode = ViewMode::Epic {
         epic_id: EpicId(10),
         selection: BoardSelection::new(),
@@ -596,7 +597,7 @@ fn esc_in_epic_view_exits_to_board() {
 
 #[test]
 fn shift_u_in_epic_view_toggles_auto_dispatch() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let mut epic = make_epic(42);
     epic.auto_dispatch = true;
     app.board.epics = vec![epic];
@@ -620,7 +621,7 @@ fn shift_u_in_epic_view_toggles_auto_dispatch() {
 
 #[test]
 fn epic_title_esc_cancels() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputEpicTitle;
     app.input.buffer = "partial".to_string();
     app.handle_key(make_key(KeyCode::Esc));
@@ -630,7 +631,7 @@ fn epic_title_esc_cancels() {
 
 #[test]
 fn epic_title_enter_with_text_advances_to_description() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputEpicTitle;
     app.input.buffer = "My Epic".to_string();
     app.handle_key(make_key(KeyCode::Enter));
@@ -641,7 +642,7 @@ fn epic_title_enter_with_text_advances_to_description() {
 
 #[test]
 fn epic_title_enter_empty_cancels() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputEpicTitle;
     app.input.buffer.clear();
     app.handle_key(make_key(KeyCode::Enter));
@@ -650,7 +651,7 @@ fn epic_title_enter_empty_cancels() {
 
 #[test]
 fn epic_description_enter_advances_to_repo_path() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputEpicDescription;
     app.input.epic_draft = Some(EpicDraft {
         title: "E".to_string(),
@@ -668,7 +669,7 @@ fn epic_description_enter_advances_to_repo_path() {
 
 #[test]
 fn epic_repo_path_enter_with_text_completes() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputEpicRepoPath;
     app.input.epic_draft = Some(EpicDraft {
         title: "E".to_string(),
@@ -685,7 +686,7 @@ fn epic_repo_path_enter_with_text_completes() {
 
 #[test]
 fn epic_repo_path_enter_empty_uses_saved_path() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.repo_paths = vec!["/tmp".to_string()];
     app.input.mode = InputMode::InputEpicRepoPath;
     app.input.epic_draft = Some(EpicDraft {
@@ -703,7 +704,7 @@ fn epic_repo_path_enter_empty_uses_saved_path() {
 
 #[test]
 fn epic_repo_path_enter_empty_no_saved_stays() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.repo_paths = vec![];
     app.input.mode = InputMode::InputEpicRepoPath;
     app.input.epic_draft = Some(EpicDraft {
@@ -719,7 +720,7 @@ fn epic_repo_path_enter_empty_no_saved_stays() {
 
 #[test]
 fn epic_text_input_char_appends() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputEpicTitle;
     app.handle_key(make_key(KeyCode::Char('A')));
     app.handle_key(make_key(KeyCode::Char('b')));
@@ -728,7 +729,7 @@ fn epic_text_input_char_appends() {
 
 #[test]
 fn epic_text_input_backspace_removes() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputEpicTitle;
     app.input.buffer = "abc".to_string();
     app.handle_key(make_key(KeyCode::Backspace));
@@ -737,7 +738,7 @@ fn epic_text_input_backspace_removes() {
 
 #[test]
 fn epic_text_input_unrecognized_key_is_noop() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputEpicTitle;
     app.input.buffer = "x".to_string();
     let cmds = app.handle_key(make_key(KeyCode::Tab));
@@ -748,7 +749,7 @@ fn epic_text_input_unrecognized_key_is_noop() {
 
 #[test]
 fn epic_repo_path_digit_quick_selects() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.repo_paths = vec!["/first".to_string(), "/second".to_string()];
     app.input.mode = InputMode::InputEpicRepoPath;
     app.input.epic_draft = Some(EpicDraft {
@@ -766,7 +767,7 @@ fn epic_repo_path_digit_quick_selects() {
 
 #[test]
 fn epic_repo_path_digit_with_nonempty_buffer_appends() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.repo_paths = vec!["/first".to_string()];
     app.input.mode = InputMode::InputEpicRepoPath;
     app.input.epic_draft = Some(EpicDraft {
@@ -781,7 +782,7 @@ fn epic_repo_path_digit_with_nonempty_buffer_appends() {
 }
 
 fn make_app_confirm_delete_epic() -> App {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     app.selection_mut().set_column(0);
     app.selection_mut().set_row(0, 1); // cursor on epic (same priority as task, sorts after by id)
@@ -792,7 +793,7 @@ fn make_app_confirm_delete_epic() -> App {
 
 #[test]
 fn confirm_delete_epic_enters_mode_with_title() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     app.selection_mut().set_column(0);
     app.selection_mut().set_row(0, 1); // cursor on epic (same priority as task, sorts after by id)
@@ -839,7 +840,7 @@ fn confirm_delete_epic_other_key_cancels() {
 
 #[test]
 fn confirm_delete_epic_no_epic_selected_is_noop() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
     app.selection_mut().set_column(0); // cursor on task, not epic
     app.input.mode = InputMode::ConfirmDeleteEpic;
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
@@ -849,7 +850,7 @@ fn confirm_delete_epic_no_epic_selected_is_noop() {
 
 #[test]
 fn g_key_on_epic_enters_epic_view() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Review;
     app.board.epics = vec![epic];
@@ -869,7 +870,7 @@ fn g_key_on_epic_enters_epic_view() {
 
 #[test]
 fn shift_g_on_epic_jumps_to_review_subtask() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Review;
     app.board.epics = vec![epic];
@@ -888,7 +889,7 @@ fn shift_g_on_epic_jumps_to_review_subtask() {
 
 #[test]
 fn shift_g_on_epic_no_session_shows_status() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let epic = make_epic(10);
     app.board.epics = vec![epic];
 
@@ -902,7 +903,7 @@ fn shift_g_on_epic_no_session_shows_status() {
 
 #[test]
 fn shift_g_on_epic_jumps_to_blocked_running_subtask() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
     app.board.epics = vec![epic];
@@ -922,7 +923,7 @@ fn shift_g_on_epic_jumps_to_blocked_running_subtask() {
 
 #[test]
 fn shift_g_on_epic_skips_active_running_subtask() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
     app.board.epics = vec![epic];
@@ -943,7 +944,7 @@ fn shift_g_on_epic_skips_active_running_subtask() {
 
 #[test]
 fn shift_g_on_epic_prefers_blocked_running_over_review() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
     app.board.epics = vec![epic];
@@ -968,7 +969,7 @@ fn shift_g_on_epic_prefers_blocked_running_over_review() {
 
 #[test]
 fn shift_g_on_epic_active_running_falls_through_to_review() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
     app.board.epics = vec![epic];
@@ -993,7 +994,7 @@ fn shift_g_on_epic_active_running_falls_through_to_review() {
 
 #[test]
 fn shift_g_on_epic_picks_lowest_sort_order() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
     app.board.epics = vec![epic];
@@ -1098,7 +1099,7 @@ fn handle_key_epic_text_input_esc_cancels() {
 
 #[test]
 fn space_toggles_epic_selection() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     // Epic is at row 0 in Backlog column (no standalone tasks)
     app.selection_mut().set_column(0);
@@ -1110,7 +1111,7 @@ fn space_toggles_epic_selection() {
 
 #[test]
 fn space_on_epic_toggle_off() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     app.selection_mut().set_column(0);
     app.selection_mut().set_row(0, 0);
@@ -1126,7 +1127,7 @@ fn space_on_epic_toggle_off() {
 
 #[test]
 fn space_on_empty_column_no_epics_is_noop() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     // Navigate to Review column (empty)
     app.update(Message::NavigateColumn(2));
     app.handle_key(make_key(KeyCode::Char(' ')));
@@ -1136,7 +1137,7 @@ fn space_on_empty_column_no_epics_is_noop() {
 
 #[test]
 fn select_all_column_includes_epics() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
 
     app.update(Message::SelectAllColumn);
@@ -1146,7 +1147,7 @@ fn select_all_column_includes_epics() {
 
 #[test]
 fn select_all_deselects_all_including_epics() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
 
     // Select all
@@ -1162,7 +1163,7 @@ fn select_all_deselects_all_including_epics() {
 
 #[test]
 fn select_all_column_with_only_epics() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10), make_epic(20)];
 
     app.update(Message::SelectAllColumn);
@@ -1174,7 +1175,7 @@ fn select_all_column_with_only_epics() {
 
 #[test]
 fn esc_clears_epic_selection() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     app.update(Message::ToggleSelectEpic(EpicId(10)));
     assert_eq!(app.select.epics.len(), 1);
@@ -1185,7 +1186,7 @@ fn esc_clears_epic_selection() {
 
 #[test]
 fn x_key_with_epic_selection_shows_count_in_confirm() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10), make_epic(20)];
     app.update(Message::ToggleSelectEpic(EpicId(10)));
     app.update(Message::ToggleSelectEpic(EpicId(20)));
@@ -1200,7 +1201,7 @@ fn x_key_with_epic_selection_shows_count_in_confirm() {
 
 #[test]
 fn shift_l_on_epic_moves_status_forward() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     // Cursor on Backlog column, row 0 (the epic)
     app.selection_mut().set_column(0);
@@ -1220,7 +1221,7 @@ fn shift_l_on_epic_moves_status_forward() {
 
 #[test]
 fn render_selected_epic_shows_star_prefix() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     app.update(Message::ToggleSelectEpic(EpicId(10)));
 
@@ -1237,7 +1238,7 @@ fn render_selected_epic_shows_star_prefix() {
 
 #[test]
 fn render_unselected_epic_no_star() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
 
     let buf = render_to_buffer(&mut app, 120, 30);
@@ -1254,7 +1255,7 @@ fn render_unselected_epic_no_star() {
 
 #[test]
 fn render_batch_hints_with_epic_selection() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     app.update(Message::ToggleSelectEpic(EpicId(10)));
 
@@ -1268,7 +1269,7 @@ fn render_batch_hints_with_epic_selection() {
 
 #[test]
 fn render_column_header_checked_with_epics() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
 
     // Select both the task and the epic
@@ -1282,7 +1283,7 @@ fn render_column_header_checked_with_epics() {
 
 #[test]
 fn refresh_epics_prunes_stale_epic_selections() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     app.update(Message::ToggleSelectEpic(EpicId(10)));
     app.update(Message::ToggleSelectEpic(EpicId(99))); // non-existent
@@ -1444,7 +1445,7 @@ fn render_detail_task_with_epic_reference() {
     task.epic_id = Some(EpicId(10));
     let mut epic = make_epic(10);
     epic.title = "Auth Epic".to_string();
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
     app.board.epics = vec![epic];
     // Switch to Epic view so the subtask is visible (Board view hides epic subtasks)
     app.board.view_mode = ViewMode::Epic {
@@ -1464,7 +1465,7 @@ fn render_detail_task_with_epic_reference() {
 
 #[test]
 fn render_detail_epic_shows_title_and_id() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.title = "Platform Migration".to_string();
     app.board.epics = vec![epic];
@@ -1485,7 +1486,7 @@ fn render_detail_epic_shows_title_and_id() {
 
 #[test]
 fn render_detail_epic_with_plan_shows_path() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.plan_path = Some("docs/plans/migration.md".to_string());
     app.board.epics = vec![epic];
@@ -1501,7 +1502,7 @@ fn render_detail_epic_with_plan_shows_path() {
 
 #[test]
 fn render_detail_epic_shows_subtask_list() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let epic = make_epic(10);
     app.board.epics = vec![epic];
 
@@ -1531,7 +1532,7 @@ fn render_detail_epic_shows_subtask_list() {
 
 #[test]
 fn render_detail_epic_subtask_conflict_shows_warning() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let epic = make_epic(10);
     app.board.epics = vec![epic];
 
@@ -1553,7 +1554,7 @@ fn render_detail_epic_subtask_conflict_shows_warning() {
 
 #[test]
 fn render_tab_bar_epic_mode_shows_epic_title() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.title = "Platform Work".to_string();
     app.board.epics = vec![epic];
@@ -1571,7 +1572,7 @@ fn render_tab_bar_epic_mode_shows_epic_title() {
 
 #[test]
 fn render_tab_bar_epic_mode_replaces_tasks_tab() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.title = "Platform Work".to_string();
     app.board.epics = vec![epic];
@@ -1591,7 +1592,7 @@ fn render_tab_bar_epic_mode_replaces_tasks_tab() {
 fn epic_card_title_truncated_in_narrow_terminal() {
     let mut epic = make_epic(1);
     epic.title = "This is a very long epic title that should be truncated to fit".to_string();
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.update(Message::RefreshEpics(vec![epic]));
 
     let buf = render_to_buffer(&mut app, 80, 10);
@@ -1606,7 +1607,7 @@ fn epic_card_title_truncated_in_narrow_terminal() {
 
 #[test]
 fn handle_key_normal_esc_in_epic_view_exits() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     app.update(Message::EnterEpic(EpicId(10)));
     assert!(matches!(app.board.view_mode, ViewMode::Epic { .. }));
@@ -1617,7 +1618,7 @@ fn handle_key_normal_esc_in_epic_view_exits() {
 
 #[test]
 fn handle_key_normal_q_in_epic_view_exits() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     app.update(Message::EnterEpic(EpicId(10)));
 
@@ -1660,7 +1661,7 @@ fn handle_key_tag_selects_epic() {
 
 #[test]
 fn handle_key_normal_dispatch_in_epic_view_with_no_items() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     app.update(Message::EnterEpic(EpicId(10)));
     // No subtasks, cursor on empty column
@@ -1673,7 +1674,7 @@ fn handle_key_normal_dispatch_in_epic_view_with_no_items() {
 
 #[test]
 fn handle_key_normal_shift_l_on_epic_moves_status() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     app.selection_mut().set_column(0);
     app.selection_mut().set_row(0, 0);
@@ -1685,7 +1686,7 @@ fn handle_key_normal_shift_l_on_epic_moves_status() {
 
 #[test]
 fn handle_key_normal_shift_h_on_epic_moves_backward() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
     app.board.epics = vec![epic];
@@ -1754,7 +1755,7 @@ fn handle_key_normal_epic_view_routes_correctly() {
 
 #[test]
 fn epic_view_header_shows_auto_dispatch_indicator() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let mut epic = make_epic(1);
     epic.auto_dispatch = true;
     app.board.epics = vec![epic];
@@ -1769,7 +1770,7 @@ fn epic_view_header_shows_auto_dispatch_indicator() {
 
 #[test]
 fn epic_view_header_shows_manual_dispatch_indicator() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let mut epic = make_epic(1);
     epic.auto_dispatch = false;
     app.board.epics = vec![epic];
@@ -1784,7 +1785,7 @@ fn epic_view_header_shows_manual_dispatch_indicator() {
 
 #[test]
 fn repo_cursor_resets_on_entering_epic_repo_path_mode() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.repo_paths = vec!["/a".to_string(), "/b".to_string()];
     app.input.repo_cursor = 1;
     app.input.mode = InputMode::InputEpicDescription;
@@ -1800,7 +1801,7 @@ fn repo_cursor_resets_on_entering_epic_repo_path_mode() {
 
 #[test]
 fn exit_sub_epic_returns_to_parent_epic() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(1), make_epic(2)];
     app.update(Message::EnterEpic(EpicId(1)));
     app.update(Message::EnterEpic(EpicId(2)));
@@ -1817,7 +1818,7 @@ fn exit_sub_epic_returns_to_parent_epic() {
 
 #[test]
 fn exit_from_root_epic_returns_to_board() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(1)];
     app.selection_mut().set_column(3);
     app.update(Message::EnterEpic(EpicId(1)));
@@ -1833,7 +1834,7 @@ fn exit_from_root_epic_returns_to_board() {
 
 #[test]
 fn board_view_excludes_sub_epics() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let mut sub = make_epic(20);
     sub.parent_epic_id = Some(EpicId(10));
     app.board.epics = vec![make_epic(10), sub];
@@ -1855,7 +1856,7 @@ fn board_view_excludes_sub_epics() {
 
 #[test]
 fn epic_view_includes_sub_epics_as_column_items() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let mut sub = make_epic(20);
     sub.parent_epic_id = Some(EpicId(10));
     app.board.epics = vec![make_epic(10), sub];
@@ -1882,7 +1883,7 @@ fn epic_view_includes_sub_epics_as_column_items() {
 
 #[test]
 fn epic_view_breadcrumb_shows_parent_and_child_title() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let parent_epic = make_epic_with_title(1, "Root Epic");
     let child_epic = make_epic_with_title(2, "Child Epic");
     app.board.epics = vec![parent_epic.clone(), child_epic.clone()];
@@ -1916,7 +1917,7 @@ fn epic_view_breadcrumb_shows_parent_and_child_title() {
 
 #[test]
 fn epic_view_no_breadcrumb_when_parent_is_board() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let epic = make_epic_with_title(1, "Only Epic");
     app.board.epics = vec![epic.clone()];
     app.board.view_mode = ViewMode::Epic {
@@ -1934,7 +1935,7 @@ fn epic_view_no_breadcrumb_when_parent_is_board() {
 
 #[test]
 fn create_epic_in_epic_view_inherits_parent() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let parent_id = EpicId(42);
     app.board.view_mode = ViewMode::Epic {
         epic_id: parent_id,
@@ -1979,7 +1980,7 @@ fn create_epic_in_epic_view_inherits_parent() {
 
 #[test]
 fn breadcrumb_shows_three_levels() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let grandparent = make_epic_with_title(1, "Grandparent");
     let parent = make_epic_with_title(2, "ParentEpic");
     let child = make_epic_with_title(3, "ChildEpic");
@@ -2018,7 +2019,7 @@ fn breadcrumb_shows_three_levels() {
 fn test_epic_anchor_preserved_on_refresh() {
     let tasks = vec![make_task(1, TaskStatus::Backlog)];
     let epics = vec![make_epic(1)];
-    let mut app = App::new(tasks.clone(), TEST_TIMEOUT);
+    let mut app = App::new(tasks.clone(), 1, TEST_TIMEOUT);
     app.update(Message::RefreshEpics(epics.clone()));
 
     let items = app.column_items_for_status(TaskStatus::Backlog);
@@ -2056,7 +2057,7 @@ fn test_selection_survives_flatten_toggle() {
         make_task(2, TaskStatus::Backlog),
     ];
     let epics = vec![make_epic(1)];
-    let mut app = App::new(tasks.clone(), TEST_TIMEOUT);
+    let mut app = App::new(tasks.clone(), 1, TEST_TIMEOUT);
     app.update(Message::RefreshEpics(epics.clone()));
 
     app.update(Message::NavigateRow(1)); // row 1 — Epic(1)

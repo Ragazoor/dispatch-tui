@@ -34,8 +34,9 @@ fn task_created_adds_to_list() {
         external_id: None,
         created_at: now,
         updated_at: now,
+        project_id: 1,
     };
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let cmds = app.update(Message::TaskCreated { task });
     assert_eq!(app.board.tasks.len(), 1);
     assert_eq!(app.board.tasks[0].id, TaskId(42));
@@ -45,7 +46,7 @@ fn task_created_adds_to_list() {
 
 #[test]
 fn repo_path_empty_uses_saved_path() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.repo_paths = vec!["/tmp".to_string()];
 
     app.input.mode = InputMode::InputRepoPath;
@@ -72,7 +73,7 @@ fn repo_path_empty_uses_saved_path() {
 
 #[test]
 fn repo_path_empty_no_saved_stays_in_mode() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.repo_paths = vec![]; // no saved paths
 
     app.input.mode = InputMode::InputRepoPath;
@@ -94,7 +95,7 @@ fn repo_path_empty_no_saved_stays_in_mode() {
 
 #[test]
 fn repo_path_nonexistent_shows_error() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputRepoPath;
     app.input.task_draft = Some(TaskDraft {
         title: "T".to_string(),
@@ -110,7 +111,7 @@ fn repo_path_nonexistent_shows_error() {
 
 #[test]
 fn repo_path_nonempty_used_as_is() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.repo_paths = vec!["/tmp".to_string()];
 
     app.input.mode = InputMode::InputRepoPath;
@@ -137,7 +138,7 @@ fn repo_path_nonempty_used_as_is() {
 
 #[test]
 fn task_edited_updates_fields() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
     app.update(Message::TaskEdited(TaskEdit {
         id: TaskId(1),
         title: "New".into(),
@@ -160,7 +161,7 @@ fn task_edited_updates_fields() {
 
 #[test]
 fn repo_paths_updated_replaces_paths() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.update(Message::RepoPathsUpdated(vec!["/a".into(), "/b".into()]));
     assert_eq!(app.board.repo_paths, vec!["/a", "/b"]);
 }
@@ -178,7 +179,7 @@ fn n_key_enters_title_mode() {
 
 #[test]
 fn backspace_pops_from_input_buffer() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputTitle;
     app.input.buffer = "abc".to_string();
     app.handle_key(make_key(KeyCode::Backspace));
@@ -187,7 +188,7 @@ fn backspace_pops_from_input_buffer() {
 
 #[test]
 fn backspace_on_empty_buffer_is_noop() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputTitle;
     app.input.buffer.clear();
     app.handle_key(make_key(KeyCode::Backspace));
@@ -197,7 +198,7 @@ fn backspace_on_empty_buffer_is_noop() {
 
 #[test]
 fn enter_with_title_advances_to_tag() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputTitle;
     app.input.buffer = "My Task".to_string();
     app.handle_key(make_key(KeyCode::Enter));
@@ -212,7 +213,7 @@ fn enter_with_title_advances_to_tag() {
 
 #[test]
 fn enter_with_empty_title_cancels() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputTitle;
     app.input.buffer.clear();
     app.handle_key(make_key(KeyCode::Enter));
@@ -223,7 +224,7 @@ fn enter_with_empty_title_cancels() {
 
 #[test]
 fn enter_with_whitespace_only_title_cancels() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputTitle;
     app.input.buffer = "   ".to_string();
     app.handle_key(make_key(KeyCode::Enter));
@@ -233,7 +234,7 @@ fn enter_with_whitespace_only_title_cancels() {
 
 #[test]
 fn enter_in_description_advances_to_repo_path() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputDescription;
     app.input.task_draft = Some(TaskDraft {
         title: "T".to_string(),
@@ -253,7 +254,7 @@ fn enter_in_description_advances_to_repo_path() {
 
 #[test]
 fn number_key_in_repo_path_selects_saved_path() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputRepoPath;
     app.input.task_draft = Some(TaskDraft {
         title: "T".to_string(),
@@ -277,7 +278,7 @@ fn number_key_in_repo_path_selects_saved_path() {
 
 #[test]
 fn number_key_out_of_range_appends_to_buffer() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputRepoPath;
     app.input.task_draft = Some(TaskDraft {
         title: "T".to_string(),
@@ -293,7 +294,7 @@ fn number_key_out_of_range_appends_to_buffer() {
 
 #[test]
 fn number_key_with_nonempty_buffer_appends() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputRepoPath;
     app.input.task_draft = Some(TaskDraft {
         title: "T".to_string(),
@@ -308,7 +309,7 @@ fn number_key_with_nonempty_buffer_appends() {
 
 #[test]
 fn zero_key_in_repo_path_appends_to_buffer() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputRepoPath;
     app.input.task_draft = Some(TaskDraft {
         title: "T".to_string(),
@@ -323,7 +324,7 @@ fn zero_key_in_repo_path_appends_to_buffer() {
 
 #[test]
 fn escape_from_title_mode_cancels() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputTitle;
     app.input.buffer = "partial".to_string();
     app.handle_key(make_key(KeyCode::Esc));
@@ -335,7 +336,7 @@ fn escape_from_title_mode_cancels() {
 
 #[test]
 fn escape_from_description_mode_cancels() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputDescription;
     app.input.task_draft = Some(TaskDraft {
         title: "T".to_string(),
@@ -352,7 +353,7 @@ fn escape_from_description_mode_cancels() {
 
 #[test]
 fn escape_from_repo_path_mode_cancels() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputRepoPath;
     app.input.task_draft = Some(TaskDraft {
         title: "T".to_string(),
@@ -423,7 +424,7 @@ fn x_key_on_empty_column_is_noop() {
 
 #[test]
 fn toggle_detail_flips_visibility() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     assert!(!app.board.detail_visible);
     app.update(Message::ToggleDetail);
     assert!(app.board.detail_visible);
@@ -433,7 +434,7 @@ fn toggle_detail_flips_visibility() {
 
 #[test]
 fn enter_key_toggles_detail() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     assert!(!app.board.detail_visible);
     app.handle_key(make_key(KeyCode::Enter));
     assert!(app.board.detail_visible);
@@ -441,7 +442,7 @@ fn enter_key_toggles_detail() {
 
 #[test]
 fn e_key_on_empty_column_is_noop() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.selection_mut().set_column(0);
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
     assert!(cmds.is_empty());
@@ -449,7 +450,7 @@ fn e_key_on_empty_column_is_noop() {
 
 #[test]
 fn e_key_enters_confirm_edit_mode() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
     app.selection_mut().set_column(0);
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
     assert!(cmds.is_empty());
@@ -462,7 +463,7 @@ fn e_key_enters_confirm_edit_mode() {
 
 #[test]
 fn e_key_confirm_y_emits_edit_task() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
     app.selection_mut().set_column(0);
     app.handle_key(make_key(KeyCode::Char('e')));
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
@@ -473,7 +474,7 @@ fn e_key_confirm_y_emits_edit_task() {
 
 #[test]
 fn e_key_confirm_n_cancels() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
     app.selection_mut().set_column(0);
     app.handle_key(make_key(KeyCode::Char('e')));
     let cmds = app.handle_key(make_key(KeyCode::Char('n')));
@@ -484,7 +485,7 @@ fn e_key_confirm_n_cancels() {
 
 #[test]
 fn confirm_retry_r_key_emits_resume() {
-    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], 1, TEST_TIMEOUT);
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
     app.board.tasks[0].worktree = Some("/repo/.worktrees/4-task-4".to_string());
     app.input.mode = InputMode::ConfirmRetry(TaskId(4));
@@ -496,7 +497,7 @@ fn confirm_retry_r_key_emits_resume() {
 
 #[test]
 fn confirm_retry_f_key_emits_fresh() {
-    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], 1, TEST_TIMEOUT);
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
     app.board.tasks[0].worktree = Some("/repo/.worktrees/4-task-4".to_string());
     app.input.mode = InputMode::ConfirmRetry(TaskId(4));
@@ -510,7 +511,7 @@ fn confirm_retry_f_key_emits_fresh() {
 
 #[test]
 fn confirm_retry_esc_returns_to_normal() {
-    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::ConfirmRetry(TaskId(4));
 
     let cmds = app.handle_key(make_key(KeyCode::Esc));
@@ -530,7 +531,7 @@ fn start_new_task_enters_title_mode() {
 
 #[test]
 fn cancel_input_returns_to_normal() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputTitle;
     app.input.buffer = "partial".to_string();
     app.input.task_draft = Some(TaskDraft::default());
@@ -544,7 +545,7 @@ fn cancel_input_returns_to_normal() {
 
 #[test]
 fn submit_title_with_text_advances_to_tag() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputTitle;
     app.update(Message::SubmitTitle("My Task".to_string()));
     assert_eq!(app.input.mode, InputMode::InputTag);
@@ -557,7 +558,7 @@ fn submit_title_with_text_advances_to_tag() {
 
 #[test]
 fn submit_empty_title_cancels() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputTitle;
     app.update(Message::SubmitTitle(String::new()));
     assert_eq!(app.input.mode, InputMode::Normal);
@@ -566,7 +567,7 @@ fn submit_empty_title_cancels() {
 
 #[test]
 fn submit_tag_advances_to_description() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputTag;
     app.input.task_draft = Some(TaskDraft {
         title: "T".to_string(),
@@ -591,7 +592,7 @@ fn submit_tag_advances_to_description() {
 
 #[test]
 fn submit_description_advances_to_repo_path() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputDescription;
     app.input.task_draft = Some(TaskDraft {
         title: "T".to_string(),
@@ -607,7 +608,7 @@ fn submit_description_advances_to_repo_path() {
 
 #[test]
 fn description_editor_result_advances_to_repo_path() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputDescription;
     app.input.task_draft = Some(TaskDraft {
         title: "T".to_string(),
@@ -623,7 +624,7 @@ fn description_editor_result_advances_to_repo_path() {
 
 #[test]
 fn description_editor_result_multiline() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputDescription;
     app.input.task_draft = Some(TaskDraft {
         title: "T".to_string(),
@@ -644,7 +645,7 @@ fn editor_result_description_saved_advances_draft() {
     // EditorResult{Description, Saved(raw)} must parse sections out of the
     // raw editor output and feed the description into the existing
     // DescriptionEditorResult flow.
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputDescription;
     app.input.task_draft = Some(TaskDraft {
         title: "T".to_string(),
@@ -663,7 +664,7 @@ fn editor_result_description_saved_advances_draft() {
 
 #[test]
 fn editor_result_description_cancelled_cancels_input() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputDescription;
     app.input.task_draft = Some(TaskDraft {
         title: "T".to_string(),
@@ -700,8 +701,9 @@ fn editor_result_task_edit_returns_finalize_command() {
         external_id: None,
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
+        project_id: 1,
     };
-    let mut app = App::new(vec![task.clone()], TEST_TIMEOUT);
+    let mut app = App::new(vec![task.clone()], 1, TEST_TIMEOUT);
     let cmds = app.update(Message::EditorResult {
         kind: EditKind::TaskEdit(task),
         outcome: EditorOutcome::Saved("--- TITLE ---\nNew\n".into()),
@@ -721,7 +723,7 @@ fn editor_result_task_edit_returns_finalize_command() {
 
 #[test]
 fn submit_repo_path_advances_to_base_branch() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputRepoPath;
     app.input.task_draft = Some(TaskDraft {
         title: "T".to_string(),
@@ -737,7 +739,7 @@ fn submit_repo_path_advances_to_base_branch() {
 
 #[test]
 fn submit_base_branch_creates_task_with_branch() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputBaseBranch;
     app.input.task_draft = Some(TaskDraft {
         title: "T".to_string(),
@@ -760,7 +762,7 @@ fn submit_base_branch_creates_task_with_branch() {
 
 #[test]
 fn submit_base_branch_empty_uses_draft_default() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::InputBaseBranch;
     app.input.task_draft = Some(TaskDraft {
         title: "T".to_string(),
@@ -792,7 +794,7 @@ fn confirm_delete_start_enters_mode() {
 
 #[test]
 fn cancel_delete_returns_to_normal() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::ConfirmDelete;
     app.status.message = Some("Delete \"Task 1\" [backlog]? [y/n]".to_string());
     app.update(Message::CancelDelete);
@@ -802,7 +804,7 @@ fn cancel_delete_returns_to_normal() {
 
 #[test]
 fn cancel_retry_returns_to_normal() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::ConfirmRetry(TaskId(4));
     app.status.message = Some("Agent stale".to_string());
     app.update(Message::CancelRetry);
@@ -889,7 +891,7 @@ fn up_arrow_navigates_row() {
 
 #[test]
 fn confirm_retry_unrecognized_key_is_noop() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::ConfirmRetry(TaskId(4));
     let cmds = app.handle_key(make_key(KeyCode::Char('x')));
     assert!(cmds.is_empty());
@@ -909,7 +911,7 @@ fn esc_dismisses_help() {
 fn confirm_delete_start_running_with_worktree_shows_warning() {
     let mut task = make_task(4, TaskStatus::Running);
     task.worktree = Some("/wt/4-test".to_string());
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
     // Task is in Running column (column 1), navigate there
     app.selection_mut().set_column(1);
     app.update(Message::ConfirmDeleteStart);
@@ -1283,7 +1285,7 @@ fn handle_key_normal_open_pr_url_missing() {
 
 #[test]
 fn esc_clears_mixed_selection() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     app.update(Message::ToggleSelect(TaskId(1)));
     app.update(Message::ToggleSelectEpic(EpicId(10)));
@@ -1295,7 +1297,7 @@ fn esc_clears_mixed_selection() {
 
 #[test]
 fn confirm_detach_tmux_clears_window() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Review)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Review)], 1, TEST_TIMEOUT);
     app.board.tasks[0].tmux_window = Some("task-1".to_string());
     app.board.tasks[0].sub_status = SubStatus::Stale;
     app.agents
@@ -1362,7 +1364,7 @@ fn confirm_edit_task_y_with_missing_task_is_noop() {
 fn confirm_detach_tmux_y_detaches() {
     let mut task = make_task(3, TaskStatus::Review);
     task.tmux_window = Some("task-3".to_string());
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
     app.input.mode = InputMode::ConfirmDetachTmux(vec![TaskId(3)]);
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     // Should produce KillTmuxWindow + PatchSubStatus commands
@@ -1432,7 +1434,7 @@ fn handle_key_normal_move_backward_via_handle_key() {
 fn handle_key_normal_detach_tmux_review_task() {
     let mut task = make_task(10, TaskStatus::Review);
     task.tmux_window = Some("main:10-test".to_string());
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
     app.selection_mut().set_column(2);
     app.selection_mut().set_row(2, 0);
     app.handle_key(make_key(KeyCode::Char('T')));
@@ -1837,7 +1839,7 @@ fn confirm_quit_without_split_emits_no_extra_commands() {
 
 #[test]
 fn number_key_selects_from_filtered_list() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     // Use two real existing dirs that both fuzzy-match "tmp" (both contain t, m, p)
     // /tmp exists; /var/tmp also exists and contains t, m, p
     app.board.repo_paths = vec![
@@ -1866,7 +1868,7 @@ fn number_key_selects_from_filtered_list() {
 
 #[test]
 fn enter_with_typed_filter_selects_filtered_item() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.repo_paths = vec!["/tmp".to_string(), "/var".to_string()];
     app.input.mode = InputMode::InputRepoPath;
     app.input.task_draft = Some(TaskDraft {

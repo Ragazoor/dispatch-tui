@@ -227,5 +227,22 @@ pub(super) fn dispatch(
             rt.exec_save_tips_state(seen_up_to, show_mode);
             vec![]
         }
+        // Project commands
+        CreateProject { name } => {
+            rt.exec_create_project(app, name);
+            vec![]
+        }
+        RenameProject { id, name } => {
+            rt.exec_rename_project(app, id, name);
+            vec![]
+        }
+        DeleteProject { id } => {
+            rt.exec_delete_project(app, id);
+            vec![]
+        }
+        ReorderProject { id, delta } => {
+            rt.exec_reorder_project(app, id, delta);
+            vec![]
+        }
     }
 }

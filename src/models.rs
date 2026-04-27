@@ -22,6 +22,20 @@ pub fn expand_tilde(path: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// ProjectId / Project
+// ---------------------------------------------------------------------------
+
+pub type ProjectId = i64;
+
+#[derive(Debug, Clone)]
+pub struct Project {
+    pub id: ProjectId,
+    pub name: String,
+    pub sort_order: i64,
+    pub is_default: bool,
+}
+
+// ---------------------------------------------------------------------------
 // TaskStatus
 // ---------------------------------------------------------------------------
 
@@ -434,6 +448,7 @@ pub struct Epic {
     pub parent_epic_id: Option<EpicId>,
     pub feed_command: Option<String>,
     pub feed_interval_secs: Option<i64>,
+    pub project_id: ProjectId,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -1097,6 +1112,7 @@ pub struct Task {
     pub sort_order: Option<i64>,
     pub base_branch: String,
     pub external_id: Option<String>,
+    pub project_id: ProjectId,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -1668,7 +1684,10 @@ mod tests {
 
     #[test]
     fn archived_column_index_is_column_count() {
-        assert_eq!(TaskStatus::Archived.column_index(), TaskStatus::COLUMN_COUNT);
+        assert_eq!(
+            TaskStatus::Archived.column_index(),
+            TaskStatus::COLUMN_COUNT
+        );
     }
 
     #[test]
@@ -2182,6 +2201,7 @@ mod tests {
             external_id: None,
             created_at: now,
             updated_at: now,
+            project_id: 1,
         };
         assert!(task.epic_id.is_none());
     }
@@ -2207,6 +2227,7 @@ mod tests {
             external_id: None,
             created_at: now,
             updated_at: now,
+            project_id: 1,
         };
         assert_eq!(task.epic_id, Some(EpicId(5)));
     }
@@ -2228,6 +2249,7 @@ mod tests {
             feed_interval_secs: None,
             created_at: now,
             updated_at: now,
+            project_id: 1,
         };
         assert_eq!(epic.id, EpicId(1));
         assert_eq!(epic.status, TaskStatus::Backlog);
@@ -2252,6 +2274,7 @@ mod tests {
             feed_interval_secs: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            project_id: 1,
         }
     }
 
@@ -2467,6 +2490,7 @@ mod tests {
             feed_interval_secs: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            project_id: 1,
         }
     }
 
@@ -2489,6 +2513,7 @@ mod tests {
             external_id: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            project_id: 1,
         }
     }
 
@@ -2687,6 +2712,7 @@ mod tests {
             external_id: None,
             created_at: now,
             updated_at: now,
+            project_id: 1,
         }
     }
 
@@ -2724,6 +2750,7 @@ mod tests {
             feed_interval_secs: None,
             created_at: now,
             updated_at: now,
+            project_id: 1,
         }
     }
 
@@ -2747,6 +2774,7 @@ mod tests {
             external_id: None,
             created_at: now,
             updated_at: now,
+            project_id: 1,
         }
     }
 

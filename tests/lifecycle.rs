@@ -8,7 +8,7 @@ use dispatch_tui::tui::{App, Command, Message, MoveDirection};
 
 fn make_app() -> (App, Database) {
     let db = Database::open_in_memory().unwrap();
-    let app = App::new(vec![], Duration::from_secs(300));
+    let app = App::new(vec![], 1, Duration::from_secs(300));
     (app, db)
 }
 
@@ -49,6 +49,7 @@ fn full_lifecycle() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     let now = chrono::Utc::now();
@@ -71,6 +72,7 @@ fn full_lifecycle() {
             external_id: None,
             created_at: now,
             updated_at: now,
+            project_id: 1,
         },
     });
     assert!(cmds.is_empty());

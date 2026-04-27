@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 fn resumed_sets_success_status_message() {
     let mut task = make_task(4, TaskStatus::Running);
     task.worktree = Some("/wt".to_string());
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
 
     app.update(Message::Resumed {
         id: TaskId(4),
@@ -47,14 +47,14 @@ fn batch_move_multiple_steps() {
 
 #[test]
 fn render_status_bar_shows_keybindings() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let buf = render_to_buffer(&mut app, 200, 20);
     assert!(buffer_contains(&buf, "uit"));
 }
 
 #[test]
 fn render_status_bar_uses_bracket_format() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
     let buf = render_to_buffer(&mut app, 220, 20);
     // Hints should use [key] bracket format
     assert!(
@@ -662,6 +662,7 @@ fn render_input_form_confirm_retry_shows_options() {
         external_id: None,
         created_at: now,
         updated_at: now,
+        project_id: 1,
     };
     app.board.tasks.push(crashed_task);
     app.input.mode = InputMode::ConfirmRetry(TaskId(5));
@@ -703,6 +704,7 @@ fn status_bar_key_color_is_consistent_across_columns() {
             make_task(3, TaskStatus::Review),
             make_task(4, TaskStatus::Done),
         ],
+        1,
         TEST_TIMEOUT,
     );
 
@@ -794,7 +796,7 @@ fn terminal_resized_returns_no_commands() {
 
 #[test]
 fn show_tips_sets_overlay() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let tips = make_tips();
     app.update(Message::ShowTips {
         tips: tips.clone(),
@@ -809,7 +811,7 @@ fn show_tips_sets_overlay() {
 
 #[test]
 fn next_tip_increments_index() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.update(Message::ShowTips {
         tips: make_tips(),
         starting_index: 0,
@@ -822,7 +824,7 @@ fn next_tip_increments_index() {
 
 #[test]
 fn next_tip_wraps_at_end() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.update(Message::ShowTips {
         tips: make_tips(),
         starting_index: 2,
@@ -835,7 +837,7 @@ fn next_tip_wraps_at_end() {
 
 #[test]
 fn prev_tip_decrements_index() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.update(Message::ShowTips {
         tips: make_tips(),
         starting_index: 2,
@@ -848,7 +850,7 @@ fn prev_tip_decrements_index() {
 
 #[test]
 fn prev_tip_wraps_at_start() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.update(Message::ShowTips {
         tips: make_tips(),
         starting_index: 0,
@@ -861,7 +863,7 @@ fn prev_tip_wraps_at_start() {
 
 #[test]
 fn set_tips_mode_updates_show_mode() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.update(Message::ShowTips {
         tips: make_tips(),
         starting_index: 0,
@@ -877,7 +879,7 @@ fn set_tips_mode_updates_show_mode() {
 
 #[test]
 fn close_tips_clears_overlay_and_returns_save_command() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.update(Message::ShowTips {
         tips: make_tips(),
         starting_index: 1, // tip id=2
@@ -910,7 +912,7 @@ fn close_tips_clears_overlay_and_returns_save_command() {
 
 #[test]
 fn close_tips_seen_up_to_respects_max_seen_id() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.update(Message::ShowTips {
         tips: make_tips(),
         starting_index: 0, // tip id=1
@@ -929,7 +931,7 @@ fn close_tips_seen_up_to_respects_max_seen_id() {
 }
 
 fn app_with_tips() -> App {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.update(Message::ShowTips {
         tips: make_tips(),
         starting_index: 1,

@@ -343,7 +343,7 @@ pub fn seed_feed_epics(db: &Database) -> Result<()> {
         .any(|e| e.feed_command.as_deref() == Some("dispatch fetch-security"));
 
     if !has_reviews {
-        let epic = db.create_epic("Reviews", "", "", None)?;
+        let epic = db.create_epic("Reviews", "", "", None, 1)?;
         db.patch_epic(
             epic.id,
             &EpicPatch::new()
@@ -354,7 +354,7 @@ pub fn seed_feed_epics(db: &Database) -> Result<()> {
     }
 
     if !has_security {
-        let epic = db.create_epic("Security", "", "", None)?;
+        let epic = db.create_epic("Security", "", "", None, 1)?;
         db.patch_epic(
             epic.id,
             &EpicPatch::new()

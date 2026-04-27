@@ -5,8 +5,8 @@ use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use rusqlite::{params, OptionalExtension};
 
 use crate::models::{
-    CiStatus, Epic, EpicId, FeedItem, ReviewAgentStatus, ReviewDecision, ReviewPr, Reviewer,
-    SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage, UsageReport,
+    CiStatus, Epic, EpicId, FeedItem, Project, ProjectId, ReviewAgentStatus, ReviewDecision,
+    ReviewPr, Reviewer, SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage, UsageReport,
 };
 
 use super::{Database, EpicPatch, TaskPatch};
@@ -14,7 +14,7 @@ use super::{Database, EpicPatch, TaskPatch};
 /// Column list shared by all task SELECT queries. Pair with `row_to_task`.
 const TASK_COLUMNS: &str = "id, title, description, repo_path, status, worktree, tmux_window, \
      plan_path, epic_id, sub_status, pr_url, tag, sort_order, base_branch, external_id, \
-     created_at, updated_at";
+     created_at, updated_at, project_id";
 
 impl super::TaskCrud for Database {
     fn create_task(
@@ -28,12 +28,15 @@ impl super::TaskCrud for Database {
         epic_id: Option<EpicId>,
         sort_order: Option<i64>,
         tag: Option<TaskTag>,
+        project_id: ProjectId,
     ) -> Result<TaskId> {
         let conn = self.conn()?;
         let sub_status = SubStatus::default_for(status);
         conn.execute(
-            "INSERT INTO tasks (title, description, repo_path, plan_path, status, sub_status, base_branch, epic_id, sort_order, tag) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            "INSERT INTO tasks \
+             (title, description, repo_path, plan_path, status, sub_status, base_branch, \
+              epic_id, sort_order, tag, project_id) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 title,
                 description,
@@ -45,6 +48,7 @@ impl super::TaskCrud for Database {
                 epic_id.map(|e| e.0),
                 sort_order,
                 tag.map(|t| t.as_str()),
+                project_id,
             ],
         )
         .context("Failed to insert task")?;
@@ -201,6 +205,10 @@ impl super::TaskCrud for Database {
             sets.push("external_id = ?");
             values.push(Box::new(eid.map(|s| s.to_string())));
         }
+        if let Some(pid) = patch.project_id {
+            sets.push("project_id = ?");
+            values.push(Box::new(pid));
+        }
 
         sets.push("updated_at = datetime('now')");
         values.push(Box::new(id.0));
@@ -299,11 +307,11 @@ impl super::TaskCrud for Database {
 
     fn upsert_feed_tasks(&self, epic_id: EpicId, items: &[FeedItem]) -> Result<()> {
         let conn = self.conn()?;
-        let repo_path: String = conn
+        let (repo_path, project_id): (String, ProjectId) = conn
             .query_row(
-                "SELECT repo_path FROM epics WHERE id = ?1",
+                "SELECT repo_path, project_id FROM epics WHERE id = ?1",
                 params![epic_id.0],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .with_context(|| format!("Epic {} not found for upsert_feed_tasks", epic_id))?;
 
@@ -312,8 +320,8 @@ impl super::TaskCrud for Database {
             conn.execute(
                 "INSERT INTO tasks
                      (title, description, repo_path, status, sub_status, base_branch,
-                      epic_id, external_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 'main', ?6, ?7)
+                      epic_id, external_id, project_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'main', ?6, ?7, ?8)
                  ON CONFLICT(epic_id, external_id) WHERE external_id IS NOT NULL
                  DO UPDATE SET
                      title       = excluded.title,
@@ -327,6 +335,7 @@ impl super::TaskCrud for Database {
                     sub_status,
                     epic_id.0,
                     item.external_id,
+                    project_id,
                 ],
             )
             .with_context(|| format!("Failed to upsert feed task '{}'", item.external_id))?;
@@ -550,16 +559,19 @@ impl super::EpicCrud for Database {
         description: &str,
         repo_path: &str,
         parent_epic_id: Option<EpicId>,
+        project_id: ProjectId,
     ) -> Result<Epic> {
-        let id = {
-            let conn = self.conn()?;
-            conn.execute(
-                "INSERT INTO epics (title, description, repo_path, parent_epic_id) VALUES (?1, ?2, ?3, ?4)",
-                params![title, description, repo_path, parent_epic_id.map(|e| e.0)],
+        let id =
+            {
+                let conn = self.conn()?;
+                conn.execute(
+                "INSERT INTO epics (title, description, repo_path, parent_epic_id, project_id) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![title, description, repo_path, parent_epic_id.map(|e| e.0), project_id],
             )
             .context("Failed to insert epic")?;
-            EpicId(conn.last_insert_rowid())
-        }; // MutexGuard dropped here — avoids deadlock when get_epic() re-locks
+                EpicId(conn.last_insert_rowid())
+            }; // MutexGuard dropped here — avoids deadlock when get_epic() re-locks
         self.get_epic(id)?
             .ok_or_else(|| anyhow::anyhow!("Epic {id} vanished after insert"))
     }
@@ -567,7 +579,8 @@ impl super::EpicCrud for Database {
     fn get_epic(&self, id: EpicId) -> Result<Option<Epic>> {
         let conn = self.conn()?;
         conn.query_row(
-            "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at
+            "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, \
+             parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, project_id \
              FROM epics WHERE id = ?1",
             params![id.0],
             row_to_epic,
@@ -580,7 +593,8 @@ impl super::EpicCrud for Database {
         let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at
+                "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, \
+                 parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, project_id \
                  FROM epics ORDER BY COALESCE(sort_order, id) ASC, id ASC",
             )
             .context("Failed to prepare list_epics")?;
@@ -596,7 +610,8 @@ impl super::EpicCrud for Database {
         let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at
+                "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, \
+                 parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, project_id \
                  FROM epics WHERE parent_epic_id IS NULL ORDER BY COALESCE(sort_order, id) ASC, id ASC",
             )
             .context("Failed to prepare list_root_epics")?;
@@ -612,7 +627,8 @@ impl super::EpicCrud for Database {
         let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at
+                "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, \
+                 parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, project_id \
                  FROM epics WHERE parent_epic_id = ?1 ORDER BY COALESCE(sort_order, id) ASC, id ASC",
             )
             .context("Failed to prepare list_sub_epics")?;
@@ -667,6 +683,10 @@ impl super::EpicCrud for Database {
         if let Some(fi) = patch.feed_interval_secs {
             sets.push("feed_interval_secs = ?");
             values.push(Box::new(fi));
+        }
+        if let Some(pid) = patch.project_id {
+            sets.push("project_id = ?");
+            values.push(Box::new(pid));
         }
 
         sets.push("updated_at = datetime('now')");
@@ -1535,6 +1555,7 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
             .unwrap_or(None)
             .unwrap_or_else(|| "main".to_string()),
         external_id: row.get::<_, Option<String>>("external_id").unwrap_or(None),
+        project_id: row.get("project_id")?,
         created_at: parse_datetime(&created_str),
         updated_at: parse_datetime(&updated_str),
     })
@@ -1562,6 +1583,7 @@ fn row_to_epic(row: &rusqlite::Row<'_>) -> rusqlite::Result<Epic> {
         feed_interval_secs: row
             .get::<_, Option<i64>>("feed_interval_secs")
             .unwrap_or(None),
+        project_id: row.get("project_id")?,
         created_at: parse_datetime(&created_str),
         updated_at: parse_datetime(&updated_str),
     })
@@ -1573,6 +1595,124 @@ fn parse_datetime(s: &str) -> DateTime<Utc> {
         .ok()
         .map(|ndt| Utc.from_utc_datetime(&ndt))
         .unwrap_or_else(Utc::now)
+}
+
+// ---------------------------------------------------------------------------
+// ProjectCrud
+// ---------------------------------------------------------------------------
+
+impl super::ProjectCrud for Database {
+    fn create_project(&self, name: &str, sort_order: i64) -> Result<Project> {
+        let conn = self.conn()?;
+        conn.execute(
+            "INSERT INTO projects (name, sort_order, is_default) VALUES (?1, ?2, 0)",
+            params![name, sort_order],
+        )
+        .context("Failed to create project")?;
+        let id = conn.last_insert_rowid();
+        Ok(Project {
+            id,
+            name: name.to_string(),
+            sort_order,
+            is_default: false,
+        })
+    }
+
+    fn list_projects(&self) -> Result<Vec<Project>> {
+        let conn = self.conn()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, name, sort_order, is_default FROM projects \
+                 ORDER BY sort_order ASC, id ASC",
+            )
+            .context("Failed to prepare list_projects")?;
+        let projects = stmt
+            .query_map([], |row| {
+                Ok(Project {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    sort_order: row.get(2)?,
+                    is_default: row.get::<_, i64>(3)? != 0,
+                })
+            })
+            .context("Failed to query projects")?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .context("Failed to collect projects")?;
+        Ok(projects)
+    }
+
+    fn get_default_project(&self) -> Result<Project> {
+        let conn = self.conn()?;
+        conn.query_row(
+            "SELECT id, name, sort_order, is_default FROM projects WHERE is_default = 1",
+            [],
+            |row| {
+                Ok(Project {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    sort_order: row.get(2)?,
+                    is_default: true,
+                })
+            },
+        )
+        .context("Failed to get default project")
+    }
+
+    fn rename_project(&self, id: ProjectId, name: &str) -> Result<()> {
+        let conn = self.conn()?;
+        let rows = conn
+            .execute(
+                "UPDATE projects SET name = ?1 WHERE id = ?2",
+                params![name, id],
+            )
+            .context("Failed to rename project")?;
+        if rows == 0 {
+            return Err(anyhow::anyhow!("Project {id} not found"));
+        }
+        Ok(())
+    }
+
+    fn delete_project_and_move_items(&self, id: ProjectId, default_id: ProjectId) -> Result<()> {
+        let conn = self.conn()?;
+        // Guard: refuse to delete the default project
+        let is_default: bool = conn
+            .query_row(
+                "SELECT is_default FROM projects WHERE id = ?1",
+                params![id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .context("Failed to check project")?
+            .map(|v| v != 0)
+            .unwrap_or(false);
+        if is_default {
+            return Err(anyhow::anyhow!("Cannot delete the default project"));
+        }
+        // Move items and delete the project atomically
+        conn.execute_batch(&format!(
+            "BEGIN;
+            UPDATE tasks SET project_id = {default_id} WHERE project_id = {id};
+            UPDATE epics SET project_id = {default_id} WHERE project_id = {id};
+            DELETE FROM projects WHERE id = {id} AND is_default = 0;
+            COMMIT;"
+        ))
+        .context("Failed to delete project and move items")?;
+        Ok(())
+    }
+
+    fn reorder_project(&self, id: ProjectId, new_sort_order: i64) -> Result<()> {
+        let conn = self.conn()?;
+        let rows = conn
+            .execute(
+                "UPDATE projects SET sort_order = ?1 WHERE id = ?2",
+                params![new_sort_order, id],
+            )
+            .context("Failed to reorder project")?;
+        if rows == 0 {
+            return Err(anyhow::anyhow!("Project {id} not found"));
+        }
+        Ok(())
+    }
 }
 
 pub(super) fn get_tips_state(

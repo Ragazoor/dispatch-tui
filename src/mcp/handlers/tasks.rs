@@ -13,7 +13,7 @@ use crate::service::{
 
 use super::types::{
     deserialize_flexible_i64, deserialize_optional_flexible_i64, parse_args,
-    service_err_to_response, JsonRpcResponse,
+    resolve_project_id, service_err_to_response, JsonRpcResponse,
 };
 
 // ---------------------------------------------------------------------------
@@ -98,6 +98,8 @@ pub(super) struct CreateTaskWithEpicArgs {
     pub(super) tag: Option<TaskTag>,
     #[serde(default)]
     pub(super) base_branch: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
+    pub(super) project_id: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -319,6 +321,11 @@ pub(super) fn handle_create_task(
     };
     tracing::info!(title = %parsed.title, epic_id = ?parsed.epic_id, "MCP create_task");
 
+    let project_id = match resolve_project_id(&id, parsed.project_id, &*state.db) {
+        Ok(pid) => pid,
+        Err(resp) => return resp,
+    };
+
     let svc = TaskService::new(state.db.clone());
     match svc.create_task(CreateTaskParams {
         title: parsed.title,
@@ -329,6 +336,7 @@ pub(super) fn handle_create_task(
         sort_order: parsed.sort_order,
         tag: parsed.tag,
         base_branch: parsed.base_branch,
+        project_id,
     }) {
         Ok(task_id) => {
             state.notify();

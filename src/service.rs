@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use crate::db::{self, EpicPatch, TaskPatch};
 use crate::models::{
-    Epic, EpicId, SubStatus, Task, TaskId, TaskStatus, TaskTag, UsageReport, DEFAULT_BASE_BRANCH,
+    Epic, EpicId, ProjectId, SubStatus, Task, TaskId, TaskStatus, TaskTag, UsageReport,
+    DEFAULT_BASE_BRANCH,
 };
 
 // ---------------------------------------------------------------------------
@@ -212,6 +213,7 @@ pub struct CreateTaskParams {
     pub sort_order: Option<i64>,
     pub tag: Option<TaskTag>,
     pub base_branch: Option<String>,
+    pub project_id: ProjectId,
 }
 
 // ---------------------------------------------------------------------------
@@ -481,6 +483,7 @@ impl TaskService {
                 params.epic_id.map(EpicId),
                 params.sort_order,
                 params.tag,
+                params.project_id,
             )
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
 
@@ -737,6 +740,7 @@ pub struct CreateEpicParams {
     pub parent_epic_id: Option<EpicId>,
     pub feed_command: Option<String>,
     pub feed_interval_secs: Option<i64>,
+    pub project_id: ProjectId,
 }
 
 // ---------------------------------------------------------------------------
@@ -760,6 +764,7 @@ impl EpicService {
                 &params.description,
                 &params.repo_path,
                 params.parent_epic_id,
+                params.project_id,
             )
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
 
@@ -919,7 +924,7 @@ impl EpicService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::Database;
+    use crate::db::{Database, ProjectCrud, TaskCrud};
 
     fn test_db() -> Arc<dyn db::TaskStore> {
         Arc::new(Database::open_in_memory().unwrap())
@@ -952,6 +957,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -975,6 +981,7 @@ mod tests {
                 sort_order: Some(5),
                 tag: Some(TaskTag::Bug),
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -998,6 +1005,7 @@ mod tests {
                 sort_order: Some(42),
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1020,6 +1028,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1048,6 +1057,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1072,6 +1082,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1097,6 +1108,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1122,6 +1134,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1155,6 +1168,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1183,6 +1197,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1214,6 +1229,7 @@ mod tests {
             sort_order: None,
             tag: None,
             base_branch: None,
+            project_id: 1,
         })
         .unwrap();
 
@@ -1276,6 +1292,7 @@ mod tests {
                 parent_epic_id: None,
                 feed_command: None,
                 feed_interval_secs: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1289,6 +1306,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1317,6 +1335,7 @@ mod tests {
                 parent_epic_id: None,
                 feed_command: None,
                 feed_interval_secs: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1330,6 +1349,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1359,6 +1379,7 @@ mod tests {
                 parent_epic_id: None,
                 feed_command: None,
                 feed_interval_secs: None,
+                project_id: 1,
             })
             .unwrap();
         let epic_b = epic_svc
@@ -1370,6 +1391,7 @@ mod tests {
                 parent_epic_id: None,
                 feed_command: None,
                 feed_interval_secs: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1383,6 +1405,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
         task_svc
@@ -1425,6 +1448,7 @@ mod tests {
                 parent_epic_id: None,
                 feed_command: None,
                 feed_interval_secs: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1454,6 +1478,7 @@ mod tests {
                 parent_epic_id: None,
                 feed_command: None,
                 feed_interval_secs: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1489,6 +1514,7 @@ mod tests {
                 parent_epic_id: None,
                 feed_command: None,
                 feed_interval_secs: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1523,6 +1549,7 @@ mod tests {
                 parent_epic_id: None,
                 feed_command: None,
                 feed_interval_secs: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1560,6 +1587,7 @@ mod tests {
                 parent_epic_id: None,
                 feed_command: None,
                 feed_interval_secs: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1573,6 +1601,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1598,6 +1627,7 @@ mod tests {
                 parent_epic_id: None,
                 feed_command: None,
                 feed_interval_secs: None,
+                project_id: 1,
             })
             .unwrap();
         let e2 = epic_svc
@@ -1609,6 +1639,7 @@ mod tests {
                 parent_epic_id: None,
                 feed_command: None,
                 feed_interval_secs: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1623,6 +1654,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
         task_svc
@@ -1635,6 +1667,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
         // 1 task in E2
@@ -1648,6 +1681,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1681,6 +1715,7 @@ mod tests {
                 parent_epic_id: None,
                 feed_command: None,
                 feed_interval_secs: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1694,6 +1729,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1720,6 +1756,7 @@ mod tests {
                 parent_epic_id: None,
                 feed_command: None,
                 feed_interval_secs: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1733,6 +1770,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1758,6 +1796,7 @@ mod tests {
                 parent_epic_id: None,
                 feed_command: None,
                 feed_interval_secs: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1771,6 +1810,7 @@ mod tests {
                 sort_order: Some(20),
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1784,6 +1824,7 @@ mod tests {
                 sort_order: Some(10),
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1806,6 +1847,7 @@ mod tests {
                 parent_epic_id: None,
                 feed_command: None,
                 feed_interval_secs: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1819,6 +1861,7 @@ mod tests {
                 sort_order: Some(1),
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1856,6 +1899,7 @@ mod tests {
                 sort_order: None,
                 tag: Some(TaskTag::Feature),
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1880,6 +1924,7 @@ mod tests {
                 parent_epic_id: None,
                 feed_command: None,
                 feed_interval_secs: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1893,6 +1938,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1914,6 +1960,7 @@ mod tests {
                 parent_epic_id: None,
                 feed_command: None,
                 feed_interval_secs: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1927,6 +1974,7 @@ mod tests {
                 sort_order: Some(3),
                 tag: Some(TaskTag::Feature),
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1952,6 +2000,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -1986,6 +2035,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -2017,6 +2067,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -2060,6 +2111,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -2086,6 +2138,7 @@ mod tests {
                 parent_epic_id: None,
                 feed_command: None,
                 feed_interval_secs: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -2131,6 +2184,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
         svc.update_task(
@@ -2159,6 +2213,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
         // First set a value
@@ -2195,6 +2250,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
         // Set PR URL
@@ -2229,6 +2285,7 @@ mod tests {
                 parent_epic_id: None,
                 feed_command: None,
                 feed_interval_secs: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -2242,6 +2299,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -2255,6 +2313,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -2283,6 +2342,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -2313,6 +2373,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -2327,6 +2388,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -2350,6 +2412,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -2363,6 +2426,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -2394,6 +2458,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -2585,6 +2650,38 @@ mod tests {
     }
 
     // -------------------------------------------------------------------------
+    // project_id propagation tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn create_task_with_explicit_project_id() {
+        let db = Arc::new(Database::open_in_memory().unwrap());
+        let svc = TaskService::new(db.clone() as Arc<dyn db::TaskAndEpicStore>);
+        let default_id = db.get_default_project().unwrap().id;
+        let other = db.create_project("Other", 1).unwrap();
+
+        let result = svc.create_task(CreateTaskParams {
+            title: "T".to_string(),
+            description: String::new(),
+            repo_path: "/r".to_string(),
+            plan_path: None,
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            base_branch: None,
+            project_id: other.id,
+        });
+        assert!(result.is_ok());
+        let task_id = result.unwrap();
+        let task = db
+            .get_task(crate::models::TaskId(task_id.0))
+            .unwrap()
+            .unwrap();
+        assert_eq!(task.project_id, other.id);
+        assert_ne!(task.project_id, default_id);
+    }
+
+    // -------------------------------------------------------------------------
     // Epic-in-epic service tests
     // -------------------------------------------------------------------------
 
@@ -2602,6 +2699,7 @@ mod tests {
                 parent_epic_id: None,
                 feed_command: None,
                 feed_interval_secs: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -2614,6 +2712,7 @@ mod tests {
                 parent_epic_id: Some(parent.id),
                 feed_command: None,
                 feed_interval_secs: None,
+                project_id: 1,
             })
             .unwrap();
 
@@ -2637,6 +2736,7 @@ mod tests {
                 parent_epic_id: None,
                 feed_command: None,
                 feed_interval_secs: None,
+                project_id: 1,
             })
             .unwrap();
         svc.create_epic(CreateEpicParams {
@@ -2647,6 +2747,7 @@ mod tests {
             parent_epic_id: Some(parent.id),
             feed_command: None,
             feed_interval_secs: None,
+            project_id: 1,
         })
         .unwrap();
 
@@ -2669,6 +2770,7 @@ mod tests {
                 parent_epic_id: None,
                 feed_command: None,
                 feed_interval_secs: None,
+                project_id: 1,
             })
             .unwrap();
         let child = svc
@@ -2680,6 +2782,7 @@ mod tests {
                 parent_epic_id: Some(parent.id),
                 feed_command: None,
                 feed_interval_secs: None,
+                project_id: 1,
             })
             .unwrap();
 

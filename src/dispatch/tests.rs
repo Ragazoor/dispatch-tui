@@ -88,6 +88,7 @@ fn make_task(repo_path: &str) -> Task {
         external_id: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
+        project_id: 1,
     }
 }
 

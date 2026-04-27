@@ -23,6 +23,7 @@ fn create_task_returning(
         None,
         None,
         None,
+        1,
     )?;
     db.get_task(id)?
         .ok_or_else(|| anyhow::anyhow!("Task {id} vanished after insert"))
@@ -42,6 +43,7 @@ fn create_and_get() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     let task = db.get_task(id).unwrap().expect("task should exist");
@@ -67,6 +69,7 @@ fn list_all() {
         None,
         None,
         None,
+        1,
     )
     .unwrap();
     db.create_task(
@@ -79,6 +82,7 @@ fn list_all() {
         None,
         None,
         None,
+        1,
     )
     .unwrap();
     db.create_task(
@@ -91,6 +95,7 @@ fn list_all() {
         None,
         None,
         None,
+        1,
     )
     .unwrap();
     let tasks = db.list_all().unwrap();
@@ -114,6 +119,7 @@ fn list_by_status() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     let id2 = db
@@ -127,6 +133,7 @@ fn list_by_status() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     db.create_task(
@@ -139,6 +146,7 @@ fn list_by_status() {
         None,
         None,
         None,
+        1,
     )
     .unwrap();
 
@@ -176,6 +184,7 @@ fn create_task_with_plan() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     let task = db.get_task(id).unwrap().unwrap();
@@ -196,6 +205,7 @@ fn create_task_without_plan() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     let task = db.get_task(id).unwrap().unwrap();
@@ -216,6 +226,7 @@ fn find_task_by_plan_returns_match() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
 
@@ -237,6 +248,7 @@ fn find_task_by_plan_returns_none_when_no_match() {
         None,
         None,
         None,
+        1,
     )
     .unwrap();
 
@@ -257,6 +269,7 @@ fn find_task_by_plan_ignores_tasks_without_plan() {
         None,
         None,
         None,
+        1,
     )
     .unwrap();
 
@@ -321,13 +334,81 @@ fn fresh_db_has_latest_schema_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 38);
+    assert_eq!(version, 39);
+}
+
+#[test]
+fn migration_v39_backfills_project_id_to_default() {
+    use rusqlite::Connection as RawConn;
+    // Build a pre-v39 database manually (v38 schema)
+    let conn = RawConn::open_in_memory().unwrap();
+    conn.execute_batch(
+        "PRAGMA journal_mode=WAL;
+         PRAGMA foreign_keys=ON;
+         CREATE TABLE tasks (
+             id INTEGER PRIMARY KEY,
+             title TEXT NOT NULL,
+             description TEXT NOT NULL DEFAULT '',
+             repo_path TEXT NOT NULL DEFAULT '',
+             status TEXT NOT NULL DEFAULT 'backlog',
+             worktree TEXT,
+             tmux_window TEXT,
+             plan_path TEXT,
+             tag TEXT,
+             epic_id INTEGER,
+             sub_status TEXT NOT NULL DEFAULT 'none',
+             pr_url TEXT,
+             sort_order INTEGER,
+             base_branch TEXT NOT NULL DEFAULT 'main',
+             external_id TEXT,
+             created_at TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         CREATE TABLE epics (
+             id INTEGER PRIMARY KEY,
+             title TEXT NOT NULL,
+             description TEXT NOT NULL DEFAULT '',
+             repo_path TEXT NOT NULL DEFAULT '',
+             status TEXT NOT NULL DEFAULT 'backlog',
+             plan_path TEXT,
+             sort_order INTEGER,
+             auto_dispatch INTEGER NOT NULL DEFAULT 0,
+             parent_epic_id INTEGER,
+             feed_command TEXT,
+             feed_interval_secs INTEGER,
+             created_at TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         INSERT INTO tasks (title, repo_path) VALUES ('Old task', '/repo');
+         INSERT INTO epics (title, repo_path) VALUES ('Old epic', '/repo');
+         PRAGMA user_version = 38;",
+    )
+    .unwrap();
+    // Apply pending migrations via init_schema
+    Database::init_schema(&conn).unwrap();
+    // Verify project_id = 1 (Default project) was backfilled
+    let task_pid: i64 = conn
+        .query_row(
+            "SELECT project_id FROM tasks WHERE title = 'Old task'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(task_pid, 1);
+    let epic_pid: i64 = conn
+        .query_row(
+            "SELECT project_id FROM epics WHERE title = 'Old epic'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(epic_pid, 1);
 }
 
 #[test]
 fn self_referential_epic_is_rejected() {
     let db = in_memory_db();
-    let epic = db.create_epic("E", "", "/repo", None).unwrap();
+    let epic = db.create_epic("E", "", "/repo", None, 1).unwrap();
     let conn = db.conn().unwrap();
     let result = conn.execute(
         "UPDATE epics SET parent_epic_id = id WHERE id = ?1",
@@ -408,7 +489,7 @@ fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 38);
+    assert_eq!(version, 39);
 }
 
 #[test]
@@ -497,7 +578,7 @@ fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 38);
+    assert_eq!(version, 39);
 }
 
 #[test]
@@ -608,7 +689,7 @@ fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 38);
+    assert_eq!(version, 39);
 }
 
 #[test]
@@ -689,6 +770,7 @@ fn patch_task_applies_all_fields() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     let patch = TaskPatch::new()
@@ -717,6 +799,7 @@ fn patch_task_none_fields_unchanged() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     let patch = TaskPatch::new();
@@ -741,6 +824,7 @@ fn patch_task_sets_tag() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     db.patch_task(id, &TaskPatch::new().tag(Some(TaskTag::Bug)))
@@ -763,6 +847,7 @@ fn patch_task_clears_tag() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     db.patch_task(id, &TaskPatch::new().tag(Some(TaskTag::Feature)))
@@ -786,6 +871,7 @@ fn has_other_tasks_with_worktree_returns_false_when_no_others() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     db.patch_task(
@@ -816,6 +902,7 @@ fn has_other_tasks_with_worktree_returns_true_when_shared() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     let id2 = db
@@ -829,6 +916,7 @@ fn has_other_tasks_with_worktree_returns_true_when_shared() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     db.patch_task(
@@ -870,6 +958,7 @@ fn has_other_tasks_with_worktree_ignores_done_tasks() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     let id2 = db
@@ -883,6 +972,7 @@ fn has_other_tasks_with_worktree_ignores_done_tasks() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     db.patch_task(
@@ -921,6 +1011,7 @@ fn patch_task_clears_plan() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     let patch = TaskPatch::new().plan_path(None);
@@ -943,6 +1034,7 @@ fn patch_task_sets_dispatch_fields() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     let patch = TaskPatch::new()
@@ -968,6 +1060,7 @@ fn patch_task_clears_dispatch_fields() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     // Set dispatch fields first
@@ -1001,6 +1094,7 @@ fn patch_task_status_and_dispatch_together() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     let patch = TaskPatch::new()
@@ -1052,6 +1146,7 @@ fn patch_task_status_change_resets_sub_status_in_db() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     db.patch_task(id, &TaskPatch::default().sub_status(SubStatus::Stale))
@@ -1079,6 +1174,7 @@ fn update_status_if_matching() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
 
@@ -1105,6 +1201,7 @@ fn update_status_if_not_matching() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
 
@@ -1135,7 +1232,7 @@ fn update_status_if_nonexistent() {
 fn create_and_get_epic() {
     let db = in_memory_db();
     let epic = db
-        .create_epic("Auth Rewrite", "Rewrite auth", "/repo", None)
+        .create_epic("Auth Rewrite", "Rewrite auth", "/repo", None, 1)
         .unwrap();
     assert_eq!(epic.title, "Auth Rewrite");
     assert_eq!(epic.description, "Rewrite auth");
@@ -1150,8 +1247,8 @@ fn create_and_get_epic() {
 #[test]
 fn list_epics() {
     let db = in_memory_db();
-    db.create_epic("Epic A", "desc", "/a", None).unwrap();
-    db.create_epic("Epic B", "desc", "/b", None).unwrap();
+    db.create_epic("Epic A", "desc", "/a", None, 1).unwrap();
+    db.create_epic("Epic B", "desc", "/b", None, 1).unwrap();
     let epics = db.list_epics().unwrap();
     assert_eq!(epics.len(), 2);
 }
@@ -1165,7 +1262,7 @@ fn get_epic_nonexistent() {
 #[test]
 fn delete_epic_cascades_subtasks() {
     let db = in_memory_db();
-    let epic = db.create_epic("Epic", "desc", "/repo", None).unwrap();
+    let epic = db.create_epic("Epic", "desc", "/repo", None, 1).unwrap();
     db.create_task(
         "Sub 1",
         "desc",
@@ -1176,6 +1273,7 @@ fn delete_epic_cascades_subtasks() {
         None,
         None,
         None,
+        1,
     )
     .unwrap();
     let sub_id = db
@@ -1189,6 +1287,7 @@ fn delete_epic_cascades_subtasks() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
 
@@ -1208,9 +1307,9 @@ fn delete_epic_cascades_subtasks() {
 #[test]
 fn delete_epic_with_sub_epics_succeeds() {
     let db = in_memory_db();
-    let parent = db.create_epic("Parent", "", "/repo", None).unwrap();
+    let parent = db.create_epic("Parent", "", "/repo", None, 1).unwrap();
     let child = db
-        .create_epic("Child", "", "/repo", Some(parent.id))
+        .create_epic("Child", "", "/repo", Some(parent.id), 1)
         .unwrap();
     let task_id = db
         .create_task(
@@ -1223,6 +1322,7 @@ fn delete_epic_with_sub_epics_succeeds() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     db.set_task_epic_id(task_id, Some(child.id)).unwrap();
@@ -1238,10 +1338,12 @@ fn delete_epic_with_sub_epics_succeeds() {
 #[test]
 fn delete_epic_multi_level_sub_epics() {
     let db = in_memory_db();
-    let root = db.create_epic("Root", "", "/repo", None).unwrap();
-    let child = db.create_epic("Child", "", "/repo", Some(root.id)).unwrap();
+    let root = db.create_epic("Root", "", "/repo", None, 1).unwrap();
+    let child = db
+        .create_epic("Child", "", "/repo", Some(root.id), 1)
+        .unwrap();
     let grandchild = db
-        .create_epic("Grandchild", "", "/repo", Some(child.id))
+        .create_epic("Grandchild", "", "/repo", Some(child.id), 1)
         .unwrap();
 
     db.delete_epic(root.id).expect("deep delete should succeed");
@@ -1255,14 +1357,14 @@ fn delete_epic_multi_level_sub_epics() {
 #[test]
 fn epic_has_status_field() {
     let db = Database::open_in_memory().unwrap();
-    let epic = db.create_epic("Test", "Desc", "/repo", None).unwrap();
+    let epic = db.create_epic("Test", "Desc", "/repo", None, 1).unwrap();
     assert_eq!(epic.status, TaskStatus::Backlog);
 }
 
 #[test]
 fn patch_epic_status() {
     let db = Database::open_in_memory().unwrap();
-    let epic = db.create_epic("Test", "Desc", "/repo", None).unwrap();
+    let epic = db.create_epic("Test", "Desc", "/repo", None, 1).unwrap();
     db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Running))
         .unwrap();
     let epic = db.get_epic(epic.id).unwrap().unwrap();
@@ -1272,7 +1374,9 @@ fn patch_epic_status() {
 #[test]
 fn patch_epic_title() {
     let db = in_memory_db();
-    let epic = db.create_epic("Old Title", "desc", "/repo", None).unwrap();
+    let epic = db
+        .create_epic("Old Title", "desc", "/repo", None, 1)
+        .unwrap();
 
     db.patch_epic(epic.id, &EpicPatch::new().title("New Title"))
         .unwrap();
@@ -1284,7 +1388,7 @@ fn patch_epic_title() {
 #[test]
 fn task_epic_id_roundtrip() {
     let db = in_memory_db();
-    let epic = db.create_epic("Epic", "desc", "/repo", None).unwrap();
+    let epic = db.create_epic("Epic", "desc", "/repo", None, 1).unwrap();
     let task_id = db
         .create_task(
             "Task",
@@ -1296,6 +1400,7 @@ fn task_epic_id_roundtrip() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
 
@@ -1311,7 +1416,7 @@ fn task_epic_id_roundtrip() {
 #[test]
 fn list_tasks_for_epic() {
     let db = in_memory_db();
-    let epic = db.create_epic("Epic", "desc", "/repo", None).unwrap();
+    let epic = db.create_epic("Epic", "desc", "/repo", None, 1).unwrap();
     let id1 = db
         .create_task(
             "Sub A",
@@ -1323,6 +1428,7 @@ fn list_tasks_for_epic() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     let _id2 = db
@@ -1336,6 +1442,7 @@ fn list_tasks_for_epic() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
 
@@ -1360,6 +1467,7 @@ fn task_roundtrip_with_pr_fields() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
 
@@ -1390,6 +1498,7 @@ fn task_pr_fields_default_to_none() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     let task = db.get_task(id).unwrap().unwrap();
@@ -1410,6 +1519,7 @@ fn patch_task_sets_pr_url() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
 
@@ -1425,7 +1535,7 @@ fn patch_task_sets_pr_url() {
 #[test]
 fn patch_epic_plan() {
     let db = in_memory_db();
-    let epic = db.create_epic("Epic", "desc", "/repo", None).unwrap();
+    let epic = db.create_epic("Epic", "desc", "/repo", None, 1).unwrap();
     assert!(epic.plan_path.is_none());
 
     db.patch_epic(epic.id, &EpicPatch::new().plan_path(Some("docs/plan.md")))
@@ -1437,7 +1547,7 @@ fn patch_epic_plan() {
 #[test]
 fn patch_epic_clear_plan() {
     let db = in_memory_db();
-    let epic = db.create_epic("Epic", "desc", "/repo", None).unwrap();
+    let epic = db.create_epic("Epic", "desc", "/repo", None, 1).unwrap();
 
     db.patch_epic(epic.id, &EpicPatch::new().plan_path(Some("docs/plan.md")))
         .unwrap();
@@ -1450,7 +1560,7 @@ fn patch_epic_clear_plan() {
 #[test]
 fn patch_epic_repo_path() {
     let db = in_memory_db();
-    let epic = db.create_epic("Epic", "desc", "/old", None).unwrap();
+    let epic = db.create_epic("Epic", "desc", "/old", None, 1).unwrap();
 
     db.patch_epic(epic.id, &EpicPatch::new().repo_path("/new"))
         .unwrap();
@@ -1473,6 +1583,7 @@ fn patch_task_sets_sort_order() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     db.patch_task(id, &TaskPatch::new().sort_order(Some(500)))
@@ -1495,6 +1606,7 @@ fn patch_task_clears_sort_order() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     db.patch_task(id, &TaskPatch::new().sort_order(Some(100)))
@@ -1519,6 +1631,7 @@ fn report_usage_first_insert() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     db.report_usage(
@@ -1556,6 +1669,7 @@ fn report_usage_accumulates() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     db.report_usage(
@@ -1990,6 +2104,7 @@ fn task_sub_status_persists() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     db.patch_task(id, &TaskPatch::default().sub_status(SubStatus::Stale))
@@ -2012,6 +2127,7 @@ fn task_sub_status_defaults_to_none() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     let task = db.get_task(id).unwrap().unwrap();
@@ -2097,7 +2213,7 @@ fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 38);
+    assert_eq!(version, 39);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -2148,6 +2264,7 @@ fn create_task_sets_default_sub_status_for_running() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     let task = db.get_task(id).unwrap().unwrap();
@@ -2168,6 +2285,7 @@ fn create_task_sets_default_sub_status_for_backlog() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     let task = db.get_task(id).unwrap().unwrap();
@@ -2177,7 +2295,7 @@ fn create_task_sets_default_sub_status_for_backlog() {
 #[test]
 fn create_task_with_epic_sort_tag_single_insert() {
     let db = in_memory_db();
-    let epic = db.create_epic("E", "", "/repo", None).unwrap();
+    let epic = db.create_epic("E", "", "/repo", None, 1).unwrap();
     let id = db
         .create_task(
             "T",
@@ -2189,6 +2307,7 @@ fn create_task_with_epic_sort_tag_single_insert() {
             Some(epic.id),
             Some(7),
             Some(TaskTag::Bug),
+            1,
         )
         .unwrap();
     let task = db.get_task(id).unwrap().unwrap();
@@ -2211,6 +2330,7 @@ fn update_status_if_resets_sub_status_to_default() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     db.patch_task(id, &TaskPatch::default().sub_status(SubStatus::Stale))
@@ -2240,6 +2360,7 @@ fn update_status_if_leaves_sub_status_unchanged_when_condition_fails() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     db.patch_task(id, &TaskPatch::default().sub_status(SubStatus::Active))
@@ -2377,7 +2498,7 @@ fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 38);
+    assert_eq!(version, 39);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -2406,7 +2527,7 @@ fn migration_16_cleans_invalid_review_needs_input() {
 #[test]
 fn recalculate_epic_status_advances_to_running() {
     let db = in_memory_db();
-    let epic = db.create_epic("E", "", "/repo", None).unwrap();
+    let epic = db.create_epic("E", "", "/repo", None, 1).unwrap();
     assert_eq!(epic.status, TaskStatus::Backlog);
 
     let task = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Backlog).unwrap();
@@ -2422,7 +2543,7 @@ fn recalculate_epic_status_advances_to_running() {
 #[test]
 fn recalculate_epic_status_moves_backward_from_review_to_running() {
     let db = in_memory_db();
-    let epic = db.create_epic("E", "", "/repo", None).unwrap();
+    let epic = db.create_epic("E", "", "/repo", None, 1).unwrap();
     db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Review))
         .unwrap();
 
@@ -2439,7 +2560,7 @@ fn recalculate_epic_status_moves_backward_from_review_to_running() {
 #[test]
 fn recalculate_epic_status_moves_backward_from_review_to_backlog() {
     let db = in_memory_db();
-    let epic = db.create_epic("E", "", "/repo", None).unwrap();
+    let epic = db.create_epic("E", "", "/repo", None, 1).unwrap();
     db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Review))
         .unwrap();
 
@@ -2454,7 +2575,7 @@ fn recalculate_epic_status_moves_backward_from_review_to_backlog() {
 #[test]
 fn recalculate_epic_status_moves_backward_when_review_subtask_completes() {
     let db = in_memory_db();
-    let epic = db.create_epic("E", "", "/repo", None).unwrap();
+    let epic = db.create_epic("E", "", "/repo", None, 1).unwrap();
 
     let t1 = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Backlog).unwrap();
     db.set_task_epic_id(t1.id, Some(epic.id)).unwrap();
@@ -2479,7 +2600,7 @@ fn recalculate_epic_status_moves_backward_when_review_subtask_completes() {
 #[test]
 fn recalculate_epic_status_all_done() {
     let db = in_memory_db();
-    let epic = db.create_epic("E", "", "/repo", None).unwrap();
+    let epic = db.create_epic("E", "", "/repo", None, 1).unwrap();
 
     let t1 = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Backlog).unwrap();
     let t2 = create_task_returning(&db, "T2", "", "/repo", None, TaskStatus::Backlog).unwrap();
@@ -2498,7 +2619,7 @@ fn recalculate_epic_status_all_done() {
 #[test]
 fn recalculate_epic_status_all_review_or_done() {
     let db = in_memory_db();
-    let epic = db.create_epic("E", "", "/repo", None).unwrap();
+    let epic = db.create_epic("E", "", "/repo", None, 1).unwrap();
 
     let t1 = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Backlog).unwrap();
     let t2 = create_task_returning(&db, "T2", "", "/repo", None, TaskStatus::Backlog).unwrap();
@@ -2517,7 +2638,7 @@ fn recalculate_epic_status_all_review_or_done() {
 #[test]
 fn recalculate_epic_status_review_beats_running() {
     let db = in_memory_db();
-    let epic = db.create_epic("E", "", "/repo", None).unwrap();
+    let epic = db.create_epic("E", "", "/repo", None, 1).unwrap();
 
     let t1 = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Backlog).unwrap();
     let t2 = create_task_returning(&db, "T2", "", "/repo", None, TaskStatus::Backlog).unwrap();
@@ -2542,7 +2663,7 @@ fn cli_update_conditional_sets_epic_to_review() {
     use crate::service::TaskService;
 
     let db = std::sync::Arc::new(in_memory_db());
-    let epic = db.create_epic("E", "", "/repo", None).unwrap();
+    let epic = db.create_epic("E", "", "/repo", None, 1).unwrap();
     let task = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Running).unwrap();
     db.set_task_epic_id(task.id, Some(epic.id)).unwrap();
     db.recalculate_epic_status(epic.id).unwrap();
@@ -2563,7 +2684,7 @@ fn cli_update_unconditional_sets_epic_to_running() {
     use crate::service::TaskService;
 
     let db = std::sync::Arc::new(in_memory_db());
-    let epic = db.create_epic("E", "", "/repo", None).unwrap();
+    let epic = db.create_epic("E", "", "/repo", None, 1).unwrap();
     let task = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Backlog).unwrap();
     db.set_task_epic_id(task.id, Some(epic.id)).unwrap();
 
@@ -2583,7 +2704,7 @@ fn cli_update_epic_drops_back_when_review_task_done() {
     use crate::service::TaskService;
 
     let db = std::sync::Arc::new(in_memory_db());
-    let epic = db.create_epic("E", "", "/repo", None).unwrap();
+    let epic = db.create_epic("E", "", "/repo", None, 1).unwrap();
 
     let t1 = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Running).unwrap();
     let t2 = create_task_returning(&db, "T2", "", "/repo", None, TaskStatus::Review).unwrap();
@@ -2609,7 +2730,7 @@ fn cli_update_with_substatus_keeps_running_and_recalculates_epic() {
     use crate::service::TaskService;
 
     let db = std::sync::Arc::new(in_memory_db());
-    let epic = db.create_epic("E", "", "/repo", None).unwrap();
+    let epic = db.create_epic("E", "", "/repo", None, 1).unwrap();
     let task = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Running).unwrap();
     db.set_task_epic_id(task.id, Some(epic.id)).unwrap();
     db.recalculate_epic_status(epic.id).unwrap();
@@ -3843,6 +3964,7 @@ fn delete_task_removes_task() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     assert!(db.get_task(id).unwrap().is_some());
@@ -3995,7 +4117,7 @@ fn patch_epic_nonexistent_errors() {
 #[test]
 fn patch_epic_no_changes_is_noop() {
     let db = in_memory_db();
-    let epic = db.create_epic("Title", "desc", "/repo", None).unwrap();
+    let epic = db.create_epic("Title", "desc", "/repo", None, 1).unwrap();
     // Empty patch — has_changes() is false, so this should succeed without touching DB
     db.patch_epic(epic.id, &EpicPatch::new()).unwrap();
     let fetched = db.get_epic(epic.id).unwrap().unwrap();
@@ -4005,7 +4127,7 @@ fn patch_epic_no_changes_is_noop() {
 #[test]
 fn patch_epic_sort_order() {
     let db = in_memory_db();
-    let epic = db.create_epic("E", "desc", "/repo", None).unwrap();
+    let epic = db.create_epic("E", "desc", "/repo", None, 1).unwrap();
     assert!(epic.sort_order.is_none());
 
     db.patch_epic(epic.id, &EpicPatch::new().sort_order(Some(42)))
@@ -4030,7 +4152,7 @@ fn delete_epic_nonexistent_errors() {
 #[test]
 fn recalculate_epic_status_ignores_archived_subtasks() {
     let db = in_memory_db();
-    let epic = db.create_epic("E", "", "/repo", None).unwrap();
+    let epic = db.create_epic("E", "", "/repo", None, 1).unwrap();
 
     let t1 = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Backlog).unwrap();
     let t2 = create_task_returning(&db, "T2", "", "/repo", None, TaskStatus::Backlog).unwrap();
@@ -4051,7 +4173,7 @@ fn recalculate_epic_status_ignores_archived_subtasks() {
 #[test]
 fn recalculate_epic_status_no_subtasks_stays_backlog() {
     let db = in_memory_db();
-    let epic = db.create_epic("E", "", "/repo", None).unwrap();
+    let epic = db.create_epic("E", "", "/repo", None, 1).unwrap();
     db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Running))
         .unwrap();
 
@@ -4434,7 +4556,7 @@ fn migration_31_re_expands_tilde_paths() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 38);
+    assert_eq!(version, 39);
 }
 
 #[test]
@@ -4506,11 +4628,11 @@ fn migrate_v32_adds_base_branch_column() {
         .unwrap();
     assert_eq!(base_branch, "main");
 
-    // init_schema runs all pending migrations (v32 and v33), so final version is 33
+    // init_schema runs all pending migrations (v32 and v33), so final version is 39
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 38);
+    assert_eq!(version, 39);
 }
 
 #[test]
@@ -4549,7 +4671,7 @@ fn migration_v33_adds_auto_dispatch_to_epics() {
 #[test]
 fn patch_epic_auto_dispatch_persists() {
     let db = in_memory_db();
-    let epic = db.create_epic("E", "desc", "/repo", None).unwrap();
+    let epic = db.create_epic("E", "desc", "/repo", None, 1).unwrap();
     assert!(epic.auto_dispatch); // default true
 
     db.patch_epic(epic.id, &EpicPatch::new().auto_dispatch(false))
@@ -4566,8 +4688,8 @@ fn patch_epic_auto_dispatch_persists() {
 #[test]
 fn list_all_tasks_with_epic_id_returns_only_tasks_with_epic() {
     let db = in_memory_db();
-    let epic1_id = db.create_epic("E1", "", "/repo", None).unwrap().id;
-    let epic2_id = db.create_epic("E2", "", "/repo", None).unwrap().id;
+    let epic1_id = db.create_epic("E1", "", "/repo", None, 1).unwrap().id;
+    let epic2_id = db.create_epic("E2", "", "/repo", None, 1).unwrap().id;
 
     let t1 = db
         .create_task(
@@ -4580,6 +4702,7 @@ fn list_all_tasks_with_epic_id_returns_only_tasks_with_epic() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     let t2 = db
@@ -4593,6 +4716,7 @@ fn list_all_tasks_with_epic_id_returns_only_tasks_with_epic() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     let _t3 = db
@@ -4606,6 +4730,7 @@ fn list_all_tasks_with_epic_id_returns_only_tasks_with_epic() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
 
@@ -4625,9 +4750,9 @@ fn list_all_tasks_with_epic_id_returns_only_tasks_with_epic() {
 #[test]
 fn sub_epic_has_parent_id() {
     let db = in_memory_db();
-    let parent = db.create_epic("Parent", "desc", "/repo", None).unwrap();
+    let parent = db.create_epic("Parent", "desc", "/repo", None, 1).unwrap();
     let child = db
-        .create_epic("Child", "desc", "/repo", Some(parent.id))
+        .create_epic("Child", "desc", "/repo", Some(parent.id), 1)
         .unwrap();
     assert_eq!(child.parent_epic_id, Some(parent.id));
 
@@ -4638,15 +4763,15 @@ fn sub_epic_has_parent_id() {
 #[test]
 fn root_epic_has_no_parent() {
     let db = in_memory_db();
-    let root = db.create_epic("Root", "desc", "/repo", None).unwrap();
+    let root = db.create_epic("Root", "desc", "/repo", None, 1).unwrap();
     assert_eq!(root.parent_epic_id, None);
 }
 
 #[test]
 fn list_root_epics_excludes_sub_epics() {
     let db = in_memory_db();
-    let parent = db.create_epic("Parent", "desc", "/repo", None).unwrap();
-    db.create_epic("Child", "desc", "/repo", Some(parent.id))
+    let parent = db.create_epic("Parent", "desc", "/repo", None, 1).unwrap();
+    db.create_epic("Child", "desc", "/repo", Some(parent.id), 1)
         .unwrap();
 
     let roots = db.list_root_epics().unwrap();
@@ -4657,15 +4782,15 @@ fn list_root_epics_excludes_sub_epics() {
 #[test]
 fn list_sub_epics_returns_children() {
     let db = in_memory_db();
-    let parent = db.create_epic("Parent", "desc", "/repo", None).unwrap();
+    let parent = db.create_epic("Parent", "desc", "/repo", None, 1).unwrap();
     let child1 = db
-        .create_epic("Child 1", "desc", "/repo", Some(parent.id))
+        .create_epic("Child 1", "desc", "/repo", Some(parent.id), 1)
         .unwrap();
     let child2 = db
-        .create_epic("Child 2", "desc", "/repo", Some(parent.id))
+        .create_epic("Child 2", "desc", "/repo", Some(parent.id), 1)
         .unwrap();
     // unrelated root epic — must not appear
-    db.create_epic("Other", "desc", "/repo", None).unwrap();
+    db.create_epic("Other", "desc", "/repo", None, 1).unwrap();
 
     let children = db.list_sub_epics(parent.id).unwrap();
     assert_eq!(children.len(), 2);
@@ -4677,9 +4802,9 @@ fn list_sub_epics_returns_children() {
 #[test]
 fn recalculate_parent_status_from_sub_epic() {
     let db = in_memory_db();
-    let parent = db.create_epic("Parent", "desc", "/repo", None).unwrap();
+    let parent = db.create_epic("Parent", "desc", "/repo", None, 1).unwrap();
     let child = db
-        .create_epic("Child", "desc", "/repo", Some(parent.id))
+        .create_epic("Child", "desc", "/repo", Some(parent.id), 1)
         .unwrap();
 
     // Add a task to the sub-epic and move it to running
@@ -4694,6 +4819,7 @@ fn recalculate_parent_status_from_sub_epic() {
             None,
             None,
             None,
+            1,
         )
         .unwrap();
     db.set_task_epic_id(task_id, Some(child.id)).unwrap();
@@ -4724,8 +4850,8 @@ fn recalculate_epic_status_terminates_on_cycle() {
         let conn = db.conn().unwrap();
         conn.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
     }
-    let a = db.create_epic("A", "", "/repo", None).unwrap();
-    let b = db.create_epic("B", "", "/repo", Some(a.id)).unwrap();
+    let a = db.create_epic("A", "", "/repo", None, 1).unwrap();
+    let b = db.create_epic("B", "", "/repo", Some(a.id), 1).unwrap();
     // Point a's parent back to b → a→b→a cycle
     {
         let conn = db.conn().unwrap();
@@ -5020,7 +5146,7 @@ fn migration_v38_feed_epic_columns() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 38);
+    assert_eq!(version, 39);
 }
 
 // ---------------------------------------------------------------------------
@@ -5040,7 +5166,7 @@ fn make_feed_item(external_id: &str, title: &str) -> crate::models::FeedItem {
 #[test]
 fn upsert_feed_tasks_creates_tasks() {
     let db = in_memory_db();
-    let epic = db.create_epic("E", "", "/repo", None).unwrap();
+    let epic = db.create_epic("E", "", "/repo", None, 1).unwrap();
     let items = vec![
         make_feed_item("ext-1", "Task One"),
         make_feed_item("ext-2", "Task Two"),
@@ -5063,7 +5189,7 @@ fn upsert_feed_tasks_creates_tasks() {
 #[test]
 fn upsert_feed_tasks_idempotent() {
     let db = in_memory_db();
-    let epic = db.create_epic("E", "", "/repo", None).unwrap();
+    let epic = db.create_epic("E", "", "/repo", None, 1).unwrap();
     let items = vec![make_feed_item("ext-1", "Task One")];
 
     db.upsert_feed_tasks(epic.id, &items).unwrap();
@@ -5077,7 +5203,7 @@ fn upsert_feed_tasks_idempotent() {
 #[test]
 fn upsert_feed_tasks_preserves_status() {
     let db = in_memory_db();
-    let epic = db.create_epic("E", "", "/repo", None).unwrap();
+    let epic = db.create_epic("E", "", "/repo", None, 1).unwrap();
     let items = vec![make_feed_item("ext-1", "Original Title")];
 
     db.upsert_feed_tasks(epic.id, &items).unwrap();
@@ -5114,7 +5240,7 @@ fn upsert_feed_tasks_preserves_status() {
 #[test]
 fn upsert_feed_tasks_adds_new_items() {
     let db = in_memory_db();
-    let epic = db.create_epic("E", "", "/repo", None).unwrap();
+    let epic = db.create_epic("E", "", "/repo", None, 1).unwrap();
 
     db.upsert_feed_tasks(epic.id, &[make_feed_item("ext-1", "First")])
         .unwrap();
@@ -5233,4 +5359,112 @@ mod property_tests {
             prop_assert_eq!(patch.has_changes(), bits != 0);
         }
     }
+}
+
+#[test]
+fn create_and_list_projects() {
+    let db = in_memory_db();
+    // Migration v39 seeds one "Default" project; we add two more.
+    let p1 = db.create_project("Alpha", 10).unwrap();
+    let p2 = db.create_project("Beta", 11).unwrap();
+    let projects = db.list_projects().unwrap();
+    // 1 seeded + 2 new = 3
+    assert_eq!(projects.len(), 3);
+    let names: Vec<&str> = projects.iter().map(|p| p.name.as_str()).collect();
+    assert!(names.contains(&"Alpha"));
+    assert!(names.contains(&"Beta"));
+    assert_eq!(
+        projects.iter().find(|p| p.id == p1.id).unwrap().name,
+        "Alpha"
+    );
+    assert_eq!(
+        projects.iter().find(|p| p.id == p2.id).unwrap().name,
+        "Beta"
+    );
+}
+
+#[test]
+fn get_default_project_returns_is_default_row() {
+    let db = in_memory_db();
+    // Migration v39 seeds one "Default" project with is_default=1 and id=1.
+    let seeded = db.get_default_project().unwrap();
+    assert_eq!(seeded.name, "Default");
+    assert!(seeded.is_default);
+
+    // Switch the default to a new project.
+    let p2 = db.create_project("My Project", 10).unwrap();
+    db.conn()
+        .unwrap()
+        .execute(
+            "UPDATE projects SET is_default = CASE WHEN id = ?1 THEN 1 ELSE 0 END",
+            rusqlite::params![p2.id],
+        )
+        .unwrap();
+    let default = db.get_default_project().unwrap();
+    assert_eq!(default.id, p2.id);
+    assert!(default.is_default);
+}
+
+#[test]
+fn rename_project_changes_name() {
+    let db = in_memory_db();
+    let p = db.create_project("Old Name", 0).unwrap();
+    db.rename_project(p.id, "New Name").unwrap();
+    let projects = db.list_projects().unwrap();
+    assert_eq!(
+        projects.iter().find(|proj| proj.id == p.id).unwrap().name,
+        "New Name"
+    );
+}
+
+#[test]
+fn delete_project_and_move_items_removes_row_and_reassigns() {
+    let db = in_memory_db();
+    let default = db.get_default_project().unwrap();
+    let before = db.list_projects().unwrap().len();
+
+    let src = db.create_project("Temporary", 99).unwrap();
+    let task = create_task_returning(&db, "T", "", "/r", None, TaskStatus::Backlog).unwrap();
+    db.patch_task(task.id, &TaskPatch::new().project_id(src.id))
+        .unwrap();
+    let epic = db.create_epic("E", "", "/r", None, src.id).unwrap();
+
+    db.delete_project_and_move_items(src.id, default.id)
+        .unwrap();
+
+    // Project row is gone
+    assert_eq!(db.list_projects().unwrap().len(), before);
+    // Items moved to default
+    assert_eq!(db.get_task(task.id).unwrap().unwrap().project_id, default.id);
+    assert_eq!(
+        db.get_epic(epic.id).unwrap().unwrap().project_id,
+        default.id
+    );
+}
+
+#[test]
+fn reorder_project_updates_sort_order() {
+    let db = in_memory_db();
+    let p = db.create_project("P", 5).unwrap();
+    db.reorder_project(p.id, 10).unwrap();
+    let projects = db.list_projects().unwrap();
+    assert_eq!(
+        projects
+            .iter()
+            .find(|proj| proj.id == p.id)
+            .unwrap()
+            .sort_order,
+        10
+    );
+}
+
+#[test]
+fn delete_default_project_returns_error() {
+    let db = in_memory_db();
+    let default = db.get_default_project().unwrap();
+    let result = db.delete_project_and_move_items(default.id, default.id);
+    assert!(
+        result.is_err(),
+        "Expected error when deleting default project"
+    );
 }

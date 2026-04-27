@@ -34,7 +34,7 @@ fn dispatch_only_backlog_tasks() {
 fn tick_captures_review_task_with_live_window() {
     let mut task = make_task(5, TaskStatus::Review);
     task.tmux_window = Some("task-5".to_string());
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
 
     let cmds = app.update(Message::Tick);
 
@@ -48,7 +48,7 @@ fn dispatch_from_running_is_noop() {
     let mut task = make_task(4, TaskStatus::Running);
     task.worktree = Some("/repo/.worktrees/4-task-4".to_string());
     task.tmux_window = Some("task-4".to_string());
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
     let cmds = app.update(Message::DispatchTask(TaskId(4), DispatchMode::Dispatch));
     assert!(cmds.is_empty());
 }
@@ -58,7 +58,7 @@ fn dispatch_from_review_is_noop() {
     let mut task = make_task(5, TaskStatus::Review);
     task.worktree = Some("/repo/.worktrees/5-task-5".to_string());
     task.tmux_window = Some("task-5".to_string());
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
     let cmds = app.update(Message::DispatchTask(TaskId(5), DispatchMode::Dispatch));
     assert!(cmds.is_empty());
 }
@@ -67,7 +67,7 @@ fn dispatch_from_review_is_noop() {
 fn d_key_on_backlog_with_plan_dispatches() {
     let mut task = make_task(3, TaskStatus::Backlog);
     task.plan_path = Some("plan.md".into());
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
     app.selection_mut().set_column(0); // Backlog column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(matches!(&cmds[0], Command::DispatchAgent { .. }));
@@ -78,7 +78,7 @@ fn d_key_on_running_with_window_shows_warning() {
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some("task-4".to_string());
     task.worktree = Some("/repo/.worktrees/4-task-4".to_string());
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
     app.selection_mut().set_column(1); // Running column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
@@ -95,7 +95,7 @@ fn d_key_on_running_no_window_resumes() {
     let mut task = make_task(4, TaskStatus::Running);
     task.worktree = Some("/repo/.worktrees/4-task-4".to_string());
     task.tmux_window = None;
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
     app.selection_mut().set_column(1); // Running column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(matches!(&cmds[0], Command::Resume { .. }));
@@ -105,7 +105,7 @@ fn d_key_on_running_no_window_resumes() {
 fn d_key_on_backlog_brainstorms() {
     let mut task = make_task(1, TaskStatus::Backlog);
     task.tag = Some(TaskTag::Epic); // tag=epic triggers brainstorm
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
     app.selection_mut().set_column(0); // Backlog column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert_eq!(cmds.len(), 1);
@@ -116,7 +116,7 @@ fn d_key_on_backlog_brainstorms() {
 
 #[test]
 fn d_key_on_done_shows_warning() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Done)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Done)], 1, TEST_TIMEOUT);
     app.selection_mut().set_column(3); // Done column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
@@ -128,7 +128,7 @@ fn d_key_on_running_no_worktree_no_window_shows_warning() {
     let mut task = make_task(4, TaskStatus::Running);
     task.worktree = None;
     task.tmux_window = None;
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
     app.selection_mut().set_column(1); // Running column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
@@ -162,7 +162,7 @@ fn brainstorm_only_backlog_tasks() {
 
 #[test]
 fn shift_d_with_one_repo_emits_quick_dispatch() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
     app.board.repo_paths = vec!["/repo".to_string()];
     let cmds = app.handle_key(make_shift_key(KeyCode::Char('D')));
     assert_eq!(cmds.len(), 1);
@@ -174,7 +174,7 @@ fn shift_d_with_one_repo_emits_quick_dispatch() {
 
 #[test]
 fn shift_d_with_no_repos_shows_error() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
     app.board.repo_paths = vec![];
     let cmds = app.handle_key(make_shift_key(KeyCode::Char('D')));
     assert!(cmds.is_empty());
@@ -184,7 +184,7 @@ fn shift_d_with_no_repos_shows_error() {
 
 #[test]
 fn shift_d_with_multiple_repos_enters_quick_dispatch_mode() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
     app.board.repo_paths = vec!["/repo1".to_string(), "/repo2".to_string()];
     let cmds = app.handle_key(make_shift_key(KeyCode::Char('D')));
     assert!(cmds.is_empty());
@@ -193,7 +193,7 @@ fn shift_d_with_multiple_repos_enters_quick_dispatch_mode() {
 
 #[test]
 fn quick_dispatch_mode_number_selects_repo() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
     app.board.repo_paths = vec!["/repo1".to_string(), "/repo2".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     let cmds = app.handle_key(make_key(KeyCode::Char('2')));
@@ -206,7 +206,7 @@ fn quick_dispatch_mode_number_selects_repo() {
 
 #[test]
 fn quick_dispatch_mode_esc_cancels() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
     app.board.repo_paths = vec!["/repo1".to_string(), "/repo2".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     let cmds = app.handle_key(make_key(KeyCode::Esc));
@@ -216,7 +216,7 @@ fn quick_dispatch_mode_esc_cancels() {
 
 #[test]
 fn quick_dispatch_mode_invalid_number_is_noop() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
     app.board.repo_paths = vec!["/repo1".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     let cmds = app.handle_key(make_key(KeyCode::Char('3')));
@@ -226,7 +226,7 @@ fn quick_dispatch_mode_invalid_number_is_noop() {
 
 #[test]
 fn quick_dispatch_message_emits_command() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let cmds = app.update(Message::QuickDispatch {
         repo_path: "/my/repo".to_string(),
         epic_id: None,
@@ -240,7 +240,7 @@ fn quick_dispatch_message_emits_command() {
 
 #[test]
 fn shift_d_in_epic_view_quick_dispatches_subtask_single_repo() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let epic = make_epic(10);
     app.board.epics = vec![epic];
     app.board.repo_paths = vec!["/my/repo".to_string()];
@@ -259,7 +259,7 @@ fn shift_d_in_epic_view_quick_dispatches_subtask_single_repo() {
 
 #[test]
 fn shift_d_in_epic_view_shows_repo_selection_with_multiple_repos() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let epic = make_epic(10);
     app.board.epics = vec![epic];
     app.board.repo_paths = vec!["/repo/a".to_string(), "/repo/b".to_string()];
@@ -276,7 +276,7 @@ fn shift_d_in_epic_view_shows_repo_selection_with_multiple_repos() {
 
 #[test]
 fn shift_d_in_epic_view_repo_selection_dispatches_with_epic_id() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let epic = make_epic(10);
     app.board.epics = vec![epic];
     app.board.repo_paths = vec!["/repo/a".to_string(), "/repo/b".to_string()];
@@ -298,7 +298,7 @@ fn shift_d_in_epic_view_repo_selection_dispatches_with_epic_id() {
 
 #[test]
 fn stale_agent_detected_after_timeout() {
-    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], 1, TEST_TIMEOUT);
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
     app.agents
         .last_active_at
@@ -316,7 +316,7 @@ fn stale_agent_detected_after_timeout() {
 
 #[test]
 fn window_gone_on_running_task_marks_crashed() {
-    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], 1, TEST_TIMEOUT);
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
 
     let cmds = app.update(Message::WindowGone(TaskId(4)));
@@ -331,7 +331,7 @@ fn window_gone_on_running_task_marks_crashed() {
 
 #[test]
 fn window_gone_on_review_task_clears_window() {
-    let mut app = App::new(vec![make_task(4, TaskStatus::Review)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(4, TaskStatus::Review)], 1, TEST_TIMEOUT);
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
 
     let cmds = app.update(Message::WindowGone(TaskId(4)));
@@ -342,7 +342,7 @@ fn window_gone_on_review_task_clears_window() {
 
 #[test]
 fn tmux_output_change_resets_staleness_timer() {
-    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], 1, TEST_TIMEOUT);
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
     app.agents
         .last_active_at
@@ -360,7 +360,7 @@ fn tmux_output_change_resets_staleness_timer() {
 
 #[test]
 fn tmux_output_same_activity_does_not_reset_timer() {
-    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], 1, TEST_TIMEOUT);
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
     let old_instant = Instant::now() - Duration::from_secs(200);
     app.agents.last_active_at.insert(TaskId(4), old_instant);
@@ -377,7 +377,7 @@ fn tmux_output_same_activity_does_not_reset_timer() {
 
 #[test]
 fn activity_ts_change_with_same_output_resets_timer() {
-    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], 1, TEST_TIMEOUT);
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
     app.agents
         .last_active_at
@@ -399,7 +399,7 @@ fn activity_ts_change_with_same_output_resets_timer() {
 
 #[test]
 fn activity_ts_same_with_different_output_no_reset() {
-    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], 1, TEST_TIMEOUT);
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
     let old_instant = Instant::now() - Duration::from_secs(200);
     app.agents.last_active_at.insert(TaskId(4), old_instant);
@@ -424,7 +424,7 @@ fn activity_ts_same_with_different_output_no_reset() {
 fn dispatched_sets_fields_and_transitions_to_running() {
     let mut task = make_task(3, TaskStatus::Backlog);
     task.plan_path = Some("plan.md".into());
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
     let cmds = app.update(Message::Dispatched {
         id: TaskId(3),
         worktree: "/wt".to_string(),
@@ -443,7 +443,7 @@ fn dispatched_sets_fields_and_transitions_to_running() {
 fn dispatched_with_switch_focus_emits_jump() {
     let mut task = make_task(3, TaskStatus::Backlog);
     task.plan_path = Some("plan.md".into());
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
     let cmds = app.update(Message::Dispatched {
         id: TaskId(3),
         worktree: "/wt".to_string(),
@@ -457,7 +457,7 @@ fn dispatched_with_switch_focus_emits_jump() {
 
 #[test]
 fn dispatched_unknown_id_is_noop() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
     let cmds = app.update(Message::Dispatched {
         id: TaskId(999),
         worktree: "/wt".to_string(),
@@ -470,7 +470,7 @@ fn dispatched_unknown_id_is_noop() {
 
 #[test]
 fn tmux_output_stores_in_map() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Running)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Running)], 1, TEST_TIMEOUT);
     let cmds = app.update(Message::TmuxOutput {
         id: TaskId(1),
         output: "hello".to_string(),
@@ -482,7 +482,7 @@ fn tmux_output_stores_in_map() {
 
 #[test]
 fn tmux_output_overwrites_previous() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Running)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Running)], 1, TEST_TIMEOUT);
     app.update(Message::TmuxOutput {
         id: TaskId(1),
         output: "first".to_string(),
@@ -501,7 +501,7 @@ fn d_key_on_review_with_window_shows_warning() {
     let mut task = make_task(5, TaskStatus::Review);
     task.tmux_window = Some("task-5".to_string());
     task.worktree = Some("/repo/.worktrees/5-task-5".to_string());
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
     app.selection_mut().set_column(2); // Review column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
@@ -518,7 +518,7 @@ fn d_key_on_review_no_window_with_worktree_resumes() {
     let mut task = make_task(5, TaskStatus::Review);
     task.worktree = Some("/repo/.worktrees/5-task-5".to_string());
     task.tmux_window = None;
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
     app.selection_mut().set_column(2); // Review column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(matches!(&cmds[0], Command::Resume { .. }));
@@ -529,7 +529,7 @@ fn d_key_on_review_no_worktree_no_window_shows_warning() {
     let mut task = make_task(5, TaskStatus::Review);
     task.worktree = None;
     task.tmux_window = None;
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
     app.selection_mut().set_column(2); // Review column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
@@ -543,7 +543,7 @@ fn d_key_on_review_no_worktree_no_window_shows_warning() {
 
 #[test]
 fn d_key_on_empty_column_is_noop() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.selection_mut().set_column(0);
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
@@ -551,14 +551,14 @@ fn d_key_on_empty_column_is_noop() {
 
 #[test]
 fn new_app_has_empty_agent_tracking() {
-    let app = App::new(vec![], TEST_TIMEOUT);
+    let app = App::new(vec![], 1, TEST_TIMEOUT);
     // stale/crashed state is now on the task's sub_status field, not in AgentTracking
     assert!(app.agents.prev_tmux_activity.is_empty());
 }
 
 #[test]
 fn kill_and_retry_enters_confirm_mode() {
-    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], 1, TEST_TIMEOUT);
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
     app.board.tasks[0].sub_status = SubStatus::Stale;
 
@@ -568,7 +568,7 @@ fn kill_and_retry_enters_confirm_mode() {
 
 #[test]
 fn retry_resume_emits_kill_and_resume() {
-    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], 1, TEST_TIMEOUT);
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
     app.board.tasks[0].worktree = Some("/repo/.worktrees/4-task-4".to_string());
     app.board.tasks[0].sub_status = SubStatus::Stale;
@@ -588,7 +588,7 @@ fn retry_resume_emits_kill_and_resume() {
 
 #[test]
 fn retry_fresh_emits_cleanup_and_dispatch() {
-    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], 1, TEST_TIMEOUT);
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
     app.board.tasks[0].worktree = Some("/repo/.worktrees/4-task-4".to_string());
     app.board.tasks[0].sub_status = SubStatus::Stale;
@@ -607,7 +607,7 @@ fn retry_fresh_emits_cleanup_and_dispatch() {
 
 #[test]
 fn d_key_on_stale_running_task_enters_retry_mode() {
-    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], 1, TEST_TIMEOUT);
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
     app.board.tasks[0].sub_status = SubStatus::Stale;
     // Navigate to Running column (index 1)
@@ -620,7 +620,7 @@ fn d_key_on_stale_running_task_enters_retry_mode() {
 
 #[test]
 fn d_key_on_crashed_running_task_enters_retry_mode() {
-    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], 1, TEST_TIMEOUT);
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
     app.board.tasks[0].sub_status = SubStatus::Crashed;
     // Navigate to Running column (index 1)
@@ -638,7 +638,7 @@ fn crashed_card_with_no_window_shows_detached_not_crashed() {
     task.sub_status = SubStatus::Crashed;
     task.worktree = Some("/repo/.worktrees/1-fix".to_string());
     task.tmux_window = None;
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
     let buf = render_to_buffer(&mut app, 120, 20);
     assert!(buffer_contains(&buf, "○ detached"), "expected '○ detached'");
     assert!(
@@ -657,7 +657,7 @@ fn d_key_on_backlog_epic_dispatches_epic() {
 
 #[test]
 fn d_key_in_epic_view_with_no_subtasks_dispatches_epic() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let epic = make_epic(10);
     app.board.epics = vec![epic];
     app.update(Message::EnterEpic(EpicId(10)));
@@ -684,6 +684,7 @@ fn dispatch_epic_on_non_backlog_shows_status() {
             t.epic_id = Some(EpicId(10));
             t
         }],
+        1,
         TEST_TIMEOUT,
     );
     let mut epic = make_epic(10);
@@ -703,7 +704,7 @@ fn dispatch_epic_on_non_backlog_shows_status() {
 
 #[test]
 fn dispatch_epic_with_plan_dispatches_next_backlog_subtask() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.plan_path = Some("docs/plan.md".to_string());
     app.board.epics = vec![epic];
@@ -729,7 +730,7 @@ fn dispatch_epic_with_plan_dispatches_next_backlog_subtask() {
 
 #[test]
 fn dispatch_epic_with_plan_brainstorms_subtask_without_plan() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.plan_path = Some("docs/plan.md".to_string());
     app.board.epics = vec![epic];
@@ -752,7 +753,7 @@ fn dispatch_epic_with_plan_brainstorms_subtask_without_plan() {
 
 #[test]
 fn dispatch_epic_with_plan_no_backlog_subtasks_shows_status() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.plan_path = Some("docs/plan.md".to_string());
     app.board.epics = vec![epic];
@@ -772,7 +773,7 @@ fn dispatch_epic_with_plan_no_backlog_subtasks_shows_status() {
 
 #[test]
 fn quick_dispatch_zero_is_noop() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.repo_paths = vec!["/repo".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     let cmds = app.handle_key(make_key(KeyCode::Char('0')));
@@ -782,7 +783,7 @@ fn quick_dispatch_zero_is_noop() {
 
 #[test]
 fn quick_dispatch_non_digit_is_noop() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.repo_paths = vec!["/repo".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     let cmds = app.handle_key(make_key(KeyCode::Char('a')));
@@ -798,6 +799,7 @@ fn conflict_flag_clears_on_dispatch() {
             t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
             t
         }],
+        1,
         TEST_TIMEOUT,
     );
 
@@ -827,6 +829,7 @@ fn conflict_flag_clears_on_move_backward() {
             t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
             t
         }],
+        1,
         TEST_TIMEOUT,
     );
 
@@ -856,7 +859,7 @@ fn dispatch_is_noop_when_on_select_all() {
 #[test]
 fn pr_created_stores_url() {
     let task = make_task(1, TaskStatus::Review);
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
 
     let cmds = app.update(Message::PrCreated {
         id: TaskId(1),
@@ -874,7 +877,7 @@ fn pr_created_stores_url() {
 #[test]
 fn pr_failed_shows_error() {
     let task = make_task(1, TaskStatus::Review);
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
 
     app.update(Message::PrFailed {
         id: TaskId(1),
@@ -895,7 +898,7 @@ fn pr_merged_moves_to_done_and_detaches() {
     task.tmux_window = Some("task-1".to_string());
     task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
     app.set_notifications_enabled(true);
 
     let cmds = app.update(Message::PrMerged(TaskId(1)));
@@ -916,7 +919,7 @@ fn pr_merged_preserves_worktree() {
     let mut task = make_task(1, TaskStatus::Review);
     task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
 
     let cmds = app.update(Message::PrMerged(TaskId(1)));
 
@@ -928,7 +931,7 @@ fn pr_merged_preserves_worktree() {
 fn pr_polling_skips_done_tasks() {
     let mut task = make_task(1, TaskStatus::Done);
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
 
     let cmds = app.update(Message::Tick);
     // Should NOT contain any CheckPrStatus command
@@ -941,7 +944,7 @@ fn pr_polling_skips_done_tasks() {
 fn pr_polling_emits_check_for_review_tasks() {
     let mut task = make_task(1, TaskStatus::Review);
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
 
     let cmds = app.update(Message::Tick);
     assert!(cmds.iter().any(|c| matches!(c, Command::CheckPrStatus { ref pr_url, .. } if pr_url == "https://github.com/org/repo/pull/42")));
@@ -1057,7 +1060,7 @@ fn dispatch_epic_all_done_shows_message() {
 
 #[test]
 fn stale_detection_sets_substatus_and_persists() {
-    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], 1, TEST_TIMEOUT);
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
 
     let cmds = app.update(Message::StaleAgent(TaskId(3)));
@@ -1070,7 +1073,7 @@ fn stale_detection_sets_substatus_and_persists() {
 
 #[test]
 fn crashed_detection_sets_substatus_and_persists() {
-    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], 1, TEST_TIMEOUT);
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
 
     let cmds = app.update(Message::AgentCrashed(TaskId(3)));
@@ -1083,7 +1086,7 @@ fn crashed_detection_sets_substatus_and_persists() {
 
 #[test]
 fn stale_does_not_overwrite_crashed() {
-    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], 1, TEST_TIMEOUT);
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
     app.board.tasks[0].sub_status = SubStatus::Crashed;
 
@@ -1095,7 +1098,7 @@ fn stale_does_not_overwrite_crashed() {
 
 #[test]
 fn stale_skips_non_running_task() {
-    let mut app = App::new(vec![make_task(3, TaskStatus::Backlog)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(3, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
 
     let cmds = app.update(Message::StaleAgent(TaskId(3)));
     let task = app.find_task(TaskId(3)).unwrap();
@@ -1105,7 +1108,7 @@ fn stale_skips_non_running_task() {
 
 #[test]
 fn crashed_skips_non_running_task() {
-    let mut app = App::new(vec![make_task(3, TaskStatus::Review)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(3, TaskStatus::Review)], 1, TEST_TIMEOUT);
 
     let cmds = app.update(Message::AgentCrashed(TaskId(3)));
     let task = app.find_task(TaskId(3)).unwrap();
@@ -1115,7 +1118,7 @@ fn crashed_skips_non_running_task() {
 
 #[test]
 fn stale_notification_sent_when_enabled() {
-    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], 1, TEST_TIMEOUT);
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
     app.set_notifications_enabled(true);
 
@@ -1127,7 +1130,7 @@ fn stale_notification_sent_when_enabled() {
 
 #[test]
 fn stale_notification_not_sent_when_disabled() {
-    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], 1, TEST_TIMEOUT);
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
     app.set_notifications_enabled(false);
 
@@ -1139,7 +1142,7 @@ fn stale_notification_not_sent_when_disabled() {
 
 #[test]
 fn crashed_notification_sent_urgent_when_enabled() {
-    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], 1, TEST_TIMEOUT);
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
     app.set_notifications_enabled(true);
 
@@ -1151,7 +1154,7 @@ fn crashed_notification_sent_urgent_when_enabled() {
 
 #[test]
 fn crashed_notification_not_sent_when_disabled() {
-    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], 1, TEST_TIMEOUT);
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
     app.set_notifications_enabled(false);
 
@@ -1235,7 +1238,7 @@ fn pr_review_state_preserves_conflict_substatus() {
 
 #[test]
 fn quick_dispatch_j_moves_cursor_down() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.repo_paths = vec!["/a".to_string(), "/b".to_string(), "/c".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     app.input.repo_cursor = 0;
@@ -1245,7 +1248,7 @@ fn quick_dispatch_j_moves_cursor_down() {
 
 #[test]
 fn quick_dispatch_enter_selects_cursor_repo() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
     app.board.repo_paths = vec![
         "/repo1".to_string(),
         "/repo2".to_string(),
@@ -1292,7 +1295,7 @@ fn dispatch_in_flight_blocks_second_dispatch() {
 fn brainstorm_in_flight_blocks_second_brainstorm() {
     let mut task = make_task(1, TaskStatus::Backlog);
     task.tag = Some(TaskTag::Feature);
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
     // First brainstorm succeeds (feature without plan → brainstorm)
     let cmds = app.update(Message::DispatchTask(TaskId(1), DispatchMode::Brainstorm));
     assert!(matches!(
@@ -1311,7 +1314,7 @@ fn brainstorm_in_flight_blocks_second_brainstorm() {
 fn plan_in_flight_blocks_second_plan() {
     let mut task = make_task(1, TaskStatus::Backlog);
     task.tag = Some(TaskTag::Feature);
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
     let cmds = app.update(Message::DispatchTask(TaskId(1), DispatchMode::Plan));
     assert!(matches!(
         cmds[0],
@@ -1380,7 +1383,7 @@ fn dispatch_failed_clears_mark_dispatching_guard() {
 fn window_gone_ignored_for_split_pinned_task() {
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some("task-4".to_string());
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
 
     // Pin task 4 in split mode
     app.board.split.active = true;
@@ -1397,7 +1400,7 @@ fn window_gone_ignored_for_split_pinned_task() {
 
 #[test]
 fn agent_crashed_stores_last_error_from_tmux_output() {
-    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], 1, TEST_TIMEOUT);
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
     app.agents.tmux_outputs.insert(
         TaskId(4),
@@ -1416,7 +1419,7 @@ fn agent_crashed_stores_last_error_from_tmux_output() {
 fn retry_fresh_clears_last_error() {
     let mut task = make_task(4, TaskStatus::Running);
     task.worktree = Some("/repo/.worktrees/4-task-4".to_string());
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
     app.agents
         .last_error
         .insert(TaskId(4), "some crash".to_string());

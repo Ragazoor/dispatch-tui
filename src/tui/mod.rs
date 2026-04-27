@@ -9,8 +9,8 @@ use std::time::{Duration, Instant};
 
 use crate::dispatch;
 use crate::models::{
-    epic_substatus, DispatchMode, Epic, EpicId, EpicSubstatus, ReviewDecision, SubStatus, Task,
-    TaskId, TaskStatus, TaskTag, TaskUsage, VisualColumn, DEFAULT_BASE_BRANCH,
+    epic_substatus, DispatchMode, Epic, EpicId, EpicSubstatus, Project, ProjectId, ReviewDecision,
+    SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage, VisualColumn, DEFAULT_BASE_BRANCH,
     DEFAULT_QUICK_TASK_TITLE,
 };
 
@@ -40,6 +40,8 @@ pub struct App {
     pub(in crate::tui) input: InputState,
     pub(in crate::tui) agents: AgentTracking,
     pub(in crate::tui) archive: ArchiveState,
+    pub(in crate::tui) projects_panel: ProjectsPanelState,
+    pub(in crate::tui) active_project: ProjectId,
     pub(in crate::tui) select: SelectionState,
     pub(in crate::tui) filter: FilterState,
     pub(in crate::tui) merge_queue: Option<MergeQueue>,
@@ -86,11 +88,16 @@ pub(in crate::tui) fn filtered_repos(paths: &[String], query: &str) -> Vec<Strin
 }
 
 impl App {
-    pub fn new(tasks: Vec<Task>, inactivity_timeout: Duration) -> Self {
+    pub fn new(
+        tasks: Vec<Task>,
+        default_project_id: ProjectId,
+        inactivity_timeout: Duration,
+    ) -> Self {
         let mut app = App {
             board: BoardState {
                 tasks,
                 epics: Vec::new(),
+                projects: Vec::new(),
                 view_mode: ViewMode::default(),
                 detail_visible: false,
                 repo_paths: Vec::new(),
@@ -104,6 +111,8 @@ impl App {
             input: InputState::default(),
             agents: AgentTracking::new(inactivity_timeout),
             archive: ArchiveState::default(),
+            projects_panel: ProjectsPanelState::default(),
+            active_project: default_project_id,
             select: SelectionState::default(),
             filter: FilterState::default(),
             merge_queue: None,
@@ -207,6 +216,21 @@ impl App {
     pub fn selected_archive_row(&self) -> usize {
         self.archive.selected_row
     }
+    pub fn active_project(&self) -> ProjectId {
+        self.active_project
+    }
+    pub fn projects(&self) -> &[Project] {
+        &self.board.projects
+    }
+    pub fn projects_panel_visible(&self) -> bool {
+        self.projects_panel.visible
+    }
+    pub fn selected_project_row(&self) -> usize {
+        self.projects_panel.selected_index()
+    }
+    pub(in crate::tui) fn selected_project(&self) -> Option<&Project> {
+        self.board.projects.get(self.projects_panel.selected_index())
+    }
     pub fn selected_tasks(&self) -> &HashSet<TaskId> {
         &self.select.tasks
     }
@@ -275,11 +299,16 @@ impl App {
         self.filter.matches(repo_path)
     }
 
+    fn project_matches(&self, project_id: ProjectId) -> bool {
+        project_id == self.active_project
+    }
+
     /// Return tasks visible in the current view.
     /// Board view: standalone tasks only (epic_id is None).
     /// Epic view: only subtasks of the active epic.
     pub fn tasks_for_current_view(&self) -> Vec<&Task> {
         let repo_match = |t: &&Task| self.repo_matches(&t.repo_path);
+        let project_match = |t: &&Task| self.project_matches(t.project_id);
         match &self.board.view_mode {
             ViewMode::Board(_) => self
                 .board
@@ -290,6 +319,7 @@ impl App {
                         && (self.board.flattened || t.epic_id.is_none())
                 })
                 .filter(repo_match)
+                .filter(project_match)
                 .collect(),
             ViewMode::Epic { epic_id, .. } => {
                 let current = *epic_id;
@@ -304,6 +334,7 @@ impl App {
                         .iter()
                         .filter(|t| subtree.contains(&t.id) && t.status != TaskStatus::Archived)
                         .filter(repo_match)
+                        .filter(project_match)
                         .collect()
                 } else {
                     self.board
@@ -311,6 +342,7 @@ impl App {
                         .iter()
                         .filter(|t| t.epic_id == Some(current) && t.status != TaskStatus::Archived)
                         .filter(repo_match)
+                        .filter(project_match)
                         .collect()
                 }
             }
@@ -332,6 +364,7 @@ impl App {
             .iter()
             .filter(|t| t.status == TaskStatus::Archived)
             .filter(|t| self.repo_matches(&t.repo_path))
+            .filter(|t| self.project_matches(t.project_id))
             .collect()
     }
 
@@ -379,6 +412,9 @@ impl App {
                             continue;
                         }
                         if !self.repo_matches(&epic.repo_path) {
+                            continue;
+                        }
+                        if !self.project_matches(epic.project_id) {
                             continue;
                         }
                         if epic.status == status {
@@ -443,6 +479,7 @@ impl App {
                 .filter(|e| {
                     e.parent_epic_id.is_none()
                         && self.filter.matches(&e.repo_path)
+                        && self.project_matches(e.project_id)
                         && e.status == status
                 })
                 .count(),
@@ -477,7 +514,11 @@ impl App {
                 .board
                 .epics
                 .iter()
-                .filter(|e| e.parent_epic_id.is_none() && self.repo_matches(&e.repo_path))
+                .filter(|e| {
+                    e.parent_epic_id.is_none()
+                        && self.repo_matches(&e.repo_path)
+                        && self.project_matches(e.project_id)
+                })
                 .collect(),
             ViewMode::Epic { epic_id, .. } => {
                 let current = *epic_id;
@@ -917,6 +958,36 @@ impl App {
                 } else {
                     vec![]
                 }
+            }
+
+            // ── Project messages ──
+            Message::ProjectsUpdated(projects) => {
+                self.board.projects = projects;
+                vec![]
+            }
+            Message::SelectProject(project_id) => {
+                self.active_project = project_id;
+                self.sync_board_selection();
+                if let Some(idx) = self.board.projects.iter().position(|p| p.id == project_id) {
+                    self.projects_panel.list_state.select(Some(idx));
+                }
+                vec![]
+            }
+            Message::OpenProjectsPanel => {
+                self.projects_panel.visible = true;
+                if let Some(idx) = self
+                    .board
+                    .projects
+                    .iter()
+                    .position(|p| p.id == self.active_project)
+                {
+                    self.projects_panel.list_state.select(Some(idx));
+                }
+                vec![]
+            }
+            Message::CloseProjectsPanel => {
+                self.projects_panel.visible = false;
+                vec![]
             }
         }
     }

@@ -341,6 +341,17 @@ Migrations live in `src/db/migrations.rs` as standalone functions. We do **not**
 3. **Update the schema test**: `fresh_db_has_latest_schema_version` in `src/db/tests.rs` asserts the final version number — bump it to match your new N.
 4. **Write a migration test** in `src/db/tests.rs` that creates a DB at the pre-migration schema, inserts test data, runs the migration, and verifies the result.
 
+### Projects Feature
+
+Projects group tasks and epics for filtering. Key behaviors:
+
+- `active_project: ProjectId` on `App` is the current filter — only tasks/epics with a matching `project_id` appear in any column (tasks view, archive, epics). The filter is applied in `project_matches()` at four call sites in `tui/mod.rs`.
+- The Default project (seeded by migration v39, `is_default = 1`) cannot be deleted. Deleting any other project moves its tasks/epics to Default in the same DB transaction (`delete_project_and_move_items`).
+- The projects panel is a left-side overlay opened with `h` (or `Left`) from column 0 (Backlog). While visible it intercepts all input before normal board key handling.
+- `ProjectId = i64` (type alias, not newtype) — simpler rusqlite integration. There is no FK constraint in the schema; integrity is enforced at the service/runtime layer.
+- The project list is **not** refreshed on every MCP tick — only after explicit project-mutating commands (`CreateProject`, `RenameProject`, `DeleteProject`, `ReorderProject`). Projects are TUI-only admin state not mutated by agents.
+- `exec_refresh_projects_from_db` follows the same `exec_refresh_*_from_db` naming pattern as epic and usage refresh helpers in `src/runtime/tasks.rs`.
+
 ## Documentation
 
 - `docs/reference.md` — Key bindings, configuration, environment variables, troubleshooting

@@ -180,6 +180,10 @@ mcp_tools! {
                 "base_branch": {
                     "type": "string",
                     "description": "The base branch for rebase and PR operations (e.g. 'main', 'develop'). Defaults to 'main' if not specified."
+                },
+                "project_id": {
+                    "type": "integer",
+                    "description": "Project to assign the task to. Omit to use the Default project."
                 }
             },
             "required": ["title", "repo_path"]
@@ -234,7 +238,8 @@ mcp_tools! {
                 "repo_path": { "type": "string", "description": "Repository path" },
                 "description": { "type": "string", "description": "Epic description" },
                 "sort_order": { "type": "integer", "description": "Display order within column (lower values appear first)" },
-                "parent_epic_id": { "type": "integer", "description": "Optional parent epic ID. When set, this epic becomes a sub-epic of the specified parent. Cannot be set to the epic's own ID (self-referential cycles are rejected by the database)." }
+                "parent_epic_id": { "type": "integer", "description": "Optional parent epic ID. When set, this epic becomes a sub-epic of the specified parent. Cannot be set to the epic's own ID (self-referential cycles are rejected by the database)." },
+                "project_id": { "type": "integer", "description": "Project to assign the epic to. Omit to use the Default project." }
             },
             "required": ["title", "repo_path"]
         };

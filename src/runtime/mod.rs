@@ -21,7 +21,7 @@ const TICK_INTERVAL: Duration = Duration::from_secs(2);
 /// Name used for the TUI's tmux window (visible in tmux status bar).
 const TUI_WINDOW_NAME: &str = "TUI";
 
-use crate::db::{PrWorkflowStore, SettingsStore, TaskCrud};
+use crate::db::{PrWorkflowStore, ProjectCrud, SettingsStore, TaskCrud};
 use crate::models::TaskId;
 use crate::process::{ProcessRunner, RealProcessRunner};
 use crate::service::FieldUpdate;
@@ -76,7 +76,14 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     });
 
     // 3. Create App and load saved repo paths
-    let mut app = App::new(tasks, Duration::from_secs(inactivity_timeout));
+    let projects = database.list_projects()?;
+    let default_project_id = projects
+        .iter()
+        .find(|p| p.is_default)
+        .map(|p| p.id)
+        .ok_or_else(|| anyhow::anyhow!("No default project found in database"))?;
+    let mut app = App::new(tasks, default_project_id, Duration::from_secs(inactivity_timeout));
+    app.update(Message::ProjectsUpdated(projects));
     let paths = database.list_repo_paths().unwrap_or_default();
     app.update(Message::RepoPathsUpdated(paths));
     let usage = database.get_all_usage().unwrap_or_default();

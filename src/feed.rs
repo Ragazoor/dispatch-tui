@@ -452,7 +452,7 @@ mod tests {
     #[tokio::test]
     async fn tick_valid_json_upserts_tasks() {
         let db = Arc::new(Database::open_in_memory().unwrap());
-        let epic = db.create_epic("My Epic", "", "/repo", None).unwrap();
+        let epic = db.create_epic("My Epic", "", "/repo", None, 1).unwrap();
         db.patch_epic(
             epic.id,
             &EpicPatch::new().feed_command(Some(
@@ -473,7 +473,7 @@ mod tests {
     #[tokio::test]
     async fn tick_nonzero_exit_no_panic() {
         let db = Arc::new(Database::open_in_memory().unwrap());
-        let epic = db.create_epic("Err Epic", "", "/repo", None).unwrap();
+        let epic = db.create_epic("Err Epic", "", "/repo", None, 1).unwrap();
         db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some("exit 1")))
             .unwrap();
 
@@ -487,7 +487,9 @@ mod tests {
     #[tokio::test]
     async fn tick_malformed_json_no_panic() {
         let db = Arc::new(Database::open_in_memory().unwrap());
-        let epic = db.create_epic("Bad JSON Epic", "", "/repo", None).unwrap();
+        let epic = db
+            .create_epic("Bad JSON Epic", "", "/repo", None, 1)
+            .unwrap();
         db.patch_epic(
             epic.id,
             &EpicPatch::new().feed_command(Some("echo 'not-json'")),
@@ -504,7 +506,9 @@ mod tests {
     #[tokio::test]
     async fn tick_interval_not_elapsed_skips_command() {
         let db = Arc::new(Database::open_in_memory().unwrap());
-        let epic = db.create_epic("Interval Epic", "", "/repo", None).unwrap();
+        let epic = db
+            .create_epic("Interval Epic", "", "/repo", None, 1)
+            .unwrap();
 
         // Write a counter to a temp file so we can count how many times the command ran.
         let tmp = std::env::temp_dir().join(format!("feed_test_{}", epic.id.0));
@@ -542,7 +546,7 @@ mod tests {
     async fn tick_null_feed_command_skipped() {
         let db = Arc::new(Database::open_in_memory().unwrap());
         // Epic with no feed_command (default)
-        let epic = db.create_epic("Plain Epic", "", "/repo", None).unwrap();
+        let epic = db.create_epic("Plain Epic", "", "/repo", None, 1).unwrap();
 
         let (mut runner, _rx) = make_runner(db.clone());
         runner.tick().await;

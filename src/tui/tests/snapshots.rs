@@ -24,7 +24,7 @@ fn render_to_string(app: &mut App, width: u16, height: u16) -> String {
 
 #[test]
 fn snapshot_empty_kanban_board() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);
 }
@@ -120,12 +120,13 @@ fn make_feed_epic(id: i64, title: &str, sort_order: i64) -> crate::models::Epic 
         feed_interval_secs: Some(30),
         created_at: now,
         updated_at: now,
+        project_id: 1,
     }
 }
 
 #[test]
 fn snapshot_tab_bar_with_feed_epics_board_active() {
-    let mut app = App::new(vec![], super::TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, super::TEST_TIMEOUT);
     app.board.epics = vec![
         make_feed_epic(1, "My Feed", -2),
         make_feed_epic(2, "Another Feed", -1),
@@ -137,7 +138,7 @@ fn snapshot_tab_bar_with_feed_epics_board_active() {
 #[test]
 fn snapshot_tab_bar_with_feed_epics_feed_active() {
     use super::super::types::Message;
-    let mut app = App::new(vec![], super::TEST_TIMEOUT);
+    let mut app = App::new(vec![], 1, super::TEST_TIMEOUT);
     app.board.epics = vec![
         make_feed_epic(1, "My Feed", -2),
         make_feed_epic(2, "Another Feed", -1),

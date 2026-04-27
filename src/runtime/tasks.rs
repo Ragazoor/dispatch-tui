@@ -1,4 +1,5 @@
 use super::*;
+use crate::models::ProjectId;
 
 impl TuiRuntime {
     pub(super) fn exec_insert_task(
@@ -17,6 +18,7 @@ impl TuiRuntime {
             sort_order: None,
             tag: draft.tag,
             base_branch: Some(draft.base_branch),
+            project_id: app.active_project(),
         };
         if let Some(task) = self.create_task(app, params) {
             app.update(Message::TaskCreated { task });
@@ -42,6 +44,7 @@ impl TuiRuntime {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: app.active_project(),
             },
         ) else {
             return;
@@ -179,7 +182,6 @@ impl TuiRuntime {
 
     pub(super) fn exec_refresh_from_db(&self, app: &mut App) -> Vec<Command> {
         let mut cmds = Vec::new();
-        // Re-read all tasks from SQLite to pick up MCP/CLI updates
         match self.database.list_all() {
             Ok(tasks) => {
                 cmds = app.update(Message::RefreshTasks(tasks));
@@ -188,7 +190,6 @@ impl TuiRuntime {
                 app.update(Message::Error(Self::db_error("refreshing tasks", e)));
             }
         }
-        // Also refresh epics
         self.exec_refresh_epics_from_db(app);
         self.exec_refresh_usage_from_db(app);
         cmds
@@ -312,6 +313,89 @@ impl TuiRuntime {
                 }
             }
         });
+    }
+
+    fn exec_refresh_projects_from_db(&self, app: &mut App) {
+        match self.database.list_projects() {
+            Ok(projects) => {
+                app.update(Message::ProjectsUpdated(projects));
+            }
+            Err(e) => {
+                app.update(Message::Error(Self::db_error("refreshing projects", e)));
+            }
+        }
+    }
+
+    pub(super) fn exec_create_project(&self, app: &mut App, name: String) {
+        let max_order = app
+            .projects()
+            .iter()
+            .map(|p| p.sort_order)
+            .max()
+            .unwrap_or(0);
+        match self.database.create_project(&name, max_order + 1) {
+            Ok(project) => {
+                app.update(Message::StatusInfo(format!(
+                    "Created project \"{}\"",
+                    project.name
+                )));
+                self.exec_refresh_projects_from_db(app);
+            }
+            Err(e) => {
+                app.update(Message::Error(Self::db_error("creating project", e)));
+            }
+        }
+    }
+
+    pub(super) fn exec_rename_project(&self, app: &mut App, id: ProjectId, name: String) {
+        match self.database.rename_project(id, &name) {
+            Ok(()) => self.exec_refresh_projects_from_db(app),
+            Err(e) => {
+                app.update(Message::Error(Self::db_error("renaming project", e)));
+            }
+        }
+    }
+
+    pub(super) fn exec_delete_project(&self, app: &mut App, id: ProjectId) {
+        let Some(default_id) = app.projects().iter().find(|p| p.is_default).map(|p| p.id) else {
+            app.update(Message::Error("No default project found".to_string()));
+            return;
+        };
+        if let Err(e) = self.database.delete_project_and_move_items(id, default_id) {
+            app.update(Message::Error(Self::db_error("deleting project", e)));
+            return;
+        }
+        if app.active_project() == id {
+            app.update(Message::SelectProject(default_id));
+        }
+        self.exec_refresh_projects_from_db(app);
+    }
+
+    pub(super) fn exec_reorder_project(&self, app: &mut App, id: ProjectId, delta: i8) {
+        let projects = app.projects().to_vec();
+        let Some(idx) = projects.iter().position(|p| p.id == id) else {
+            return;
+        };
+        let neighbor_idx = if delta > 0 {
+            if idx + 1 >= projects.len() {
+                return;
+            }
+            idx + 1
+        } else {
+            if idx == 0 {
+                return;
+            }
+            idx - 1
+        };
+        let current_order = projects[idx].sort_order;
+        let neighbor_order = projects[neighbor_idx].sort_order;
+        // Swap sort_order values — let _ is intentional: partial failure is non-critical,
+        // exec_refresh_projects_from_db below will reflect whatever state the DB is in.
+        let _ = self.database.reorder_project(id, neighbor_order);
+        let _ = self
+            .database
+            .reorder_project(projects[neighbor_idx].id, current_order);
+        self.exec_refresh_projects_from_db(app);
     }
 
     pub(super) fn exec_resume(&self, task: models::Task) {

@@ -102,6 +102,18 @@ pub(in crate::tui::ui) fn render_tab_bar(frame: &mut Frame, app: &App, area: Rec
 
     let mut spans: Vec<Span> = Vec::new();
 
+    // Active project prefix
+    let active_project_name = app
+        .projects()
+        .iter()
+        .find(|p| p.id == app.active_project())
+        .map(|p| p.name.clone())
+        .unwrap_or_else(|| "Default".to_string());
+    spans.push(Span::styled(
+        format!("[{}]  ", active_project_name),
+        Style::default().fg(PURPLE).add_modifier(Modifier::BOLD),
+    ));
+
     // Tasks tab
     match app.view_mode() {
         ViewMode::Epic { epic_id, .. } if active_feed_idx.is_none() => {

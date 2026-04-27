@@ -212,6 +212,7 @@ mod tests {
             feed_interval_secs: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            project_id: 1,
         }
     }
 
@@ -282,6 +283,7 @@ mod tests {
             external_id: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            project_id: 1,
         }
     }
 

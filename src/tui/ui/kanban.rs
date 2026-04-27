@@ -135,6 +135,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     render_summary(frame, app, &epic_stats, vertical[1]);
     render_columns(frame, app, &epic_stats, vertical[2], now);
     render_archive_overlay(frame, app, vertical[2], now);
+    render_projects_panel(frame, app, vertical[2]);
     render_detail(frame, app, vertical[3], now);
     render_status_bar(frame, app, vertical[4]);
 
@@ -724,6 +725,101 @@ fn render_archive_overlay(frame: &mut Frame, app: &mut App, area: Rect, now: Dat
 
     let list = List::new(items).block(block);
     frame.render_stateful_widget(list, overlay_area, &mut app.archive.list_state);
+}
+
+fn render_projects_panel(frame: &mut Frame, app: &mut App, area: Rect) {
+    if !app.projects_panel_visible() {
+        return;
+    }
+
+    let overlay_width = (area.width / 5).clamp(18, 30);
+    let overlay_area = Rect::new(area.x, area.y, overlay_width, area.height);
+
+    frame.render_widget(Clear, overlay_area);
+
+    let block = Block::default()
+        .title(" Projects ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Double)
+        .border_style(Style::default().fg(PURPLE))
+        .title_style(Style::default().fg(PURPLE).add_modifier(Modifier::BOLD));
+
+    let inner = block.inner(overlay_area);
+
+    let selected_row = app.selected_project_row();
+    let active_project = app.active_project();
+    let items: Vec<ListItem> = app
+        .projects()
+        .iter()
+        .enumerate()
+        .map(|(idx, project)| {
+            let marker = if project.id == active_project { "\u{25cf} " } else { "  " };
+            let label = format!("{}{}", marker, project.name);
+            if idx == selected_row {
+                ListItem::new(Line::from(Span::styled(
+                    label,
+                    Style::default()
+                        .bg(Color::Rgb(50, 34, 66))
+                        .fg(super::palette::FG)
+                        .add_modifier(Modifier::BOLD),
+                )))
+            } else {
+                ListItem::new(Line::from(Span::styled(
+                    label,
+                    Style::default().fg(MUTED_LIGHT),
+                )))
+            }
+        })
+        .collect();
+
+    let confirm_text: Option<String> = match app.mode() {
+        InputMode::ConfirmDeleteProject1 { .. } => {
+            let name = app
+                .selected_project()
+                .map(|p| p.name.as_str())
+                .unwrap_or("?");
+            Some(format!("Delete \"{}\"? [y/n]", name))
+        }
+        InputMode::ConfirmDeleteProject2 { item_count, .. } => {
+            Some(format!("Move {} items to Default? [y/n]", item_count))
+        }
+        _ => None,
+    };
+
+    let show_input = matches!(app.mode(), InputMode::InputProjectName { .. });
+
+    let (list_area, input_area) = if show_input {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(1), Constraint::Length(3)])
+            .split(inner);
+        (chunks[0], Some(chunks[1]))
+    } else {
+        (inner, None)
+    };
+
+    frame.render_widget(block, overlay_area);
+
+    if let Some(confirm) = confirm_text {
+        let para = Paragraph::new(confirm)
+            .style(Style::default().fg(YELLOW))
+            .wrap(Wrap { trim: true });
+        frame.render_widget(para, list_area);
+    } else {
+        let list = List::new(items);
+        frame.render_stateful_widget(list, list_area, &mut app.projects_panel.list_state);
+    }
+
+    if let Some(input_rect) = input_area {
+        let prompt = match app.mode() {
+            InputMode::InputProjectName { editing_id: None } => "New project: ",
+            _ => "Rename: ",
+        };
+        let input_widget = Paragraph::new(format!("{}{}", prompt, app.input_buffer()))
+            .style(Style::default().fg(super::palette::FG))
+            .block(Block::default().borders(Borders::ALL));
+        frame.render_widget(input_widget, input_rect);
+    }
 }
 
 fn format_tokens(n: i64) -> String {
@@ -1582,7 +1678,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             } else if let Some(ColumnItem::Epic(epic)) = app.selected_column_item() {
                 epic_action_hints(epic, key_color)
             } else {
-                action_hints(app.selected_task(), key_color)
+                action_hints(app.selected_task(), app.selected_column(), key_color)
             };
             if app.split_active() {
                 let mut prefix = vec![
@@ -1762,12 +1858,19 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
+        InputMode::InputProjectName { .. }
+        | InputMode::ConfirmDeleteProject1 { .. }
+        | InputMode::ConfirmDeleteProject2 { .. } => {}
     }
 }
 
 /// Build context-sensitive keybinding hint spans for the status bar.
 /// Returns styled spans showing available actions for the selected task.
-pub(in crate::tui) fn action_hints(task: Option<&Task>, key_color: Color) -> Vec<Span<'static>> {
+pub(in crate::tui) fn action_hints(
+    task: Option<&Task>,
+    selected_column: usize,
+    key_color: Color,
+) -> Vec<Span<'static>> {
     let label_style = Style::default().fg(MUTED);
 
     let mut spans: Vec<Span<'static>> = Vec::new();
@@ -1788,6 +1891,7 @@ pub(in crate::tui) fn action_hints(task: Option<&Task>, key_color: Color) -> Vec
                 push_hint("e", "edit");
                 push_hint("L", "move");
                 push_hint("x", "archive");
+                push_hint("h", "projects");
             }
             TaskStatus::Running => {
                 if task.tmux_window.is_some() {
@@ -1833,6 +1937,9 @@ pub(in crate::tui) fn action_hints(task: Option<&Task>, key_color: Color) -> Vec
     if task.is_some() {
         push_hint("Enter", "detail");
         push_hint("c", "copy");
+    }
+    if task.is_none() && selected_column == 0 {
+        push_hint("h", "projects");
     }
     push_hint("a", "select all");
     push_hint("n", "new");
@@ -1917,7 +2024,7 @@ mod tests {
     use std::time::Duration;
 
     fn make_test_app() -> App {
-        App::new(vec![], Duration::from_secs(300))
+        App::new(vec![], 1, Duration::from_secs(300))
     }
 
     fn dummy_style() -> Style {

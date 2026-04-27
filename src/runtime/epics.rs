@@ -17,6 +17,7 @@ impl TuiRuntime {
             parent_epic_id,
             feed_command: None,
             feed_interval_secs: None,
+            project_id: app.active_project(),
         }) {
             Ok(epic) => {
                 app.update(Message::EpicCreated(epic));
@@ -112,6 +113,7 @@ impl TuiRuntime {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
+                project_id: epic.project_id,
             }) {
             Ok(task) => task,
             Err(e) => {

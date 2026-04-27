@@ -7,6 +7,7 @@ mod epics;
 mod helpers;
 mod input_handlers;
 mod navigation;
+mod projects;
 mod rendering;
 mod repo_filter;
 mod split_pane;
