@@ -726,7 +726,6 @@ impl Default for InputState {
 
 #[derive(Debug, Clone, Default)]
 pub struct ArchiveState {
-    pub visible: bool,
     pub selected_row: usize,
     pub list_state: ListState,
 }
@@ -737,14 +736,7 @@ pub struct ArchiveState {
 
 #[derive(Debug, Clone, Default)]
 pub struct ProjectsPanelState {
-    pub visible: bool,
     pub list_state: ListState,
-}
-
-impl ProjectsPanelState {
-    pub fn selected_index(&self) -> usize {
-        self.list_state.selected().unwrap_or(0)
-    }
 }
 
 // ---------------------------------------------------------------------------

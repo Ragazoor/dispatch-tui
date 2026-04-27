@@ -90,12 +90,12 @@ impl App {
     }
 
     fn handle_key_normal(&mut self, key: KeyEvent) -> Vec<Command> {
-        if self.archive.visible {
+        if self.show_archived() {
             return self.handle_key_archive(key);
         }
 
         // Projects panel intercepts all input when visible (except in Epic view).
-        if self.projects_panel.visible {
+        if self.projects_panel_visible() {
             return self.handle_key_projects_panel(key);
         }
 
@@ -561,7 +561,7 @@ impl App {
 
     fn handle_key_confirm_delete(&mut self, key: KeyEvent) -> Vec<Command> {
         self.confirm_dialog(key, |s| {
-            if s.archive.visible {
+            if s.show_archived() {
                 s.confirm_delete_archived()
             } else {
                 s.confirm_delete_selected()
@@ -812,25 +812,23 @@ impl App {
             KeyCode::Char('j') | KeyCode::Down => {
                 let len = self.board.projects.len();
                 if len > 0 {
-                    let next = (self.projects_panel.selected_index() + 1).min(len - 1);
+                    let next = (self.selection().row(0) + 1).min(len - 1);
                     self.projects_panel.list_state.select(Some(next));
                 }
                 vec![]
             }
             KeyCode::Char('k') | KeyCode::Up => {
-                let prev = self.projects_panel.selected_index().saturating_sub(1);
+                let prev = self.selection().row(0).saturating_sub(1);
                 self.projects_panel.list_state.select(Some(prev));
                 vec![]
             }
             KeyCode::Char('l') | KeyCode::Enter => {
                 if let Some(id) = self.selected_project().map(|p| p.id) {
-                    self.projects_panel.visible = false;
                     return self.update(Message::SelectProject(id));
                 }
                 vec![]
             }
             KeyCode::Char('h') | KeyCode::Left | KeyCode::Esc => {
-                self.projects_panel.visible = false;
                 vec![]
             }
             KeyCode::Char('n') => {
@@ -945,7 +943,6 @@ impl App {
         match key.code {
             KeyCode::Char('y') => {
                 self.input.mode = InputMode::Normal;
-                self.projects_panel.visible = false;
                 vec![Command::DeleteProject { id }]
             }
             KeyCode::Char('n') | KeyCode::Esc => {
