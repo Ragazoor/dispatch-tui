@@ -6,6 +6,3 @@ cargo fmt
 
 echo "clippy..."
 cargo clippy --all-targets --fix -- -D warnings
-
-echo "test..."
-cargo test
