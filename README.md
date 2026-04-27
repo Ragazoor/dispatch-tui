@@ -1,6 +1,32 @@
 # Dispatch
 
-A terminal kanban board for managing development tasks and dispatching Claude Code agents. Create tasks, dispatch agents into isolated git worktrees and tmux windows, and monitor their progress — all from a single TUI.
+A terminal kanban board for dispatching and monitoring Claude Code agents — each in its own git worktree and tmux window.
+
+![Dispatch kanban board](docs/images/task_view.png)
+
+## What you get
+
+- **Kanban board** — track agents from Backlog → Running → Review → Done, auto-updated as they work
+- **Isolated worktrees** — each agent gets its own git branch, keeping your working tree clean
+- **Epics** — chain agents in sequence: a planner writes the spec, the rest implement it
+- **Split pane** — press `S` to watch an agent work side-by-side with the board
+- **Agent coordination** — agents create subtasks, message each other, and trigger the next task in a chain
+
+<table>
+<tr>
+<td><img src="docs/images/task_not_flat_view.png" width="480"/><br/><b>Kanban</b> — tasks and epics side by side</td>
+<td><img src="docs/images/epic_view.png" width="480"/><br/><b>Epics</b> — subtasks dispatched in sequence</td>
+</tr>
+</table>
+
+## Why Dispatch?
+
+Most agent managers are session managers — they open a terminal and let you watch agents run. Dispatch is a workflow tool: tasks move through a kanban board, agents report their own status back via MCP hooks, and epics let one planning agent decompose work that a sequence of agents then implement.
+
+- **Structured work, not just open terminals** — every agent has a task, a status, and optionally a plan
+- **Agents drive the board** — hooks fire when an agent starts, finishes, or waits for input; no manual status updates
+- **Epics as orchestration** — a planner writes a spec, dispatch queues the subtasks, agents implement them in order
+- **MCP server built in** — agents can create tasks, message each other, and trigger the next task in a chain
 
 ## Prerequisites
 
@@ -10,7 +36,7 @@ A terminal kanban board for managing development tasks and dispatching Claude Co
 | `tmux` | Yes | `apt install tmux` / `brew install tmux` |
 | `git` | Yes | Already installed on most systems |
 | `claude` | Yes | [Claude Code CLI](https://claude.ai/code) |
-| `gh` | Optional | [GitHub CLI](https://cli.github.com) — needed for Review and Security boards |
+| `gh` | Optional | [GitHub CLI](https://cli.github.com) — needed for PR operations |
 
 ## Getting Started
 
@@ -28,7 +54,7 @@ cargo install --path .
 dispatch setup
 ```
 
-This registers the dispatch MCP server, installs the dispatch plugin (hooks, skills, commands), adds MCP tool permissions, and enables and persists tmux `focus-events` (needed for the split-view focus indicator).
+This registers the dispatch MCP server, installs the dispatch plugin (hooks, skills, commands), adds MCP tool permissions, and enables tmux `focus-events` (needed for the split-view focus indicator).
 
 **3. Open a tmux session** (dispatch must run inside tmux):
 
@@ -39,8 +65,10 @@ tmux new-session -s dev
 **4. Start the TUI:**
 
 ```bash
-cargo run tui
+dispatch tui
 ```
+
+You're ready — press `n` to create your first task and `d` to dispatch it.
 
 ## Usage
 
@@ -50,7 +78,7 @@ cargo run tui
 
 **Epics (`E`)** — group related work under an epic. The first `d` creates a planning subtask whose agent writes an implementation plan broken into subtasks; each subsequent `d` dispatches the next Backlog subtask in order.
 
-**Navigation** — `Tab` cycles between the task, review, and security boards. `g` jumps to the selected agent's tmux window, `S` opens a side-by-side split with the TUI on the left and the agent pane on the right.
+**Navigation** — `g` jumps to the selected agent's tmux window, `S` opens a side-by-side split with the TUI on the left and the agent pane on the right.
 
 Full key bindings and configuration options are in [docs/reference.md](docs/reference.md).
 
@@ -81,10 +109,6 @@ Full key bindings and configuration options are in [docs/reference.md](docs/refe
 
 **Epics** — a group of related tasks. Press `g` on an epic to see its subtasks. Press `d` on the epic to dispatch the next Backlog subtask automatically. Epics can be nested — an epic subtask can itself be an epic.
 
-**Review Board** — press `Tab` to see GitHub PRs in two modes — **Reviewer** (PRs awaiting your review) and **Author** (your own PRs) — toggled with `1`/`2`. Requires `gh` CLI.
-
-**Security Board** — press `Tab` again to see dependency vulnerability alerts across your repos.
-
 ## Agentic patterns
 
 Dispatch agents can coordinate with each other through the MCP server:
@@ -99,3 +123,7 @@ Dispatch agents can coordinate with each other through the MCP server:
 
 - **[Reference](docs/reference.md)** — key bindings, configuration, CLI usage, troubleshooting
 - **[CLAUDE.md](CLAUDE.md)** — architecture, testing patterns, contribution guidelines
+
+## License
+
+[MIT](LICENSE)
