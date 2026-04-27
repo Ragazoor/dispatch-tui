@@ -715,7 +715,6 @@ impl App {
             Message::ToggleFlattened => self.handle_toggle_flattened(),
             Message::ToggleHelp => self.handle_toggle_help(),
             Message::ToggleNotifications => self.handle_toggle_notifications(),
-            Message::ToggleArchive => self.handle_toggle_archive(),
             Message::ToggleSplitMode => self.handle_toggle_split_mode(),
             Message::SwapSplitPane(task_id) => self.handle_swap_split_pane(task_id),
             Message::SplitPaneOpened { pane_id, task_id } => {
@@ -1758,15 +1757,6 @@ impl App {
         } else {
             vec![]
         }
-    }
-
-    fn handle_toggle_archive(&mut self) -> Vec<Command> {
-        self.archive.visible = !self.archive.visible;
-        if self.archive.visible {
-            self.archive.selected_row = 0;
-            *self.archive.list_state.selected_mut() = Some(0);
-        }
-        vec![]
     }
 
     fn handle_toggle_select(&mut self, id: TaskId) -> Vec<Command> {

@@ -203,7 +203,6 @@ pub enum Message {
     RetryResume(TaskId),
     RetryFresh(TaskId),
     ArchiveTask(TaskId),
-    ToggleArchive,
     ToggleSelect(TaskId),
     ToggleSelectEpic(EpicId),
     ClearSelection,
