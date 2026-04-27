@@ -1497,3 +1497,45 @@ fn test_on_select_all_preserved_on_refresh() {
     assert!(app.selection().on_select_all);
     assert_eq!(app.selection().anchor, None);
 }
+
+#[test]
+fn summary_shows_five_columns_when_projects_focused() {
+    let mut app = make_app();
+    // Navigate left from Backlog (col 1) to Projects (col 0)
+    app.update(Message::NavigateColumn(-1));
+    assert_eq!(app.selected_column(), 0);
+    let buf = render_to_buffer(&mut app, 120, 40);
+    // The summary row (y=1) should contain "Projects" as a column header.
+    // Row 0 is the tab bar, row 1 is the summary line.
+    let summary_row: String = (0..120u16)
+        .map(|x| buf[(x, 1)].symbol().to_string())
+        .collect();
+    assert!(
+        summary_row.contains("Projects"),
+        "summary row should show Projects header when col 0 focused; got: {summary_row:?}"
+    );
+    assert!(
+        summary_row.contains("backlog"),
+        "summary row should still show backlog header; got: {summary_row:?}"
+    );
+}
+
+#[test]
+fn summary_shows_four_columns_when_backlog_focused() {
+    let mut app = make_app();
+    // Default is col 1 (Backlog)
+    assert_eq!(app.selected_column(), 1);
+    let buf = render_to_buffer(&mut app, 120, 40);
+    // The summary row (y=1) should NOT contain "Projects".
+    let summary_row: String = (0..120u16)
+        .map(|x| buf[(x, 1)].symbol().to_string())
+        .collect();
+    assert!(
+        !summary_row.contains("Projects"),
+        "summary row should NOT show Projects when col 1 focused; got: {summary_row:?}"
+    );
+    assert!(
+        summary_row.contains("backlog"),
+        "summary row should show backlog header; got: {summary_row:?}"
+    );
+}

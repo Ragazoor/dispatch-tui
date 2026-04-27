@@ -172,63 +172,140 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     render_tips_overlay(frame, app, area);
 }
 
+/// Returns the layout constraints for the summary row based on which column is focused.
+/// When an edge column (Projects=0 or Archive=5) is focused, 5 segments are shown.
+/// When a task column (1–4) is focused, 4 segments are shown (task columns only).
+fn column_layout_constraints(selected_col: usize) -> Vec<Constraint> {
+    let n = if selected_col == 0 || selected_col == TaskStatus::COLUMN_COUNT + 1 {
+        5u32
+    } else {
+        4u32
+    };
+    vec![Constraint::Ratio(1, n); n as usize]
+}
+
 fn render_summary(frame: &mut Frame, app: &App, epic_stats: &EpicStatsMap, area: Rect) {
+    let sel = app.selected_column();
+    let constraints = column_layout_constraints(sel);
     let col_segments = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints(
-            [Constraint::Ratio(1, TaskStatus::COLUMN_COUNT as u32); TaskStatus::COLUMN_COUNT],
-        )
+        .constraints(constraints)
         .split(area);
 
     let layout = ColumnLayout::build(app, epic_stats);
 
-    for (col_idx, &status) in TaskStatus::ALL.iter().enumerate() {
+    // Build segments: (label, color, is_focused, checkbox_info)
+    // checkbox_info is Some((all_selected, on_select_all, status)) for focused task columns.
+    enum CheckboxInfo {
+        Task {
+            all_selected: bool,
+            on_select_all: bool,
+            status: TaskStatus,
+        },
+        None,
+    }
+
+    struct Segment {
+        label: String,
+        color: Color,
+        is_focused: bool,
+        checkbox: CheckboxInfo,
+    }
+
+    let mut segments: Vec<Segment> = Vec::new();
+
+    // Edge column: Projects (only shown when col 0 is focused)
+    if sel == 0 {
+        let count = app.projects().len();
+        segments.push(Segment {
+            label: format!("\u{25b8} Projects {}", count),
+            color: PURPLE,
+            is_focused: true,
+            checkbox: CheckboxInfo::None,
+        });
+    }
+
+    // Task columns 1–4
+    for (idx, &status) in TaskStatus::ALL.iter().enumerate() {
+        let nav_col = idx + 1;
         let items = layout.get(status);
         let count = items.len();
-        let is_focused = app.selected_column() == col_idx;
+        let is_focused = sel == nav_col;
         let color = column_color(status);
-
-        let (prefix, label_style) = if is_focused {
-            (
-                "\u{25b8} ",
-                Style::default()
-                    .fg(color)
-                    .add_modifier(Modifier::BOLD)
-                    .add_modifier(Modifier::UNDERLINED),
-            )
-        } else {
-            ("\u{25e6} ", Style::default().fg(MUTED))
-        };
-
+        let prefix = if is_focused { "\u{25b8} " } else { "\u{25e6} " };
         let label = format!("{}{} {}", prefix, status.as_str(), count);
 
-        let spans = if is_focused {
+        let checkbox = if is_focused {
             let all_selected = !items.is_empty()
                 && items.iter().all(|item| match item {
                     ColumnItem::Task(t) => app.selected_tasks().contains(&t.id),
                     ColumnItem::Epic(e) => app.selected_epics().contains(&e.id),
                 });
-            let checkbox = if all_selected { " [x]" } else { " [ ]" };
-
-            let checkbox_style = if app.on_select_all() {
-                Style::default()
-                    .bg(cursor_bg_color(status))
-                    .fg(FG)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(MUTED)
-            };
-
-            vec![
-                Span::styled(label, label_style),
-                Span::styled(checkbox, checkbox_style),
-            ]
+            CheckboxInfo::Task {
+                all_selected,
+                on_select_all: app.on_select_all(),
+                status,
+            }
         } else {
-            vec![Span::styled(label, label_style)]
+            CheckboxInfo::None
+        };
+
+        segments.push(Segment {
+            label,
+            color,
+            is_focused,
+            checkbox,
+        });
+    }
+
+    // Edge column: Archive (only shown when col 5 is focused)
+    if sel == TaskStatus::COLUMN_COUNT + 1 {
+        let count = app.archived_tasks().len();
+        segments.push(Segment {
+            label: format!("\u{25b8} Archive {}", count),
+            color: ARCHIVE_STRIPE,
+            is_focused: true,
+            checkbox: CheckboxInfo::None,
+        });
+    }
+
+    for (i, seg) in segments.iter().enumerate() {
+        let label_style = if seg.is_focused {
+            Style::default()
+                .fg(seg.color)
+                .add_modifier(Modifier::BOLD)
+                .add_modifier(Modifier::UNDERLINED)
+        } else {
+            Style::default().fg(MUTED)
+        };
+
+        let spans = match &seg.checkbox {
+            CheckboxInfo::Task {
+                all_selected,
+                on_select_all,
+                status,
+            } => {
+                let checkbox = if *all_selected { " [x]" } else { " [ ]" };
+                let checkbox_style = if *on_select_all {
+                    Style::default()
+                        .bg(cursor_bg_color(*status))
+                        .fg(FG)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(MUTED)
+                };
+                vec![
+                    Span::styled(seg.label.clone(), label_style),
+                    Span::styled(checkbox, checkbox_style),
+                ]
+            }
+            CheckboxInfo::None => {
+                vec![Span::styled(seg.label.clone(), label_style)]
+            }
         };
 
         let paragraph = Paragraph::new(Line::from(spans)).alignment(Alignment::Center);
-        frame.render_widget(paragraph, col_segments[col_idx]);
+        frame.render_widget(paragraph, col_segments[i]);
     }
 }
 
