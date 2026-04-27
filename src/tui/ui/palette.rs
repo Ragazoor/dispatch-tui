@@ -14,9 +14,8 @@ pub(super) const FLASH_BG: Color = Color::Rgb(62, 52, 20);
 
 // Archive column — muted blue-gray stripe
 pub(super) const ARCHIVE_STRIPE: Color = Color::Rgb(72, 82, 120);
-// Archive column background tints
+// Archive column background tint
 pub(super) const ARCHIVE_COL_BG: Color = Color::Rgb(26, 28, 40);
-pub(super) const ARCHIVE_CURSOR_BG: Color = Color::Rgb(30, 34, 56);
 // Projects column background tints (purple family)
 pub(super) const PROJECTS_COL_BG: Color = Color::Rgb(30, 26, 42);
 pub(super) const PROJECTS_CURSOR_BG: Color = Color::Rgb(50, 34, 66);
