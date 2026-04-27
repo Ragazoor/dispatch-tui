@@ -211,10 +211,10 @@ impl App {
         self.agents.inactivity_timeout
     }
     pub fn show_archived(&self) -> bool {
-        self.archive.visible
+        self.selection().column() == 5
     }
     pub fn selected_archive_row(&self) -> usize {
-        self.archive.selected_row
+        self.selection().row(5)
     }
     pub fn active_project(&self) -> ProjectId {
         self.active_project
@@ -223,13 +223,13 @@ impl App {
         &self.board.projects
     }
     pub fn projects_panel_visible(&self) -> bool {
-        self.projects_panel.visible
+        self.selection().column() == 0
     }
     pub fn selected_project_row(&self) -> usize {
-        self.projects_panel.selected_index()
+        self.selection().row(0)
     }
     pub(in crate::tui) fn selected_project(&self) -> Option<&Project> {
-        self.board.projects.get(self.projects_panel.selected_index())
+        self.board.projects.get(self.selection().row(0))
     }
     pub fn selected_tasks(&self) -> &HashSet<TaskId> {
         &self.select.tasks
@@ -974,7 +974,6 @@ impl App {
                 vec![]
             }
             Message::OpenProjectsPanel => {
-                self.projects_panel.visible = true;
                 if let Some(idx) = self
                     .board
                     .projects
@@ -986,7 +985,6 @@ impl App {
                 vec![]
             }
             Message::CloseProjectsPanel => {
-                self.projects_panel.visible = false;
                 vec![]
             }
         }
@@ -1062,12 +1060,9 @@ impl App {
         self.selection_mut().set_column(new_col);
 
         let at_archive = new_col == TaskStatus::COLUMN_COUNT;
-        if at_archive && !self.archive.visible {
-            self.archive.visible = true;
+        if at_archive {
             self.archive.selected_row = 0;
             *self.archive.list_state.selected_mut() = Some(0);
-        } else if !at_archive && self.archive.visible {
-            self.archive.visible = false;
         }
 
         self.clamp_selection();
