@@ -1,0 +1,44 @@
+---
+source: src/tui/tests/snapshots.rs
+expression: rendered
+---
+ ▸ Tasks   [Tab]                                                                                                  🔕  [N]
+        ▸ backlog 2 [ ]                 ◦ running 1                   ◦ review 0                     ◦ done 1
+  ▌ #1 Task 1                   ── active                                                   ▎ #4 Task 4
+   ◦ <1h                        ▎ #3 Task 3                                                  ✓ <1h
+  ▎ #2 Task 2                    ◉ running
+   ◦ <1h
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+┌ New Task ────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│  Title: My new task_                                                                                                 │
+│                                                                                                                      │
+│  [Enter] confirm  [Esc] cancel                                                                                       │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+Creating task: enter title

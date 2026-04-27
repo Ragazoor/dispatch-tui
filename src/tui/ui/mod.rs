@@ -1,3 +1,4 @@
+mod input_form;
 mod kanban;
 mod palette;
 mod shared;

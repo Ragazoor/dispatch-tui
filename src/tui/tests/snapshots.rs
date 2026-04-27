@@ -44,6 +44,66 @@ fn snapshot_help_overlay() {
     insta::assert_snapshot!(rendered);
 }
 
+#[test]
+fn snapshot_input_title_form() {
+    use super::super::types::{InputMode, TaskDraft};
+    let mut app = make_app();
+    app.input.mode = InputMode::InputTitle;
+    app.input.buffer = "My new task".to_string();
+    app.input.task_draft = Some(TaskDraft::default());
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
+fn snapshot_input_repo_path_form() {
+    use super::super::types::{InputMode, TaskDraft};
+    use crate::models::TaskTag;
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo/alpha".to_string(), "/repo/beta".to_string()];
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.buffer = String::new();
+    app.input.task_draft = Some(TaskDraft {
+        title: "My new task".to_string(),
+        description: "A description".to_string(),
+        tag: Some(TaskTag::Feature),
+        ..TaskDraft::default()
+    });
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
+fn snapshot_quick_dispatch_form() {
+    use super::super::types::InputMode;
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo/alpha".to_string(), "/repo/beta".to_string()];
+    app.input.mode = InputMode::QuickDispatch;
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
+fn snapshot_confirm_retry_form() {
+    use super::super::types::InputMode;
+    use crate::models::TaskId;
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmRetry(TaskId(1));
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
+fn snapshot_input_epic_title_form() {
+    use super::super::types::{EpicDraft, InputMode};
+    let mut app = make_app();
+    app.input.mode = InputMode::InputEpicTitle;
+    app.input.buffer = "My new epic".to_string();
+    app.input.epic_draft = Some(EpicDraft::default());
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
 fn make_feed_epic(id: i64, title: &str, sort_order: i64) -> crate::models::Epic {
     let now = chrono::Utc::now();
     crate::models::Epic {
