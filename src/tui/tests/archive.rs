@@ -975,6 +975,21 @@ fn handle_key_confirm_archive_routes_correctly() {
     assert_eq!(app.input.mode, InputMode::Normal);
 }
 
+#[test]
+fn archive_column_renders_task_cards_when_focused() {
+    let mut app = make_app_with_archived_task();
+    // Navigate to Archive (col 5)
+    for _ in 0..4 {
+        app.update(Message::NavigateColumn(1));
+    }
+    assert_eq!(app.selected_column(), TaskStatus::COLUMN_COUNT + 1);
+    let buf = render_to_buffer(&mut app, 120, 40);
+    assert!(
+        buffer_contains(&buf, "archived task"),
+        "expected archived task card in buffer"
+    );
+}
+
 /// ConfirmArchiveEpic mode routes correctly.
 #[test]
 fn handle_key_confirm_archive_epic_routes_correctly() {

@@ -122,6 +122,14 @@ pub(in crate::tui) fn make_epic_with_title(id: i64, title: &str) -> Epic {
     }
 }
 
+pub(in crate::tui) fn make_app_with_archived_task() -> App {
+    let mut app = make_app();
+    let mut t = make_task(10, TaskStatus::Archived);
+    t.title = "archived task".to_string();
+    app.board.tasks.push(t);
+    app
+}
+
 pub(in crate::tui) fn make_feed_epic(id: i64, title: &str, sort_order: i64) -> Epic {
     Epic {
         title: title.to_string(),

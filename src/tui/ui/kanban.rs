@@ -161,7 +161,6 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     render_tab_bar(frame, app, vertical[0]);
     render_summary(frame, app, &epic_stats, vertical[1]);
     render_columns(frame, app, &epic_stats, vertical[2], now);
-    render_archive_overlay(frame, app, vertical[2], now);
     render_projects_panel(frame, app, vertical[2]);
     render_detail(frame, app, vertical[3], now);
     render_status_bar(frame, app, vertical[4]);
@@ -603,95 +602,161 @@ fn render_columns(
         area
     };
 
+    let sel = app.selected_column();
+    let constraints = column_layout_constraints(sel);
     let column_areas = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints(
-            [Constraint::Ratio(1, TaskStatus::COLUMN_COUNT as u32); TaskStatus::COLUMN_COUNT],
-        )
+        .constraints(constraints)
         .split(board_area);
 
-    for (col_idx, &status) in TaskStatus::ALL.iter().enumerate() {
-        let col_area = column_areas[col_idx];
-        let is_focused = app.selected_column() == col_idx;
-        let color = column_color(status);
-        // Only Running and Review benefit from substatus grouping headers.
-        let show_headers = matches!(status, TaskStatus::Running | TaskStatus::Review);
+    let mut area_idx = 0usize;
 
-        let column_items = app.column_items_for_status_with_stats(status, Some(epic_stats));
-        let selected_row = app.selected_row()[col_idx];
+    // Projects column placeholder (only when col 0 focused — rendered in Task 7)
+    if sel == 0 {
+        // render empty placeholder for now; Task 7 will add render_projects_column
+        area_idx += 1;
+    }
 
-        let mut list_items: Vec<ListItem> = Vec::new();
-        let mut list_selection_idx: Option<usize> = None;
-        let mut current_priority: Option<u8> = None;
+    // Task columns 1–4
+    for (task_col_idx, &status) in TaskStatus::ALL.iter().enumerate() {
+        let nav_col = task_col_idx + 1;
+        render_task_column(
+            frame,
+            app,
+            column_areas[area_idx],
+            now,
+            status,
+            nav_col,
+            task_col_idx,
+            epic_stats,
+        );
+        area_idx += 1;
+    }
 
-        for (item_idx, item) in column_items.iter().enumerate() {
-            if show_headers {
-                let priority = match item {
-                    ColumnItem::Task(t) => t.sub_status.column_priority_detached(t.is_detached()),
+    // Archive column (col 5, only when focused)
+    if sel == TaskStatus::COLUMN_COUNT + 1 {
+        render_archive_column(frame, app, column_areas[area_idx], now);
+    }
+}
+
+/// Render a single task-status column (Backlog/Running/Review/Done).
+///
+/// `nav_col` is the navigation column index (1–4) used for focus detection.
+/// `col_idx` is the 0-based index into `selected_row` and `list_states` arrays.
+fn render_task_column(
+    frame: &mut Frame,
+    app: &mut App,
+    col_area: Rect,
+    now: DateTime<Utc>,
+    status: TaskStatus,
+    nav_col: usize,
+    col_idx: usize,
+    epic_stats: &EpicStatsMap,
+) {
+    let is_focused = app.selected_column() == nav_col;
+    let color = column_color(status);
+    // Only Running and Review benefit from substatus grouping headers.
+    let show_headers = matches!(status, TaskStatus::Running | TaskStatus::Review);
+
+    let column_items = app.column_items_for_status_with_stats(status, Some(epic_stats));
+    let selected_row = app.selected_row()[col_idx];
+
+    let mut list_items: Vec<ListItem> = Vec::new();
+    let mut list_selection_idx: Option<usize> = None;
+    let mut current_priority: Option<u8> = None;
+
+    for (item_idx, item) in column_items.iter().enumerate() {
+        if show_headers {
+            let priority = match item {
+                ColumnItem::Task(t) => t.sub_status.column_priority_detached(t.is_detached()),
+                ColumnItem::Epic(e) => epic_stats
+                    .get(&e.id)
+                    .map(|s| s.substatus.column_priority())
+                    .unwrap_or(0),
+            };
+            if Some(priority) != current_priority {
+                current_priority = Some(priority);
+                let label = match item {
+                    ColumnItem::Task(t) => t
+                        .sub_status
+                        .header_label_detached(t.is_detached())
+                        .to_string(),
                     ColumnItem::Epic(e) => epic_stats
                         .get(&e.id)
-                        .map(|s| s.substatus.column_priority())
-                        .unwrap_or(0),
+                        .map(|s| s.substatus.header_label())
+                        .unwrap_or_default()
+                        .to_string(),
                 };
-                if Some(priority) != current_priority {
-                    current_priority = Some(priority);
-                    let label = match item {
-                        ColumnItem::Task(t) => t
-                            .sub_status
-                            .header_label_detached(t.is_detached())
-                            .to_string(),
-                        ColumnItem::Epic(e) => epic_stats
-                            .get(&e.id)
-                            .map(|s| s.substatus.header_label())
-                            .unwrap_or_default()
-                            .to_string(),
-                    };
-                    list_items.push(render_substatus_header(&label, list_items.is_empty()));
-                }
+                list_items.push(render_substatus_header(&label, list_items.is_empty()));
             }
+        }
 
-            if item_idx == selected_row {
-                list_selection_idx = Some(list_items.len());
+        if item_idx == selected_row {
+            list_selection_idx = Some(list_items.len());
+        }
+
+        let is_cursor = is_focused && !app.on_select_all() && item_idx == selected_row;
+        list_items.push(match item {
+            ColumnItem::Task(task) => {
+                build_task_list_item(task, status, app, now, is_cursor, color, col_area.width)
             }
-
-            let is_cursor = is_focused && !app.on_select_all() && item_idx == selected_row;
-            list_items.push(match item {
-                ColumnItem::Task(task) => {
-                    build_task_list_item(task, status, app, now, is_cursor, color, col_area.width)
-                }
-                ColumnItem::Epic(epic) => {
-                    render_epic_item(epic, is_cursor, app, epic_stats, status, col_area.width)
-                }
-            });
-        }
-
-        let on_select_all = app.on_select_all();
-        let sel = app.selection_mut();
-        if is_focused {
-            *sel.list_states[col_idx].selected_mut() = if on_select_all {
-                None
-            } else {
-                list_selection_idx
-            };
-        }
-
-        if is_focused {
-            let block = Block::default().style(Style::default().bg(column_bg_color(status)));
-            let inner = block.inner(col_area);
-            frame.render_widget(block, col_area);
-            frame.render_stateful_widget(
-                List::new(list_items),
-                inner,
-                &mut sel.list_states[col_idx],
-            );
-        } else {
-            frame.render_stateful_widget(
-                List::new(list_items),
-                col_area,
-                &mut sel.list_states[col_idx],
-            );
-        }
+            ColumnItem::Epic(epic) => {
+                render_epic_item(epic, is_cursor, app, epic_stats, status, col_area.width)
+            }
+        });
     }
+
+    let on_select_all = app.on_select_all();
+    let sel = app.selection_mut();
+    if is_focused {
+        *sel.list_states[col_idx].selected_mut() = if on_select_all {
+            None
+        } else {
+            list_selection_idx
+        };
+    }
+
+    if is_focused {
+        let block = Block::default().style(Style::default().bg(column_bg_color(status)));
+        let inner = block.inner(col_area);
+        frame.render_widget(block, col_area);
+        frame.render_stateful_widget(
+            List::new(list_items),
+            inner,
+            &mut sel.list_states[col_idx],
+        );
+    } else {
+        frame.render_stateful_widget(
+            List::new(list_items),
+            col_area,
+            &mut sel.list_states[col_idx],
+        );
+    }
+}
+
+fn render_archive_column(frame: &mut Frame, app: &mut App, area: Rect, now: DateTime<Utc>) {
+    let archived = app.archived_tasks();
+    let sel_row = app.selected_archive_row();
+    let color = ARCHIVE_STRIPE;
+
+    let bg_block = Block::default().style(Style::default().bg(ARCHIVE_COL_BG));
+    frame.render_widget(bg_block, area);
+
+    let items: Vec<ListItem> = archived
+        .iter()
+        .enumerate()
+        .map(|(idx, task)| {
+            let is_cursor = idx == sel_row;
+            build_task_list_item(task, TaskStatus::Archived, app, now, is_cursor, color, area.width)
+        })
+        .collect();
+
+    let title = format!(" Archive ({}) ", archived.len());
+    let block = Block::default()
+        .title(title)
+        .title_style(Style::default().fg(color).add_modifier(Modifier::BOLD));
+    let list = List::new(items).block(block);
+    frame.render_stateful_widget(list, area, &mut app.archive.list_state);
 }
 
 fn epic_substatus_color(substatus: &EpicSubstatus) -> Color {
@@ -780,60 +845,6 @@ fn render_epic_item(
     }
 
     item
-}
-
-fn render_archive_overlay(frame: &mut Frame, app: &mut App, area: Rect, now: DateTime<Utc>) {
-    if !app.show_archived() {
-        return;
-    }
-
-    let archived = app.archived_tasks();
-
-    // Right-side overlay: 40% of screen width, full height of kanban area
-    let overlay_width = (area.width * 40 / 100).clamp(30, 60);
-    let x = area.x + area.width.saturating_sub(overlay_width);
-    let overlay_area = Rect::new(x, area.y, overlay_width, area.height);
-
-    frame.render_widget(Clear, overlay_area);
-
-    let block = Block::default()
-        .title(format!(" Archive ({}) ", archived.len()))
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .border_style(Style::default().fg(Color::DarkGray))
-        .title_style(
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-        );
-
-    let items: Vec<ListItem> = archived
-        .iter()
-        .enumerate()
-        .map(|(idx, task)| {
-            let age = format_age(task.updated_at, now);
-            let title = truncate(&task.title, (overlay_width as usize).saturating_sub(10));
-            let label = format!("{title} {age}");
-            let is_selected = idx == app.selected_archive_row();
-            if is_selected {
-                ListItem::new(Line::from(Span::styled(
-                    label,
-                    Style::default()
-                        .bg(Color::DarkGray)
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                )))
-            } else {
-                ListItem::new(Line::from(Span::styled(
-                    label,
-                    Style::default().fg(Color::Gray),
-                )))
-            }
-        })
-        .collect();
-
-    let list = List::new(items).block(block);
-    frame.render_stateful_widget(list, overlay_area, &mut app.archive.list_state);
 }
 
 fn render_projects_panel(frame: &mut Frame, app: &mut App, area: Rect) {
