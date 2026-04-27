@@ -88,7 +88,6 @@ fn navigate_column_clamps() {
 
     // From archive column (COLUMN_COUNT), pressing right stays clamped
     app.selection_mut().set_column(TaskStatus::COLUMN_COUNT);
-    app.archive.visible = true; // keep state consistent
     app.update(Message::NavigateColumn(1));
     assert_eq!(app.selection().column(), TaskStatus::COLUMN_COUNT); // can't go above max
 }

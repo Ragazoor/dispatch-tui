@@ -162,7 +162,7 @@ fn archive_panel_j_k_navigation() {
         1,
         TEST_TIMEOUT,
     );
-    app.archive.visible = true;
+    app.selection_mut().set_column(5);
     assert_eq!(app.archive.selected_row, 0);
 
     app.handle_key(make_key(KeyCode::Char('j')));
@@ -182,7 +182,7 @@ fn archive_panel_j_k_navigation() {
 #[test]
 fn archive_panel_x_enters_confirm_delete() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Archived)], 1, TEST_TIMEOUT);
-    app.archive.visible = true;
+    app.selection_mut().set_column(5);
 
     app.handle_key(make_key(KeyCode::Char('x')));
     assert_eq!(app.input.mode, InputMode::ConfirmDelete);
@@ -195,7 +195,7 @@ fn archive_panel_x_enters_confirm_delete() {
 #[test]
 fn archive_panel_confirm_delete_removes_task() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Archived)], 1, TEST_TIMEOUT);
-    app.archive.visible = true;
+    app.selection_mut().set_column(5);
 
     app.handle_key(make_key(KeyCode::Char('x')));
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
@@ -262,11 +262,9 @@ fn full_archive_flow() {
     assert!(task.worktree.is_none());
     assert!(cmds.iter().any(|c| matches!(c, Command::Cleanup { .. })));
 
-    // Navigate to archive column
-    for _ in 0..4 {
-        app.update(Message::NavigateColumn(1));
-    }
-    assert!(app.archive.visible);
+    // Navigate to archive column (directly set to col 5 — the archive nav column)
+    app.selection_mut().set_column(5);
+    assert!(app.show_archived());
 
     // Should see 1 archived task
     assert_eq!(app.archived_tasks().len(), 1);
@@ -355,7 +353,7 @@ fn render_archive_overlay_shows_archived_tasks() {
     task.status = TaskStatus::Archived;
     task.title = "Archived Item".to_string();
     let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
-    app.archive.visible = true;
+    app.selection_mut().set_column(5);
     let buf = render_to_buffer(&mut app, 100, 30);
     assert!(
         buffer_contains(&buf, "Archived Item"),
@@ -558,7 +556,7 @@ fn archive_panel_down_arrow_navigates() {
         1,
         TEST_TIMEOUT,
     );
-    app.archive.visible = true;
+    app.selection_mut().set_column(5);
     assert_eq!(app.archive.selected_row, 0);
     app.handle_key(make_key(KeyCode::Down));
     assert_eq!(app.archive.selected_row, 1);
@@ -574,7 +572,7 @@ fn archive_panel_up_arrow_navigates() {
         1,
         TEST_TIMEOUT,
     );
-    app.archive.visible = true;
+    app.selection_mut().set_column(5);
     app.archive.selected_row = 1;
     app.handle_key(make_key(KeyCode::Up));
     assert_eq!(app.archive.selected_row, 0);
@@ -583,15 +581,15 @@ fn archive_panel_up_arrow_navigates() {
 #[test]
 fn archive_panel_esc_closes() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Archived)], 1, TEST_TIMEOUT);
-    app.archive.visible = true;
+    app.selection_mut().set_column(5);
     app.handle_key(make_key(KeyCode::Esc));
-    assert!(!app.archive.visible);
+    assert!(!app.show_archived());
 }
 
 #[test]
 fn archive_panel_e_edits_task() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Archived)], 1, TEST_TIMEOUT);
-    app.archive.visible = true;
+    app.selection_mut().set_column(5);
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
     assert!(cmds.is_empty());
     assert!(matches!(
@@ -606,7 +604,7 @@ fn archive_panel_e_edits_task() {
 #[test]
 fn archive_panel_e_on_empty_is_noop() {
     let mut app = App::new(vec![], 1, TEST_TIMEOUT);
-    app.archive.visible = true;
+    app.selection_mut().set_column(5);
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
     assert!(cmds.is_empty());
 }
@@ -614,7 +612,7 @@ fn archive_panel_e_on_empty_is_noop() {
 #[test]
 fn archive_panel_x_on_empty_is_noop() {
     let mut app = App::new(vec![], 1, TEST_TIMEOUT);
-    app.archive.visible = true;
+    app.selection_mut().set_column(5);
     app.handle_key(make_key(KeyCode::Char('x')));
     assert_eq!(app.input.mode, InputMode::Normal); // did not enter ConfirmDelete
 }
@@ -622,7 +620,7 @@ fn archive_panel_x_on_empty_is_noop() {
 #[test]
 fn archive_panel_q_enters_confirm_quit() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Archived)], 1, TEST_TIMEOUT);
-    app.archive.visible = true;
+    app.selection_mut().set_column(5);
     app.handle_key(make_key(KeyCode::Char('q')));
     assert!(!app.should_quit);
     assert_eq!(app.input.mode, InputMode::ConfirmQuit);
@@ -631,10 +629,10 @@ fn archive_panel_q_enters_confirm_quit() {
 #[test]
 fn archive_panel_unrecognized_key_is_noop() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Archived)], 1, TEST_TIMEOUT);
-    app.archive.visible = true;
+    app.selection_mut().set_column(5);
     let cmds = app.handle_key(make_key(KeyCode::Char('z')));
     assert!(cmds.is_empty());
-    assert!(app.archive.visible);
+    assert!(app.show_archived());
 }
 
 #[test]
@@ -818,16 +816,16 @@ fn archive_esc_closes_overlay() {
     let mut app = make_app();
     // Archive a task first
     app.update(Message::ArchiveTask(TaskId(1)));
-    app.archive.visible = true;
+    app.selection_mut().set_column(5);
     app.handle_key(make_key(KeyCode::Esc));
-    assert!(!app.archive.visible);
+    assert!(!app.show_archived());
 }
 
 #[test]
 fn archive_e_enters_edit_confirm() {
     let mut app = make_app();
     app.update(Message::ArchiveTask(TaskId(1)));
-    app.archive.visible = true;
+    app.selection_mut().set_column(5);
     app.archive.selected_row = 0;
     app.handle_key(make_key(KeyCode::Char('e')));
     assert!(matches!(app.input.mode, InputMode::ConfirmEditTask(_)));
@@ -837,7 +835,7 @@ fn archive_e_enters_edit_confirm() {
 fn archive_q_quits() {
     let mut app = make_app();
     app.update(Message::ArchiveTask(TaskId(1)));
-    app.archive.visible = true;
+    app.selection_mut().set_column(5);
     app.handle_key(make_key(KeyCode::Char('q')));
     assert_eq!(app.input.mode, InputMode::ConfirmQuit);
 }
@@ -852,7 +850,7 @@ fn handle_key_archive_j_navigates_down() {
     t2.title = "Archived 2".to_string();
     app.board.tasks.push(t1);
     app.board.tasks.push(t2);
-    app.archive.visible = true;
+    app.selection_mut().set_column(5);
     app.archive.selected_row = 0;
 
     app.handle_key(make_key(KeyCode::Char('j')));
@@ -868,7 +866,7 @@ fn handle_key_archive_k_navigates_up() {
     t2.title = "Archived 2".to_string();
     app.board.tasks.push(t1);
     app.board.tasks.push(t2);
-    app.archive.visible = true;
+    app.selection_mut().set_column(5);
     app.archive.selected_row = 1;
 
     app.handle_key(make_key(KeyCode::Char('k')));
@@ -880,7 +878,7 @@ fn handle_key_archive_k_clamps_at_zero() {
     let mut app = make_app();
     let t = make_task(100, TaskStatus::Archived);
     app.board.tasks.push(t);
-    app.archive.visible = true;
+    app.selection_mut().set_column(5);
     app.archive.selected_row = 0;
 
     app.handle_key(make_key(KeyCode::Char('k')));
@@ -894,7 +892,7 @@ fn handle_key_archive_down_arrow_navigates() {
     let t2 = make_task(101, TaskStatus::Archived);
     app.board.tasks.push(t1);
     app.board.tasks.push(t2);
-    app.archive.visible = true;
+    app.selection_mut().set_column(5);
     app.archive.selected_row = 0;
 
     app.handle_key(make_key(KeyCode::Down));
@@ -908,7 +906,7 @@ fn handle_key_archive_up_arrow_navigates() {
     let t2 = make_task(101, TaskStatus::Archived);
     app.board.tasks.push(t1);
     app.board.tasks.push(t2);
-    app.archive.visible = true;
+    app.selection_mut().set_column(5);
     app.archive.selected_row = 1;
 
     app.handle_key(make_key(KeyCode::Up));
@@ -920,7 +918,7 @@ fn handle_key_archive_x_enters_confirm_delete() {
     let mut app = make_app();
     let t = make_task(100, TaskStatus::Archived);
     app.board.tasks.push(t);
-    app.archive.visible = true;
+    app.selection_mut().set_column(5);
     app.archive.selected_row = 0;
 
     app.handle_key(make_key(KeyCode::Char('x')));
@@ -932,7 +930,7 @@ fn handle_key_archive_e_enters_confirm_edit() {
     let mut app = make_app();
     let t = make_task(100, TaskStatus::Archived);
     app.board.tasks.push(t);
-    app.archive.visible = true;
+    app.selection_mut().set_column(5);
     app.archive.selected_row = 0;
 
     app.handle_key(make_key(KeyCode::Char('e')));
@@ -945,15 +943,15 @@ fn handle_key_archive_e_enters_confirm_edit() {
 #[test]
 fn handle_key_archive_esc_closes() {
     let mut app = make_app();
-    app.archive.visible = true;
+    app.selection_mut().set_column(5);
     app.handle_key(make_key(KeyCode::Esc));
-    assert!(!app.archive.visible);
+    assert!(!app.show_archived());
 }
 
 #[test]
 fn handle_key_archive_q_quits() {
     let mut app = make_app();
-    app.archive.visible = true;
+    app.selection_mut().set_column(5);
     app.handle_key(make_key(KeyCode::Char('q')));
     assert_eq!(*app.mode(), InputMode::ConfirmQuit);
 }
@@ -961,7 +959,7 @@ fn handle_key_archive_q_quits() {
 #[test]
 fn handle_key_archive_unknown_key_is_noop() {
     let mut app = make_app();
-    app.archive.visible = true;
+    app.selection_mut().set_column(5);
     let cmds = app.handle_key(make_key(KeyCode::Char('z')));
     assert!(cmds.is_empty());
 }
