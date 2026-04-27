@@ -787,6 +787,12 @@ rule DeleteTask {
         -- The archived-status precondition is enforced by the TUI input
         -- layer (archive view only shows archived tasks), not by the
         -- handler itself.
+        --
+        -- Archive navigation: the archive view is a hidden column to the
+        -- right of Done. Press l from the Done column to reveal it; press
+        -- h, Left, or Esc to return to Done. The archive is not shown as
+        -- a regular kanban column — it appears as an overlay panel when
+        -- the virtual archive column (index 4) is selected.
 }
 
 -- == Copy Task ==
