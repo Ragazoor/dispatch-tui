@@ -2068,3 +2068,28 @@ fn navigate_left_from_done_does_not_show_archive() {
     assert_eq!(app.selected_column(), 2);
     assert!(!app.show_archived());
 }
+
+#[test]
+fn board_selection_projects_row_roundtrip() {
+    let mut sel = BoardSelection::new();
+    assert_eq!(sel.row(0), 0); // projects_row starts at 0
+    sel.set_row(0, 3);
+    assert_eq!(sel.row(0), 3);
+}
+
+#[test]
+fn board_selection_archive_row_roundtrip() {
+    let mut sel = BoardSelection::new();
+    assert_eq!(sel.row(5), 0); // archive_row starts at 0
+    sel.set_row(5, 7);
+    assert_eq!(sel.row(5), 7);
+}
+
+#[test]
+fn board_selection_task_col_row_uses_offset() {
+    let mut sel = BoardSelection::new();
+    sel.set_row(1, 10); // Backlog = nav col 1 → array index 0
+    assert_eq!(sel.row(1), 10);
+    sel.set_row(4, 5); // Done = nav col 4 → array index 3
+    assert_eq!(sel.row(4), 5);
+}

@@ -842,6 +842,8 @@ pub struct BoardSelection {
     pub(in crate::tui) on_select_all: bool,
     pub(in crate::tui) list_states: [ListState; TaskStatus::COLUMN_COUNT],
     pub(in crate::tui) anchor: Option<ColumnAnchor>,
+    pub(in crate::tui) projects_row: usize,
+    pub(in crate::tui) archive_row: usize,
 }
 
 impl BoardSelection {
@@ -852,15 +854,28 @@ impl BoardSelection {
             on_select_all: false,
             list_states: std::array::from_fn(|_| ListState::default()),
             anchor: None,
+            projects_row: 0,
+            archive_row: 0,
         }
+    }
+
+    pub fn new_for_epic() -> Self {
+        Self { selected_column: 1, ..Self::new() }
     }
 
     pub fn column(&self) -> usize {
         self.selected_column
     }
 
+    /// Row cursor for the given navigation column.
+    /// nav col 0 → projects_row, nav col 1–4 → selected_row[nav_col-1], nav col 5 → archive_row.
     pub fn row(&self, col: usize) -> usize {
-        self.selected_row[col]
+        match col {
+            0 => self.projects_row,
+            1..=4 => self.selected_row[col - 1],
+            5 => self.archive_row,
+            _ => 0,
+        }
     }
 
     pub fn set_column(&mut self, col: usize) {
@@ -868,18 +883,19 @@ impl BoardSelection {
     }
 
     pub fn set_row(&mut self, col: usize, row: usize) {
-        self.selected_row[col] = row;
+        match col {
+            0 => self.projects_row = row,
+            1..=4 => self.selected_row[col - 1] = row,
+            5 => self.archive_row = row,
+            _ => {}
+        }
     }
 
     /// List item index for `ListState` scrolling.
     /// Returns `None` when the cursor is on the select-all toggle (header),
     /// since no list item should be selected in that case.
     pub fn list_state_index(&self, col: usize) -> Option<usize> {
-        if self.on_select_all {
-            None
-        } else {
-            Some(self.selected_row[col])
-        }
+        if self.on_select_all { None } else { Some(self.row(col)) }
     }
 }
 
