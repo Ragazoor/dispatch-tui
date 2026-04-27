@@ -978,7 +978,7 @@ impl App {
             }
             Message::SelectProject(project_id) => {
                 self.active_project = project_id;
-                self.sync_board_selection();
+                self.clamp_selection();
                 if let Some(idx) = self.board.projects.iter().position(|p| p.id == project_id) {
                     self.projects_panel.list_state.select(Some(idx));
                 }

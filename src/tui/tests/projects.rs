@@ -4,7 +4,7 @@ use crate::models::{Project, Task, TaskStatus};
 use crate::tui::types::{Command, InputMode};
 use crate::tui::{App, Message};
 
-use super::helpers::{make_key, make_task, TEST_TIMEOUT};
+use super::helpers::{buffer_contains, make_app, make_key, make_task, render_to_buffer, TEST_TIMEOUT};
 
 fn make_task_with_project(id: i64, status: TaskStatus, project_id: i64) -> Task {
     Task {
@@ -391,4 +391,58 @@ fn shift_k_emits_reorder_project_up() {
     assert!(cmds
         .iter()
         .any(|c| matches!(c, Command::ReorderProject { id: 2, delta: -1 })));
+}
+
+// ---------------------------------------------------------------------------
+// Inline Projects column rendering tests (Task 7)
+// ---------------------------------------------------------------------------
+
+fn make_app_with_default_project() -> App {
+    let mut app = make_app();
+    app.board.projects.push(Project {
+        id: 1,
+        name: "Default".to_string(),
+        is_default: true,
+        sort_order: 0,
+    });
+    app
+}
+
+#[test]
+fn projects_column_renders_project_cards_when_focused() {
+    let mut app = make_app_with_default_project();
+    // Navigate from col 1 (Backlog) left to col 0 (Projects)
+    app.update(Message::NavigateColumn(-1));
+    assert_eq!(app.selected_column(), 0);
+    let buf = render_to_buffer(&mut app, 120, 40);
+    assert!(
+        buffer_contains(&buf, "Default"),
+        "expected Default project card in buffer"
+    );
+}
+
+#[test]
+fn projects_column_shows_task_count() {
+    let mut app = make_app_with_default_project();
+    app.update(Message::NavigateColumn(-1));
+    assert_eq!(app.selected_column(), 0);
+    let buf = render_to_buffer(&mut app, 120, 40);
+    assert!(
+        buffer_contains(&buf, "tasks"),
+        "expected task count in project card"
+    );
+}
+
+#[test]
+fn selecting_project_keeps_focus_in_col_0() {
+    let mut app = make_app_with_default_project();
+    app.update(Message::NavigateColumn(-1));
+    assert_eq!(app.selected_column(), 0);
+    let project_id = app.projects()[0].id;
+    app.update(Message::SelectProject(project_id));
+    assert_eq!(
+        app.selected_column(),
+        0,
+        "focus should stay in Projects column after SelectProject"
+    );
 }

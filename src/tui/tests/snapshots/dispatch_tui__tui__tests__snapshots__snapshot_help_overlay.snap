@@ -4,8 +4,8 @@ expression: rendered
 ---
 [Default]   ▸ Tasks   [Tab]                                                                                       🔕  [N]
         ▸ backlog 2 [ ]                 ◦ running 1                   ◦ review 0                     ◦ done 1
-  ▎ #1 Task 1                   ── active                                                   ▎ #4 Task 4
-   ◦ <1h                        ▌ #3 Task 3                                                  ✓ <1h
+  ▌ #1 Task 1                   ── active                                                   ▎ #4 Task 4
+   ◦ <1h                        ▎ #3 Task 3                                                  ✓ <1h
   ▎ #2 Task 2           ╔ Help ════════════════════════════════════════════════════════════════╗
    ◦ <1h                ║                                                                      ║
                         ║  Navigation                                                          ║
