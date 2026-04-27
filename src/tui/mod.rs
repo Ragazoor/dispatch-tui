@@ -211,10 +211,10 @@ impl App {
         self.agents.inactivity_timeout
     }
     pub fn show_archived(&self) -> bool {
-        self.selection().column() == 5
+        self.selection().column() == TaskStatus::COLUMN_COUNT + 1
     }
     pub fn selected_archive_row(&self) -> usize {
-        self.selection().row(5)
+        self.selection().row(TaskStatus::COLUMN_COUNT + 1)
     }
     pub fn active_project(&self) -> ProjectId {
         self.active_project
