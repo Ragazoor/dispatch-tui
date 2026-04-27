@@ -1357,6 +1357,180 @@ rule HookNotification {
         -- resets sub_status back to active (default for running).
 }
 
+-- == Learning ==
+-- Rules governing the unified learning store: dispatch-prompt augmentation,
+-- wrap-up reflection nudge, MCP capture/retrieval tools, and human review actions.
+-- Storage and MCP implementation are deferred to WP3 and WP4 respectively.
+-- Prompt injection is deferred to WP6; wrap-up nudge to WP8.
+
+rule AugmentDispatchPromptWithLearnings {
+    when: AgentLaunched(task, mode)
+
+    requires: mode in {standard, brainstorm, plan, resume, quick}
+
+    let relevant = core/Learnings where applies_to_dispatch(task)
+
+    ensures:
+        if relevant.count > 0:
+            DispatchPromptAugmented(task: task, learnings: relevant)
+
+    @guidance
+        -- Fires after every agent launch that creates a worktree session.
+        -- relevant is the set of approved core/Learning records where
+        -- applies_to_dispatch(task) = true (user + repo + epic scopes).
+        -- scope_priority order (highest first): procedural, epic, repo, project, user.
+        -- Procedural learnings are prepended as prompt-prefix instructions.
+        -- Other kinds are collected under a "Relevant learnings" section.
+        -- If relevant is empty, nothing is prepended and the rule still fires
+        -- (DispatchPromptAugmented with empty learnings is a no-op).
+        -- Implemented in dispatch_with_prompt() (src/dispatch.rs) in WP6.
+        -- Until WP6 lands this rule is forward-looking: it documents intended
+        -- behaviour so downstream work packages can plan against the spec.
+}
+
+rule WrapUpReflection {
+    when: WrapUp(task, action)
+
+    requires: config.learning_reflection_enabled = true
+
+    ensures: WrapUpReflectionNudged(task: task)
+
+    @guidance
+        -- The MCP wrap_up handler appends a nudge to its response: "Before
+        -- finishing, did you discover anything non-obvious about this repo or
+        -- task? If so, call record_learning with a brief summary."
+        -- This is prompt encouragement, not a hard gate. The agent may proceed
+        -- to wrap up without proposing a learning.
+        -- Gated by config.learning_reflection_enabled (default: true).
+        -- Implemented in handle_wrap_up() (src/mcp/handlers/tasks.rs) in WP8.
+        -- Until WP8 lands this rule is forward-looking.
+}
+
+rule RecordLearningViaMcp {
+    when: McpRecordLearning(task, kind, summary, scope, detail?, scope_ref?, tags?)
+
+    requires: summary != ""
+    requires: scope = user implies scope_ref = null
+    requires: scope in {project, repo, epic, task} implies scope_ref != null
+
+    ensures: core/Learning.created(
+        kind: kind,
+        summary: summary,
+        detail: detail,
+        scope: scope,
+        scope_ref: scope_ref ?? default_scope_ref(task, scope),
+        tags: tags ?? {},
+        status: proposed,
+        source_task: task,
+        confirmed_count: 0,
+        created_at: now,
+        updated_at: now
+    )
+
+    @guidance
+        -- Agents call this during task execution or at wrap-up to surface
+        -- non-obvious learnings. Entries always land as proposed; they do not
+        -- affect future dispatches until a human approves them in the TUI.
+        -- default_scope_ref resolves when scope_ref is omitted:
+        --   scope=project → str(task.project_id)
+        --   scope=repo    → task.repo_path
+        --   scope=epic    → str(task.epic_id), error if task has no epic
+        --   scope=task    → str(task.id)
+        --   scope=user    → null
+        -- tags defaults to the empty set when omitted.
+        -- Implemented in src/mcp/handlers/ in WP4.
+}
+
+rule QueryLearningsViaMcp {
+    when: McpQueryLearnings(task, tag_filter?, limit?)
+
+    ensures: returns approved core/Learning records where applies_to_dispatch(task),
+             filtered to those whose tags intersect tag_filter (when tag_filter is provided),
+             ordered by scope_priority(scope) then confirmed_count desc,
+             limited to min(limit ?? 20, 50)
+
+    @guidance
+        -- Retrieval unions: user + project:<task.project_id> + repo:<task.repo_path>
+        -- + epic:<task.epic_id> (if task has an epic). task-scoped learnings are excluded from
+        -- applies_to_dispatch; agents can reach them by calling this tool with
+        -- an explicit tag_filter matching a task scope (WP5 episodic ingestion).
+        -- scope_priority order (highest first): procedural, epic, repo, project, user.
+        -- limit is capped at 50 to bound prompt size.
+        -- Implemented in src/mcp/handlers/ in WP4.
+}
+
+rule ConfirmLearningViaMcp {
+    when: McpConfirmLearning(learning, task)
+
+    requires: learning.status = approved
+
+    ensures: learning.confirmed_count = learning.confirmed_count + 1
+    ensures: learning.last_confirmed_at = now
+    ensures: learning.updated_at = now
+
+    @guidance
+        -- Agents call this when they act on a learning and it proves correct.
+        -- confirmed_count is an evidence signal used to rank query results.
+        -- No status change: confirmation strengthens an approved entry but
+        -- does not alter its lifecycle.
+        -- Implemented in src/mcp/handlers/ in WP4.
+}
+
+-- == Learning Review ==
+-- Human-facing TUI actions for reviewing proposed learnings.
+-- The TUI review surface is defined in WP7; these rules specify the transitions.
+
+rule ApproveLearning {
+    when: ApproveLearning(learning)
+
+    requires: learning.status = proposed
+
+    ensures: learning.status = approved
+    ensures: learning.updated_at = now
+}
+
+rule RejectLearning {
+    when: RejectLearning(learning)
+
+    requires: learning.status in {proposed, approved}
+
+    ensures: learning.status = rejected
+    ensures: learning.updated_at = now
+}
+
+rule ArchiveLearning {
+    when: ArchiveLearning(learning)
+
+    requires: learning.status = approved
+
+    ensures: learning.status = archived
+    ensures: learning.updated_at = now
+}
+
+rule EditLearning {
+    when: EditLearning(learning, summary?, detail?, kind?, tags?)
+
+    requires: learning.status in {proposed, approved}
+    requires: summary != null implies summary != ""
+
+    ensures:
+        if summary != null: learning.summary = summary
+    ensures:
+        if detail != null: learning.detail = detail
+    ensures:
+        if kind != null: learning.kind = kind
+    ensures:
+        if tags != null: learning.tags = tags
+    ensures: learning.updated_at = now
+
+    @guidance
+        -- EditLearning follows the same editor pattern as EditTask: the TUI
+        -- opens $EDITOR with a structured file containing the learning fields.
+        -- Editing does not change status. Pair with ApproveLearning to approve
+        -- an edited proposed entry in a single TUI action.
+        -- Implemented in the TUI review surface in WP7.
+}
+
 ------------------------------------------------------------
 -- Surfaces
 ------------------------------------------------------------

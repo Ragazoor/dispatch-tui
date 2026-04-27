@@ -80,6 +80,27 @@ enum SubStatus {
 --   done      -> none
 --   archived  -> none
 
+-- LearningScope identifies what context a learning applies to.
+-- Dispatch retrieval unions: user + project:<this_project> + repo:<this_repo> + epic:<this_epic> (if set).
+-- task scope carries past-task episodic outcomes, retrieved on demand.
+enum LearningScope { user | project | repo | epic | task }
+
+-- LearningKind categorises what was learned.
+-- procedural learnings, once approved, are injected as prompt-prefix instructions
+-- ahead of the normal learnings section.
+enum LearningKind {
+    pitfall              -- a failure mode; agents should avoid or handle carefully
+    convention           -- preferred code pattern or style in this context
+    preference           -- the user's explicit working preference
+    tool_recommendation  -- recommended tool or library for a given problem
+    procedural           -- injected verbatim into matching dispatch prompts once approved
+    episodic             -- outcome summary of a past task (what was tried, what worked)
+}
+
+-- LearningStatus controls whether an entry is active in retrieval.
+-- Agents always propose; humans approve, reject, or archive via the TUI.
+enum LearningStatus { proposed | approved | rejected | archived }
+
 ------------------------------------------------------------
 -- Entities and Variants
 ------------------------------------------------------------
@@ -183,6 +204,57 @@ entity SavedRepoPath {
     last_used: Timestamp     -- updated on each use; drives recency ordering
 }
 
+-- Learning captures knowledge a dispatched agent discovered and proposes back for
+-- human review. Approved learnings are injected into future dispatch prompts for the
+-- matching scope. Human approval is always required before an entry affects dispatches.
+entity Learning {
+    kind: LearningKind
+    summary: String          -- one-sentence digest; injected into dispatch prompts
+    detail: String?          -- extended context; shown in TUI review panel
+    scope: LearningScope
+    scope_ref: String?       -- qualifies the scope:
+                             --   scope=project → string form of project_id
+                             --   scope=repo    → repo_path of the target repository
+                             --   scope=epic    → string form of epic_id
+                             --   scope=task    → string form of task_id
+                             --   scope=user    → null (no qualifier needed)
+    tags: Set<String>        -- free-form labels for filtering (e.g. "rust", "testing")
+    status: LearningStatus
+    source_task: Task?       -- the task whose agent proposed this entry; null for human-authored entries
+    confirmed_count: Integer -- times an agent confirmed this learning as applicable
+    last_confirmed_at: Timestamp?
+    created_at: Timestamp
+    updated_at: Timestamp
+
+    transitions status {
+        proposed -> approved
+        proposed -> rejected
+        approved -> archived
+        approved -> rejected
+        terminal: rejected, archived
+    }
+
+    -- Derived
+    is_active: status = approved
+
+    -- True when this learning is relevant to the given task's dispatch.
+    -- task-scoped learnings are excluded from auto-injection; they surface
+    -- via query_learnings on demand (see tasks.allium).
+    applies_to_dispatch(task):
+        status = approved
+        and (
+            scope = user
+            or (scope = project and scope_ref = str(task.project_id))
+            or (scope = repo and scope_ref = task.repo_path)
+            or (scope = epic and task.epic != null and scope_ref = str(task.epic.id))
+        )
+
+    invariant ScopeRefConsistency {
+        (scope = user implies scope_ref = null)
+        and (scope != user implies scope_ref != null)
+    }
+}
+
 -- SplitPane is a runtime-only UI concept (not persisted) that tracks
 -- whether the TUI is displaying a task's tmux window as a side pane.
 -- It is modelled here because task lifecycle events (finish, PR creation)
@@ -248,6 +320,11 @@ config {
     fresh_threshold: Duration = 3.days
     aging_threshold: Duration = 7.days
     weeks_threshold: Duration = 14.days
+
+    -- When true, the MCP wrap_up response includes a nudge asking the agent
+    -- to propose learnings before finishing. Prompt encouragement only;
+    -- agents may wrap up without proposing. (see tasks.allium: WrapUpReflection)
+    learning_reflection_enabled: Boolean = true
 }
 
 ------------------------------------------------------------
