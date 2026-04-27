@@ -341,6 +341,7 @@ pub fn seed_feed_epics(db: &Database) -> Result<()> {
     let has_security = epics
         .iter()
         .any(|e| e.feed_command.as_deref() == Some("dispatch fetch-security"));
+    let has_dependabot = epics.iter().any(|e| e.title == "Dependabot");
 
     if !has_reviews {
         let epic = db.create_epic("Reviews", "", "", None, 1)?;
@@ -362,6 +363,11 @@ pub fn seed_feed_epics(db: &Database) -> Result<()> {
                 .feed_interval_secs(Some(300))
                 .sort_order(Some(-1)),
         )?;
+    }
+
+    if !has_dependabot {
+        let epic = db.create_epic("Dependabot", "", "", None, 1)?;
+        db.patch_epic(epic.id, &EpicPatch::new().sort_order(Some(0)))?;
     }
 
     Ok(())
@@ -600,11 +606,40 @@ mod tests {
     // -- seed_feed_epics --
 
     #[test]
+    fn seeds_dependabot_epic() {
+        let db = Database::open_in_memory().unwrap();
+        seed_feed_epics(&db).unwrap();
+
+        let epics = db.list_epics().unwrap();
+        let dependabot = epics
+            .iter()
+            .find(|e| e.title == "Dependabot")
+            .expect("Dependabot epic should be seeded");
+
+        assert_eq!(dependabot.sort_order, Some(0));
+        assert!(
+            dependabot.feed_command.is_none(),
+            "Dependabot epic should have no feed_command at seed time"
+        );
+    }
+
+    #[test]
+    fn seed_feed_epics_idempotent_dependabot() {
+        let db = Database::open_in_memory().unwrap();
+        seed_feed_epics(&db).unwrap();
+        seed_feed_epics(&db).unwrap();
+
+        let epics = db.list_epics().unwrap();
+        let count = epics.iter().filter(|e| e.title == "Dependabot").count();
+        assert_eq!(count, 1, "Dependabot epic must not be duplicated");
+    }
+
+    #[test]
     fn seed_feed_epics_creates_both_epics_when_empty() {
         let db = Database::open_in_memory().unwrap();
         seed_feed_epics(&db).unwrap();
         let epics = db.list_epics().unwrap();
-        assert_eq!(epics.len(), 2);
+        assert_eq!(epics.len(), 3);
         let commands: Vec<_> = epics
             .iter()
             .filter_map(|e| e.feed_command.as_deref())
@@ -641,8 +676,8 @@ mod tests {
         let epics = db.list_epics().unwrap();
         assert_eq!(
             epics.len(),
-            2,
-            "expected exactly 2 epics, got {}",
+            3,
+            "expected exactly 3 epics, got {}",
             epics.len()
         );
     }
