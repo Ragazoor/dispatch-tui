@@ -1058,8 +1058,7 @@ impl App {
         } else {
             (0isize, TaskStatus::COLUMN_COUNT as isize + 1) // [0, 5] on main board
         };
-        let new_col = (self.selection().column() as isize + delta)
-            .clamp(min_col, max_col) as usize;
+        let new_col = (self.selection().column() as isize + delta).clamp(min_col, max_col) as usize;
         self.selection_mut().set_column(new_col);
 
         // Reset archive list state when entering the archive column.
@@ -1082,8 +1081,8 @@ impl App {
             if count == 0 {
                 return vec![];
             }
-            let new_row = (self.selection().row(0) as isize + delta)
-                .clamp(0, count as isize - 1) as usize;
+            let new_row =
+                (self.selection().row(0) as isize + delta).clamp(0, count as isize - 1) as usize;
             self.selection_mut().set_row(0, new_row);
             self.projects_panel.list_state.select(Some(new_row));
             return vec![];

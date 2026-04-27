@@ -82,7 +82,11 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
         .find(|p| p.is_default)
         .map(|p| p.id)
         .ok_or_else(|| anyhow::anyhow!("No default project found in database"))?;
-    let mut app = App::new(tasks, default_project_id, Duration::from_secs(inactivity_timeout));
+    let mut app = App::new(
+        tasks,
+        default_project_id,
+        Duration::from_secs(inactivity_timeout),
+    );
     app.update(Message::ProjectsUpdated(projects));
     let paths = database.list_repo_paths().unwrap_or_default();
     app.update(Message::RepoPathsUpdated(paths));

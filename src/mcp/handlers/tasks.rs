@@ -12,8 +12,8 @@ use crate::service::{
 };
 
 use super::types::{
-    deserialize_flexible_i64, deserialize_optional_flexible_i64, parse_args,
-    resolve_project_id, service_err_to_response, JsonRpcResponse,
+    deserialize_flexible_i64, deserialize_optional_flexible_i64, parse_args, resolve_project_id,
+    service_err_to_response, JsonRpcResponse,
 };
 
 // ---------------------------------------------------------------------------

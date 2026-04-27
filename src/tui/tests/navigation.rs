@@ -113,7 +113,7 @@ fn navigate_column_clamps_at_visual_column_max() {
     app.selection_mut().set_column(TaskStatus::COLUMN_COUNT);
     app.update(Message::NavigateColumn(1));
     assert_eq!(app.selected_column(), TaskStatus::COLUMN_COUNT + 1); // archive column
-    // From archive (nav col 5), pressing right is clamped.
+                                                                     // From archive (nav col 5), pressing right is clamped.
     app.update(Message::NavigateColumn(1));
     assert_eq!(app.selected_column(), TaskStatus::COLUMN_COUNT + 1); // stays at archive
 }
@@ -2117,7 +2117,9 @@ fn navigate_left_from_backlog_enters_projects() {
 fn navigate_right_from_done_enters_archive() {
     let mut app = make_app();
     // Board starts at Backlog (col 1). Navigate to Done (col 4): 3 steps.
-    for _ in 0..3 { app.update(Message::NavigateColumn(1)); }
+    for _ in 0..3 {
+        app.update(Message::NavigateColumn(1));
+    }
     assert_eq!(app.selected_column(), 4);
     app.update(Message::NavigateColumn(1)); // col 4 → col 5 (Archive)
     assert_eq!(app.selected_column(), 5);
@@ -2137,7 +2139,9 @@ fn navigate_left_at_projects_is_noop() {
 fn navigate_right_at_archive_is_noop() {
     let mut app = make_app();
     // Board starts at Backlog (col 1). Navigate to Archive (col 5): 4 steps.
-    for _ in 0..4 { app.update(Message::NavigateColumn(1)); }
+    for _ in 0..4 {
+        app.update(Message::NavigateColumn(1));
+    }
     assert_eq!(app.selected_column(), 5);
     app.update(Message::NavigateColumn(1)); // clamp at 5
     assert_eq!(app.selected_column(), 5);

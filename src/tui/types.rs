@@ -851,11 +851,17 @@ impl BoardSelection {
 
     /// Main board starts at Backlog (nav col 1), to the right of the Projects edge column.
     pub fn new_for_board() -> Self {
-        Self { selected_column: 1, ..Self::new() }
+        Self {
+            selected_column: 1,
+            ..Self::new()
+        }
     }
 
     pub fn new_for_epic() -> Self {
-        Self { selected_column: 1, ..Self::new() }
+        Self {
+            selected_column: 1,
+            ..Self::new()
+        }
     }
 
     pub fn column(&self) -> usize {
@@ -890,7 +896,11 @@ impl BoardSelection {
     /// Returns `None` when the cursor is on the select-all toggle (header),
     /// since no list item should be selected in that case.
     pub fn list_state_index(&self, col: usize) -> Option<usize> {
-        if self.on_select_all { None } else { Some(self.row(col)) }
+        if self.on_select_all {
+            None
+        } else {
+            Some(self.row(col))
+        }
     }
 }
 

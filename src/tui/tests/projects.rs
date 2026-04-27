@@ -4,7 +4,9 @@ use crate::models::{Project, Task, TaskStatus};
 use crate::tui::types::{Command, InputMode};
 use crate::tui::{App, Message};
 
-use super::helpers::{buffer_contains, make_app, make_key, make_task, render_to_buffer, TEST_TIMEOUT};
+use super::helpers::{
+    buffer_contains, make_app, make_key, make_task, render_to_buffer, TEST_TIMEOUT,
+};
 
 fn make_task_with_project(id: i64, status: TaskStatus, project_id: i64) -> Task {
     Task {
