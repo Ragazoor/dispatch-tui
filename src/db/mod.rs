@@ -9,8 +9,9 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use crate::models::{
-    Epic, EpicId, FeedItem, Project, ProjectId, SubStatus, Task, TaskId, TaskStatus, TaskTag,
-    TaskUsage, TipsShowMode, UsageReport,
+    Epic, EpicId, FeedItem, Learning, LearningId, LearningKind, LearningScope, LearningStatus,
+    Project, ProjectId, SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage, TipsShowMode,
+    UsageReport,
 };
 
 // ---------------------------------------------------------------------------
@@ -481,16 +482,129 @@ pub trait ProjectCrud: Send + Sync {
 }
 
 // ---------------------------------------------------------------------------
+// LearningPatch — builder for partial learning updates
+// ---------------------------------------------------------------------------
+
+/// `None` = don't change. For nullable fields (`detail`), use double-Option:
+/// `None` = don't change, `Some(None)` = set NULL, `Some(Some(v))` = set value.
+#[derive(Debug, Default)]
+pub struct LearningPatch<'a> {
+    pub status: Option<LearningStatus>,
+    pub summary: Option<&'a str>,
+    pub detail: Option<Option<&'a str>>,
+    pub kind: Option<LearningKind>,
+    pub tags: Option<&'a [String]>,
+}
+
+impl<'a> LearningPatch<'a> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn status(mut self, status: LearningStatus) -> Self {
+        self.status = Some(status);
+        self
+    }
+
+    pub fn summary(mut self, summary: &'a str) -> Self {
+        self.summary = Some(summary);
+        self
+    }
+
+    pub fn detail(mut self, detail: Option<&'a str>) -> Self {
+        self.detail = Some(detail);
+        self
+    }
+
+    pub fn kind(mut self, kind: LearningKind) -> Self {
+        self.kind = Some(kind);
+        self
+    }
+
+    pub fn tags(mut self, tags: &'a [String]) -> Self {
+        self.tags = Some(tags);
+        self
+    }
+
+    pub fn has_changes(&self) -> bool {
+        self.status.is_some()
+            || self.summary.is_some()
+            || self.detail.is_some()
+            || self.kind.is_some()
+            || self.tags.is_some()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// LearningFilter — optional filter for list_learnings
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Default)]
+pub struct LearningFilter {
+    pub status: Option<LearningStatus>,
+    pub scope: Option<LearningScope>,
+    pub scope_ref: Option<String>,
+    /// Return only learnings whose tags intersect this set (OR match).
+    pub tags: Vec<String>,
+    pub limit: Option<usize>,
+}
+
+// ---------------------------------------------------------------------------
+// LearningStore — narrow sub-trait for the learnings table
+// ---------------------------------------------------------------------------
+
+pub trait LearningStore: Send + Sync {
+    #[allow(clippy::too_many_arguments)]
+    fn create_learning(
+        &self,
+        kind: LearningKind,
+        summary: &str,
+        detail: Option<&str>,
+        scope: LearningScope,
+        scope_ref: Option<&str>,
+        tags: &[String],
+        source_task_id: Option<TaskId>,
+    ) -> Result<LearningId>;
+
+    fn get_learning(&self, id: LearningId) -> Result<Option<Learning>>;
+
+    fn list_learnings(&self, filter: LearningFilter) -> Result<Vec<Learning>>;
+
+    fn patch_learning(&self, id: LearningId, patch: &LearningPatch<'_>) -> Result<()>;
+
+    fn delete_learning(&self, id: LearningId) -> Result<()>;
+
+    /// Atomically increments `confirmed_count` and updates `last_confirmed_at` and `updated_at`.
+    fn confirm_learning(&self, id: LearningId) -> Result<()>;
+
+    /// Returns approved learnings for the given task context, unioning user + project + repo + epic
+    /// scopes. Task-scoped learnings are excluded (they surface via explicit query only).
+    /// Ordered by scope priority (procedural > epic > repo > project > user), then confirmed_count DESC.
+    fn list_learnings_for_dispatch(
+        &self,
+        project_id: Option<ProjectId>,
+        repo_path: &str,
+        epic_id: Option<EpicId>,
+    ) -> Result<Vec<Learning>>;
+}
+
+// ---------------------------------------------------------------------------
 // TaskStore — supertrait combining all sub-traits
 // ---------------------------------------------------------------------------
 
 pub trait TaskStore:
-    TaskAndEpicStore + PrStore + AlertStore + SettingsStore + PrWorkflowStore + ProjectCrud
+    TaskAndEpicStore + PrStore + AlertStore + SettingsStore + PrWorkflowStore + ProjectCrud + LearningStore
 {
 }
 
 impl<
-        T: TaskAndEpicStore + PrStore + AlertStore + SettingsStore + PrWorkflowStore + ProjectCrud,
+        T: TaskAndEpicStore
+            + PrStore
+            + AlertStore
+            + SettingsStore
+            + PrWorkflowStore
+            + ProjectCrud
+            + LearningStore,
     > TaskStore for T
 {
 }

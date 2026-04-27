@@ -52,6 +52,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (37, migrate_v37_pr_workflow_states),
     (38, migrate_v38_feed_epic_columns),
     (39, migrate_v39_add_projects),
+    (40, migrate_v40_create_learnings),
 ];
 
 fn migrate_v1_add_plan_column(conn: &Connection) -> Result<()> {
@@ -851,4 +852,31 @@ fn migrate_v36_tips_state(conn: &Connection) -> Result<()> {
         VALUES (1, 0, 'always');",
     )
     .context("Failed to create tips_state table (migration v36)")
+}
+
+fn migrate_v40_create_learnings(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS learnings (
+            id                INTEGER PRIMARY KEY,
+            kind              TEXT    NOT NULL,
+            summary           TEXT    NOT NULL,
+            detail            TEXT,
+            scope             TEXT    NOT NULL,
+            scope_ref         TEXT,
+            tags              TEXT    NOT NULL DEFAULT '[]',
+            status            TEXT    NOT NULL DEFAULT 'proposed',
+            source_task_id    INTEGER REFERENCES tasks(id),
+            confirmed_count   INTEGER NOT NULL DEFAULT 0,
+            last_confirmed_at TEXT,
+            created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+            updated_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+            CHECK (
+                (scope = 'user' AND scope_ref IS NULL)
+                OR (scope != 'user' AND scope_ref IS NOT NULL)
+            )
+        );
+        CREATE INDEX IF NOT EXISTS idx_learnings_scope ON learnings(scope, scope_ref);
+        CREATE INDEX IF NOT EXISTS idx_learnings_status ON learnings(status);",
+    )
+    .context("Failed to create learnings table (migration v40)")
 }
