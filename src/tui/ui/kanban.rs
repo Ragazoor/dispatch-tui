@@ -269,6 +269,11 @@ fn render_summary(frame: &mut Frame, app: &App, epic_stats: &EpicStatsMap, area:
         });
     }
 
+    debug_assert_eq!(
+        segments.len(),
+        col_segments.len(),
+        "summary segment count must match layout constraint count"
+    );
     for (i, seg) in segments.iter().enumerate() {
         let label_style = if seg.is_focused {
             Style::default()

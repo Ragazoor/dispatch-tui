@@ -1539,3 +1539,24 @@ fn summary_shows_four_columns_when_backlog_focused() {
         "summary row should show backlog header; got: {summary_row:?}"
     );
 }
+
+#[test]
+fn summary_shows_five_columns_when_archive_focused() {
+    let mut app = make_app();
+    for _ in 0..4 {
+        app.update(Message::NavigateColumn(1));
+    }
+    assert_eq!(app.selected_column(), TaskStatus::COLUMN_COUNT + 1);
+    let buf = render_to_buffer(&mut app, 120, 40);
+    let summary_row: String = (0..120u16)
+        .map(|x| buf[(x, 1)].symbol().to_string())
+        .collect();
+    assert!(
+        summary_row.contains("Archive"),
+        "summary row should show Archive header when col 5 focused; got: {summary_row:?}"
+    );
+    assert!(
+        !summary_row.contains("Projects"),
+        "summary row should NOT show Projects when Archive focused; got: {summary_row:?}"
+    );
+}
