@@ -1,5 +1,5 @@
 use super::palette::{
-    ARCHIVE_COL_BG, ARCHIVE_CURSOR_BG, ARCHIVE_STRIPE, BLUE, BORDER, CYAN, FG, FLASH_BG, GREEN,
+    ARCHIVE_COL_BG, ARCHIVE_STRIPE, BLUE, BORDER, CYAN, FG, FLASH_BG, GREEN,
     MUTED, MUTED_LIGHT, PROJECTS_COL_BG, PROJECTS_CURSOR_BG, PURPLE, YELLOW,
 };
 use super::shared::{
@@ -58,29 +58,6 @@ pub(in crate::tui) fn column_bg_color(status: TaskStatus) -> Color {
     }
 }
 
-/// Stripe color for an edge navigation column (col 0 = Projects, col 5 = Archive).
-pub(in crate::tui) fn edge_column_stripe(col: usize) -> Color {
-    match col {
-        0 => PURPLE,
-        _ => ARCHIVE_STRIPE,
-    }
-}
-
-/// Column background tint for edge columns (col 0 or 5).
-pub(in crate::tui) fn edge_column_bg(col: usize) -> Color {
-    match col {
-        0 => PROJECTS_COL_BG,
-        _ => ARCHIVE_COL_BG,
-    }
-}
-
-/// Cursor highlight background for edge columns.
-pub(in crate::tui) fn edge_cursor_bg(col: usize) -> Color {
-    match col {
-        0 => PROJECTS_CURSOR_BG,
-        _ => ARCHIVE_CURSOR_BG,
-    }
-}
 
 /// Unicode status icon for the metadata line of each card.
 fn status_icon(status: TaskStatus) -> &'static str {
@@ -620,16 +597,7 @@ fn render_columns(
     // Task columns 1–4
     for (task_col_idx, &status) in TaskStatus::ALL.iter().enumerate() {
         let nav_col = task_col_idx + 1;
-        render_task_column(
-            frame,
-            app,
-            column_areas[area_idx],
-            now,
-            status,
-            nav_col,
-            task_col_idx,
-            epic_stats,
-        );
+        render_task_column(frame, app, column_areas[area_idx], now, status, nav_col, epic_stats);
         area_idx += 1;
     }
 
@@ -641,8 +609,8 @@ fn render_columns(
 
 /// Render a single task-status column (Backlog/Running/Review/Done).
 ///
-/// `nav_col` is the navigation column index (1–4) used for focus detection.
-/// `col_idx` is the 0-based index into `selected_row` and `list_states` arrays.
+/// `nav_col` is the navigation column index (1–4) used for focus detection and
+/// derives the 0-based array index (`nav_col - 1`) for `selected_row`/`list_states`.
 fn render_task_column(
     frame: &mut Frame,
     app: &mut App,
@@ -650,9 +618,9 @@ fn render_task_column(
     now: DateTime<Utc>,
     status: TaskStatus,
     nav_col: usize,
-    col_idx: usize,
     epic_stats: &EpicStatsMap,
 ) {
+    let col_idx = nav_col - 1;
     let is_focused = app.selected_column() == nav_col;
     let color = column_color(status);
     // Only Running and Review benefit from substatus grouping headers.
