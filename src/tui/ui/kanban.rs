@@ -1430,8 +1430,10 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled("(epic: jump to subtask tmux)", note),
         ]),
         Line::from(vec![
-            Span::styled("  [l]", key),
-            Span::styled(" →archive   ", desc),
+            Span::styled("  [h/\u{2190}]", key),
+            Span::styled(" Projects  ", desc),
+            Span::styled("[l/\u{2192}]", key),
+            Span::styled(" Archive   ", desc),
             Span::styled("[V]", key),
             Span::styled(" epic done  ", desc),
             Span::styled("[a]", key),

@@ -19,7 +19,7 @@ expression: rendered
                         ║  [d] dispatch*  [m] move fwd   [M] move back                         ║
                         ║  [x] archive    [D] quick dsp  [g] session/board                     ║
                         ║  [G] session    (epic: jump to subtask tmux)                         ║
-                        ║  [l] →archive   [V] epic done  [a] select all                        ║
+                        ║  [h/←] Projects  [l/→] Archive   [V] epic done  [a] select all       ║
                         ║  [Space] select  [f] filter repos  [W] wrap up  (task/epic)          ║
                         ║  [T] detach tmux panel  (Review tasks, supports batch)               ║
                         ║  [S] toggle split mode  (side-by-side with agent)                    ║
