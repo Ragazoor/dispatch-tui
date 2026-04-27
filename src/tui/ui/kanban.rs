@@ -8,7 +8,8 @@ use super::shared::{
 
 use crate::dispatch;
 use crate::models::{
-    format_age, Epic, EpicId, EpicSubstatus, Staleness, SubStatus, Task, TaskStatus, TaskUsage,
+    format_age, Epic, EpicId, EpicSubstatus, Project, Staleness, SubStatus, Task, TaskStatus,
+    TaskUsage,
 };
 use crate::tui::{
     App, ColumnItem, ColumnLayout, EpicStatsMap, InputMode, RepoFilterMode, ViewMode,
@@ -161,7 +162,6 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     render_tab_bar(frame, app, vertical[0]);
     render_summary(frame, app, &epic_stats, vertical[1]);
     render_columns(frame, app, &epic_stats, vertical[2], now);
-    render_projects_panel(frame, app, vertical[2]);
     render_detail(frame, app, vertical[3], now);
     render_status_bar(frame, app, vertical[4]);
 
@@ -611,9 +611,9 @@ fn render_columns(
 
     let mut area_idx = 0usize;
 
-    // Projects column placeholder (only when col 0 focused — rendered in Task 7)
+    // Projects column (only when col 0 focused)
     if sel == 0 {
-        // render empty placeholder for now; Task 7 will add render_projects_column
+        render_projects_column(frame, app, column_areas[area_idx], now);
         area_idx += 1;
     }
 
@@ -847,99 +847,78 @@ fn render_epic_item(
     item
 }
 
-fn render_projects_panel(frame: &mut Frame, app: &mut App, area: Rect) {
-    if !app.projects_panel_visible() {
-        return;
-    }
+fn build_project_list_item<'a>(
+    project: &Project,
+    task_count: usize,
+    is_cursor: bool,
+    is_active: bool,
+    col_width: u16,
+) -> ListItem<'a> {
+    let stripe_color = if is_active {
+        PURPLE
+    } else {
+        Color::Rgb(120, 100, 160)
+    };
+    let stripe = if is_cursor { "▌ " } else { "▎ " };
 
-    let overlay_width = (area.width / 5).clamp(18, 30);
-    let overlay_area = Rect::new(area.x, area.y, overlay_width, area.height);
+    let name = truncate(&project.name, col_width.saturating_sub(4) as usize);
+    let active_marker = if is_active { " ◉" } else { "" };
+    let name_line = Line::from(vec![
+        Span::styled(stripe, Style::default().fg(stripe_color)),
+        Span::styled(
+            format!("{}{}", name, active_marker),
+            if is_cursor {
+                Style::default()
+                    .bg(PROJECTS_CURSOR_BG)
+                    .fg(FG)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(FG)
+            },
+        ),
+    ]);
 
-    frame.render_widget(Clear, overlay_area);
+    let meta_line = Line::from(Span::styled(
+        format!("   {} tasks", task_count),
+        Style::default().fg(MUTED),
+    ));
 
-    let block = Block::default()
-        .title(" Projects ")
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .border_style(Style::default().fg(PURPLE))
-        .title_style(Style::default().fg(PURPLE).add_modifier(Modifier::BOLD));
+    ListItem::new(vec![name_line, meta_line])
+}
 
-    let inner = block.inner(overlay_area);
-
-    let selected_row = app.selected_project_row();
+fn render_projects_column(frame: &mut Frame, app: &mut App, area: Rect, _now: DateTime<Utc>) {
+    let sel_row = app.selected_project_row();
     let active_project = app.active_project();
+
+    let bg_block = Block::default().style(Style::default().bg(PROJECTS_COL_BG));
+    frame.render_widget(bg_block, area);
+
     let items: Vec<ListItem> = app
         .projects()
         .iter()
         .enumerate()
         .map(|(idx, project)| {
-            let marker = if project.id == active_project { "\u{25cf} " } else { "  " };
-            let label = format!("{}{}", marker, project.name);
-            if idx == selected_row {
-                ListItem::new(Line::from(Span::styled(
-                    label,
-                    Style::default()
-                        .bg(Color::Rgb(50, 34, 66))
-                        .fg(super::palette::FG)
-                        .add_modifier(Modifier::BOLD),
-                )))
-            } else {
-                ListItem::new(Line::from(Span::styled(
-                    label,
-                    Style::default().fg(MUTED_LIGHT),
-                )))
-            }
+            let task_count = app
+                .tasks()
+                .iter()
+                .filter(|t| t.project_id == project.id && t.status != TaskStatus::Archived)
+                .count();
+            build_project_list_item(
+                project,
+                task_count,
+                idx == sel_row,
+                project.id == active_project,
+                area.width,
+            )
         })
         .collect();
 
-    let confirm_text: Option<String> = match app.mode() {
-        InputMode::ConfirmDeleteProject1 { .. } => {
-            let name = app
-                .selected_project()
-                .map(|p| p.name.as_str())
-                .unwrap_or("?");
-            Some(format!("Delete \"{}\"? [y/n]", name))
-        }
-        InputMode::ConfirmDeleteProject2 { item_count, .. } => {
-            Some(format!("Move {} items to Default? [y/n]", item_count))
-        }
-        _ => None,
-    };
-
-    let show_input = matches!(app.mode(), InputMode::InputProjectName { .. });
-
-    let (list_area, input_area) = if show_input {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(1), Constraint::Length(3)])
-            .split(inner);
-        (chunks[0], Some(chunks[1]))
-    } else {
-        (inner, None)
-    };
-
-    frame.render_widget(block, overlay_area);
-
-    if let Some(confirm) = confirm_text {
-        let para = Paragraph::new(confirm)
-            .style(Style::default().fg(YELLOW))
-            .wrap(Wrap { trim: true });
-        frame.render_widget(para, list_area);
-    } else {
-        let list = List::new(items);
-        frame.render_stateful_widget(list, list_area, &mut app.projects_panel.list_state);
-    }
-
-    if let Some(input_rect) = input_area {
-        let prompt = match app.mode() {
-            InputMode::InputProjectName { editing_id: None } => "New project: ",
-            _ => "Rename: ",
-        };
-        let input_widget = Paragraph::new(format!("{}{}", prompt, app.input_buffer()))
-            .style(Style::default().fg(super::palette::FG))
-            .block(Block::default().borders(Borders::ALL));
-        frame.render_widget(input_widget, input_rect);
-    }
+    let title = format!(" Projects ({}) ", app.projects().len());
+    let block = Block::default()
+        .title(title)
+        .title_style(Style::default().fg(PURPLE).add_modifier(Modifier::BOLD));
+    let list = List::new(items).block(block);
+    frame.render_stateful_widget(list, area, &mut app.projects_panel.list_state);
 }
 
 fn format_tokens(n: i64) -> String {
