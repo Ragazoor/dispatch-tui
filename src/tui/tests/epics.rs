@@ -2047,6 +2047,39 @@ fn test_epic_anchor_preserved_on_refresh() {
 }
 
 #[test]
+fn epic_view_navigation_does_not_enter_projects_or_archive() {
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    app.board.epics = vec![make_epic(10)];
+    app.update(Message::EnterEpic(EpicId(10)));
+    assert!(matches!(app.board.view_mode, ViewMode::Epic { .. }));
+
+    // Starts at Backlog (column 1)
+    assert_eq!(app.selected_column(), 1);
+
+    // Navigate left past Backlog — should not enter Projects (col 0)
+    app.update(Message::NavigateColumn(-1));
+    assert_eq!(
+        app.selected_column(),
+        1,
+        "should not enter Projects (col 0) from epic view"
+    );
+
+    // Navigate right to Done (col 4)
+    for _ in 0..3 {
+        app.update(Message::NavigateColumn(1));
+    }
+    assert_eq!(app.selected_column(), 4);
+
+    // Navigate right past Done — should not enter Archive (col 5)
+    app.update(Message::NavigateColumn(1));
+    assert_eq!(
+        app.selected_column(),
+        4,
+        "should not enter Archive (col 5) from epic view"
+    );
+}
+
+#[test]
 fn test_selection_survives_flatten_toggle() {
     // Use task IDs > 1 so they sort after Epic(1) in the column.
     // Column order: [Task(1), Epic(1), Task(2)] — tasks inserted before epics,
