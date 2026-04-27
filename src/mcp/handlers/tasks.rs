@@ -46,6 +46,8 @@ pub(super) struct UpdateTaskArgs {
     pub(super) epic_id: Option<i64>,
     #[serde(default)]
     pub(super) base_branch: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
+    pub(super) project_id: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -294,6 +296,23 @@ pub(super) fn handle_update_task(
     }
     if let Some(epic_id) = parsed.epic_id {
         params = params.epic_id(epic_id);
+    }
+    if let Some(project_id) = parsed.project_id {
+        if !state
+            .db
+            .list_projects()
+            .unwrap_or_default()
+            .iter()
+            .any(|p| p.id == project_id)
+        {
+            return service_err_to_response(
+                id,
+                crate::service::ServiceError::Validation(format!(
+                    "project {project_id} does not exist"
+                )),
+            );
+        }
+        params = params.project_id(project_id);
     }
     let fields_display = params.updated_field_names().join(", ");
 

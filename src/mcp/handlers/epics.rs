@@ -50,6 +50,8 @@ pub(super) struct UpdateEpicArgs {
     pub(super) sort_order: Option<i64>,
     #[serde(default)]
     pub(super) repo_path: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
+    pub(super) project_id: Option<i64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -199,6 +201,21 @@ pub(super) fn handle_update_epic(
         );
     }
 
+    if let Some(project_id) = parsed.project_id {
+        if !state
+            .db
+            .list_projects()
+            .unwrap_or_default()
+            .iter()
+            .any(|p| p.id == project_id)
+        {
+            return service_err_to_response(
+                id,
+                ServiceError::Validation(format!("project {project_id} does not exist")),
+            );
+        }
+    }
+
     let params = UpdateEpicParams {
         epic_id: parsed.epic_id,
         title: parsed.title,
@@ -210,6 +227,7 @@ pub(super) fn handle_update_epic(
         auto_dispatch: None,
         feed_command: None,
         feed_interval_secs: None,
+        project_id: parsed.project_id,
     };
     let field_names: Vec<String> = params
         .updated_field_names()

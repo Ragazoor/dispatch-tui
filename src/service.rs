@@ -63,6 +63,7 @@ pub struct UpdateTaskParams {
     pub worktree: Option<FieldUpdate>,
     pub tmux_window: Option<FieldUpdate>,
     pub base_branch: Option<String>,
+    pub project_id: Option<ProjectId>,
 }
 
 impl UpdateTaskParams {
@@ -111,6 +112,9 @@ impl UpdateTaskParams {
         if self.base_branch.is_some() {
             names.push("base_branch");
         }
+        if self.project_id.is_some() {
+            names.push("project_id");
+        }
         names
     }
 
@@ -131,6 +135,7 @@ impl UpdateTaskParams {
             worktree: None,
             tmux_window: None,
             base_branch: None,
+            project_id: None,
         }
     }
 
@@ -196,6 +201,11 @@ impl UpdateTaskParams {
 
     pub fn base_branch(mut self, base_branch: Option<String>) -> Self {
         self.base_branch = base_branch;
+        self
+    }
+
+    pub fn project_id(mut self, project_id: ProjectId) -> Self {
+        self.project_id = Some(project_id);
         self
     }
 }
@@ -293,6 +303,9 @@ fn build_task_patch<'a>(
     }
     if let Some(ss) = sub_status {
         patch = patch.sub_status(ss);
+    }
+    if let Some(pid) = params.project_id {
+        patch = patch.project_id(pid);
     }
     patch
 }
@@ -688,6 +701,7 @@ pub struct UpdateEpicParams {
     pub auto_dispatch: Option<bool>,
     pub feed_command: Option<FieldUpdate>,
     pub feed_interval_secs: Option<i64>,
+    pub project_id: Option<ProjectId>,
 }
 
 impl UpdateEpicParams {
@@ -723,6 +737,9 @@ impl UpdateEpicParams {
         }
         if self.feed_interval_secs.is_some() {
             names.push("feed_interval_secs");
+        }
+        if self.project_id.is_some() {
+            names.push("project_id");
         }
         names
     }
@@ -897,6 +914,9 @@ impl EpicService {
         }
         if let Some(fi) = params.feed_interval_secs {
             patch = patch.feed_interval_secs(Some(fi));
+        }
+        if let Some(pid) = params.project_id {
+            patch = patch.project_id(pid);
         }
 
         let epic_id = EpicId(params.epic_id);
@@ -1493,6 +1513,7 @@ mod tests {
             auto_dispatch: None,
             feed_command: None,
             feed_interval_secs: None,
+            project_id: None,
         })
         .unwrap();
 
@@ -1530,6 +1551,7 @@ mod tests {
                 auto_dispatch: None,
                 feed_command: None,
                 feed_interval_secs: None,
+                project_id: None,
             })
             .unwrap_err();
         assert!(matches!(err, ServiceError::Validation(_)));
@@ -1566,6 +1588,7 @@ mod tests {
             auto_dispatch: Some(false),
             feed_command: None,
             feed_interval_secs: None,
+            project_id: None,
         })
         .unwrap();
 
@@ -2518,6 +2541,7 @@ mod tests {
             auto_dispatch: None,
             feed_command: None,
             feed_interval_secs: None,
+            project_id: None,
         };
         assert!(
             with_field.has_any_field(),
@@ -2539,6 +2563,7 @@ mod tests {
             auto_dispatch: None,
             feed_command: None,
             feed_interval_secs: None,
+            project_id: None,
         };
         assert!(
             !empty.has_any_field(),
@@ -2569,6 +2594,7 @@ mod tests {
             UpdateTaskParams::for_task(1).worktree(FieldUpdate::Set("w".to_string())),
             UpdateTaskParams::for_task(1).tmux_window(FieldUpdate::Set("tw".to_string())),
             UpdateTaskParams::for_task(1).base_branch(Some("main".to_string())),
+            UpdateTaskParams::for_task(1).project_id(1),
         ];
         for params in &cases {
             assert!(
@@ -2598,6 +2624,7 @@ mod tests {
             auto_dispatch: None,
             feed_command: None,
             feed_interval_secs: None,
+            project_id: None,
         };
         let cases: Vec<UpdateEpicParams> = vec![
             UpdateEpicParams {
@@ -2634,6 +2661,10 @@ mod tests {
             },
             UpdateEpicParams {
                 feed_interval_secs: Some(300),
+                ..base()
+            },
+            UpdateEpicParams {
+                project_id: Some(1),
                 ..base()
             },
         ];
@@ -2790,4 +2821,80 @@ mod tests {
         assert_eq!(subs.len(), 1);
         assert_eq!(subs[0].id, child.id);
     }
+
+    // -- project_id in update_task --------------------------------------------
+
+    #[test]
+    fn update_task_project_id_moves_task() {
+        let db = test_db();
+        let svc = task_svc(&db);
+        let d: Arc<dyn db::ProjectCrud> = db.clone();
+        let other = d.create_project("Dispatch", 1).unwrap();
+
+        let id = svc
+            .create_task(CreateTaskParams {
+                title: "T".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                plan_path: None,
+                epic_id: None,
+                sort_order: None,
+                tag: None,
+                base_branch: None,
+                project_id: 1,
+            })
+            .unwrap();
+
+        svc.update_task(UpdateTaskParams::for_task(id.0).project_id(other.id))
+            .unwrap();
+
+        let db2: Arc<dyn db::TaskCrud> = db.clone();
+        let task = db2.get_task(id).unwrap().unwrap();
+        assert_eq!(task.project_id, other.id);
+    }
+
+
+    // -- project_id in update_epic --------------------------------------------
+
+    #[test]
+    fn update_epic_project_id_moves_epic() {
+        let db = test_db();
+        let svc = epic_svc(&db);
+        let d: Arc<dyn db::ProjectCrud> = db.clone();
+        let other = d.create_project("Dispatch", 1).unwrap();
+
+        let epic = svc
+            .create_epic(CreateEpicParams {
+                title: "E".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                sort_order: None,
+                parent_epic_id: None,
+                feed_command: None,
+                feed_interval_secs: None,
+                project_id: 1,
+            })
+            .unwrap();
+
+        svc.update_epic(UpdateEpicParams {
+            epic_id: epic.id.0,
+            title: None,
+            description: None,
+            status: None,
+            plan_path: None,
+            sort_order: None,
+            repo_path: None,
+            auto_dispatch: None,
+            feed_command: None,
+            feed_interval_secs: None,
+            project_id: Some(other.id),
+        })
+        .unwrap();
+
+        let d2: Arc<dyn db::EpicCrud> = db.clone();
+        let epics = d2.list_epics().unwrap();
+        let updated = epics.iter().find(|e| e.id == epic.id).unwrap();
+        assert_eq!(updated.project_id, other.id);
+    }
+
 }

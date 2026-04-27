@@ -331,10 +331,16 @@ rule DeleteEpic {
 -- == MCP Epic Tools ==
 
 rule UpdateEpicViaMcp {
-    when: McpUpdateEpic(epic, title?, description?, status?, plan?, sort_order?, repo_path?)
+    when: McpUpdateEpic(epic, title?, description?, status?, plan?, sort_order?, repo_path?,
+                        project_id?)
 
     requires: title != null or description != null or status != null
               or plan != null or sort_order != null or repo_path != null
+              or project_id != null
+
+    -- project_id must refer to an existing project when provided
+    requires:
+        if project_id != null: Project.exists(project_id)
 
     -- Cannot set status to archived via MCP. The agent receives a
     -- validation error instructing them to ask the human operator to
@@ -353,6 +359,8 @@ rule UpdateEpicViaMcp {
         if sort_order != null: epic.sort_order = sort_order
     ensures:
         if repo_path != null: epic.repo_path = repo_path
+    ensures:
+        if project_id != null: epic.project_id = project_id
 
     @guidance
         -- updated_at is refreshed automatically by the database layer
@@ -362,6 +370,8 @@ rule UpdateEpicViaMcp {
         -- tool; it is toggled only from the TUI through ToggleAutoDispatch.
         -- repo_path is expanded through expand_tilde before being
         -- stored (so "~/proj" becomes "$HOME/proj").
+        -- project_id must refer to an existing project; an unknown ID
+        -- returns a -32602 validation error.
 }
 
 rule DispatchNextViaMcp {

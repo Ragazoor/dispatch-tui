@@ -125,6 +125,10 @@ mcp_tools! {
                 "base_branch": {
                     "type": "string",
                     "description": "The base branch for rebase and PR operations (e.g. 'main', 'develop'). Defaults to 'main' if not specified."
+                },
+                "project_id": {
+                    "type": "integer",
+                    "description": "Move the task to a different project. Use list_projects to look up IDs."
                 }
             },
             "required": ["task_id"]
@@ -259,7 +263,7 @@ mcp_tools! {
         { "type": "object", "properties": {} };
 
     sync "update_epic" => epics::handle_update_epic,
-        "Update an epic's title, description, status, plan, sort order, or repo path.",
+        "Update an epic's title, description, status, plan, sort order, repo path, or project.",
         {
             "type": "object",
             "properties": {
@@ -269,7 +273,8 @@ mcp_tools! {
                 "status": { "type": "string", "description": "New status: backlog, running, review, or done", "enum": ["backlog", "running", "review", "done"] },
                 "plan_path": { "type": "string", "description": "Path to the plan file" },
                 "sort_order": { "type": "integer", "description": "Display order within column (lower values appear first)" },
-                "repo_path": { "type": "string", "description": "Repository path for the epic" }
+                "repo_path": { "type": "string", "description": "Repository path for the epic" },
+                "project_id": { "type": "integer", "description": "Move the epic to a different project. Use list_projects to look up IDs." }
             },
             "required": ["epic_id"]
         };
@@ -490,7 +495,38 @@ mcp_tools! {
                 }
             },
             "required": ["repo", "number", "kind", "local_repo"]
+        };
+
+    sync "list_projects" => handle_list_projects,
+        "List all projects on the board so you can look up a project_id by name.",
+        { "type": "object", "properties": {} }
+}
+
+// ---------------------------------------------------------------------------
+// list_projects handler
+// ---------------------------------------------------------------------------
+
+fn handle_list_projects(state: &McpState, id: Option<Value>, _args: Value) -> JsonRpcResponse {
+    match state.db.list_projects() {
+        Ok(projects) => {
+            let text = projects
+                .iter()
+                .map(|p| {
+                    if p.is_default {
+                        format!("- [{}] {} (default)", p.id, p.name)
+                    } else {
+                        format!("- [{}] {}", p.id, p.name)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            JsonRpcResponse::ok(
+                id,
+                json!({"content": [{"type": "text", "text": text}]}),
+            )
         }
+        Err(e) => JsonRpcResponse::err(id, -32603, format!("Failed to list projects: {e}")),
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -56,6 +56,7 @@ impl TuiRuntime {
             auto_dispatch: None,
             feed_command: None,
             feed_interval_secs: None,
+            project_id: None,
         }) {
             app.update(Message::Error(Self::db_error("updating epic", e)));
         }
@@ -78,6 +79,7 @@ impl TuiRuntime {
             auto_dispatch: Some(auto_dispatch),
             feed_command: None,
             feed_interval_secs: None,
+            project_id: None,
         }) {
             app.update(Message::Error(Self::db_error("toggling auto dispatch", e)));
         }

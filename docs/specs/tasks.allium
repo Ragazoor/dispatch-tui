@@ -1055,13 +1055,17 @@ rule RetryFresh {
 rule UpdateTaskViaMcp {
     when: McpUpdateTask(task, status?, sub_status?, plan?, title?, description?,
                         repo_path?, sort_order?, pr_url?, tag?, epic_id?,
-                        base_branch?)
+                        base_branch?, project_id?)
 
     requires: status != null or sub_status != null or plan != null or title != null
               or description != null or repo_path != null
               or sort_order != null or epic_id != null
               or pr_url != null or tag != null
-              or base_branch != null
+              or base_branch != null or project_id != null
+
+    -- project_id must refer to an existing project when provided
+    requires:
+        if project_id != null: Project.exists(project_id)
 
     -- Cannot set status to done or archived via MCP. This restriction
     -- is enforced at the MCP handler boundary, not in the service layer.
@@ -1102,19 +1106,35 @@ rule UpdateTaskViaMcp {
         if epic_id != null: task.epic = core/Epic.find(epic_id)
     ensures:
         if base_branch != null: task.base_branch = base_branch
+    ensures:
+        if project_id != null: task.project_id = project_id
     ensures: task.updated_at = now
 
     @guidance
         -- MCP update_task accepts status, sub_status, plan_path, title,
         -- description, repo_path, sort_order, pr_url, tag, epic_id,
-        -- and base_branch. It does NOT accept worktree or tmux_window —
-        -- those are owned by the dispatch flow and never set via MCP.
+        -- base_branch, and project_id. It does NOT accept worktree or
+        -- tmux_window — those are owned by the dispatch flow and never
+        -- set via MCP.
         -- An empty-string pr_url clears the field (maps to FieldUpdate::Clear);
         -- any non-empty string sets it.
         -- When status or epic_id changes, the parent epic's status is
         -- recalculated (if a parent epic exists). Re-assigning a task
         -- from one epic to another triggers recalculation on both the
         -- old and new epic.
+        -- project_id must refer to an existing project; an unknown ID
+        -- returns a -32602 validation error.
+}
+
+rule ListProjectsViaMcp {
+    when: McpListProjects()
+
+    ensures: returns list of all core/Project records ordered by sort_order
+
+    @guidance
+        -- Returns all projects (including the default one) so agents can
+        -- look up a project_id by name before calling update_task or
+        -- update_epic.
 }
 
 rule ClaimTaskViaMcp {
