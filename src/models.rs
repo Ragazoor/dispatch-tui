@@ -96,7 +96,7 @@ impl TaskStatus {
             TaskStatus::Running => 1,
             TaskStatus::Review => 2,
             TaskStatus::Done => 3,
-            TaskStatus::Archived => 0, // Not displayed in kanban
+            TaskStatus::Archived => TaskStatus::COLUMN_COUNT, // Virtual archive column, rightmost
         }
     }
 
@@ -1664,6 +1664,11 @@ mod tests {
             TaskStatus::parse("Backlog").is_none(),
             "should be case-sensitive"
         );
+    }
+
+    #[test]
+    fn archived_column_index_is_column_count() {
+        assert_eq!(TaskStatus::Archived.column_index(), TaskStatus::COLUMN_COUNT);
     }
 
     #[test]
