@@ -153,11 +153,8 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
         }
         if event::poll(Duration::from_millis(50)).unwrap_or(false) {
             match event::read() {
-                Ok(Event::Key(key)) => {
-                    if key_tx.send(key).is_err() {
-                        break;
-                    }
-                }
+                Ok(Event::Key(key)) if key_tx.send(key).is_err() => break,
+                Ok(Event::Key(_)) => {}
                 Ok(Event::Resize(..)) => {
                     let _ = resize_tx.send(Message::TerminalResized);
                 }

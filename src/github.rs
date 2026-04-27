@@ -1,6 +1,7 @@
 use crate::models::{CiStatus, ReviewDecision, ReviewPr, Reviewer};
 use crate::process::ProcessRunner;
 use chrono::{DateTime, Utc};
+use std::cmp::Reverse;
 
 /// Determine the effective review decision for a PR node.
 ///
@@ -267,7 +268,7 @@ fn parse_prs_response(json: &str, alias_count: usize) -> Result<Vec<ReviewPr>, S
         });
     }
 
-    prs.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    prs.sort_by_key(|pr| Reverse(pr.updated_at));
     Ok(prs)
 }
 
