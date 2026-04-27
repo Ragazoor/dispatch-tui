@@ -939,7 +939,7 @@ fn reorder_task_down_swaps_sort_order() {
         2
     );
     // Cursor should have moved down
-    assert_eq!(app.selection().row(0), 1);
+    assert_eq!(app.selection().row(1), 1);
 }
 
 #[test]
@@ -970,7 +970,7 @@ fn reorder_task_up_swaps_sort_order() {
     app.board.tasks = vec![t1, t2];
 
     // Move cursor to row 1 (second task), then reorder up
-    app.selection_mut().set_row(0, 1);
+    app.selection_mut().set_row(1, 1);
     let cmds = app.update(Message::ReorderItem(-1));
 
     // After reorder, task 2 should have a lower sort value than task 1
@@ -989,7 +989,7 @@ fn reorder_task_up_swaps_sort_order() {
         2
     );
     // Cursor should have moved up
-    assert_eq!(app.selection().row(0), 0);
+    assert_eq!(app.selection().row(1), 0);
 }
 
 #[test]
@@ -1344,8 +1344,8 @@ fn task_card_title_adapts_to_terminal_width() {
 #[test]
 fn handle_key_normal_reorder_j_down() {
     let mut app = make_app();
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 0);
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
     let cmds = app.handle_key(make_key(KeyCode::Char('J')));
     // Reorder should produce a persist command
     assert!(cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
@@ -1354,8 +1354,8 @@ fn handle_key_normal_reorder_j_down() {
 #[test]
 fn handle_key_normal_reorder_k_up() {
     let mut app = make_app();
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 1);
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 1);
     let cmds = app.handle_key(make_key(KeyCode::Char('K')));
     assert!(cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
 }
@@ -1364,8 +1364,8 @@ fn handle_key_normal_reorder_k_up() {
 fn handle_key_normal_enter_on_select_all_row() {
     let mut app = make_app();
     // Navigate up past first item to land on "select all" virtual row
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 0);
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
     // Manually set on_select_all
     app.selection_mut().on_select_all = true;
 
@@ -1397,7 +1397,7 @@ fn backlog_column_color_is_blue() {
 #[test]
 fn focused_backlog_header_renders_in_blue() {
     let mut app = make_app();
-    assert_eq!(app.selected_column(), 0);
+    assert_eq!(app.selected_column(), 1);
 
     let buf = render_to_buffer(&mut app, 100, 20);
     let area = buf.area();

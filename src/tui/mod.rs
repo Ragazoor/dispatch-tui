@@ -586,7 +586,12 @@ impl App {
             return None;
         }
         let col = self.selection().column();
-        let status = TaskStatus::from_column_index(col)?;
+        // Edge columns (Projects=0, Archive=5) have no task/epic column items.
+        if col == 0 || col == TaskStatus::COLUMN_COUNT + 1 {
+            return None;
+        }
+        // Task columns 1–4: offset by 1 to get the 0-based task status index.
+        let status = TaskStatus::from_column_index(col - 1)?;
         let items = self.column_items_for_status(status);
         let row = self.selection().row(col);
         items.into_iter().nth(row)
@@ -612,13 +617,15 @@ impl App {
 
     /// Clamp all selected_row values to be within bounds for each column.
     pub fn clamp_selection(&mut self) {
-        for (col, &status) in TaskStatus::ALL.iter().enumerate() {
+        // Task columns use nav col offset: Backlog=1, Running=2, Review=3, Done=4.
+        for (idx, &status) in TaskStatus::ALL.iter().enumerate() {
+            let nav_col = idx + 1; // convert 0-based task index to nav col
             let count = self.column_item_count(status);
             let sel = self.selection_mut();
             if count == 0 {
-                sel.set_row(col, 0);
-            } else if sel.row(col) >= count {
-                sel.set_row(col, count - 1);
+                sel.set_row(nav_col, 0);
+            } else if sel.row(nav_col) >= count {
+                sel.set_row(nav_col, count - 1);
             }
         }
     }
@@ -635,12 +642,13 @@ impl App {
             return;
         }
         let col = self.selection().column();
-        // Archive column (col == COLUMN_COUNT) has no row array slot; nothing to anchor.
-        if col >= TaskStatus::COLUMN_COUNT {
+        // Edge columns (Projects=0, Archive=5) have no anchoring in the task board.
+        if col == 0 || col > TaskStatus::COLUMN_COUNT {
             return;
         }
         let row = self.selection().row(col);
-        let status = match TaskStatus::from_column_index(col) {
+        // Task columns 1–4: offset by 1 to get the 0-based task status index.
+        let status = match TaskStatus::from_column_index(col - 1) {
             Some(s) => s,
             None => return,
         };
@@ -671,7 +679,9 @@ impl App {
 
         let stats = self.compute_epic_stats();
         let mut found: Option<(usize, usize)> = None;
-        'outer: for (col, &status) in TaskStatus::ALL.iter().enumerate() {
+        // Task columns use nav col offset: Backlog=1, Running=2, Review=3, Done=4.
+        'outer: for (idx, &status) in TaskStatus::ALL.iter().enumerate() {
+            let nav_col = idx + 1;
             let items = self.column_items_for_status_with_stats(status, Some(&stats));
             for (row, item) in items.into_iter().enumerate() {
                 let item_anchor = match item {
@@ -679,23 +689,24 @@ impl App {
                     ColumnItem::Epic(e) => ColumnAnchor::Epic(e.id),
                 };
                 if item_anchor == anchor {
-                    found = Some((col, row));
+                    found = Some((nav_col, row));
                     break 'outer;
                 }
             }
         }
 
         if let Some((found_col, found_row)) = found {
-            for (col, &status) in TaskStatus::ALL.iter().enumerate() {
-                if col == found_col {
+            for (idx, &status) in TaskStatus::ALL.iter().enumerate() {
+                let nav_col = idx + 1;
+                if nav_col == found_col {
                     continue;
                 }
                 let count = self.column_item_count(status);
                 let sel = self.selection_mut();
                 if count == 0 {
-                    sel.set_row(col, 0);
-                } else if sel.row(col) >= count {
-                    sel.set_row(col, count - 1);
+                    sel.set_row(nav_col, 0);
+                } else if sel.row(nav_col) >= count {
+                    sel.set_row(nav_col, count - 1);
                 }
             }
             let sel = self.selection_mut();
@@ -973,20 +984,6 @@ impl App {
                 }
                 vec![]
             }
-            Message::OpenProjectsPanel => {
-                if let Some(idx) = self
-                    .board
-                    .projects
-                    .iter()
-                    .position(|p| p.id == self.active_project)
-                {
-                    self.projects_panel.list_state.select(Some(idx));
-                }
-                vec![]
-            }
-            Message::CloseProjectsPanel => {
-                vec![]
-            }
         }
     }
 
@@ -1054,13 +1051,19 @@ impl App {
     }
 
     fn handle_navigate_column(&mut self, delta: isize) -> Vec<Command> {
-        // COLUMN_COUNT (4) is the virtual archive column; normal columns are 0..COLUMN_COUNT-1.
+        // Column range [0, 5]: 0=Projects, 1=Backlog, 2=Running, 3=Review, 4=Done, 5=Archive.
+        // In Epic view, Projects and Archive are not shown; clamp to [1, COLUMN_COUNT].
+        let (min_col, max_col) = if matches!(self.board.view_mode, ViewMode::Epic { .. }) {
+            (1isize, TaskStatus::COLUMN_COUNT as isize) // [1, 4] in epic view
+        } else {
+            (0isize, TaskStatus::COLUMN_COUNT as isize + 1) // [0, 5] on main board
+        };
         let new_col = (self.selection().column() as isize + delta)
-            .clamp(0, TaskStatus::COLUMN_COUNT as isize) as usize;
+            .clamp(min_col, max_col) as usize;
         self.selection_mut().set_column(new_col);
 
-        let at_archive = new_col == TaskStatus::COLUMN_COUNT;
-        if at_archive {
+        // Reset archive list state when entering the archive column.
+        if new_col == TaskStatus::COLUMN_COUNT + 1 {
             self.archive.selected_row = 0;
             *self.archive.list_state.selected_mut() = Some(0);
         }
@@ -1072,10 +1075,34 @@ impl App {
 
     fn handle_navigate_row(&mut self, delta: isize) -> Vec<Command> {
         let col = self.selection().column();
-        if col >= TaskStatus::COLUMN_COUNT {
+
+        // Edge columns: Projects (0) and Archive (5)
+        if col == 0 {
+            let count = self.board.projects.len();
+            if count == 0 {
+                return vec![];
+            }
+            let new_row = (self.selection().row(0) as isize + delta)
+                .clamp(0, count as isize - 1) as usize;
+            self.selection_mut().set_row(0, new_row);
+            self.projects_panel.list_state.select(Some(new_row));
             return vec![];
         }
-        let status = match TaskStatus::from_column_index(col) {
+        if col == TaskStatus::COLUMN_COUNT + 1 {
+            let count = self.archived_tasks().len();
+            if count == 0 {
+                return vec![];
+            }
+            let new_row = (self.selection().row(TaskStatus::COLUMN_COUNT + 1) as isize + delta)
+                .clamp(0, count as isize - 1) as usize;
+            self.selection_mut()
+                .set_row(TaskStatus::COLUMN_COUNT + 1, new_row);
+            self.archive.list_state.select(Some(new_row));
+            return vec![];
+        }
+
+        // Task columns 1–4: pass col-1 to from_column_index
+        let status = match TaskStatus::from_column_index(col - 1) {
             Some(s) => s,
             None => return vec![],
         };
@@ -1110,7 +1137,11 @@ impl App {
 
     fn handle_reorder_item(&mut self, direction: isize) -> Vec<Command> {
         let col = self.selection().column();
-        let Some(status) = TaskStatus::from_column_index(col) else {
+        // Edge columns (Projects=0, Archive=5) don't support reorder
+        if col == 0 || col == TaskStatus::COLUMN_COUNT + 1 {
+            return vec![];
+        }
+        let Some(status) = TaskStatus::from_column_index(col - 1) else {
             return vec![];
         };
         let row = self.selection().row(col);
@@ -1867,7 +1898,11 @@ impl App {
 
     fn handle_select_all_column(&mut self) -> Vec<Command> {
         let col = self.selection().column();
-        let Some(status) = TaskStatus::from_column_index(col) else {
+        // Edge columns (Projects=0, Archive=5) don't support select-all.
+        if col == 0 || col == TaskStatus::COLUMN_COUNT + 1 {
+            return vec![];
+        }
+        let Some(status) = TaskStatus::from_column_index(col - 1) else {
             return vec![];
         };
         let items = self.column_items_for_status(status);
@@ -2975,7 +3010,7 @@ impl App {
         let parent = Box::new(self.board.view_mode.clone());
         self.board.view_mode = ViewMode::Epic {
             epic_id,
-            selection: BoardSelection::new(),
+            selection: BoardSelection::new_for_epic(),
             parent,
         };
         self.board.detail_visible = false;

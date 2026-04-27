@@ -110,15 +110,6 @@ impl App {
                 }
             }
 
-            // In Board view at column 0, h/Left opens the projects panel instead of
-            // navigating left (there is nothing to the left of Backlog).
-            KeyCode::Char('h') | KeyCode::Left
-                if matches!(self.board.view_mode, ViewMode::Board(_))
-                    && self.selection().column() == 0 =>
-            {
-                self.update(Message::OpenProjectsPanel)
-            }
-
             KeyCode::Char('h') | KeyCode::Left => self.update(Message::NavigateColumn(-1)),
             KeyCode::Char('l') | KeyCode::Right => self.update(Message::NavigateColumn(1)),
             KeyCode::Char('j') | KeyCode::Down => self.update(Message::NavigateRow(1)),
@@ -356,15 +347,21 @@ impl App {
         match key.code {
             KeyCode::Char('j') | KeyCode::Down => {
                 let count = self.archived_tasks().len();
-                if count > 0 && self.archive.selected_row < count - 1 {
-                    self.archive.selected_row += 1;
+                if count > 0 {
+                    let archive_col = TaskStatus::COLUMN_COUNT + 1;
+                    let next = (self.selection().row(archive_col) + 1).min(count - 1);
+                    self.selection_mut().set_row(archive_col, next);
+                    self.archive.selected_row = next;
+                    *self.archive.list_state.selected_mut() = Some(next);
                 }
-                *self.archive.list_state.selected_mut() = Some(self.archive.selected_row);
                 vec![]
             }
             KeyCode::Char('k') | KeyCode::Up => {
-                self.archive.selected_row = self.archive.selected_row.saturating_sub(1);
-                *self.archive.list_state.selected_mut() = Some(self.archive.selected_row);
+                let archive_col = TaskStatus::COLUMN_COUNT + 1;
+                let prev = self.selection().row(archive_col).saturating_sub(1);
+                self.selection_mut().set_row(archive_col, prev);
+                self.archive.selected_row = prev;
+                *self.archive.list_state.selected_mut() = Some(prev);
                 vec![]
             }
             KeyCode::Char('h') | KeyCode::Left | KeyCode::Esc => {
@@ -813,23 +810,29 @@ impl App {
                 let len = self.board.projects.len();
                 if len > 0 {
                     let next = (self.selection().row(0) + 1).min(len - 1);
+                    self.selection_mut().set_row(0, next);
                     self.projects_panel.list_state.select(Some(next));
                 }
                 vec![]
             }
             KeyCode::Char('k') | KeyCode::Up => {
                 let prev = self.selection().row(0).saturating_sub(1);
+                self.selection_mut().set_row(0, prev);
                 self.projects_panel.list_state.select(Some(prev));
                 vec![]
             }
             KeyCode::Char('l') | KeyCode::Enter => {
                 if let Some(id) = self.selected_project().map(|p| p.id) {
-                    return self.update(Message::SelectProject(id));
+                    let mut cmds = self.update(Message::SelectProject(id));
+                    // Close the panel by navigating right to Backlog (col 1)
+                    cmds.extend(self.update(Message::NavigateColumn(1)));
+                    return cmds;
                 }
                 vec![]
             }
             KeyCode::Char('h') | KeyCode::Left | KeyCode::Esc => {
-                vec![]
+                // Close projects panel by navigating right to Backlog (col 1)
+                self.update(Message::NavigateColumn(1))
             }
             KeyCode::Char('n') => {
                 self.input.mode = InputMode::InputProjectName { editing_id: None };
@@ -943,7 +946,11 @@ impl App {
         match key.code {
             KeyCode::Char('y') => {
                 self.input.mode = InputMode::Normal;
-                vec![Command::DeleteProject { id }]
+                // Navigate away from Projects panel (col 0) to Backlog (col 1)
+                let nav = self.update(Message::NavigateColumn(1));
+                let mut cmds = vec![Command::DeleteProject { id }];
+                cmds.extend(nav);
+                cmds
             }
             KeyCode::Char('n') | KeyCode::Esc => {
                 self.input.mode = InputMode::Normal;

@@ -371,7 +371,7 @@ fn escape_from_repo_path_mode_cancels() {
 #[test]
 fn confirm_delete_y_deletes_task() {
     let mut app = make_app();
-    app.selection_mut().set_column(0);
+    app.selection_mut().set_column(1);
     app.input.mode = InputMode::ConfirmDelete;
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert_eq!(app.input.mode, InputMode::Normal);
@@ -383,7 +383,7 @@ fn confirm_delete_y_deletes_task() {
 #[test]
 fn confirm_delete_uppercase_y_deletes_task() {
     let mut app = make_app();
-    app.selection_mut().set_column(0);
+    app.selection_mut().set_column(1);
     app.input.mode = InputMode::ConfirmDelete;
     let cmds = app.handle_key(make_key(KeyCode::Char('Y')));
     assert_eq!(app.input.mode, InputMode::Normal);
@@ -394,7 +394,7 @@ fn confirm_delete_uppercase_y_deletes_task() {
 #[test]
 fn confirm_delete_n_cancels() {
     let mut app = make_app();
-    app.selection_mut().set_column(0);
+    app.selection_mut().set_column(1);
     app.input.mode = InputMode::ConfirmDelete;
     let cmds = app.handle_key(make_key(KeyCode::Char('n')));
     assert_eq!(app.input.mode, InputMode::Normal);
@@ -406,7 +406,7 @@ fn confirm_delete_n_cancels() {
 #[test]
 fn confirm_delete_esc_cancels() {
     let mut app = make_app();
-    app.selection_mut().set_column(0);
+    app.selection_mut().set_column(1);
     app.input.mode = InputMode::ConfirmDelete;
     let cmds = app.handle_key(make_key(KeyCode::Esc));
     assert_eq!(app.input.mode, InputMode::Normal);
@@ -417,7 +417,7 @@ fn confirm_delete_esc_cancels() {
 #[test]
 fn x_key_on_empty_column_is_noop() {
     let mut app = make_app();
-    app.selection_mut().set_column(2); // Review column is empty
+    app.selection_mut().set_column(3); // Review column is empty
     app.handle_key(make_key(KeyCode::Char('x')));
     assert_eq!(app.input.mode, InputMode::Normal); // did NOT enter ConfirmArchive
 }
@@ -443,7 +443,7 @@ fn enter_key_toggles_detail() {
 #[test]
 fn e_key_on_empty_column_is_noop() {
     let mut app = App::new(vec![], 1, TEST_TIMEOUT);
-    app.selection_mut().set_column(0);
+    app.selection_mut().set_column(1);
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
     assert!(cmds.is_empty());
 }
@@ -451,7 +451,7 @@ fn e_key_on_empty_column_is_noop() {
 #[test]
 fn e_key_enters_confirm_edit_mode() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
-    app.selection_mut().set_column(0);
+    app.selection_mut().set_column(1);
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
     assert!(cmds.is_empty());
     assert!(matches!(
@@ -464,7 +464,7 @@ fn e_key_enters_confirm_edit_mode() {
 #[test]
 fn e_key_confirm_y_emits_edit_task() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
-    app.selection_mut().set_column(0);
+    app.selection_mut().set_column(1);
     app.handle_key(make_key(KeyCode::Char('e')));
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert_eq!(cmds.len(), 1);
@@ -475,7 +475,7 @@ fn e_key_confirm_y_emits_edit_task() {
 #[test]
 fn e_key_confirm_n_cancels() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
-    app.selection_mut().set_column(0);
+    app.selection_mut().set_column(1);
     app.handle_key(make_key(KeyCode::Char('e')));
     let cmds = app.handle_key(make_key(KeyCode::Char('n')));
     assert!(cmds.is_empty());
@@ -875,18 +875,18 @@ fn right_arrow_navigates_column() {
 #[test]
 fn down_arrow_navigates_row() {
     let mut app = make_app();
-    app.selection_mut().set_column(0); // Backlog has 2 tasks
+    app.selection_mut().set_column(1); // Backlog has 2 tasks
     app.handle_key(make_key(KeyCode::Down));
-    assert_eq!(app.selection().row(0), 1);
+    assert_eq!(app.selection().row(1), 1);
 }
 
 #[test]
 fn up_arrow_navigates_row() {
     let mut app = make_app();
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 1);
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 1);
     app.handle_key(make_key(KeyCode::Up));
-    assert_eq!(app.selection().row(0), 0);
+    assert_eq!(app.selection().row(1), 0);
 }
 
 #[test]
@@ -912,8 +912,8 @@ fn confirm_delete_start_running_with_worktree_shows_warning() {
     let mut task = make_task(4, TaskStatus::Running);
     task.worktree = Some("/wt/4-test".to_string());
     let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
-    // Task is in Running column (column 1), navigate there
-    app.selection_mut().set_column(1);
+    // Task is in Running column (column 2), navigate there
+    app.selection_mut().set_column(2);
     app.update(Message::ConfirmDeleteStart);
     assert_eq!(app.input.mode, InputMode::ConfirmDelete);
     assert_eq!(
@@ -945,25 +945,25 @@ fn handle_key_dismisses_error_popup() {
 #[test]
 fn handle_key_normal_navigation() {
     let mut app = make_app();
-    // Start at column 0, row 0
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 0);
+    // Start at column 1 (Backlog), row 0
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
 
     // 'l' moves right
     app.handle_key(make_key(KeyCode::Char('l')));
-    assert_eq!(app.selection().column(), 1);
+    assert_eq!(app.selection().column(), 2);
 
     // 'h' moves left
     app.handle_key(make_key(KeyCode::Char('h')));
-    assert_eq!(app.selection().column(), 0);
+    assert_eq!(app.selection().column(), 1);
 
     // 'j' moves down
     app.handle_key(make_key(KeyCode::Char('j')));
-    assert_eq!(app.selection().row(0), 1);
+    assert_eq!(app.selection().row(1), 1);
 
     // 'k' moves up
     app.handle_key(make_key(KeyCode::Char('k')));
-    assert_eq!(app.selection().row(0), 0);
+    assert_eq!(app.selection().row(1), 0);
 }
 
 #[test]
@@ -1189,8 +1189,8 @@ fn handle_key_tag_esc_cancels() {
 fn handle_key_normal_dispatch_backlog_task() {
     let mut app = make_app();
     // Select task 1 (backlog)
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 0);
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
 
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds
@@ -1201,9 +1201,9 @@ fn handle_key_normal_dispatch_backlog_task() {
 #[test]
 fn handle_key_normal_dispatch_running_task_with_window_shows_info() {
     let mut app = make_app();
-    // Select running task (column 1)
-    app.selection_mut().set_column(1);
-    app.selection_mut().set_row(1, 0);
+    // Select running task (column 2)
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
     // Give running task a window
     let task_3 = app
         .board
@@ -1221,8 +1221,8 @@ fn handle_key_normal_dispatch_running_task_with_window_shows_info() {
 #[test]
 fn handle_key_normal_enter_toggles_detail() {
     let mut app = make_app();
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 0);
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
     assert!(!app.board.detail_visible);
     app.handle_key(make_key(KeyCode::Enter));
     assert!(app.board.detail_visible);
@@ -1242,8 +1242,8 @@ fn handle_key_normal_jump_to_tmux() {
         .unwrap();
     task.tmux_window = Some("main:task-3".to_string());
     // Select running column
-    app.selection_mut().set_column(1);
-    app.selection_mut().set_row(1, 0);
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
 
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert!(cmds
@@ -1261,8 +1261,8 @@ fn handle_key_normal_open_pr_url() {
         .find(|t| t.id == TaskId(1))
         .unwrap();
     task.pr_url = Some("https://github.com/example/repo/pull/42".to_string());
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 0);
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
 
     let cmds = app.handle_key(make_key(KeyCode::Char('p')));
     assert!(cmds.iter().any(|c| matches!(
@@ -1275,8 +1275,8 @@ fn handle_key_normal_open_pr_url() {
 fn handle_key_normal_open_pr_url_missing() {
     let mut app = make_app();
     // task 1 has no pr_url by default
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 0);
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
 
     let cmds = app.handle_key(make_key(KeyCode::Char('p')));
     assert!(cmds.is_empty());
@@ -1383,8 +1383,8 @@ fn confirm_detach_tmux_n_cancels() {
 #[test]
 fn handle_key_normal_copy_task() {
     let mut app = make_app();
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 0);
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
     app.handle_key(make_key(KeyCode::Char('c')));
     // CopyTask skips title/tag and goes straight to repo path with pre-filled buffer
     assert_eq!(*app.mode(), InputMode::InputRepoPath);
@@ -1408,8 +1408,8 @@ fn handle_key_normal_toggle_notifications() {
 #[test]
 fn handle_key_normal_move_forward_via_handle_key() {
     let mut app = make_app();
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 0);
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
     let cmds = app.handle_key(make_key(KeyCode::Char('L')));
     // Task 1 should move from Backlog to Running
     assert!(cmds
@@ -1420,9 +1420,9 @@ fn handle_key_normal_move_forward_via_handle_key() {
 #[test]
 fn handle_key_normal_move_backward_via_handle_key() {
     let mut app = make_app();
-    // Select running task (column 1)
-    app.selection_mut().set_column(1);
-    app.selection_mut().set_row(1, 0);
+    // Select running task (column 2)
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
     let cmds = app.handle_key(make_key(KeyCode::Char('H')));
     // Task 3 should move from Running to Backlog
     assert!(cmds
@@ -1435,8 +1435,8 @@ fn handle_key_normal_detach_tmux_review_task() {
     let mut task = make_task(10, TaskStatus::Review);
     task.tmux_window = Some("main:10-test".to_string());
     let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
-    app.selection_mut().set_column(2);
-    app.selection_mut().set_row(2, 0);
+    app.selection_mut().set_column(3);
+    app.selection_mut().set_row(3, 0);
     app.handle_key(make_key(KeyCode::Char('T')));
     assert!(matches!(*app.mode(), InputMode::ConfirmDetachTmux(_)));
 }
@@ -1445,8 +1445,8 @@ fn handle_key_normal_detach_tmux_review_task() {
 fn handle_key_normal_detach_tmux_no_window_is_noop() {
     let mut app = make_app();
     // Task 1 has no tmux window
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 0);
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
     let cmds = app.handle_key(make_key(KeyCode::Char('T')));
     assert!(cmds.is_empty());
 }

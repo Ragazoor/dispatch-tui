@@ -68,7 +68,7 @@ fn d_key_on_backlog_with_plan_dispatches() {
     let mut task = make_task(3, TaskStatus::Backlog);
     task.plan_path = Some("plan.md".into());
     let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
-    app.selection_mut().set_column(0); // Backlog column
+    app.selection_mut().set_column(1); // Backlog column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(matches!(&cmds[0], Command::DispatchAgent { .. }));
 }
@@ -79,7 +79,7 @@ fn d_key_on_running_with_window_shows_warning() {
     task.tmux_window = Some("task-4".to_string());
     task.worktree = Some("/repo/.worktrees/4-task-4".to_string());
     let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
-    app.selection_mut().set_column(1); // Running column
+    app.selection_mut().set_column(2); // Running column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
     assert!(app
@@ -96,7 +96,7 @@ fn d_key_on_running_no_window_resumes() {
     task.worktree = Some("/repo/.worktrees/4-task-4".to_string());
     task.tmux_window = None;
     let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
-    app.selection_mut().set_column(1); // Running column
+    app.selection_mut().set_column(2); // Running column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(matches!(&cmds[0], Command::Resume { .. }));
 }
@@ -106,7 +106,7 @@ fn d_key_on_backlog_brainstorms() {
     let mut task = make_task(1, TaskStatus::Backlog);
     task.tag = Some(TaskTag::Epic); // tag=epic triggers brainstorm
     let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
-    app.selection_mut().set_column(0); // Backlog column
+    app.selection_mut().set_column(1); // Backlog column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert_eq!(cmds.len(), 1);
     assert!(
@@ -117,7 +117,7 @@ fn d_key_on_backlog_brainstorms() {
 #[test]
 fn d_key_on_done_shows_warning() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Done)], 1, TEST_TIMEOUT);
-    app.selection_mut().set_column(3); // Done column
+    app.selection_mut().set_column(4); // Done column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
     assert!(app.status.message.is_some());
@@ -129,7 +129,7 @@ fn d_key_on_running_no_worktree_no_window_shows_warning() {
     task.worktree = None;
     task.tmux_window = None;
     let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
-    app.selection_mut().set_column(1); // Running column
+    app.selection_mut().set_column(2); // Running column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
     assert!(app
@@ -246,7 +246,7 @@ fn shift_d_in_epic_view_quick_dispatches_subtask_single_repo() {
     app.board.repo_paths = vec!["/my/repo".to_string()];
     app.board.view_mode = ViewMode::Epic {
         epic_id: EpicId(10),
-        selection: BoardSelection::new(),
+        selection: BoardSelection::new_for_epic(),
         parent: Box::new(ViewMode::Board(BoardSelection::new())),
     };
     let cmds = app.handle_key(make_shift_key(KeyCode::Char('D')));
@@ -265,7 +265,7 @@ fn shift_d_in_epic_view_shows_repo_selection_with_multiple_repos() {
     app.board.repo_paths = vec!["/repo/a".to_string(), "/repo/b".to_string()];
     app.board.view_mode = ViewMode::Epic {
         epic_id: EpicId(10),
-        selection: BoardSelection::new(),
+        selection: BoardSelection::new_for_epic(),
         parent: Box::new(ViewMode::Board(BoardSelection::new())),
     };
     let cmds = app.handle_key(make_shift_key(KeyCode::Char('D')));
@@ -282,7 +282,7 @@ fn shift_d_in_epic_view_repo_selection_dispatches_with_epic_id() {
     app.board.repo_paths = vec!["/repo/a".to_string(), "/repo/b".to_string()];
     app.board.view_mode = ViewMode::Epic {
         epic_id: EpicId(10),
-        selection: BoardSelection::new(),
+        selection: BoardSelection::new_for_epic(),
         parent: Box::new(ViewMode::Board(BoardSelection::new())),
     };
     // Enter selection mode
@@ -502,7 +502,7 @@ fn d_key_on_review_with_window_shows_warning() {
     task.tmux_window = Some("task-5".to_string());
     task.worktree = Some("/repo/.worktrees/5-task-5".to_string());
     let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
-    app.selection_mut().set_column(2); // Review column
+    app.selection_mut().set_column(3); // Review column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
     assert!(app
@@ -519,7 +519,7 @@ fn d_key_on_review_no_window_with_worktree_resumes() {
     task.worktree = Some("/repo/.worktrees/5-task-5".to_string());
     task.tmux_window = None;
     let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
-    app.selection_mut().set_column(2); // Review column
+    app.selection_mut().set_column(3); // Review column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(matches!(&cmds[0], Command::Resume { .. }));
 }
@@ -530,7 +530,7 @@ fn d_key_on_review_no_worktree_no_window_shows_warning() {
     task.worktree = None;
     task.tmux_window = None;
     let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
-    app.selection_mut().set_column(2); // Review column
+    app.selection_mut().set_column(3); // Review column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
     assert!(app
@@ -544,7 +544,7 @@ fn d_key_on_review_no_worktree_no_window_shows_warning() {
 #[test]
 fn d_key_on_empty_column_is_noop() {
     let mut app = App::new(vec![], 1, TEST_TIMEOUT);
-    app.selection_mut().set_column(0);
+    app.selection_mut().set_column(1);
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
 }
@@ -610,9 +610,9 @@ fn d_key_on_stale_running_task_enters_retry_mode() {
     let mut app = App::new(vec![make_task(4, TaskStatus::Running)], 1, TEST_TIMEOUT);
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
     app.board.tasks[0].sub_status = SubStatus::Stale;
-    // Navigate to Running column (index 1)
-    app.selection_mut().set_column(1);
-    app.selection_mut().set_row(1, 0);
+    // Navigate to Running column (index 2)
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
 
     app.handle_key(make_key(KeyCode::Char('d')));
     assert!(matches!(app.input.mode, InputMode::ConfirmRetry(TaskId(4))));
@@ -623,9 +623,9 @@ fn d_key_on_crashed_running_task_enters_retry_mode() {
     let mut app = App::new(vec![make_task(4, TaskStatus::Running)], 1, TEST_TIMEOUT);
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
     app.board.tasks[0].sub_status = SubStatus::Crashed;
-    // Navigate to Running column (index 1)
-    app.selection_mut().set_column(1);
-    app.selection_mut().set_row(1, 0);
+    // Navigate to Running column (index 2)
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
 
     app.handle_key(make_key(KeyCode::Char('d')));
     assert!(matches!(app.input.mode, InputMode::ConfirmRetry(TaskId(4))));
@@ -719,8 +719,8 @@ fn dispatch_epic_with_plan_dispatches_next_backlog_subtask() {
     app.board.tasks = vec![task1.clone(), task2];
 
     // Select the epic (only item in backlog column at row 0)
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 0);
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
 
     let cmds = app.update(Message::DispatchEpic(EpicId(10)));
     // Should dispatch task1 (first backlog subtask, has plan)
@@ -741,8 +741,8 @@ fn dispatch_epic_with_plan_brainstorms_subtask_without_plan() {
     task1.tag = Some(TaskTag::Epic);
     app.board.tasks = vec![task1];
 
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 0);
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
 
     let cmds = app.update(Message::DispatchEpic(EpicId(10)));
     assert_eq!(cmds.len(), 1);
@@ -764,8 +764,8 @@ fn dispatch_epic_with_plan_no_backlog_subtasks_shows_status() {
     task1.epic_id = Some(EpicId(10));
     app.board.tasks = vec![task1];
 
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 0);
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
 
     let cmds = app.update(Message::DispatchEpic(EpicId(10)));
     assert!(cmds.is_empty());
@@ -1025,8 +1025,8 @@ fn dispatch_epic_no_plan_with_backlog_subtask_does_not_create_planning() {
     t1.epic_id = Some(EpicId(1));
     app.board.tasks = vec![t1];
 
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 0);
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
 
     let cmds = app.update(Message::DispatchEpic(EpicId(1)));
     // Should NOT create planning subtask since subtasks already exist

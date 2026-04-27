@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 #[test]
 fn x_key_enters_confirm_archive_mode() {
     let mut app = make_app();
-    app.selection_mut().set_column(0); // Backlog has tasks
+    // make_app() starts at Backlog (nav col 1) — no need to set_column.
     let cmds = app.handle_key(make_key(KeyCode::Char('x')));
     assert!(cmds.is_empty());
     assert!(matches!(app.input.mode, InputMode::ConfirmArchive(Some(_))));
@@ -26,7 +26,7 @@ fn x_key_enters_confirm_archive_mode() {
 #[test]
 fn confirm_archive_y_emits_archive_task() {
     let mut app = make_app();
-    app.selection_mut().set_column(0);
+    // make_app() starts at Backlog (nav col 1).
     app.handle_key(make_key(KeyCode::Char('x')));
     let _ = app.handle_key(make_key(KeyCode::Char('y')));
     assert_eq!(app.input.mode, InputMode::Normal);
@@ -38,7 +38,7 @@ fn confirm_archive_y_emits_archive_task() {
 #[test]
 fn confirm_archive_n_cancels() {
     let mut app = make_app();
-    app.selection_mut().set_column(0);
+    // make_app() starts at Backlog (nav col 1).
     app.handle_key(make_key(KeyCode::Char('x')));
     let _ = app.handle_key(make_key(KeyCode::Char('n')));
     assert_eq!(app.input.mode, InputMode::Normal);
@@ -58,10 +58,10 @@ fn archive_targets_task_at_x_press_not_at_y_press() {
         1,
         TEST_TIMEOUT,
     );
-    // Navigate to Done column (index 3) and move down to task 2 (row 1).
-    app.selection_mut().set_column(3);
+    // Navigate to Done column (nav col 4) and move down to task 2 (row 1).
+    app.selection_mut().set_column(4);
     app.update(Message::NavigateRow(1));
-    assert_eq!(app.selection().row(3), 1);
+    assert_eq!(app.selection().row(4), 1);
 
     // Press 'x' — cursor is on task 2.
     app.handle_key(make_key(KeyCode::Char('x')));
@@ -83,7 +83,7 @@ fn archive_targets_task_at_x_press_not_at_y_press() {
     // to row 1 (task 3, the last visible item).
     assert_eq!(
         app.selected_column(),
-        3,
+        4,
         "cursor should still be in Done column"
     );
 
@@ -396,10 +396,10 @@ fn x_key_on_epic_with_non_done_subtasks_rejects_archive() {
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
     app.board.epics = vec![epic];
-    // Subtasks are hidden in board view. Epic status is Running (col 1).
+    // Subtasks are hidden in board view. Epic status is Running (nav col 2).
     // Epic is the only item in Running column → row 0.
-    app.selection_mut().set_column(1);
-    app.selection_mut().set_row(1, 0);
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
     let cmds = app.handle_key(make_key(KeyCode::Char('x')));
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::Normal);
@@ -443,9 +443,9 @@ fn x_key_on_epic_with_mixed_subtasks_rejects_archive_with_count() {
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
     app.board.epics = vec![epic];
-    // 2 Done + 1 Running → epic status Running (col 1). Epic is only item → row 0.
-    app.selection_mut().set_column(1);
-    app.selection_mut().set_row(1, 0);
+    // 2 Done + 1 Running → epic status Running (nav col 2). Epic is only item → row 0.
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
     let cmds = app.handle_key(make_key(KeyCode::Char('x')));
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::Normal);
@@ -471,9 +471,9 @@ fn x_key_on_epic_with_all_done_subtasks_allows_archive() {
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Done;
     app.board.epics = vec![epic];
-    // All done → epic status Done (column 3). Epic is only item → row 0.
-    app.selection_mut().set_column(3);
-    app.selection_mut().set_row(3, 0);
+    // All done → epic status Done (nav col 4). Epic is only item → row 0.
+    app.selection_mut().set_column(4);
+    app.selection_mut().set_row(4, 0);
     let cmds = app.handle_key(make_key(KeyCode::Char('x')));
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::ConfirmArchiveEpic);
@@ -489,9 +489,9 @@ fn x_key_on_epic_with_all_done_subtasks_allows_archive() {
 fn confirm_archive_epic_no_subtasks_allows_archive() {
     let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
-    // No subtasks → derived status Backlog (col 0). Epic is only item → row 0.
-    app.selection_mut().set_column(0);
-    app.selection_mut().set_row(0, 0);
+    // No subtasks → derived status Backlog (nav col 1). Epic is only item → row 0.
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
     let cmds = app.update(Message::ConfirmArchiveEpic);
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::ConfirmArchiveEpic);
@@ -539,7 +539,7 @@ fn confirm_archive_epic_other_key_cancels() {
 #[test]
 fn confirm_archive_epic_no_epic_selected_is_noop() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
-    app.selection_mut().set_column(0);
+    app.selection_mut().set_column(1); // Backlog = nav col 1
     app.input.mode = InputMode::ConfirmArchiveEpic;
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert_eq!(app.input.mode, InputMode::Normal);
