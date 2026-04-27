@@ -435,6 +435,7 @@ fn render_card_indicator(indicator: CardIndicator) -> Line<'static> {
     ])
 }
 
+/// Returns a horizontal rule `Line` of box-drawing dashes spanning `width` columns.
 fn card_rule_line(color: Color, width: u16) -> Line<'static> {
     let rule = "\u{2500}".repeat(width as usize); // ─
     Line::from(Span::styled(rule, Style::default().fg(color)))
@@ -2344,6 +2345,7 @@ mod tests {
     #[test]
     fn card_rule_line_zero_width_returns_empty() {
         let line = card_rule_line(MUTED, 0);
+        assert_eq!(line.spans.len(), 1);
         assert_eq!(line.spans[0].content, "");
     }
 }
