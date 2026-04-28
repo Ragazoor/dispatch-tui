@@ -511,4 +511,3 @@ fn resolve_initial_project(
         default_id
     }
 }
-
