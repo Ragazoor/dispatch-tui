@@ -206,19 +206,6 @@ fn format_task_detail(task: &Task, epic_titles: &HashMap<EpicId, String>) -> Str
 }
 
 fn format_task_line(t: &Task, epic_titles: &HashMap<EpicId, String>) -> String {
-    let desc_preview = if t.description.len() > 200 {
-        let end = t
-            .description
-            .char_indices()
-            .take_while(|(i, _)| *i < 200)
-            .last()
-            .map(|(i, c)| i + c.len_utf8())
-            .unwrap_or(0);
-        format!("{}...", &t.description[..end])
-    } else {
-        t.description.clone()
-    };
-    let plan_indicator = if t.plan_path.is_some() { " [plan]" } else { "" };
     let tag_indicator = match t.tag {
         Some(tag) => format!(" [{}]", tag.as_str()),
         None => String::new(),
@@ -230,16 +217,46 @@ fn format_task_line(t: &Task, epic_titles: &HashMap<EpicId, String>) -> String {
         },
         None => String::new(),
     };
+    let pr_part = match &t.pr_url {
+        Some(url) => format!(" | PR: {url}"),
+        None => String::new(),
+    };
+    let goal = t
+        .plan_path
+        .as_deref()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|content| crate::plan::parse_plan(&content).ok())
+        .map(|meta| meta.description)
+        .filter(|d| !d.is_empty())
+        .unwrap_or_else(|| {
+            if t.description.len() > 200 {
+                let end = t
+                    .description
+                    .char_indices()
+                    .take_while(|(i, _)| *i < 200)
+                    .last()
+                    .map(|(i, c)| i + c.len_utf8())
+                    .unwrap_or(0);
+                format!("{}...", &t.description[..end])
+            } else {
+                t.description.clone()
+            }
+        });
+    let goal_part = if goal.is_empty() {
+        String::new()
+    } else {
+        format!(" | Goal: {goal}")
+    };
     format!(
-        "- [{}] {} ({}/{}){}{}{}: {}",
+        "- [{}] {} ({}/{}){}{}{}{}",
         t.id,
         t.title,
         t.status.as_str(),
         t.sub_status.as_str(),
-        plan_indicator,
         tag_indicator,
         epic_indicator,
-        desc_preview
+        pr_part,
+        goal_part,
     )
 }
 

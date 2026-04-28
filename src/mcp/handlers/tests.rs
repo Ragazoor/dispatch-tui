@@ -4358,9 +4358,11 @@ async fn list_tasks_shows_tag_and_plan_indicators() {
     )
     .await;
     let text = extract_response_text(&resp);
+    // [plan] indicator replaced by | Goal: <goal text> when plan is readable;
+    // when the plan file doesn't exist the description is shown as fallback.
     assert!(
-        text.contains("[plan]"),
-        "should show plan indicator: {text}"
+        !text.contains("[plan]"),
+        "old [plan] badge should no longer appear: {text}"
     );
     assert!(text.contains("[bug]"), "should show tag indicator: {text}");
 }
@@ -7319,4 +7321,128 @@ async fn list_tasks_unknown_caller_task_id_returns_error() {
     .await;
 
     assert_error(&resp, "Unknown caller_task_id");
+}
+
+#[tokio::test]
+async fn list_tasks_includes_pr_url_in_output() {
+    let state = test_state();
+
+    let task_id = create_task_fixture(&state);
+    state
+        .db
+        .patch_task(
+            task_id,
+            &crate::db::TaskPatch::new().pr_url(Some("https://github.com/org/repo/pull/42")),
+        )
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "list_tasks", "arguments": {} })),
+    )
+    .await;
+
+    let text = extract_response_text(&resp);
+    assert!(
+        text.contains("| PR: https://github.com/org/repo/pull/42"),
+        "PR URL should appear in output; got: {text}"
+    );
+}
+
+#[tokio::test]
+async fn list_tasks_includes_plan_goal_in_output() {
+    let state = test_state();
+
+    let plan_path = std::env::temp_dir().join("dispatch_test_plan_345.md");
+    std::fs::write(
+        &plan_path,
+        "# My Feature — Implementation Plan\n\n**Goal:** Implement the learning enrichment.\n",
+    )
+    .unwrap();
+    let plan_path_str = plan_path.to_string_lossy().to_string();
+
+    state
+        .db
+        .create_task(
+            "Feature task",
+            "desc",
+            "/repo",
+            Some(&plan_path_str),
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+            1,
+        )
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "list_tasks", "arguments": {} })),
+    )
+    .await;
+
+    let text = extract_response_text(&resp);
+    assert!(
+        text.contains("| Goal: Implement the learning enrichment."),
+        "Plan goal should appear in output; got: {text}"
+    );
+
+    let _ = std::fs::remove_file(&plan_path);
+}
+
+#[tokio::test]
+async fn list_tasks_falls_back_to_description_when_no_plan() {
+    let state = test_state();
+
+    state
+        .db
+        .create_task(
+            "No Plan Task",
+            "A task without a plan file",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+            1,
+        )
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "list_tasks", "arguments": {} })),
+    )
+    .await;
+
+    let text = extract_response_text(&resp);
+    assert!(
+        text.contains("A task without a plan file"),
+        "Description should appear as fallback; got: {text}"
+    );
+}
+
+#[tokio::test]
+async fn list_tasks_omits_pr_segment_when_no_pr_url() {
+    let state = test_state();
+    create_task_fixture(&state);
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "list_tasks", "arguments": {} })),
+    )
+    .await;
+
+    let text = extract_response_text(&resp);
+    assert!(
+        !text.contains("| PR:"),
+        "No PR segment should appear when pr_url is null; got: {text}"
+    );
 }
