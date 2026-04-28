@@ -85,19 +85,23 @@ fn parse_repo_slug(remote_url: &str) -> Option<String> {
 }
 
 /// Push the branch to origin and create a GitHub PR using `gh`.
+///
+/// `push_dir` is the directory used for `git push`. Pass the worktree path so
+/// the pre-push hook runs in the worktree's working directory, where dirty files
+/// from other worktrees or the main repo are invisible.
 pub fn create_pr(
-    repo_path: &str,
+    push_dir: &str,
     branch: &str,
     title: &str,
     description: &str,
     base_branch: &str,
     runner: &dyn ProcessRunner,
 ) -> std::result::Result<PrResult, PrError> {
-    let repo_path = &expand_tilde(repo_path);
+    let push_dir = &expand_tilde(push_dir);
 
     // 1. Push the branch
     let output = runner
-        .run("git", &["-C", repo_path, "push", "-u", "origin", branch])
+        .run("git", &["-C", push_dir, "push", "-u", "origin", branch])
         .map_err(|e| PrError::PushFailed(format!("Failed to run git push: {e}")))?;
     if !output.status.success() {
         return Err(PrError::PushFailed(stderr_str(&output)));
@@ -105,7 +109,7 @@ pub fn create_pr(
 
     // 2. Get the repo slug from git remote
     let remote_output = runner
-        .run("git", &["-C", repo_path, "remote", "get-url", "origin"])
+        .run("git", &["-C", push_dir, "remote", "get-url", "origin"])
         .map_err(|e| PrError::Other(format!("Failed to get remote URL: {e}")))?;
     let remote_url = stdout_str(&remote_output);
     let repo_slug = parse_repo_slug(&remote_url)
