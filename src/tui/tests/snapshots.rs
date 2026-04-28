@@ -1,8 +1,9 @@
 use ratatui::buffer::Buffer;
 
 use super::super::App;
-use super::{make_app, make_key, render_to_buffer, TEST_TIMEOUT};
+use super::{make_app, make_key, make_task, render_to_buffer, TEST_TIMEOUT};
 use crossterm::event::KeyCode;
+use crate::models::TaskStatus;
 
 fn buffer_to_string(buf: &Buffer) -> String {
     let area = buf.area();
@@ -187,6 +188,50 @@ fn snapshot_kanban_with_archive_focused() {
         app.selected_column(),
         crate::models::TaskStatus::COLUMN_COUNT + 1
     );
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
+fn snapshot_task_detail_overlay_peek() {
+    use crate::tui::Message;
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    let mut task = make_task(1, TaskStatus::Backlog);
+    task.description = "First line of description.\nSecond line.\nThird line.".to_string();
+    task.repo_path = "/repo/my-project".to_string();
+    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
+    app.board.tasks.push(task);
+    app.update(Message::OpenTaskDetail(1));
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
+fn snapshot_task_detail_overlay_zoomed() {
+    use crate::tui::{Message, ViewMode};
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    let mut task = make_task(1, TaskStatus::Backlog);
+    task.description = "First line of description.\nSecond line.\nThird line.".to_string();
+    task.repo_path = "/repo/my-project".to_string();
+    app.board.tasks.push(task);
+    app.update(Message::OpenTaskDetail(1));
+    if let ViewMode::TaskDetail { ref mut zoomed, .. } = app.board.view_mode {
+        *zoomed = true;
+    }
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
+fn snapshot_task_detail_overlay_empty_optional_fields() {
+    use crate::tui::Message;
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    let mut task = make_task(1, TaskStatus::Backlog);
+    task.description = "Just a description.".to_string();
+    task.repo_path = "/repo/path".to_string();
+    // pr_url, plan_path, epic_id all None (default from make_task)
+    app.board.tasks.push(task);
+    app.update(Message::OpenTaskDetail(1));
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);
 }
