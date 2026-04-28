@@ -1463,9 +1463,14 @@ fn create_pr_pushes_from_push_dir_not_repo_root() {
     .unwrap();
 
     let calls = mock.recorded_calls();
-    let push_call = calls.iter().find(|c| c.1.contains(&"push".to_string())).unwrap();
+    let push_call = calls
+        .iter()
+        .find(|c| c.1.contains(&"push".to_string()))
+        .unwrap();
     assert!(
-        push_call.1.contains(&"/repo/.worktrees/42-fix-bug".to_string()),
+        push_call
+            .1
+            .contains(&"/repo/.worktrees/42-fix-bug".to_string()),
         "git push must use push_dir (worktree), got: {:?}",
         push_call.1
     );
