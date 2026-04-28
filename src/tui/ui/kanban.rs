@@ -2104,7 +2104,11 @@ pub(in crate::tui) fn action_hints(
     push_hint("F", "flat");
     push_hint("f", "filter");
     push_hint("?", "help");
-    push_hint("q", "projects");
+    if selected_column == 0 {
+        push_hint("q", "quit");
+    } else {
+        push_hint("q", "projects");
+    }
 
     spans
 }
@@ -2141,7 +2145,7 @@ pub(in crate::tui) fn epic_action_hints(epic: &Epic, key_color: Color) -> Vec<Sp
     push_hint("F", "flat");
     push_hint("f", "filter");
     push_hint("?", "help");
-    push_hint("q", "quit");
+    push_hint("q", "projects");
 
     spans
 }
