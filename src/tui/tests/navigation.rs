@@ -1521,26 +1521,6 @@ fn resumed_clears_last_error() {
     assert!(!app.agents.last_error.contains_key(&TaskId(4)));
 }
 
-#[test]
-fn task_detail_lines_include_last_error() {
-    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], 1, TEST_TIMEOUT);
-    app.board.tasks[0].tmux_window = Some("task-4".to_string());
-    app.agents
-        .last_error
-        .insert(TaskId(4), "Error: something went wrong".to_string());
-    let task = app.board.tasks[0].clone();
-    let lines = super::ui::task_detail_lines(&app, &task);
-
-    let error_text: String = lines
-        .iter()
-        .flat_map(|line| line.spans.iter().map(|s| s.content.to_string()))
-        .collect::<Vec<_>>()
-        .join("");
-    assert!(
-        error_text.contains("Error: something went wrong"),
-        "Expected last_error in detail lines, got: {error_text}"
-    );
-}
 
 #[test]
 fn mark_active_sets_last_active_at_to_now() {

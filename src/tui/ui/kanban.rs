@@ -6,10 +6,8 @@ use super::shared::{
     push_hint_spans, render_substatus_header, render_tab_bar, staleness_color, truncate,
 };
 
-use crate::dispatch;
 use crate::models::{
     format_age, Epic, EpicId, EpicSubstatus, Project, Staleness, SubStatus, Task, TaskStatus,
-    TaskUsage,
 };
 use crate::tui::{
     is_edge_column, App, ColumnItem, ColumnLayout, EpicStatsMap, InputMode, RepoFilterMode,
@@ -70,14 +68,6 @@ fn status_icon(status: TaskStatus) -> &'static str {
     }
 }
 
-fn truncate_for_detail(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        let truncated: String = s.chars().take(max.saturating_sub(3)).collect();
-        format!("{truncated}...")
-    }
-}
 
 /// Compute how tall the detail/input panel should be based on the current input mode.
 /// Expands when a repo list is being shown so all repos (plus cursor) are visible.
@@ -130,7 +120,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             Constraint::Length(1),       // tab bar
             Constraint::Length(1),       // summary row
             Constraint::Min(6),          // kanban board
-            Constraint::Length(panel_h), // detail panel
+            Constraint::Length(panel_h), // input form
             Constraint::Length(1),       // status bar
         ])
         .split(area);
@@ -976,196 +966,9 @@ fn render_projects_column(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_stateful_widget(list, area, &mut app.projects_panel.list_state);
 }
 
-fn format_tokens(n: i64) -> String {
-    if n >= 1000 {
-        format!("{}k", n / 1000)
-    } else {
-        n.to_string()
-    }
-}
 
-fn format_usage(u: &TaskUsage) -> String {
-    format!(
-        "${:.2} \u{00b7} {} in / {} out",
-        u.cost_usd,
-        format_tokens(u.input_tokens),
-        format_tokens(u.output_tokens),
-    )
-}
 
-// ── Detail-panel component functions ────────────────────────────────
 
-pub(in crate::tui) fn task_detail_lines(app: &App, task: &Task) -> Vec<Line<'static>> {
-    let status_color = column_color(task.status);
-
-    // Line 1: title (bold, colored) + inline metadata (dim)
-    let mut line1_spans = vec![
-        Span::styled(
-            task.title.clone(),
-            Style::default()
-                .fg(status_color)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            if task.sub_status != SubStatus::None {
-                format!(
-                    " \u{00b7} #{} \u{00b7} {} ({}) \u{00b7} {}",
-                    task.id,
-                    task.status.as_str(),
-                    task.sub_status.as_str(),
-                    task.repo_path
-                )
-            } else {
-                format!(
-                    " \u{00b7} #{} \u{00b7} {} \u{00b7} {}",
-                    task.id,
-                    task.status.as_str(),
-                    task.repo_path
-                )
-            },
-            Style::default().fg(MUTED),
-        ),
-    ];
-
-    // Add crash/stale suffix
-    if app.is_crashed(task.id) {
-        line1_spans.push(Span::styled(
-            " (crashed)",
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-        ));
-    } else if app.is_stale(task.id) {
-        let mins = app
-            .agents
-            .inactive_duration(task.id)
-            .map(|d| d.as_secs() / 60)
-            .unwrap_or(0);
-        line1_spans.push(Span::styled(
-            format!(" (stale \u{00b7} {}m)", mins),
-            Style::default().fg(Color::Yellow),
-        ));
-    }
-
-    if let Some(tag) = &task.tag {
-        line1_spans.push(Span::styled(
-            format!(" \u{00b7} [{tag}]"),
-            Style::default().fg(Color::Cyan),
-        ));
-    }
-
-    if let Some(pr_url) = &task.pr_url {
-        line1_spans.push(Span::styled(
-            format!(" \u{00b7} PR: {pr_url}"),
-            Style::default().fg(Color::Cyan),
-        ));
-    }
-
-    if let Some(epic_id) = task.epic_id {
-        if let Some(epic_title) = app.epic_title(epic_id) {
-            line1_spans.push(Span::styled(
-                format!(" \u{00b7} Epic: {epic_title} (#{epic_id})"),
-                Style::default().fg(Color::Magenta),
-            ));
-        }
-    }
-
-    let desc_style = Style::default().fg(MUTED_LIGHT);
-    let mut lines = vec![Line::from(line1_spans)];
-    for desc_line in task.description.lines() {
-        lines.push(Line::from(Span::styled(desc_line.to_string(), desc_style)));
-    }
-    if task.description.is_empty() {
-        lines.push(Line::from(Span::styled(String::new(), desc_style)));
-    }
-    if let Some(u) = app.board.usage.get(&task.id) {
-        lines.push(Line::from(Span::styled(
-            format_usage(u),
-            Style::default().fg(MUTED),
-        )));
-    }
-    if let Some(error) = app.last_error(task.id) {
-        lines.push(Line::from(Span::styled(
-            format!("Last error: {error}"),
-            Style::default().fg(Color::Red),
-        )));
-    }
-    lines
-}
-
-fn epic_detail_lines(app: &App, epic: &Epic) -> Vec<Line<'static>> {
-    let epic_id = epic.id;
-    let line1 = Line::from(vec![
-        Span::styled(
-            epic.title.clone(),
-            Style::default()
-                .fg(Color::Magenta)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!(" \u{00b7} #{} \u{00b7} {}", epic.id, epic.repo_path),
-            Style::default().fg(MUTED),
-        ),
-    ]);
-    let desc_style = Style::default().fg(MUTED_LIGHT);
-    let mut lines = vec![line1];
-    for desc_line in epic.description.lines() {
-        lines.push(Line::from(Span::styled(desc_line.to_string(), desc_style)));
-    }
-    if epic.description.is_empty() {
-        lines.push(Line::from(Span::styled(String::new(), desc_style)));
-    }
-    if let Some(plan) = &epic.plan_path {
-        lines.push(Line::from(Span::styled(
-            format!("plan: {plan}"),
-            Style::default().fg(MUTED),
-        )));
-    }
-
-    // Subtask status list
-    let mut subtasks: Vec<&Task> = app
-        .tasks()
-        .iter()
-        .filter(|t| t.epic_id == Some(epic_id) && t.status != TaskStatus::Archived)
-        .collect();
-    subtasks.sort_by_key(|t| (t.status.column_index(), t.sort_order.unwrap_or(t.id.0)));
-
-    if !subtasks.is_empty() {
-        lines.push(Line::from(""));
-        for task in &subtasks {
-            let icon = status_icon(task.status);
-            let icon_color = column_color(task.status);
-            let mut spans = vec![
-                Span::styled(format!("  {icon} "), Style::default().fg(icon_color)),
-                Span::styled(
-                    truncate_for_detail(&task.title, 40),
-                    Style::default().fg(Color::Rgb(180, 184, 200)),
-                ),
-            ];
-            if let Some(wt) = &task.worktree {
-                if let Some(branch) = dispatch::branch_from_worktree(wt) {
-                    spans.push(Span::styled(
-                        format!(" ({branch})"),
-                        Style::default().fg(Color::Rgb(86, 95, 137)),
-                    ));
-                }
-            }
-            if task.sub_status == SubStatus::Conflict {
-                spans.push(Span::styled(
-                    " \u{26a0} conflict",
-                    Style::default().fg(Color::Red),
-                ));
-            }
-            if let Some(pr_url) = &task.pr_url {
-                spans.push(Span::styled(
-                    format!(" \u{00b7} PR: {}", truncate_for_detail(pr_url, 30)),
-                    Style::default().fg(Color::Cyan),
-                ));
-            }
-            lines.push(Line::from(spans));
-        }
-    }
-
-    lines
-}
 
 fn render_input_form_panel(frame: &mut Frame, app: &App, area: Rect) {
     if render_input_form(frame, app, area) {
@@ -1558,7 +1361,7 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled("  [Enter]", key),
-            Span::styled(" detail panel     ", desc),
+            Span::styled(" task detail      ", desc),
             Span::styled("[e]", key),
             Span::styled(" edit / enter epic", desc),
         ]),
@@ -2466,36 +2269,6 @@ mod tests {
     }
 
     #[test]
-    fn format_tokens_below_1000() {
-        assert_eq!(format_tokens(500), "500");
-        assert_eq!(format_tokens(0), "0");
-        assert_eq!(format_tokens(999), "999");
-    }
-
-    #[test]
-    fn format_tokens_at_and_above_1000() {
-        assert_eq!(format_tokens(1000), "1k");
-        assert_eq!(format_tokens(1999), "1k");
-        assert_eq!(format_tokens(12_345), "12k");
-    }
-
-    #[test]
-    fn format_usage_compact() {
-        use crate::models::TaskId;
-        use chrono::Utc;
-        let u = TaskUsage {
-            task_id: TaskId(1),
-            cost_usd: 0.45,
-            input_tokens: 12_345,
-            output_tokens: 2_000,
-            cache_read_tokens: 500,
-            cache_write_tokens: 100,
-            updated_at: Utc::now(),
-        };
-        assert_eq!(format_usage(&u), "$0.45 \u{00b7} 12k in / 2k out");
-    }
-
-    #[test]
     fn first_substatus_header_has_no_blank_line() {
         let item = render_substatus_header("awaiting review", true);
         assert_eq!(
@@ -2528,5 +2301,48 @@ mod tests {
         let line = card_rule_line(MUTED, 0);
         assert_eq!(line.spans.len(), 1);
         assert_eq!(line.spans[0].content, "");
+    }
+
+    #[test]
+    fn wrapped_line_count_empty_string_returns_zero() {
+        assert_eq!(wrapped_line_count("", 80), 0);
+    }
+
+    #[test]
+    fn wrapped_line_count_width_zero_returns_zero() {
+        assert_eq!(wrapped_line_count("hello", 0), 0);
+    }
+
+    #[test]
+    fn wrapped_line_count_single_line_shorter_than_width() {
+        assert_eq!(wrapped_line_count("hello", 80), 1);
+    }
+
+    #[test]
+    fn wrapped_line_count_single_line_exactly_width() {
+        assert_eq!(wrapped_line_count("hello", 5), 1);
+    }
+
+    #[test]
+    fn wrapped_line_count_single_line_longer_than_width_wraps() {
+        // 10 chars, width 5 -> ceil(10/5) = 2 lines
+        assert_eq!(wrapped_line_count("helloworld", 5), 2);
+    }
+
+    #[test]
+    fn wrapped_line_count_single_newline_counts_as_one() {
+        assert_eq!(wrapped_line_count("\n", 80), 1);
+    }
+
+    #[test]
+    fn wrapped_line_count_multiline_text() {
+        // "hello\nworld" -> 2 lines each 5 chars, width 80 -> 2 lines total
+        assert_eq!(wrapped_line_count("hello\nworld", 80), 2);
+    }
+
+    #[test]
+    fn wrapped_line_count_multiline_with_wrapping() {
+        // "aaaaaaaaaa\nbb" -> ceil(10/5)=2 + ceil(2/5)=1 = 3
+        assert_eq!(wrapped_line_count("aaaaaaaaaa\nbb", 5), 3);
     }
 }

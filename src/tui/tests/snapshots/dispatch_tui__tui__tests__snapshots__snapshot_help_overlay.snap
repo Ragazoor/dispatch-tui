@@ -11,7 +11,7 @@ expression: rendered
 ────────────────────────║  Navigation                                                          ║────────────────────────
   ▎ #2 Task 2           ║  [h/←] prev column     [j/↓] next task                               ║
    ◦ <1h                ║  [l/→] next column     [k/↑] prev task                               ║
-────────────────────────║  [Enter] detail panel     [e] edit / enter epic                      ║
+────────────────────────║  [Enter] task detail      [e] edit / enter epic                      ║
                         ║  [q] exit epic (in epic)   [Esc] clear selection                     ║
                         ║                                                                      ║
                         ║  Actions                                                             ║
