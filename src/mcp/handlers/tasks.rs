@@ -475,9 +475,8 @@ pub(super) fn handle_list_tasks(
         };
         exclude_task_id = Some(caller.id);
 
-        let has_explicit_scope = parsed.epic_id.is_some()
-            || parsed.project_id.is_some()
-            || parsed.repo_paths.is_some();
+        let has_explicit_scope =
+            parsed.epic_id.is_some() || parsed.project_id.is_some() || parsed.repo_paths.is_some();
         if !has_explicit_scope {
             if let Some(eid) = caller.epic_id {
                 derived_epic_id = Some(eid);

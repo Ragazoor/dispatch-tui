@@ -1277,7 +1277,13 @@ fn tool_schemas_match_arg_structs() {
         ),
         (
             "list_tasks",
-            BTreeSet::from(["status", "epic_id", "project_id", "repo_paths", "caller_task_id"]),
+            BTreeSet::from([
+                "status",
+                "epic_id",
+                "project_id",
+                "repo_paths",
+                "caller_task_id",
+            ]),
             BTreeSet::new(),
             json!({"status": "backlog", "epic_id": 1, "project_id": 1, "repo_paths": ["/r"], "caller_task_id": 1}),
         ),
@@ -7161,25 +7167,64 @@ async fn list_tasks_caller_task_id_scopes_to_epic() {
     let state = test_state();
 
     // Create epics directly via DB
-    let epic = state.db.create_epic("My Epic", "", "/repo", None, 1).unwrap();
-    let epic2 = state.db.create_epic("Other Epic", "", "/repo", None, 1).unwrap();
+    let epic = state
+        .db
+        .create_epic("My Epic", "", "/repo", None, 1)
+        .unwrap();
+    let epic2 = state
+        .db
+        .create_epic("Other Epic", "", "/repo", None, 1)
+        .unwrap();
 
     // Task A (caller) in epic
     let id_a = state
         .db
-        .create_task("Task A", "", "/repo", None, TaskStatus::Backlog, "main", Some(epic.id), None, None, 1)
+        .create_task(
+            "Task A",
+            "",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            Some(epic.id),
+            None,
+            None,
+            1,
+        )
         .unwrap();
 
     // Task B (sibling) in the same epic
     state
         .db
-        .create_task("Task B", "", "/repo", None, TaskStatus::Backlog, "main", Some(epic.id), None, None, 1)
+        .create_task(
+            "Task B",
+            "",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            Some(epic.id),
+            None,
+            None,
+            1,
+        )
         .unwrap();
 
     // Task C in a different epic (should NOT appear)
     state
         .db
-        .create_task("Task C", "", "/repo", None, TaskStatus::Backlog, "main", Some(epic2.id), None, None, 1)
+        .create_task(
+            "Task C",
+            "",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            Some(epic2.id),
+            None,
+            None,
+            1,
+        )
         .unwrap();
 
     let resp = call(
@@ -7195,7 +7240,10 @@ async fn list_tasks_caller_task_id_scopes_to_epic() {
     let text = extract_response_text(&resp);
     assert!(text.contains("Task B"), "should include sibling Task B");
     assert!(!text.contains("Task A"), "should exclude the caller Task A");
-    assert!(!text.contains("Task C"), "should exclude Task C from other epic");
+    assert!(
+        !text.contains("Task C"),
+        "should exclude Task C from other epic"
+    );
 }
 
 #[tokio::test]
@@ -7205,19 +7253,52 @@ async fn list_tasks_caller_task_id_scopes_to_project_when_no_epic() {
     // Task A (caller) in project 1, no epic
     let id_a = state
         .db
-        .create_task("Task A", "", "/repo", None, TaskStatus::Backlog, "main", None, None, None, 1)
+        .create_task(
+            "Task A",
+            "",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+            1,
+        )
         .unwrap();
 
     // Task B sibling in project 1
     state
         .db
-        .create_task("Task B", "", "/repo", None, TaskStatus::Backlog, "main", None, None, None, 1)
+        .create_task(
+            "Task B",
+            "",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+            1,
+        )
         .unwrap();
 
     // Task C in project 2 (should NOT appear)
     state
         .db
-        .create_task("Task C", "", "/repo", None, TaskStatus::Backlog, "main", None, None, None, 2)
+        .create_task(
+            "Task C",
+            "",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+            2,
+        )
         .unwrap();
 
     let resp = call(
@@ -7231,9 +7312,15 @@ async fn list_tasks_caller_task_id_scopes_to_project_when_no_epic() {
     .await;
 
     let text = extract_response_text(&resp);
-    assert!(text.contains("Task B"), "should include project sibling Task B");
+    assert!(
+        text.contains("Task B"),
+        "should include project sibling Task B"
+    );
     assert!(!text.contains("Task A"), "should exclude caller Task A");
-    assert!(!text.contains("Task C"), "should exclude Task C from project 2");
+    assert!(
+        !text.contains("Task C"),
+        "should exclude Task C from project 2"
+    );
 }
 
 #[tokio::test]
@@ -7246,19 +7333,52 @@ async fn list_tasks_explicit_scope_overrides_caller_derived_scope() {
     // Caller is in the epic
     let id_a = state
         .db
-        .create_task("Task A", "", "/repo", None, TaskStatus::Backlog, "main", Some(epic.id), None, None, 1)
+        .create_task(
+            "Task A",
+            "",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            Some(epic.id),
+            None,
+            None,
+            1,
+        )
         .unwrap();
 
     // Task B also in the epic
     state
         .db
-        .create_task("Task B", "", "/repo", None, TaskStatus::Backlog, "main", Some(epic.id), None, None, 1)
+        .create_task(
+            "Task B",
+            "",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            Some(epic.id),
+            None,
+            None,
+            1,
+        )
         .unwrap();
 
     // Task C in project 2, no epic — explicit project_id=2 should match this
     state
         .db
-        .create_task("Task C", "", "/repo", None, TaskStatus::Backlog, "main", None, None, None, 2)
+        .create_task(
+            "Task C",
+            "",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+            2,
+        )
         .unwrap();
 
     // Pass caller_task_id (which has epic) BUT also explicit project_id=2 → project wins
@@ -7273,8 +7393,14 @@ async fn list_tasks_explicit_scope_overrides_caller_derived_scope() {
     .await;
 
     let text = extract_response_text(&resp);
-    assert!(text.contains("Task C"), "explicit project_id=2 should show Task C");
-    assert!(!text.contains("Task B"), "Task B is in epic/project1, should not appear");
+    assert!(
+        text.contains("Task C"),
+        "explicit project_id=2 should show Task C"
+    );
+    assert!(
+        !text.contains("Task B"),
+        "Task B is in epic/project1, should not appear"
+    );
     assert!(!text.contains("Task A"), "caller excluded");
 }
 
@@ -7284,11 +7410,33 @@ async fn list_tasks_repo_paths_filter() {
 
     state
         .db
-        .create_task("Repo A task", "", "/repo/a", None, TaskStatus::Backlog, "main", None, None, None, 1)
+        .create_task(
+            "Repo A task",
+            "",
+            "/repo/a",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+            1,
+        )
         .unwrap();
     state
         .db
-        .create_task("Repo B task", "", "/repo/b", None, TaskStatus::Backlog, "main", None, None, None, 1)
+        .create_task(
+            "Repo B task",
+            "",
+            "/repo/b",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+            1,
+        )
         .unwrap();
 
     let resp = call(
