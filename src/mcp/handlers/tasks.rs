@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use crate::db;
 use crate::dispatch;
 use crate::mcp::McpState;
-use crate::models::{DispatchMode, EpicId, SubStatus, Task, TaskStatus, TaskTag};
+use crate::models::{DispatchMode, EpicId, SubStatus, Task, TaskId, TaskStatus, TaskTag};
 use crate::service::{
     ClaimTaskParams, CreateTaskParams, ListTasksFilter, ServiceError, TaskService, UpdateTaskParams,
 };
@@ -62,6 +62,12 @@ pub(super) struct ListTasksArgs {
     pub(super) status: Option<Value>,
     #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
     pub(super) epic_id: Option<i64>,
+    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
+    pub(super) caller_task_id: Option<i64>,
+    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
+    pub(super) project_id: Option<i64>,
+    #[serde(default)]
+    pub(super) repo_paths: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -397,7 +403,7 @@ pub(super) fn handle_list_tasks(
     };
     tracing::info!(status = ?parsed.status, "MCP list_tasks");
 
-    // Parse status filter (supports string or array) — this is JSON-RPC parsing logic
+    // Parse status filter (supports string or array)
     let status_filter: Option<Vec<TaskStatus>> = match parsed.status {
         Some(Value::String(ref s)) => match TaskStatus::parse(s) {
             Some(st) => Some(vec![st]),
@@ -431,11 +437,49 @@ pub(super) fn handle_list_tasks(
         None => None,
     };
 
+    // Resolve caller task and auto-derive scope when no explicit scope given
+    let mut derived_epic_id: Option<EpicId> = None;
+    let mut derived_project_id: Option<i64> = None;
+    let mut exclude_task_id: Option<TaskId> = None;
+
+    if let Some(caller_id) = parsed.caller_task_id {
+        let caller = match state.db.get_task(TaskId(caller_id)) {
+            Ok(Some(t)) => t,
+            Ok(None) => {
+                return JsonRpcResponse::err(
+                    id,
+                    -32602,
+                    format!("Unknown caller_task_id: {caller_id}"),
+                );
+            }
+            Err(e) => {
+                return JsonRpcResponse::err(id, -32603, format!("Database error: {e}"));
+            }
+        };
+        exclude_task_id = Some(caller.id);
+
+        let has_explicit_scope = parsed.epic_id.is_some()
+            || parsed.project_id.is_some()
+            || parsed.repo_paths.is_some();
+        if !has_explicit_scope {
+            if let Some(eid) = caller.epic_id {
+                derived_epic_id = Some(eid);
+            } else {
+                derived_project_id = Some(caller.project_id);
+            }
+        }
+    }
+
+    let epic_id = parsed.epic_id.map(EpicId).or(derived_epic_id);
+    let project_id = parsed.project_id.or(derived_project_id);
+
     let svc = TaskService::new(state.db.clone());
     match svc.list_tasks(ListTasksFilter {
         statuses: status_filter,
-        epic_id: parsed.epic_id.map(EpicId),
-        ..Default::default()
+        epic_id,
+        project_id,
+        repo_paths: parsed.repo_paths,
+        exclude_task_id,
     }) {
         Ok(filtered) => {
             if filtered.is_empty() {
