@@ -435,6 +435,7 @@ pub(super) fn handle_list_tasks(
     match svc.list_tasks(ListTasksFilter {
         statuses: status_filter,
         epic_id: parsed.epic_id.map(EpicId),
+        ..Default::default()
     }) {
         Ok(filtered) => {
             if filtered.is_empty() {

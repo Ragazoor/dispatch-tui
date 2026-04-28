@@ -240,9 +240,13 @@ pub struct ClaimTaskParams {
 // ListTasksFilter
 // ---------------------------------------------------------------------------
 
+#[derive(Default)]
 pub struct ListTasksFilter {
     pub statuses: Option<Vec<TaskStatus>>,
     pub epic_id: Option<EpicId>,
+    pub project_id: Option<ProjectId>,
+    pub repo_paths: Option<Vec<String>>,
+    pub exclude_task_id: Option<TaskId>,
 }
 
 // ---------------------------------------------------------------------------
@@ -537,6 +541,18 @@ impl TaskService {
             })
             .filter(|t| match filter.epic_id {
                 Some(eid) => t.epic_id == Some(eid),
+                None => true,
+            })
+            .filter(|t| match filter.project_id {
+                Some(pid) => t.project_id == pid,
+                None => true,
+            })
+            .filter(|t| match &filter.repo_paths {
+                Some(paths) => paths.iter().any(|p| p == &t.repo_path),
+                None => true,
+            })
+            .filter(|t| match filter.exclude_task_id {
+                Some(excluded) => t.id != excluded,
                 None => true,
             })
             .collect();
@@ -1442,7 +1458,7 @@ mod tests {
         let tasks = svc
             .list_tasks(ListTasksFilter {
                 statuses: Some(vec![TaskStatus::Backlog]),
-                epic_id: None,
+                ..Default::default()
             })
             .unwrap();
         assert_eq!(tasks.len(), 1);
@@ -1450,7 +1466,7 @@ mod tests {
         let tasks = svc
             .list_tasks(ListTasksFilter {
                 statuses: Some(vec![TaskStatus::Running]),
-                epic_id: None,
+                ..Default::default()
             })
             .unwrap();
         assert!(tasks.is_empty());
@@ -2528,8 +2544,8 @@ mod tests {
 
         let tasks = svc
             .list_tasks(ListTasksFilter {
-                statuses: None,
                 epic_id: Some(epic.id),
+                ..Default::default()
             })
             .unwrap();
         assert_eq!(tasks.len(), 1);
@@ -2560,11 +2576,134 @@ mod tests {
 
         let tasks = svc
             .list_tasks(ListTasksFilter {
-                statuses: None,
-                epic_id: None,
+                ..Default::default()
             })
             .unwrap();
         assert!(tasks.is_empty());
+    }
+
+    #[test]
+    fn list_tasks_filters_by_project_id() {
+        let db = test_db();
+        let svc = task_svc(&db);
+
+        svc.create_task(CreateTaskParams {
+            title: "P1 task".into(),
+            description: "".into(),
+            repo_path: "/repo".into(),
+            plan_path: None,
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            base_branch: None,
+            project_id: 1,
+        })
+        .unwrap();
+
+        svc.create_task(CreateTaskParams {
+            title: "P2 task".into(),
+            description: "".into(),
+            repo_path: "/repo".into(),
+            plan_path: None,
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            base_branch: None,
+            project_id: 2,
+        })
+        .unwrap();
+
+        let tasks = svc
+            .list_tasks(ListTasksFilter {
+                project_id: Some(2),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].title, "P2 task");
+    }
+
+    #[test]
+    fn list_tasks_filters_by_repo_paths() {
+        let db = test_db();
+        let svc = task_svc(&db);
+
+        svc.create_task(CreateTaskParams {
+            title: "Repo A".into(),
+            description: "".into(),
+            repo_path: "/repo/a".into(),
+            plan_path: None,
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            base_branch: None,
+            project_id: 1,
+        })
+        .unwrap();
+
+        svc.create_task(CreateTaskParams {
+            title: "Repo B".into(),
+            description: "".into(),
+            repo_path: "/repo/b".into(),
+            plan_path: None,
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            base_branch: None,
+            project_id: 1,
+        })
+        .unwrap();
+
+        let tasks = svc
+            .list_tasks(ListTasksFilter {
+                repo_paths: Some(vec!["/repo/a".to_string()]),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].title, "Repo A");
+    }
+
+    #[test]
+    fn list_tasks_excludes_caller_task() {
+        let db = test_db();
+        let svc = task_svc(&db);
+
+        let id1 = svc
+            .create_task(CreateTaskParams {
+                title: "T1".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                plan_path: None,
+                epic_id: None,
+                sort_order: None,
+                tag: None,
+                base_branch: None,
+                project_id: 1,
+            })
+            .unwrap();
+
+        svc.create_task(CreateTaskParams {
+            title: "T2".into(),
+            description: "".into(),
+            repo_path: "/repo".into(),
+            plan_path: None,
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            base_branch: None,
+            project_id: 1,
+        })
+        .unwrap();
+
+        let tasks = svc
+            .list_tasks(ListTasksFilter {
+                exclude_task_id: Some(id1),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].title, "T2");
     }
 
     #[test]
