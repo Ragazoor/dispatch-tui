@@ -1762,8 +1762,8 @@ pub(super) fn save_tips_state(
 // LearningStore
 // ---------------------------------------------------------------------------
 
-use crate::models::{Learning, LearningId, LearningKind, LearningScope, LearningStatus};
 use super::{LearningFilter, LearningPatch, LearningStore};
+use crate::models::{Learning, LearningId, LearningKind, LearningScope, LearningStatus};
 
 const LEARNING_COLUMNS: &str =
     "id, kind, summary, detail, scope, scope_ref, tags, status, source_task_id, \
@@ -1878,10 +1878,11 @@ impl LearningStore for Database {
             "SELECT {LEARNING_COLUMNS} FROM learnings {where_clause} ORDER BY created_at DESC {limit_clause}"
         );
 
-        let params_refs: Vec<&dyn rusqlite::ToSql> =
-            bind.iter().map(|b| b.as_ref()).collect();
+        let params_refs: Vec<&dyn rusqlite::ToSql> = bind.iter().map(|b| b.as_ref()).collect();
 
-        let mut stmt = conn.prepare(&sql).context("Failed to prepare list_learnings")?;
+        let mut stmt = conn
+            .prepare(&sql)
+            .context("Failed to prepare list_learnings")?;
         let rows = stmt
             .query_map(params_refs.as_slice(), row_to_learning)
             .context("Failed to list learnings")?
@@ -1939,8 +1940,7 @@ impl LearningStore for Database {
             bind.len()
         );
 
-        let params_refs: Vec<&dyn rusqlite::ToSql> =
-            bind.iter().map(|b| b.as_ref()).collect();
+        let params_refs: Vec<&dyn rusqlite::ToSql> = bind.iter().map(|b| b.as_ref()).collect();
 
         conn.execute(&sql, params_refs.as_slice())
             .context("Failed to patch learning")?;
@@ -1997,10 +1997,7 @@ impl LearningStore for Database {
         }
         if let Some(ref eref) = epic_ref {
             bind.push(Box::new(eref.clone()));
-            scope_conditions.push(format!(
-                "(scope = 'epic' AND scope_ref = ?{})",
-                bind.len()
-            ));
+            scope_conditions.push(format!("(scope = 'epic' AND scope_ref = ?{})", bind.len()));
         }
 
         let scope_filter = scope_conditions.join(" OR ");
@@ -2021,8 +2018,7 @@ impl LearningStore for Database {
                confirmed_count DESC"
         );
 
-        let params_refs: Vec<&dyn rusqlite::ToSql> =
-            bind.iter().map(|b| b.as_ref()).collect();
+        let params_refs: Vec<&dyn rusqlite::ToSql> = bind.iter().map(|b| b.as_ref()).collect();
 
         let mut stmt = conn
             .prepare(&sql)

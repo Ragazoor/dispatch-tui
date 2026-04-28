@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 use crate::mcp::McpState;
 
 use super::epics;
+use super::learnings;
 use super::review;
 use super::tasks;
 use super::types::{JsonRpcRequest, JsonRpcResponse};
@@ -499,7 +500,85 @@ mcp_tools! {
 
     sync "list_projects" => handle_list_projects,
         "List all projects on the board so you can look up a project_id by name.",
-        { "type": "object", "properties": {} }
+        { "type": "object", "properties": {} };
+
+    sync "record_learning" => learnings::handle_record_learning,
+        "Propose a new learning entry. Always lands as 'proposed' and has no effect until a human approves it in the TUI. Omit scope_ref to auto-derive it from the calling task (recommended in most cases).",
+        {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "integer",
+                    "description": "ID of the task this learning was discovered during"
+                },
+                "kind": {
+                    "type": "string",
+                    "description": "Category: pitfall, convention, preference, tool_recommendation, procedural, or episodic",
+                    "enum": ["pitfall", "convention", "preference", "tool_recommendation", "procedural", "episodic"]
+                },
+                "summary": {
+                    "type": "string",
+                    "description": "One-sentence description of what was learned (required, non-empty)"
+                },
+                "scope": {
+                    "type": "string",
+                    "description": "Scope this learning applies to: user (global), repo, project, epic, or task",
+                    "enum": ["user", "repo", "project", "epic", "task"]
+                },
+                "detail": {
+                    "type": "string",
+                    "description": "Optional extended context or explanation"
+                },
+                "scope_ref": {
+                    "type": "string",
+                    "description": "Qualifier for the scope (e.g. repo path, epic ID as string). Omit to auto-derive from the calling task — only set explicitly when recording a learning about a different context than the current task."
+                },
+                "tags": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Optional free-form labels for filtering (e.g. [\"rust\", \"testing\"])"
+                }
+            },
+            "required": ["task_id", "kind", "summary", "scope"]
+        };
+
+    sync "query_learnings" => learnings::handle_query_learnings,
+        "Retrieve approved learnings relevant to this task's context (user + project + repo + epic scopes). Ordered by scope priority then confirmation count. Excludes task-scoped learnings.",
+        {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "integer",
+                    "description": "ID of the calling task — determines which repo/project/epic to query"
+                },
+                "tag_filter": {
+                    "type": "string",
+                    "description": "Optional tag to filter results — only learnings tagged with this value are returned"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of results to return (default 20, max 50)"
+                }
+            },
+            "required": ["task_id"]
+        };
+
+    sync "confirm_learning" => learnings::handle_confirm_learning,
+        "Signal that an approved learning was applicable and proved correct. Increments its confirmation count.",
+        {
+            "type": "object",
+            "properties": {
+                "learning_id": {
+                    "type": "integer",
+                    "description": "ID of the learning to confirm"
+                },
+                "task_id": {
+                    "type": "integer",
+                    "description": "ID of the task that acted on this learning"
+                }
+            },
+            "required": ["learning_id", "task_id"]
+        }
 }
 
 // ---------------------------------------------------------------------------

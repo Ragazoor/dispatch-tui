@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 /// Default port for the MCP server, used when `DISPATCH_PORT` is not set.
 pub const DEFAULT_PORT: u16 = 3142;
 

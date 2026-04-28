@@ -483,7 +483,10 @@ fn selecting_project_keeps_focus_in_col_0() {
 fn refresh_preserves_projects_panel() {
     let mut app = two_project_app();
     app.handle_key(make_key(KeyCode::Char('h')));
-    assert!(app.projects_panel_visible(), "precondition: projects panel open");
+    assert!(
+        app.projects_panel_visible(),
+        "precondition: projects panel open"
+    );
 
     let tasks = app.board.tasks.clone();
     app.update(Message::RefreshTasks(tasks));
