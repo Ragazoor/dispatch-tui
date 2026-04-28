@@ -403,6 +403,135 @@ fn confirm_delete_project2_n_resets_mode() {
 }
 
 #[test]
+fn shift_j_cursor_follows_moved_project_down() {
+    let mut app = two_project_app();
+    app.handle_key(make_key(KeyCode::Char('h')));
+    assert_eq!(
+        app.selected_project_row(),
+        0,
+        "precondition: cursor at row 0 (Default)"
+    );
+
+    app.update(Message::ProjectsUpdated(vec![
+        Project {
+            id: 2,
+            name: "Backend".to_string(),
+            sort_order: 0,
+            is_default: false,
+        },
+        Project {
+            id: 1,
+            name: "Default".to_string(),
+            sort_order: 1,
+            is_default: true,
+        },
+    ]));
+    app.update(Message::FollowProject(1));
+
+    assert_eq!(
+        app.selected_project_row(),
+        1,
+        "cursor should follow Default project to its new index 1"
+    );
+}
+
+#[test]
+fn shift_k_cursor_follows_moved_project_up() {
+    let mut app = two_project_app();
+    app.handle_key(make_key(KeyCode::Char('h')));
+    app.handle_key(make_key(KeyCode::Char('j')));
+    assert_eq!(app.selected_project_row(), 1);
+
+    app.update(Message::ProjectsUpdated(vec![
+        Project {
+            id: 2,
+            name: "Backend".to_string(),
+            sort_order: 0,
+            is_default: false,
+        },
+        Project {
+            id: 1,
+            name: "Default".to_string(),
+            sort_order: 1,
+            is_default: true,
+        },
+    ]));
+    app.update(Message::FollowProject(2));
+
+    assert_eq!(
+        app.selected_project_row(),
+        0,
+        "cursor should follow Backend project to its new index 0"
+    );
+}
+
+#[test]
+fn follow_project_unknown_id_does_not_panic() {
+    let mut app = two_project_app();
+    app.update(Message::FollowProject(99));
+    assert_eq!(app.selected_project_row(), 0);
+}
+
+#[test]
+fn follow_project_at_boundary_does_not_move_cursor() {
+    let mut app = two_project_app();
+    app.handle_key(make_key(KeyCode::Char('h')));
+    assert_eq!(app.selected_project_row(), 0);
+    app.update(Message::FollowProject(1));
+    assert_eq!(app.selected_project_row(), 0, "cursor should stay at 0");
+}
+
+#[test]
+fn follow_project_updates_list_state_and_selection_in_sync() {
+    let mut app = two_project_app();
+    app.handle_key(make_key(KeyCode::Char('h')));
+    app.update(Message::ProjectsUpdated(vec![
+        Project {
+            id: 2,
+            name: "Backend".to_string(),
+            sort_order: 0,
+            is_default: false,
+        },
+        Project {
+            id: 1,
+            name: "Default".to_string(),
+            sort_order: 1,
+            is_default: true,
+        },
+    ]));
+    app.update(Message::FollowProject(2));
+
+    assert_eq!(app.selected_project_row(), 0, "selection row should be 0");
+    assert_eq!(
+        app.selected_project().map(|p| p.id),
+        Some(2),
+        "selected_project() should return Backend (id=2) after FollowProject"
+    );
+}
+
+#[test]
+fn g_selects_project_same_as_enter() {
+    let mut app = two_project_app();
+    app.handle_key(make_key(KeyCode::Char('h')));
+    app.handle_key(make_key(KeyCode::Char('j')));
+    app.handle_key(make_key(KeyCode::Char('g')));
+    assert!(app.projects_panel_visible());
+    assert_eq!(app.active_project(), 2, "g should select Backend (id=2)");
+}
+
+#[test]
+fn g_in_empty_projects_panel_is_noop() {
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    app.update(Message::ProjectsUpdated(vec![]));
+    app.update(Message::NavigateColumn(-1));
+    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
+    assert!(
+        cmds.is_empty(),
+        "g with no projects should emit no commands"
+    );
+}
+
+#[test]
 fn shift_j_emits_reorder_project_down() {
     use crossterm::event::KeyEvent;
     let mut app = two_project_app();
@@ -554,7 +683,10 @@ fn q_from_board_opens_projects_panel() {
     assert!(!app.projects_panel_visible());
 
     app.handle_key(make_key(KeyCode::Char('q')));
-    assert!(app.projects_panel_visible(), "q should navigate to projects panel");
+    assert!(
+        app.projects_panel_visible(),
+        "q should navigate to projects panel"
+    );
     assert!(!app.should_quit(), "q should not quit yet");
 }
 
@@ -576,7 +708,10 @@ fn q_then_q_full_flow() {
     // First q opens the projects panel; second q enters ConfirmQuit
     let mut app = two_project_app();
     app.handle_key(make_key(KeyCode::Char('q')));
-    assert!(app.projects_panel_visible(), "first q should open projects panel");
+    assert!(
+        app.projects_panel_visible(),
+        "first q should open projects panel"
+    );
 
     app.handle_key(make_key(KeyCode::Char('q')));
     assert!(

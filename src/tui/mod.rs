@@ -1010,6 +1010,13 @@ impl App {
                     value: project_id.to_string(),
                 }]
             }
+            Message::FollowProject(project_id) => {
+                if let Some(idx) = self.board.projects.iter().position(|p| p.id == project_id) {
+                    self.selection_mut().set_row(0, idx);
+                    self.projects_panel.list_state.select(Some(idx));
+                }
+                vec![]
+            }
         }
     }
 

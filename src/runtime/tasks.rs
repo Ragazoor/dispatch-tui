@@ -396,6 +396,7 @@ impl TuiRuntime {
             .database
             .reorder_project(projects[neighbor_idx].id, current_order);
         self.exec_refresh_projects_from_db(app);
+        app.update(Message::FollowProject(id));
     }
 
     pub(super) fn exec_resume(&self, task: models::Task) {

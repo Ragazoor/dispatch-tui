@@ -351,6 +351,7 @@ pub enum Message {
     // Project messages
     ProjectsUpdated(Vec<Project>),
     SelectProject(ProjectId),
+    FollowProject(ProjectId),
 }
 
 // ---------------------------------------------------------------------------

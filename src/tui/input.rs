@@ -820,7 +820,7 @@ impl App {
                 vec![]
             }
             KeyCode::Char('l') | KeyCode::Right => self.update(Message::NavigateColumn(1)),
-            KeyCode::Enter => {
+            KeyCode::Enter | KeyCode::Char('g') => {
                 if let Some(id) = self.selected_project().map(|p| p.id) {
                     return self.update(Message::SelectProject(id));
                 }
