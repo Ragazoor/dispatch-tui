@@ -1015,33 +1015,27 @@ fn render_task_detail_overlay(frame: &mut Frame, app: &mut App, area: Rect) {
     // ── Header lines (metadata) ──────────────────────────────────────────────
     let label_style = Style::default().fg(MUTED);
     let value_style = Style::default().fg(FG);
-    let mut header_lines: Vec<Line> = Vec::new();
+    let mut header_lines: Vec<Line> = Vec::with_capacity(4);
+    let mut field = |label: &'static str, value: String| {
+        header_lines.push(Line::from(vec![
+            Span::styled(label, label_style),
+            Span::styled(value, value_style),
+        ]));
+    };
 
-    header_lines.push(Line::from(vec![
-        Span::styled("Repo:  ", label_style),
-        Span::styled(task.repo_path.clone(), value_style),
-    ]));
+    field("Repo:  ", task.repo_path.clone());
 
     if let Some(epic_id) = task.epic_id {
         let epic_title = app.epic_title(epic_id).unwrap_or("").to_string();
-        header_lines.push(Line::from(vec![
-            Span::styled("Epic:  ", label_style),
-            Span::styled(format!("#{} — {}", epic_id, epic_title), value_style),
-        ]));
+        field("Epic:  ", format!("#{} — {}", epic_id, epic_title));
     }
 
     if let Some(pr_url) = &task.pr_url {
-        header_lines.push(Line::from(vec![
-            Span::styled("PR:    ", label_style),
-            Span::styled(pr_url.clone(), value_style),
-        ]));
+        field("PR:    ", pr_url.clone());
     }
 
     if let Some(plan_path) = &task.plan_path {
-        header_lines.push(Line::from(vec![
-            Span::styled("Plan:  ", label_style),
-            Span::styled(plan_path.clone(), value_style),
-        ]));
+        field("Plan:  ", plan_path.clone());
     }
 
     let header_height = header_lines.len() as u16 + 1; // +1 for separator line
@@ -1056,7 +1050,9 @@ fn render_task_detail_overlay(frame: &mut Frame, app: &mut App, area: Rect) {
     let new_max_scroll = desc_wrapped.saturating_sub(body_height as usize) as u16;
 
     if let ViewMode::TaskDetail { ref mut max_scroll, .. } = app.board.view_mode {
-        *max_scroll = new_max_scroll;
+        if *max_scroll != new_max_scroll {
+            *max_scroll = new_max_scroll;
+        }
     }
 
     // ── Block with hints ─────────────────────────────────────────────────────

@@ -143,8 +143,7 @@ impl App {
         self.board.view_mode.selection_mut()
     }
 
-    /// Returns the view mode used for board rendering.
-    /// When in TaskDetail overlay, the board beneath shows the previous mode.
+    /// When in TaskDetail overlay, returns the board mode beneath (Board or Epic).
     pub(in crate::tui) fn effective_view_mode(&self) -> &ViewMode {
         match &self.board.view_mode {
             ViewMode::TaskDetail { previous, .. } => previous.as_ref(),
