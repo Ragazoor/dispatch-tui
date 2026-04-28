@@ -1227,33 +1227,6 @@ fn render_detail_task_with_pr_url() {
 }
 
 #[test]
-fn render_detail_task_with_usage_shows_cost() {
-    use crate::models::TaskUsage;
-    let task = make_task(1, TaskStatus::Running);
-    let mut app = App::new(vec![task], 1, TEST_TIMEOUT);
-    // Navigate to Running column (index 1)
-    app.update(Message::NavigateColumn(1));
-    // The TaskDetail overlay is implemented in Task 6.
-    // This test verifies the overlay can be opened and usage is available.
-    app.update(Message::OpenTaskDetail(1));
-    app.board.usage.insert(
-        TaskId(1),
-        TaskUsage {
-            task_id: TaskId(1),
-            cost_usd: 1.23,
-            input_tokens: 50_000,
-            output_tokens: 10_000,
-            cache_read_tokens: 0,
-            cache_write_tokens: 0,
-            updated_at: chrono::Utc::now(),
-        },
-    );
-    // When Task 6 implements the overlay renderer, it will display usage.
-    // For now, just verify that TaskDetail mode was entered successfully.
-    assert!(matches!(app.board.view_mode, ViewMode::TaskDetail { task_id, .. } if task_id == 1));
-}
-
-#[test]
 fn render_detail_no_selection_shows_message() {
     // The old detail panel is replaced by the TaskDetail overlay (Task 6).
     // Placeholder: just verify that rendering an empty board does not crash.

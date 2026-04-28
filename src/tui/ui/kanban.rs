@@ -139,13 +139,14 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     render_tab_bar(frame, app, vertical[0]);
     render_summary(frame, app, &epic_stats, vertical[1]);
     render_columns(frame, app, &epic_stats, vertical[2], now);
-    render_detail(frame, app, vertical[3], now);
+    render_input_form_panel(frame, app, vertical[3]);
     render_status_bar(frame, app, vertical[4]);
 
     render_error_popup(frame, app, area);
     render_help_overlay(frame, app, area);
     render_repo_filter_overlay(frame, app, area);
     render_tips_overlay(frame, app, area);
+    render_task_detail_overlay(frame, app, area);
 }
 
 /// Returns the layout constraints for the summary row based on which column is focused.
@@ -1166,21 +1167,153 @@ fn epic_detail_lines(app: &App, epic: &Epic) -> Vec<Line<'static>> {
     lines
 }
 
-fn render_detail(frame: &mut Frame, app: &App, area: Rect, _now: DateTime<Utc>) {
-    // When in input mode, show the input form instead of detail
+fn render_input_form_panel(frame: &mut Frame, app: &App, area: Rect) {
     if render_input_form(frame, app, area) {
         return;
     }
-
-    // Top border separator
+    // Empty panel — just a top border separator when no input form is active
     let block = Block::default()
         .borders(Borders::TOP)
         .border_style(Style::default().fg(BORDER));
+    frame.render_widget(Paragraph::new("").block(block), area);
+}
 
-    // The old fixed detail panel is superseded by the TaskDetail overlay (Task 6).
-    // Render the empty placeholder until the overlay renderer replaces this.
-    let paragraph = Paragraph::new("").block(block);
-    frame.render_widget(paragraph, area);
+fn render_task_detail_overlay(frame: &mut Frame, app: &mut App, area: Rect) {
+    let (task_id, scroll, zoomed) = match &app.board.view_mode {
+        ViewMode::TaskDetail {
+            task_id,
+            scroll,
+            zoomed,
+            ..
+        } => (*task_id, *scroll, *zoomed),
+        _ => return,
+    };
+
+    let Some(task) = app.board.tasks.iter().find(|t| t.id.0 == task_id).cloned() else {
+        return;
+    };
+
+    // Compute overlay area
+    let overlay_height = if zoomed {
+        area.height.saturating_sub(1) // full height minus status bar
+    } else {
+        area.height / 2
+    };
+    let overlay_y = area.bottom().saturating_sub(overlay_height + 1); // above status bar
+    let overlay_area = Rect {
+        x: area.x,
+        y: overlay_y,
+        width: area.width,
+        height: overlay_height,
+    };
+
+    frame.render_widget(Clear, overlay_area);
+
+    // ── Header lines (metadata) ──────────────────────────────────────────────
+    let label_style = Style::default().fg(MUTED);
+    let value_style = Style::default().fg(FG);
+    let mut header_lines: Vec<Line> = Vec::new();
+
+    header_lines.push(Line::from(vec![
+        Span::styled("Repo:  ", label_style),
+        Span::styled(task.repo_path.clone(), value_style),
+    ]));
+
+    if let Some(epic_id) = task.epic_id {
+        let epic_title = app.epic_title(epic_id).unwrap_or("").to_string();
+        header_lines.push(Line::from(vec![
+            Span::styled("Epic:  ", label_style),
+            Span::styled(format!("#{} — {}", epic_id, epic_title), value_style),
+        ]));
+    }
+
+    if let Some(pr_url) = &task.pr_url {
+        header_lines.push(Line::from(vec![
+            Span::styled("PR:    ", label_style),
+            Span::styled(pr_url.clone(), value_style),
+        ]));
+    }
+
+    if let Some(plan_path) = &task.plan_path {
+        header_lines.push(Line::from(vec![
+            Span::styled("Plan:  ", label_style),
+            Span::styled(plan_path.clone(), value_style),
+        ]));
+    }
+
+    let header_height = header_lines.len() as u16 + 1; // +1 for separator line
+
+    // ── Compute body area and scroll clamping ────────────────────────────────
+    let body_height = overlay_area
+        .height
+        .saturating_sub(2 + header_height + 1); // borders(2) + header + separator(1)
+    let body_width = overlay_area.width.saturating_sub(2) as usize;
+
+    let desc_wrapped = wrapped_line_count(&task.description, body_width);
+    let new_max_scroll = desc_wrapped.saturating_sub(body_height as usize) as u16;
+
+    if let ViewMode::TaskDetail { ref mut max_scroll, .. } = app.board.view_mode {
+        *max_scroll = new_max_scroll;
+    }
+
+    // ── Block with hints ─────────────────────────────────────────────────────
+    let hint_style = Style::default().fg(MUTED);
+    let block = Block::default()
+        .title(format!(" Task #{task_id} "))
+        .title_bottom(Line::from(Span::styled(
+            " j/k scroll · z zoom · q/Esc/Enter close ",
+            hint_style,
+        )))
+        .borders(Borders::ALL)
+        .border_type(BorderType::Plain)
+        .border_style(Style::default().fg(BORDER));
+
+    let inner = block.inner(overlay_area);
+    frame.render_widget(block, overlay_area);
+
+    // ── Render header inside block ────────────────────────────────────────────
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(vec![Constraint::Length(header_height), Constraint::Min(0)])
+        .split(inner);
+
+    let header_block = Block::default()
+        .borders(Borders::BOTTOM)
+        .border_style(Style::default().fg(BORDER));
+    frame.render_widget(
+        Paragraph::new(header_lines).block(header_block),
+        layout[0],
+    );
+
+    // ── Render scrollable description ─────────────────────────────────────────
+    let desc_lines: Vec<Line> = task
+        .description
+        .lines()
+        .map(|l| Line::from(Span::styled(l.to_string(), Style::default().fg(MUTED_LIGHT))))
+        .collect();
+
+    frame.render_widget(
+        Paragraph::new(desc_lines)
+            .scroll((scroll, 0))
+            .wrap(Wrap { trim: false }),
+        layout[1],
+    );
+}
+
+/// Approximate wrapped line count for scroll clamping.
+fn wrapped_line_count(text: &str, width: usize) -> usize {
+    if width == 0 {
+        return 0;
+    }
+    text.lines()
+        .map(|line| {
+            if line.is_empty() {
+                1
+            } else {
+                line.len().div_ceil(width)
+            }
+        })
+        .sum()
 }
 
 use super::input_form::{
