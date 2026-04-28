@@ -205,7 +205,27 @@ fn format_task_detail(task: &Task, epic_titles: &HashMap<EpicId, String>) -> Str
     text
 }
 
-fn format_task_line(t: &Task, epic_titles: &HashMap<EpicId, String>) -> String {
+fn plan_goal(path: &str) -> Option<String> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let description = crate::plan::parse_plan(&content).ok()?.description;
+    (!description.is_empty()).then_some(description)
+}
+
+fn description_preview(s: &str) -> String {
+    if s.len() > 200 {
+        let end = s
+            .char_indices()
+            .take_while(|(i, _)| *i < 200)
+            .last()
+            .map(|(i, c)| i + c.len_utf8())
+            .unwrap_or(0);
+        format!("{}...", &s[..end])
+    } else {
+        s.to_owned()
+    }
+}
+
+fn format_task_line(t: &Task, epic_titles: &HashMap<EpicId, String>, goal: &str) -> String {
     let tag_indicator = match t.tag {
         Some(tag) => format!(" [{}]", tag.as_str()),
         None => String::new(),
@@ -217,31 +237,11 @@ fn format_task_line(t: &Task, epic_titles: &HashMap<EpicId, String>) -> String {
         },
         None => String::new(),
     };
-    let pr_part = match &t.pr_url {
-        Some(url) => format!(" | PR: {url}"),
-        None => String::new(),
-    };
-    let goal = t
-        .plan_path
+    let pr_part = t
+        .pr_url
         .as_deref()
-        .and_then(|path| std::fs::read_to_string(path).ok())
-        .and_then(|content| crate::plan::parse_plan(&content).ok())
-        .map(|meta| meta.description)
-        .filter(|d| !d.is_empty())
-        .unwrap_or_else(|| {
-            if t.description.len() > 200 {
-                let end = t
-                    .description
-                    .char_indices()
-                    .take_while(|(i, _)| *i < 200)
-                    .last()
-                    .map(|(i, c)| i + c.len_utf8())
-                    .unwrap_or(0);
-                format!("{}...", &t.description[..end])
-            } else {
-                t.description.clone()
-            }
-        });
+        .map(|url| format!(" | PR: {url}"))
+        .unwrap_or_default();
     let goal_part = if goal.is_empty() {
         String::new()
     } else {
@@ -454,12 +454,9 @@ pub(super) fn handle_list_tasks(
         None => None,
     };
 
-    // Resolve caller task and auto-derive scope when no explicit scope given
-    let mut derived_epic_id: Option<EpicId> = None;
-    let mut derived_project_id: Option<i64> = None;
-    let mut exclude_task_id: Option<TaskId> = None;
-
-    if let Some(caller_id) = parsed.caller_task_id {
+    let (derived_epic_id, derived_project_id, exclude_task_id) = if let Some(caller_id) =
+        parsed.caller_task_id
+    {
         let caller = match state.db.get_task(TaskId(caller_id)) {
             Ok(Some(t)) => t,
             Ok(None) => {
@@ -473,18 +470,19 @@ pub(super) fn handle_list_tasks(
                 return JsonRpcResponse::err(id, -32603, format!("Database error: {e}"));
             }
         };
-        exclude_task_id = Some(caller.id);
-
         let has_explicit_scope =
             parsed.epic_id.is_some() || parsed.project_id.is_some() || parsed.repo_paths.is_some();
-        if !has_explicit_scope {
-            if let Some(eid) = caller.epic_id {
-                derived_epic_id = Some(eid);
-            } else {
-                derived_project_id = Some(caller.project_id);
-            }
-        }
-    }
+        let (epic, proj) = if has_explicit_scope {
+            (None, None)
+        } else if let Some(eid) = caller.epic_id {
+            (Some(eid), None)
+        } else {
+            (None, Some(caller.project_id))
+        };
+        (epic, proj, Some(caller.id))
+    } else {
+        (None, None, None)
+    };
 
     let epic_id = parsed.epic_id.map(EpicId).or(derived_epic_id);
     let project_id = parsed.project_id.or(derived_project_id);
@@ -505,9 +503,27 @@ pub(super) fn handle_list_tasks(
                 );
             }
             let epic_titles = build_epic_titles(state);
+            // Read each unique plan file once to avoid repeated blocking I/O per task.
+            let plan_goals: HashMap<String, String> = {
+                let mut cache = HashMap::new();
+                for t in &filtered {
+                    if let Some(path) = t.plan_path.as_deref() {
+                        cache
+                            .entry(path.to_owned())
+                            .or_insert_with(|| plan_goal(path).unwrap_or_default());
+                    }
+                }
+                cache
+            };
             let lines: Vec<String> = filtered
                 .iter()
-                .map(|t| format_task_line(t, &epic_titles))
+                .map(|t| {
+                    let goal = match t.plan_path.as_deref().and_then(|p| plan_goals.get(p)) {
+                        Some(g) if !g.is_empty() => g.clone(),
+                        _ => description_preview(&t.description),
+                    };
+                    format_task_line(t, &epic_titles, &goal)
+                })
                 .collect();
             JsonRpcResponse::ok(
                 id,
