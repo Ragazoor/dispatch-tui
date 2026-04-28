@@ -106,7 +106,7 @@ impl App {
                 if matches!(self.board.view_mode, ViewMode::Epic { .. }) {
                     self.update(Message::ExitEpic)
                 } else {
-                    self.update(Message::Quit)
+                    self.update(Message::NavigateColumn(-1))
                 }
             }
 
@@ -865,6 +865,7 @@ impl App {
                 }
                 vec![]
             }
+            KeyCode::Char('q') => self.update(Message::Quit),
             _ => vec![],
         }
     }

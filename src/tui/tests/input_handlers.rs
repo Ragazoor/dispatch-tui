@@ -967,11 +967,11 @@ fn handle_key_normal_navigation() {
 }
 
 #[test]
-fn handle_key_normal_quit_enters_confirm() {
+fn handle_key_normal_q_opens_projects_panel() {
     let mut app = make_app();
     app.handle_key(make_key(KeyCode::Char('q')));
-    assert!(!app.should_quit);
-    assert_eq!(app.input.mode, InputMode::ConfirmQuit);
+    assert!(app.projects_panel_visible(), "q should open projects panel, not quit");
+    assert!(!app.should_quit());
 }
 
 #[test]

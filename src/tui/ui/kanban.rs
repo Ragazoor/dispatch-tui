@@ -2104,7 +2104,7 @@ pub(in crate::tui) fn action_hints(
     push_hint("F", "flat");
     push_hint("f", "filter");
     push_hint("?", "help");
-    push_hint("q", "quit");
+    push_hint("q", "projects");
 
     spans
 }

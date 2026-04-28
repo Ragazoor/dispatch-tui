@@ -546,3 +546,61 @@ fn select_project_emits_persist_string_setting() {
         "expected PersistStringSetting(last_project=2) but got {cmds:?}"
     );
 }
+
+#[test]
+fn q_from_board_opens_projects_panel() {
+    let mut app = two_project_app();
+    assert_eq!(app.selected_column(), 1);
+    assert!(!app.projects_panel_visible());
+
+    app.handle_key(make_key(KeyCode::Char('q')));
+    assert!(app.projects_panel_visible(), "q should navigate to projects panel");
+    assert!(!app.should_quit(), "q should not quit yet");
+}
+
+#[test]
+fn q_from_projects_panel_triggers_quit_prompt() {
+    let mut app = two_project_app();
+    app.handle_key(make_key(KeyCode::Char('h')));
+    assert!(app.projects_panel_visible());
+
+    app.handle_key(make_key(KeyCode::Char('q')));
+    assert!(
+        matches!(app.mode(), crate::tui::types::InputMode::ConfirmQuit),
+        "q from projects panel should enter ConfirmQuit mode"
+    );
+}
+
+#[test]
+fn q_then_q_full_flow() {
+    // First q opens the projects panel; second q enters ConfirmQuit
+    let mut app = two_project_app();
+    app.handle_key(make_key(KeyCode::Char('q')));
+    assert!(app.projects_panel_visible(), "first q should open projects panel");
+
+    app.handle_key(make_key(KeyCode::Char('q')));
+    assert!(
+        matches!(app.mode(), crate::tui::types::InputMode::ConfirmQuit),
+        "second q should enter ConfirmQuit"
+    );
+}
+
+#[test]
+fn q_in_epic_view_exits_epic_not_projects_panel() {
+    use crate::models::EpicId;
+    let mut app = two_project_app();
+    app.board.epics = vec![super::helpers::make_epic(10)];
+    app.update(Message::EnterEpic(EpicId(10)));
+    assert!(matches!(
+        app.view_mode(),
+        crate::tui::types::ViewMode::Epic { .. }
+    ));
+
+    app.handle_key(make_key(KeyCode::Char('q')));
+    // Should exit the epic, not open the projects panel
+    assert!(!app.projects_panel_visible());
+    assert!(matches!(
+        app.view_mode(),
+        crate::tui::types::ViewMode::Board(_)
+    ));
+}
