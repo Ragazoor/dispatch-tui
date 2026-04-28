@@ -1126,6 +1126,31 @@ rule UpdateTaskViaMcp {
         -- returns a -32602 validation error.
 }
 
+rule ListTasksViaMcp {
+    when: McpListTasks(epic_id?, project_id?, repo_paths?, status?, caller_task_id?)
+
+    ensures: returns Task records where
+        (epic_id != null implies task.epic_id = epic_id)
+        and (project_id != null implies task.project_id = project_id)
+        and (repo_paths != null implies task.repo_path in repo_paths)
+        and (status != null implies task.status in status else task.status != archived)
+        and (caller_task_id != null implies task.id != caller_task_id)
+
+    @guidance
+        -- When caller_task_id is given and none of epic_id/project_id/repo_paths are set,
+        -- auto-derive scope from the caller:
+        --   caller.epic_id != null → filter by epic_id = caller.epic_id
+        --   else                   → filter by project_id = caller.project_id
+        -- Explicit scope filters always win over auto-derived scope.
+        -- When caller_task_id is given alongside an explicit scope filter, the caller task
+        -- is still excluded from results but no additional scope is derived.
+        -- Output line per task: title, status/sub_status, tag, epic, then
+        --   | PR: <pr_url>  (omitted when pr_url is null)
+        --   | Goal: <plan goal>  (from **Goal:** line in plan file; falls back to
+        --                         description preview ≤200 chars when plan absent/unreadable)
+        -- Implemented in src/mcp/handlers/tasks.rs.
+}
+
 rule ListProjectsViaMcp {
     when: McpListProjects()
 
