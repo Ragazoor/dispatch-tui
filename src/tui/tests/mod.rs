@@ -11,6 +11,7 @@ mod projects;
 mod rendering;
 mod repo_filter;
 mod split_pane;
+mod task_detail;
 mod tips_and_status;
 mod wrap_up;
 

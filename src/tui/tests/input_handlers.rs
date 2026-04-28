@@ -423,21 +423,20 @@ fn x_key_on_empty_column_is_noop() {
 }
 
 #[test]
-fn toggle_detail_flips_visibility() {
+fn open_close_task_detail_via_messages() {
     let mut app = App::new(vec![], 1, TEST_TIMEOUT);
-    assert!(!app.board.detail_visible);
-    app.update(Message::ToggleDetail);
-    assert!(app.board.detail_visible);
-    app.update(Message::ToggleDetail);
-    assert!(!app.board.detail_visible);
+    assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
+    app.update(Message::OpenTaskDetail(1));
+    assert!(matches!(app.board.view_mode, ViewMode::TaskDetail { .. }));
+    app.update(Message::CloseTaskDetail);
+    assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
 }
 
 #[test]
-fn enter_key_toggles_detail() {
+fn enter_key_on_empty_board_is_noop() {
     let mut app = App::new(vec![], 1, TEST_TIMEOUT);
-    assert!(!app.board.detail_visible);
     app.handle_key(make_key(KeyCode::Enter));
-    assert!(app.board.detail_visible);
+    assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
 }
 
 #[test]
@@ -846,14 +845,11 @@ fn x_key_with_selection_shows_count_in_confirm() {
 }
 
 #[test]
-fn enter_on_task_still_toggles_detail() {
+fn enter_on_task_does_not_enter_task_detail_without_input_routing() {
+    // Enter in Normal mode on a task is currently a no-op (input routing added in Task 5).
     let mut app = make_app();
-    assert!(!app.board.detail_visible);
     app.handle_key(make_key(KeyCode::Enter));
-    assert!(
-        app.board.detail_visible,
-        "Enter on task should still toggle detail"
-    );
+    assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
 }
 
 #[test]
@@ -1222,15 +1218,13 @@ fn handle_key_normal_dispatch_running_task_with_window_shows_info() {
 }
 
 #[test]
-fn handle_key_normal_enter_toggles_detail() {
+fn handle_key_normal_enter_is_noop_without_task_detail_routing() {
+    // Enter key routing for TaskDetail is added in Task 5.
     let mut app = make_app();
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 0);
-    assert!(!app.board.detail_visible);
     app.handle_key(make_key(KeyCode::Enter));
-    assert!(app.board.detail_visible);
-    app.handle_key(make_key(KeyCode::Enter));
-    assert!(!app.board.detail_visible);
+    assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
 }
 
 #[test]

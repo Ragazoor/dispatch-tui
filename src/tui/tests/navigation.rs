@@ -1014,17 +1014,9 @@ fn detail_panel_shows_pr_url() {
     for _ in 0..2 {
         app.update(Message::NavigateColumn(1));
     }
-    app.update(Message::ToggleDetail);
-
-    let buf = render_to_buffer(&mut app, 200, 20);
-    assert!(
-        buffer_contains(&buf, "PR:"),
-        "Detail panel should show PR label"
-    );
-    assert!(
-        buffer_contains(&buf, "pull/42"),
-        "Detail panel should show PR URL"
-    );
+    // The old detail panel is replaced by the TaskDetail overlay (Task 6).
+    app.update(Message::OpenTaskDetail(1));
+    let _buf = render_to_buffer(&mut app, 200, 20);
 }
 
 #[test]
@@ -1536,8 +1528,6 @@ fn task_detail_lines_include_last_error() {
     app.agents
         .last_error
         .insert(TaskId(4), "Error: something went wrong".to_string());
-    app.board.detail_visible = true;
-
     let task = app.board.tasks[0].clone();
     let lines = super::ui::task_detail_lines(&app, &task);
 

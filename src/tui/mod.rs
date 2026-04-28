@@ -105,7 +105,6 @@ impl App {
                 epics: Vec::new(),
                 projects: Vec::new(),
                 view_mode: ViewMode::default(),
-                detail_visible: false,
                 repo_paths: Vec::new(),
                 usage: HashMap::new(),
                 split: SplitState::default(),
@@ -136,17 +135,20 @@ impl App {
 
     /// Get the current selection state (from whichever view mode is active).
     pub fn selection(&self) -> &BoardSelection {
-        match &self.board.view_mode {
-            ViewMode::Board(sel) => sel,
-            ViewMode::Epic { selection, .. } => selection,
-        }
+        self.board.view_mode.selection()
     }
 
     /// Get mutable access to the current selection state.
     pub(in crate::tui) fn selection_mut(&mut self) -> &mut BoardSelection {
-        match &mut self.board.view_mode {
-            ViewMode::Board(sel) => sel,
-            ViewMode::Epic { selection, .. } => selection,
+        self.board.view_mode.selection_mut()
+    }
+
+    /// Returns the view mode used for board rendering.
+    /// When in TaskDetail overlay, the board beneath shows the previous mode.
+    pub(in crate::tui) fn effective_view_mode(&self) -> &ViewMode {
+        match &self.board.view_mode {
+            ViewMode::TaskDetail { previous, .. } => previous.as_ref(),
+            other => other,
         }
     }
 
@@ -174,9 +176,6 @@ impl App {
     }
     pub fn input_buffer(&self) -> &str {
         &self.input.buffer
-    }
-    pub fn detail_visible(&self) -> bool {
-        self.board.detail_visible
     }
     pub fn split_active(&self) -> bool {
         self.board.split.active
@@ -315,7 +314,7 @@ impl App {
     pub fn tasks_for_current_view(&self) -> Vec<&Task> {
         let repo_match = |t: &&Task| self.repo_matches(&t.repo_path);
         let project_match = |t: &&Task| self.project_matches(t.project_id);
-        match &self.board.view_mode {
+        match self.effective_view_mode() {
             ViewMode::Board(_) => self
                 .board
                 .tasks
@@ -351,6 +350,9 @@ impl App {
                         .filter(project_match)
                         .collect()
                 }
+            }
+            ViewMode::TaskDetail { .. } => {
+                unreachable!("effective_view_mode never returns TaskDetail")
             }
         }
     }
@@ -410,7 +412,7 @@ impl App {
         let mut items: Vec<ColumnItem<'_>> = tasks.into_iter().map(ColumnItem::Task).collect();
 
         if !self.board.flattened {
-            match &self.board.view_mode {
+            match self.effective_view_mode() {
                 ViewMode::Board(_) => {
                     // Main board: show only root epics (no parent)
                     for epic in &self.board.epics {
@@ -439,6 +441,9 @@ impl App {
                             items.push(ColumnItem::Epic(epic));
                         }
                     }
+                }
+                ViewMode::TaskDetail { .. } => {
+                    unreachable!("effective_view_mode never returns TaskDetail")
                 }
             }
         }
@@ -477,7 +482,7 @@ impl App {
         if self.board.flattened {
             return task_count;
         }
-        let epic_count = match &self.board.view_mode {
+        let epic_count = match self.effective_view_mode() {
             ViewMode::Board(_) => self
                 .board
                 .epics
@@ -497,6 +502,9 @@ impl App {
                     .filter(|e| e.parent_epic_id == Some(current) && e.status == status)
                     .count()
             }
+            ViewMode::TaskDetail { .. } => {
+                unreachable!("effective_view_mode never returns TaskDetail")
+            }
         };
         task_count + epic_count
     }
@@ -515,7 +523,7 @@ impl App {
 
         let mut items: Vec<ColumnItem<'_>> = tasks.into_iter().map(ColumnItem::Task).collect();
 
-        let epics_to_show: Vec<&Epic> = match &self.board.view_mode {
+        let epics_to_show: Vec<&Epic> = match self.effective_view_mode() {
             ViewMode::Board(_) => self
                 .board
                 .epics
@@ -533,6 +541,9 @@ impl App {
                     .iter()
                     .filter(|e| e.parent_epic_id == Some(current))
                     .collect()
+            }
+            ViewMode::TaskDetail { .. } => {
+                unreachable!("effective_view_mode never returns TaskDetail")
             }
         };
 
@@ -692,8 +703,9 @@ impl App {
             return;
         }
 
-        let anchor = match &self.board.view_mode {
+        let anchor = match self.effective_view_mode() {
             ViewMode::Board(sel) | ViewMode::Epic { selection: sel, .. } => sel.anchor,
+            ViewMode::TaskDetail { .. } => unreachable!("effective_view_mode never returns TaskDetail"),
         };
 
         let Some(anchor) = anchor else {
@@ -790,7 +802,8 @@ impl App {
             Message::NavigateRow(delta) => self.handle_navigate_row(delta),
             Message::MoveTask { id, direction } => self.handle_move_task(id, direction),
             Message::ReorderItem(dir) => self.handle_reorder_item(dir),
-            Message::ToggleDetail => self.handle_toggle_detail(),
+            Message::OpenTaskDetail(task_id) => self.handle_open_task_detail(task_id),
+            Message::CloseTaskDetail => self.handle_close_task_detail(),
             Message::ToggleFlattened => self.handle_toggle_flattened(),
             Message::ToggleHelp => self.handle_toggle_help(),
             Message::ToggleNotifications => self.handle_toggle_notifications(),
@@ -1086,7 +1099,7 @@ impl App {
     fn handle_navigate_column(&mut self, delta: isize) -> Vec<Command> {
         // Column range [0, 5]: 0=Projects, 1=Backlog, 2=Running, 3=Review, 4=Done, 5=Archive.
         // In Epic view, Projects and Archive are not shown; clamp to [1, COLUMN_COUNT].
-        let (min_col, max_col) = if matches!(self.board.view_mode, ViewMode::Epic { .. }) {
+        let (min_col, max_col) = if matches!(self.effective_view_mode(), ViewMode::Epic { .. }) {
             (1isize, TaskStatus::COLUMN_COUNT as isize) // [1, 4] in epic view
         } else {
             (0isize, TaskStatus::COLUMN_COUNT as isize + 1) // [0, 5] on main board
@@ -1413,8 +1426,22 @@ impl App {
         cmds
     }
 
-    fn handle_toggle_detail(&mut self) -> Vec<Command> {
-        self.board.detail_visible = !self.board.detail_visible;
+    fn handle_open_task_detail(&mut self, task_id: i64) -> Vec<Command> {
+        let previous = Box::new(self.board.view_mode.clone());
+        self.board.view_mode = ViewMode::TaskDetail {
+            task_id,
+            scroll: 0,
+            zoomed: false,
+            max_scroll: 0,
+            previous,
+        };
+        vec![]
+    }
+
+    fn handle_close_task_detail(&mut self) -> Vec<Command> {
+        if let ViewMode::TaskDetail { previous, .. } = &self.board.view_mode {
+            self.board.view_mode = *previous.clone();
+        }
         vec![]
     }
 
@@ -2409,7 +2436,7 @@ impl App {
         let draft = self.input.task_draft.take().unwrap_or_default();
         self.input.mode = InputMode::Normal;
         self.clear_status();
-        let epic_id = match &self.board.view_mode {
+        let epic_id = match self.effective_view_mode() {
             ViewMode::Epic { epic_id, .. } => Some(*epic_id),
             _ => None,
         };
@@ -3032,6 +3059,9 @@ impl App {
                 }
                 // Not a feed epic — no-op
             }
+            ViewMode::TaskDetail { .. } => {
+                // No-op: tab cycle does nothing inside task detail overlay
+            }
         }
         vec![]
     }
@@ -3043,7 +3073,6 @@ impl App {
             selection: BoardSelection::new_for_epic(),
             parent,
         };
-        self.board.detail_visible = false;
         vec![]
     }
 
@@ -3051,7 +3080,6 @@ impl App {
         if let ViewMode::Epic { parent, .. } = &self.board.view_mode {
             self.board.view_mode = *parent.clone();
         }
-        self.board.detail_visible = false;
         vec![]
     }
 

@@ -1177,26 +1177,9 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect, _now: DateTime<Utc>) 
         .borders(Borders::TOP)
         .border_style(Style::default().fg(BORDER));
 
-    if !app.board.detail_visible {
-        let paragraph = Paragraph::new("").block(block);
-        frame.render_widget(paragraph, area);
-        return;
-    }
-
-    let lines: Vec<Line> = if let Some(task) = app.selected_task() {
-        task_detail_lines(app, task)
-    } else if let Some(ColumnItem::Epic(epic)) = app.selected_column_item() {
-        epic_detail_lines(app, epic)
-    } else {
-        vec![Line::from(Span::styled(
-            "No task selected",
-            Style::default().fg(MUTED),
-        ))]
-    };
-
-    let paragraph = Paragraph::new(lines)
-        .block(block)
-        .wrap(Wrap { trim: false });
+    // The old fixed detail panel is superseded by the TaskDetail overlay (Task 6).
+    // Render the empty placeholder until the overlay renderer replaces this.
+    let paragraph = Paragraph::new("").block(block);
     frame.render_widget(paragraph, area);
 }
 

@@ -174,7 +174,8 @@ pub enum Message {
         task: Task,
     },
     DeleteTask(TaskId),
-    ToggleDetail,
+    OpenTaskDetail(i64),
+    CloseTaskDetail,
     ToggleFlattened,
     TmuxOutput {
         id: TaskId,
@@ -606,7 +607,6 @@ pub struct BoardState {
     pub(in crate::tui) epics: Vec<Epic>,
     pub(in crate::tui) projects: Vec<Project>,
     pub(in crate::tui) view_mode: ViewMode,
-    pub(in crate::tui) detail_visible: bool,
     pub(in crate::tui) repo_paths: Vec<String>,
     pub(in crate::tui) usage: HashMap<TaskId, TaskUsage>,
     pub(in crate::tui) split: SplitState,
@@ -925,6 +925,32 @@ pub enum ViewMode {
         /// For a nested sub-epic, this is `ViewMode::Epic { ... }` of the parent.
         parent: Box<ViewMode>,
     },
+    TaskDetail {
+        task_id: i64,
+        scroll: u16,
+        zoomed: bool,
+        /// Scroll limit updated by renderer each frame.
+        max_scroll: u16,
+        previous: Box<ViewMode>,
+    },
+}
+
+impl ViewMode {
+    pub(in crate::tui) fn selection(&self) -> &BoardSelection {
+        match self {
+            ViewMode::Board(sel) => sel,
+            ViewMode::Epic { selection, .. } => selection,
+            ViewMode::TaskDetail { previous, .. } => previous.selection(),
+        }
+    }
+
+    pub(in crate::tui) fn selection_mut(&mut self) -> &mut BoardSelection {
+        match self {
+            ViewMode::Board(sel) => sel,
+            ViewMode::Epic { selection, .. } => selection,
+            ViewMode::TaskDetail { previous, .. } => previous.selection_mut(),
+        }
+    }
 }
 
 impl Default for ViewMode {

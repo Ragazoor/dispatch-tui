@@ -233,7 +233,7 @@ impl App {
                 if self.selection().on_select_all {
                     return self.update(Message::SelectAllColumn);
                 }
-                self.update(Message::ToggleDetail)
+                vec![]
             }
 
             KeyCode::Char('e') => match self.selected_column_item() {

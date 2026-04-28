@@ -295,15 +295,10 @@ fn enter_on_epic_toggles_detail() {
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 0);
 
-    assert!(!app.board.detail_visible);
     app.handle_key(make_key(KeyCode::Enter));
     assert!(
-        app.board.detail_visible,
-        "Enter on epic should toggle detail panel"
-    );
-    assert!(
         matches!(app.board.view_mode, ViewMode::Board(_)),
-        "Should stay in board view"
+        "Should stay in board view — Enter on epic is a no-op until Task 5 input routing"
     );
 }
 
@@ -1455,12 +1450,9 @@ fn render_detail_task_with_epic_reference() {
     };
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 0);
-    app.board.detail_visible = true;
-    let buf = render_to_buffer(&mut app, 160, 30);
-    assert!(
-        buffer_contains(&buf, "Epic: Auth Epic"),
-        "detail panel should show 'Epic: Auth Epic' for a task linked to that epic"
-    );
+    // The old detail panel is replaced by the TaskDetail overlay (Task 6).
+    // This test will be updated in Task 6 to use the overlay.
+    let _buf = render_to_buffer(&mut app, 160, 30);
 }
 
 #[test]
@@ -1472,16 +1464,9 @@ fn render_detail_epic_shows_title_and_id() {
     // Epic is the only item in Backlog column (no standalone tasks)
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 0);
-    app.board.detail_visible = true;
-    let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(
-        buffer_contains(&buf, "Platform Migration"),
-        "epic detail should show the title 'Platform Migration'"
-    );
-    assert!(
-        buffer_contains(&buf, "#10"),
-        "epic detail should show the id '#10'"
-    );
+    // The old detail panel is replaced by the TaskDetail overlay (Task 6).
+    // This test will be updated in Task 6 to use the overlay.
+    let _buf = render_to_buffer(&mut app, 120, 30);
 }
 
 #[test]
@@ -1492,12 +1477,9 @@ fn render_detail_epic_with_plan_shows_path() {
     app.board.epics = vec![epic];
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 0);
-    app.board.detail_visible = true;
-    let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(
-        buffer_contains(&buf, "plan: docs/plans/migration.md"),
-        "epic detail should show 'plan: docs/plans/migration.md'"
-    );
+    // The old detail panel is replaced by the TaskDetail overlay (Task 6).
+    // This test will be updated in Task 6 to use the overlay.
+    let _buf = render_to_buffer(&mut app, 120, 30);
 }
 
 #[test]
@@ -1518,16 +1500,9 @@ fn render_detail_epic_shows_subtask_list() {
     // standalone items in column 1 (Backlog). The epic itself is the first item.
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 0);
-    app.board.detail_visible = true;
-    let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(
-        buffer_contains(&buf, "Subtask Alpha"),
-        "epic detail should list subtask 'Subtask Alpha'"
-    );
-    assert!(
-        buffer_contains(&buf, "Subtask Beta"),
-        "epic detail should list subtask 'Subtask Beta'"
-    );
+    // The old detail panel is replaced by the TaskDetail overlay (Task 6).
+    // This test will be updated in Task 6 to use the overlay.
+    let _buf = render_to_buffer(&mut app, 120, 30);
 }
 
 #[test]
@@ -1544,12 +1519,9 @@ fn render_detail_epic_subtask_conflict_shows_warning() {
 
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 0);
-    app.board.detail_visible = true;
-    let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(
-        buffer_contains(&buf, "conflict"),
-        "epic detail should show 'conflict' warning for subtask with Conflict sub_status"
-    );
+    // The old detail panel is replaced by the TaskDetail overlay (Task 6).
+    // This test will be updated in Task 6 to use the overlay.
+    let _buf = render_to_buffer(&mut app, 120, 30);
 }
 
 #[test]
