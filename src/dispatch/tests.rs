@@ -1443,6 +1443,35 @@ fn create_pr_uses_explicit_base_branch_not_auto_detected() {
 }
 
 #[test]
+fn create_pr_pushes_from_push_dir_not_repo_root() {
+    // push_dir (the worktree) is used for git push so the pre-push hook runs in the
+    // worktree's working directory where main-repo dirty files are invisible.
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // git push
+        MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // git remote get-url
+        MockProcessRunner::ok_with_stdout(b"https://github.com/org/repo/pull/1\n"), // gh pr create
+    ]);
+
+    create_pr(
+        "/repo/.worktrees/42-fix-bug",
+        "42-fix-bug",
+        "Fix bug",
+        "desc",
+        "main",
+        &mock,
+    )
+    .unwrap();
+
+    let calls = mock.recorded_calls();
+    let push_call = calls.iter().find(|c| c.1.contains(&"push".to_string())).unwrap();
+    assert!(
+        push_call.1.contains(&"/repo/.worktrees/42-fix-bug".to_string()),
+        "git push must use push_dir (worktree), got: {:?}",
+        push_call.1
+    );
+}
+
+#[test]
 fn dispatch_agent_uses_task_base_branch_in_prompt() {
     let (_dir, repo_path, worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
 
