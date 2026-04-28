@@ -970,7 +970,10 @@ fn handle_key_normal_navigation() {
 fn handle_key_normal_q_opens_projects_panel() {
     let mut app = make_app();
     app.handle_key(make_key(KeyCode::Char('q')));
-    assert!(app.projects_panel_visible(), "q should open projects panel, not quit");
+    assert!(
+        app.projects_panel_visible(),
+        "q should open projects panel, not quit"
+    );
     assert!(!app.should_quit());
 }
 
