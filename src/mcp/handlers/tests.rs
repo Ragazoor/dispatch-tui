@@ -2905,7 +2905,7 @@ async fn wrap_up_rebase_conflict_returns_error() {
 async fn wrap_up_rebase_not_on_main_returns_error() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::fail(""),                     // git rev-parse (empty stdout → treated as non-main)
+        MockProcessRunner::fail(""), // git rev-parse (empty stdout → treated as non-main)
         MockProcessRunner::ok_with_stdout(b"feature\n"), // unused
     ]));
     let state = Arc::new(McpState {

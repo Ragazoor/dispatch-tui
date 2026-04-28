@@ -5621,19 +5621,38 @@ fn scope_ref_consistency_constraint_is_enforced() {
         &[],
         None,
     );
-    assert!(result.is_err(), "user scope with scope_ref must be rejected");
+    assert!(
+        result.is_err(),
+        "user scope with scope_ref must be rejected"
+    );
 }
 
 #[test]
 fn list_learnings_filter_by_status() {
-    use crate::models::{LearningKind, LearningScope, LearningStatus};
     use crate::db::LearningFilter;
+    use crate::models::{LearningKind, LearningScope, LearningStatus};
     let db = in_memory_db();
     let id1 = db
-        .create_learning(LearningKind::Pitfall, "A pitfall", None, LearningScope::User, None, &[], None)
+        .create_learning(
+            LearningKind::Pitfall,
+            "A pitfall",
+            None,
+            LearningScope::User,
+            None,
+            &[],
+            None,
+        )
         .unwrap();
     let id2 = db
-        .create_learning(LearningKind::Convention, "A convention", None, LearningScope::User, None, &[], None)
+        .create_learning(
+            LearningKind::Convention,
+            "A convention",
+            None,
+            LearningScope::User,
+            None,
+            &[],
+            None,
+        )
         .unwrap();
     // approve id1
     db.patch_learning(
@@ -5643,10 +5662,16 @@ fn list_learnings_filter_by_status() {
     .unwrap();
 
     let proposed = db
-        .list_learnings(LearningFilter { status: Some(LearningStatus::Proposed), ..Default::default() })
+        .list_learnings(LearningFilter {
+            status: Some(LearningStatus::Proposed),
+            ..Default::default()
+        })
         .unwrap();
     let approved = db
-        .list_learnings(LearningFilter { status: Some(LearningStatus::Approved), ..Default::default() })
+        .list_learnings(LearningFilter {
+            status: Some(LearningStatus::Approved),
+            ..Default::default()
+        })
         .unwrap();
 
     assert_eq!(proposed.len(), 1);
@@ -5657,14 +5682,23 @@ fn list_learnings_filter_by_status() {
 
 #[test]
 fn patch_learning_updates_summary_and_updated_at() {
-    use crate::models::{LearningKind, LearningScope};
     use crate::db::LearningPatch;
+    use crate::models::{LearningKind, LearningScope};
     let db = in_memory_db();
     let id = db
-        .create_learning(LearningKind::Convention, "Original", None, LearningScope::User, None, &[], None)
+        .create_learning(
+            LearningKind::Convention,
+            "Original",
+            None,
+            LearningScope::User,
+            None,
+            &[],
+            None,
+        )
         .unwrap();
     let before = db.get_learning(id).unwrap().unwrap();
-    db.patch_learning(id, &LearningPatch::new().summary("Updated")).unwrap();
+    db.patch_learning(id, &LearningPatch::new().summary("Updated"))
+        .unwrap();
     let after = db.get_learning(id).unwrap().unwrap();
     assert_eq!(after.summary, "Updated");
     assert!(after.updated_at >= before.updated_at);
@@ -5672,14 +5706,23 @@ fn patch_learning_updates_summary_and_updated_at() {
 
 #[test]
 fn confirm_learning_increments_count_and_timestamps() {
-    use crate::models::{LearningKind, LearningScope, LearningStatus};
     use crate::db::LearningPatch;
+    use crate::models::{LearningKind, LearningScope, LearningStatus};
     let db = in_memory_db();
     let id = db
-        .create_learning(LearningKind::Convention, "A convention", None, LearningScope::User, None, &[], None)
+        .create_learning(
+            LearningKind::Convention,
+            "A convention",
+            None,
+            LearningScope::User,
+            None,
+            &[],
+            None,
+        )
         .unwrap();
     // must be approved first
-    db.patch_learning(id, &LearningPatch::new().status(LearningStatus::Approved)).unwrap();
+    db.patch_learning(id, &LearningPatch::new().status(LearningStatus::Approved))
+        .unwrap();
     let before = db.get_learning(id).unwrap().unwrap();
     assert_eq!(before.confirmed_count, 0);
     assert!(before.last_confirmed_at.is_none());
@@ -5700,7 +5743,15 @@ fn delete_learning_removes_row() {
     use crate::models::{LearningKind, LearningScope};
     let db = in_memory_db();
     let id = db
-        .create_learning(LearningKind::Pitfall, "To be deleted", None, LearningScope::User, None, &[], None)
+        .create_learning(
+            LearningKind::Pitfall,
+            "To be deleted",
+            None,
+            LearningScope::User,
+            None,
+            &[],
+            None,
+        )
         .unwrap();
     assert!(db.get_learning(id).unwrap().is_some());
     db.delete_learning(id).unwrap();
@@ -5709,58 +5760,152 @@ fn delete_learning_removes_row() {
 
 #[test]
 fn list_learnings_for_dispatch_unions_scopes() {
-    use crate::models::{LearningKind, LearningScope, LearningStatus};
     use crate::db::LearningPatch;
+    use crate::models::{LearningKind, LearningScope, LearningStatus};
     let db = in_memory_db();
 
     // user-scoped: should appear
-    let u = db.create_learning(LearningKind::Convention, "User learning", None, LearningScope::User, None, &[], None).unwrap();
+    let u = db
+        .create_learning(
+            LearningKind::Convention,
+            "User learning",
+            None,
+            LearningScope::User,
+            None,
+            &[],
+            None,
+        )
+        .unwrap();
     // repo-scoped matching: should appear
-    let r = db.create_learning(LearningKind::Convention, "Repo learning", None, LearningScope::Repo, Some("/repo/a"), &[], None).unwrap();
+    let r = db
+        .create_learning(
+            LearningKind::Convention,
+            "Repo learning",
+            None,
+            LearningScope::Repo,
+            Some("/repo/a"),
+            &[],
+            None,
+        )
+        .unwrap();
     // repo-scoped not matching: should NOT appear
-    let _r2 = db.create_learning(LearningKind::Convention, "Other repo", None, LearningScope::Repo, Some("/repo/b"), &[], None).unwrap();
+    let _r2 = db
+        .create_learning(
+            LearningKind::Convention,
+            "Other repo",
+            None,
+            LearningScope::Repo,
+            Some("/repo/b"),
+            &[],
+            None,
+        )
+        .unwrap();
     // task-scoped: should NOT appear (task scope excluded from auto-dispatch)
-    let _t = db.create_learning(LearningKind::Episodic, "Task outcome", None, LearningScope::Task, Some("42"), &[], None).unwrap();
+    let _t = db
+        .create_learning(
+            LearningKind::Episodic,
+            "Task outcome",
+            None,
+            LearningScope::Task,
+            Some("42"),
+            &[],
+            None,
+        )
+        .unwrap();
 
     // approve all
     for id in [u, r, _r2, _t] {
-        db.patch_learning(id, &LearningPatch::new().status(LearningStatus::Approved)).unwrap();
+        db.patch_learning(id, &LearningPatch::new().status(LearningStatus::Approved))
+            .unwrap();
     }
 
-    let results = db.list_learnings_for_dispatch(None, "/repo/a", None).unwrap();
+    let results = db
+        .list_learnings_for_dispatch(None, "/repo/a", None)
+        .unwrap();
     let ids: Vec<_> = results.iter().map(|l| l.id).collect();
     assert!(ids.contains(&u), "user-scoped learning should appear");
     assert!(ids.contains(&r), "matching repo learning should appear");
-    assert!(!ids.contains(&_r2), "non-matching repo learning should not appear");
+    assert!(
+        !ids.contains(&_r2),
+        "non-matching repo learning should not appear"
+    );
     assert!(!ids.contains(&_t), "task-scoped learning should not appear");
 }
 
 #[test]
 fn list_learnings_for_dispatch_procedural_first() {
-    use crate::models::{LearningKind, LearningScope, LearningStatus};
     use crate::db::LearningPatch;
+    use crate::models::{LearningKind, LearningScope, LearningStatus};
     let db = in_memory_db();
 
-    let convention = db.create_learning(LearningKind::Convention, "A convention", None, LearningScope::User, None, &[], None).unwrap();
-    let procedural = db.create_learning(LearningKind::Procedural, "A procedure", None, LearningScope::User, None, &[], None).unwrap();
+    let convention = db
+        .create_learning(
+            LearningKind::Convention,
+            "A convention",
+            None,
+            LearningScope::User,
+            None,
+            &[],
+            None,
+        )
+        .unwrap();
+    let procedural = db
+        .create_learning(
+            LearningKind::Procedural,
+            "A procedure",
+            None,
+            LearningScope::User,
+            None,
+            &[],
+            None,
+        )
+        .unwrap();
 
     for id in [convention, procedural] {
-        db.patch_learning(id, &LearningPatch::new().status(LearningStatus::Approved)).unwrap();
+        db.patch_learning(id, &LearningPatch::new().status(LearningStatus::Approved))
+            .unwrap();
     }
 
     let results = db.list_learnings_for_dispatch(None, "/any", None).unwrap();
-    assert_eq!(results[0].id, procedural, "procedural learning must be first");
+    assert_eq!(
+        results[0].id, procedural,
+        "procedural learning must be first"
+    );
 }
 
 #[test]
 fn list_learnings_for_dispatch_excludes_non_approved() {
-    use crate::models::{LearningKind, LearningScope, LearningStatus};
     use crate::db::LearningPatch;
+    use crate::models::{LearningKind, LearningScope, LearningStatus};
     let db = in_memory_db();
 
-    let proposed = db.create_learning(LearningKind::Convention, "Proposed", None, LearningScope::User, None, &[], None).unwrap();
-    let approved = db.create_learning(LearningKind::Convention, "Approved", None, LearningScope::User, None, &[], None).unwrap();
-    db.patch_learning(approved, &LearningPatch::new().status(LearningStatus::Approved)).unwrap();
+    let proposed = db
+        .create_learning(
+            LearningKind::Convention,
+            "Proposed",
+            None,
+            LearningScope::User,
+            None,
+            &[],
+            None,
+        )
+        .unwrap();
+    let approved = db
+        .create_learning(
+            LearningKind::Convention,
+            "Approved",
+            None,
+            LearningScope::User,
+            None,
+            &[],
+            None,
+        )
+        .unwrap();
+    db.patch_learning(
+        approved,
+        &LearningPatch::new().status(LearningStatus::Approved),
+    )
+    .unwrap();
 
     let results = db.list_learnings_for_dispatch(None, "/any", None).unwrap();
     let ids: Vec<_> = results.iter().map(|l| l.id).collect();

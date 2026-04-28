@@ -1028,10 +1028,7 @@ impl LearningService {
             .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
     }
 
-    pub fn approve_learning(
-        &self,
-        id: crate::models::LearningId,
-    ) -> Result<(), ServiceError> {
+    pub fn approve_learning(&self, id: crate::models::LearningId) -> Result<(), ServiceError> {
         let learning = self.get_learning(id)?;
         if learning.status != crate::models::LearningStatus::Proposed {
             return Err(ServiceError::Validation(format!(
@@ -1040,14 +1037,14 @@ impl LearningService {
             )));
         }
         self.db
-            .patch_learning(id, &db::LearningPatch::new().status(crate::models::LearningStatus::Approved))
+            .patch_learning(
+                id,
+                &db::LearningPatch::new().status(crate::models::LearningStatus::Approved),
+            )
             .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
     }
 
-    pub fn reject_learning(
-        &self,
-        id: crate::models::LearningId,
-    ) -> Result<(), ServiceError> {
+    pub fn reject_learning(&self, id: crate::models::LearningId) -> Result<(), ServiceError> {
         let learning = self.get_learning(id)?;
         if learning.status.is_terminal() {
             return Err(ServiceError::Validation(format!(
@@ -1056,14 +1053,14 @@ impl LearningService {
             )));
         }
         self.db
-            .patch_learning(id, &db::LearningPatch::new().status(crate::models::LearningStatus::Rejected))
+            .patch_learning(
+                id,
+                &db::LearningPatch::new().status(crate::models::LearningStatus::Rejected),
+            )
             .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
     }
 
-    pub fn archive_learning(
-        &self,
-        id: crate::models::LearningId,
-    ) -> Result<(), ServiceError> {
+    pub fn archive_learning(&self, id: crate::models::LearningId) -> Result<(), ServiceError> {
         let learning = self.get_learning(id)?;
         if learning.status != crate::models::LearningStatus::Approved {
             return Err(ServiceError::Validation(format!(
@@ -1072,14 +1069,14 @@ impl LearningService {
             )));
         }
         self.db
-            .patch_learning(id, &db::LearningPatch::new().status(crate::models::LearningStatus::Archived))
+            .patch_learning(
+                id,
+                &db::LearningPatch::new().status(crate::models::LearningStatus::Archived),
+            )
             .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
     }
 
-    pub fn update_learning(
-        &self,
-        params: UpdateLearningParams,
-    ) -> Result<(), ServiceError> {
+    pub fn update_learning(&self, params: UpdateLearningParams) -> Result<(), ServiceError> {
         let learning = self.get_learning(params.id)?;
         if learning.status != crate::models::LearningStatus::Proposed
             && learning.status != crate::models::LearningStatus::Approved
@@ -1112,10 +1109,7 @@ impl LearningService {
             .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
     }
 
-    pub fn confirm_learning(
-        &self,
-        id: crate::models::LearningId,
-    ) -> Result<(), ServiceError> {
+    pub fn confirm_learning(&self, id: crate::models::LearningId) -> Result<(), ServiceError> {
         let learning = self.get_learning(id)?;
         if learning.status != crate::models::LearningStatus::Approved {
             return Err(ServiceError::Validation(format!(
@@ -3095,10 +3089,10 @@ mod tests {
 
 #[cfg(test)]
 mod learning_tests {
-    use std::sync::Arc;
+    use super::{CreateLearningParams, LearningService, ServiceError, UpdateLearningParams};
     use crate::db::Database;
     use crate::models::{LearningKind, LearningScope, LearningStatus};
-    use super::{LearningService, CreateLearningParams, UpdateLearningParams, ServiceError};
+    use std::sync::Arc;
 
     fn service() -> LearningService {
         let db = Arc::new(Database::open_in_memory().unwrap());

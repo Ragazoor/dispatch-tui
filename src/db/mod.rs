@@ -593,7 +593,13 @@ pub trait LearningStore: Send + Sync {
 // ---------------------------------------------------------------------------
 
 pub trait TaskStore:
-    TaskAndEpicStore + PrStore + AlertStore + SettingsStore + PrWorkflowStore + ProjectCrud + LearningStore
+    TaskAndEpicStore
+    + PrStore
+    + AlertStore
+    + SettingsStore
+    + PrWorkflowStore
+    + ProjectCrud
+    + LearningStore
 {
 }
 
