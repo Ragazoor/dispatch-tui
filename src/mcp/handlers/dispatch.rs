@@ -195,7 +195,7 @@ mcp_tools! {
         };
 
     sync "list_tasks" => tasks::handle_list_tasks,
-        "List tasks on the kanban board, optionally filtered by status and/or epic.",
+        "List tasks on the kanban board. Filters are ANDed. Pass caller_task_id to auto-scope to your epic (or project if you have no epic) and exclude yourself from results — the fastest way to survey sibling task outcomes. Output includes PR URL and plan goal when available.",
         {
             "type": "object",
             "properties": {
@@ -208,7 +208,20 @@ mcp_tools! {
                 },
                 "epic_id": {
                     "type": "integer",
-                    "description": "Filter to only tasks belonging to this epic"
+                    "description": "Filter to only tasks belonging to this epic."
+                },
+                "project_id": {
+                    "type": "integer",
+                    "description": "Filter to only tasks in this project."
+                },
+                "repo_paths": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Filter to tasks whose repo_path is in this list."
+                },
+                "caller_task_id": {
+                    "type": "integer",
+                    "description": "Your own task ID. When provided and no explicit epic_id/project_id/repo_paths are given, auto-scopes to your epic (if you have one) or your project, and excludes you from results."
                 }
             }
         };
