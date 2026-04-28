@@ -1262,6 +1262,24 @@ fn create_pr_gh_create_fails() {
     assert!(matches!(result, Err(PrError::CreateFailed(_))));
 }
 
+#[test]
+fn create_pr_returns_existing_url_when_pr_already_exists() {
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // git push
+        MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // git remote get-url
+        MockProcessRunner::fail(
+            "a pull request for branch '42-fix-bug' already exists:\nhttps://github.com/org/repo/pull/7",
+        ), // gh pr create — already exists
+    ]);
+
+    let result = create_pr("/repo", "42-fix-bug", "Fix bug", "desc", "main", &mock);
+    assert!(
+        result.is_ok(),
+        "create_pr should succeed when PR already exists, got: {result:?}"
+    );
+    assert_eq!(result.unwrap().pr_url, "https://github.com/org/repo/pull/7");
+}
+
 // --- check_pr_status tests ---
 
 #[test]

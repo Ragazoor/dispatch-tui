@@ -2504,7 +2504,7 @@ async fn wrap_up_rebase_returns_started() {
 }
 
 #[tokio::test]
-async fn wrap_up_pr_returns_started() {
+async fn wrap_up_pr_succeeds_with_complete_message() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         // task.base_branch = "main" is passed explicitly to create_pr; no symbolic-ref call
@@ -2905,8 +2905,8 @@ async fn wrap_up_rebase_conflict_returns_error() {
 async fn wrap_up_rebase_not_on_main_returns_error() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::fail(""),                     // detect_default_branch
-        MockProcessRunner::ok_with_stdout(b"feature\n"), // git rev-parse HEAD (not on main)
+        MockProcessRunner::fail(""),                     // git rev-parse (empty stdout → treated as non-main)
+        MockProcessRunner::ok_with_stdout(b"feature\n"), // unused
     ]));
     let state = Arc::new(McpState {
         db: db.clone(),
@@ -2957,7 +2957,6 @@ async fn wrap_up_rebase_not_on_main_returns_error() {
 async fn wrap_up_pr_push_fails_returns_error() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::fail(""), // detect_default_branch
         MockProcessRunner::fail("remote: Permission denied"), // git push fails
     ]));
     let state = Arc::new(McpState {
@@ -4000,6 +3999,78 @@ async fn wrap_up_pr_does_not_inject_review_command() {
             .iter()
             .any(|(cmd, args)| cmd == "tmux" && args.iter().any(|a| a == "send-keys")),
         "wrap_up pr must not inject a review command via send-keys; got calls: {calls:?}"
+    );
+}
+
+#[tokio::test]
+async fn wrap_up_pr_returns_existing_url_on_duplicate() {
+    // When gh pr create fails because the PR already exists, wrap_up should treat
+    // it as success and return the URL from the error message.
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // git push
+        MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // git remote get-url
+        MockProcessRunner::fail(
+            "a pull request for branch '1-feature' already exists:\nhttps://github.com/org/repo/pull/7",
+        ), // gh pr create — already exists
+    ]));
+    let state = Arc::new(McpState {
+        db: db.clone(),
+        notify_tx: None,
+        runner,
+    });
+
+    let task_id = db
+        .create_task(
+            "Feature",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Running,
+            "main",
+            None,
+            None,
+            None,
+            1,
+        )
+        .unwrap();
+    db.patch_task(
+        task_id,
+        &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-feature")),
+    )
+    .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "wrap_up",
+            "arguments": { "task_id": task_id.0, "action": "pr" }
+        })),
+    )
+    .await;
+
+    assert!(
+        resp.error.is_none(),
+        "expected success when PR already exists, got error: {:?}",
+        resp.error
+    );
+    let text = extract_response_text(&resp);
+    assert!(
+        text.contains("https://github.com/org/repo/pull/7"),
+        "response should include existing PR URL, got: {text}"
+    );
+
+    let task = db.get_task(task_id).unwrap().unwrap();
+    assert_eq!(
+        task.status,
+        TaskStatus::Review,
+        "Task should move to Review even when PR already exists"
+    );
+    assert_eq!(
+        task.pr_url.as_deref(),
+        Some("https://github.com/org/repo/pull/7"),
+        "Existing PR URL should be saved"
     );
 }
 

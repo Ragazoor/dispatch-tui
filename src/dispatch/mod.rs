@@ -141,7 +141,17 @@ pub fn create_pr(
         )
         .map_err(|e| PrError::Other(format!("Failed to run gh: {e}")))?;
     if !output.status.success() {
-        return Err(PrError::CreateFailed(stderr_str(&output)));
+        let stderr = stderr_str(&output);
+        // gh emits "…already exists:\nhttps://github.com/…/pull/N" — treat as success
+        // so that wrap_up pr is idempotent (calling it again returns the existing URL).
+        if stderr.contains("already exists") {
+            if let Some(url) = stderr.lines().find(|l| l.starts_with("https://")) {
+                return Ok(PrResult {
+                    pr_url: url.to_string(),
+                });
+            }
+        }
+        return Err(PrError::CreateFailed(stderr));
     }
 
     // 4. Parse the PR URL from stdout

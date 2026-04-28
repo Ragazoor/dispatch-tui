@@ -280,7 +280,7 @@ mcp_tools! {
         };
 
     async "wrap_up" => tasks::handle_wrap_up,
-        "Wrap up a running or review task: rebase the branch onto main or push and create a GitHub PR. The task is moved to done on success. Returns immediately; the operation runs in the background. For rebase, the tmux window is killed when done, ending your session.",
+        "Wrap up a running or review task. Blocks until the operation completes. rebase: rebases the task branch onto base_branch, fast-forwards base_branch, kills the tmux window, and moves the task to Done — your session ends. pr: pushes the branch, creates a draft GitHub PR targeting base_branch, and moves the task to Review; the response includes the PR URL. If a PR already exists for the branch, returns the existing URL.",
         {
             "type": "object",
             "properties": {
