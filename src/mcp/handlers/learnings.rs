@@ -70,7 +70,6 @@ pub(super) fn handle_record_learning(
         Err(e) => return JsonRpcResponse::err(id, -32603, format!("database error: {e}")),
     };
 
-    // Derive scope_ref when not explicitly provided.
     let scope_ref = match parsed.scope_ref {
         Some(r) => Some(r),
         None => match parsed.scope {
@@ -148,7 +147,6 @@ pub(super) fn handle_query_learnings(
         learnings.retain(|l| l.tags.iter().any(|t| t == tag));
     }
 
-    // Cap at min(limit ?? 20, 50).
     let limit = parsed.limit.unwrap_or(20).min(50) as usize;
     learnings.truncate(limit);
 
@@ -195,28 +193,15 @@ pub(super) fn handle_confirm_learning(
 
     let svc = LearningService::new(state.db.clone());
     match svc.confirm_learning(parsed.learning_id) {
-        Ok(()) => {
-            // Fetch updated count for the confirmation message.
-            let count = state
-                .db
-                .get_learning(parsed.learning_id)
-                .ok()
-                .flatten()
-                .map(|l| l.confirmed_count)
-                .unwrap_or(0);
-            JsonRpcResponse::ok(
-                id,
-                json!({
-                    "content": [{
-                        "type": "text",
-                        "text": format!(
-                            "Learning {} confirmed. Confirmed {count} time(s) total.",
-                            parsed.learning_id
-                        )
-                    }]
-                }),
-            )
-        }
+        Ok(()) => JsonRpcResponse::ok(
+            id,
+            json!({
+                "content": [{
+                    "type": "text",
+                    "text": format!("Learning {} confirmed.", parsed.learning_id)
+                }]
+            }),
+        ),
         Err(e) => service_err_to_response(id, e),
     }
 }
