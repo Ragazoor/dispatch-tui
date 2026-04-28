@@ -3201,3 +3201,169 @@ mod security_tests {
         assert_eq!(DEFAULT_BASE_BRANCH, "main");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Learning domain types
+// ---------------------------------------------------------------------------
+
+pub type LearningId = i64;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LearningKind {
+    Pitfall,
+    Convention,
+    Preference,
+    ToolRecommendation,
+    Procedural,
+    Episodic,
+}
+
+impl LearningKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LearningKind::Pitfall => "pitfall",
+            LearningKind::Convention => "convention",
+            LearningKind::Preference => "preference",
+            LearningKind::ToolRecommendation => "tool_recommendation",
+            LearningKind::Procedural => "procedural",
+            LearningKind::Episodic => "episodic",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "pitfall" => Some(LearningKind::Pitfall),
+            "convention" => Some(LearningKind::Convention),
+            "preference" => Some(LearningKind::Preference),
+            "tool_recommendation" => Some(LearningKind::ToolRecommendation),
+            "procedural" => Some(LearningKind::Procedural),
+            "episodic" => Some(LearningKind::Episodic),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for LearningKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for LearningKind {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s).ok_or_else(|| format!("unknown learning kind: {s}"))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LearningScope {
+    User,
+    Project,
+    Repo,
+    Epic,
+    Task,
+}
+
+impl LearningScope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LearningScope::User => "user",
+            LearningScope::Project => "project",
+            LearningScope::Repo => "repo",
+            LearningScope::Epic => "epic",
+            LearningScope::Task => "task",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "user" => Some(LearningScope::User),
+            "project" => Some(LearningScope::Project),
+            "repo" => Some(LearningScope::Repo),
+            "epic" => Some(LearningScope::Epic),
+            "task" => Some(LearningScope::Task),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for LearningScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for LearningScope {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s).ok_or_else(|| format!("unknown learning scope: {s}"))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LearningStatus {
+    Proposed,
+    Approved,
+    Rejected,
+    Archived,
+}
+
+impl LearningStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LearningStatus::Proposed => "proposed",
+            LearningStatus::Approved => "approved",
+            LearningStatus::Rejected => "rejected",
+            LearningStatus::Archived => "archived",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "proposed" => Some(LearningStatus::Proposed),
+            "approved" => Some(LearningStatus::Approved),
+            "rejected" => Some(LearningStatus::Rejected),
+            "archived" => Some(LearningStatus::Archived),
+            _ => None,
+        }
+    }
+
+    /// Returns true if this status is terminal (no further transitions allowed).
+    pub fn is_terminal(self) -> bool {
+        matches!(self, LearningStatus::Rejected | LearningStatus::Archived)
+    }
+}
+
+impl std::fmt::Display for LearningStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for LearningStatus {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s).ok_or_else(|| format!("unknown learning status: {s}"))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Learning {
+    pub id: LearningId,
+    pub kind: LearningKind,
+    pub summary: String,
+    pub detail: Option<String>,
+    pub scope: LearningScope,
+    pub scope_ref: Option<String>,
+    pub tags: Vec<String>,
+    pub status: LearningStatus,
+    pub source_task_id: Option<TaskId>,
+    pub confirmed_count: i64,
+    pub last_confirmed_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}

@@ -826,9 +826,7 @@ impl App {
                 }
                 vec![]
             }
-            KeyCode::Char('h') | KeyCode::Left | KeyCode::Esc => {
-                self.update(Message::NavigateColumn(1))
-            }
+            KeyCode::Esc => self.update(Message::NavigateColumn(1)),
             KeyCode::Char('n') => {
                 self.input.mode = InputMode::InputProjectName { editing_id: None };
                 self.input.buffer.clear();

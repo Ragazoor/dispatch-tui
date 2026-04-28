@@ -77,14 +77,11 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
 
     // 3. Create App and load saved repo paths
     let projects = database.list_projects()?;
-    let default_project_id = projects
-        .iter()
-        .find(|p| p.is_default)
-        .map(|p| p.id)
-        .ok_or_else(|| anyhow::anyhow!("No default project found in database"))?;
+    let saved_project = database.get_setting_string("last_project").ok().flatten();
+    let initial_project_id = resolve_initial_project(&projects, saved_project);
     let mut app = App::new(
         tasks,
-        default_project_id,
+        initial_project_id,
         Duration::from_secs(inactivity_timeout),
     );
     app.update(Message::ProjectsUpdated(projects));
@@ -487,5 +484,30 @@ pub fn tips_starting_index(
                 None // NewOnly + no new tips
             }
         }
+    }
+}
+
+/// Returns the project id to open at startup.
+/// Prefers the saved `last_project` setting; falls back to the default project.
+fn resolve_initial_project(
+    projects: &[crate::models::Project],
+    saved: Option<String>,
+) -> crate::models::ProjectId {
+    let default_id = projects
+        .iter()
+        .find(|p| p.is_default)
+        .map(|p| p.id)
+        .expect("no default project — database invariant violated");
+
+    let Some(raw) = saved else {
+        return default_id;
+    };
+    let Ok(id) = raw.parse::<crate::models::ProjectId>() else {
+        return default_id;
+    };
+    if projects.iter().any(|p| p.id == id) {
+        id
+    } else {
+        default_id
     }
 }

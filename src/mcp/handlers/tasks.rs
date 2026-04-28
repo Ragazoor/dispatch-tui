@@ -617,7 +617,7 @@ pub(super) async fn handle_wrap_up(
             let pr_result = match tokio::task::spawn_blocking(move || {
                 tracing::info!(task_id = task_id.0, %branch, "MCP wrap_up pr starting");
                 dispatch::create_pr(
-                    &repo_path,
+                    &worktree,
                     &branch,
                     &title,
                     &description,

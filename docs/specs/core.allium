@@ -374,9 +374,15 @@ config {
 --     outside the task-status model.
 --
 -- Navigation:
---   - h/l (or Left/Right) moves between nav indices 0–5.
+--   - h/l (or Left/Right) moves the cursor between nav indices 0–5.
+--   - At nav index 0 (Projects), h/Left is a no-op (already at leftmost edge).
+--   - At nav index 5 (Archive), l/Right is a no-op (already at rightmost edge).
+--   - Esc closes the Projects panel (navigates right to Backlog).
+--   - h/Left closes the Archive column (navigates left to Done).
 --   - In ViewMode::Epic the nav index is clamped to [1, 4]: Projects and
 --     Archive are not reachable from the epic view.
+--   - Edge columns persist across data refreshes: a RefreshTasks event does
+--     not move the cursor out of an edge column.
 --   - Parent group boundaries are annotated in the column header.
 --   - A task's visual column is determined by (task.status, task.sub_status).
 
