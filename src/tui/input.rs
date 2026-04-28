@@ -89,7 +89,37 @@ impl App {
         }
     }
 
+    fn handle_key_task_detail(&mut self, key: KeyEvent) -> Vec<Command> {
+        match key.code {
+            KeyCode::Char('q') | KeyCode::Esc | KeyCode::Enter => {
+                return self.update(Message::CloseTaskDetail);
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if let ViewMode::TaskDetail { scroll, max_scroll, .. } = &mut self.board.view_mode {
+                    *scroll = scroll.saturating_add(1).min(*max_scroll);
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if let ViewMode::TaskDetail { scroll, .. } = &mut self.board.view_mode {
+                    *scroll = scroll.saturating_sub(1);
+                }
+            }
+            KeyCode::Char('z') => {
+                if let ViewMode::TaskDetail { zoomed, .. } = &mut self.board.view_mode {
+                    *zoomed = !*zoomed;
+                }
+            }
+            _ => {}
+        }
+        vec![]
+    }
+
     fn handle_key_normal(&mut self, key: KeyEvent) -> Vec<Command> {
+        // TaskDetail overlay captures all input when visible
+        if matches!(self.board.view_mode, ViewMode::TaskDetail { .. }) {
+            return self.handle_key_task_detail(key);
+        }
+
         if self.show_archived() {
             return self.handle_key_archive(key);
         }
