@@ -845,11 +845,14 @@ fn x_key_with_selection_shows_count_in_confirm() {
 }
 
 #[test]
-fn enter_on_task_does_not_enter_task_detail_without_input_routing() {
-    // Enter in Normal mode on a task is currently a no-op (input routing added in Task 5).
+fn enter_on_task_opens_task_detail() {
+    // Enter in Normal mode on a task opens the TaskDetail overlay.
     let mut app = make_app();
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
     app.handle_key(make_key(KeyCode::Enter));
-    assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
+    // Should open task detail for the first task in Backlog column
+    assert!(matches!(app.board.view_mode, ViewMode::TaskDetail { task_id, .. } if task_id == 1));
 }
 
 #[test]
@@ -1218,13 +1221,13 @@ fn handle_key_normal_dispatch_running_task_with_window_shows_info() {
 }
 
 #[test]
-fn handle_key_normal_enter_is_noop_without_task_detail_routing() {
-    // Enter key routing for TaskDetail is added in Task 5.
+fn handle_key_normal_enter_opens_task_detail() {
+    // Enter key on a task opens the TaskDetail overlay.
     let mut app = make_app();
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 0);
     app.handle_key(make_key(KeyCode::Enter));
-    assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
+    assert!(matches!(app.board.view_mode, ViewMode::TaskDetail { task_id, .. } if task_id == 1));
 }
 
 #[test]

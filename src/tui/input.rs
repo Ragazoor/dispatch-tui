@@ -263,6 +263,10 @@ impl App {
                 if self.selection().on_select_all {
                     return self.update(Message::SelectAllColumn);
                 }
+                if let Some(task) = self.selected_task() {
+                    let id = task.id.0;
+                    return self.update(Message::OpenTaskDetail(id));
+                }
                 vec![]
             }
 

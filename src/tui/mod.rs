@@ -1439,8 +1439,10 @@ impl App {
     }
 
     fn handle_close_task_detail(&mut self) -> Vec<Command> {
-        if let ViewMode::TaskDetail { previous, .. } = &self.board.view_mode {
-            self.board.view_mode = *previous.clone();
+        if let ViewMode::TaskDetail { previous, .. } =
+            std::mem::replace(&mut self.board.view_mode, ViewMode::default())
+        {
+            self.board.view_mode = *previous;
         }
         vec![]
     }
@@ -3077,8 +3079,10 @@ impl App {
     }
 
     fn handle_exit_epic(&mut self) -> Vec<Command> {
-        if let ViewMode::Epic { parent, .. } = &self.board.view_mode {
-            self.board.view_mode = *parent.clone();
+        if let ViewMode::Epic { parent, .. } =
+            std::mem::replace(&mut self.board.view_mode, ViewMode::default())
+        {
+            self.board.view_mode = *parent;
         }
         vec![]
     }

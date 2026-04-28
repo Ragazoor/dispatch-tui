@@ -929,7 +929,8 @@ pub enum ViewMode {
         task_id: i64,
         scroll: u16,
         zoomed: bool,
-        /// Scroll limit updated by renderer each frame.
+        /// Scroll limit — updated by the renderer each frame from the actual wrapped line count.
+        /// Do not treat this as authoritative input state; it is renderer-managed.
         max_scroll: u16,
         previous: Box<ViewMode>,
     },

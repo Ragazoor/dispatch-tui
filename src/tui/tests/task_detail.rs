@@ -1,7 +1,5 @@
-#![allow(unused_imports)]
-
 use super::*;
-use crate::models::{TaskId, TaskStatus};
+use crate::models::TaskStatus;
 use crate::tui::{Message, ViewMode};
 use crossterm::event::KeyCode;
 
@@ -119,6 +117,30 @@ fn down_key_increments_scroll() {
         *max_scroll = 10;
     }
     app.handle_key(make_key(KeyCode::Down));
+    assert!(matches!(&app.board.view_mode, ViewMode::TaskDetail { scroll, .. } if *scroll == 1));
+}
+
+#[test]
+fn k_key_decrements_scroll_from_nonzero() {
+    let mut app = make_app_with_task();
+    app.update(Message::OpenTaskDetail(1));
+    if let ViewMode::TaskDetail { ref mut scroll, ref mut max_scroll, .. } = app.board.view_mode {
+        *scroll = 3;
+        *max_scroll = 5;
+    }
+    app.handle_key(make_key(KeyCode::Char('k')));
+    assert!(matches!(&app.board.view_mode, ViewMode::TaskDetail { scroll, .. } if *scroll == 2));
+}
+
+#[test]
+fn up_key_decrements_scroll() {
+    let mut app = make_app_with_task();
+    app.update(Message::OpenTaskDetail(1));
+    if let ViewMode::TaskDetail { ref mut scroll, ref mut max_scroll, .. } = app.board.view_mode {
+        *scroll = 2;
+        *max_scroll = 5;
+    }
+    app.handle_key(make_key(KeyCode::Up));
     assert!(matches!(&app.board.view_mode, ViewMode::TaskDetail { scroll, .. } if *scroll == 1));
 }
 
