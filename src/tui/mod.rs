@@ -147,6 +147,7 @@ impl App {
     pub(in crate::tui) fn effective_view_mode(&self) -> &ViewMode {
         match &self.board.view_mode {
             ViewMode::TaskDetail { previous, .. } => previous.as_ref(),
+            ViewMode::ProposedLearnings { previous, .. } => previous.as_ref(),
             other => other,
         }
     }
@@ -1043,14 +1044,95 @@ impl App {
                 vec![]
             }
             Message::OpenProposedLearnings => vec![Command::LoadProposedLearnings],
-            Message::ShowProposedLearnings(_)
-            | Message::CloseProposedLearnings
-            | Message::NavigateProposedLearning(_)
-            | Message::ApproveLearning(_)
-            | Message::RejectLearning(_)
-            | Message::EditLearning(_)
-            | Message::LearningActioned(_)
-            | Message::LearningEdited(_) => vec![],
+            Message::ShowProposedLearnings(learnings) => {
+                let previous = Box::new(self.board.view_mode.clone());
+                self.board.view_mode = ViewMode::ProposedLearnings {
+                    selected: 0,
+                    learnings,
+                    previous,
+                };
+                vec![]
+            }
+            Message::CloseProposedLearnings => {
+                if let ViewMode::ProposedLearnings { previous, .. } =
+                    std::mem::take(&mut self.board.view_mode)
+                {
+                    self.board.view_mode = *previous;
+                }
+                vec![]
+            }
+            Message::NavigateProposedLearning(delta) => {
+                if let ViewMode::ProposedLearnings {
+                    ref mut selected,
+                    ref learnings,
+                    ..
+                } = self.board.view_mode
+                {
+                    if !learnings.is_empty() {
+                        let count = learnings.len() as isize;
+                        *selected =
+                            (*selected as isize + delta).clamp(0, count - 1) as usize;
+                    }
+                }
+                vec![]
+            }
+            Message::ApproveLearning(id) => {
+                if let ViewMode::ProposedLearnings { ref learnings, .. } =
+                    self.board.view_mode
+                {
+                    if learnings.iter().any(|l| l.id == id) {
+                        return vec![Command::ApproveLearning(id)];
+                    }
+                }
+                vec![]
+            }
+            Message::RejectLearning(id) => {
+                if let ViewMode::ProposedLearnings { ref learnings, .. } =
+                    self.board.view_mode
+                {
+                    if learnings.iter().any(|l| l.id == id) {
+                        return vec![Command::RejectLearning(id)];
+                    }
+                }
+                vec![]
+            }
+            Message::EditLearning(id) => {
+                if let ViewMode::ProposedLearnings { ref learnings, .. } =
+                    self.board.view_mode
+                {
+                    if let Some(learning) = learnings.iter().find(|l| l.id == id).cloned() {
+                        return vec![Command::PopOutEditor(EditKind::Learning(learning))];
+                    }
+                }
+                vec![]
+            }
+            Message::LearningActioned(id) => {
+                if let ViewMode::ProposedLearnings {
+                    ref mut learnings,
+                    ref mut selected,
+                    ..
+                } = self.board.view_mode
+                {
+                    learnings.retain(|l| l.id != id);
+                    if !learnings.is_empty() {
+                        *selected = (*selected).min(learnings.len() - 1);
+                    } else {
+                        *selected = 0;
+                    }
+                }
+                vec![]
+            }
+            Message::LearningEdited(updated) => {
+                if let ViewMode::ProposedLearnings {
+                    ref mut learnings, ..
+                } = self.board.view_mode
+                {
+                    if let Some(entry) = learnings.iter_mut().find(|l| l.id == updated.id) {
+                        *entry = updated;
+                    }
+                }
+                vec![]
+            }
         }
     }
 
