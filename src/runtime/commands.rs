@@ -104,6 +104,14 @@ pub(super) fn dispatch(
             rt.exec_refresh_epics_from_db(app);
             vec![]
         }
+        TriggerEpicFeed {
+            epic_id,
+            epic_title,
+            feed_command,
+        } => {
+            rt.exec_trigger_epic_feed(epic_id, epic_title, feed_command);
+            vec![]
+        }
         DispatchEpic { epic } => {
             rt.exec_dispatch_epic(app, epic);
             vec![]

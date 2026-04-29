@@ -1,7 +1,7 @@
 use crossterm::event::KeyCode;
 
 use super::super::{App, Command, InputMode, Message};
-use super::{make_app, make_key};
+use super::{make_app, make_epic, make_key, make_task};
 use crate::models::{TaskId, TaskStatus};
 
 /// Drives an `App` through a sequence of key events, collecting all `Command`s emitted.
@@ -193,5 +193,103 @@ fn scenario_lowercase_m_is_no_longer_bound_to_move() {
             .iter()
             .any(|c| matches!(c, Command::PersistTask(_))),
         "lowercase 'm' must not emit PersistTask"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Feed epic manual trigger — key binding scenarios
+// ---------------------------------------------------------------------------
+
+fn make_feed_epic(id: i64) -> crate::models::Epic {
+    let mut e = make_epic(id);
+    e.feed_command = Some("echo '[]'".to_string());
+    e
+}
+
+fn make_app_with_feed_epic_selected() -> super::App {
+    use super::{App, TEST_TIMEOUT};
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
+    app.board.epics = vec![make_feed_epic(10)];
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 1);
+    app
+}
+
+fn make_app_with_non_feed_epic_selected() -> super::App {
+    use super::{App, TEST_TIMEOUT};
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
+    app.board.epics = vec![make_epic(10)]; // no feed_command
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 1);
+    app
+}
+
+#[test]
+fn r_on_feed_epic_card_emits_trigger_command() {
+    let mut s = Scenario::with_app(make_app_with_feed_epic_selected());
+    s.key(KeyCode::Char('r'));
+    assert!(
+        s.commands
+            .iter()
+            .any(|c| matches!(c, Command::TriggerEpicFeed { .. })),
+        "pressing r on a feed epic card should emit TriggerEpicFeed command"
+    );
+}
+
+#[test]
+fn r_on_non_feed_epic_card_does_nothing() {
+    let mut s = Scenario::with_app(make_app_with_non_feed_epic_selected());
+    s.key(KeyCode::Char('r'));
+    assert!(
+        !s.commands
+            .iter()
+            .any(|c| matches!(c, Command::TriggerEpicFeed { .. })),
+        "pressing r on a non-feed epic should NOT emit TriggerEpicFeed"
+    );
+}
+
+#[test]
+fn r_in_epic_view_of_feed_epic_emits_trigger_command() {
+    use super::{App, TEST_TIMEOUT};
+    use crate::tui::{BoardSelection, ViewMode};
+
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    app.board.epics = vec![make_feed_epic(10)];
+    app.board.view_mode = ViewMode::Epic {
+        epic_id: crate::models::EpicId(10),
+        selection: BoardSelection::new_for_epic(),
+        parent: Box::new(ViewMode::Board(BoardSelection::new())),
+    };
+
+    let mut s = Scenario::with_app(app);
+    s.key(KeyCode::Char('r'));
+    assert!(
+        s.commands
+            .iter()
+            .any(|c| matches!(c, Command::TriggerEpicFeed { .. })),
+        "pressing r inside Epic view of a feed epic should emit TriggerEpicFeed"
+    );
+}
+
+#[test]
+fn r_in_epic_view_of_non_feed_epic_does_nothing() {
+    use super::{App, TEST_TIMEOUT};
+    use crate::tui::{BoardSelection, ViewMode};
+
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    app.board.epics = vec![make_epic(10)]; // no feed_command
+    app.board.view_mode = ViewMode::Epic {
+        epic_id: crate::models::EpicId(10),
+        selection: BoardSelection::new_for_epic(),
+        parent: Box::new(ViewMode::Board(BoardSelection::new())),
+    };
+
+    let mut s = Scenario::with_app(app);
+    s.key(KeyCode::Char('r'));
+    assert!(
+        !s.commands
+            .iter()
+            .any(|c| matches!(c, Command::TriggerEpicFeed { .. })),
+        "pressing r inside Epic view of a non-feed epic should NOT emit TriggerEpicFeed"
     );
 }

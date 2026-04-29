@@ -149,6 +149,43 @@ rule FeedCommandFailure {
         -- as an epic-level health badge, but that is out of scope here.
 }
 
+-- == Manual trigger ==
+
+rule ManualFeedTrigger {
+    when: User presses "r" on a feed epic in the TUI
+
+    -- A feed epic is any Epic where feed_command != null. The "r" key is
+    -- only active when such an epic is selected (card highlighted on the
+    -- kanban board, or focused inside the Epic view). Pressing "r" on a
+    -- non-feed epic has no effect.
+    --
+    -- The command runs immediately — it does not wait for the next
+    -- FeedTick interval. The FeedRunner's last_run timestamp for this
+    -- epic is NOT updated by the manual trigger; the next automatic poll
+    -- fires at its normal scheduled time.
+    --
+    -- Status bar feedback (contrast with FeedCommandFailure, which is
+    -- silent):
+    --   - On start:   "Fetching feed for '<title>'…"
+    --   - On success: "Feed for '<title>': N task(s) synced"
+    --   - On failure: "Feed for '<title>' failed: <error>"
+
+    ensures:
+        status_bar = "Fetching feed for '{epic.title}'…"
+        Spawn(epic.feed_command)
+        on_success:
+            UpsertFeedTasks(epic, items)
+            status_bar = "Feed for '{epic.title}': {count} task(s) synced"
+        on_failure:
+            status_bar = "Feed for '{epic.title}' failed: {error}"
+
+    @guidance
+        -- Implementation: src/runtime/epics.rs::exec_trigger_epic_feed.
+        -- Keybinding: src/tui/input.rs::handle_key_normal, KeyCode::Char('r').
+        -- FeedCommandFailure (auto-poll failures) remains silent — only
+        -- manual trigger failures surface in the status bar.
+}
+
 ------------------------------------------------------------
 -- Notifications
 ------------------------------------------------------------

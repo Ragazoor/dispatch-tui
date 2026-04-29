@@ -1960,3 +1960,88 @@ mod resolve_initial_project_tests {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// exec_trigger_epic_feed
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn exec_trigger_epic_feed_success() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let epic = db.create_epic("Security Vulnerabilities", "", "/repo", None, 1).unwrap();
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let rt = make_runtime(db, tx, Arc::new(MockProcessRunner::new(vec![])));
+
+    let cmd = r#"echo '[{"external_id":"vuln:1","title":"CVE-1","description":"desc","status":"backlog"}]'"#;
+    rt.exec_trigger_epic_feed(epic.id, "Security Vulnerabilities".to_string(), cmd.to_string());
+
+    let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+        .await
+        .expect("timed out waiting for FeedRefreshed")
+        .expect("channel closed");
+    assert!(
+        matches!(msg, Message::FeedRefreshed { count: 1, .. }),
+        "expected FeedRefreshed with count=1, got: {msg:?}"
+    );
+}
+
+#[tokio::test]
+async fn exec_trigger_epic_feed_zero_items() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let epic = db.create_epic("Empty Feed", "", "/repo", None, 1).unwrap();
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let rt = make_runtime(db, tx, Arc::new(MockProcessRunner::new(vec![])));
+
+    rt.exec_trigger_epic_feed(epic.id, "Empty Feed".to_string(), "echo '[]'".to_string());
+
+    let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+        .await
+        .expect("timed out")
+        .expect("channel closed");
+    assert!(
+        matches!(msg, Message::FeedRefreshed { count: 0, .. }),
+        "empty feed should still succeed with count=0, got: {msg:?}"
+    );
+}
+
+#[tokio::test]
+async fn exec_trigger_epic_feed_command_fails() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let epic = db.create_epic("Failing Feed", "", "/repo", None, 1).unwrap();
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let rt = make_runtime(db, tx, Arc::new(MockProcessRunner::new(vec![])));
+
+    rt.exec_trigger_epic_feed(epic.id, "Failing Feed".to_string(), "exit 1".to_string());
+
+    let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+        .await
+        .expect("timed out")
+        .expect("channel closed");
+    assert!(
+        matches!(msg, Message::FeedFailed { .. }),
+        "non-zero exit should produce FeedFailed, got: {msg:?}"
+    );
+}
+
+#[tokio::test]
+async fn exec_trigger_epic_feed_malformed_json() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let epic = db.create_epic("Bad JSON Feed", "", "/repo", None, 1).unwrap();
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let rt = make_runtime(db, tx, Arc::new(MockProcessRunner::new(vec![])));
+
+    rt.exec_trigger_epic_feed(epic.id, "Bad JSON Feed".to_string(), "echo 'not-json'".to_string());
+
+    let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+        .await
+        .expect("timed out")
+        .expect("channel closed");
+    assert!(
+        matches!(msg, Message::FeedFailed { .. }),
+        "malformed JSON should produce FeedFailed, got: {msg:?}"
+    );
+}

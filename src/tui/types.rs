@@ -351,6 +351,15 @@ pub enum Message {
     ProjectsUpdated(Vec<Project>),
     SelectProject(ProjectId),
     FollowProject(ProjectId),
+    TriggerEpicFeed(EpicId),
+    FeedRefreshed {
+        epic_title: String,
+        count: usize,
+    },
+    FeedFailed {
+        epic_title: String,
+        error: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -454,6 +463,11 @@ pub enum Command {
         auto_dispatch: bool,
     },
     RefreshEpicsFromDb,
+    TriggerEpicFeed {
+        epic_id: EpicId,
+        epic_title: String,
+        feed_command: String,
+    },
     SendNotification {
         title: String,
         body: String,

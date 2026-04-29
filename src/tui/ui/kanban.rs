@@ -2073,6 +2073,9 @@ pub(in crate::tui) fn epic_action_hints(epic: &Epic, key_color: Color) -> Vec<Sp
     push_hint("e", "edit");
     push_hint("W", "wrap up");
     push_hint("U", "auto dispatch");
+    if epic.feed_command.is_some() {
+        push_hint("r", "refresh");
+    }
     push_hint("L", "status \u{2192}");
     push_hint("H", "status \u{2190}");
     push_hint("x", "archive");

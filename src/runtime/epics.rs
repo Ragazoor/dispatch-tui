@@ -172,4 +172,49 @@ impl TuiRuntime {
             }
         });
     }
+
+    pub(super) fn exec_trigger_epic_feed(
+        &self,
+        epic_id: models::EpicId,
+        epic_title: String,
+        feed_command: String,
+    ) {
+        let db = self.database.clone();
+        let tx = self.msg_tx.clone();
+
+        tokio::spawn(async move {
+            let fail = |error: String| {
+                let _ = tx.send(Message::FeedFailed {
+                    epic_title: epic_title.clone(),
+                    error,
+                });
+            };
+
+            let output = match tokio::process::Command::new("sh")
+                .args(["-c", &feed_command])
+                .output()
+                .await
+            {
+                Ok(o) => o,
+                Err(e) => return fail(e.to_string()),
+            };
+
+            if !output.status.success() {
+                return fail(String::from_utf8_lossy(&output.stderr).into_owned());
+            }
+
+            let items: Vec<models::FeedItem> = match serde_json::from_slice(&output.stdout) {
+                Ok(i) => i,
+                Err(e) => return fail(e.to_string()),
+            };
+
+            let count = items.len();
+            match db.upsert_feed_tasks(epic_id, &items) {
+                Ok(()) => {
+                    let _ = tx.send(Message::FeedRefreshed { epic_title, count });
+                }
+                Err(e) => fail(e.to_string()),
+            }
+        });
+    }
 }

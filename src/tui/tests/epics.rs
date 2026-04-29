@@ -2083,3 +2083,134 @@ fn test_selection_survives_flatten_toggle() {
     };
     assert_eq!(pre_id, post_id);
 }
+
+// ---------------------------------------------------------------------------
+// Feed epic manual trigger — message handling
+// ---------------------------------------------------------------------------
+
+#[test]
+fn trigger_epic_feed_sets_status_and_returns_command() {
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    let mut epic = make_epic(10);
+    epic.feed_command = Some("echo '[]'".to_string());
+    app.board.epics = vec![epic];
+
+    let cmds = app.update(Message::TriggerEpicFeed(EpicId(10)));
+
+    assert!(
+        app.status_message()
+            .map(|s| s.contains("Epic 10"))
+            .unwrap_or(false),
+        "status should mention epic title"
+    );
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::TriggerEpicFeed {
+                epic_id,
+                ..
+            } if *epic_id == EpicId(10)
+        )),
+        "should return TriggerEpicFeed command"
+    );
+}
+
+#[test]
+fn trigger_epic_feed_no_feed_command_sets_status_no_command() {
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    app.board.epics = vec![make_epic(10)]; // no feed_command
+
+    let cmds = app.update(Message::TriggerEpicFeed(EpicId(10)));
+
+    assert!(
+        app.status_message().is_some(),
+        "should show a status message"
+    );
+    assert!(
+        !cmds.iter().any(|c| matches!(c, Command::TriggerEpicFeed { .. })),
+        "should not return TriggerEpicFeed command when no feed_command"
+    );
+}
+
+#[test]
+fn feed_refreshed_sets_status_and_returns_refresh_from_db() {
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+
+    let cmds = app.update(Message::FeedRefreshed {
+        epic_title: "My Feed Epic".to_string(),
+        count: 5,
+    });
+
+    let status = app.status_message().unwrap_or("");
+    assert!(
+        status.contains("My Feed Epic"),
+        "status should mention epic title, got: {status}"
+    );
+    assert!(
+        status.contains("5"),
+        "status should mention task count, got: {status}"
+    );
+    assert!(
+        cmds.iter().any(|c| matches!(c, Command::RefreshFromDb)),
+        "should return RefreshFromDb command"
+    );
+}
+
+#[test]
+fn feed_refreshed_zero_items_still_succeeds() {
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+
+    let cmds = app.update(Message::FeedRefreshed {
+        epic_title: "Empty Feed".to_string(),
+        count: 0,
+    });
+
+    assert!(
+        cmds.iter().any(|c| matches!(c, Command::RefreshFromDb)),
+        "zero-item refresh should still return RefreshFromDb"
+    );
+}
+
+#[test]
+fn feed_failed_sets_status_no_refresh() {
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+
+    let cmds = app.update(Message::FeedFailed {
+        epic_title: "Bad Feed".to_string(),
+        error: "exit code 1".to_string(),
+    });
+
+    let status = app.status_message().unwrap_or("");
+    assert!(
+        status.contains("Bad Feed"),
+        "status should mention epic title, got: {status}"
+    );
+    assert!(
+        status.contains("exit code 1"),
+        "status should mention the error, got: {status}"
+    );
+    assert!(
+        !cmds.iter().any(|c| matches!(c, Command::RefreshFromDb)),
+        "failed feed should NOT return RefreshFromDb"
+    );
+}
+
+#[test]
+fn epic_action_hints_shows_refresh_for_feed_epic() {
+    let mut epic = make_epic(1);
+    epic.feed_command = Some("echo '[]'".to_string());
+    let hints = ui::epic_action_hints(&epic, ratatui::style::Color::Rgb(122, 162, 247));
+    let keys = hint_keys(&hints);
+    assert!(keys.contains(&"[r]"), "feed epic should show [r] refresh hint");
+}
+
+#[test]
+fn epic_action_hints_no_refresh_for_non_feed_epic() {
+    let epic = make_epic(1); // no feed_command
+    let hints = ui::epic_action_hints(&epic, ratatui::style::Color::Rgb(122, 162, 247));
+    let keys = hint_keys(&hints);
+    assert!(
+        !keys.contains(&"[r]"),
+        "non-feed epic should NOT show [r] refresh hint"
+    );
+}

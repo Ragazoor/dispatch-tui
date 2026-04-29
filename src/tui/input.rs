@@ -366,6 +366,28 @@ impl App {
                 }
             }
 
+            KeyCode::Char('r') => {
+                let feed_epic_id = match self.selected_column_item() {
+                    Some(ColumnItem::Epic(e)) if e.feed_command.is_some() => Some(e.id),
+                    _ => None,
+                }
+                .or_else(|| {
+                    if let ViewMode::Epic { epic_id, .. } = &self.board.view_mode {
+                        let id = *epic_id;
+                        self.find_epic(id)
+                            .filter(|e| e.feed_command.is_some())
+                            .map(|e| e.id)
+                    } else {
+                        None
+                    }
+                });
+                if let Some(id) = feed_epic_id {
+                    self.update(Message::TriggerEpicFeed(id))
+                } else {
+                    vec![]
+                }
+            }
+
             KeyCode::Esc => {
                 if matches!(self.board.view_mode, ViewMode::Epic { .. }) {
                     self.update(Message::ExitEpic)

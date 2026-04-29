@@ -762,6 +762,10 @@ impl App {
         self.board.tasks.iter_mut().find(|t| t.id == id)
     }
 
+    fn find_epic(&self, id: EpicId) -> Option<&Epic> {
+        self.board.epics.iter().find(|e| e.id == id)
+    }
+
     /// Remove all in-memory agent tracking state for a task.
     fn clear_agent_tracking(&mut self, id: TaskId) {
         self.agents.clear(id);
@@ -1027,6 +1031,15 @@ impl App {
                     self.selection_mut().set_row(0, idx);
                     self.projects_panel.list_state.select(Some(idx));
                 }
+                vec![]
+            }
+            Message::TriggerEpicFeed(id) => self.handle_trigger_epic_feed(id),
+            Message::FeedRefreshed { epic_title, count } => {
+                self.set_status(format!("Feed for '{epic_title}': {count} task(s) synced"));
+                vec![Command::RefreshFromDb]
+            }
+            Message::FeedFailed { epic_title, error } => {
+                self.set_status(format!("Feed for '{epic_title}' failed: {error}"));
                 vec![]
             }
         }
@@ -2015,6 +2028,26 @@ impl App {
         self.select.epics.clear();
         self.select.tasks.clear();
         cmds
+    }
+
+    fn handle_trigger_epic_feed(&mut self, id: EpicId) -> Vec<Command> {
+        let result = self
+            .find_epic(id)
+            .and_then(|e| e.feed_command.as_deref().map(|cmd| (e.title.clone(), cmd.to_owned())));
+        match result {
+            Some((title, feed_command)) => {
+                self.set_status(format!("Fetching feed for '{title}'…"));
+                vec![Command::TriggerEpicFeed {
+                    epic_id: id,
+                    epic_title: title,
+                    feed_command,
+                }]
+            }
+            None => {
+                self.set_status("No feed command configured".to_string());
+                vec![]
+            }
+        }
     }
 
     fn handle_toggle_epic_auto_dispatch(&mut self, id: EpicId) -> Vec<Command> {
