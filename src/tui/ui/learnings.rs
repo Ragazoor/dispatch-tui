@@ -5,17 +5,17 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::models::{Learning, LearningKind, LearningScope};
-use crate::tui::ui::palette::{BORDER, CYAN, DARK_GRAY, GREEN, MAGENTA, RED, WHITE, YELLOW};
+use super::palette::{BORDER, CYAN, FG, GREEN, MUTED, PURPLE, RED, YELLOW};
 use crate::tui::{App, ViewMode};
 
 fn kind_color(kind: LearningKind) -> Color {
     match kind {
         LearningKind::Pitfall => RED,
         LearningKind::Convention => CYAN,
-        LearningKind::Preference => MAGENTA,
+        LearningKind::Preference => PURPLE,
         LearningKind::Procedural => YELLOW,
         LearningKind::ToolRecommendation => GREEN,
-        LearningKind::Episodic => DARK_GRAY,
+        LearningKind::Episodic => MUTED,
     }
 }
 
@@ -75,7 +75,7 @@ pub fn render_proposed_learnings(frame: &mut Frame, app: &App, area: Rect) {
             Line::from(""),
             Line::from(Span::styled(
                 "No proposed learnings \u{2014} you're all caught up.",
-                Style::default().fg(WHITE),
+                Style::default().fg(FG),
             )),
         ])
         .wrap(Wrap { trim: false });
@@ -105,7 +105,7 @@ pub fn render_proposed_learnings(frame: &mut Frame, app: &App, area: Rect) {
         if last_scope.as_deref() != Some(&scope_key) {
             let fill_len = (content_area.width as usize).saturating_sub(scope_key.len() + 5);
             let sep = format!("\u{2500}\u{2500} {} {}", scope_key, "\u{2500}".repeat(fill_len));
-            lines.push(Line::from(Span::styled(sep, Style::default().fg(DARK_GRAY))));
+            lines.push(Line::from(Span::styled(sep, Style::default().fg(MUTED))));
             last_scope = Some(scope_key);
         }
 
@@ -137,10 +137,10 @@ pub fn render_proposed_learnings(frame: &mut Frame, app: &App, area: Rect) {
 
         lines.push(Line::from(vec![
             Span::styled(cursor.to_string(), base_style.fg(CYAN)),
-            Span::styled(format!("[{:>3}] ", learning.id), base_style.fg(DARK_GRAY)),
+            Span::styled(format!("[{:>3}] ", learning.id), base_style.fg(MUTED)),
             Span::styled(kind_str, base_style.fg(kind_color(learning.kind))),
-            Span::styled(summary, base_style.fg(WHITE)),
-            Span::styled(format!("  {tags}"), base_style.fg(DARK_GRAY)),
+            Span::styled(summary, base_style.fg(FG)),
+            Span::styled(format!("  {tags}"), base_style.fg(MUTED)),
         ]));
     }
 
@@ -167,14 +167,14 @@ pub fn render_proposed_learnings(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(
             "[j/k]",
             Style::default()
-                .fg(DARK_GRAY)
+                .fg(MUTED)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(" navigate  "),
         Span::styled(
             "[q]",
             Style::default()
-                .fg(DARK_GRAY)
+                .fg(MUTED)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(" close"),
