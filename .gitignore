@@ -1,5 +1,7 @@
 /target
 /.worktrees
+__pycache__/
+*.pyc
 docs/superpowers/**
 .superpowers/
 .claude-prompt
