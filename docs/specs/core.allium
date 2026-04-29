@@ -384,6 +384,12 @@ config {
 --     not move the cursor out of an edge column.
 --   - Parent group boundaries are annotated in the column header.
 --   - A task's visual column is determined by (task.status, task.sub_status).
+--
+-- Projects panel selection:
+--   - Moving the cursor with j/k (or Down/Up) immediately activates the
+--     hovered project, updating the board filter to show that project's tasks.
+--   - Enter, g, l, Right, and Esc all close the panel without changing the
+--     active project (the project already selected by cursor movement is kept).
 
 concept VisualColumn {
     label: String
