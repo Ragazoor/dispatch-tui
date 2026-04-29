@@ -240,11 +240,10 @@ impl super::TaskCrud for Database {
         let conn = self.conn()?;
         conn.execute(
             "INSERT INTO task_usage
-                 (task_id, cost_usd, input_tokens, output_tokens,
+                 (task_id, input_tokens, output_tokens,
                   cache_read_tokens, cache_write_tokens, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))
+             VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))
              ON CONFLICT(task_id) DO UPDATE SET
-                 cost_usd           = cost_usd           + excluded.cost_usd,
                  input_tokens       = input_tokens       + excluded.input_tokens,
                  output_tokens      = output_tokens      + excluded.output_tokens,
                  cache_read_tokens  = cache_read_tokens  + excluded.cache_read_tokens,
@@ -252,7 +251,6 @@ impl super::TaskCrud for Database {
                  updated_at         = excluded.updated_at",
             params![
                 task_id.0,
-                usage.cost_usd,
                 usage.input_tokens,
                 usage.output_tokens,
                 usage.cache_read_tokens,
@@ -267,7 +265,7 @@ impl super::TaskCrud for Database {
         let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
-                "SELECT task_id, cost_usd, input_tokens, output_tokens,
+                "SELECT task_id, input_tokens, output_tokens,
                     cache_read_tokens, cache_write_tokens, updated_at
              FROM task_usage",
             )
@@ -276,25 +274,23 @@ impl super::TaskCrud for Database {
             .query_map([], |row| {
                 Ok((
                     row.get::<_, i64>(0)?,
-                    row.get::<_, f64>(1)?,
+                    row.get::<_, i64>(1)?,
                     row.get::<_, i64>(2)?,
                     row.get::<_, i64>(3)?,
                     row.get::<_, i64>(4)?,
-                    row.get::<_, i64>(5)?,
-                    row.get::<_, String>(6)?,
+                    row.get::<_, String>(5)?,
                 ))
             })
             .context("Failed to query task_usage")?;
         let mut out = Vec::new();
         for row in rows {
-            let (task_id, cost_usd, input, output, cr, cw, updated_at_str) =
+            let (task_id, input, output, cr, cw, updated_at_str) =
                 row.context("Failed to read usage row")?;
             let updated_at = NaiveDateTime::parse_from_str(&updated_at_str, "%Y-%m-%d %H:%M:%S")
                 .with_context(|| format!("Invalid updated_at in task_usage: {updated_at_str:?}"))?
                 .and_utc();
             out.push(TaskUsage {
                 task_id: TaskId(task_id),
-                cost_usd,
                 input_tokens: input,
                 output_tokens: output,
                 cache_read_tokens: cr,

@@ -1134,7 +1134,6 @@ async fn report_usage_stores_and_accumulates() {
             "name": "report_usage",
             "arguments": {
                 "task_id": task_id.0,
-                "cost_usd": 0.10,
                 "input_tokens": 1000,
                 "output_tokens": 500
             }
@@ -1151,7 +1150,6 @@ async fn report_usage_stores_and_accumulates() {
             "name": "report_usage",
             "arguments": {
                 "task_id": task_id.0,
-                "cost_usd": 0.05,
                 "input_tokens": 500,
                 "output_tokens": 250,
                 "cache_read_tokens": 100,
@@ -1170,7 +1168,6 @@ async fn report_usage_stores_and_accumulates() {
     assert_eq!(all.len(), 1);
     let u = &all[0];
     assert_eq!(u.task_id, task_id);
-    assert!((u.cost_usd - 0.15).abs() < 1e-9);
     assert_eq!(u.input_tokens, 1_500);
     assert_eq!(u.output_tokens, 750);
     assert_eq!(u.cache_read_tokens, 100);
@@ -1188,7 +1185,6 @@ async fn report_usage_unknown_task_returns_error() {
             "name": "report_usage",
             "arguments": {
                 "task_id": 9999,
-                "cost_usd": 0.10,
                 "input_tokens": 1000,
                 "output_tokens": 500
             }
@@ -1338,14 +1334,13 @@ fn tool_schemas_match_arg_structs() {
             "report_usage",
             BTreeSet::from([
                 "task_id",
-                "cost_usd",
                 "input_tokens",
                 "output_tokens",
                 "cache_read_tokens",
                 "cache_write_tokens",
             ]),
-            BTreeSet::from(["task_id", "cost_usd", "input_tokens", "output_tokens"]),
-            json!({"task_id": 1, "cost_usd": 0.42, "input_tokens": 1000,
+            BTreeSet::from(["task_id", "input_tokens", "output_tokens"]),
+            json!({"task_id": 1, "input_tokens": 1000,
                    "output_tokens": 500, "cache_read_tokens": 100, "cache_write_tokens": 50}),
         ),
         (

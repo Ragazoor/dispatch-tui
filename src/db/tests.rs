@@ -334,7 +334,7 @@ fn fresh_db_has_latest_schema_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 40);
+    assert_eq!(version, 41);
 }
 
 #[test]
@@ -489,7 +489,7 @@ fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 40);
+    assert_eq!(version, 41);
 }
 
 #[test]
@@ -578,7 +578,7 @@ fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 40);
+    assert_eq!(version, 41);
 }
 
 #[test]
@@ -689,7 +689,7 @@ fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 40);
+    assert_eq!(version, 41);
 }
 
 #[test]
@@ -1637,7 +1637,6 @@ fn report_usage_first_insert() {
     db.report_usage(
         id,
         &UsageReport {
-            cost_usd: 0.42,
             input_tokens: 10_000,
             output_tokens: 2_000,
             cache_read_tokens: 0,
@@ -1648,7 +1647,6 @@ fn report_usage_first_insert() {
     let all = db.get_all_usage().unwrap();
     assert_eq!(all.len(), 1);
     assert_eq!(all[0].task_id, id);
-    assert!((all[0].cost_usd - 0.42).abs() < 1e-9);
     assert_eq!(all[0].input_tokens, 10_000);
     assert_eq!(all[0].output_tokens, 2_000);
     assert_eq!(all[0].cache_read_tokens, 0);
@@ -1675,7 +1673,6 @@ fn report_usage_accumulates() {
     db.report_usage(
         id,
         &UsageReport {
-            cost_usd: 0.10,
             input_tokens: 1_000,
             output_tokens: 500,
             cache_read_tokens: 100,
@@ -1686,7 +1683,6 @@ fn report_usage_accumulates() {
     db.report_usage(
         id,
         &UsageReport {
-            cost_usd: 0.05,
             input_tokens: 500,
             output_tokens: 250,
             cache_read_tokens: 50,
@@ -1697,7 +1693,6 @@ fn report_usage_accumulates() {
     let all = db.get_all_usage().unwrap();
     assert_eq!(all.len(), 1);
     let u = &all[0];
-    assert!((u.cost_usd - 0.15).abs() < 1e-9);
     assert_eq!(u.input_tokens, 1_500);
     assert_eq!(u.output_tokens, 750);
     assert_eq!(u.cache_read_tokens, 150);
@@ -2178,7 +2173,6 @@ fn migration_13_converts_needs_input() {
          );
          CREATE TABLE task_usage (
              task_id            INTEGER PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
-             cost_usd           REAL    NOT NULL DEFAULT 0.0,
              input_tokens       INTEGER NOT NULL DEFAULT 0,
              output_tokens      INTEGER NOT NULL DEFAULT 0,
              cache_read_tokens  INTEGER NOT NULL DEFAULT 0,
@@ -2213,7 +2207,7 @@ fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 40);
+    assert_eq!(version, 41);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -2454,7 +2448,6 @@ fn migration_16_cleans_invalid_review_needs_input() {
          CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
          CREATE TABLE task_usage (
              task_id INTEGER PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
-             cost_usd REAL NOT NULL DEFAULT 0.0,
              input_tokens INTEGER NOT NULL DEFAULT 0,
              output_tokens INTEGER NOT NULL DEFAULT 0,
              cache_read_tokens INTEGER NOT NULL DEFAULT 0,
@@ -2498,7 +2491,7 @@ fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 40);
+    assert_eq!(version, 41);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -4556,7 +4549,7 @@ fn migration_31_re_expands_tilde_paths() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 40);
+    assert_eq!(version, 41);
 }
 
 #[test]
@@ -4632,7 +4625,7 @@ fn migrate_v32_adds_base_branch_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 40);
+    assert_eq!(version, 41);
 }
 
 #[test]
@@ -5146,7 +5139,7 @@ fn migration_v38_feed_epic_columns() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 40);
+    assert_eq!(version, 41);
 }
 
 // ---------------------------------------------------------------------------
@@ -5483,7 +5476,7 @@ fn fresh_db_schema_version_is_40() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 40);
+    assert_eq!(version, 41);
 }
 
 #[test]
@@ -5553,7 +5546,77 @@ fn migration_v40_creates_learnings_table() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 40);
+    assert_eq!(version, 41);
+}
+
+#[test]
+fn migration_v41_drops_cost_usd_column() {
+    use rusqlite::Connection as RawConn;
+    let conn = RawConn::open_in_memory().unwrap();
+    // Simulate a v40 database with task_usage including cost_usd
+    conn.execute_batch(
+        "PRAGMA journal_mode=WAL;
+         PRAGMA foreign_keys=OFF;
+         CREATE TABLE tasks (
+             id INTEGER PRIMARY KEY,
+             title TEXT NOT NULL,
+             description TEXT NOT NULL DEFAULT '',
+             repo_path TEXT NOT NULL DEFAULT '',
+             status TEXT NOT NULL DEFAULT 'backlog',
+             worktree TEXT,
+             tmux_window TEXT,
+             plan_path TEXT,
+             tag TEXT,
+             epic_id INTEGER,
+             sub_status TEXT NOT NULL DEFAULT 'none',
+             pr_url TEXT,
+             sort_order INTEGER,
+             base_branch TEXT NOT NULL DEFAULT 'main',
+             external_id TEXT,
+             project_id INTEGER NOT NULL DEFAULT 1,
+             created_at TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         CREATE TABLE task_usage (
+             task_id INTEGER NOT NULL PRIMARY KEY REFERENCES tasks(id),
+             cost_usd REAL NOT NULL DEFAULT 0.0,
+             input_tokens INTEGER NOT NULL DEFAULT 0,
+             output_tokens INTEGER NOT NULL DEFAULT 0,
+             cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+             cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+             updated_at TEXT NOT NULL DEFAULT ''
+         );
+         INSERT INTO tasks (id, title, status) VALUES (999, 'test', 'backlog');
+         INSERT INTO task_usage (task_id, cost_usd, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, updated_at)
+             VALUES (999, 0.42, 100, 50, 10, 5, '');
+         PRAGMA user_version = 40;",
+    )
+    .unwrap();
+    Database::init_schema(&conn).unwrap();
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, 41);
+    // Original token data is preserved
+    let row: (i64, i64, i64, i64, i64) = conn
+        .query_row(
+            "SELECT task_id, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens
+             FROM task_usage WHERE task_id = 999",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        )
+        .unwrap();
+    assert_eq!(row, (999, 100, 50, 10, 5));
+    // cost_usd column no longer exists
+    let has_cost_usd: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('task_usage') WHERE name = 'cost_usd'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|n| n > 0)
+        .unwrap_or(false);
+    assert!(!has_cost_usd, "cost_usd column should have been removed by migration v41");
 }
 
 #[test]

@@ -94,7 +94,7 @@ The setup is idempotent — safe to run on every install or upgrade.
 | `/wrap-up` skill | Commit, rebase or PR when a task is complete |
 | `/queue-plan` command | Queue a plan file as a task |
 | `task-status-hook` | Automatically transitions task status (running/review/needs_input) |
-| `task-usage-hook` | Reports token usage and cost per task |
+| `task-usage-hook` | Reports token usage per task |
 
 To verify the plugin is installed:
 ```bash

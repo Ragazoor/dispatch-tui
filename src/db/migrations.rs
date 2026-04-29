@@ -53,6 +53,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (38, migrate_v38_feed_epic_columns),
     (39, migrate_v39_add_projects),
     (40, migrate_v40_create_learnings),
+    (41, migrate_v41_drop_cost_usd),
 ];
 
 fn migrate_v1_add_plan_column(conn: &Connection) -> Result<()> {
@@ -879,4 +880,34 @@ fn migrate_v40_create_learnings(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_learnings_status ON learnings(status);",
     )
     .context("Failed to create learnings table (migration v40)")
+}
+
+fn migrate_v41_drop_cost_usd(conn: &Connection) -> Result<()> {
+    let has_cost_usd: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('task_usage') WHERE name = 'cost_usd'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        > 0;
+    if !has_cost_usd {
+        return Ok(());
+    }
+    conn.execute_batch(
+        "CREATE TABLE task_usage_new (
+            task_id            INTEGER NOT NULL PRIMARY KEY REFERENCES tasks(id),
+            input_tokens       INTEGER NOT NULL DEFAULT 0,
+            output_tokens      INTEGER NOT NULL DEFAULT 0,
+            cache_read_tokens  INTEGER NOT NULL DEFAULT 0,
+            cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+            updated_at         TEXT NOT NULL DEFAULT ''
+        );
+        INSERT INTO task_usage_new
+            SELECT task_id, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, updated_at
+            FROM task_usage;
+        DROP TABLE task_usage;
+        ALTER TABLE task_usage_new RENAME TO task_usage;",
+    )
+    .context("Failed to drop cost_usd from task_usage (migration v41)")
 }

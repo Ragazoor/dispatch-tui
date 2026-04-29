@@ -82,7 +82,6 @@ pub(super) struct ClaimTaskArgs {
 pub(super) struct ReportUsageArgs {
     #[serde(deserialize_with = "deserialize_flexible_i64")]
     pub(super) task_id: i64,
-    pub(super) cost_usd: f64,
     pub(super) input_tokens: i64,
     pub(super) output_tokens: i64,
     #[serde(default)]
@@ -1062,17 +1061,12 @@ pub(super) fn handle_report_usage(
         Ok(a) => a,
         Err(resp) => return resp,
     };
-    tracing::info!(
-        task_id = parsed.task_id,
-        cost_usd = parsed.cost_usd,
-        "MCP report_usage"
-    );
+    tracing::info!(task_id = parsed.task_id, "MCP report_usage");
 
     let svc = TaskService::new(state.db.clone());
     match svc.report_usage(
         parsed.task_id,
         &crate::models::UsageReport {
-            cost_usd: parsed.cost_usd,
             input_tokens: parsed.input_tokens,
             output_tokens: parsed.output_tokens,
             cache_read_tokens: parsed.cache_read_tokens,

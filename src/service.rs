@@ -1488,7 +1488,6 @@ mod tests {
             .report_usage(
                 999,
                 &UsageReport {
-                    cost_usd: 1.0,
                     input_tokens: 100,
                     output_tokens: 50,
                     cache_read_tokens: 0,

@@ -1061,7 +1061,6 @@ fn handle_refresh_usage_stores_by_task_id() {
     let mut app = make_app();
     let usage = vec![TaskUsage {
         task_id: TaskId(1),
-        cost_usd: 0.42,
         input_tokens: 10_000,
         output_tokens: 2_000,
         cache_read_tokens: 500,
@@ -1070,7 +1069,7 @@ fn handle_refresh_usage_stores_by_task_id() {
     }];
     app.update(Message::RefreshUsage(usage));
     assert!(app.board.usage.contains_key(&TaskId(1)));
-    assert!((app.board.usage[&TaskId(1)].cost_usd - 0.42).abs() < 1e-9);
+    assert_eq!(app.board.usage[&TaskId(1)].input_tokens, 10_000);
 }
 
 #[test]

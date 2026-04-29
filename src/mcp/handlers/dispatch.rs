@@ -338,18 +338,17 @@ mcp_tools! {
         };
 
     sync "report_usage" => tasks::handle_report_usage,
-        "Report token usage and cost for a task session. Accumulates across sessions.",
+        "Report token usage for a task session. Accumulates across sessions.",
         {
             "type": "object",
             "properties": {
                 "task_id":            { "type": "integer", "description": "The task ID" },
-                "cost_usd":           { "type": "number",  "description": "Session cost in USD" },
                 "input_tokens":       { "type": "integer", "description": "Input tokens used" },
                 "output_tokens":      { "type": "integer", "description": "Output tokens used" },
                 "cache_read_tokens":  { "type": "integer", "description": "Cache read tokens (optional)" },
                 "cache_write_tokens": { "type": "integer", "description": "Cache write tokens (optional)" }
             },
-            "required": ["task_id", "cost_usd", "input_tokens", "output_tokens"]
+            "required": ["task_id", "input_tokens", "output_tokens"]
         };
 
     sync "update_review_status" => tasks::handle_update_review_status,
