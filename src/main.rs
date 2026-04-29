@@ -6,6 +6,7 @@ use tracing_subscriber::EnvFilter;
 
 use dispatch_tui::db::{ProjectCrud, SettingsStore, TaskCrud};
 use dispatch_tui::process::RealProcessRunner;
+use dispatch_tui::tui::ui::truncate;
 use dispatch_tui::{db, feed, github, models, plan, runtime, service};
 
 #[derive(Parser)]
@@ -158,15 +159,6 @@ fn default_db_path() -> PathBuf {
     dispatch_tui::default_db_path()
 }
 
-/// Truncate `s` to at most `max_chars` Unicode scalar values and append `…`.
-/// Returns an owned copy of `s` unchanged if it is already short enough.
-fn truncate_at(s: &str, max_chars: usize) -> String {
-    let mut chars = s.char_indices();
-    match chars.nth(max_chars) {
-        Some((i, _)) => format!("{}…", &s[..i]),
-        None => s.to_owned(),
-    }
-}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -387,16 +379,8 @@ async fn main() -> Result<()> {
                     if !items.is_empty() {
                         println!("{:<52} {:<55} STATUS", "EXTERNAL_ID", "TITLE");
                         for item in &items {
-                            let id = if item.external_id.chars().count() > 50 {
-                                truncate_at(&item.external_id, 49)
-                            } else {
-                                item.external_id.clone()
-                            };
-                            let title = if item.title.chars().count() > 53 {
-                                truncate_at(&item.title, 52)
-                            } else {
-                                item.title.clone()
-                            };
+                            let id = truncate(&item.external_id, 50);
+                            let title = truncate(&item.title, 53);
                             println!("{:<52} {:<55} {}", id, title, item.status.as_str());
                         }
                         println!();
@@ -405,12 +389,7 @@ async fn main() -> Result<()> {
                     println!("✓ {} valid item{s}", items.len());
                 }
                 Err(e) => {
-                    let preview = stdout.trim();
-                    let preview = if preview.len() > 500 {
-                        &preview[..500]
-                    } else {
-                        preview
-                    };
+                    let preview: String = stdout.trim().chars().take(500).collect();
                     eprintln!("verify-feed: failed to parse output as FeedItem array: {e}");
                     eprintln!("Output (first 500 chars):\n{preview}");
                     std::process::exit(1);
