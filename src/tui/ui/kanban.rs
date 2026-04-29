@@ -361,8 +361,7 @@ fn classify_card_indicator(
     }
     if task.is_detached() {
         if let (TaskStatus::Review, Some(pr_url)) = (status, task.pr_url.as_deref()) {
-            let pr_label = crate::models::pr_number_from_url(pr_url)
-                .map_or("PR".to_string(), |n| format!("PR #{n}"));
+            let pr_label = crate::models::url_label(pr_url);
             return CardIndicator::DetachedReview { pr_label };
         }
         return CardIndicator::Detached;
@@ -1026,7 +1025,15 @@ fn render_task_detail_overlay(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 
     if let Some(pr_url) = &task.pr_url {
-        field("PR:    ", pr_url.clone());
+        let clean = pr_url.split(['?', '#']).next().unwrap_or("");
+        let field_label = if clean.contains("/pull/") {
+            "PR:    "
+        } else if clean.contains("/issues/") {
+            "Issue: "
+        } else {
+            "Link:  "
+        };
+        field(field_label, pr_url.clone());
     }
 
     if let Some(plan_path) = &task.plan_path {
