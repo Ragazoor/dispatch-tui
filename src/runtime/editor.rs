@@ -547,6 +547,50 @@ mod learning_editor_tests {
         let unchanged = db.get_learning(id).unwrap().unwrap();
         assert_eq!(unchanged.summary, "original summary");
     }
+
+    #[test]
+    fn saved_content_for_rejected_learning_shows_status_error() {
+        // update_learning rejects learnings with status Rejected — verify the
+        // error surfaces as StatusInfo and does not update DB.
+        let db = Arc::new(Database::open_in_memory().unwrap());
+        let id = db
+            .create_learning(
+                LearningKind::Convention,
+                "original summary",
+                None,
+                LearningScope::User,
+                None,
+                &[],
+                None,
+            )
+            .unwrap();
+        // Reject it so it's in an un-editable state
+        crate::service::LearningService::new(db.clone() as Arc<dyn crate::db::LearningStore>)
+            .reject_learning(id)
+            .unwrap();
+        let learning = make_learning(id);
+        let rt = make_runtime(db.clone());
+        let mut app = App::new(vec![], 1, std::time::Duration::from_secs(300));
+
+        rt.exec_finalize_editor_result(
+            &mut app,
+            EditKind::Learning(learning),
+            EditorOutcome::Saved(
+                "--- SUMMARY ---\nnew summary\n--- KIND ---\nconvention\n--- TAGS ---\n\n--- DETAIL ---\n\n"
+                    .to_string(),
+            ),
+        );
+
+        // Status message should contain the error
+        let msg = app.status_message().unwrap_or_default();
+        assert!(
+            msg.contains("Edit failed"),
+            "expected 'Edit failed' in status message, got: {msg}"
+        );
+        // DB summary unchanged
+        let unchanged = db.get_learning(id).unwrap().unwrap();
+        assert_eq!(unchanged.summary, "original summary");
+    }
 }
 
 #[cfg(test)]

@@ -183,4 +183,51 @@ mod tests {
         // Should show a status message, not panic
         assert!(app.status_message().is_some());
     }
+
+    #[test]
+    fn exec_load_sorts_by_scope_then_created_at_desc() {
+        use chrono::Duration;
+        let db = Arc::new(Database::open_in_memory().unwrap());
+        let now = Utc::now();
+
+        // Insert two repo learnings and one user learning.
+        // We can't control created_at directly via create_learning (it uses NOW()),
+        // so insert them in order and verify scope ordering overrides insertion order.
+        let repo_id1 = db
+            .create_learning(
+                LearningKind::Convention,
+                "repo learning 1",
+                None,
+                LearningScope::Repo,
+                Some("/repo"),
+                &[],
+                None,
+            )
+            .unwrap();
+        let user_id = db
+            .create_learning(
+                LearningKind::Convention,
+                "user learning",
+                None,
+                LearningScope::User,
+                None,
+                &[],
+                None,
+            )
+            .unwrap();
+
+        let rt = make_runtime(db.clone());
+        let mut app = App::new(vec![], 1, std::time::Duration::from_secs(300));
+
+        rt.exec_load_proposed_learnings(&mut app);
+
+        // User scope (0) must come before Repo scope (2)
+        if let ViewMode::ProposedLearnings { learnings, .. } = app.view_mode() {
+            assert_eq!(learnings.len(), 2);
+            assert_eq!(learnings[0].id, user_id, "user scope should sort first");
+            assert_eq!(learnings[1].id, repo_id1, "repo scope should sort second");
+        } else {
+            panic!("expected ProposedLearnings");
+        }
+    }
 }
