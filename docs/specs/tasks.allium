@@ -1561,6 +1561,38 @@ rule EditLearning {
         -- Implemented in the TUI review surface in WP7.
 }
 
+surface ProposedLearningsReview {
+    facing user: User
+
+    let learnings: [Learning] = core/Learnings where status = proposed
+                                ordered_by scope asc, created_at desc
+    let selected: Integer = 0
+
+    exposes:
+        learnings
+        selected
+
+    provides:
+        Navigate(delta: Integer)
+            requires: learnings != []
+            ensures: selected = clamp(selected + delta, 0, len(learnings) - 1)
+
+        Approve(learning: Learning)
+            requires: learning.status = proposed
+            ensures: ApproveLearning(learning)
+
+        Reject(learning: Learning)
+            requires: learning.status = proposed
+            ensures: RejectLearning(learning)
+
+        Edit(learning: Learning)
+            requires: learning.status in {proposed, approved}
+            ensures: EditLearning(learning)
+
+        Close
+            ensures: surface closed, previous view restored
+}
+
 ------------------------------------------------------------
 -- Surfaces
 ------------------------------------------------------------
