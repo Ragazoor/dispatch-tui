@@ -35,7 +35,7 @@ expression: rendered
       │                                                                                                          │
 ──────│                                                                                                          │──────
       │                                                                                                          │
-      │[a] approve  [r] reject  [e] edit  [j/k] navigate  [q] close                                              │
+      │[a]pprove  [r]eject  [e]dit  [j/k] navigate  [q] close                                                    │
       ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 
 

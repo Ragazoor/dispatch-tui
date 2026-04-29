@@ -6,6 +6,7 @@ use ratatui::Frame;
 
 use crate::models::{Learning, LearningKind, LearningScope};
 use super::palette::{BORDER, CYAN, FG, GREEN, MUTED, PURPLE, RED, YELLOW};
+use super::shared::{push_hint_spans, truncate};
 use crate::tui::{App, ViewMode};
 
 fn kind_color(kind: LearningKind) -> Color {
@@ -97,31 +98,22 @@ pub fn render_proposed_learnings(frame: &mut Frame, app: &App, area: Rect) {
 
     // Build lines with scope group headers
     let mut lines: Vec<Line<'static>> = Vec::new();
-    let mut last_scope: Option<String> = None;
+    let mut last_scope: Option<LearningScope> = None;
     let summary_width = content_area.width.saturating_sub(30) as usize;
 
     for (idx, learning) in learnings.iter().enumerate() {
-        let scope_key = scope_label(learning);
-        if last_scope.as_deref() != Some(&scope_key) {
-            let fill_len = (content_area.width as usize).saturating_sub(scope_key.len() + 5);
-            let sep = format!("\u{2500}\u{2500} {} {}", scope_key, "\u{2500}".repeat(fill_len));
+        if last_scope != Some(learning.scope) {
+            let label = scope_label(learning);
+            let fill_len = (content_area.width as usize).saturating_sub(label.len() + 5);
+            let sep = format!("\u{2500}\u{2500} {} {}", label, "\u{2500}".repeat(fill_len));
             lines.push(Line::from(Span::styled(sep, Style::default().fg(MUTED))));
-            last_scope = Some(scope_key);
+            last_scope = Some(learning.scope);
         }
 
         let is_selected = idx == selected;
-        let cursor = if is_selected { "> " } else { "  " };
+        let cursor: &str = if is_selected { "> " } else { "  " };
         let kind_str = format!("{:<18}", learning.kind.display_label());
-        let summary: String = if learning.summary.chars().count() > summary_width {
-            learning
-                .summary
-                .chars()
-                .take(summary_width.saturating_sub(1))
-                .collect::<String>()
-                + "\u{2026}"
-        } else {
-            learning.summary.clone()
-        };
+        let summary = truncate(&learning.summary, summary_width);
         let tags: String = learning
             .tags
             .iter()
@@ -136,7 +128,7 @@ pub fn render_proposed_learnings(frame: &mut Frame, app: &App, area: Rect) {
         };
 
         lines.push(Line::from(vec![
-            Span::styled(cursor.to_string(), base_style.fg(CYAN)),
+            Span::styled(cursor, base_style.fg(CYAN)),
             Span::styled(format!("[{:>3}] ", learning.id), base_style.fg(MUTED)),
             Span::styled(kind_str, base_style.fg(kind_color(learning.kind))),
             Span::styled(summary, base_style.fg(FG)),
@@ -148,36 +140,12 @@ pub fn render_proposed_learnings(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(content, content_area);
 
     // Footer hints
-    let hints = Paragraph::new(Line::from(vec![
-        Span::styled(
-            "[a]",
-            Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(" approve  "),
-        Span::styled(
-            "[r]",
-            Style::default().fg(RED).add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(" reject  "),
-        Span::styled(
-            "[e]",
-            Style::default().fg(CYAN).add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(" edit  "),
-        Span::styled(
-            "[j/k]",
-            Style::default()
-                .fg(MUTED)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(" navigate  "),
-        Span::styled(
-            "[q]",
-            Style::default()
-                .fg(MUTED)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(" close"),
-    ]));
-    frame.render_widget(hints, footer_area);
+    let muted = Style::default().fg(MUTED);
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    push_hint_spans(&mut spans, "a", "approve", GREEN, muted);
+    push_hint_spans(&mut spans, "r", "reject", RED, muted);
+    push_hint_spans(&mut spans, "e", "edit", CYAN, muted);
+    push_hint_spans(&mut spans, "j/k", "navigate", MUTED, muted);
+    push_hint_spans(&mut spans, "q", "close", MUTED, muted);
+    frame.render_widget(Paragraph::new(Line::from(spans)), footer_area);
 }

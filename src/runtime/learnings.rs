@@ -1,6 +1,6 @@
 use super::*;
 use crate::db;
-use crate::models::LearningStatus;
+use crate::models::{LearningId, LearningScope, LearningStatus};
 use crate::service::LearningService;
 
 impl TuiRuntime {
@@ -13,17 +13,15 @@ impl TuiRuntime {
         match db.list_learnings(filter) {
             Ok(mut learnings) => {
                 // Sort: user < project < repo < epic < task, then created_at desc within scope
-                learnings.sort_by(|a, b| {
-                    let scope_ord = |s: crate::models::LearningScope| match s {
-                        crate::models::LearningScope::User => 0,
-                        crate::models::LearningScope::Project => 1,
-                        crate::models::LearningScope::Repo => 2,
-                        crate::models::LearningScope::Epic => 3,
-                        crate::models::LearningScope::Task => 4,
+                learnings.sort_by_key(|l| {
+                    let scope_ord = match l.scope {
+                        LearningScope::User => 0,
+                        LearningScope::Project => 1,
+                        LearningScope::Repo => 2,
+                        LearningScope::Epic => 3,
+                        LearningScope::Task => 4,
                     };
-                    scope_ord(a.scope)
-                        .cmp(&scope_ord(b.scope))
-                        .then(b.created_at.cmp(&a.created_at))
+                    (scope_ord, std::cmp::Reverse(l.created_at))
                 });
                 app.update(Message::ShowProposedLearnings(learnings));
             }
@@ -35,41 +33,31 @@ impl TuiRuntime {
         }
     }
 
-    pub(super) fn exec_approve_learning(
-        &self,
-        app: &mut App,
-        id: crate::models::LearningId,
-    ) {
-        let db: Arc<dyn db::LearningStore> = self.database.clone();
-        let svc = LearningService::new(db);
-        match svc.approve_learning(id) {
-            Ok(()) => {
-                app.update(Message::LearningActioned(id));
-                app.update(Message::StatusInfo(format!("Learning {id} approved")));
-            }
-            Err(e) => {
-                app.update(Message::StatusInfo(format!(
-                    "Could not approve learning: {e}"
-                )));
-            }
-        }
+    pub(super) fn exec_approve_learning(&self, app: &mut App, id: LearningId) {
+        self.exec_action_learning(app, id, "approve", |svc, id| svc.approve_learning(id));
     }
 
-    pub(super) fn exec_reject_learning(
+    pub(super) fn exec_reject_learning(&self, app: &mut App, id: LearningId) {
+        self.exec_action_learning(app, id, "reject", |svc, id| svc.reject_learning(id));
+    }
+
+    fn exec_action_learning(
         &self,
         app: &mut App,
-        id: crate::models::LearningId,
+        id: LearningId,
+        verb: &str,
+        action: impl Fn(&LearningService, LearningId) -> Result<(), crate::service::ServiceError>,
     ) {
         let db: Arc<dyn db::LearningStore> = self.database.clone();
         let svc = LearningService::new(db);
-        match svc.reject_learning(id) {
+        match action(&svc, id) {
             Ok(()) => {
                 app.update(Message::LearningActioned(id));
-                app.update(Message::StatusInfo(format!("Learning {id} rejected")));
+                app.update(Message::StatusInfo(format!("Learning {id} {verb}ed")));
             }
             Err(e) => {
                 app.update(Message::StatusInfo(format!(
-                    "Could not reject learning: {e}"
+                    "Could not {verb} learning: {e}"
                 )));
             }
         }
@@ -191,7 +179,7 @@ mod tests {
         // Insert two repo learnings and one user learning.
         // We can't control created_at directly via create_learning (it uses NOW()),
         // so insert them in order and verify scope ordering overrides insertion order.
-        let repo_id1 = db
+        let repo_id = db
             .create_learning(
                 LearningKind::Convention,
                 "repo learning 1",
@@ -223,7 +211,7 @@ mod tests {
         if let ViewMode::ProposedLearnings { learnings, .. } = app.view_mode() {
             assert_eq!(learnings.len(), 2);
             assert_eq!(learnings[0].id, user_id, "user scope should sort first");
-            assert_eq!(learnings[1].id, repo_id1, "repo scope should sort second");
+            assert_eq!(learnings[1].id, repo_id, "repo scope should sort second");
         } else {
             panic!("expected ProposedLearnings");
         }

@@ -252,7 +252,6 @@ pub(super) fn dispatch(
             rt.exec_reorder_project(app, id, delta);
             vec![]
         }
-        // Proposed learnings review
         LoadProposedLearnings => {
             rt.exec_load_proposed_learnings(app);
             vec![]

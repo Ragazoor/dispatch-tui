@@ -260,7 +260,6 @@ impl TuiRuntime {
 
         let params = crate::service::UpdateLearningParams {
             id: learning.id,
-            // Empty parsed summary → treat as "no change"
             summary: if fields.summary.is_empty() {
                 None
             } else {

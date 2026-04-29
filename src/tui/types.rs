@@ -349,7 +349,6 @@ pub enum Message {
     PrevTip,
     SetTipsMode(TipsShowMode),
     CloseTips,
-    // Proposed learnings review
     OpenProposedLearnings,
     ShowProposedLearnings(Vec<crate::models::Learning>),
     CloseProposedLearnings,
@@ -544,7 +543,6 @@ pub enum Command {
         id: ProjectId,
         delta: i8,
     },
-    // Proposed learnings review
     LoadProposedLearnings,
     ApproveLearning(crate::models::LearningId),
     RejectLearning(crate::models::LearningId),
