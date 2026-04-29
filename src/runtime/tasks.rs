@@ -56,11 +56,18 @@ impl TuiRuntime {
         let paths = self.database.list_repo_paths().unwrap_or_default();
         app.update(Message::RepoPathsUpdated(paths));
         let epic_ctx = dispatch::EpicContext::from_db(&task, &*self.database);
+        let learnings: Vec<models::Learning> = self
+            .database
+            .list_learnings_for_dispatch(Some(task.project_id), &task.repo_path, task.epic_id)
+            .unwrap_or_default()
+            .into_iter()
+            .take(10)
+            .collect();
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
         tokio::task::spawn_blocking(move || {
             let id = task.id;
-            match dispatch::quick_dispatch_agent(&task, &*runner, epic_ctx.as_ref(), &[]) {
+            match dispatch::quick_dispatch_agent(&task, &*runner, epic_ctx.as_ref(), &learnings) {
                 Ok(result) => {
                     let _ = tx.send(Message::Dispatched {
                         id,
@@ -116,6 +123,13 @@ impl TuiRuntime {
 
     pub(super) fn exec_dispatch_agent(&self, task: models::Task, mode: models::DispatchMode) {
         let epic_ctx = dispatch::EpicContext::from_db(&task, &*self.database);
+        let learnings: Vec<models::Learning> = self
+            .database
+            .list_learnings_for_dispatch(Some(task.project_id), &task.repo_path, task.epic_id)
+            .unwrap_or_default()
+            .into_iter()
+            .take(10)
+            .collect();
         let label = match mode {
             models::DispatchMode::Dispatch => "Dispatch",
             models::DispatchMode::Brainstorm => "Brainstorm",
@@ -124,11 +138,13 @@ impl TuiRuntime {
         self.spawn_dispatch(
             task,
             move |t, r| match mode {
-                models::DispatchMode::Dispatch => dispatch::dispatch_agent(t, r, epic_ctx.as_ref(), &[]),
-                models::DispatchMode::Brainstorm => {
-                    dispatch::brainstorm_agent(t, r, epic_ctx.as_ref(), &[])
+                models::DispatchMode::Dispatch => {
+                    dispatch::dispatch_agent(t, r, epic_ctx.as_ref(), &learnings)
                 }
-                models::DispatchMode::Plan => dispatch::plan_agent(t, r, epic_ctx.as_ref(), &[]),
+                models::DispatchMode::Brainstorm => {
+                    dispatch::brainstorm_agent(t, r, epic_ctx.as_ref(), &learnings)
+                }
+                models::DispatchMode::Plan => dispatch::plan_agent(t, r, epic_ctx.as_ref(), &learnings),
             },
             label,
         );

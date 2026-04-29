@@ -752,10 +752,16 @@ fn do_dispatch(
     runner: &dyn crate::process::ProcessRunner,
 ) -> anyhow::Result<crate::models::DispatchResult> {
     let epic_ctx = dispatch::EpicContext::from_db(task, db);
+    let learnings: Vec<crate::models::Learning> = db
+        .list_learnings_for_dispatch(Some(task.project_id), &task.repo_path, task.epic_id)
+        .unwrap_or_default()
+        .into_iter()
+        .take(10)
+        .collect();
     match DispatchMode::for_task(task) {
-        DispatchMode::Dispatch => dispatch::dispatch_agent(task, runner, epic_ctx.as_ref(), &[]),
-        DispatchMode::Brainstorm => dispatch::brainstorm_agent(task, runner, epic_ctx.as_ref(), &[]),
-        DispatchMode::Plan => dispatch::plan_agent(task, runner, epic_ctx.as_ref(), &[]),
+        DispatchMode::Dispatch => dispatch::dispatch_agent(task, runner, epic_ctx.as_ref(), &learnings),
+        DispatchMode::Brainstorm => dispatch::brainstorm_agent(task, runner, epic_ctx.as_ref(), &learnings),
+        DispatchMode::Plan => dispatch::plan_agent(task, runner, epic_ctx.as_ref(), &learnings),
     }
 }
 

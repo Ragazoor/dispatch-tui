@@ -126,6 +126,14 @@ impl TuiRuntime {
 
         app.update(Message::TaskCreated { task: task.clone() });
 
+        let learnings: Vec<models::Learning> = self
+            .database
+            .list_learnings_for_dispatch(Some(task.project_id), &task.repo_path, task.epic_id)
+            .unwrap_or_default()
+            .into_iter()
+            .take(10)
+            .collect();
+
         // Dispatch the planning subtask asynchronously
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
@@ -146,7 +154,7 @@ impl TuiRuntime {
                 &epic_title,
                 &epic_description,
                 &*runner,
-                &[],
+                &learnings,
             ) {
                 Ok(result) => {
                     let _ = tx.send(Message::Dispatched {
