@@ -144,12 +144,6 @@ where
         ) -> Result<Option<Option<String>>, D2::Error> {
             String::deserialize(d).map(|s| Some(Some(s)))
         }
-        fn visit_str<E: de::Error>(self, v: &str) -> Result<Option<Option<String>>, E> {
-            Ok(Some(Some(v.to_owned())))
-        }
-        fn visit_string<E: de::Error>(self, v: String) -> Result<Option<Option<String>>, E> {
-            Ok(Some(Some(v)))
-        }
     }
     deserializer.deserialize_option(NullableString)
 }
