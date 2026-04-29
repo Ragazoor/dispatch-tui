@@ -203,6 +203,27 @@ entity SavedRepoPath {
     last_used: Timestamp     -- updated on each use; drives recency ordering
 }
 
+-- Project is a user-defined grouping for tasks and epics.
+-- Exactly one project has is_default = true (the "Default" project, seeded at
+-- database initialisation and never deletable). All other projects are user-created.
+--
+-- Filtering: when the active project is the Default project, the board shows
+-- every task and epic regardless of project_id (catch-all view). When any
+-- other project is active, only items with a matching project_id are shown.
+--
+-- Item assignment: tasks and epics created while Default is active receive
+-- project_id = Default.id (the default bucket). When a non-default project is
+-- deleted, its items are reassigned to Default.
+entity Project {
+    name: String
+    sort_order: Integer   -- display order in the projects panel, ascending
+    is_default: Boolean   -- true for exactly one record (the seeded Default project)
+
+    @guidance
+        -- is_default is set at seeding time and is never modified.
+        -- The service layer prevents deletion of the default project.
+}
+
 -- Learning captures knowledge a dispatched agent discovered and proposes back for
 -- human review. Approved learnings are injected into future dispatch prompts for the
 -- matching scope. Human approval is always required before an entry affects dispatches.
@@ -390,6 +411,8 @@ config {
 --     hovered project, updating the board filter to show that project's tasks.
 --   - Enter, g, l, Right, and Esc all close the panel without changing the
 --     active project (the project already selected by cursor movement is kept).
+--   - The Default project (is_default = true) is a catch-all: selecting it
+--     shows all tasks and epics regardless of their project_id.
 
 concept VisualColumn {
     label: String

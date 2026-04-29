@@ -724,6 +724,69 @@ fn q_from_projects_panel_triggers_quit_prompt() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Default project catch-all filter
+// ---------------------------------------------------------------------------
+
+fn app_with_default_and_custom_projects() -> App {
+    let t1 = make_task_with_project(1, TaskStatus::Backlog, 1); // Default
+    let t2 = make_task_with_project(2, TaskStatus::Backlog, 2); // Custom
+    let mut app = App::new(vec![t1, t2], 1, TEST_TIMEOUT);
+    app.update(Message::ProjectsUpdated(vec![
+        Project {
+            id: 1,
+            name: "Default".to_string(),
+            sort_order: 0,
+            is_default: true,
+        },
+        Project {
+            id: 2,
+            name: "Custom".to_string(),
+            sort_order: 1,
+            is_default: false,
+        },
+    ]));
+    app
+}
+
+#[test]
+fn default_project_shows_all_tasks() {
+    let app = app_with_default_and_custom_projects();
+    // active_project = 1 (Default) → both tasks should appear
+    let visible = app.column_items_for_status(TaskStatus::Backlog);
+    assert_eq!(
+        visible.len(),
+        2,
+        "Default project should show all tasks regardless of project_id"
+    );
+}
+
+#[test]
+fn non_default_project_shows_only_its_own_tasks() {
+    let mut app = app_with_default_and_custom_projects();
+    app.update(Message::SelectProject(2));
+    let visible = app.column_items_for_status(TaskStatus::Backlog);
+    assert_eq!(
+        visible.len(),
+        1,
+        "Custom project should show only its own tasks"
+    );
+}
+
+#[test]
+fn default_project_shows_archived_from_all_projects() {
+    let mut app = app_with_default_and_custom_projects();
+    app.board.tasks = vec![
+        make_task_with_project(1, TaskStatus::Archived, 1),
+        make_task_with_project(2, TaskStatus::Archived, 2),
+    ];
+    assert_eq!(
+        app.archived_tasks().len(),
+        2,
+        "Default project should show archived tasks from all projects"
+    );
+}
+
 #[test]
 fn q_then_q_full_flow() {
     // First q opens the projects panel; second q enters ConfirmQuit

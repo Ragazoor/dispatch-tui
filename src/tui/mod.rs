@@ -48,6 +48,7 @@ pub struct App {
     pub(in crate::tui) archive: ArchiveState,
     pub(in crate::tui) projects_panel: ProjectsPanelState,
     pub(in crate::tui) active_project: ProjectId,
+    pub(in crate::tui) active_is_default: bool,
     pub(in crate::tui) select: SelectionState,
     pub(in crate::tui) filter: FilterState,
     pub(in crate::tui) merge_queue: Option<MergeQueue>,
@@ -118,6 +119,7 @@ impl App {
             archive: ArchiveState::default(),
             projects_panel: ProjectsPanelState::default(),
             active_project: default_project_id,
+            active_is_default: false,
             select: SelectionState::default(),
             filter: FilterState::default(),
             merge_queue: None,
@@ -305,7 +307,7 @@ impl App {
     }
 
     fn project_matches(&self, project_id: ProjectId) -> bool {
-        project_id == self.active_project
+        self.active_is_default || project_id == self.active_project
     }
 
     /// Return tasks visible in the current view.
@@ -1014,10 +1016,20 @@ impl App {
             // ── Project messages ──
             Message::ProjectsUpdated(projects) => {
                 self.board.projects = projects;
+                self.active_is_default = self
+                    .board
+                    .projects
+                    .iter()
+                    .any(|p| p.id == self.active_project && p.is_default);
                 vec![]
             }
             Message::SelectProject(project_id) => {
                 self.active_project = project_id;
+                self.active_is_default = self
+                    .board
+                    .projects
+                    .iter()
+                    .any(|p| p.id == project_id && p.is_default);
                 self.clamp_selection();
                 if let Some(idx) = self.board.projects.iter().position(|p| p.id == project_id) {
                     self.projects_panel.list_state.select(Some(idx));
