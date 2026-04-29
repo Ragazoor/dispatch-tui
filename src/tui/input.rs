@@ -118,8 +118,11 @@ impl App {
     }
 
     fn handle_key_proposed_learnings(&mut self, key: KeyEvent) -> Vec<Command> {
-        let selected_id = if let ViewMode::ProposedLearnings { selected, ref learnings, .. } =
-            self.board.view_mode
+        let selected_id = if let ViewMode::ProposedLearnings {
+            selected,
+            ref learnings,
+            ..
+        } = self.board.view_mode
         {
             learnings.get(selected).map(|l| l.id)
         } else {
@@ -128,12 +131,8 @@ impl App {
 
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => self.update(Message::CloseProposedLearnings),
-            KeyCode::Char('j') | KeyCode::Down => {
-                self.update(Message::NavigateProposedLearning(1))
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                self.update(Message::NavigateProposedLearning(-1))
-            }
+            KeyCode::Char('j') | KeyCode::Down => self.update(Message::NavigateProposedLearning(1)),
+            KeyCode::Char('k') | KeyCode::Up => self.update(Message::NavigateProposedLearning(-1)),
             KeyCode::Char('a') => {
                 if let Some(id) = selected_id {
                     self.update(Message::ApproveLearning(id))

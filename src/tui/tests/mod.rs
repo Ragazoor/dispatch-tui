@@ -6,6 +6,7 @@ mod dispatch;
 mod epics;
 mod helpers;
 mod input_handlers;
+mod learning_review;
 mod navigation;
 mod projects;
 mod rendering;
@@ -14,7 +15,6 @@ mod split_pane;
 mod task_detail;
 mod tips_and_status;
 mod wrap_up;
-mod learning_review;
 
 // Re-exports: child test modules access these via `super::<item>`.
 pub(in crate::tui) use super::*;

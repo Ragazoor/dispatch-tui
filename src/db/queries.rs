@@ -339,10 +339,9 @@ impl super::TaskCrud for Database {
             .with_context(|| format!("Failed to upsert feed task '{}'", item.external_id))?;
         }
 
-        let keep_ids = serde_json::to_string(
-            &items.iter().map(|i| &i.external_id).collect::<Vec<_>>(),
-        )
-        .expect("Vec<String> serialization is infallible");
+        let keep_ids =
+            serde_json::to_string(&items.iter().map(|i| &i.external_id).collect::<Vec<_>>())
+                .expect("Vec<String> serialization is infallible");
         tx.execute(
             "DELETE FROM tasks
              WHERE epic_id = ?1

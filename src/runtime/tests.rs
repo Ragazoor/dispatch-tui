@@ -1968,13 +1968,19 @@ mod resolve_initial_project_tests {
 #[tokio::test]
 async fn exec_trigger_epic_feed_success() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
-    let epic = db.create_epic("Security Vulnerabilities", "", "/repo", None, 1).unwrap();
+    let epic = db
+        .create_epic("Security Vulnerabilities", "", "/repo", None, 1)
+        .unwrap();
 
     let (tx, mut rx) = mpsc::unbounded_channel();
     let rt = make_runtime(db, tx, Arc::new(MockProcessRunner::new(vec![])));
 
     let cmd = r#"echo '[{"external_id":"vuln:1","title":"CVE-1","description":"desc","status":"backlog"}]'"#;
-    rt.exec_trigger_epic_feed(epic.id, "Security Vulnerabilities".to_string(), cmd.to_string());
+    rt.exec_trigger_epic_feed(
+        epic.id,
+        "Security Vulnerabilities".to_string(),
+        cmd.to_string(),
+    );
 
     let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
         .await
@@ -2009,7 +2015,9 @@ async fn exec_trigger_epic_feed_zero_items() {
 #[tokio::test]
 async fn exec_trigger_epic_feed_command_fails() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
-    let epic = db.create_epic("Failing Feed", "", "/repo", None, 1).unwrap();
+    let epic = db
+        .create_epic("Failing Feed", "", "/repo", None, 1)
+        .unwrap();
 
     let (tx, mut rx) = mpsc::unbounded_channel();
     let rt = make_runtime(db, tx, Arc::new(MockProcessRunner::new(vec![])));
@@ -2029,12 +2037,18 @@ async fn exec_trigger_epic_feed_command_fails() {
 #[tokio::test]
 async fn exec_trigger_epic_feed_malformed_json() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
-    let epic = db.create_epic("Bad JSON Feed", "", "/repo", None, 1).unwrap();
+    let epic = db
+        .create_epic("Bad JSON Feed", "", "/repo", None, 1)
+        .unwrap();
 
     let (tx, mut rx) = mpsc::unbounded_channel();
     let rt = make_runtime(db, tx, Arc::new(MockProcessRunner::new(vec![])));
 
-    rt.exec_trigger_epic_feed(epic.id, "Bad JSON Feed".to_string(), "echo 'not-json'".to_string());
+    rt.exec_trigger_epic_feed(
+        epic.id,
+        "Bad JSON Feed".to_string(),
+        "echo 'not-json'".to_string(),
+    );
 
     let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
         .await

@@ -538,8 +538,7 @@ mod tests {
         runner.tick(); // must not panic
 
         // No Refresh is sent on failure — expect timeout
-        let result =
-            tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
+        let result = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
         assert!(result.is_err(), "expected timeout but got a notification");
 
         let tasks = db.list_tasks_for_epic(epic.id).unwrap();
@@ -561,8 +560,7 @@ mod tests {
         let (mut runner, mut rx) = make_runner(db.clone());
         runner.tick(); // must not panic
 
-        let result =
-            tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
+        let result = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
         assert!(result.is_err(), "expected timeout but got a notification");
 
         let tasks = db.list_tasks_for_epic(epic.id).unwrap();
@@ -624,7 +622,10 @@ mod tests {
 
         // No background task spawned — channel stays empty
         let result = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await;
-        assert!(result.is_err(), "expected empty channel but got notification");
+        assert!(
+            result.is_err(),
+            "expected empty channel but got notification"
+        );
 
         let tasks = db.list_tasks_for_epic(epic.id).unwrap();
         assert!(tasks.is_empty());

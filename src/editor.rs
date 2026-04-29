@@ -245,14 +245,15 @@ pub fn parse_learning_editor_output(input: &str) -> LearningEditorFields {
                 .collect()
         }
     });
-    let detail = s.remove("DETAIL").map(|d| {
-        if d.trim().is_empty() {
-            None
-        } else {
-            Some(d)
-        }
-    });
-    LearningEditorFields { summary, kind, tags, detail }
+    let detail = s
+        .remove("DETAIL")
+        .map(|d| if d.trim().is_empty() { None } else { Some(d) });
+    LearningEditorFields {
+        summary,
+        kind,
+        tags,
+        detail,
+    }
 }
 
 #[cfg(test)]
@@ -829,7 +830,8 @@ mod tests {
 
         #[test]
         fn parse_empty_summary_returns_empty_string() {
-            let input = "--- SUMMARY ---\n\n--- KIND ---\nconvention\n--- TAGS ---\n\n--- DETAIL ---\n\n";
+            let input =
+                "--- SUMMARY ---\n\n--- KIND ---\nconvention\n--- TAGS ---\n\n--- DETAIL ---\n\n";
             let f = parse_learning_editor_output(input);
             assert_eq!(f.summary, "");
         }

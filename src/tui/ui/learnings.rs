@@ -4,9 +4,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::models::{Learning, LearningKind, LearningScope};
 use super::palette::{BORDER, CYAN, FG, GREEN, MUTED, PURPLE, RED, YELLOW};
 use super::shared::{push_hint_spans, truncate};
+use crate::models::{Learning, LearningKind, LearningScope};
 use crate::tui::{App, ViewMode};
 
 fn kind_color(kind: LearningKind) -> Color {
@@ -23,22 +23,12 @@ fn kind_color(kind: LearningKind) -> Color {
 fn scope_label(learning: &Learning) -> String {
     match learning.scope {
         LearningScope::User => "user".to_string(),
-        LearningScope::Project => format!(
-            "project ({})",
-            learning.scope_ref.as_deref().unwrap_or("?")
-        ),
-        LearningScope::Repo => format!(
-            "repo ({})",
-            learning.scope_ref.as_deref().unwrap_or("?")
-        ),
-        LearningScope::Epic => format!(
-            "epic ({})",
-            learning.scope_ref.as_deref().unwrap_or("?")
-        ),
-        LearningScope::Task => format!(
-            "task ({})",
-            learning.scope_ref.as_deref().unwrap_or("?")
-        ),
+        LearningScope::Project => {
+            format!("project ({})", learning.scope_ref.as_deref().unwrap_or("?"))
+        }
+        LearningScope::Repo => format!("repo ({})", learning.scope_ref.as_deref().unwrap_or("?")),
+        LearningScope::Epic => format!("epic ({})", learning.scope_ref.as_deref().unwrap_or("?")),
+        LearningScope::Task => format!("task ({})", learning.scope_ref.as_deref().unwrap_or("?")),
     }
 }
 

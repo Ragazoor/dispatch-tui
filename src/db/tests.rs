@@ -5305,7 +5305,11 @@ fn upsert_feed_tasks_does_not_remove_manual_tasks() {
     db.upsert_feed_tasks(epic.id, &[]).unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).unwrap();
-    assert_eq!(tasks.len(), 1, "manual task should survive empty feed fetch");
+    assert_eq!(
+        tasks.len(),
+        1,
+        "manual task should survive empty feed fetch"
+    );
     assert_eq!(tasks[0].id, manual_task_id);
 }
 

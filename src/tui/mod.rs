@@ -443,7 +443,9 @@ impl App {
                     }
                 }
                 ViewMode::TaskDetail { .. } | ViewMode::ProposedLearnings { .. } => {
-                    unreachable!("effective_view_mode never returns TaskDetail or ProposedLearnings")
+                    unreachable!(
+                        "effective_view_mode never returns TaskDetail or ProposedLearnings"
+                    )
                 }
             }
         }
@@ -1070,16 +1072,13 @@ impl App {
                 {
                     if !learnings.is_empty() {
                         let count = learnings.len() as isize;
-                        *selected =
-                            (*selected as isize + delta).clamp(0, count - 1) as usize;
+                        *selected = (*selected as isize + delta).clamp(0, count - 1) as usize;
                     }
                 }
                 vec![]
             }
             Message::ApproveLearning(id) => {
-                if let ViewMode::ProposedLearnings { ref learnings, .. } =
-                    self.board.view_mode
-                {
+                if let ViewMode::ProposedLearnings { ref learnings, .. } = self.board.view_mode {
                     if learnings.iter().any(|l| l.id == id) {
                         return vec![Command::ApproveLearning(id)];
                     }
@@ -1087,9 +1086,7 @@ impl App {
                 vec![]
             }
             Message::RejectLearning(id) => {
-                if let ViewMode::ProposedLearnings { ref learnings, .. } =
-                    self.board.view_mode
-                {
+                if let ViewMode::ProposedLearnings { ref learnings, .. } = self.board.view_mode {
                     if learnings.iter().any(|l| l.id == id) {
                         return vec![Command::RejectLearning(id)];
                     }
@@ -1097,9 +1094,7 @@ impl App {
                 vec![]
             }
             Message::EditLearning(id) => {
-                if let ViewMode::ProposedLearnings { ref learnings, .. } =
-                    self.board.view_mode
-                {
+                if let ViewMode::ProposedLearnings { ref learnings, .. } = self.board.view_mode {
                     if let Some(learning) = learnings.iter().find(|l| l.id == id).cloned() {
                         return vec![Command::PopOutEditor(EditKind::Learning(learning))];
                     }
@@ -2122,9 +2117,11 @@ impl App {
     }
 
     fn handle_trigger_epic_feed(&mut self, id: EpicId) -> Vec<Command> {
-        let result = self
-            .find_epic(id)
-            .and_then(|e| e.feed_command.as_deref().map(|cmd| (e.title.clone(), cmd.to_owned())));
+        let result = self.find_epic(id).and_then(|e| {
+            e.feed_command
+                .as_deref()
+                .map(|cmd| (e.title.clone(), cmd.to_owned()))
+        });
         match result {
             Some((title, feed_command)) => {
                 self.set_status(format!("Fetching feed for '{title}'…"));

@@ -32,10 +32,9 @@ fn make_app_with_learnings() -> App {
 fn open_proposed_learnings_returns_load_command() {
     let mut app = make_app();
     let cmds = app.update(Message::OpenProposedLearnings);
-    assert!(
-        cmds.iter()
-            .any(|c| matches!(c, Command::LoadProposedLearnings))
-    );
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::LoadProposedLearnings)));
 }
 
 #[test]
@@ -98,14 +97,18 @@ fn navigate_up_clamps_at_zero() {
 fn approve_learning_returns_command() {
     let mut app = make_app_with_learnings();
     let cmds = app.update(Message::ApproveLearning(1));
-    assert!(cmds.iter().any(|c| matches!(c, Command::ApproveLearning(id) if *id == 1)));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::ApproveLearning(id) if *id == 1)));
 }
 
 #[test]
 fn reject_learning_returns_command() {
     let mut app = make_app_with_learnings();
     let cmds = app.update(Message::RejectLearning(1));
-    assert!(cmds.iter().any(|c| matches!(c, Command::RejectLearning(id) if *id == 1)));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::RejectLearning(id) if *id == 1)));
 }
 
 #[test]
@@ -242,7 +245,9 @@ fn a_key_emits_approve_command() {
     let mut app = make_app_with_learnings();
     let cmds = app.handle_key(make_key(KeyCode::Char('a')));
     // selected=0, first learning has id=1
-    assert!(cmds.iter().any(|c| matches!(c, Command::ApproveLearning(id) if *id == 1)));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::ApproveLearning(id) if *id == 1)));
 }
 
 #[test]
@@ -250,7 +255,9 @@ fn r_key_emits_reject_command() {
     let mut app = make_app_with_learnings();
     let cmds = app.handle_key(make_key(KeyCode::Char('r')));
     // selected=0, first learning has id=1
-    assert!(cmds.iter().any(|c| matches!(c, Command::RejectLearning(id) if *id == 1)));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::RejectLearning(id) if *id == 1)));
 }
 
 #[test]
@@ -268,14 +275,19 @@ fn board_keys_inert_when_overlay_open() {
     let mut app = make_app_with_learnings();
     // 'd' would dispatch a task from the board — must be swallowed
     app.handle_key(make_key(KeyCode::Char('d')));
-    assert!(matches!(app.board.view_mode, ViewMode::ProposedLearnings { .. }));
+    assert!(matches!(
+        app.board.view_mode,
+        ViewMode::ProposedLearnings { .. }
+    ));
 }
 
 #[test]
 fn i_key_from_board_emits_load_command() {
     let mut app = make_app();
     let cmds = app.handle_key(make_key(KeyCode::Char('I')));
-    assert!(cmds.iter().any(|c| matches!(c, Command::LoadProposedLearnings)));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::LoadProposedLearnings)));
 }
 
 #[test]
@@ -284,5 +296,8 @@ fn a_key_on_empty_overlay_is_inert() {
     app.update(Message::ShowProposedLearnings(vec![]));
     let cmds = app.handle_key(make_key(KeyCode::Char('a')));
     assert!(cmds.is_empty());
-    assert!(matches!(app.board.view_mode, ViewMode::ProposedLearnings { .. }));
+    assert!(matches!(
+        app.board.view_mode,
+        ViewMode::ProposedLearnings { .. }
+    ));
 }
