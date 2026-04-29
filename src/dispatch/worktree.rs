@@ -34,6 +34,25 @@ pub(super) fn provision_worktree(
     if std::path::Path::new(&worktree_path).exists() {
         tracing::info!(task_id = task.id.0, %worktree_path, "worktree already exists, reusing");
     } else {
+        // Fetch origin/<base_branch> so the new branch starts from the latest
+        // remote state rather than a potentially stale local branch.
+        // Soft-fail: if fetch is unavailable (no origin, no network), fall
+        // back to the local branch and continue — dispatch is not blocked.
+        let start_point: Option<String> = if let Some(base) = base_branch {
+            let fetch_ok = runner
+                .run("git", &["-C", &repo_path, "fetch", "origin", base])
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            if fetch_ok {
+                Some(format!("origin/{base}"))
+            } else {
+                tracing::warn!(base, "git fetch origin failed, falling back to local branch");
+                Some(base.to_string())
+            }
+        } else {
+            None
+        };
+
         let mut args = vec![
             "-C",
             &repo_path,
@@ -43,8 +62,8 @@ pub(super) fn provision_worktree(
             "-B",
             &*worktree_name,
         ];
-        if let Some(base) = base_branch {
-            args.push(base);
+        if let Some(ref sp) = start_point {
+            args.push(sp.as_str());
         }
         let output = runner
             .run("git", &args)

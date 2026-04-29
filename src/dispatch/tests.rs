@@ -707,7 +707,8 @@ fn provision_worktree_with_base_branch_passes_start_point() {
     let (_dir, repo_path) = make_test_repo();
 
     let mock = MockProcessRunner::new(vec![
-        MockProcessRunner::ok(), // git worktree add (with base branch)
+        MockProcessRunner::ok(), // git fetch origin 99-prev-task
+        MockProcessRunner::ok(), // git worktree add (with origin/99-prev-task)
         MockProcessRunner::ok(), // tmux new-window
         MockProcessRunner::ok(), // tmux set-option @dispatch_dir
         MockProcessRunner::ok(), // tmux set-hook (after-split-window)
@@ -717,17 +718,141 @@ fn provision_worktree_with_base_branch_passes_start_point() {
     let result = provision_worktree(&task, &mock, Some("99-prev-task")).unwrap();
 
     let calls = mock.recorded_calls();
+    // call[0] = fetch
     assert_eq!(calls[0].0, "git");
-    // The base branch should be the last arg to git worktree add
-    let git_args = &calls[0].1;
+    assert!(calls[0].1.contains(&"fetch".to_string()));
+    assert!(calls[0].1.contains(&"99-prev-task".to_string()));
+    // call[1] = worktree add — start point is now origin/<base>
+    assert_eq!(calls[1].0, "git");
+    let git_args = &calls[1].1;
     assert_eq!(
         git_args.last().unwrap(),
-        "99-prev-task",
-        "base branch should be last git arg, got: {git_args:?}"
+        "origin/99-prev-task",
+        "base branch should be origin/99-prev-task as last git arg, got: {git_args:?}"
     );
 
     let expected_path = format!("{repo_path}/.worktrees/42-fix-bug");
     assert_eq!(result.worktree_path, expected_path);
+}
+
+#[test]
+fn provision_worktree_fetches_origin_before_create() {
+    // Fetch succeeds → worktree add should use origin/<base> as start point
+    let (_dir, repo_path) = make_test_repo();
+
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // git fetch origin main
+        MockProcessRunner::ok(), // git worktree add
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(), // tmux set-hook (after-split-window)
+    ]);
+
+    let task = make_task(&repo_path);
+    provision_worktree(&task, &mock, Some("main")).unwrap();
+
+    let calls = mock.recorded_calls();
+    // call[0] = git fetch origin main
+    assert_eq!(calls[0].0, "git");
+    assert!(
+        calls[0].1.contains(&"fetch".to_string()),
+        "expected fetch, got: {:?}",
+        calls[0].1
+    );
+    assert!(calls[0].1.contains(&"origin".to_string()));
+    assert!(calls[0].1.contains(&"main".to_string()));
+    // call[1] = git worktree add ... origin/main
+    assert_eq!(calls[1].0, "git");
+    assert!(calls[1].1.contains(&"worktree".to_string()));
+    assert_eq!(
+        calls[1].1.last().unwrap(),
+        "origin/main",
+        "worktree add should use origin/main as start point, got: {:?}",
+        calls[1].1
+    );
+}
+
+#[test]
+fn provision_worktree_fetch_failure_falls_back_to_local() {
+    // Fetch fails → worktree add should use local branch (no error propagated)
+    let (_dir, repo_path) = make_test_repo();
+
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::fail("fatal: 'origin' does not appear to be a git repository"),
+        MockProcessRunner::ok(), // git worktree add
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(), // tmux set-hook (after-split-window)
+    ]);
+
+    let task = make_task(&repo_path);
+    // Should NOT return an error — soft fail
+    provision_worktree(&task, &mock, Some("main")).unwrap();
+
+    let calls = mock.recorded_calls();
+    // call[0] = fetch (failed)
+    assert_eq!(calls[0].0, "git");
+    assert!(calls[0].1.contains(&"fetch".to_string()));
+    // call[1] = worktree add using local "main" (not "origin/main")
+    assert_eq!(calls[1].0, "git");
+    assert!(calls[1].1.contains(&"worktree".to_string()));
+    assert_eq!(
+        calls[1].1.last().unwrap(),
+        "main",
+        "fallback should use local main, got: {:?}",
+        calls[1].1
+    );
+}
+
+#[test]
+fn provision_worktree_fetch_uses_custom_base_branch() {
+    // Custom base_branch is used in both fetch and worktree add
+    let (_dir, repo_path) = make_test_repo();
+
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // git fetch origin develop
+        MockProcessRunner::ok(), // git worktree add
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(), // tmux set-hook (after-split-window)
+    ]);
+
+    let task = make_task(&repo_path);
+    provision_worktree(&task, &mock, Some("develop")).unwrap();
+
+    let calls = mock.recorded_calls();
+    assert!(
+        calls[0].1.contains(&"develop".to_string()),
+        "fetch should use 'develop', got: {:?}",
+        calls[0].1
+    );
+    assert_eq!(
+        calls[1].1.last().unwrap(),
+        "origin/develop",
+        "worktree add should use origin/develop, got: {:?}",
+        calls[1].1
+    );
+}
+
+#[test]
+fn provision_worktree_skips_fetch_when_dir_exists() {
+    // Pre-existing worktree dir → no git calls at all (fetch + worktree add both skipped)
+    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(), // tmux set-hook (after-split-window)
+    ]);
+
+    let task = make_task(&repo_path);
+    provision_worktree(&task, &mock, Some("main")).unwrap();
+
+    let calls = mock.recorded_calls();
+    assert!(
+        calls.iter().all(|(prog, _)| prog != "git"),
+        "no git calls expected when worktree dir already exists, got: {calls:?}"
+    );
 }
 
 #[test]
@@ -860,6 +985,7 @@ fn dispatch_fails_fast_if_git_fails() {
     let (_dir, repo_path) = make_test_repo();
 
     let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(),                   // git fetch origin main (succeeds)
         MockProcessRunner::fail("not a git repo"), // git worktree add fails
     ]);
 
@@ -869,8 +995,8 @@ fn dispatch_fails_fast_if_git_fails() {
     let calls = mock.recorded_calls();
     assert_eq!(
         calls.len(),
-        1,
-        "only git worktree add should have been called (no detect_default_branch)"
+        2,
+        "only git fetch + git worktree add should have been called (no detect_default_branch)"
     );
 }
 
