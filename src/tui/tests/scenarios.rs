@@ -122,7 +122,6 @@ fn scenario_quick_dispatch_without_repo_path_shows_no_dispatch_command() {
     );
 }
 
-
 #[test]
 fn scenario_help_overlay_opens_on_question_mark() {
     let mut s = Scenario::new();

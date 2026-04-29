@@ -288,7 +288,6 @@ fn repo_filter_exclude_applies_to_epics() {
     }
 }
 
-
 #[test]
 fn close_repo_filter_persists_mode() {
     let mut app = make_app();
