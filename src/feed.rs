@@ -89,7 +89,27 @@ impl FeedRunner {
         }
     }
 
-    pub fn tick(&mut self) {
+<<<<<<< HEAD
+    /// Poll interval for the background feed task.
+    /// Kept in `feed.rs` (not reusing `TICK_INTERVAL` from `runtime`) so the two
+    /// concerns stay independent.
+    const FEED_POLL_INTERVAL: Duration = Duration::from_secs(2);
+
+    /// Consume this runner and spawn it as a background tokio task.
+    /// Returns immediately. The task polls feed commands independently of the
+    /// main event loop, preventing slow commands from freezing the UI.
+    pub fn start(self) {
+        tokio::spawn(async move {
+            let mut runner = self;
+            let mut interval = tokio::time::interval(Self::FEED_POLL_INTERVAL);
+            loop {
+                interval.tick().await;
+                runner.tick().await;
+            }
+        });
+    }
+
+    pub async fn tick(&mut self) {
         let epics = match self.db.list_epics() {
             Ok(e) => e,
             Err(err) => {
@@ -628,5 +648,55 @@ mod tests {
 
         let tasks = db.list_tasks_for_epic(epic.id).unwrap();
         assert!(tasks.is_empty());
+    }
+
+    #[tokio::test]
+    async fn start_returns_immediately_without_blocking() {
+        let db = Arc::new(Database::open_in_memory().unwrap());
+        let epic = db.create_epic("Slow Epic", "", "/repo", None, 1).unwrap();
+        // A command that would block for 5 seconds if awaited inline.
+        db.patch_epic(
+            epic.id,
+            &EpicPatch::new().feed_command(Some("sleep 5")),
+        )
+        .unwrap();
+
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let runner = FeedRunner::new(db as Arc<dyn crate::db::TaskAndEpicStore>, tx);
+
+        let before = std::time::Instant::now();
+        runner.start(); // must return immediately — it just spawns a task
+        let elapsed = before.elapsed();
+
+        assert!(
+            elapsed < std::time::Duration::from_millis(50),
+            "start() took {elapsed:?}, expected <50ms — it must not block"
+        );
+    }
+
+    #[tokio::test]
+    async fn start_background_task_eventually_runs_feed_command() {
+        let db = Arc::new(Database::open_in_memory().unwrap());
+        let epic = db.create_epic("BG Feed Epic", "", "/repo", None, 1).unwrap();
+        db.patch_epic(
+            epic.id,
+            &EpicPatch::new().feed_command(Some(
+                r#"echo '[{"external_id":"bg1","title":"BG Task","description":"","status":"backlog"}]'"#,
+            )),
+        )
+        .unwrap();
+
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let runner = FeedRunner::new(Arc::clone(&db) as Arc<dyn crate::db::TaskAndEpicStore>, tx);
+        runner.start();
+
+        // The tokio interval fires on the first tick almost immediately.
+        // Give the background task 500 ms to complete.
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+        assert_eq!(tasks.len(), 1, "background task should have upserted one feed task");
+        assert_eq!(tasks[0].title, "BG Task");
+        assert_eq!(tasks[0].external_id.as_deref(), Some("bg1"));
     }
 }
