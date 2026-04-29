@@ -117,10 +117,57 @@ impl App {
         vec![]
     }
 
+    fn handle_key_proposed_learnings(&mut self, key: KeyEvent) -> Vec<Command> {
+        let selected_id = if let ViewMode::ProposedLearnings { selected, ref learnings, .. } =
+            self.board.view_mode
+        {
+            learnings.get(selected).map(|l| l.id)
+        } else {
+            return vec![];
+        };
+
+        match key.code {
+            KeyCode::Char('q') | KeyCode::Esc => self.update(Message::CloseProposedLearnings),
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.update(Message::NavigateProposedLearning(1))
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.update(Message::NavigateProposedLearning(-1))
+            }
+            KeyCode::Char('a') => {
+                if let Some(id) = selected_id {
+                    self.update(Message::ApproveLearning(id))
+                } else {
+                    vec![]
+                }
+            }
+            KeyCode::Char('r') => {
+                if let Some(id) = selected_id {
+                    self.update(Message::RejectLearning(id))
+                } else {
+                    vec![]
+                }
+            }
+            KeyCode::Char('e') => {
+                if let Some(id) = selected_id {
+                    self.update(Message::EditLearning(id))
+                } else {
+                    vec![]
+                }
+            }
+            _ => vec![],
+        }
+    }
+
     fn handle_key_normal(&mut self, key: KeyEvent) -> Vec<Command> {
         // TaskDetail overlay captures all input when visible
         if matches!(self.board.view_mode, ViewMode::TaskDetail { .. }) {
             return self.handle_key_task_detail(key);
+        }
+
+        // ProposedLearnings overlay captures all input when visible
+        if matches!(self.board.view_mode, ViewMode::ProposedLearnings { .. }) {
+            return self.handle_key_proposed_learnings(key);
         }
 
         if self.show_archived() {
@@ -345,6 +392,8 @@ impl App {
             }
 
             KeyCode::Char('F') => self.update(Message::ToggleFlattened),
+
+            KeyCode::Char('I') => self.update(Message::OpenProposedLearnings),
 
             KeyCode::Char('?') => self.update(Message::ToggleHelp),
 

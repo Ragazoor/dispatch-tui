@@ -202,3 +202,84 @@ fn approve_on_empty_list_is_noop() {
     let cmds = app.update(Message::ApproveLearning(1));
     assert!(cmds.is_empty());
 }
+
+#[test]
+fn j_key_navigates_down_in_overlay() {
+    let mut app = make_app_with_learnings();
+    app.handle_key(make_key(KeyCode::Char('j')));
+    assert!(matches!(
+        &app.board.view_mode,
+        ViewMode::ProposedLearnings { selected, .. } if *selected == 1
+    ));
+}
+
+#[test]
+fn k_key_at_top_stays_at_zero() {
+    let mut app = make_app_with_learnings();
+    app.handle_key(make_key(KeyCode::Char('k')));
+    assert!(matches!(
+        &app.board.view_mode,
+        ViewMode::ProposedLearnings { selected, .. } if *selected == 0
+    ));
+}
+
+#[test]
+fn q_closes_overlay() {
+    let mut app = make_app_with_learnings();
+    app.handle_key(make_key(KeyCode::Char('q')));
+    assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
+}
+
+#[test]
+fn esc_closes_overlay() {
+    let mut app = make_app_with_learnings();
+    app.handle_key(make_key(KeyCode::Esc));
+    assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
+}
+
+#[test]
+fn a_key_emits_approve_command() {
+    let mut app = make_app_with_learnings();
+    let cmds = app.handle_key(make_key(KeyCode::Char('a')));
+    assert!(cmds.iter().any(|c| matches!(c, Command::ApproveLearning(_))));
+}
+
+#[test]
+fn r_key_emits_reject_command() {
+    let mut app = make_app_with_learnings();
+    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
+    assert!(cmds.iter().any(|c| matches!(c, Command::RejectLearning(_))));
+}
+
+#[test]
+fn e_key_emits_pop_out_editor_command() {
+    let mut app = make_app_with_learnings();
+    let cmds = app.handle_key(make_key(KeyCode::Char('e')));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::PopOutEditor(EditKind::Learning(_)))));
+}
+
+#[test]
+fn board_keys_inert_when_overlay_open() {
+    let mut app = make_app_with_learnings();
+    // 'd' would dispatch a task from the board — must be swallowed
+    app.handle_key(make_key(KeyCode::Char('d')));
+    assert!(matches!(app.board.view_mode, ViewMode::ProposedLearnings { .. }));
+}
+
+#[test]
+fn i_key_from_board_emits_load_command() {
+    let mut app = make_app();
+    let cmds = app.handle_key(make_key(KeyCode::Char('I')));
+    assert!(cmds.iter().any(|c| matches!(c, Command::LoadProposedLearnings)));
+}
+
+#[test]
+fn a_key_on_empty_overlay_is_inert() {
+    let mut app = make_app();
+    app.update(Message::ShowProposedLearnings(vec![]));
+    let cmds = app.handle_key(make_key(KeyCode::Char('a')));
+    assert!(cmds.is_empty());
+    assert!(matches!(app.board.view_mode, ViewMode::ProposedLearnings { .. }));
+}
