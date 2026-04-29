@@ -98,6 +98,9 @@ impl FeedRunner {
             }
         };
 
+        let active_ids: std::collections::HashSet<EpicId> = epics.iter().map(|e| e.id).collect();
+        self.last_run.retain(|id, _| active_ids.contains(id));
+
         for epic in epics {
             let Some(ref cmd) = epic.feed_command else {
                 continue;
@@ -118,8 +121,6 @@ impl FeedRunner {
                 continue;
             }
 
-            // Stamp last_run before spawning so repeated ticks don't queue up
-            // concurrent fetches for the same epic.
             self.last_run.insert(epic.id, Instant::now());
 
             let db = self.db.clone();
