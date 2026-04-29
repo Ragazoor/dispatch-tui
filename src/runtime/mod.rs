@@ -345,7 +345,7 @@ async fn run_loop(
 
             // Periodic tick for tmux capture and feed polling
             _ = tick_interval.tick() => {
-                rt.feed_runner.tick().await;
+                rt.feed_runner.tick();
                 app.update(Message::Tick)
             }
         };

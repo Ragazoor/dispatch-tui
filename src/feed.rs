@@ -89,7 +89,7 @@ impl FeedRunner {
         }
     }
 
-    pub async fn tick(&mut self) {
+    pub fn tick(&mut self) {
         let epics = match self.db.list_epics() {
             Ok(e) => e,
             Err(err) => {
@@ -118,58 +118,65 @@ impl FeedRunner {
                 continue;
             }
 
-            let output = match tokio::process::Command::new("sh")
-                .args(["-c", cmd])
-                .output()
-                .await
-            {
-                Ok(o) => o,
-                Err(err) => {
-                    tracing::warn!(
-                        epic_id = epic.id.0,
-                        epic_title = %epic.title,
-                        "FeedRunner: failed to spawn command: {err:#}"
-                    );
-                    self.last_run.insert(epic.id, Instant::now());
-                    continue;
-                }
-            };
-
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                tracing::warn!(
-                    epic_id = epic.id.0,
-                    epic_title = %epic.title,
-                    "FeedRunner: command exited non-zero: {stderr}"
-                );
-                self.last_run.insert(epic.id, Instant::now());
-                continue;
-            }
-
-            let items: Vec<FeedItem> = match serde_json::from_slice::<Vec<FeedItem>>(&output.stdout)
-            {
-                Ok(i) => i,
-                Err(err) => {
-                    tracing::warn!(
-                        epic_id = epic.id.0,
-                        epic_title = %epic.title,
-                        "FeedRunner: failed to parse JSON output: {err:#}"
-                    );
-                    self.last_run.insert(epic.id, Instant::now());
-                    continue;
-                }
-            };
-
-            if let Err(err) = self.db.upsert_feed_tasks(epic.id, &items) {
-                tracing::warn!(
-                    epic_id = epic.id.0,
-                    "FeedRunner: upsert_feed_tasks failed: {err:#}"
-                );
-            } else {
-                let _ = self.notify.send(McpEvent::Refresh);
-            }
-
+            // Stamp last_run before spawning so repeated ticks don't queue up
+            // concurrent fetches for the same epic.
             self.last_run.insert(epic.id, Instant::now());
+
+            let db = self.db.clone();
+            let notify = self.notify.clone();
+            let cmd = cmd.clone();
+            let epic_id = epic.id;
+            let epic_title = epic.title.clone();
+
+            tokio::task::spawn(async move {
+                let output = match tokio::process::Command::new("sh")
+                    .args(["-c", &cmd])
+                    .output()
+                    .await
+                {
+                    Ok(o) => o,
+                    Err(err) => {
+                        tracing::warn!(
+                            epic_id = epic_id.0,
+                            epic_title = %epic_title,
+                            "FeedRunner: failed to spawn command: {err:#}"
+                        );
+                        return;
+                    }
+                };
+
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    tracing::warn!(
+                        epic_id = epic_id.0,
+                        epic_title = %epic_title,
+                        "FeedRunner: command exited non-zero: {stderr}"
+                    );
+                    return;
+                }
+
+                let items: Vec<FeedItem> =
+                    match serde_json::from_slice::<Vec<FeedItem>>(&output.stdout) {
+                        Ok(i) => i,
+                        Err(err) => {
+                            tracing::warn!(
+                                epic_id = epic_id.0,
+                                epic_title = %epic_title,
+                                "FeedRunner: failed to parse JSON output: {err:#}"
+                            );
+                            return;
+                        }
+                    };
+
+                if let Err(err) = db.upsert_feed_tasks(epic_id, &items) {
+                    tracing::warn!(
+                        epic_id = epic_id.0,
+                        "FeedRunner: upsert_feed_tasks failed: {err:#}"
+                    );
+                } else {
+                    let _ = notify.send(McpEvent::Refresh);
+                }
+            });
         }
     }
 }
@@ -450,6 +457,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tick_does_not_block_event_loop() {
+        let db = Arc::new(Database::open_in_memory().unwrap());
+        let epic = db.create_epic("Slow Epic", "", "/repo", None, 1).unwrap();
+        db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some("sleep 5")))
+            .unwrap();
+
+        let (mut runner, _rx) = make_runner(db.clone());
+
+        let start = std::time::Instant::now();
+        runner.tick();
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed < Duration::from_millis(500),
+            "tick() blocked for {elapsed:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn tick_background_task_upserts_tasks() {
+        let db = Arc::new(Database::open_in_memory().unwrap());
+        let epic = db.create_epic("BG Epic", "", "/repo", None, 1).unwrap();
+        db.patch_epic(
+            epic.id,
+            &EpicPatch::new().feed_command(Some(
+                r#"echo '[{"external_id":"bg1","title":"BG","description":"","status":"backlog"}]'"#,
+            )),
+        )
+        .unwrap();
+
+        let (mut runner, mut rx) = make_runner(db.clone());
+        runner.tick();
+
+        tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("timed out waiting for McpEvent::Refresh")
+            .expect("channel closed");
+
+        let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].title, "BG");
+    }
+
+    #[tokio::test]
     async fn tick_valid_json_upserts_tasks() {
         let db = Arc::new(Database::open_in_memory().unwrap());
         let epic = db.create_epic("My Epic", "", "/repo", None, 1).unwrap();
@@ -461,8 +512,13 @@ mod tests {
         )
         .unwrap();
 
-        let (mut runner, _rx) = make_runner(db.clone());
-        runner.tick().await;
+        let (mut runner, mut rx) = make_runner(db.clone());
+        runner.tick();
+
+        tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("timed out waiting for McpEvent::Refresh")
+            .expect("channel closed");
 
         let tasks = db.list_tasks_for_epic(epic.id).unwrap();
         assert_eq!(tasks.len(), 1);
@@ -477,8 +533,13 @@ mod tests {
         db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some("exit 1")))
             .unwrap();
 
-        let (mut runner, _rx) = make_runner(db.clone());
-        runner.tick().await; // must not panic
+        let (mut runner, mut rx) = make_runner(db.clone());
+        runner.tick(); // must not panic
+
+        // No Refresh is sent on failure — expect timeout
+        let result =
+            tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
+        assert!(result.is_err(), "expected timeout but got a notification");
 
         let tasks = db.list_tasks_for_epic(epic.id).unwrap();
         assert!(tasks.is_empty());
@@ -496,8 +557,12 @@ mod tests {
         )
         .unwrap();
 
-        let (mut runner, _rx) = make_runner(db.clone());
-        runner.tick().await; // must not panic
+        let (mut runner, mut rx) = make_runner(db.clone());
+        runner.tick(); // must not panic
+
+        let result =
+            tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
+        assert!(result.is_err(), "expected timeout but got a notification");
 
         let tasks = db.list_tasks_for_epic(epic.id).unwrap();
         assert!(tasks.is_empty());
@@ -524,11 +589,16 @@ mod tests {
         )
         .unwrap();
 
-        let (mut runner, _rx) = make_runner(db.clone());
+        let (mut runner, mut rx) = make_runner(db.clone());
         // First tick: command runs, counter file gets one line.
-        runner.tick().await;
+        runner.tick();
+        // Wait for the background task to finish before checking interval logic.
+        tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("timed out waiting for first tick refresh")
+            .expect("channel closed");
         // Second tick immediately: interval (10000s) not elapsed, command must not run again.
-        runner.tick().await;
+        runner.tick();
 
         let content = std::fs::read_to_string(&tmp).unwrap_or_default();
         let lines: Vec<_> = content.lines().collect();
@@ -548,8 +618,12 @@ mod tests {
         // Epic with no feed_command (default)
         let epic = db.create_epic("Plain Epic", "", "/repo", None, 1).unwrap();
 
-        let (mut runner, _rx) = make_runner(db.clone());
-        runner.tick().await;
+        let (mut runner, mut rx) = make_runner(db.clone());
+        runner.tick();
+
+        // No background task spawned — channel stays empty
+        let result = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await;
+        assert!(result.is_err(), "expected empty channel but got notification");
 
         let tasks = db.list_tasks_for_epic(epic.id).unwrap();
         assert!(tasks.is_empty());

@@ -59,9 +59,11 @@ rule FeedTick {
                 Spawn(epic.feed_command)
 
     @guidance
-        -- Each epic's last_run timestamp is bumped after every spawn
-        -- attempt — successful or not. This prevents a misconfigured
-        -- command from being retried on every tick.
+        -- Each epic's last_run timestamp is bumped before the spawn so
+        -- that a misconfigured command is not retried on every tick.
+        -- Command execution MUST NOT block the event loop. Each eligible
+        -- epic's command is spawned as a background tokio::task so that
+        -- key events and MCP notifications remain responsive during fetch.
         -- Implementation: src/feed.rs::FeedRunner.
 }
 
