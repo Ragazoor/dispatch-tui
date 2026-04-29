@@ -979,10 +979,8 @@ fn handle_key_normal_q_opens_projects_panel() {
 #[test]
 fn handle_key_q_from_running_jumps_directly_to_projects() {
     let mut app = make_app();
-    // Move to Running column (col 2) from Backlog (col 1).
     app.update(Message::NavigateColumn(1));
     assert_eq!(app.selection().column(), 2, "should be in Running column");
-    // Pressing [q] once should jump directly to Projects (col 0), not just col 1.
     app.handle_key(make_key(KeyCode::Char('q')));
     assert!(
         app.projects_panel_visible(),
