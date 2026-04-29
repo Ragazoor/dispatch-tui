@@ -352,8 +352,33 @@ Projects group tasks and epics for filtering. Key behaviors:
 - The project list is **not** refreshed on every MCP tick — only after explicit project-mutating commands (`CreateProject`, `RenameProject`, `DeleteProject`, `ReorderProject`). Projects are TUI-only admin state not mutated by agents.
 - `exec_refresh_projects_from_db` follows the same `exec_refresh_*_from_db` naming pattern as epic and usage refresh helpers in `src/runtime/tasks.rs`.
 
+### Learning Store MCP Tools
+
+Three MCP tools manage the learning store from within an agent session:
+
+- **`record_learning`** — propose a new learning (lands as `proposed`; awaits human approval before affecting future dispatches)
+- **`query_learnings`** — retrieve approved learnings relevant to the current task's context; supports `tag_filter` and `limit`
+- **`confirm_learning`** — increment `confirmed_count` on a learning that proved useful
+
+**When to call these tools:**
+- Call `query_learnings` at the start of a task to surface relevant conventions and past decisions.
+- Call `record_learning` when you discover a pattern worth capturing for future agents (pitfall, convention, preference, etc.).
+- Call `confirm_learning` when a retrieved learning turns out to be correct and useful.
+
+**Scope auto-derivation:** omit `scope_ref` — the MCP handler derives it from the task's project, repo, or epic automatically. Pass `scope_ref` explicitly only to override.
+
+**Task-scoped learnings** are not auto-injected into dispatch prompts. Use `query_learnings` with `tag_filter` to retrieve them when needed.
+
+**Scopes at retrieval time**: a `query_learnings` call for a task returns the union of all approved learnings where:
+- `scope = user` (always included)
+- `scope = repo` and `scope_ref` matches the task's repo path
+- `scope = project` and `scope_ref` matches the task's project
+- `scope = epic` and `scope_ref` matches the task's epic (only if the task belongs to an epic)
+
+See `docs/reference.md` → *Learning Store* for the full scoping model with examples.
+
 ## Documentation
 
-- `docs/reference.md` — Key bindings, configuration, environment variables, troubleshooting
+- `docs/reference.md` — Key bindings, configuration, environment variables, troubleshooting, learning store
 - `docs/specs/` — Allium specifications for domain logic
 - `docs/plans/` — Implementation plans (working artifacts, never committed)

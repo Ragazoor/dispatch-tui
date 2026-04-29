@@ -138,3 +138,80 @@ The dispatch plugin may not be installed. Run `dispatch setup` to install it.
 
 **Agent window disappeared but task is still Running**
 Press `d` on the Running task to reopen a tmux window in the existing worktree and resume the agent.
+
+## Learning Store
+
+Dispatch maintains a learning store — approved knowledge that is injected into agent prompts automatically and can be queried or recorded via MCP tools.
+
+### Scopes
+
+Learnings are tagged with a scope that determines which tasks see them:
+
+| Scope     | Covers                        | Example use |
+|-----------|-------------------------------|-------------|
+| `user`    | All tasks for this user       | Editor preference, personal workflow rules |
+| `project` | All tasks in a project        | Project-specific conventions |
+| `repo`    | All tasks in a repository     | Build toolchain, test patterns |
+| `epic`    | All tasks in an epic          | Shared design decisions for this feature |
+| `task`    | One specific task             | Episodic notes scoped to a single agent run |
+
+### Retrieval at Dispatch Time
+
+When an agent is dispatched, Dispatch queries approved learnings that match the task's context and injects them into the prompt. The union includes:
+
+- **Always**: `user`-scoped learnings
+- **Always**: `repo`-scoped learnings where `scope_ref` matches the task's repo path
+- **Always**: `project`-scoped learnings where `scope_ref` matches the task's project
+- **If task belongs to an epic**: `epic`-scoped learnings for that epic
+
+`task`-scoped learnings are **not** auto-injected. They can be retrieved explicitly via `query_learnings` with a `tag_filter`.
+
+### Ranking
+
+Within the injected set, learnings are ordered:
+
+1. **Kind first**: `procedural` learnings appear before all others (injected verbatim as prompt-prefix instructions)
+2. **Scope proximity**: epic → repo → project → user (closest context first)
+3. **Confirmation count**: more-confirmed learnings rank higher within the same band
+
+The auto-inject cap is **10 learnings**. Agents can retrieve up to **50** via an explicit `query_learnings` call.
+
+### Recording a Learning
+
+Agents propose learnings via `record_learning`. The `scope_ref` is auto-derived from the task's context when omitted:
+
+```
+scope=user    → scope_ref: (none)
+scope=repo    → scope_ref: task.repo_path
+scope=project → scope_ref: task.project_id
+scope=epic    → scope_ref: task.epic_id  (error if task has no epic)
+scope=task    → scope_ref: task.id
+```
+
+All proposed learnings await human approval before appearing in any agent's context.
+
+### Examples
+
+**User preference** — applies to every task you run:
+```
+scope=user, kind=preference
+summary="Always use uv to run Python scripts, never python directly"
+```
+
+**Repo convention** — applies to all tasks in this repository:
+```
+scope=repo, kind=convention
+summary="Integration tests use Database::open_in_memory() — never mock the DB layer"
+```
+
+**Epic decision** — applies only to tasks in this epic:
+```
+scope=epic, kind=procedural
+summary="This epic adds the learning store; consult docs/specs/core.allium before changing domain types"
+```
+
+**Task episodic note** — scoped to a single task, not auto-injected:
+```
+scope=task, kind=episodic
+summary="Rebase on main resolved the rusqlite version conflict; use that if it recurs"
+```
