@@ -136,7 +136,10 @@ impl App {
                 if matches!(self.board.view_mode, ViewMode::Epic { .. }) {
                     self.update(Message::ExitEpic)
                 } else {
-                    self.update(Message::NavigateColumn(-1))
+                    self.selection_mut().set_column(0);
+                    self.clamp_selection();
+                    self.update_anchor_from_current();
+                    vec![]
                 }
             }
 
