@@ -4,7 +4,8 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::mpsc;
 
-use crate::db::TaskAndEpicStore;
+use crate::db::TaskStore;
+use crate::dispatch::{extract_github_repo, resolve_repo_path};
 use crate::mcp::McpEvent;
 use crate::models::{
     AlertKind, AlertSeverity, EpicId, FeedItem, ReviewDecision, ReviewPr, SecurityAlert, TaskStatus,
@@ -80,13 +81,13 @@ const DEFAULT_FEED_INTERVAL: Duration = Duration::from_secs(30);
 const FEED_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 pub struct FeedRunner {
-    db: Arc<dyn TaskAndEpicStore>,
+    db: Arc<dyn TaskStore>,
     notify: mpsc::UnboundedSender<McpEvent>,
     last_run: HashMap<EpicId, Instant>,
 }
 
 impl FeedRunner {
-    pub fn new(db: Arc<dyn TaskAndEpicStore>, notify: mpsc::UnboundedSender<McpEvent>) -> Self {
+    pub fn new(db: Arc<dyn TaskStore>, notify: mpsc::UnboundedSender<McpEvent>) -> Self {
         Self {
             db,
             notify,
@@ -186,7 +187,26 @@ impl FeedRunner {
                         }
                     };
 
-                if let Err(err) = db.upsert_feed_tasks(epic_id, &items) {
+                let known_paths = match db.list_repo_paths() {
+                    Ok(p) => p,
+                    Err(err) => {
+                        tracing::warn!(
+                            epic_id = epic_id.0,
+                            "FeedRunner: failed to list repo_paths, using empty sentinel: {err:#}"
+                        );
+                        vec![]
+                    }
+                };
+                let repo_paths: Vec<String> = items
+                    .iter()
+                    .map(|item| {
+                        extract_github_repo(&item.url)
+                            .and_then(|r| resolve_repo_path(r, &known_paths))
+                            .unwrap_or_default()
+                    })
+                    .collect();
+
+                if let Err(err) = db.upsert_feed_tasks(epic_id, &items, &repo_paths) {
                     tracing::warn!(
                         epic_id = epic_id.0,
                         "FeedRunner: upsert_feed_tasks failed: {err:#}"
@@ -202,7 +222,7 @@ impl FeedRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::{Database, EpicCrud, EpicPatch};
+    use crate::db::{Database, EpicCrud, EpicPatch, SettingsStore};
     use crate::models::CiStatus;
     use std::sync::Arc;
 
@@ -656,7 +676,7 @@ mod tests {
             .unwrap();
 
         let (tx, _rx) = mpsc::unbounded_channel();
-        let runner = FeedRunner::new(db as Arc<dyn crate::db::TaskAndEpicStore>, tx);
+        let runner = FeedRunner::new(db as Arc<dyn crate::db::TaskStore>, tx);
 
         let before = std::time::Instant::now();
         runner.start(); // must return immediately — it just spawns a task
@@ -683,7 +703,7 @@ mod tests {
         .unwrap();
 
         let (tx, _rx) = mpsc::unbounded_channel();
-        let runner = FeedRunner::new(Arc::clone(&db) as Arc<dyn crate::db::TaskAndEpicStore>, tx);
+        let runner = FeedRunner::new(Arc::clone(&db) as Arc<dyn crate::db::TaskStore>, tx);
         runner.start();
 
         // The tokio interval fires on the first tick almost immediately.
@@ -698,5 +718,89 @@ mod tests {
         );
         assert_eq!(tasks[0].title, "BG Task");
         assert_eq!(tasks[0].external_id.as_deref(), Some("bg1"));
+    }
+
+    // --- repo_path resolution via URL ---
+
+    #[tokio::test]
+    async fn tick_github_url_resolves_to_known_repo_path() {
+        let db = Arc::new(Database::open_in_memory().unwrap());
+        // Register a known repo path matching "myrepo"
+        db.save_repo_path("/home/user/code/myrepo").unwrap();
+        let epic = db.create_epic("Feed Epic", "", "/fallback", None, 1).unwrap();
+        let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","url":"https://github.com/org/myrepo/pull/42","status":"backlog"}]'"#;
+        db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some(cmd)))
+            .unwrap();
+
+        let (mut runner, _rx) = make_runner(db.clone());
+        runner.tick().await;
+
+        // Wait briefly for the spawned task to complete
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(
+            tasks[0].repo_path, "/home/user/code/myrepo",
+            "repo_path should be resolved from GitHub URL"
+        );
+    }
+
+    #[tokio::test]
+    async fn tick_no_matching_repo_stores_empty_sentinel() {
+        let db = Arc::new(Database::open_in_memory().unwrap());
+        // Known repo is "other-repo", not matching "myrepo"
+        db.save_repo_path("/home/user/code/other-repo").unwrap();
+        let epic = db.create_epic("Feed Epic", "", "/fallback", None, 1).unwrap();
+        let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","url":"https://github.com/org/myrepo/pull/42","status":"backlog"}]'"#;
+        db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some(cmd)))
+            .unwrap();
+
+        let (mut runner, _rx) = make_runner(db.clone());
+        runner.tick().await;
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].repo_path, "", "unresolved URL should store empty sentinel");
+    }
+
+    #[tokio::test]
+    async fn tick_empty_url_stores_empty_sentinel() {
+        let db = Arc::new(Database::open_in_memory().unwrap());
+        db.save_repo_path("/home/user/code/myrepo").unwrap();
+        let epic = db.create_epic("Feed Epic", "", "/fallback", None, 1).unwrap();
+        let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","status":"backlog"}]'"#;
+        db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some(cmd)))
+            .unwrap();
+
+        let (mut runner, _rx) = make_runner(db.clone());
+        runner.tick().await;
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].repo_path, "", "empty url should store empty sentinel");
+    }
+
+    #[tokio::test]
+    async fn tick_non_github_url_stores_empty_sentinel() {
+        let db = Arc::new(Database::open_in_memory().unwrap());
+        db.save_repo_path("/home/user/code/myrepo").unwrap();
+        let epic = db.create_epic("Feed Epic", "", "/fallback", None, 1).unwrap();
+        let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","url":"https://jira.company.com/PROJ-123","status":"backlog"}]'"#;
+        db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some(cmd)))
+            .unwrap();
+
+        let (mut runner, _rx) = make_runner(db.clone());
+        runner.tick().await;
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].repo_path, "", "non-github url should store empty sentinel");
     }
 }

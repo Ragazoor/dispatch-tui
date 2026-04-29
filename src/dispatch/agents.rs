@@ -64,6 +64,11 @@ fn dispatch_with_prompt(
     base_branch: Option<&str>,
     learnings: &[Learning],
 ) -> Result<DispatchResult> {
+    if task.repo_path.is_empty() {
+        anyhow::bail!(
+            "Repository path is not set. Edit the task (press 'e') to set it before dispatching."
+        );
+    }
     let repo_path = expand_tilde(&task.repo_path);
 
     // Resolve the start-point once; reuse in both provision_worktree and rebase_preamble.

@@ -29,7 +29,11 @@ concept FeedItem {
     external_id: String       -- stable, unique-per-feed identifier (e.g. "pr:acme/app#42")
     title: String
     description: String
-    url: String = ""          -- optional external URL; empty string when absent
+    url: String = ""          -- optional external URL; empty string when absent.
+                              -- When the URL points to a known GitHub repo whose
+                              -- local clone is registered in the dispatch repo
+                              -- list, the runner uses it to resolve a repo_path
+                              -- for the inserted Task. See UpsertFeedTasks.
     status: core/TaskStatus   -- desired column for newly-inserted tasks
 }
 
@@ -74,13 +78,43 @@ rule UpsertFeedTasks {
 
     -- Items are matched against existing tasks by (epic_id, external_id).
     --
-    --   - New (no match): a Task is inserted with the FeedItem's title,
-    --     description, repo_path = epic.repo_path, status = item.status,
-    --     sub_status = SubStatus.default_for(item.status), external_id =
+    -- == Repo path resolution ==
+    --
+    -- Before upserting, the runner resolves a repo_path for each item.
+    -- The resolution does NOT consult the parent epic's repo_path —
+    -- feed tasks live in whichever local clone matches the item's
+    -- upstream URL, which can differ from epic to epic and item to
+    -- item.
+    --
+    -- The resolution is, per item:
+    --
+    --   1. extract_github_repo(item.url) returns Some("org/repo") for
+    --      well-formed GitHub URLs (https://github.com/org/repo/...)
+    --      or None for empty, non-GitHub, or malformed URLs.
+    --   2. resolve_repo_path("org/repo", known_paths) matches that
+    --      pair against the local repo paths registered in the
+    --      dispatch DB (db.list_repo_paths). Returns Some(local_path)
+    --      on match, None otherwise.
+    --   3. If either step yields None, the item's resolved path is the
+    --      empty-string sentinel "". An empty repo_path is a valid
+    --      stored state but blocks dispatch (see DispatchRequiresRepoPath).
+    --
+    -- If db.list_repo_paths fails the runner logs a warning and treats
+    -- known_paths as empty, so every item resolves to "".
+    --
+    -- == Per-item upsert ==
+    --
+    --   - New (no match): a Task is inserted with the FeedItem's
+    --     title, description, repo_path = resolved_path[item] (which
+    --     may be ""), status = item.status, sub_status =
+    --     SubStatus.default_for(item.status), external_id =
     --     item.external_id, base_branch = "main", epic = epic.
     --
     --   - Match: title and description on the existing Task are updated
-    --     to the new values; status is NOT touched. updated_at is bumped.
+    --     to the new values; status, sub_status, AND repo_path are NOT
+    --     touched. updated_at is bumped. This means a user who manually
+    --     fixes the repo_path on a feed task (via 'e') keeps that
+    --     correction across subsequent feed refreshes.
     --
     -- Tasks present locally that are NOT in the latest emission are
     -- removed. The dispatch runtime treats the feed as the source of
@@ -90,13 +124,19 @@ rule UpsertFeedTasks {
     -- touched by this rule.
 
     ensures:
+        let known_paths = db.list_repo_paths() else []
         for item in items:
+            let github_repo = extract_github_repo(item.url)
+            let resolved =
+                github_repo
+                    ? (resolve_repo_path(github_repo, known_paths) ?? "")
+                    : ""
             let existing = Task.find(epic = epic, external_id = item.external_id)
             if existing = null:
                 Task.created(
                     title: item.title,
                     description: item.description,
-                    repo_path: epic.repo_path,
+                    repo_path: resolved,
                     status: item.status,
                     sub_status: core/SubStatus.default_for(item.status),
                     external_id: item.external_id,
@@ -106,7 +146,7 @@ rule UpsertFeedTasks {
             else:
                 existing.title = item.title
                 existing.description = item.description
-                -- existing.status, existing.sub_status preserved
+                -- existing.status, existing.sub_status, existing.repo_path preserved
 
         for task in Tasks where epic = epic and external_id != null:
             if not items.any(i => i.external_id = task.external_id):
@@ -117,9 +157,51 @@ rule UpsertFeedTasks {
         -- on a feed-derived task (moves it to running, opens a PR, etc.),
         -- subsequent feed refreshes must not yank the card back to its
         -- original column.
+        -- repo_path preservation on conflict is for the same reason: a
+        -- user-corrected path must survive feed refreshes. Only the
+        -- INSERT path writes a repo_path; the UPDATE path leaves it
+        -- alone.
         -- The ON CONFLICT clause is conditional on external_id NOT NULL —
         -- non-feed tasks (external_id = null) never collide.
-        -- Implementation: src/db/queries.rs::upsert_feed_tasks.
+        -- Implementation: src/db/queries.rs::upsert_feed_tasks (takes a
+        -- repo_paths slice, one entry per item, parallel to items).
+        -- Resolution helpers: src/feed.rs::extract_github_repo,
+        -- src/feed.rs::resolve_repo_path. Callers:
+        -- src/feed.rs::FeedRunner.tick (auto-poll) and
+        -- src/runtime/epics.rs::exec_trigger_epic_feed (manual "r").
+}
+
+-- == Dispatch guard ==
+
+rule DispatchRequiresRepoPath {
+    when: User attempts to dispatch task
+
+    -- Feed tasks may end up with repo_path = "" when the runner cannot
+    -- resolve the FeedItem URL to a known local clone. An empty
+    -- repo_path is a valid stored state — the task remains visible on
+    -- the kanban board and can be edited — but dispatch is refused
+    -- because there is no worktree to create.
+    --
+    -- The user resolves this by pressing 'e' on the task and entering
+    -- a repo_path manually, after which dispatch proceeds normally.
+    -- This guard applies to every task, not just feed tasks; non-feed
+    -- tasks ordinarily acquire a non-empty repo_path at creation time
+    -- and so never trigger it.
+
+    requires:
+        task.repo_path != ""
+
+    ensures:
+        if task.repo_path = "":
+            dispatch_refused(
+                "Repository path is not set. Edit the task (press 'e') "
+                "to set it before dispatching."
+            )
+
+    @guidance
+        -- Implementation: src/dispatch/agents.rs::dispatch_with_prompt
+        -- returns an error before spawning any worktree or tmux window
+        -- when task.repo_path.is_empty().
 }
 
 -- == Failure handling ==

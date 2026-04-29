@@ -1479,6 +1479,84 @@ fn finish_task_pull_fails() {
     assert!(matches!(result.unwrap_err(), FinishError::Other(_)));
 }
 
+// --- extract_github_repo tests ---
+
+#[test]
+fn extract_github_repo_pr_url() {
+    assert_eq!(
+        extract_github_repo("https://github.com/org/repo/pull/42"),
+        Some("org/repo"),
+    );
+}
+
+#[test]
+fn extract_github_repo_issue_url() {
+    assert_eq!(
+        extract_github_repo("https://github.com/org/repo/issues/5"),
+        Some("org/repo"),
+    );
+}
+
+#[test]
+fn extract_github_repo_root_url() {
+    assert_eq!(
+        extract_github_repo("https://github.com/org/repo"),
+        Some("org/repo"),
+    );
+}
+
+#[test]
+fn extract_github_repo_root_url_with_trailing_slash() {
+    assert_eq!(
+        extract_github_repo("https://github.com/org/repo/"),
+        Some("org/repo"),
+    );
+}
+
+#[test]
+fn extract_github_repo_tree_url() {
+    assert_eq!(
+        extract_github_repo("https://github.com/org/repo/tree/main"),
+        Some("org/repo"),
+    );
+}
+
+#[test]
+fn extract_github_repo_non_github_url() {
+    assert_eq!(extract_github_repo("https://jira.company.com/browse/PROJ-123"), None);
+}
+
+#[test]
+fn extract_github_repo_empty_string() {
+    assert_eq!(extract_github_repo(""), None);
+}
+
+#[test]
+fn extract_github_repo_only_one_segment() {
+    assert_eq!(extract_github_repo("https://github.com/org"), None);
+}
+
+#[test]
+fn extract_github_repo_malformed_url() {
+    assert_eq!(extract_github_repo("not-a-url"), None);
+}
+
+// --- dispatch guard tests ---
+
+#[test]
+fn dispatch_agent_fails_fast_with_empty_repo_path() {
+    let mock = MockProcessRunner::new(vec![]);
+    let mut task = make_task("/some/repo");
+    task.repo_path = "".to_string();
+    let result = dispatch_agent(&task, &mock, None, &[]);
+    assert!(result.is_err());
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("Repository path"),
+        "error should mention 'Repository path', got: {msg}"
+    );
+}
+
 // --- create_pr tests ---
 
 #[test]

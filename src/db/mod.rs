@@ -291,7 +291,16 @@ pub trait TaskCrud: Send + Sync {
     fn get_all_usage(&self) -> Result<Vec<TaskUsage>>;
     /// Upsert tasks from a feed. Inserts new tasks; on conflict (epic_id, external_id)
     /// updates title and description only — status and other user-managed fields are preserved.
-    fn upsert_feed_tasks(&self, epic_id: EpicId, items: &[FeedItem]) -> Result<()>;
+    ///
+    /// `repo_paths` is a parallel slice: `repo_paths[i]` is the resolved local path for
+    /// `items[i]`. Pass `""` when the path could not be resolved — dispatch will be blocked
+    /// until the user sets it via the task editor.
+    fn upsert_feed_tasks(
+        &self,
+        epic_id: EpicId,
+        items: &[FeedItem],
+        repo_paths: &[String],
+    ) -> Result<()>;
 }
 
 /// Epic CRUD, list, patch, recalculate status.

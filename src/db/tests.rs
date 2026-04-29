@@ -5164,8 +5164,9 @@ fn upsert_feed_tasks_creates_tasks() {
         make_feed_item("ext-1", "Task One"),
         make_feed_item("ext-2", "Task Two"),
     ];
+    let repo_paths = vec!["/repo".to_string(), "/repo".to_string()];
 
-    db.upsert_feed_tasks(epic.id, &items).unwrap();
+    db.upsert_feed_tasks(epic.id, &items, &repo_paths).unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).unwrap();
     assert_eq!(tasks.len(), 2);
@@ -5184,9 +5185,10 @@ fn upsert_feed_tasks_idempotent() {
     let db = in_memory_db();
     let epic = db.create_epic("E", "", "/repo", None, 1).unwrap();
     let items = vec![make_feed_item("ext-1", "Task One")];
+    let repo_paths = vec!["/repo".to_string()];
 
-    db.upsert_feed_tasks(epic.id, &items).unwrap();
-    db.upsert_feed_tasks(epic.id, &items).unwrap();
+    db.upsert_feed_tasks(epic.id, &items, &repo_paths).unwrap();
+    db.upsert_feed_tasks(epic.id, &items, &repo_paths).unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).unwrap();
     assert_eq!(tasks.len(), 1, "second call should not create duplicate");
@@ -5199,7 +5201,7 @@ fn upsert_feed_tasks_preserves_status() {
     let epic = db.create_epic("E", "", "/repo", None, 1).unwrap();
     let items = vec![make_feed_item("ext-1", "Original Title")];
 
-    db.upsert_feed_tasks(epic.id, &items).unwrap();
+    db.upsert_feed_tasks(epic.id, &items, &["/repo".to_string()]).unwrap();
 
     // Simulate user moving task to Running
     let tasks = db.list_tasks_for_epic(epic.id).unwrap();
@@ -5214,7 +5216,7 @@ fn upsert_feed_tasks_preserves_status() {
         url: String::new(),
         status: TaskStatus::Done, // feed says done; user status should be preserved
     }];
-    db.upsert_feed_tasks(epic.id, &updated).unwrap();
+    db.upsert_feed_tasks(epic.id, &updated, &["/repo".to_string()]).unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).unwrap();
     assert_eq!(tasks.len(), 1);
@@ -5235,7 +5237,7 @@ fn upsert_feed_tasks_adds_new_items() {
     let db = in_memory_db();
     let epic = db.create_epic("E", "", "/repo", None, 1).unwrap();
 
-    db.upsert_feed_tasks(epic.id, &[make_feed_item("ext-1", "First")])
+    db.upsert_feed_tasks(epic.id, &[make_feed_item("ext-1", "First")], &["/repo".to_string()])
         .unwrap();
 
     db.upsert_feed_tasks(
@@ -5244,6 +5246,7 @@ fn upsert_feed_tasks_adds_new_items() {
             make_feed_item("ext-1", "First"),
             make_feed_item("ext-2", "Second"),
         ],
+        &["/repo".to_string(), "/repo".to_string()],
     )
     .unwrap();
 
@@ -5263,17 +5266,97 @@ fn upsert_feed_tasks_removes_stale_items() {
             make_feed_item("ext-1", "First"),
             make_feed_item("ext-2", "Second"),
         ],
+        &["/repo".to_string(), "/repo".to_string()],
     )
     .unwrap();
     assert_eq!(db.list_tasks_for_epic(epic.id).unwrap().len(), 2);
 
     // Second fetch: only ext-1 remains in the feed
-    db.upsert_feed_tasks(epic.id, &[make_feed_item("ext-1", "First")])
+    db.upsert_feed_tasks(epic.id, &[make_feed_item("ext-1", "First")], &["/repo".to_string()])
         .unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).unwrap();
     assert_eq!(tasks.len(), 1, "stale feed task should be removed");
     assert_eq!(tasks[0].external_id.as_deref(), Some("ext-1"));
+}
+
+#[test]
+fn upsert_feed_tasks_uses_resolved_repo_path() {
+    let db = in_memory_db();
+    let epic = db.create_epic("E", "", "/epic-repo", None, 1).unwrap();
+    let items = vec![make_feed_item("ext-1", "Task One")];
+    let repo_paths = vec!["/resolved/local/repo".to_string()];
+
+    db.upsert_feed_tasks(epic.id, &items, &repo_paths).unwrap();
+
+    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    assert_eq!(tasks[0].repo_path, "/resolved/local/repo");
+}
+
+#[test]
+fn upsert_feed_tasks_stores_empty_sentinel_when_unresolved() {
+    let db = in_memory_db();
+    let epic = db.create_epic("E", "", "/epic-repo", None, 1).unwrap();
+    let items = vec![make_feed_item("ext-1", "Task One")];
+    let repo_paths = vec!["".to_string()];
+
+    db.upsert_feed_tasks(epic.id, &items, &repo_paths).unwrap();
+
+    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    assert_eq!(tasks[0].repo_path, "");
+}
+
+#[test]
+fn upsert_feed_tasks_on_conflict_does_not_update_repo_path() {
+    let db = in_memory_db();
+    let epic = db.create_epic("E", "", "/epic-repo", None, 1).unwrap();
+    let items = vec![make_feed_item("ext-1", "Original")];
+
+    // First upsert: resolved path stored
+    db.upsert_feed_tasks(epic.id, &items, &["/first/path".to_string()])
+        .unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    assert_eq!(tasks[0].repo_path, "/first/path");
+
+    // Second upsert: different path provided — ON CONFLICT should NOT update repo_path
+    let updated = vec![crate::models::FeedItem {
+        external_id: "ext-1".to_string(),
+        title: "Updated Title".to_string(),
+        description: "new desc".to_string(),
+        url: String::new(),
+        status: TaskStatus::Backlog,
+    }];
+    db.upsert_feed_tasks(epic.id, &updated, &["/second/path".to_string()])
+        .unwrap();
+
+    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    assert_eq!(tasks[0].title, "Updated Title");
+    assert_eq!(
+        tasks[0].repo_path, "/first/path",
+        "repo_path must not be updated on conflict"
+    );
+}
+
+#[test]
+fn upsert_feed_tasks_mixed_batch_resolved_and_unresolved() {
+    let db = in_memory_db();
+    let epic = db.create_epic("E", "", "/epic-repo", None, 1).unwrap();
+    let items = vec![
+        make_feed_item("ext-1", "Resolved Task"),
+        make_feed_item("ext-2", "Unresolved Task"),
+    ];
+    let repo_paths = vec![
+        "/matched/local/path".to_string(),
+        "".to_string(),
+    ];
+
+    db.upsert_feed_tasks(epic.id, &items, &repo_paths).unwrap();
+
+    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    let resolved = tasks.iter().find(|t| t.external_id.as_deref() == Some("ext-1")).unwrap();
+    let unresolved = tasks.iter().find(|t| t.external_id.as_deref() == Some("ext-2")).unwrap();
+    assert_eq!(resolved.repo_path, "/matched/local/path");
+    assert_eq!(unresolved.repo_path, "");
 }
 
 #[test]
@@ -5298,11 +5381,11 @@ fn upsert_feed_tasks_does_not_remove_manual_tasks() {
         .unwrap();
 
     // Feed fetch with one item
-    db.upsert_feed_tasks(epic.id, &[make_feed_item("ext-1", "Feed Task")])
+    db.upsert_feed_tasks(epic.id, &[make_feed_item("ext-1", "Feed Task")], &["/repo".to_string()])
         .unwrap();
 
     // Feed fetch returns nothing — only manual task should survive
-    db.upsert_feed_tasks(epic.id, &[]).unwrap();
+    db.upsert_feed_tasks(epic.id, &[], &[]).unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).unwrap();
     assert_eq!(tasks.len(), 1, "manual task should survive empty feed fetch");

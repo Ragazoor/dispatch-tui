@@ -301,19 +301,24 @@ impl super::TaskCrud for Database {
         Ok(out)
     }
 
-    fn upsert_feed_tasks(&self, epic_id: EpicId, items: &[FeedItem]) -> Result<()> {
+    fn upsert_feed_tasks(
+        &self,
+        epic_id: EpicId,
+        items: &[FeedItem],
+        repo_paths: &[String],
+    ) -> Result<()> {
         let conn = self.conn()?;
-        let (repo_path, project_id): (String, ProjectId) = conn
+        let project_id: ProjectId = conn
             .query_row(
-                "SELECT repo_path, project_id FROM epics WHERE id = ?1",
+                "SELECT project_id FROM epics WHERE id = ?1",
                 params![epic_id.0],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| row.get(0),
             )
             .with_context(|| format!("Epic {} not found for upsert_feed_tasks", epic_id))?;
 
         let tx = conn.unchecked_transaction()?;
 
-        for item in items {
+        for (item, repo_path) in items.iter().zip(repo_paths.iter()) {
             let sub_status = SubStatus::default_for(item.status).as_str().to_string();
             tx.execute(
                 "INSERT INTO tasks

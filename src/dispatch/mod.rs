@@ -213,6 +213,29 @@ pub fn merge_pr(pr_url: &str, runner: &dyn ProcessRunner) -> Result<()> {
     Ok(())
 }
 
+/// Extract `"org/repo"` from a GitHub URL.
+///
+/// Handles `https://github.com/org/repo`, `.../pull/N`, `.../issues/N`,
+/// `.../tree/...`, and similar paths — any URL whose host is `github.com`.
+/// Returns `None` for non-GitHub URLs, empty strings, and single-segment paths.
+pub fn extract_github_repo(url: &str) -> Option<&str> {
+    let rest = url.strip_prefix("https://github.com/")?;
+    let rest = rest.trim_end_matches('/');
+    // Need at least two path segments: "org/repo[/...]"
+    let slash = rest.find('/')?;
+    let after_org = &rest[slash + 1..];
+    if after_org.is_empty() {
+        return None;
+    }
+    let end = after_org.find('/').unwrap_or(after_org.len());
+    let repo = &after_org[..end];
+    if repo.is_empty() {
+        return None;
+    }
+    // Return the "org/repo" slice from the original `rest`
+    Some(&rest[..slash + 1 + end])
+}
+
 /// Resolve a GitHub repo name (e.g. `"org/repo"`) to a local filesystem path
 /// by matching against known repo paths.  Returns the first path whose
 /// directory name equals the short repo name.

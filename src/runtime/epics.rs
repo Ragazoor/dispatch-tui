@@ -209,7 +209,16 @@ impl TuiRuntime {
             };
 
             let count = items.len();
-            match db.upsert_feed_tasks(epic_id, &items) {
+            let known_paths = db.list_repo_paths().unwrap_or_default();
+            let repo_paths: Vec<String> = items
+                .iter()
+                .map(|item| {
+                    dispatch::extract_github_repo(&item.url)
+                        .and_then(|r| dispatch::resolve_repo_path(r, &known_paths))
+                        .unwrap_or_default()
+                })
+                .collect();
+            match db.upsert_feed_tasks(epic_id, &items, &repo_paths) {
                 Ok(()) => {
                     let _ = tx.send(Message::FeedRefreshed { epic_title, count });
                 }
