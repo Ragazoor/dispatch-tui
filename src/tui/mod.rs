@@ -2422,10 +2422,12 @@ impl App {
     }
 
     fn handle_select_quick_dispatch_repo(&mut self, idx: usize) -> Vec<Command> {
-        if idx < self.board.repo_paths.len() {
-            let repo_path = self.board.repo_paths[idx].clone();
+        let repos = filtered_repos(&self.board.repo_paths, &self.input.buffer);
+        if idx < repos.len() {
+            let repo_path = repos[idx].clone();
             let epic_id = self.input.pending_epic_id.take();
             self.input.mode = InputMode::Normal;
+            self.input.buffer.clear();
             self.clear_status();
             self.handle_quick_dispatch(repo_path, epic_id)
         } else {
@@ -3409,7 +3411,7 @@ impl App {
     fn handle_move_repo_cursor(&mut self, delta: isize) -> Vec<Command> {
         let count = if matches!(
             self.input.mode,
-            InputMode::InputRepoPath | InputMode::InputEpicRepoPath
+            InputMode::InputRepoPath | InputMode::InputEpicRepoPath | InputMode::QuickDispatch
         ) {
             filtered_repos(&self.board.repo_paths, &self.input.buffer).len()
         } else {
