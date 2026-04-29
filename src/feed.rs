@@ -486,7 +486,7 @@ mod tests {
         let (mut runner, _rx) = make_runner(db.clone());
 
         let start = std::time::Instant::now();
-        runner.tick();
+        runner.tick().await;
         let elapsed = start.elapsed();
 
         assert!(
@@ -508,7 +508,7 @@ mod tests {
         .unwrap();
 
         let (mut runner, mut rx) = make_runner(db.clone());
-        runner.tick();
+        runner.tick().await;
 
         tokio::time::timeout(Duration::from_secs(5), rx.recv())
             .await
@@ -533,7 +533,7 @@ mod tests {
         .unwrap();
 
         let (mut runner, mut rx) = make_runner(db.clone());
-        runner.tick();
+        runner.tick().await;
 
         tokio::time::timeout(Duration::from_secs(5), rx.recv())
             .await
@@ -554,7 +554,7 @@ mod tests {
             .unwrap();
 
         let (mut runner, mut rx) = make_runner(db.clone());
-        runner.tick(); // must not panic
+        runner.tick().await; // must not panic
 
         // No Refresh is sent on failure — expect timeout
         let result =
@@ -578,7 +578,7 @@ mod tests {
         .unwrap();
 
         let (mut runner, mut rx) = make_runner(db.clone());
-        runner.tick(); // must not panic
+        runner.tick().await; // must not panic
 
         let result =
             tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
@@ -611,14 +611,14 @@ mod tests {
 
         let (mut runner, mut rx) = make_runner(db.clone());
         // First tick: command runs, counter file gets one line.
-        runner.tick();
+        runner.tick().await;
         // Wait for the background task to finish before checking interval logic.
         tokio::time::timeout(Duration::from_secs(5), rx.recv())
             .await
             .expect("timed out waiting for first tick refresh")
             .expect("channel closed");
         // Second tick immediately: interval (10000s) not elapsed, command must not run again.
-        runner.tick();
+        runner.tick().await;
 
         let content = std::fs::read_to_string(&tmp).unwrap_or_default();
         let lines: Vec<_> = content.lines().collect();
@@ -639,7 +639,7 @@ mod tests {
         let epic = db.create_epic("Plain Epic", "", "/repo", None, 1).unwrap();
 
         let (mut runner, mut rx) = make_runner(db.clone());
-        runner.tick();
+        runner.tick().await;
 
         // No background task spawned — channel stays empty
         let result = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await;
