@@ -232,8 +232,22 @@ pub fn extract_github_repo(url: &str) -> Option<&str> {
     if repo.is_empty() {
         return None;
     }
-    // Return the "org/repo" slice from the original `rest`
     Some(&rest[..slash + 1 + end])
+}
+
+/// Resolve the local repo path for each feed item from its URL.
+///
+/// For each item, attempts `extract_github_repo(url)` → `resolve_repo_path(...)`.
+/// Items whose URL cannot be resolved get an empty-string sentinel (`""`).
+pub fn resolve_feed_item_repo_paths(items: &[crate::models::FeedItem], known_paths: &[String]) -> Vec<String> {
+    items
+        .iter()
+        .map(|item| {
+            extract_github_repo(&item.url)
+                .and_then(|r| resolve_repo_path(r, known_paths))
+                .unwrap_or_default()
+        })
+        .collect()
 }
 
 /// Resolve a GitHub repo name (e.g. `"org/repo"`) to a local filesystem path

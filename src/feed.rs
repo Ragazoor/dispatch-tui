@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 use crate::db::TaskStore;
-use crate::dispatch::{extract_github_repo, resolve_repo_path};
+use crate::dispatch::resolve_feed_item_repo_paths;
 use crate::mcp::McpEvent;
 use crate::models::{
     AlertKind, AlertSeverity, EpicId, FeedItem, ReviewDecision, ReviewPr, SecurityAlert, TaskStatus,
@@ -197,14 +197,7 @@ impl FeedRunner {
                         vec![]
                     }
                 };
-                let repo_paths: Vec<String> = items
-                    .iter()
-                    .map(|item| {
-                        extract_github_repo(&item.url)
-                            .and_then(|r| resolve_repo_path(r, &known_paths))
-                            .unwrap_or_default()
-                    })
-                    .collect();
+                let repo_paths = resolve_feed_item_repo_paths(&items, &known_paths);
 
                 if let Err(err) = db.upsert_feed_tasks(epic_id, &items, &repo_paths) {
                     tracing::warn!(
