@@ -350,8 +350,8 @@ impl App {
                         .collect()
                 }
             }
-            ViewMode::TaskDetail { .. } => {
-                unreachable!("effective_view_mode never returns TaskDetail")
+            ViewMode::TaskDetail { .. } | ViewMode::ProposedLearnings { .. } => {
+                unreachable!("effective_view_mode never returns TaskDetail or ProposedLearnings")
             }
         }
     }
@@ -441,8 +441,8 @@ impl App {
                         }
                     }
                 }
-                ViewMode::TaskDetail { .. } => {
-                    unreachable!("effective_view_mode never returns TaskDetail")
+                ViewMode::TaskDetail { .. } | ViewMode::ProposedLearnings { .. } => {
+                    unreachable!("effective_view_mode never returns TaskDetail or ProposedLearnings")
                 }
             }
         }
@@ -501,8 +501,8 @@ impl App {
                     .filter(|e| e.parent_epic_id == Some(current) && e.status == status)
                     .count()
             }
-            ViewMode::TaskDetail { .. } => {
-                unreachable!("effective_view_mode never returns TaskDetail")
+            ViewMode::TaskDetail { .. } | ViewMode::ProposedLearnings { .. } => {
+                unreachable!("effective_view_mode never returns TaskDetail or ProposedLearnings")
             }
         };
         task_count + epic_count
@@ -541,8 +541,8 @@ impl App {
                     .filter(|e| e.parent_epic_id == Some(current))
                     .collect()
             }
-            ViewMode::TaskDetail { .. } => {
-                unreachable!("effective_view_mode never returns TaskDetail")
+            ViewMode::TaskDetail { .. } | ViewMode::ProposedLearnings { .. } => {
+                unreachable!("effective_view_mode never returns TaskDetail or ProposedLearnings")
             }
         };
 
@@ -704,8 +704,8 @@ impl App {
 
         let anchor = match self.effective_view_mode() {
             ViewMode::Board(sel) | ViewMode::Epic { selection: sel, .. } => sel.anchor,
-            ViewMode::TaskDetail { .. } => {
-                unreachable!("effective_view_mode never returns TaskDetail")
+            ViewMode::TaskDetail { .. } | ViewMode::ProposedLearnings { .. } => {
+                unreachable!("effective_view_mode never returns TaskDetail or ProposedLearnings")
             }
         };
 
@@ -1042,6 +1042,15 @@ impl App {
                 self.set_status(format!("Feed for '{epic_title}' failed: {error}"));
                 vec![]
             }
+            Message::OpenProposedLearnings => vec![Command::LoadProposedLearnings],
+            Message::ShowProposedLearnings(_)
+            | Message::CloseProposedLearnings
+            | Message::NavigateProposedLearning(_)
+            | Message::ApproveLearning(_)
+            | Message::RejectLearning(_)
+            | Message::EditLearning(_)
+            | Message::LearningActioned(_)
+            | Message::LearningEdited(_) => vec![],
         }
     }
 

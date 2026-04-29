@@ -252,5 +252,7 @@ pub(super) fn dispatch(
             rt.exec_reorder_project(app, id, delta);
             vec![]
         }
+        // Proposed learnings review — handled in Task 6
+        LoadProposedLearnings | ApproveLearning(_) | RejectLearning(_) => todo!(),
     }
 }

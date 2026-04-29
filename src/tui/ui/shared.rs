@@ -95,7 +95,9 @@ pub(in crate::tui::ui) fn render_tab_bar(frame: &mut Frame, app: &App, area: Rec
     // Determine which feed epic index (if any) is active.
     let active_feed_idx: Option<usize> = match app.view_mode() {
         ViewMode::Epic { epic_id, .. } => feed_epics.iter().position(|e| e.id == *epic_id),
-        ViewMode::Board(_) | ViewMode::TaskDetail { .. } => None,
+        ViewMode::Board(_) | ViewMode::TaskDetail { .. } | ViewMode::ProposedLearnings { .. } => {
+            None
+        }
     };
 
     let mut spans: Vec<Span> = Vec::new();

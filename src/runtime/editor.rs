@@ -96,6 +96,7 @@ fn initial_content_for(kind: &EditKind) -> (String, String) {
             "description-".to_string(),
             format_description_for_editor(""),
         ),
+        EditKind::Learning(_) => todo!(),
     }
 }
 
@@ -235,6 +236,7 @@ impl TuiRuntime {
                 tracing::warn!("FinalizeEditorResult received Description kind; ignoring");
                 vec![]
             }
+            EditKind::Learning(_) => todo!(),
         }
     }
 

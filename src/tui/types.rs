@@ -134,6 +134,8 @@ pub enum EditKind {
     /// Description-only editor used during task/epic creation.
     /// `is_epic` distinguishes the epic-create flow from the task-create flow.
     Description { is_epic: bool },
+    /// Edit a learning's summary, kind, tags, and detail.
+    Learning(crate::models::Learning),
 }
 
 /// Result of a pop-out editor session. `Saved` carries the final tempfile
@@ -347,6 +349,16 @@ pub enum Message {
     PrevTip,
     SetTipsMode(TipsShowMode),
     CloseTips,
+    // Proposed learnings review
+    OpenProposedLearnings,
+    ShowProposedLearnings(Vec<crate::models::Learning>),
+    CloseProposedLearnings,
+    NavigateProposedLearning(isize),
+    ApproveLearning(crate::models::LearningId),
+    RejectLearning(crate::models::LearningId),
+    EditLearning(crate::models::LearningId),
+    LearningActioned(crate::models::LearningId),
+    LearningEdited(crate::models::Learning),
     // Project messages
     ProjectsUpdated(Vec<Project>),
     SelectProject(ProjectId),
@@ -532,6 +544,10 @@ pub enum Command {
         id: ProjectId,
         delta: i8,
     },
+    // Proposed learnings review
+    LoadProposedLearnings,
+    ApproveLearning(crate::models::LearningId),
+    RejectLearning(crate::models::LearningId),
 }
 
 // ---------------------------------------------------------------------------
@@ -946,6 +962,11 @@ pub enum ViewMode {
         max_scroll: u16,
         previous: Box<ViewMode>,
     },
+    ProposedLearnings {
+        selected: usize,
+        learnings: Vec<crate::models::Learning>,
+        previous: Box<ViewMode>,
+    },
 }
 
 impl ViewMode {
@@ -954,6 +975,7 @@ impl ViewMode {
             ViewMode::Board(sel) => sel,
             ViewMode::Epic { selection, .. } => selection,
             ViewMode::TaskDetail { previous, .. } => previous.selection(),
+            ViewMode::ProposedLearnings { previous, .. } => previous.selection(),
         }
     }
 
@@ -962,6 +984,7 @@ impl ViewMode {
             ViewMode::Board(sel) => sel,
             ViewMode::Epic { selection, .. } => selection,
             ViewMode::TaskDetail { previous, .. } => previous.selection_mut(),
+            ViewMode::ProposedLearnings { previous, .. } => previous.selection_mut(),
         }
     }
 }

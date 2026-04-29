@@ -14,6 +14,7 @@ mod split_pane;
 mod task_detail;
 mod tips_and_status;
 mod wrap_up;
+mod learning_review;
 
 // Re-exports: child test modules access these via `super::<item>`.
 pub(in crate::tui) use super::*;
