@@ -198,10 +198,10 @@ fn j_moves_cursor_down_in_panel() {
 fn k_moves_cursor_up_in_panel() {
     let mut app = two_project_app();
     app.handle_key(make_key(KeyCode::Char('h')));
-    // Start at row 0, j moves to 1, k moves back to 0
     app.handle_key(make_key(KeyCode::Char('j')));
     app.handle_key(make_key(KeyCode::Char('k')));
     assert_eq!(app.selected_project_row(), 0);
+    assert_eq!(app.active_project(), 1, "k should auto-select Default (id=1)");
 }
 
 #[test]
@@ -210,29 +210,6 @@ fn k_does_not_underflow_at_row0() {
     app.handle_key(make_key(KeyCode::Char('h')));
     app.handle_key(make_key(KeyCode::Char('k')));
     assert_eq!(app.selected_project_row(), 0);
-}
-
-#[test]
-fn j_auto_selects_hovered_project() {
-    let mut app = two_project_app();
-    app.handle_key(make_key(KeyCode::Char('h')));
-    assert_eq!(app.active_project(), 1);
-
-    app.handle_key(make_key(KeyCode::Char('j')));
-    assert_eq!(app.selected_project_row(), 1);
-    assert_eq!(app.active_project(), 2, "j should auto-select Backend (id=2)");
-}
-
-#[test]
-fn k_auto_selects_hovered_project() {
-    let mut app = two_project_app();
-    app.handle_key(make_key(KeyCode::Char('h')));
-    app.handle_key(make_key(KeyCode::Char('j')));
-    assert_eq!(app.active_project(), 2);
-
-    app.handle_key(make_key(KeyCode::Char('k')));
-    assert_eq!(app.selected_project_row(), 0);
-    assert_eq!(app.active_project(), 1, "k should auto-select Default (id=1)");
 }
 
 #[test]
@@ -261,7 +238,7 @@ fn right_closes_projects_panel() {
 fn enter_closes_projects_panel() {
     let mut app = two_project_app();
     app.handle_key(make_key(KeyCode::Char('h')));
-    app.handle_key(make_key(KeyCode::Char('j'))); // hover Backend (id=2) — auto-selects it
+    app.handle_key(make_key(KeyCode::Char('j')));
     app.handle_key(make_key(KeyCode::Enter));
     assert!(!app.projects_panel_visible(), "Enter should close the panel");
     assert_eq!(app.selected_column(), 1, "focus should return to Backlog");
@@ -536,7 +513,7 @@ fn follow_project_updates_list_state_and_selection_in_sync() {
 fn g_closes_projects_panel() {
     let mut app = two_project_app();
     app.handle_key(make_key(KeyCode::Char('h')));
-    app.handle_key(make_key(KeyCode::Char('j'))); // hover Backend (id=2) — auto-selects it
+    app.handle_key(make_key(KeyCode::Char('j')));
     app.handle_key(make_key(KeyCode::Char('g')));
     assert!(!app.projects_panel_visible(), "g should close the panel");
     assert_eq!(app.selected_column(), 1, "focus should return to Backlog");

@@ -842,6 +842,9 @@ impl App {
                 let len = self.board.projects.len();
                 if len > 0 {
                     let next = (self.selection().row(0) + 1).min(len - 1);
+                    if next == self.selection().row(0) {
+                        return vec![];
+                    }
                     self.selection_mut().set_row(0, next);
                     self.projects_panel.list_state.select(Some(next));
                     if let Some(id) = self.selected_project().map(|p| p.id) {
@@ -852,6 +855,9 @@ impl App {
             }
             KeyCode::Char('k') | KeyCode::Up => {
                 let prev = self.selection().row(0).saturating_sub(1);
+                if prev == self.selection().row(0) {
+                    return vec![];
+                }
                 self.selection_mut().set_row(0, prev);
                 self.projects_panel.list_state.select(Some(prev));
                 if let Some(id) = self.selected_project().map(|p| p.id) {
@@ -859,9 +865,9 @@ impl App {
                 }
                 vec![]
             }
-            KeyCode::Char('l') | KeyCode::Right => self.update(Message::NavigateColumn(1)),
-            KeyCode::Enter | KeyCode::Char('g') => self.update(Message::NavigateColumn(1)),
-            KeyCode::Esc => self.update(Message::NavigateColumn(1)),
+            KeyCode::Char('l') | KeyCode::Right
+            | KeyCode::Enter | KeyCode::Char('g')
+            | KeyCode::Esc => self.update(Message::NavigateColumn(1)),
             KeyCode::Char('n') => {
                 self.input.mode = InputMode::InputProjectName { editing_id: None };
                 self.input.buffer.clear();
