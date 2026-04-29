@@ -7,7 +7,9 @@ use super::prompts::{
 use super::worktree::provision_worktree;
 use super::*;
 
-use crate::models::{EpicId, Task, TaskId, TaskStatus};
+use crate::models::{
+    EpicId, Learning, LearningKind, LearningScope, LearningStatus, Task, TaskId, TaskStatus,
+};
 use crate::process::{exit_fail, MockProcessRunner};
 use chrono::Utc;
 use std::process::Output;
@@ -69,6 +71,96 @@ fn allium_instruction_mentions_spec_and_skills() {
     assert!(instr.contains("allium:weed"));
 }
 
+#[test]
+fn format_learnings_preamble_returns_none_for_empty_slice() {
+    assert!(super::agents::format_learnings_preamble(&[]).is_none());
+}
+
+#[test]
+fn format_learnings_preamble_procedural_only_has_instructions_section() {
+    let learning = make_learning(LearningKind::Procedural, "Always run cargo fmt --check.");
+    let preamble = super::agents::format_learnings_preamble(&[learning]).unwrap();
+    assert!(
+        preamble.contains("# Instructions from past experience"),
+        "should have instructions heading"
+    );
+    assert!(
+        preamble.contains("Always run cargo fmt --check."),
+        "should include summary"
+    );
+    assert!(
+        !preamble.contains("# Relevant learnings"),
+        "should not have relevant learnings heading"
+    );
+}
+
+#[test]
+fn format_learnings_preamble_non_procedural_only_has_relevant_section() {
+    let learning = make_learning(LearningKind::Convention, "Use FieldUpdate for nullable fields.");
+    let preamble = super::agents::format_learnings_preamble(&[learning]).unwrap();
+    assert!(
+        preamble.contains("# Relevant learnings"),
+        "should have relevant learnings heading"
+    );
+    assert!(
+        preamble.contains("[Convention]"),
+        "should include kind label in brackets"
+    );
+    assert!(
+        preamble.contains("Use FieldUpdate for nullable fields."),
+        "should include summary"
+    );
+    assert!(
+        !preamble.contains("# Instructions from past experience"),
+        "should not have instructions heading"
+    );
+}
+
+#[test]
+fn format_learnings_preamble_mixed_has_both_sections() {
+    let proc_l = make_learning(LearningKind::Procedural, "Run tests before committing.");
+    let conv_l = make_learning(LearningKind::Convention, "Use snake_case for file names.");
+    let preamble = super::agents::format_learnings_preamble(&[proc_l, conv_l]).unwrap();
+    assert!(
+        preamble.contains("# Instructions from past experience"),
+        "should have instructions section"
+    );
+    assert!(
+        preamble.contains("# Relevant learnings"),
+        "should have relevant learnings section"
+    );
+}
+
+#[test]
+fn format_learnings_preamble_procedural_has_no_kind_label() {
+    let learning = make_learning(LearningKind::Procedural, "Always rebase before pushing.");
+    let preamble = super::agents::format_learnings_preamble(&[learning]).unwrap();
+    assert!(
+        !preamble.contains("[Procedural]"),
+        "procedural learnings should not show a kind label"
+    );
+    assert!(
+        preamble.contains("- Always rebase before pushing."),
+        "procedural items should be plain bullets"
+    );
+}
+
+#[test]
+fn format_learnings_preamble_kind_labels_are_human_readable() {
+    let pitfall = make_learning(LearningKind::Pitfall, "Watch out for X.");
+    let tool_rec = make_learning(LearningKind::ToolRecommendation, "Use ripgrep.");
+    let episodic = make_learning(LearningKind::Episodic, "Last time we tried Y.");
+    let preference = make_learning(LearningKind::Preference, "User prefers short commits.");
+
+    let preamble =
+        super::agents::format_learnings_preamble(&[pitfall, tool_rec, episodic, preference])
+            .unwrap();
+    assert!(preamble.contains("[Pitfall]"), "Pitfall label");
+    assert!(preamble.contains("[Tool recommendation]"), "ToolRecommendation label");
+    assert!(preamble.contains("[Episodic]"), "Episodic label");
+    assert!(preamble.contains("[Preference]"), "Preference label");
+}
+
 fn make_task(repo_path: &str) -> Task {
     Task {
         id: TaskId(42),
@@ -112,6 +204,24 @@ fn make_test_repo_with_worktree(slug: &str) -> (tempfile::TempDir, String, std::
     let worktree_dir = dir.path().join(".worktrees").join(slug);
     std::fs::create_dir_all(&worktree_dir).unwrap();
     (dir, repo_path, worktree_dir)
+}
+
+fn make_learning(kind: LearningKind, summary: &str) -> Learning {
+    Learning {
+        id: 1,
+        kind,
+        summary: summary.to_string(),
+        detail: None,
+        scope: LearningScope::User,
+        scope_ref: None,
+        tags: vec![],
+        status: LearningStatus::Approved,
+        source_task_id: None,
+        confirmed_count: 0,
+        last_confirmed_at: None,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    }
 }
 
 #[test]

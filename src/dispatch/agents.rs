@@ -2,7 +2,8 @@ use anyhow::{Context, Result};
 use std::fs;
 
 use crate::models::{
-    expand_tilde, AlertKind, DispatchResult, EpicId, ResumeResult, Task, TaskId, TaskStatus,
+    expand_tilde, AlertKind, DispatchResult, EpicId, Learning, LearningKind, ResumeResult, Task,
+    TaskId, TaskStatus,
 };
 use crate::process::ProcessRunner;
 use crate::tmux;
@@ -16,6 +17,54 @@ use super::prompts::{
 };
 use super::stderr_str;
 use super::worktree::provision_worktree;
+
+pub(super) fn format_learnings_preamble(learnings: &[Learning]) -> Option<String> {
+    let procedural: Vec<&Learning> = learnings
+        .iter()
+        .filter(|l| l.kind == LearningKind::Procedural)
+        .collect();
+    let other: Vec<&Learning> = learnings
+        .iter()
+        .filter(|l| l.kind != LearningKind::Procedural)
+        .collect();
+
+    if procedural.is_empty() && other.is_empty() {
+        return None;
+    }
+
+    let mut sections = Vec::new();
+
+    if !procedural.is_empty() {
+        let items = procedural
+            .iter()
+            .map(|l| format!("- {}", l.summary))
+            .collect::<Vec<_>>()
+            .join("\n");
+        sections.push(format!("# Instructions from past experience\n{items}"));
+    }
+
+    if !other.is_empty() {
+        let items = other
+            .iter()
+            .map(|l| format!("- [{}] {}", kind_label(l.kind), l.summary))
+            .collect::<Vec<_>>()
+            .join("\n");
+        sections.push(format!("# Relevant learnings\n{items}"));
+    }
+
+    Some(sections.join("\n\n"))
+}
+
+fn kind_label(kind: LearningKind) -> &'static str {
+    match kind {
+        LearningKind::Pitfall => "Pitfall",
+        LearningKind::Convention => "Convention",
+        LearningKind::Preference => "Preference",
+        LearningKind::ToolRecommendation => "Tool recommendation",
+        LearningKind::Episodic => "Episodic",
+        LearningKind::Procedural => "Procedural",
+    }
+}
 
 /// Provision worktree, write prompt file, launch Claude via tmux.
 /// The prompt file is deleted after Claude reads it.
