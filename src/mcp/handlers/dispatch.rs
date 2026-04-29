@@ -277,7 +277,7 @@ mcp_tools! {
         { "type": "object", "properties": {} };
 
     sync "update_epic" => epics::handle_update_epic,
-        "Update an epic's title, description, status, plan, sort order, repo path, or project.",
+        "Update an epic's title, description, status, plan, sort order, repo path, project, or feed configuration.",
         {
             "type": "object",
             "properties": {
@@ -288,7 +288,9 @@ mcp_tools! {
                 "plan_path": { "type": "string", "description": "Path to the plan file" },
                 "sort_order": { "type": "integer", "description": "Display order within column (lower values appear first)" },
                 "repo_path": { "type": "string", "description": "Repository path for the epic" },
-                "project_id": { "type": "integer", "description": "Move the epic to a different project. Use list_projects to look up IDs." }
+                "project_id": { "type": "integer", "description": "Move the epic to a different project. Use list_projects to look up IDs." },
+                "feed_command": { "type": ["string", "null"], "description": "Shell command that emits JSON FeedItems to populate tasks. Pass null to clear." },
+                "feed_interval_secs": { "type": ["integer", "null"], "description": "Polling interval in seconds (overrides the default). Pass null to clear." }
             },
             "required": ["epic_id"]
         };

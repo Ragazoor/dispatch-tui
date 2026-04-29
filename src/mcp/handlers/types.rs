@@ -115,6 +115,78 @@ where
     deserializer.deserialize_option(OptFlexI64)
 }
 
+/// Nullable string deserializer for `Option<Option<String>>` fields.
+/// Used with `#[serde(default)]` to distinguish absent (→ outer None),
+/// JSON null (→ Some(None) = clear), and a value (→ Some(Some(v)) = set).
+pub(super) fn deserialize_nullable_string<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de;
+
+    struct NullableString;
+    impl<'de> de::Visitor<'de> for NullableString {
+        type Value = Option<Option<String>>;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("null or a string")
+        }
+        fn visit_none<E: de::Error>(self) -> Result<Option<Option<String>>, E> {
+            Ok(Some(None))
+        }
+        fn visit_unit<E: de::Error>(self) -> Result<Option<Option<String>>, E> {
+            Ok(Some(None))
+        }
+        fn visit_some<D2: serde::Deserializer<'de>>(
+            self,
+            d: D2,
+        ) -> Result<Option<Option<String>>, D2::Error> {
+            String::deserialize(d).map(|s| Some(Some(s)))
+        }
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<Option<Option<String>>, E> {
+            Ok(Some(Some(v.to_owned())))
+        }
+        fn visit_string<E: de::Error>(self, v: String) -> Result<Option<Option<String>>, E> {
+            Ok(Some(Some(v)))
+        }
+    }
+    deserializer.deserialize_option(NullableString)
+}
+
+/// Nullable flexible i64 deserializer for `Option<Option<i64>>` fields.
+/// Used with `#[serde(default)]` to distinguish absent (→ outer None),
+/// JSON null (→ Some(None) = clear), and a value (→ Some(Some(v)) = set).
+pub(super) fn deserialize_nullable_flexible_i64<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<i64>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de;
+
+    struct NullableFlexI64;
+    impl<'de> de::Visitor<'de> for NullableFlexI64 {
+        type Value = Option<Option<i64>>;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("null, an integer, or a string integer")
+        }
+        fn visit_none<E: de::Error>(self) -> Result<Option<Option<i64>>, E> {
+            Ok(Some(None))
+        }
+        fn visit_unit<E: de::Error>(self) -> Result<Option<Option<i64>>, E> {
+            Ok(Some(None))
+        }
+        fn visit_some<D2: serde::Deserializer<'de>>(
+            self,
+            d: D2,
+        ) -> Result<Option<Option<i64>>, D2::Error> {
+            d.deserialize_any(FlexibleI64Visitor).map(|v| Some(Some(v)))
+        }
+    }
+    deserializer.deserialize_option(NullableFlexI64)
+}
+
 // ---------------------------------------------------------------------------
 // Argument parsing helper
 // ---------------------------------------------------------------------------

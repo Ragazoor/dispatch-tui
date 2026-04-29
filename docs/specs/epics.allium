@@ -332,11 +332,12 @@ rule DeleteEpic {
 
 rule UpdateEpicViaMcp {
     when: McpUpdateEpic(epic, title?, description?, status?, plan?, sort_order?, repo_path?,
-                        project_id?)
+                        project_id?, feed_command?, feed_interval_secs?)
 
     requires: title != null or description != null or status != null
               or plan != null or sort_order != null or repo_path != null
-              or project_id != null
+              or project_id != null or feed_command != omitted
+              or feed_interval_secs != omitted
 
     -- project_id must refer to an existing project when provided
     requires:
@@ -361,6 +362,14 @@ rule UpdateEpicViaMcp {
         if repo_path != null: epic.repo_path = repo_path
     ensures:
         if project_id != null: epic.project_id = project_id
+    ensures:
+        -- feed_command supports three states: omitted (no change), a string
+        -- (set), or explicit null (clear to NULL)
+        if feed_command != omitted: epic.feed_command = feed_command
+    ensures:
+        -- feed_interval_secs supports three states: omitted (no change), an
+        -- integer (set), or explicit null (clear to NULL)
+        if feed_interval_secs != omitted: epic.feed_interval_secs = feed_interval_secs
 
     @guidance
         -- updated_at is refreshed automatically by the database layer
@@ -372,6 +381,9 @@ rule UpdateEpicViaMcp {
         -- stored (so "~/proj" becomes "$HOME/proj").
         -- project_id must refer to an existing project; an unknown ID
         -- returns a -32602 validation error.
+        -- feed_command and feed_interval_secs use triple-state JSON
+        -- semantics: absent field = no change; explicit null = clear;
+        -- string/integer value = set.
 }
 
 rule DispatchNextViaMcp {

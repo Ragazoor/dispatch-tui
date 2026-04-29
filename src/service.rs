@@ -716,7 +716,7 @@ pub struct UpdateEpicParams {
     pub repo_path: Option<String>,
     pub auto_dispatch: Option<bool>,
     pub feed_command: Option<FieldUpdate>,
-    pub feed_interval_secs: Option<i64>,
+    pub feed_interval_secs: Option<Option<i64>>,
     pub project_id: Option<ProjectId>,
 }
 
@@ -929,7 +929,7 @@ impl EpicService {
             });
         }
         if let Some(fi) = params.feed_interval_secs {
-            patch = patch.feed_interval_secs(Some(fi));
+            patch = patch.feed_interval_secs(fi);
         }
         if let Some(pid) = params.project_id {
             patch = patch.project_id(pid);
@@ -2984,7 +2984,7 @@ mod tests {
                 ..base()
             },
             UpdateEpicParams {
-                feed_interval_secs: Some(300),
+                feed_interval_secs: Some(Some(300)),
                 ..base()
             },
             UpdateEpicParams {

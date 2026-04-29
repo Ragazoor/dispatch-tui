@@ -1320,6 +1320,8 @@ fn tool_schemas_match_arg_structs() {
                 "sort_order",
                 "repo_path",
                 "project_id",
+                "feed_command",
+                "feed_interval_secs",
             ]),
             BTreeSet::from(["epic_id"]),
             json!({"epic_id": 1, "plan_path": "docs/plan.md", "sort_order": 42, "repo_path": "/new/path"}),
@@ -2217,6 +2219,158 @@ async fn update_epic_no_fields_errors() {
     )
     .await;
     assert_error(&resp, "At least one");
+}
+
+#[tokio::test]
+async fn update_epic_feed_command_set() {
+    let state = test_state();
+    let epic = state.db.create_epic("Feed Epic", "", "/repo", None, 1).unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_epic",
+            "arguments": { "epic_id": epic.id.0, "feed_command": "echo []" }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "{:?}", resp.error);
+
+    let updated = state.db.get_epic(epic.id).unwrap().unwrap();
+    assert_eq!(updated.feed_command.as_deref(), Some("echo []"));
+}
+
+#[tokio::test]
+async fn update_epic_feed_command_clear() {
+    let state = test_state();
+    let epic = state.db.create_epic("Feed Epic", "", "/repo", None, 1).unwrap();
+    state
+        .db
+        .patch_epic(epic.id, &crate::db::EpicPatch::default().feed_command(Some("old cmd")))
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_epic",
+            "arguments": { "epic_id": epic.id.0, "feed_command": null }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "{:?}", resp.error);
+
+    let updated = state.db.get_epic(epic.id).unwrap().unwrap();
+    assert!(updated.feed_command.is_none(), "feed_command should be cleared");
+}
+
+#[tokio::test]
+async fn update_epic_feed_command_absent_preserves_existing() {
+    let state = test_state();
+    let epic = state.db.create_epic("Feed Epic", "", "/repo", None, 1).unwrap();
+    state
+        .db
+        .patch_epic(epic.id, &crate::db::EpicPatch::default().feed_command(Some("keep me")))
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_epic",
+            "arguments": { "epic_id": epic.id.0, "title": "Updated Title" }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "{:?}", resp.error);
+
+    let updated = state.db.get_epic(epic.id).unwrap().unwrap();
+    assert_eq!(updated.feed_command.as_deref(), Some("keep me"));
+}
+
+#[tokio::test]
+async fn update_epic_feed_interval_secs_set() {
+    let state = test_state();
+    let epic = state.db.create_epic("Feed Epic", "", "/repo", None, 1).unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_epic",
+            "arguments": { "epic_id": epic.id.0, "feed_interval_secs": 60 }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "{:?}", resp.error);
+
+    let updated = state.db.get_epic(epic.id).unwrap().unwrap();
+    assert_eq!(updated.feed_interval_secs, Some(60));
+}
+
+#[tokio::test]
+async fn update_epic_feed_interval_secs_clear() {
+    let state = test_state();
+    let epic = state.db.create_epic("Feed Epic", "", "/repo", None, 1).unwrap();
+    state
+        .db
+        .patch_epic(
+            epic.id,
+            &crate::db::EpicPatch::default().feed_interval_secs(Some(120)),
+        )
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_epic",
+            "arguments": { "epic_id": epic.id.0, "feed_interval_secs": null }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "{:?}", resp.error);
+
+    let updated = state.db.get_epic(epic.id).unwrap().unwrap();
+    assert!(
+        updated.feed_interval_secs.is_none(),
+        "feed_interval_secs should be cleared"
+    );
+}
+
+#[tokio::test]
+async fn get_epic_shows_feed_command() {
+    let state = test_state();
+    let epic = state.db.create_epic("Feed Epic", "", "/repo", None, 1).unwrap();
+    state
+        .db
+        .patch_epic(
+            epic.id,
+            &crate::db::EpicPatch::default()
+                .feed_command(Some("./scripts/feed.sh"))
+                .feed_interval_secs(Some(300)),
+        )
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "get_epic",
+            "arguments": { "epic_id": epic.id.0 }
+        })),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert!(
+        text.contains("./scripts/feed.sh"),
+        "get_epic should show feed_command: {text}"
+    );
+    assert!(
+        text.contains("300"),
+        "get_epic should show feed_interval_secs: {text}"
+    );
 }
 
 #[tokio::test]

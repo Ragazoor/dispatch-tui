@@ -6,8 +6,9 @@ use crate::models::{EpicId, TaskStatus};
 use crate::service::{CreateEpicParams, EpicService, ServiceError, UpdateEpicParams};
 
 use super::types::{
-    deserialize_flexible_i64, deserialize_optional_flexible_i64, parse_args, resolve_project_id,
-    service_err_to_response, JsonRpcResponse,
+    deserialize_flexible_i64, deserialize_nullable_flexible_i64, deserialize_nullable_string,
+    deserialize_optional_flexible_i64, parse_args, resolve_project_id, service_err_to_response,
+    JsonRpcResponse,
 };
 
 // ---------------------------------------------------------------------------
@@ -52,6 +53,10 @@ pub(super) struct UpdateEpicArgs {
     pub(super) repo_path: Option<String>,
     #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
     pub(super) project_id: Option<i64>,
+    #[serde(default, deserialize_with = "deserialize_nullable_string")]
+    pub(super) feed_command: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_nullable_flexible_i64")]
+    pub(super) feed_interval_secs: Option<Option<i64>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -124,6 +129,12 @@ pub(super) fn handle_get_epic(state: &McpState, id: Option<Value>, args: Value) 
             }
             if let Some(sort_order) = epic.sort_order {
                 text.push_str(&format!("\nSort order: {sort_order}"));
+            }
+            if let Some(ref fc) = epic.feed_command {
+                text.push_str(&format!("\nFeed command: {fc}"));
+            }
+            if let Some(fi) = epic.feed_interval_secs {
+                text.push_str(&format!("\nFeed interval: {fi}s"));
             }
             text.push_str(&format!(
                 "\nCreated: {}",
@@ -225,8 +236,11 @@ pub(super) fn handle_update_epic(
         sort_order: parsed.sort_order,
         repo_path: parsed.repo_path,
         auto_dispatch: None,
-        feed_command: None,
-        feed_interval_secs: None,
+        feed_command: parsed.feed_command.map(|v| match v {
+            Some(s) => crate::service::FieldUpdate::Set(s),
+            None => crate::service::FieldUpdate::Clear,
+        }),
+        feed_interval_secs: parsed.feed_interval_secs,
         project_id: parsed.project_id,
     };
     let field_names: Vec<String> = params
