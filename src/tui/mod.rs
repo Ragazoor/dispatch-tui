@@ -2416,7 +2416,8 @@ impl App {
     fn handle_start_quick_dispatch_selection(&mut self) -> Vec<Command> {
         self.input.mode = InputMode::QuickDispatch;
         self.input.repo_cursor = 0;
-        self.set_status("j/k navigate · Enter select · 1-9 shortcut · Esc cancel".to_string());
+        self.input.buffer.clear();
+        self.set_status("Type to filter · j/k navigate · Enter select · 1-9 shortcut · Esc cancel".to_string());
         vec![]
     }
 

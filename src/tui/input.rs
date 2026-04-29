@@ -701,6 +701,16 @@ impl App {
                 let idx = (c as usize) - ('1' as usize);
                 self.update(Message::SelectQuickDispatchRepo(idx))
             }
+            KeyCode::Char(c) => {
+                self.input.buffer.push(c);
+                self.input.repo_cursor = 0;
+                vec![]
+            }
+            KeyCode::Backspace => {
+                self.input.buffer.pop();
+                self.input.repo_cursor = 0;
+                vec![]
+            }
             _ => vec![],
         }
     }
