@@ -241,23 +241,26 @@ fn esc_closes_overlay() {
 fn a_key_emits_approve_command() {
     let mut app = make_app_with_learnings();
     let cmds = app.handle_key(make_key(KeyCode::Char('a')));
-    assert!(cmds.iter().any(|c| matches!(c, Command::ApproveLearning(_))));
+    // selected=0, first learning has id=1
+    assert!(cmds.iter().any(|c| matches!(c, Command::ApproveLearning(id) if *id == 1)));
 }
 
 #[test]
 fn r_key_emits_reject_command() {
     let mut app = make_app_with_learnings();
     let cmds = app.handle_key(make_key(KeyCode::Char('r')));
-    assert!(cmds.iter().any(|c| matches!(c, Command::RejectLearning(_))));
+    // selected=0, first learning has id=1
+    assert!(cmds.iter().any(|c| matches!(c, Command::RejectLearning(id) if *id == 1)));
 }
 
 #[test]
 fn e_key_emits_pop_out_editor_command() {
     let mut app = make_app_with_learnings();
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
+    // selected=0, first learning has id=1
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::PopOutEditor(EditKind::Learning(_)))));
+        .any(|c| matches!(c, Command::PopOutEditor(EditKind::Learning(l)) if l.id == 1)));
 }
 
 #[test]
