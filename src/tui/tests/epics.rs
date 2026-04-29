@@ -2127,7 +2127,9 @@ fn trigger_epic_feed_no_feed_command_sets_status_no_command() {
         "should show a status message"
     );
     assert!(
-        !cmds.iter().any(|c| matches!(c, Command::TriggerEpicFeed { .. })),
+        !cmds
+            .iter()
+            .any(|c| matches!(c, Command::TriggerEpicFeed { .. })),
         "should not return TriggerEpicFeed command when no feed_command"
     );
 }
@@ -2201,7 +2203,10 @@ fn epic_action_hints_shows_refresh_for_feed_epic() {
     epic.feed_command = Some("echo '[]'".to_string());
     let hints = ui::epic_action_hints(&epic, ratatui::style::Color::Rgb(122, 162, 247));
     let keys = hint_keys(&hints);
-    assert!(keys.contains(&"[r]"), "feed epic should show [r] refresh hint");
+    assert!(
+        keys.contains(&"[r]"),
+        "feed epic should show [r] refresh hint"
+    );
 }
 
 #[test]

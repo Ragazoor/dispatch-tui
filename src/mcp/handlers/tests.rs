@@ -2224,7 +2224,10 @@ async fn update_epic_no_fields_errors() {
 #[tokio::test]
 async fn update_epic_feed_command_set() {
     let state = test_state();
-    let epic = state.db.create_epic("Feed Epic", "", "/repo", None, 1).unwrap();
+    let epic = state
+        .db
+        .create_epic("Feed Epic", "", "/repo", None, 1)
+        .unwrap();
 
     let resp = call(
         &state,
@@ -2244,10 +2247,16 @@ async fn update_epic_feed_command_set() {
 #[tokio::test]
 async fn update_epic_feed_command_clear() {
     let state = test_state();
-    let epic = state.db.create_epic("Feed Epic", "", "/repo", None, 1).unwrap();
+    let epic = state
+        .db
+        .create_epic("Feed Epic", "", "/repo", None, 1)
+        .unwrap();
     state
         .db
-        .patch_epic(epic.id, &crate::db::EpicPatch::default().feed_command(Some("old cmd")))
+        .patch_epic(
+            epic.id,
+            &crate::db::EpicPatch::default().feed_command(Some("old cmd")),
+        )
         .unwrap();
 
     let resp = call(
@@ -2262,16 +2271,25 @@ async fn update_epic_feed_command_clear() {
     assert!(resp.error.is_none(), "{:?}", resp.error);
 
     let updated = state.db.get_epic(epic.id).unwrap().unwrap();
-    assert!(updated.feed_command.is_none(), "feed_command should be cleared");
+    assert!(
+        updated.feed_command.is_none(),
+        "feed_command should be cleared"
+    );
 }
 
 #[tokio::test]
 async fn update_epic_feed_command_absent_preserves_existing() {
     let state = test_state();
-    let epic = state.db.create_epic("Feed Epic", "", "/repo", None, 1).unwrap();
+    let epic = state
+        .db
+        .create_epic("Feed Epic", "", "/repo", None, 1)
+        .unwrap();
     state
         .db
-        .patch_epic(epic.id, &crate::db::EpicPatch::default().feed_command(Some("keep me")))
+        .patch_epic(
+            epic.id,
+            &crate::db::EpicPatch::default().feed_command(Some("keep me")),
+        )
         .unwrap();
 
     let resp = call(
@@ -2292,7 +2310,10 @@ async fn update_epic_feed_command_absent_preserves_existing() {
 #[tokio::test]
 async fn update_epic_feed_interval_secs_set() {
     let state = test_state();
-    let epic = state.db.create_epic("Feed Epic", "", "/repo", None, 1).unwrap();
+    let epic = state
+        .db
+        .create_epic("Feed Epic", "", "/repo", None, 1)
+        .unwrap();
 
     let resp = call(
         &state,
@@ -2312,7 +2333,10 @@ async fn update_epic_feed_interval_secs_set() {
 #[tokio::test]
 async fn update_epic_feed_interval_secs_clear() {
     let state = test_state();
-    let epic = state.db.create_epic("Feed Epic", "", "/repo", None, 1).unwrap();
+    let epic = state
+        .db
+        .create_epic("Feed Epic", "", "/repo", None, 1)
+        .unwrap();
     state
         .db
         .patch_epic(
@@ -2342,7 +2366,10 @@ async fn update_epic_feed_interval_secs_clear() {
 #[tokio::test]
 async fn get_epic_shows_feed_command() {
     let state = test_state();
-    let epic = state.db.create_epic("Feed Epic", "", "/repo", None, 1).unwrap();
+    let epic = state
+        .db
+        .create_epic("Feed Epic", "", "/repo", None, 1)
+        .unwrap();
     state
         .db
         .patch_epic(
@@ -7767,7 +7794,7 @@ fn make_rebase_state() -> (Arc<dyn db::TaskStore>, Arc<McpState>) {
 fn make_pr_state() -> (Arc<dyn db::TaskStore>, Arc<McpState>) {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::ok(),                                               // git push
+        MockProcessRunner::ok(), // git push
         MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // git remote get-url
         MockProcessRunner::ok_with_stdout(b"https://github.com/org/repo/pull/7\n"), // gh pr create
     ]));

@@ -568,8 +568,7 @@ mod tests {
         runner.tick().await; // must not panic
 
         // No Refresh is sent on failure — expect timeout
-        let result =
-            tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
+        let result = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
         assert!(result.is_err(), "expected timeout but got a notification");
 
         let tasks = db.list_tasks_for_epic(epic.id).unwrap();
@@ -591,8 +590,7 @@ mod tests {
         let (mut runner, mut rx) = make_runner(db.clone());
         runner.tick().await; // must not panic
 
-        let result =
-            tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
+        let result = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
         assert!(result.is_err(), "expected timeout but got a notification");
 
         let tasks = db.list_tasks_for_epic(epic.id).unwrap();
@@ -654,7 +652,10 @@ mod tests {
 
         // No background task spawned — channel stays empty
         let result = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await;
-        assert!(result.is_err(), "expected empty channel but got notification");
+        assert!(
+            result.is_err(),
+            "expected empty channel but got notification"
+        );
 
         let tasks = db.list_tasks_for_epic(epic.id).unwrap();
         assert!(tasks.is_empty());
@@ -720,7 +721,9 @@ mod tests {
         let db = Arc::new(Database::open_in_memory().unwrap());
         // Register a known repo path matching "myrepo"
         db.save_repo_path("/home/user/code/myrepo").unwrap();
-        let epic = db.create_epic("Feed Epic", "", "/fallback", None, 1).unwrap();
+        let epic = db
+            .create_epic("Feed Epic", "", "/fallback", None, 1)
+            .unwrap();
         let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","url":"https://github.com/org/myrepo/pull/42","status":"backlog"}]'"#;
         db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some(cmd)))
             .unwrap();
@@ -744,7 +747,9 @@ mod tests {
         let db = Arc::new(Database::open_in_memory().unwrap());
         // Known repo is "other-repo", not matching "myrepo"
         db.save_repo_path("/home/user/code/other-repo").unwrap();
-        let epic = db.create_epic("Feed Epic", "", "/fallback", None, 1).unwrap();
+        let epic = db
+            .create_epic("Feed Epic", "", "/fallback", None, 1)
+            .unwrap();
         let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","url":"https://github.com/org/myrepo/pull/42","status":"backlog"}]'"#;
         db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some(cmd)))
             .unwrap();
@@ -756,14 +761,19 @@ mod tests {
 
         let tasks = db.list_tasks_for_epic(epic.id).unwrap();
         assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].repo_path, "", "unresolved URL should store empty sentinel");
+        assert_eq!(
+            tasks[0].repo_path, "",
+            "unresolved URL should store empty sentinel"
+        );
     }
 
     #[tokio::test]
     async fn tick_empty_url_stores_empty_sentinel() {
         let db = Arc::new(Database::open_in_memory().unwrap());
         db.save_repo_path("/home/user/code/myrepo").unwrap();
-        let epic = db.create_epic("Feed Epic", "", "/fallback", None, 1).unwrap();
+        let epic = db
+            .create_epic("Feed Epic", "", "/fallback", None, 1)
+            .unwrap();
         let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","status":"backlog"}]'"#;
         db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some(cmd)))
             .unwrap();
@@ -775,14 +785,19 @@ mod tests {
 
         let tasks = db.list_tasks_for_epic(epic.id).unwrap();
         assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].repo_path, "", "empty url should store empty sentinel");
+        assert_eq!(
+            tasks[0].repo_path, "",
+            "empty url should store empty sentinel"
+        );
     }
 
     #[tokio::test]
     async fn tick_non_github_url_stores_empty_sentinel() {
         let db = Arc::new(Database::open_in_memory().unwrap());
         db.save_repo_path("/home/user/code/myrepo").unwrap();
-        let epic = db.create_epic("Feed Epic", "", "/fallback", None, 1).unwrap();
+        let epic = db
+            .create_epic("Feed Epic", "", "/fallback", None, 1)
+            .unwrap();
         let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","url":"https://jira.company.com/PROJ-123","status":"backlog"}]'"#;
         db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some(cmd)))
             .unwrap();
@@ -794,6 +809,9 @@ mod tests {
 
         let tasks = db.list_tasks_for_epic(epic.id).unwrap();
         assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].repo_path, "", "non-github url should store empty sentinel");
+        assert_eq!(
+            tasks[0].repo_path, "",
+            "non-github url should store empty sentinel"
+        );
     }
 }

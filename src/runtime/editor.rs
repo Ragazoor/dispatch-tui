@@ -397,8 +397,8 @@ mod learning_editor_tests {
     use super::*;
     use crate::db::{Database, LearningStore};
     use crate::models::{Learning, LearningId, LearningKind, LearningScope, LearningStatus};
-    use crate::tui::{App, Message};
     use crate::tui::ViewMode;
+    use crate::tui::{App, Message};
     use chrono::Utc;
     use std::sync::Arc;
 
@@ -504,7 +504,9 @@ mod learning_editor_tests {
         let mut app = App::new(vec![], 1, std::time::Duration::from_secs(300));
         app.update(Message::ShowProposedLearnings(vec![learning.clone()]));
 
-        let content_empty_summary = "--- SUMMARY ---\n\n--- KIND ---\npitfall\n--- TAGS ---\n\n--- DETAIL ---\n\n".to_string();
+        let content_empty_summary =
+            "--- SUMMARY ---\n\n--- KIND ---\npitfall\n--- TAGS ---\n\n--- DETAIL ---\n\n"
+                .to_string();
         rt.exec_finalize_editor_result(
             &mut app,
             EditKind::Learning(learning),

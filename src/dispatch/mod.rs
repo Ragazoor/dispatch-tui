@@ -239,7 +239,10 @@ pub fn extract_github_repo(url: &str) -> Option<&str> {
 ///
 /// For each item, attempts `extract_github_repo(url)` → `resolve_repo_path(...)`.
 /// Items whose URL cannot be resolved get an empty-string sentinel (`""`).
-pub fn resolve_feed_item_repo_paths(items: &[crate::models::FeedItem], known_paths: &[String]) -> Vec<String> {
+pub fn resolve_feed_item_repo_paths(
+    items: &[crate::models::FeedItem],
+    known_paths: &[String],
+) -> Vec<String> {
     items
         .iter()
         .map(|item| {

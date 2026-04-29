@@ -186,7 +186,10 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     let mut runtime = TuiRuntime {
         task_svc: crate::service::TaskService::new(database.clone()),
         epic_svc: crate::service::EpicService::new(database.clone()),
-        feed_runner: Some(crate::feed::FeedRunner::new(database.clone(), feed_notify_tx)),
+        feed_runner: Some(crate::feed::FeedRunner::new(
+            database.clone(),
+            feed_notify_tx,
+        )),
         database,
         msg_tx,
         runner,

@@ -1286,7 +1286,11 @@ fn quick_dispatch_typing_updates_buffer() {
 #[test]
 fn quick_dispatch_typing_resets_cursor() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
-    app.board.repo_paths = vec!["/api".to_string(), "/backend".to_string(), "/core".to_string()];
+    app.board.repo_paths = vec![
+        "/api".to_string(),
+        "/backend".to_string(),
+        "/core".to_string(),
+    ];
     app.input.mode = InputMode::QuickDispatch;
     app.input.repo_cursor = 2;
     app.handle_key(make_key(KeyCode::Char('a')));
@@ -1344,7 +1348,7 @@ fn quick_dispatch_number_shortcut_uses_filtered_list() {
     ];
     app.input.mode = InputMode::QuickDispatch;
     app.input.buffer = "api".to_string(); // filtered: ["/api-service", "/api-gateway"]
-    // Press '2' → second item in filtered list → "/api-gateway"
+                                          // Press '2' → second item in filtered list → "/api-gateway"
     let cmds = app.handle_key(make_key(KeyCode::Char('2')));
     assert_eq!(cmds.len(), 1);
     assert!(

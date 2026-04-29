@@ -78,7 +78,12 @@ fn input_panel_height(app: &App, area_height: u16) -> u16 {
     match &app.input.mode {
         InputMode::QuickDispatch => {
             // header(1) + blank(1) + filter(1) + repos(N) + blank(1) + hint(1) + borders(2) = N + 7
-            let n = app.board.repo_paths.iter().filter(|p| crate::tui::fuzzy_matches(p, &app.input.buffer)).count();
+            let n = app
+                .board
+                .repo_paths
+                .iter()
+                .filter(|p| crate::tui::fuzzy_matches(p, &app.input.buffer))
+                .count();
             let rows = n as u16 + 7;
             rows.clamp(8, max_height)
         }

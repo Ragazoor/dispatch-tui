@@ -1523,7 +1523,10 @@ fn extract_github_repo_tree_url() {
 
 #[test]
 fn extract_github_repo_non_github_url() {
-    assert_eq!(extract_github_repo("https://jira.company.com/browse/PROJ-123"), None);
+    assert_eq!(
+        extract_github_repo("https://jira.company.com/browse/PROJ-123"),
+        None
+    );
 }
 
 #[test]
