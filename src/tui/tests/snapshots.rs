@@ -278,3 +278,72 @@ fn snapshot_confirm_delete_project2() {
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);
 }
+
+#[test]
+fn snapshot_proposed_learnings_overlay() {
+    use crate::models::{Learning, LearningKind, LearningScope, LearningStatus};
+    use chrono::Utc;
+
+    let mut app = make_app();
+
+    let now = Utc::now();
+    let learnings = vec![
+        Learning {
+            id: 1,
+            kind: LearningKind::Preference,
+            summary: "Prefer concise responses over verbose ones".to_string(),
+            detail: None,
+            scope: LearningScope::User,
+            scope_ref: None,
+            tags: vec!["style".to_string()],
+            status: LearningStatus::Proposed,
+            source_task_id: None,
+            confirmed_count: 0,
+            last_confirmed_at: None,
+            created_at: now,
+            updated_at: now,
+        },
+        Learning {
+            id: 2,
+            kind: LearningKind::Pitfall,
+            summary: "tokio::spawn needs explicit error logging".to_string(),
+            detail: None,
+            scope: LearningScope::Repo,
+            scope_ref: Some("/repo".to_string()),
+            tags: vec!["async".to_string()],
+            status: LearningStatus::Proposed,
+            source_task_id: None,
+            confirmed_count: 0,
+            last_confirmed_at: None,
+            created_at: now,
+            updated_at: now,
+        },
+        Learning {
+            id: 3,
+            kind: LearningKind::Convention,
+            summary: "Use LearningService not raw db for learnings".to_string(),
+            detail: None,
+            scope: LearningScope::Repo,
+            scope_ref: Some("/repo".to_string()),
+            tags: vec![],
+            status: LearningStatus::Proposed,
+            source_task_id: None,
+            confirmed_count: 0,
+            last_confirmed_at: None,
+            created_at: now,
+            updated_at: now,
+        },
+    ];
+    app.update(crate::tui::Message::ShowProposedLearnings(learnings));
+
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
+fn snapshot_proposed_learnings_empty_state() {
+    let mut app = make_app();
+    app.update(crate::tui::Message::ShowProposedLearnings(vec![]));
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
