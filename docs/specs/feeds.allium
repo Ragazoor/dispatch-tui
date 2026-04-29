@@ -82,9 +82,12 @@ rule UpsertFeedTasks {
     --   - Match: title and description on the existing Task are updated
     --     to the new values; status is NOT touched. updated_at is bumped.
     --
-    -- Tasks present locally that are NOT in the latest emission are left
-    -- alone. The dispatch runtime does not delete tasks based on a feed —
-    -- removal is an explicit user action.
+    -- Tasks present locally that are NOT in the latest emission are
+    -- removed. The dispatch runtime treats the feed as the source of
+    -- truth: any feed-managed task (external_id IS NOT NULL) that does
+    -- not appear in the current emission is deleted from the epic.
+    -- Non-feed tasks (external_id = null) in the same epic are never
+    -- touched by this rule.
 
     ensures:
         for item in items:
@@ -104,6 +107,10 @@ rule UpsertFeedTasks {
                 existing.title = item.title
                 existing.description = item.description
                 -- existing.status, existing.sub_status preserved
+
+        for task in Tasks where epic = epic and external_id != null:
+            if not items.any(i => i.external_id = task.external_id):
+                not exists task
 
     @guidance
         -- Status preservation is intentional: once a user starts working
