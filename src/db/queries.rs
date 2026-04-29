@@ -311,9 +311,11 @@ impl super::TaskCrud for Database {
             )
             .with_context(|| format!("Epic {} not found for upsert_feed_tasks", epic_id))?;
 
+        let tx = conn.unchecked_transaction()?;
+
         for item in items {
             let sub_status = SubStatus::default_for(item.status).as_str().to_string();
-            conn.execute(
+            tx.execute(
                 "INSERT INTO tasks
                      (title, description, repo_path, status, sub_status, base_branch,
                       epic_id, external_id, project_id)
@@ -337,13 +339,11 @@ impl super::TaskCrud for Database {
             .with_context(|| format!("Failed to upsert feed task '{}'", item.external_id))?;
         }
 
-        // Remove feed-managed tasks that are no longer in the current emission.
-        // Non-feed tasks (external_id IS NULL) are never touched.
         let keep_ids = serde_json::to_string(
             &items.iter().map(|i| &i.external_id).collect::<Vec<_>>(),
         )
-        .context("Failed to serialize external_ids for feed cleanup")?;
-        conn.execute(
+        .expect("Vec<String> serialization is infallible");
+        tx.execute(
             "DELETE FROM tasks
              WHERE epic_id = ?1
                AND external_id IS NOT NULL
@@ -352,6 +352,7 @@ impl super::TaskCrud for Database {
         )
         .context("Failed to delete stale feed tasks")?;
 
+        tx.commit()?;
         Ok(())
     }
 }
