@@ -129,7 +129,7 @@ fn learning_actioned_clamps_selected_when_last_removed() {
     assert!(matches!(
         &app.board.view_mode,
         ViewMode::ProposedLearnings { selected, learnings, .. }
-            if *selected < learnings.len()
+            if *selected == learnings.len() - 1
     ));
 }
 
@@ -170,6 +170,28 @@ fn refresh_tasks_does_not_update_learnings_snapshot() {
     assert!(matches!(
         &app.board.view_mode,
         ViewMode::ProposedLearnings { learnings, .. } if learnings.len() == original_len
+    ));
+}
+
+#[test]
+fn edit_learning_returns_pop_out_editor_command() {
+    let mut app = make_app_with_learnings();
+    let cmds = app.update(Message::EditLearning(2));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::PopOutEditor(EditKind::Learning(l)) if l.id == 2
+    )));
+}
+
+#[test]
+fn learning_actioned_on_single_entry_empties_list() {
+    let mut app = make_app();
+    app.update(Message::ShowProposedLearnings(vec![make_learning(1)]));
+    app.update(Message::LearningActioned(1));
+    assert!(matches!(
+        &app.board.view_mode,
+        ViewMode::ProposedLearnings { learnings, selected, .. }
+            if learnings.is_empty() && *selected == 0
     ));
 }
 
