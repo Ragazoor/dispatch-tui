@@ -19,14 +19,8 @@ use super::stderr_str;
 use super::worktree::provision_worktree;
 
 pub(super) fn format_learnings_preamble(learnings: &[Learning]) -> Option<String> {
-    let procedural: Vec<&Learning> = learnings
-        .iter()
-        .filter(|l| l.kind == LearningKind::Procedural)
-        .collect();
-    let other: Vec<&Learning> = learnings
-        .iter()
-        .filter(|l| l.kind != LearningKind::Procedural)
-        .collect();
+    let (procedural, other): (Vec<&Learning>, Vec<&Learning>) =
+        learnings.iter().partition(|l| l.kind == LearningKind::Procedural);
 
     if procedural.is_empty() && other.is_empty() {
         return None;
@@ -46,24 +40,13 @@ pub(super) fn format_learnings_preamble(learnings: &[Learning]) -> Option<String
     if !other.is_empty() {
         let items = other
             .iter()
-            .map(|l| format!("- [{}] {}", kind_label(l.kind), l.summary))
+            .map(|l| format!("- [{}] {}", l.kind.display_label(), l.summary))
             .collect::<Vec<_>>()
             .join("\n");
         sections.push(format!("# Relevant learnings\n{items}"));
     }
 
     Some(sections.join("\n\n"))
-}
-
-fn kind_label(kind: LearningKind) -> &'static str {
-    match kind {
-        LearningKind::Pitfall => "Pitfall",
-        LearningKind::Convention => "Convention",
-        LearningKind::Preference => "Preference",
-        LearningKind::ToolRecommendation => "Tool recommendation",
-        LearningKind::Episodic => "Episodic",
-        LearningKind::Procedural => "Procedural",
-    }
 }
 
 /// Provision worktree, write prompt file, launch Claude via tmux.
