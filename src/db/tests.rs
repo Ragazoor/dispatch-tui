@@ -5251,6 +5251,64 @@ fn upsert_feed_tasks_adds_new_items() {
     assert_eq!(tasks.len(), 2, "new item should be created on second call");
 }
 
+#[test]
+fn upsert_feed_tasks_removes_stale_items() {
+    let db = in_memory_db();
+    let epic = db.create_epic("E", "", "/repo", None, 1).unwrap();
+
+    // First fetch: two items
+    db.upsert_feed_tasks(
+        epic.id,
+        &[
+            make_feed_item("ext-1", "First"),
+            make_feed_item("ext-2", "Second"),
+        ],
+    )
+    .unwrap();
+    assert_eq!(db.list_tasks_for_epic(epic.id).unwrap().len(), 2);
+
+    // Second fetch: only ext-1 remains in the feed
+    db.upsert_feed_tasks(epic.id, &[make_feed_item("ext-1", "First")])
+        .unwrap();
+
+    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    assert_eq!(tasks.len(), 1, "stale feed task should be removed");
+    assert_eq!(tasks[0].external_id.as_deref(), Some("ext-1"));
+}
+
+#[test]
+fn upsert_feed_tasks_does_not_remove_manual_tasks() {
+    let db = in_memory_db();
+    let epic = db.create_epic("E", "", "/repo", None, 1).unwrap();
+
+    // Manually created task linked to the epic (no external_id)
+    let manual_task_id = db
+        .create_task(
+            "Manual",
+            "",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            Some(epic.id),
+            None,
+            None,
+            1,
+        )
+        .unwrap();
+
+    // Feed fetch with one item
+    db.upsert_feed_tasks(epic.id, &[make_feed_item("ext-1", "Feed Task")])
+        .unwrap();
+
+    // Feed fetch returns nothing — only manual task should survive
+    db.upsert_feed_tasks(epic.id, &[]).unwrap();
+
+    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    assert_eq!(tasks.len(), 1, "manual task should survive empty feed fetch");
+    assert_eq!(tasks[0].id, manual_task_id);
+}
+
 // ---------------------------------------------------------------------------
 // Property tests
 // ---------------------------------------------------------------------------
