@@ -1638,7 +1638,11 @@ pub fn url_label(url: &str) -> String {
     let type_label = url_type(url);
 
     if type_label != "Link" {
-        let segment = if type_label == "PR" { "/pull/" } else { "/issues/" };
+        let segment = if type_label == "PR" {
+            "/pull/"
+        } else {
+            "/issues/"
+        };
         if let Some((_, after)) = clean.split_once(segment) {
             if let Some(n) = after
                 .trim_end_matches('/')
@@ -2444,18 +2448,12 @@ mod tests {
 
     #[test]
     fn url_label_github_pr() {
-        assert_eq!(
-            url_label("https://github.com/org/repo/pull/42"),
-            "PR #42"
-        );
+        assert_eq!(url_label("https://github.com/org/repo/pull/42"), "PR #42");
     }
 
     #[test]
     fn url_label_github_pr_no_number() {
-        assert_eq!(
-            url_label("https://github.com/org/repo/pull/"),
-            "PR"
-        );
+        assert_eq!(url_label("https://github.com/org/repo/pull/"), "PR");
     }
 
     #[test]
@@ -2484,10 +2482,7 @@ mod tests {
 
     #[test]
     fn url_label_github_issue_no_number() {
-        assert_eq!(
-            url_label("https://github.com/org/repo/issues/"),
-            "Issue"
-        );
+        assert_eq!(url_label("https://github.com/org/repo/issues/"), "Issue");
     }
 
     #[test]
