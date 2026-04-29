@@ -96,7 +96,11 @@ fn initial_content_for(kind: &EditKind) -> (String, String) {
             "description-".to_string(),
             format_description_for_editor(""),
         ),
-        EditKind::Learning(_) => todo!(),
+        EditKind::Learning(learning) => {
+            let prefix = format!("learning-{}-", learning.id);
+            let content = crate::editor::format_learning_for_editor(learning);
+            (prefix, content)
+        }
     }
 }
 
@@ -236,7 +240,48 @@ impl TuiRuntime {
                 tracing::warn!("FinalizeEditorResult received Description kind; ignoring");
                 vec![]
             }
-            EditKind::Learning(_) => todo!(),
+            EditKind::Learning(learning) => {
+                self.finalize_learning_edit(app, learning, outcome);
+                vec![]
+            }
+        }
+    }
+
+    fn finalize_learning_edit(
+        &self,
+        app: &mut App,
+        learning: models::Learning,
+        outcome: EditorOutcome,
+    ) {
+        let EditorOutcome::Saved(content) = outcome else {
+            return; // Cancelled — no-op
+        };
+        let fields = crate::editor::parse_learning_editor_output(&content);
+
+        let params = crate::service::UpdateLearningParams {
+            id: learning.id,
+            // Empty parsed summary → treat as "no change"
+            summary: if fields.summary.is_empty() {
+                None
+            } else {
+                Some(fields.summary)
+            },
+            kind: fields.kind,
+            tags: fields.tags,
+            detail: fields.detail,
+        };
+
+        let db: Arc<dyn crate::db::LearningStore> = self.database.clone();
+        let svc = crate::service::LearningService::new(db.clone());
+        match svc.update_learning(params) {
+            Ok(()) => {
+                if let Ok(Some(updated)) = db.get_learning(learning.id) {
+                    app.update(Message::LearningEdited(updated));
+                }
+            }
+            Err(e) => {
+                app.update(Message::StatusInfo(format!("Edit failed: {e}")));
+            }
         }
     }
 
@@ -345,6 +390,162 @@ fn clear_session_slot(slot: &Arc<Mutex<Option<EditorSession>>>) {
             let mut g = poisoned.into_inner();
             g.take();
         }
+    }
+}
+
+#[cfg(test)]
+mod learning_editor_tests {
+    use super::*;
+    use crate::db::{Database, LearningStore};
+    use crate::models::{Learning, LearningId, LearningKind, LearningScope, LearningStatus};
+    use crate::tui::{App, Message};
+    use crate::tui::ViewMode;
+    use chrono::Utc;
+    use std::sync::Arc;
+
+    fn make_learning(id: LearningId) -> Learning {
+        Learning {
+            id,
+            kind: LearningKind::Convention,
+            summary: "original summary".to_string(),
+            detail: None,
+            scope: LearningScope::Repo,
+            scope_ref: Some("/repo".to_string()),
+            tags: vec![],
+            status: LearningStatus::Proposed,
+            source_task_id: None,
+            confirmed_count: 0,
+            last_confirmed_at: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    fn make_runtime(db: Arc<Database>) -> TuiRuntime {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let (feed_tx, _) = tokio::sync::mpsc::unbounded_channel();
+        let db_arc: Arc<dyn crate::db::TaskStore> = db.clone();
+        TuiRuntime {
+            database: db_arc.clone(),
+            task_svc: crate::service::TaskService::new(db_arc.clone()),
+            epic_svc: crate::service::EpicService::new(db_arc.clone()),
+            feed_runner: crate::feed::FeedRunner::new(db_arc.clone(), feed_tx),
+            msg_tx: tx,
+            runner: Arc::new(crate::process::MockProcessRunner::new(vec![])),
+            editor_session: Arc::new(std::sync::Mutex::new(None)),
+        }
+    }
+
+    #[test]
+    fn initial_content_includes_summary_and_kind() {
+        let l = make_learning(1);
+        let (prefix, content) = initial_content_for(&EditKind::Learning(l));
+        assert!(content.contains("original summary"));
+        assert!(content.contains("convention"));
+        assert!(prefix.starts_with("learning-1-"));
+    }
+
+    #[test]
+    fn saved_valid_content_updates_db_and_sends_learning_edited() {
+        let db = Arc::new(Database::open_in_memory().unwrap());
+        let id = db
+            .create_learning(
+                LearningKind::Convention,
+                "original summary",
+                None,
+                LearningScope::User,
+                None,
+                &[],
+                None,
+            )
+            .unwrap();
+        let learning = make_learning(id);
+        let rt = make_runtime(db.clone());
+        // Put app into ProposedLearnings view
+        let mut app = App::new(vec![], 1, std::time::Duration::from_secs(300));
+        app.update(Message::ShowProposedLearnings(vec![learning.clone()]));
+
+        let updated_content = format!(
+            "--- SUMMARY ---\nnew summary\n--- KIND ---\npitfall\n--- TAGS ---\nrust\n--- DETAIL ---\nsome detail\n"
+        );
+        rt.exec_finalize_editor_result(
+            &mut app,
+            EditKind::Learning(learning),
+            EditorOutcome::Saved(updated_content),
+        );
+
+        let updated = db.get_learning(id).unwrap().unwrap();
+        assert_eq!(updated.summary, "new summary");
+        assert_eq!(updated.kind, LearningKind::Pitfall);
+
+        // Snapshot in overlay should be updated
+        assert!(matches!(
+            app.view_mode(),
+            ViewMode::ProposedLearnings { learnings, .. }
+                if learnings.iter().find(|l| l.id == id)
+                    .map(|l| l.summary.as_str()) == Some("new summary")
+        ));
+    }
+
+    #[test]
+    fn saved_empty_summary_preserves_original() {
+        // Empty SUMMARY → treat as "no change" (consistent with task editor).
+        let db = Arc::new(Database::open_in_memory().unwrap());
+        let id = db
+            .create_learning(
+                LearningKind::Convention,
+                "original summary",
+                None,
+                LearningScope::User,
+                None,
+                &[],
+                None,
+            )
+            .unwrap();
+        let learning = make_learning(id);
+        let rt = make_runtime(db.clone());
+        let mut app = App::new(vec![], 1, std::time::Duration::from_secs(300));
+        app.update(Message::ShowProposedLearnings(vec![learning.clone()]));
+
+        let content_empty_summary = "--- SUMMARY ---\n\n--- KIND ---\npitfall\n--- TAGS ---\n\n--- DETAIL ---\n\n".to_string();
+        rt.exec_finalize_editor_result(
+            &mut app,
+            EditKind::Learning(learning),
+            EditorOutcome::Saved(content_empty_summary),
+        );
+
+        // Summary unchanged; kind updated
+        let updated = db.get_learning(id).unwrap().unwrap();
+        assert_eq!(updated.summary, "original summary");
+        assert_eq!(updated.kind, LearningKind::Pitfall);
+    }
+
+    #[test]
+    fn cancelled_edit_is_noop() {
+        let db = Arc::new(Database::open_in_memory().unwrap());
+        let id = db
+            .create_learning(
+                LearningKind::Convention,
+                "original summary",
+                None,
+                LearningScope::User,
+                None,
+                &[],
+                None,
+            )
+            .unwrap();
+        let learning = make_learning(id);
+        let rt = make_runtime(db.clone());
+        let mut app = App::new(vec![], 1, std::time::Duration::from_secs(300));
+
+        rt.exec_finalize_editor_result(
+            &mut app,
+            EditKind::Learning(learning),
+            EditorOutcome::Cancelled,
+        );
+
+        let unchanged = db.get_learning(id).unwrap().unwrap();
+        assert_eq!(unchanged.summary, "original summary");
     }
 }
 
