@@ -94,9 +94,7 @@ impl FeedRunner {
         }
     }
 
-    /// Consume this runner and spawn it as a background tokio task.
-    /// Returns immediately. The task polls feed commands independently of the
-    /// main event loop, preventing slow commands from freezing the UI.
+    /// Spawns as an independent background task so slow feed commands can't freeze the UI.
     pub fn start(self) {
         tokio::spawn(async move {
             let mut runner = self;

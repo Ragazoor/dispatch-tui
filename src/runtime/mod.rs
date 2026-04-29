@@ -314,9 +314,8 @@ async fn run_loop(
     tick_interval: &mut tokio::time::Interval,
     rt: &mut TuiRuntime,
 ) -> Result<()> {
-    // Start the feed runner as an independent background task.
-    // Doing this here (not in TuiRuntime::new) means tests that construct
-    // TuiRuntime directly don't accidentally spawn background tasks.
+    // Here (not in TuiRuntime::new) so tests that construct TuiRuntime directly
+    // don't accidentally spawn background tasks.
     if let Some(feed_runner) = rt.feed_runner.take() {
         feed_runner.start();
     }
