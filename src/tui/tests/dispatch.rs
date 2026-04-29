@@ -1265,6 +1265,94 @@ fn quick_dispatch_enter_selects_cursor_repo() {
 }
 
 #[test]
+fn quick_dispatch_clears_buffer_on_entry() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
+    app.board.repo_paths = vec!["/repo1".to_string(), "/repo2".to_string()];
+    app.input.buffer = "leftover".to_string();
+    app.update(Message::StartQuickDispatchSelection);
+    assert_eq!(app.input.buffer, "");
+    assert_eq!(app.input.mode, InputMode::QuickDispatch);
+}
+
+#[test]
+fn quick_dispatch_typing_updates_buffer() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
+    app.board.repo_paths = vec!["/api-service".to_string(), "/frontend".to_string()];
+    app.input.mode = InputMode::QuickDispatch;
+    app.handle_key(make_key(KeyCode::Char('a')));
+    assert_eq!(app.input.buffer, "a");
+}
+
+#[test]
+fn quick_dispatch_typing_resets_cursor() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
+    app.board.repo_paths = vec!["/api".to_string(), "/backend".to_string(), "/core".to_string()];
+    app.input.mode = InputMode::QuickDispatch;
+    app.input.repo_cursor = 2;
+    app.handle_key(make_key(KeyCode::Char('a')));
+    assert_eq!(app.input.repo_cursor, 0);
+}
+
+#[test]
+fn quick_dispatch_backspace_shrinks_buffer_and_resets_cursor() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
+    app.board.repo_paths = vec!["/api".to_string(), "/backend".to_string()];
+    app.input.mode = InputMode::QuickDispatch;
+    app.input.buffer = "ap".to_string();
+    app.input.repo_cursor = 1;
+    app.handle_key(make_key(KeyCode::Backspace));
+    assert_eq!(app.input.buffer, "a");
+    assert_eq!(app.input.repo_cursor, 0);
+}
+
+#[test]
+fn quick_dispatch_enter_selects_from_filtered_list() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
+    app.board.repo_paths = vec![
+        "/api-service".to_string(),
+        "/backend".to_string(),
+        "/api-gateway".to_string(),
+    ];
+    app.input.mode = InputMode::QuickDispatch;
+    app.input.buffer = "api".to_string(); // matches index 0 and 2 of full list
+    app.input.repo_cursor = 1; // second item in filtered list → "/api-gateway"
+    let cmds = app.handle_key(make_key(KeyCode::Enter));
+    assert_eq!(cmds.len(), 1);
+    assert!(
+        matches!(&cmds[0], Command::QuickDispatch { ref draft, .. } if draft.repo_path == "/api-gateway")
+    );
+}
+
+#[test]
+fn quick_dispatch_enter_with_empty_filter_is_noop() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
+    app.board.repo_paths = vec!["/api-service".to_string(), "/backend".to_string()];
+    app.input.mode = InputMode::QuickDispatch;
+    app.input.buffer = "zzz".to_string(); // matches nothing
+    let cmds = app.handle_key(make_key(KeyCode::Enter));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::QuickDispatch);
+}
+
+#[test]
+fn quick_dispatch_number_shortcut_uses_filtered_list() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
+    app.board.repo_paths = vec![
+        "/api-service".to_string(),
+        "/backend".to_string(),
+        "/api-gateway".to_string(),
+    ];
+    app.input.mode = InputMode::QuickDispatch;
+    app.input.buffer = "api".to_string(); // filtered: ["/api-service", "/api-gateway"]
+    // Press '2' → second item in filtered list → "/api-gateway"
+    let cmds = app.handle_key(make_key(KeyCode::Char('2')));
+    assert_eq!(cmds.len(), 1);
+    assert!(
+        matches!(&cmds[0], Command::QuickDispatch { ref draft, .. } if draft.repo_path == "/api-gateway")
+    );
+}
+
+#[test]
 fn tab_hint_absent_from_tab_bar() {
     let mut app = make_app();
     let buf = render_to_buffer(&mut app, 100, 30);
