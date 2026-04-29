@@ -1616,6 +1616,31 @@ pub fn pr_number_from_url(url: &str) -> Option<i64> {
         .and_then(|s| s.parse::<i64>().ok())
 }
 
+/// Returns the display label for a URL stored in the `pr_url` field.
+///
+/// - URLs containing `/pull/<N>` → `"PR #N"` (or `"PR"` if no number follows)
+/// - URLs containing `/issues/<N>` → `"Issue #N"` (or `"Issue"` if no number follows)
+/// - Anything else → `"Link"`
+pub fn url_label(url: &str) -> String {
+    let clean = url.split(['?', '#']).next().unwrap_or(url);
+
+    for (segment, type_label) in &[("/pull/", "PR"), ("/issues/", "Issue")] {
+        if let Some((_, after)) = clean.split_once(segment) {
+            let number = after
+                .trim_end_matches('/')
+                .split('/')
+                .next()
+                .and_then(|s| s.parse::<i64>().ok());
+            return match number {
+                Some(n) => format!("{type_label} #{n}"),
+                None => type_label.to_string(),
+            };
+        }
+    }
+
+    "Link".to_string()
+}
+
 /// Extract the GitHub repo slug (e.g. "org/repo") from a PR URL.
 /// Handles query parameters and fragment identifiers.
 /// Returns None for non-GitHub URLs or malformed input.
@@ -2399,6 +2424,77 @@ mod tests {
             pr_number_from_url("https://github.com/org/repo/pull/42#issuecomment-123"),
             Some(42)
         );
+    }
+
+    // --- url_label ---
+
+    #[test]
+    fn url_label_github_pr() {
+        assert_eq!(
+            url_label("https://github.com/org/repo/pull/42"),
+            "PR #42"
+        );
+    }
+
+    #[test]
+    fn url_label_github_pr_no_number() {
+        assert_eq!(
+            url_label("https://github.com/org/repo/pull/"),
+            "PR"
+        );
+    }
+
+    #[test]
+    fn url_label_github_pr_with_query() {
+        assert_eq!(
+            url_label("https://github.com/org/repo/pull/42?diff=split"),
+            "PR #42"
+        );
+    }
+
+    #[test]
+    fn url_label_github_pr_with_fragment() {
+        assert_eq!(
+            url_label("https://github.com/org/repo/pull/42#issuecomment-123"),
+            "PR #42"
+        );
+    }
+
+    #[test]
+    fn url_label_github_issue() {
+        assert_eq!(
+            url_label("https://github.com/org/repo/issues/7"),
+            "Issue #7"
+        );
+    }
+
+    #[test]
+    fn url_label_github_issue_no_number() {
+        assert_eq!(
+            url_label("https://github.com/org/repo/issues/"),
+            "Issue"
+        );
+    }
+
+    #[test]
+    fn url_label_github_issue_with_fragment() {
+        assert_eq!(
+            url_label("https://github.com/org/repo/issues/7#issuecomment-999"),
+            "Issue #7"
+        );
+    }
+
+    #[test]
+    fn url_label_arbitrary_url() {
+        assert_eq!(
+            url_label("https://jira.example.com/browse/PROJ-123"),
+            "Link"
+        );
+    }
+
+    #[test]
+    fn url_label_empty_string() {
+        assert_eq!(url_label(""), "Link");
     }
 
     // --- github_repo_from_pr_url ---
