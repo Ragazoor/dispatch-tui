@@ -654,11 +654,8 @@ mod tests {
         let db = Arc::new(Database::open_in_memory().unwrap());
         let epic = db.create_epic("Slow Epic", "", "/repo", None, 1).unwrap();
         // A command that would block for 5 seconds if awaited inline.
-        db.patch_epic(
-            epic.id,
-            &EpicPatch::new().feed_command(Some("sleep 5")),
-        )
-        .unwrap();
+        db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some("sleep 5")))
+            .unwrap();
 
         let (tx, _rx) = mpsc::unbounded_channel();
         let runner = FeedRunner::new(db as Arc<dyn crate::db::TaskAndEpicStore>, tx);
@@ -676,7 +673,9 @@ mod tests {
     #[tokio::test]
     async fn start_background_task_eventually_runs_feed_command() {
         let db = Arc::new(Database::open_in_memory().unwrap());
-        let epic = db.create_epic("BG Feed Epic", "", "/repo", None, 1).unwrap();
+        let epic = db
+            .create_epic("BG Feed Epic", "", "/repo", None, 1)
+            .unwrap();
         db.patch_epic(
             epic.id,
             &EpicPatch::new().feed_command(Some(
@@ -694,7 +693,11 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
         let tasks = db.list_tasks_for_epic(epic.id).unwrap();
-        assert_eq!(tasks.len(), 1, "background task should have upserted one feed task");
+        assert_eq!(
+            tasks.len(),
+            1,
+            "background task should have upserted one feed task"
+        );
         assert_eq!(tasks[0].title, "BG Task");
         assert_eq!(tasks[0].external_id.as_deref(), Some("bg1"));
     }
