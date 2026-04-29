@@ -7743,3 +7743,156 @@ async fn list_tasks_omits_pr_segment_when_no_pr_url() {
         "No PR segment should appear when pr_url is null; got: {text}"
     );
 }
+
+// =======================================================================
+// wrap_up: reflection nudge
+// =======================================================================
+
+fn make_rebase_state() -> (Arc<dyn db::TaskStore>, Arc<McpState>) {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse --abbrev-ref HEAD
+        MockProcessRunner::fail(""),                  // git remote get-url (no remote)
+        MockProcessRunner::ok(),                      // git rebase main
+        MockProcessRunner::ok(),                      // git merge --ff-only
+    ]));
+    let state = Arc::new(McpState {
+        db: db.clone(),
+        notify_tx: None,
+        runner,
+    });
+    (db, state)
+}
+
+fn make_pr_state() -> (Arc<dyn db::TaskStore>, Arc<McpState>) {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(),                                               // git push
+        MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // git remote get-url
+        MockProcessRunner::ok_with_stdout(b"https://github.com/org/repo/pull/7\n"), // gh pr create
+    ]));
+    let state = Arc::new(McpState {
+        db: db.clone(),
+        notify_tx: None,
+        runner,
+    });
+    (db, state)
+}
+
+fn seed_task_with_worktree(db: &Arc<dyn db::TaskStore>, suffix: &str) -> crate::models::TaskId {
+    let task_id = db
+        .create_task(
+            &format!("Task {suffix}"),
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Running,
+            "main",
+            None,
+            None,
+            None,
+            1,
+        )
+        .unwrap();
+    db.patch_task(
+        task_id,
+        &db::TaskPatch::new().worktree(Some(&format!(
+            "/repo/.worktrees/{}-task-{suffix}",
+            task_id.0
+        ))),
+    )
+    .unwrap();
+    task_id
+}
+
+#[tokio::test]
+async fn wrap_up_rebase_appends_reflection_nudge_by_default() {
+    let (db, state) = make_rebase_state();
+    let task_id = seed_task_with_worktree(&db, "nudge-default");
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "wrap_up",
+            "arguments": { "task_id": task_id.0, "action": "rebase" }
+        })),
+    )
+    .await;
+
+    let text = extract_response_text(&resp);
+    assert!(
+        text.contains("record_learning"),
+        "nudge should appear by default; got: {text}"
+    );
+}
+
+#[tokio::test]
+async fn wrap_up_rebase_appends_reflection_nudge_when_enabled() {
+    let (db, state) = make_rebase_state();
+    db.set_setting_bool("learning_reflection_enabled", true)
+        .unwrap();
+    let task_id = seed_task_with_worktree(&db, "nudge-enabled");
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "wrap_up",
+            "arguments": { "task_id": task_id.0, "action": "rebase" }
+        })),
+    )
+    .await;
+
+    let text = extract_response_text(&resp);
+    assert!(
+        text.contains("record_learning"),
+        "nudge should appear when enabled=true; got: {text}"
+    );
+}
+
+#[tokio::test]
+async fn wrap_up_rebase_omits_reflection_nudge_when_disabled() {
+    let (db, state) = make_rebase_state();
+    db.set_setting_bool("learning_reflection_enabled", false)
+        .unwrap();
+    let task_id = seed_task_with_worktree(&db, "nudge-disabled");
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "wrap_up",
+            "arguments": { "task_id": task_id.0, "action": "rebase" }
+        })),
+    )
+    .await;
+
+    let text = extract_response_text(&resp);
+    assert!(
+        !text.contains("record_learning"),
+        "nudge must not appear when disabled; got: {text}"
+    );
+}
+
+#[tokio::test]
+async fn wrap_up_pr_appends_reflection_nudge_by_default() {
+    let (db, state) = make_pr_state();
+    let task_id = seed_task_with_worktree(&db, "pr-nudge");
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "wrap_up",
+            "arguments": { "task_id": task_id.0, "action": "pr" }
+        })),
+    )
+    .await;
+
+    let text = extract_response_text(&resp);
+    assert!(
+        text.contains("record_learning"),
+        "nudge should appear on PR wrap_up by default; got: {text}"
+    );
+}

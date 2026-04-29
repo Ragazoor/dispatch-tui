@@ -561,6 +561,19 @@ pub(super) fn handle_claim_task(
     }
 }
 
+fn reflection_nudge(db: &dyn crate::db::TaskStore) -> &'static str {
+    let enabled = db
+        .get_setting_bool("learning_reflection_enabled")
+        .unwrap_or(None)
+        .unwrap_or(true);
+    if enabled {
+        " Before finishing, did you discover anything non-obvious about \
+this repo or task? If so, call record_learning with a brief summary."
+    } else {
+        ""
+    }
+}
+
 pub(super) async fn handle_wrap_up(
     state: &McpState,
     id: Option<Value>,
@@ -670,7 +683,7 @@ pub(super) async fn handle_wrap_up(
                     });
                     JsonRpcResponse::ok(
                         id,
-                        json!({"content": [{"type": "text", "text": format!("wrap_up complete (task {}, action: rebase)", parsed.task_id)}]}),
+                        json!({"content": [{"type": "text", "text": format!("wrap_up complete (task {}, action: rebase){}", parsed.task_id, reflection_nudge(&*state.db))}]}),
                     )
                 }
                 Err(e) => {
@@ -732,7 +745,7 @@ pub(super) async fn handle_wrap_up(
                     }
                     JsonRpcResponse::ok(
                         id,
-                        json!({"content": [{"type": "text", "text": format!("wrap_up complete (task {}, action: pr, pr_url: {})", parsed.task_id, pr_url)}]}),
+                        json!({"content": [{"type": "text", "text": format!("wrap_up complete (task {}, action: pr, pr_url: {}){}", parsed.task_id, pr_url, reflection_nudge(&*state.db))}]}),
                     )
                 }
                 Err(e) => {

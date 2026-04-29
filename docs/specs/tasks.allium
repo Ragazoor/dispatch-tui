@@ -1433,7 +1433,6 @@ rule WrapUpReflection {
         -- to wrap up without proposing a learning.
         -- Gated by config.learning_reflection_enabled (default: true).
         -- Implemented in handle_wrap_up() (src/mcp/handlers/tasks.rs) in WP8.
-        -- Until WP8 lands this rule is forward-looking.
 }
 
 rule RecordLearningViaMcp {
