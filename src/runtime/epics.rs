@@ -132,10 +132,7 @@ impl TuiRuntime {
             .unwrap_or_else(|e| {
                 tracing::warn!(error = %e, "failed to fetch learnings for dispatch");
                 vec![]
-            })
-            .into_iter()
-            .take(10)
-            .collect();
+            });
 
         // Dispatch the planning subtask asynchronously
         let tx = self.msg_tx.clone();

@@ -2011,7 +2011,8 @@ impl LearningStore for Database {
                  WHEN 'user'    THEN 4
                  ELSE 5
                END,
-               confirmed_count DESC"
+               confirmed_count DESC
+             LIMIT 10"
         );
 
         let params_refs: Vec<&dyn rusqlite::ToSql> = bind.iter().map(|b| b.as_ref()).collect();

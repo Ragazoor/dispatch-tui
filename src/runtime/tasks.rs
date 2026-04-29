@@ -62,10 +62,7 @@ impl TuiRuntime {
             .unwrap_or_else(|e| {
                 tracing::warn!(error = %e, "failed to fetch learnings for dispatch");
                 vec![]
-            })
-            .into_iter()
-            .take(10)
-            .collect();
+            });
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
         tokio::task::spawn_blocking(move || {
@@ -132,10 +129,7 @@ impl TuiRuntime {
             .unwrap_or_else(|e| {
                 tracing::warn!(error = %e, "failed to fetch learnings for dispatch");
                 vec![]
-            })
-            .into_iter()
-            .take(10)
-            .collect();
+            });
         let label = match mode {
             models::DispatchMode::Dispatch => "Dispatch",
             models::DispatchMode::Brainstorm => "Brainstorm",

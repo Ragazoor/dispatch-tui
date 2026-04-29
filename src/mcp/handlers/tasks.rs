@@ -757,10 +757,7 @@ fn do_dispatch(
         .unwrap_or_else(|e| {
             tracing::warn!(error = %e, "failed to fetch learnings for dispatch");
             vec![]
-        })
-        .into_iter()
-        .take(10)
-        .collect();
+        });
     match DispatchMode::for_task(task) {
         DispatchMode::Dispatch => dispatch::dispatch_agent(task, runner, epic_ctx.as_ref(), &learnings),
         DispatchMode::Brainstorm => dispatch::brainstorm_agent(task, runner, epic_ctx.as_ref(), &learnings),
