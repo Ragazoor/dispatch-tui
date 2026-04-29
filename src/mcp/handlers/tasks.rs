@@ -754,7 +754,10 @@ fn do_dispatch(
     let epic_ctx = dispatch::EpicContext::from_db(task, db);
     let learnings: Vec<crate::models::Learning> = db
         .list_learnings_for_dispatch(Some(task.project_id), &task.repo_path, task.epic_id)
-        .unwrap_or_default()
+        .unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "failed to fetch learnings for dispatch");
+            vec![]
+        })
         .into_iter()
         .take(10)
         .collect();
