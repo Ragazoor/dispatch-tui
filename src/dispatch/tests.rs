@@ -161,6 +161,77 @@ fn format_learnings_preamble_kind_labels_are_human_readable() {
     assert!(preamble.contains("[Preference]"), "Preference label");
 }
 
+#[test]
+fn dispatch_agent_prepends_procedural_learnings_to_prompt() {
+    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(), // tmux set-hook
+        MockProcessRunner::ok(), // tmux send-keys -l
+        MockProcessRunner::ok(), // tmux send-keys Enter
+    ]);
+    let task = make_task(&repo_path);
+    let learning = make_learning(LearningKind::Procedural, "Always run cargo fmt --check before pushing.");
+    let result = dispatch_agent(&task, &mock, None, &[learning]).unwrap();
+    let written = std::fs::read_to_string(format!("{}/.claude-prompt", result.worktree_path)).unwrap();
+    assert!(
+        written.contains("# Instructions from past experience"),
+        "prompt should contain instructions section; got:\n{written}"
+    );
+    assert!(
+        written.contains("Always run cargo fmt --check before pushing."),
+        "prompt should contain learning summary"
+    );
+}
+
+#[test]
+fn dispatch_agent_with_no_learnings_omits_preamble() {
+    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(), // tmux set-hook
+        MockProcessRunner::ok(), // tmux send-keys -l
+        MockProcessRunner::ok(), // tmux send-keys Enter
+    ]);
+    let task = make_task(&repo_path);
+    let result = dispatch_agent(&task, &mock, None, &[]).unwrap();
+    let written = std::fs::read_to_string(format!("{}/.claude-prompt", result.worktree_path)).unwrap();
+    assert!(
+        !written.contains("# Instructions from past experience"),
+        "empty learnings should not add instructions section"
+    );
+    assert!(
+        !written.contains("# Relevant learnings"),
+        "empty learnings should not add relevant learnings section"
+    );
+}
+
+#[test]
+fn dispatch_agent_relevant_learnings_section_uses_kind_labels() {
+    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(), // tmux set-hook
+        MockProcessRunner::ok(), // tmux send-keys -l
+        MockProcessRunner::ok(), // tmux send-keys Enter
+    ]);
+    let task = make_task(&repo_path);
+    let learning = make_learning(LearningKind::Pitfall, "Watch out for X.");
+    let result = dispatch_agent(&task, &mock, None, &[learning]).unwrap();
+    let written = std::fs::read_to_string(format!("{}/.claude-prompt", result.worktree_path)).unwrap();
+    assert!(
+        written.contains("# Relevant learnings"),
+        "non-procedural learning should produce relevant learnings section"
+    );
+    assert!(
+        written.contains("[Pitfall]"),
+        "pitfall learning should have [Pitfall] label"
+    );
+}
+
 fn make_task(repo_path: &str) -> Task {
     Task {
         id: TaskId(42),
@@ -667,7 +738,7 @@ fn dispatch_reuses_existing_worktree() {
     ]);
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None).unwrap();
+    dispatch_agent(&task, &mock, None, &[]).unwrap();
 
     let calls = mock.recorded_calls();
     assert!(
@@ -698,7 +769,7 @@ fn dispatch_sends_claude_command() {
     ]);
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None).unwrap();
+    dispatch_agent(&task, &mock, None, &[]).unwrap();
 
     let calls = mock.recorded_calls();
     // The literal send-keys call (index 3) carries the claude invocation
@@ -729,7 +800,7 @@ fn dispatch_agent_uses_plan_mode() {
     ]);
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None).unwrap();
+    dispatch_agent(&task, &mock, None, &[]).unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, 3, "claude");
@@ -753,7 +824,7 @@ fn plan_agent_uses_plan_mode() {
     ]);
 
     let task = make_task(&repo_path);
-    plan_agent(&task, &mock, None).unwrap();
+    plan_agent(&task, &mock, None, &[]).unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, 3, "claude");
@@ -1075,7 +1146,7 @@ fn dispatch_uses_task_base_branch_in_prompt() {
 
     let mut task = make_task(&repo_path);
     task.base_branch = "master".to_string();
-    dispatch_agent(&task, &mock, None).unwrap();
+    dispatch_agent(&task, &mock, None, &[]).unwrap();
 
     // Verify the prompt uses task.base_branch directly — no symbolic-ref call needed
     let prompt_file = worktree_dir.join(".claude-prompt");
@@ -1100,7 +1171,7 @@ fn dispatch_fails_fast_if_git_fails() {
     ]);
 
     let task = make_task(&repo_path);
-    let result = dispatch_agent(&task, &mock, None);
+    let result = dispatch_agent(&task, &mock, None, &[]);
     assert!(result.is_err());
     let calls = mock.recorded_calls();
     assert_eq!(
@@ -1125,7 +1196,7 @@ fn brainstorm_reuses_existing_worktree() {
     ]);
 
     let task = make_task(&repo_path);
-    brainstorm_agent(&task, &mock, None).unwrap();
+    brainstorm_agent(&task, &mock, None, &[]).unwrap();
 
     let calls = mock.recorded_calls();
     assert!(
@@ -1152,7 +1223,7 @@ fn brainstorm_sends_brainstorm_prompt() {
     ]);
 
     let task = make_task(&repo_path);
-    brainstorm_agent(&task, &mock, None).unwrap();
+    brainstorm_agent(&task, &mock, None, &[]).unwrap();
 
     // Verify the prompt file was written with brainstorm content
     let prompt_file = worktree_dir.join(".claude-prompt");
@@ -1182,7 +1253,7 @@ fn quick_dispatch_reuses_existing_worktree() {
     ]);
 
     let task = make_task(&repo_path);
-    quick_dispatch_agent(&task, &mock, None).unwrap();
+    quick_dispatch_agent(&task, &mock, None, &[]).unwrap();
 
     let calls = mock.recorded_calls();
     assert!(
@@ -1209,7 +1280,7 @@ fn quick_dispatch_sends_rename_prompt() {
     ]);
 
     let task = make_task(&repo_path);
-    quick_dispatch_agent(&task, &mock, None).unwrap();
+    quick_dispatch_agent(&task, &mock, None, &[]).unwrap();
 
     let prompt_file = worktree_dir.join(".claude-prompt");
     let prompt = std::fs::read_to_string(prompt_file).unwrap();
@@ -1727,7 +1798,7 @@ fn dispatch_agent_uses_task_base_branch_in_prompt() {
 
     let mut task = make_task(&repo_path);
     task.base_branch = "develop".to_string();
-    dispatch_agent(&task, &mock, None).unwrap();
+    dispatch_agent(&task, &mock, None, &[]).unwrap();
 
     let prompt_file = worktree_dir.join(".claude-prompt");
     let prompt = std::fs::read_to_string(prompt_file).unwrap();
@@ -1957,7 +2028,7 @@ fn dispatch_agent_includes_plugin_dir() {
     ]);
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None).unwrap();
+    dispatch_agent(&task, &mock, None, &[]).unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, 3, "claude");

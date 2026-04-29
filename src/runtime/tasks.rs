@@ -60,7 +60,7 @@ impl TuiRuntime {
         let runner = self.runner.clone();
         tokio::task::spawn_blocking(move || {
             let id = task.id;
-            match dispatch::quick_dispatch_agent(&task, &*runner, epic_ctx.as_ref()) {
+            match dispatch::quick_dispatch_agent(&task, &*runner, epic_ctx.as_ref(), &[]) {
                 Ok(result) => {
                     let _ = tx.send(Message::Dispatched {
                         id,
@@ -124,11 +124,11 @@ impl TuiRuntime {
         self.spawn_dispatch(
             task,
             move |t, r| match mode {
-                models::DispatchMode::Dispatch => dispatch::dispatch_agent(t, r, epic_ctx.as_ref()),
+                models::DispatchMode::Dispatch => dispatch::dispatch_agent(t, r, epic_ctx.as_ref(), &[]),
                 models::DispatchMode::Brainstorm => {
-                    dispatch::brainstorm_agent(t, r, epic_ctx.as_ref())
+                    dispatch::brainstorm_agent(t, r, epic_ctx.as_ref(), &[])
                 }
-                models::DispatchMode::Plan => dispatch::plan_agent(t, r, epic_ctx.as_ref()),
+                models::DispatchMode::Plan => dispatch::plan_agent(t, r, epic_ctx.as_ref(), &[]),
             },
             label,
         );

@@ -753,9 +753,9 @@ fn do_dispatch(
 ) -> anyhow::Result<crate::models::DispatchResult> {
     let epic_ctx = dispatch::EpicContext::from_db(task, db);
     match DispatchMode::for_task(task) {
-        DispatchMode::Dispatch => dispatch::dispatch_agent(task, runner, epic_ctx.as_ref()),
-        DispatchMode::Brainstorm => dispatch::brainstorm_agent(task, runner, epic_ctx.as_ref()),
-        DispatchMode::Plan => dispatch::plan_agent(task, runner, epic_ctx.as_ref()),
+        DispatchMode::Dispatch => dispatch::dispatch_agent(task, runner, epic_ctx.as_ref(), &[]),
+        DispatchMode::Brainstorm => dispatch::brainstorm_agent(task, runner, epic_ctx.as_ref(), &[]),
+        DispatchMode::Plan => dispatch::plan_agent(task, runner, epic_ctx.as_ref(), &[]),
     }
 }
 

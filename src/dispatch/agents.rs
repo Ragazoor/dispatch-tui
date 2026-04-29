@@ -78,6 +78,7 @@ fn dispatch_with_prompt(
     prompt: &str,
     runner: &dyn ProcessRunner,
     base_branch: Option<&str>,
+    learnings: &[Learning],
 ) -> Result<DispatchResult> {
     let repo_path = expand_tilde(&task.repo_path);
 
@@ -93,11 +94,16 @@ fn dispatch_with_prompt(
 
     let provision = provision_worktree(task, runner, Some(resolved))?;
 
+    let preamble = format_learnings_preamble(learnings);
+    let prompt_with_learnings = match preamble {
+        Some(p) => format!("{p}\n\n{prompt}"),
+        None => prompt.to_string(),
+    };
     let full_prompt = format!(
         "{}\n\n\
          Always work from this worktree folder — do not `cd` to the parent repo \
          or other directories.\n\n\
-         {prompt}",
+         {prompt_with_learnings}",
         rebase_preamble(resolved)
     );
     let prompt_file = format!("{}/.claude-prompt", provision.worktree_path);
@@ -122,6 +128,7 @@ pub fn dispatch_agent(
     task: &Task,
     runner: &dyn ProcessRunner,
     epic: Option<&EpicContext>,
+    learnings: &[Learning],
 ) -> Result<DispatchResult> {
     let prompt = build_prompt(
         task.id,
@@ -130,34 +137,37 @@ pub fn dispatch_agent(
         task.plan_path.as_deref(),
         epic,
     );
-    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch))
+    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch), learnings)
 }
 
 pub fn brainstorm_agent(
     task: &Task,
     runner: &dyn ProcessRunner,
     epic: Option<&EpicContext>,
+    learnings: &[Learning],
 ) -> Result<DispatchResult> {
     let prompt = build_brainstorm_prompt(task.id, &task.title, &task.description, epic);
-    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch))
+    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch), learnings)
 }
 
 pub fn plan_agent(
     task: &Task,
     runner: &dyn ProcessRunner,
     epic: Option<&EpicContext>,
+    learnings: &[Learning],
 ) -> Result<DispatchResult> {
     let prompt = build_plan_prompt(task.id, &task.title, &task.description, epic);
-    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch))
+    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch), learnings)
 }
 
 pub fn quick_dispatch_agent(
     task: &Task,
     runner: &dyn ProcessRunner,
     epic: Option<&EpicContext>,
+    learnings: &[Learning],
 ) -> Result<DispatchResult> {
     let prompt = build_quick_dispatch_prompt(task.id, &task.title, &task.description, epic);
-    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch))
+    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch), learnings)
 }
 
 pub fn epic_planning_agent(
@@ -166,9 +176,10 @@ pub fn epic_planning_agent(
     epic_title: &str,
     epic_description: &str,
     runner: &dyn ProcessRunner,
+    learnings: &[Learning],
 ) -> Result<DispatchResult> {
     let prompt = build_epic_planning_prompt(epic_id, epic_title, epic_description);
-    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch))
+    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch), learnings)
 }
 
 /// Re-open a tmux window for an existing worktree and resume the most recent
