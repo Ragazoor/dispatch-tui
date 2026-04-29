@@ -704,7 +704,9 @@ impl App {
 
         let anchor = match self.effective_view_mode() {
             ViewMode::Board(sel) | ViewMode::Epic { selection: sel, .. } => sel.anchor,
-            ViewMode::TaskDetail { .. } => unreachable!("effective_view_mode never returns TaskDetail"),
+            ViewMode::TaskDetail { .. } => {
+                unreachable!("effective_view_mode never returns TaskDetail")
+            }
         };
 
         let Some(anchor) = anchor else {
@@ -1436,9 +1438,7 @@ impl App {
     }
 
     fn handle_close_task_detail(&mut self) -> Vec<Command> {
-        if let ViewMode::TaskDetail { previous, .. } =
-            std::mem::take(&mut self.board.view_mode)
-        {
+        if let ViewMode::TaskDetail { previous, .. } = std::mem::take(&mut self.board.view_mode) {
             self.board.view_mode = *previous;
         }
         vec![]
@@ -3042,9 +3042,7 @@ impl App {
     }
 
     fn handle_exit_epic(&mut self) -> Vec<Command> {
-        if let ViewMode::Epic { parent, .. } =
-            std::mem::take(&mut self.board.view_mode)
-        {
+        if let ViewMode::Epic { parent, .. } = std::mem::take(&mut self.board.view_mode) {
             self.board.view_mode = *parent;
         }
         vec![]

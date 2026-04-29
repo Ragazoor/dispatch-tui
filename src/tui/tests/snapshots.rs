@@ -2,8 +2,8 @@ use ratatui::buffer::Buffer;
 
 use super::super::App;
 use super::{make_app, make_key, make_task, render_to_buffer, TEST_TIMEOUT};
-use crossterm::event::KeyCode;
 use crate::models::TaskStatus;
+use crossterm::event::KeyCode;
 
 fn buffer_to_string(buf: &Buffer) -> String {
     let area = buf.area();

@@ -191,7 +191,11 @@ fn j_moves_cursor_down_in_panel() {
 
     app.handle_key(make_key(KeyCode::Char('j')));
     assert_eq!(app.selected_project_row(), 1);
-    assert_eq!(app.active_project(), 2, "j should auto-select Backend (id=2)");
+    assert_eq!(
+        app.active_project(),
+        2,
+        "j should auto-select Backend (id=2)"
+    );
 }
 
 #[test]
@@ -201,7 +205,11 @@ fn k_moves_cursor_up_in_panel() {
     app.handle_key(make_key(KeyCode::Char('j')));
     app.handle_key(make_key(KeyCode::Char('k')));
     assert_eq!(app.selected_project_row(), 0);
-    assert_eq!(app.active_project(), 1, "k should auto-select Default (id=1)");
+    assert_eq!(
+        app.active_project(),
+        1,
+        "k should auto-select Default (id=1)"
+    );
 }
 
 #[test]
@@ -240,9 +248,16 @@ fn enter_closes_projects_panel() {
     app.handle_key(make_key(KeyCode::Char('h')));
     app.handle_key(make_key(KeyCode::Char('j')));
     app.handle_key(make_key(KeyCode::Enter));
-    assert!(!app.projects_panel_visible(), "Enter should close the panel");
+    assert!(
+        !app.projects_panel_visible(),
+        "Enter should close the panel"
+    );
     assert_eq!(app.selected_column(), 1, "focus should return to Backlog");
-    assert_eq!(app.active_project(), 2, "active project should still be Backend");
+    assert_eq!(
+        app.active_project(),
+        2,
+        "active project should still be Backend"
+    );
 }
 
 #[test]
@@ -517,7 +532,11 @@ fn g_closes_projects_panel() {
     app.handle_key(make_key(KeyCode::Char('g')));
     assert!(!app.projects_panel_visible(), "g should close the panel");
     assert_eq!(app.selected_column(), 1, "focus should return to Backlog");
-    assert_eq!(app.active_project(), 2, "active project should still be Backend");
+    assert_eq!(
+        app.active_project(),
+        2,
+        "active project should still be Backend"
+    );
 }
 
 #[test]
@@ -527,7 +546,10 @@ fn g_in_empty_projects_panel_closes_panel() {
     app.update(Message::NavigateColumn(-1));
     assert!(app.projects_panel_visible(), "precondition: panel open");
     app.handle_key(make_key(KeyCode::Char('g')));
-    assert!(!app.projects_panel_visible(), "g should close panel even with no projects");
+    assert!(
+        !app.projects_panel_visible(),
+        "g should close panel even with no projects"
+    );
 }
 
 #[test]

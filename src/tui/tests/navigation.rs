@@ -1520,7 +1520,6 @@ fn resumed_clears_last_error() {
     assert!(!app.agents.last_error.contains_key(&TaskId(4)));
 }
 
-
 #[test]
 fn mark_active_sets_last_active_at_to_now() {
     let mut tracking = AgentTracking::new(TEST_TIMEOUT);

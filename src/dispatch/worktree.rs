@@ -46,7 +46,10 @@ pub(super) fn provision_worktree(
             if fetch_ok {
                 Some(format!("origin/{base}"))
             } else {
-                tracing::warn!(base, "git fetch origin failed, falling back to local branch");
+                tracing::warn!(
+                    base,
+                    "git fetch origin failed, falling back to local branch"
+                );
                 Some(base.to_string())
             }
         } else {

@@ -759,8 +759,12 @@ fn do_dispatch(
             vec![]
         });
     match DispatchMode::for_task(task) {
-        DispatchMode::Dispatch => dispatch::dispatch_agent(task, runner, epic_ctx.as_ref(), &learnings),
-        DispatchMode::Brainstorm => dispatch::brainstorm_agent(task, runner, epic_ctx.as_ref(), &learnings),
+        DispatchMode::Dispatch => {
+            dispatch::dispatch_agent(task, runner, epic_ctx.as_ref(), &learnings)
+        }
+        DispatchMode::Brainstorm => {
+            dispatch::brainstorm_agent(task, runner, epic_ctx.as_ref(), &learnings)
+        }
         DispatchMode::Plan => dispatch::plan_agent(task, runner, epic_ctx.as_ref(), &learnings),
     }
 }

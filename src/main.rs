@@ -159,7 +159,6 @@ fn default_db_path() -> PathBuf {
     dispatch_tui::default_db_path()
 }
 
-
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();

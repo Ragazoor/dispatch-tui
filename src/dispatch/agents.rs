@@ -19,8 +19,9 @@ use super::stderr_str;
 use super::worktree::provision_worktree;
 
 pub(super) fn format_learnings_preamble(learnings: &[Learning]) -> Option<String> {
-    let (procedural, other): (Vec<&Learning>, Vec<&Learning>) =
-        learnings.iter().partition(|l| l.kind == LearningKind::Procedural);
+    let (procedural, other): (Vec<&Learning>, Vec<&Learning>) = learnings
+        .iter()
+        .partition(|l| l.kind == LearningKind::Procedural);
 
     if procedural.is_empty() && other.is_empty() {
         return None;

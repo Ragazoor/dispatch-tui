@@ -96,7 +96,10 @@ fn format_learnings_preamble_procedural_only_has_instructions_section() {
 
 #[test]
 fn format_learnings_preamble_non_procedural_only_has_relevant_section() {
-    let learning = make_learning(LearningKind::Convention, "Use FieldUpdate for nullable fields.");
+    let learning = make_learning(
+        LearningKind::Convention,
+        "Use FieldUpdate for nullable fields.",
+    );
     let preamble = super::agents::format_learnings_preamble(&[learning]).unwrap();
     assert!(
         preamble.contains("# Relevant learnings"),
@@ -156,7 +159,10 @@ fn format_learnings_preamble_kind_labels_are_human_readable() {
         super::agents::format_learnings_preamble(&[pitfall, tool_rec, episodic, preference])
             .unwrap();
     assert!(preamble.contains("[Pitfall]"), "Pitfall label");
-    assert!(preamble.contains("[Tool recommendation]"), "ToolRecommendation label");
+    assert!(
+        preamble.contains("[Tool recommendation]"),
+        "ToolRecommendation label"
+    );
     assert!(preamble.contains("[Episodic]"), "Episodic label");
     assert!(preamble.contains("[Preference]"), "Preference label");
 }
@@ -172,9 +178,13 @@ fn dispatch_agent_prepends_procedural_learnings_to_prompt() {
         MockProcessRunner::ok(), // tmux send-keys Enter
     ]);
     let task = make_task(&repo_path);
-    let learning = make_learning(LearningKind::Procedural, "Always run cargo fmt --check before pushing.");
+    let learning = make_learning(
+        LearningKind::Procedural,
+        "Always run cargo fmt --check before pushing.",
+    );
     let result = dispatch_agent(&task, &mock, None, &[learning]).unwrap();
-    let written = std::fs::read_to_string(format!("{}/.claude-prompt", result.worktree_path)).unwrap();
+    let written =
+        std::fs::read_to_string(format!("{}/.claude-prompt", result.worktree_path)).unwrap();
     assert!(
         written.contains("# Instructions from past experience"),
         "prompt should contain instructions section; got:\n{written}"
@@ -197,7 +207,8 @@ fn dispatch_agent_with_no_learnings_omits_preamble() {
     ]);
     let task = make_task(&repo_path);
     let result = dispatch_agent(&task, &mock, None, &[]).unwrap();
-    let written = std::fs::read_to_string(format!("{}/.claude-prompt", result.worktree_path)).unwrap();
+    let written =
+        std::fs::read_to_string(format!("{}/.claude-prompt", result.worktree_path)).unwrap();
     assert!(
         !written.contains("# Instructions from past experience"),
         "empty learnings should not add instructions section"
@@ -221,7 +232,8 @@ fn dispatch_agent_relevant_learnings_section_uses_kind_labels() {
     let task = make_task(&repo_path);
     let learning = make_learning(LearningKind::Pitfall, "Watch out for X.");
     let result = dispatch_agent(&task, &mock, None, &[learning]).unwrap();
-    let written = std::fs::read_to_string(format!("{}/.claude-prompt", result.worktree_path)).unwrap();
+    let written =
+        std::fs::read_to_string(format!("{}/.claude-prompt", result.worktree_path)).unwrap();
     assert!(
         written.contains("# Relevant learnings"),
         "non-procedural learning should produce relevant learnings section"

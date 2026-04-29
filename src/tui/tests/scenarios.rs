@@ -195,4 +195,3 @@ fn scenario_lowercase_m_is_no_longer_bound_to_move() {
         "lowercase 'm' must not emit PersistTask"
     );
 }
-

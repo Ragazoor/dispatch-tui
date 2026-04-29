@@ -554,10 +554,7 @@ fn verify_feed_invalid_json_fails() {
         ])
         .output()
         .unwrap();
-    assert!(
-        !out.status.success(),
-        "Expected failure for invalid JSON"
-    );
+    assert!(!out.status.success(), "Expected failure for invalid JSON");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         stderr.contains("failed to parse"),
@@ -569,12 +566,7 @@ fn verify_feed_invalid_json_fails() {
 fn verify_feed_command_failure_exits_nonzero() {
     let db = NamedTempFile::new().unwrap();
     let out = binary()
-        .args([
-            "--db",
-            db.path().to_str().unwrap(),
-            "verify-feed",
-            "exit 1",
-        ])
+        .args(["--db", db.path().to_str().unwrap(), "verify-feed", "exit 1"])
         .output()
         .unwrap();
     assert!(

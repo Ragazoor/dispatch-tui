@@ -5616,7 +5616,10 @@ fn migration_v41_drops_cost_usd_column() {
         )
         .map(|n| n > 0)
         .unwrap_or(false);
-    assert!(!has_cost_usd, "cost_usd column should have been removed by migration v41");
+    assert!(
+        !has_cost_usd,
+        "cost_usd column should have been removed by migration v41"
+    );
 }
 
 #[test]

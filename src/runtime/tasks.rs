@@ -144,7 +144,9 @@ impl TuiRuntime {
                 models::DispatchMode::Brainstorm => {
                     dispatch::brainstorm_agent(t, r, epic_ctx.as_ref(), &learnings)
                 }
-                models::DispatchMode::Plan => dispatch::plan_agent(t, r, epic_ctx.as_ref(), &learnings),
+                models::DispatchMode::Plan => {
+                    dispatch::plan_agent(t, r, epic_ctx.as_ref(), &learnings)
+                }
             },
             label,
         );

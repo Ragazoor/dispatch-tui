@@ -95,7 +95,10 @@ impl App {
                 return self.update(Message::CloseTaskDetail);
             }
             KeyCode::Char('j') | KeyCode::Down => {
-                if let ViewMode::TaskDetail { scroll, max_scroll, .. } = &mut self.board.view_mode {
+                if let ViewMode::TaskDetail {
+                    scroll, max_scroll, ..
+                } = &mut self.board.view_mode
+                {
                     *scroll = scroll.saturating_add(1).min(*max_scroll);
                 }
             }
@@ -865,8 +868,10 @@ impl App {
                 }
                 vec![]
             }
-            KeyCode::Char('l') | KeyCode::Right
-            | KeyCode::Enter | KeyCode::Char('g')
+            KeyCode::Char('l')
+            | KeyCode::Right
+            | KeyCode::Enter
+            | KeyCode::Char('g')
             | KeyCode::Esc => self.update(Message::NavigateColumn(1)),
             KeyCode::Char('n') => {
                 self.input.mode = InputMode::InputProjectName { editing_id: None };

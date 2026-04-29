@@ -16,8 +16,8 @@
 set -euo pipefail
 
 REPOS=(
-  "owner/repo1"
-  "owner/repo2"
+  "annotell/airflow-dags"
+  "annotell/scala-common"
   # add more repos here
 )
 

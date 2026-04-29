@@ -68,7 +68,6 @@ fn status_icon(status: TaskStatus) -> &'static str {
     }
 }
 
-
 /// Compute how tall the detail/input panel should be based on the current input mode.
 /// Expands when a repo list is being shown so all repos (plus cursor) are visible.
 fn input_panel_height(app: &App, area_height: u16) -> u16 {
@@ -966,10 +965,6 @@ fn render_projects_column(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_stateful_widget(list, area, &mut app.projects_panel.list_state);
 }
 
-
-
-
-
 fn render_input_form_panel(frame: &mut Frame, app: &App, area: Rect) {
     if render_input_form(frame, app, area) {
         return;
@@ -1041,15 +1036,16 @@ fn render_task_detail_overlay(frame: &mut Frame, app: &mut App, area: Rect) {
     let header_height = header_lines.len() as u16 + 1; // +1 for separator line
 
     // ── Compute body area and scroll clamping ────────────────────────────────
-    let body_height = overlay_area
-        .height
-        .saturating_sub(2 + header_height + 1); // borders(2) + header + separator(1)
+    let body_height = overlay_area.height.saturating_sub(2 + header_height + 1); // borders(2) + header + separator(1)
     let body_width = overlay_area.width.saturating_sub(2) as usize;
 
     let desc_wrapped = wrapped_line_count(&task.description, body_width);
     let new_max_scroll = desc_wrapped.saturating_sub(body_height as usize) as u16;
 
-    if let ViewMode::TaskDetail { ref mut max_scroll, .. } = app.board.view_mode {
+    if let ViewMode::TaskDetail {
+        ref mut max_scroll, ..
+    } = app.board.view_mode
+    {
         if *max_scroll != new_max_scroll {
             *max_scroll = new_max_scroll;
         }
@@ -1079,16 +1075,18 @@ fn render_task_detail_overlay(frame: &mut Frame, app: &mut App, area: Rect) {
     let header_block = Block::default()
         .borders(Borders::BOTTOM)
         .border_style(Style::default().fg(BORDER));
-    frame.render_widget(
-        Paragraph::new(header_lines).block(header_block),
-        layout[0],
-    );
+    frame.render_widget(Paragraph::new(header_lines).block(header_block), layout[0]);
 
     // ── Render scrollable description ─────────────────────────────────────────
     let desc_lines: Vec<Line> = task
         .description
         .lines()
-        .map(|l| Line::from(Span::styled(l.to_string(), Style::default().fg(MUTED_LIGHT))))
+        .map(|l| {
+            Line::from(Span::styled(
+                l.to_string(),
+                Style::default().fg(MUTED_LIGHT),
+            ))
+        })
         .collect();
 
     frame.render_widget(

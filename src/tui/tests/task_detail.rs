@@ -82,7 +82,10 @@ fn close_task_detail_from_epic_restores_epic_mode() {
 fn j_key_increments_scroll_in_task_detail() {
     let mut app = make_app_with_task();
     app.update(Message::OpenTaskDetail(1));
-    if let ViewMode::TaskDetail { ref mut max_scroll, .. } = app.board.view_mode {
+    if let ViewMode::TaskDetail {
+        ref mut max_scroll, ..
+    } = app.board.view_mode
+    {
         *max_scroll = 10;
     }
     app.handle_key(make_key(KeyCode::Char('j')));
@@ -101,7 +104,12 @@ fn k_key_at_zero_stays_at_zero() {
 fn j_key_clamped_at_max_scroll() {
     let mut app = make_app_with_task();
     app.update(Message::OpenTaskDetail(1));
-    if let ViewMode::TaskDetail { ref mut scroll, ref mut max_scroll, .. } = app.board.view_mode {
+    if let ViewMode::TaskDetail {
+        ref mut scroll,
+        ref mut max_scroll,
+        ..
+    } = app.board.view_mode
+    {
         *scroll = 3;
         *max_scroll = 3;
     }
@@ -113,7 +121,10 @@ fn j_key_clamped_at_max_scroll() {
 fn down_key_increments_scroll() {
     let mut app = make_app_with_task();
     app.update(Message::OpenTaskDetail(1));
-    if let ViewMode::TaskDetail { ref mut max_scroll, .. } = app.board.view_mode {
+    if let ViewMode::TaskDetail {
+        ref mut max_scroll, ..
+    } = app.board.view_mode
+    {
         *max_scroll = 10;
     }
     app.handle_key(make_key(KeyCode::Down));
@@ -124,7 +135,12 @@ fn down_key_increments_scroll() {
 fn k_key_decrements_scroll_from_nonzero() {
     let mut app = make_app_with_task();
     app.update(Message::OpenTaskDetail(1));
-    if let ViewMode::TaskDetail { ref mut scroll, ref mut max_scroll, .. } = app.board.view_mode {
+    if let ViewMode::TaskDetail {
+        ref mut scroll,
+        ref mut max_scroll,
+        ..
+    } = app.board.view_mode
+    {
         *scroll = 3;
         *max_scroll = 5;
     }
@@ -136,7 +152,12 @@ fn k_key_decrements_scroll_from_nonzero() {
 fn up_key_decrements_scroll() {
     let mut app = make_app_with_task();
     app.update(Message::OpenTaskDetail(1));
-    if let ViewMode::TaskDetail { ref mut scroll, ref mut max_scroll, .. } = app.board.view_mode {
+    if let ViewMode::TaskDetail {
+        ref mut scroll,
+        ref mut max_scroll,
+        ..
+    } = app.board.view_mode
+    {
         *scroll = 2;
         *max_scroll = 5;
     }
