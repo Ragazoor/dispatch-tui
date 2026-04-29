@@ -78,7 +78,8 @@ fn input_panel_height(app: &App, area_height: u16) -> u16 {
     match &app.input.mode {
         InputMode::QuickDispatch => {
             // header(1) + blank(1) + filter(1) + repos(N) + blank(1) + hint(1) + borders(2) = N + 7
-            let rows = app.board.repo_paths.len() as u16 + 7;
+            let n = crate::tui::filtered_repos(&app.board.repo_paths, &app.input.buffer).len();
+            let rows = n as u16 + 7;
             rows.clamp(8, max_height)
         }
         InputMode::InputRepoPath | InputMode::InputEpicRepoPath if app.input.buffer.is_empty() => {
