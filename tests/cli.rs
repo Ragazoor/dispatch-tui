@@ -486,6 +486,109 @@ fn fetch_security_no_settings_prints_empty_array() {
 }
 
 // ---------------------------------------------------------------------------
+// verify-feed
+// ---------------------------------------------------------------------------
+
+#[test]
+fn verify_feed_valid_empty_array_succeeds() {
+    let db = NamedTempFile::new().unwrap();
+    let out = binary()
+        .args([
+            "--db",
+            db.path().to_str().unwrap(),
+            "verify-feed",
+            "echo '[]'",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("0 valid items"),
+        "Expected '0 valid items', got: {stdout}"
+    );
+}
+
+#[test]
+fn verify_feed_valid_items_succeeds() {
+    let db = NamedTempFile::new().unwrap();
+    let json = r#"[{"external_id":"dependabot:org/repo#1","title":"[HIGH] lodash RCE","description":"desc","url":"https://example.com","status":"backlog"}]"#;
+    let cmd = format!("echo '{json}'");
+    let out = binary()
+        .args(["--db", db.path().to_str().unwrap(), "verify-feed", &cmd])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("1 valid item"),
+        "Expected '1 valid item', got: {stdout}"
+    );
+    assert!(
+        stdout.contains("dependabot:org/repo#1"),
+        "Expected external_id in output, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("[HIGH] lodash RCE"),
+        "Expected title in output, got: {stdout}"
+    );
+}
+
+#[test]
+fn verify_feed_invalid_json_fails() {
+    let db = NamedTempFile::new().unwrap();
+    let out = binary()
+        .args([
+            "--db",
+            db.path().to_str().unwrap(),
+            "verify-feed",
+            "echo 'not valid json'",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "Expected failure for invalid JSON"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("failed to parse"),
+        "Expected parse error in stderr, got: {stderr}"
+    );
+}
+
+#[test]
+fn verify_feed_command_failure_exits_nonzero() {
+    let db = NamedTempFile::new().unwrap();
+    let out = binary()
+        .args([
+            "--db",
+            db.path().to_str().unwrap(),
+            "verify-feed",
+            "exit 1",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "Expected failure when command exits non-zero"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("command exited"),
+        "Expected 'command exited' in stderr, got: {stderr}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // tui — tmux guard
 // ---------------------------------------------------------------------------
 

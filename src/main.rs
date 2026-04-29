@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use tracing::Level;
@@ -105,6 +105,11 @@ enum Commands {
     FetchReviews,
     /// Fetch security alerts and print as FeedItem JSON to stdout
     FetchSecurity,
+    /// Run a feed command and validate its output as FeedItem JSON
+    VerifyFeed {
+        /// Shell command to run (executed via sh -c)
+        command: String,
+    },
 }
 
 fn parse_status(s: &str) -> anyhow::Result<models::TaskStatus> {
@@ -349,6 +354,55 @@ async fn main() -> Result<()> {
                 }
                 Err(e) => {
                     eprintln!("fetch-security: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        Commands::VerifyFeed { command } => {
+            let output = std::process::Command::new("sh")
+                .args(["-c", &command])
+                .output()
+                .context("failed to spawn command")?;
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                eprintln!(
+                    "verify-feed: command exited with {}\n{}",
+                    output.status, stderr
+                );
+                std::process::exit(1);
+            }
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            match serde_json::from_str::<Vec<models::FeedItem>>(stdout.trim()) {
+                Ok(items) => {
+                    if !items.is_empty() {
+                        println!("{:<52} {:<55} STATUS", "EXTERNAL_ID", "TITLE");
+                        for item in &items {
+                            let id = if item.external_id.len() > 50 {
+                                format!("{}…", &item.external_id[..49])
+                            } else {
+                                item.external_id.clone()
+                            };
+                            let title = if item.title.len() > 53 {
+                                format!("{}…", &item.title[..52])
+                            } else {
+                                item.title.clone()
+                            };
+                            println!("{:<52} {:<55} {}", id, title, item.status.as_str());
+                        }
+                        println!();
+                    }
+                    let s = if items.len() == 1 { "" } else { "s" };
+                    println!("✓ {} valid item{s}", items.len());
+                }
+                Err(e) => {
+                    let preview = stdout.trim();
+                    let preview = if preview.len() > 500 {
+                        &preview[..500]
+                    } else {
+                        preview
+                    };
+                    eprintln!("verify-feed: failed to parse output as FeedItem array: {e}");
+                    eprintln!("Output (first 500 chars):\n{preview}");
                     std::process::exit(1);
                 }
             }
