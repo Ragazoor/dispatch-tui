@@ -1680,8 +1680,6 @@ fn render_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
                 Span::styled(" toggle  ", note_style),
                 Span::styled("[a]", key_style),
                 Span::styled(format!(" {a_label}  "), note_style),
-                Span::styled("[Tab]", key_style),
-                Span::styled(" incl/excl", note_style),
             ]));
             lines.push(Line::from(vec![
                 Span::styled("  [s]", key_style),

@@ -1,4 +1,4 @@
-use super::palette::{BORDER, FG, MUTED, MUTED_LIGHT, PURPLE};
+use super::palette::{BORDER, FG, MUTED, PURPLE};
 
 use crate::models::{Epic, Staleness};
 use crate::tui::{App, RepoFilterMode, ViewMode};
@@ -86,8 +86,6 @@ fn tab_label(prefix: &str, name: &str, count: usize, filter: bool, loading: bool
 pub(in crate::tui::ui) fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
     let active_style = Style::default().fg(FG).add_modifier(Modifier::BOLD);
     let inactive_style = Style::default().fg(MUTED);
-    let hint_style = Style::default().fg(MUTED);
-
     let feed_epics: Vec<&Epic> = app
         .epics()
         .iter()
@@ -152,21 +150,6 @@ pub(in crate::tui::ui) fn render_tab_bar(frame: &mut Frame, app: &App, area: Rec
             inactive_style
         };
         spans.push(Span::styled(label, style));
-    }
-
-    let key_hint = Style::default()
-        .fg(MUTED_LIGHT)
-        .add_modifier(Modifier::BOLD);
-    let next_tab_name = match active_feed_idx {
-        None => feed_epics.first().map(|e| e.title.as_str()).unwrap_or(""),
-        Some(i) => feed_epics
-            .get(i + 1)
-            .map(|e| e.title.as_str())
-            .unwrap_or("Tasks"),
-    };
-    spans.push(Span::styled("  [Tab]", key_hint));
-    if !next_tab_name.is_empty() {
-        spans.push(Span::styled(format!(" {next_tab_name}"), hint_style));
     }
 
     let line = Line::from(spans);

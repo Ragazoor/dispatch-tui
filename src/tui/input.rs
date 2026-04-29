@@ -130,8 +130,6 @@ impl App {
         }
 
         match key.code {
-            KeyCode::Tab => self.update(Message::TabCycle),
-
             KeyCode::Char('q') => {
                 if matches!(self.board.view_mode, ViewMode::Epic { .. }) {
                     self.update(Message::ExitEpic)
@@ -713,7 +711,6 @@ impl App {
             KeyCode::Enter | KeyCode::Esc | KeyCode::Char('q') => {
                 self.update(Message::CloseRepoFilter)
             }
-            KeyCode::Tab => self.update(Message::ToggleRepoFilterMode),
             KeyCode::Char('a') => self.update(Message::ToggleAllRepoFilter),
             KeyCode::Char('j') | KeyCode::Down => self.update(Message::MoveRepoCursor(1)),
             KeyCode::Char('k') | KeyCode::Up => self.update(Message::MoveRepoCursor(-1)),

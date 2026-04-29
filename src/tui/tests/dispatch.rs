@@ -1265,18 +1265,12 @@ fn quick_dispatch_enter_selects_cursor_repo() {
 }
 
 #[test]
-fn tab_bar_board_mode_highlights_tab_key() {
+fn tab_hint_absent_from_tab_bar() {
     let mut app = make_app();
     let buf = render_to_buffer(&mut app, 100, 30);
-    let style = find_style_of(&buf, "[Tab]").expect("[Tab] text not found in buffer");
     assert!(
-        style.add_modifier.contains(Modifier::BOLD),
-        "[Tab] should be bold"
-    );
-    assert_eq!(
-        style.fg,
-        Some(Color::Rgb(120, 124, 153)),
-        "[Tab] should use MUTED_LIGHT color"
+        find_style_of(&buf, "[Tab]").is_none(),
+        "[Tab] hint must not appear in the board view"
     );
 }
 

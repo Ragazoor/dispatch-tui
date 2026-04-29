@@ -2,7 +2,7 @@
 source: src/tui/tests/snapshots.rs
 expression: rendered
 ---
-[Default]   ▸ Tasks   [Tab]                                                                                       🔕  [N]
+[Default]   ▸ Tasks                                                                                               🔕  [N]
       ▸ Projects 1             ◦ backlog 2             ◦ running 1             ◦ review 0               ◦ done 1
  Projects (1) ──────────│────────────────────│────────────────────────│────────────────────────│────────────────────────
 ────────────────────────│────────────────────│  ── active             │                        │────────────────────────

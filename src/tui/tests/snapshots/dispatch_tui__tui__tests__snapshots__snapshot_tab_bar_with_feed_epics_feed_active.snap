@@ -2,7 +2,7 @@
 source: src/tui/tests/snapshots.rs
 expression: rendered
 ---
-[Default]   Tasks  │  ▸ My Feed  │  Another Feed   [Tab] Another Feed                        manual dispatch [U]  🔕  [N]
+[Default]   Tasks  │  ▸ My Feed  │  Another Feed                                             manual dispatch [U]  🔕  [N]
         ▸ backlog 0 [ ]                 ◦ running 0                   ◦ review 0                     ◦ done 0
 ╭ My Feed ─────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │──────────────────────────────│──────────────────────────│──────────────────────────────│─────────────────────────────│

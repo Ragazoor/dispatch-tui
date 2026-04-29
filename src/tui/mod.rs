@@ -827,7 +827,6 @@ impl App {
                 activity_ts,
             } => self.handle_tmux_output(id, output, activity_ts),
             Message::WindowGone(id) => self.handle_window_gone(id),
-            Message::TabCycle => self.handle_tab_cycle(),
 
             // ── Task lifecycle, dispatch, selection, wrap-up ──
             Message::DispatchTask(id, mode) => self.handle_dispatch_task(id, mode),
@@ -940,7 +939,6 @@ impl App {
             Message::CloseRepoFilter => self.handle_close_repo_filter(),
             Message::ToggleRepoFilter(path) => self.handle_toggle_repo_filter(path),
             Message::ToggleAllRepoFilter => self.handle_toggle_all_repo_filter(),
-            Message::ToggleRepoFilterMode => self.handle_toggle_repo_filter_mode(),
             Message::MoveRepoCursor(delta) => self.handle_move_repo_cursor(delta),
             Message::StartSavePreset => self.handle_start_save_preset(),
             Message::SaveFilterPreset(name) => self.handle_save_filter_preset(name),
@@ -3033,40 +3031,6 @@ impl App {
         }
     }
 
-    fn handle_tab_cycle(&mut self) -> Vec<Command> {
-        let feed_ids: Vec<EpicId> = self
-            .board
-            .epics
-            .iter()
-            .filter(|e| e.feed_command.is_some())
-            .map(|e| e.id)
-            .collect();
-
-        // Clone to release the borrow before calling &mut self methods below.
-        match self.board.view_mode.clone() {
-            ViewMode::Board(_) => {
-                if let Some(&first_id) = feed_ids.first() {
-                    return self.handle_enter_epic(first_id);
-                }
-            }
-            ViewMode::Epic { epic_id, .. } => {
-                if let Some(pos) = feed_ids.iter().position(|&id| id == epic_id) {
-                    if let Some(&next_id) = feed_ids.get(pos + 1) {
-                        let _ = self.handle_exit_epic(); // always vec![], exit before entering next
-                        return self.handle_enter_epic(next_id);
-                    } else {
-                        return self.handle_exit_epic();
-                    }
-                }
-                // Not a feed epic — no-op
-            }
-            ViewMode::TaskDetail { .. } => {
-                // No-op: tab cycle does nothing inside task detail overlay
-            }
-        }
-        vec![]
-    }
-
     fn handle_enter_epic(&mut self, epic_id: EpicId) -> Vec<Command> {
         let parent = Box::new(self.board.view_mode.clone());
         self.board.view_mode = ViewMode::Epic {
@@ -3371,15 +3335,6 @@ impl App {
         } else {
             self.filter.repos = self.board.repo_paths.iter().cloned().collect();
         }
-        self.sync_board_selection();
-        vec![]
-    }
-
-    fn handle_toggle_repo_filter_mode(&mut self) -> Vec<Command> {
-        self.filter.mode = match self.filter.mode {
-            RepoFilterMode::Include => RepoFilterMode::Exclude,
-            RepoFilterMode::Exclude => RepoFilterMode::Include,
-        };
         self.sync_board_selection();
         vec![]
     }

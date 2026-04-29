@@ -288,24 +288,6 @@ fn repo_filter_exclude_applies_to_epics() {
     }
 }
 
-#[test]
-fn toggle_repo_filter_mode_switches() {
-    let mut app = make_app();
-    assert_eq!(app.filter.mode, RepoFilterMode::Include);
-    app.update(Message::ToggleRepoFilterMode);
-    assert_eq!(app.filter.mode, RepoFilterMode::Exclude);
-    app.update(Message::ToggleRepoFilterMode);
-    assert_eq!(app.filter.mode, RepoFilterMode::Include);
-}
-
-#[test]
-fn tab_key_toggles_repo_filter_mode() {
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/repo".to_string()];
-    app.input.mode = InputMode::RepoFilter;
-    app.handle_key(make_key(KeyCode::Tab));
-    assert_eq!(app.filter.mode, RepoFilterMode::Exclude);
-}
 
 #[test]
 fn close_repo_filter_persists_mode() {
@@ -689,17 +671,6 @@ fn handle_key_normal_start_repo_filter() {
     let mut app = make_app();
     app.handle_key(make_key(KeyCode::Char('f')));
     assert_eq!(*app.mode(), InputMode::RepoFilter);
-}
-
-#[test]
-fn handle_key_repo_filter_tab_toggles_mode() {
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/repo".to_string()];
-    app.input.mode = InputMode::RepoFilter;
-    let initial_mode = app.filter.mode;
-
-    app.handle_key(make_key(KeyCode::Tab));
-    assert_ne!(app.filter.mode, initial_mode);
 }
 
 #[test]

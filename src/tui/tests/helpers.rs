@@ -130,16 +130,6 @@ pub(in crate::tui) fn make_app_with_archived_task() -> App {
     app
 }
 
-pub(in crate::tui) fn make_feed_epic(id: i64, title: &str, sort_order: i64) -> Epic {
-    Epic {
-        title: title.to_string(),
-        sort_order: Some(sort_order),
-        feed_command: Some(format!("feed-{title}")),
-        feed_interval_secs: Some(30),
-        ..make_epic(id)
-    }
-}
-
 /// Helper: create an app with one task + one epic in Backlog, cursor on the epic.
 pub(in crate::tui) fn make_app_with_epic_selected() -> App {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);

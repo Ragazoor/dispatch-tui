@@ -300,7 +300,6 @@ pub enum Message {
     ConfirmDone,
     CancelDone,
     ToggleNotifications,
-    TabCycle,
     OpenInBrowser {
         url: String,
     },
@@ -310,7 +309,6 @@ pub enum Message {
     ToggleRepoFilter(String),
     ToggleAllRepoFilter,
     MoveRepoCursor(isize),
-    ToggleRepoFilterMode,
     // Filter presets
     StartSavePreset,
     SaveFilterPreset(String),
