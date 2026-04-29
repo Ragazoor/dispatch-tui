@@ -117,15 +117,21 @@ rule DispatchTask {
     ensures: AgentLaunched(task: task, mode: standard)
 
     @guidance
-        -- The worktree branch is created from task.base_branch.
-        -- Specifically: `git worktree add -b <branch> <path> <base_branch>`.
+        -- Before creating the worktree, `git fetch origin <base_branch>` is
+        -- run in the repo root to update the remote-tracking ref. On success,
+        -- the worktree branch is created from `origin/<base_branch>` so the
+        -- agent starts from the latest remote state. On fetch failure (no
+        -- origin remote, network error), the step is skipped silently and the
+        -- worktree falls back to the local base branch.
+        -- Specifically: `git worktree add -B <branch> <path> origin/<base_branch>`.
         -- If the worktree directory already exists on disk (pre-created),
-        -- the git worktree add step is skipped.
+        -- the fetch and git worktree add steps are both skipped.
         -- The launched Claude command includes a plugin-dir flag so
         -- the agent discovers dispatch plugin skills (e.g. /wrap-up).
         -- The agent prompt is prepended with a `git rebase <base>`
         -- preamble so the agent picks up latest base changes on first
-        -- run. All task dispatches use --permission-mode plan
+        -- run (also useful when an agent is resumed after time passes).
+        -- All task dispatches use --permission-mode plan
         -- (see PlanTask guidance for the full rationale).
 }
 
