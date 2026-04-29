@@ -191,6 +191,7 @@ fn j_moves_cursor_down_in_panel() {
 
     app.handle_key(make_key(KeyCode::Char('j')));
     assert_eq!(app.selected_project_row(), 1);
+    assert_eq!(app.active_project(), 2, "j should auto-select Backend (id=2)");
 }
 
 #[test]
@@ -209,6 +210,29 @@ fn k_does_not_underflow_at_row0() {
     app.handle_key(make_key(KeyCode::Char('h')));
     app.handle_key(make_key(KeyCode::Char('k')));
     assert_eq!(app.selected_project_row(), 0);
+}
+
+#[test]
+fn j_auto_selects_hovered_project() {
+    let mut app = two_project_app();
+    app.handle_key(make_key(KeyCode::Char('h')));
+    assert_eq!(app.active_project(), 1);
+
+    app.handle_key(make_key(KeyCode::Char('j')));
+    assert_eq!(app.selected_project_row(), 1);
+    assert_eq!(app.active_project(), 2, "j should auto-select Backend (id=2)");
+}
+
+#[test]
+fn k_auto_selects_hovered_project() {
+    let mut app = two_project_app();
+    app.handle_key(make_key(KeyCode::Char('h')));
+    app.handle_key(make_key(KeyCode::Char('j')));
+    assert_eq!(app.active_project(), 2);
+
+    app.handle_key(make_key(KeyCode::Char('k')));
+    assert_eq!(app.selected_project_row(), 0);
+    assert_eq!(app.active_project(), 1, "k should auto-select Default (id=1)");
 }
 
 #[test]
@@ -234,15 +258,14 @@ fn right_closes_projects_panel() {
 }
 
 #[test]
-fn enter_selects_project_and_stays_in_col0() {
+fn enter_closes_projects_panel() {
     let mut app = two_project_app();
     app.handle_key(make_key(KeyCode::Char('h')));
-    // Navigate to row 1 (Backend, id=2)
-    app.handle_key(make_key(KeyCode::Char('j')));
+    app.handle_key(make_key(KeyCode::Char('j'))); // hover Backend (id=2) — auto-selects it
     app.handle_key(make_key(KeyCode::Enter));
-    // Enter activates the project but focus stays at col 0 per spec
-    assert!(app.projects_panel_visible());
-    assert_eq!(app.active_project(), 2);
+    assert!(!app.projects_panel_visible(), "Enter should close the panel");
+    assert_eq!(app.selected_column(), 1, "focus should return to Backlog");
+    assert_eq!(app.active_project(), 2, "active project should still be Backend");
 }
 
 #[test]
@@ -510,25 +533,24 @@ fn follow_project_updates_list_state_and_selection_in_sync() {
 }
 
 #[test]
-fn g_selects_project_same_as_enter() {
+fn g_closes_projects_panel() {
     let mut app = two_project_app();
     app.handle_key(make_key(KeyCode::Char('h')));
-    app.handle_key(make_key(KeyCode::Char('j')));
+    app.handle_key(make_key(KeyCode::Char('j'))); // hover Backend (id=2) — auto-selects it
     app.handle_key(make_key(KeyCode::Char('g')));
-    assert!(app.projects_panel_visible());
-    assert_eq!(app.active_project(), 2, "g should select Backend (id=2)");
+    assert!(!app.projects_panel_visible(), "g should close the panel");
+    assert_eq!(app.selected_column(), 1, "focus should return to Backlog");
+    assert_eq!(app.active_project(), 2, "active project should still be Backend");
 }
 
 #[test]
-fn g_in_empty_projects_panel_is_noop() {
+fn g_in_empty_projects_panel_closes_panel() {
     let mut app = App::new(vec![], 1, TEST_TIMEOUT);
     app.update(Message::ProjectsUpdated(vec![]));
     app.update(Message::NavigateColumn(-1));
-    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
-    assert!(
-        cmds.is_empty(),
-        "g with no projects should emit no commands"
-    );
+    assert!(app.projects_panel_visible(), "precondition: panel open");
+    app.handle_key(make_key(KeyCode::Char('g')));
+    assert!(!app.projects_panel_visible(), "g should close panel even with no projects");
 }
 
 #[test]

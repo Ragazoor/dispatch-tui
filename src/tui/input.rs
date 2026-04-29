@@ -844,6 +844,9 @@ impl App {
                     let next = (self.selection().row(0) + 1).min(len - 1);
                     self.selection_mut().set_row(0, next);
                     self.projects_panel.list_state.select(Some(next));
+                    if let Some(id) = self.selected_project().map(|p| p.id) {
+                        return self.update(Message::SelectProject(id));
+                    }
                 }
                 vec![]
             }
@@ -851,15 +854,13 @@ impl App {
                 let prev = self.selection().row(0).saturating_sub(1);
                 self.selection_mut().set_row(0, prev);
                 self.projects_panel.list_state.select(Some(prev));
-                vec![]
-            }
-            KeyCode::Char('l') | KeyCode::Right => self.update(Message::NavigateColumn(1)),
-            KeyCode::Enter | KeyCode::Char('g') => {
                 if let Some(id) = self.selected_project().map(|p| p.id) {
                     return self.update(Message::SelectProject(id));
                 }
                 vec![]
             }
+            KeyCode::Char('l') | KeyCode::Right => self.update(Message::NavigateColumn(1)),
+            KeyCode::Enter | KeyCode::Char('g') => self.update(Message::NavigateColumn(1)),
             KeyCode::Esc => self.update(Message::NavigateColumn(1)),
             KeyCode::Char('n') => {
                 self.input.mode = InputMode::InputProjectName { editing_id: None };
