@@ -186,9 +186,7 @@ mod tests {
 
     #[test]
     fn exec_load_sorts_by_scope_then_created_at_desc() {
-        use chrono::Duration;
         let db = Arc::new(Database::open_in_memory().unwrap());
-        let now = Utc::now();
 
         // Insert two repo learnings and one user learning.
         // We can't control created_at directly via create_learning (it uses NOW()),

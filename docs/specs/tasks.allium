@@ -1562,8 +1562,6 @@ rule EditLearning {
 }
 
 surface ProposedLearningsReview {
-    facing user: User
-
     let learnings: [Learning] = core/Learnings where status = proposed
                                 ordered_by scope asc, created_at desc
     let selected: Integer = 0

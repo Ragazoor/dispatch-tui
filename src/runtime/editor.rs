@@ -465,9 +465,7 @@ mod learning_editor_tests {
         let mut app = App::new(vec![], 1, std::time::Duration::from_secs(300));
         app.update(Message::ShowProposedLearnings(vec![learning.clone()]));
 
-        let updated_content = format!(
-            "--- SUMMARY ---\nnew summary\n--- KIND ---\npitfall\n--- TAGS ---\nrust\n--- DETAIL ---\nsome detail\n"
-        );
+        let updated_content = "--- SUMMARY ---\nnew summary\n--- KIND ---\npitfall\n--- TAGS ---\nrust\n--- DETAIL ---\nsome detail\n".to_string();
         rt.exec_finalize_editor_result(
             &mut app,
             EditKind::Learning(learning),
