@@ -184,7 +184,6 @@ entity Epic {
 
 entity TaskUsage {
     task: Task
-    cost_usd: Float
     input_tokens: Integer
     output_tokens: Integer
     cache_read_tokens: Integer
@@ -193,7 +192,7 @@ entity TaskUsage {
 
     @guidance
         -- Uses accumulation semantics: one row per task, upserted on each
-        -- report. Numeric fields (cost_usd, input_tokens, output_tokens,
+        -- report. Numeric fields (input_tokens, output_tokens,
         -- cache_read_tokens, cache_write_tokens) are summed with the
         -- existing values rather than replaced. updated_at reflects the
         -- time of the most recent report.
