@@ -80,7 +80,7 @@ mod tests {
         TuiRuntime {
             task_svc: crate::service::TaskService::new(db_arc.clone()),
             epic_svc: crate::service::EpicService::new(db_arc.clone()),
-            feed_runner: crate::feed::FeedRunner::new(db_arc.clone(), feed_tx),
+            feed_runner: Some(crate::feed::FeedRunner::new(db_arc.clone(), feed_tx)),
             database: db_arc,
             msg_tx: tx,
             runner: Arc::new(crate::process::MockProcessRunner::new(vec![])),
