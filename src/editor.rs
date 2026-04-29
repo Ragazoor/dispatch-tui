@@ -15,7 +15,7 @@ pub struct EditorFields {
     pub base_branch: String,
 }
 
-use crate::models::{Epic, Task};
+use crate::models::{Epic, Task, LearningKind};
 use crate::service::FieldUpdate;
 
 pub struct EpicEditorFields {
@@ -206,6 +206,55 @@ pub fn parse_editor_content(input: &str) -> EditorFields {
         tag: s.remove("TAG").unwrap_or_default(),
         base_branch: s.remove("BASE_BRANCH").unwrap_or_default(),
     }
+}
+
+pub struct LearningEditorFields {
+    pub summary: String,
+    pub kind: Option<LearningKind>,
+    /// `None` = section absent (don't change).
+    /// `Some(None)` = section present but empty (clear to NULL).
+    /// `Some(Some(v))` = section present with text (set value).
+    pub detail: Option<Option<String>>,
+    /// `None` = section absent (don't change). `Some(vec![])` = clear tags.
+    pub tags: Option<Vec<String>>,
+}
+
+pub fn format_learning_for_editor(learning: &crate::models::Learning) -> String {
+    let tags = learning.tags.join(", ");
+    let detail = learning.detail.as_deref().unwrap_or("");
+    format!(
+        "--- SUMMARY ---\n{}\n--- KIND ---\n{}\n--- TAGS ---\n{}\n--- DETAIL ---\n{}\n",
+        learning.summary,
+        learning.kind.as_str(),
+        tags,
+        detail,
+    )
+}
+
+pub fn parse_learning_editor_output(input: &str) -> LearningEditorFields {
+    let mut s = parse_sections(input);
+    let summary = s.remove("SUMMARY").unwrap_or_default();
+    let kind = s
+        .remove("KIND")
+        .and_then(|k| LearningKind::parse(k.trim()));
+    let tags = s.remove("TAGS").map(|t| {
+        if t.trim().is_empty() {
+            vec![]
+        } else {
+            t.split(',')
+                .map(|tag| tag.trim().to_string())
+                .filter(|t| !t.is_empty())
+                .collect()
+        }
+    });
+    let detail = s.remove("DETAIL").map(|d| {
+        if d.trim().is_empty() {
+            None
+        } else {
+            Some(d)
+        }
+    });
+    LearningEditorFields { summary, kind, tags, detail }
 }
 
 #[cfg(test)]
@@ -735,5 +784,76 @@ mod tests {
             crate::service::FieldUpdate::Set("scripts/fetch-dependabot.sh".into())
         );
         assert_eq!(applied.feed_interval_secs, Some(60));
+    }
+
+    // --- learning editor tests ---
+
+    fn make_learning() -> crate::models::Learning {
+        use crate::models::{Learning, LearningScope, LearningStatus};
+        Learning {
+            id: 1,
+            kind: LearningKind::Convention,
+            summary: "Use LearningService not raw db".to_string(),
+            detail: Some("Ensures validation runs.".to_string()),
+            scope: LearningScope::Repo,
+            scope_ref: Some("/repo".to_string()),
+            tags: vec!["arch".to_string(), "service".to_string()],
+            status: LearningStatus::Proposed,
+            source_task_id: None,
+            confirmed_count: 0,
+            last_confirmed_at: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn format_round_trips_all_fields() {
+        let l = make_learning();
+        let s = format_learning_for_editor(&l);
+        let f = parse_learning_editor_output(&s);
+        assert_eq!(f.summary, l.summary);
+        assert_eq!(f.kind, Some(l.kind));
+        assert_eq!(f.tags, Some(l.tags.clone()));
+        assert_eq!(f.detail, Some(Some(l.detail.clone().unwrap())));
+    }
+
+    #[test]
+    fn format_round_trips_no_detail() {
+        let mut l = make_learning();
+        l.detail = None;
+        let s = format_learning_for_editor(&l);
+        let f = parse_learning_editor_output(&s);
+        // Empty DETAIL section → Some(None) meaning "clear"
+        assert_eq!(f.detail, Some(None));
+    }
+
+    #[test]
+    fn parse_empty_summary_returns_empty_string() {
+        let input = "--- SUMMARY ---\n\n--- KIND ---\nconvention\n--- TAGS ---\n\n--- DETAIL ---\n\n";
+        let f = parse_learning_editor_output(input);
+        assert_eq!(f.summary, "");
+    }
+
+    #[test]
+    fn parse_unknown_kind_returns_none() {
+        let input = "--- SUMMARY ---\nfoo\n--- KIND ---\nnot_a_kind\n--- TAGS ---\n\n--- DETAIL ---\n\n";
+        let f = parse_learning_editor_output(input);
+        assert_eq!(f.kind, None);
+    }
+
+    #[test]
+    fn parse_missing_sections_return_none() {
+        let f = parse_learning_editor_output("--- SUMMARY ---\nsome text\n");
+        assert_eq!(f.kind, None);
+        assert_eq!(f.tags, None);
+        assert_eq!(f.detail, None);
+    }
+
+    #[test]
+    fn parse_tags_trims_whitespace() {
+        let input = "--- SUMMARY ---\nfoo\n--- KIND ---\npitfall\n--- TAGS ---\n async , rust \n--- DETAIL ---\n\n";
+        let f = parse_learning_editor_output(input);
+        assert_eq!(f.tags, Some(vec!["async".to_string(), "rust".to_string()]));
     }
 }
