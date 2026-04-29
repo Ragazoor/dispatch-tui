@@ -235,3 +235,46 @@ fn snapshot_task_detail_overlay_empty_optional_fields() {
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);
 }
+
+#[test]
+fn snapshot_input_project_name_create() {
+    use super::super::types::InputMode;
+    let mut app = make_app();
+    app.input.mode = InputMode::InputProjectName { editing_id: None };
+    app.input.buffer = "My Project".to_string();
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
+fn snapshot_input_project_name_rename() {
+    use super::super::types::InputMode;
+    let mut app = make_app();
+    app.input.mode = InputMode::InputProjectName {
+        editing_id: Some(1),
+    };
+    app.input.buffer = "Renamed Project".to_string();
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
+fn snapshot_confirm_delete_project1() {
+    use super::super::types::InputMode;
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmDeleteProject1 { id: 2 };
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
+fn snapshot_confirm_delete_project2() {
+    use super::super::types::InputMode;
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmDeleteProject2 {
+        id: 2,
+        item_count: 3,
+    };
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}

@@ -1928,9 +1928,33 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
-        InputMode::InputProjectName { .. }
-        | InputMode::ConfirmDeleteProject1 { .. }
-        | InputMode::ConfirmDeleteProject2 { .. } => {}
+        InputMode::InputProjectName { editing_id } => {
+            let action = if editing_id.is_some() {
+                "Rename project"
+            } else {
+                "New project"
+            };
+            let text = format!(
+                "{}:  {}  [Enter] save  [Esc] cancel",
+                action, app.input.buffer
+            );
+            let bar = Paragraph::new(text).style(Style::default().fg(Color::Cyan));
+            frame.render_widget(bar, area);
+        }
+        InputMode::ConfirmDeleteProject1 { .. } => {
+            let bar = Paragraph::new("Delete project? [y] yes  [n/Esc] cancel")
+                .style(Style::default().fg(Color::Red));
+            frame.render_widget(bar, area);
+        }
+        InputMode::ConfirmDeleteProject2 { item_count, .. } => {
+            let text = format!(
+                "Move {} item{} to Default and delete project? [y] confirm  [n/Esc] cancel",
+                item_count,
+                if *item_count == 1 { "" } else { "s" }
+            );
+            let bar = Paragraph::new(text).style(Style::default().fg(Color::Red));
+            frame.render_widget(bar, area);
+        }
     }
 }
 
