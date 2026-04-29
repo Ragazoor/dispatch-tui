@@ -243,6 +243,7 @@ mod agents;
 mod commands;
 mod editor;
 mod epics;
+mod learnings;
 mod pr;
 mod settings;
 mod split;

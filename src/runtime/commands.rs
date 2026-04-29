@@ -252,7 +252,18 @@ pub(super) fn dispatch(
             rt.exec_reorder_project(app, id, delta);
             vec![]
         }
-        // Proposed learnings review — handled in Task 6
-        LoadProposedLearnings | ApproveLearning(_) | RejectLearning(_) => todo!(),
+        // Proposed learnings review
+        LoadProposedLearnings => {
+            rt.exec_load_proposed_learnings(app);
+            vec![]
+        }
+        ApproveLearning(id) => {
+            rt.exec_approve_learning(app, id);
+            vec![]
+        }
+        RejectLearning(id) => {
+            rt.exec_reject_learning(app, id);
+            vec![]
+        }
     }
 }
