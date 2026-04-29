@@ -1,5 +1,6 @@
 mod input_form;
 mod kanban;
+pub mod learnings;
 mod palette;
 mod shared;
 

@@ -12,6 +12,11 @@ pub(super) const CYAN: Color = Color::Rgb(86, 182, 194);
 pub(super) const BLUE: Color = Color::Rgb(122, 162, 247);
 pub(super) const FLASH_BG: Color = Color::Rgb(62, 52, 20);
 
+pub(super) const RED: Color = Color::Rgb(247, 118, 142);
+pub(super) const MAGENTA: Color = Color::Rgb(187, 154, 247);
+pub(super) const WHITE: Color = Color::Rgb(192, 202, 245);
+pub(super) const DARK_GRAY: Color = Color::Rgb(86, 95, 137);
+
 // Archive column — muted blue-gray stripe
 pub(super) const ARCHIVE_STRIPE: Color = Color::Rgb(72, 82, 120);
 // Archive column background tint
