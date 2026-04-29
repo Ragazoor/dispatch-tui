@@ -1616,6 +1616,18 @@ pub fn pr_number_from_url(url: &str) -> Option<i64> {
         .and_then(|s| s.parse::<i64>().ok())
 }
 
+/// Returns the URL type word: `"PR"` for pull requests, `"Issue"` for issues, `"Link"` otherwise.
+pub fn url_type(url: &str) -> &'static str {
+    let clean = url.split(['?', '#']).next().unwrap_or(url);
+    if clean.contains("/pull/") {
+        "PR"
+    } else if clean.contains("/issues/") {
+        "Issue"
+    } else {
+        "Link"
+    }
+}
+
 /// Returns the display label for a URL stored in the `pr_url` field.
 ///
 /// - URLs containing `/pull/<N>` → `"PR #N"` (or `"PR"` if no number follows)
@@ -1623,18 +1635,20 @@ pub fn pr_number_from_url(url: &str) -> Option<i64> {
 /// - Anything else → `"Link"`
 pub fn url_label(url: &str) -> String {
     let clean = url.split(['?', '#']).next().unwrap_or(url);
+    let type_label = url_type(url);
 
-    for (segment, type_label) in &[("/pull/", "PR"), ("/issues/", "Issue")] {
+    if type_label != "Link" {
+        let segment = if type_label == "PR" { "/pull/" } else { "/issues/" };
         if let Some((_, after)) = clean.split_once(segment) {
-            let number = after
+            if let Some(n) = after
                 .trim_end_matches('/')
                 .split('/')
                 .next()
-                .and_then(|s| s.parse::<i64>().ok());
-            return match number {
-                Some(n) => format!("{type_label} #{n}"),
-                None => type_label.to_string(),
-            };
+                .and_then(|s| s.parse::<i64>().ok())
+            {
+                return format!("{type_label} #{n}");
+            }
+            return type_label.to_string();
         }
     }
 

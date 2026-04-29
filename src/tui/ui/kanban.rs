@@ -1025,11 +1025,7 @@ fn render_task_detail_overlay(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 
     if let Some(pr_url) = &task.pr_url {
-        let field_label = match crate::models::url_label(pr_url)
-            .split_whitespace()
-            .next()
-            .unwrap_or("Link")
-        {
+        let field_label = match crate::models::url_type(pr_url) {
             "PR" => "PR:    ",
             "Issue" => "Issue: ",
             _ => "Link:  ",
