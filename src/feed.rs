@@ -74,6 +74,11 @@ fn review_decision_to_status(decision: ReviewDecision) -> TaskStatus {
 
 const DEFAULT_FEED_INTERVAL: Duration = Duration::from_secs(30);
 
+/// Poll interval for the background feed task.
+/// Kept in `feed.rs` (not reusing `TICK_INTERVAL` from `runtime`) so the two
+/// concerns stay independent.
+const FEED_POLL_INTERVAL: Duration = Duration::from_secs(2);
+
 pub struct FeedRunner {
     db: Arc<dyn TaskAndEpicStore>,
     notify: mpsc::UnboundedSender<McpEvent>,
@@ -89,19 +94,13 @@ impl FeedRunner {
         }
     }
 
-<<<<<<< HEAD
-    /// Poll interval for the background feed task.
-    /// Kept in `feed.rs` (not reusing `TICK_INTERVAL` from `runtime`) so the two
-    /// concerns stay independent.
-    const FEED_POLL_INTERVAL: Duration = Duration::from_secs(2);
-
     /// Consume this runner and spawn it as a background tokio task.
     /// Returns immediately. The task polls feed commands independently of the
     /// main event loop, preventing slow commands from freezing the UI.
     pub fn start(self) {
         tokio::spawn(async move {
             let mut runner = self;
-            let mut interval = tokio::time::interval(Self::FEED_POLL_INTERVAL);
+            let mut interval = tokio::time::interval(FEED_POLL_INTERVAL);
             loop {
                 interval.tick().await;
                 runner.tick().await;
