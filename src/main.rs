@@ -158,6 +158,16 @@ fn default_db_path() -> PathBuf {
     dispatch_tui::default_db_path()
 }
 
+/// Truncate `s` to at most `max_chars` Unicode scalar values and append `…`.
+/// Returns an owned copy of `s` unchanged if it is already short enough.
+fn truncate_at(s: &str, max_chars: usize) -> String {
+    let mut chars = s.char_indices();
+    match chars.nth(max_chars) {
+        Some((i, _)) => format!("{}…", &s[..i]),
+        None => s.to_owned(),
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -377,13 +387,13 @@ async fn main() -> Result<()> {
                     if !items.is_empty() {
                         println!("{:<52} {:<55} STATUS", "EXTERNAL_ID", "TITLE");
                         for item in &items {
-                            let id = if item.external_id.len() > 50 {
-                                format!("{}…", &item.external_id[..49])
+                            let id = if item.external_id.chars().count() > 50 {
+                                truncate_at(&item.external_id, 49)
                             } else {
                                 item.external_id.clone()
                             };
-                            let title = if item.title.len() > 53 {
-                                format!("{}…", &item.title[..52])
+                            let title = if item.title.chars().count() > 53 {
+                                truncate_at(&item.title, 52)
                             } else {
                                 item.title.clone()
                             };
