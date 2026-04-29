@@ -239,18 +239,25 @@ pub(in crate::tui) fn quick_dispatch_lines<'a>(
     let mut lines = vec![
         Line::from(Span::styled("  Quick Dispatch — select repo:", active)),
         Line::from(""),
+        Line::from(Span::styled(
+            format!("  Filter: {}_ ", app.input.buffer),
+            active,
+        )),
     ];
-    append_repo_path_list(
-        &mut lines,
-        &app.board.repo_paths,
-        app.input.repo_cursor,
-        6,
-        area.height,
-        hint,
-    );
+    let filtered = crate::tui::filtered_repos(&app.board.repo_paths, &app.input.buffer);
+    if !filtered.is_empty() {
+        append_repo_path_list(
+            &mut lines,
+            &filtered,
+            app.input.repo_cursor,
+            7,
+            area.height,
+            hint,
+        );
+    }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "  [j/k] navigate · [Enter] select · [1-9] shortcut · [Esc] cancel",
+        "  Type to filter · [j/k] navigate · [Enter] select · [1-9] shortcut · [Esc] cancel",
         hint,
     )));
     lines

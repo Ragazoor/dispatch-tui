@@ -36,9 +36,9 @@ expression: rendered
 ┌ Quick Dispatch ──────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │  Quick Dispatch — select repo:                                                                                       │
 │                                                                                                                      │
+│  Filter: _                                                                                                           │
 │  ► /repo/alpha                                                                                                       │
-│    /repo/beta                                                                                                        │
 │                                                                                                                      │
-│  [j/k] navigate · [Enter] select · [1-9] shortcut · [Esc] cancel                                                     │
+│  Type to filter · [j/k] navigate · [Enter] select · [1-9] shortcut · [Esc] cancel                                    │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 Quick dispatch: select repo path
