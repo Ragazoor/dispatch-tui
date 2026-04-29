@@ -14,7 +14,7 @@
 
 # ---------------------------------------------------------------------------
 # Configure your repositories here (space-separated "owner/repo" slugs):
-REPOS=""
+REPOS="annotell/airflow-dags annotell/scala-common"
 # Example:
 # REPOS="myorg/frontend myorg/backend myorg/infra"
 # ---------------------------------------------------------------------------
