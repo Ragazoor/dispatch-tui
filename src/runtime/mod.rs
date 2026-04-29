@@ -186,7 +186,7 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     let mut runtime = TuiRuntime {
         task_svc: crate::service::TaskService::new(database.clone()),
         epic_svc: crate::service::EpicService::new(database.clone()),
-        feed_runner: crate::feed::FeedRunner::new(database.clone(), feed_notify_tx),
+        feed_runner: Some(crate::feed::FeedRunner::new(database.clone(), feed_notify_tx)),
         database,
         msg_tx,
         runner,
@@ -236,7 +236,7 @@ struct TuiRuntime {
     /// editor is currently open. We enforce "at most one editor at a time"
     /// by refusing to start a new one while this slot is populated.
     editor_session: Arc<std::sync::Mutex<Option<editor::EditorSession>>>,
-    feed_runner: crate::feed::FeedRunner,
+    feed_runner: Option<crate::feed::FeedRunner>,
 }
 
 mod agents;
@@ -314,6 +314,13 @@ async fn run_loop(
     tick_interval: &mut tokio::time::Interval,
     rt: &mut TuiRuntime,
 ) -> Result<()> {
+    // Start the feed runner as an independent background task.
+    // Doing this here (not in TuiRuntime::new) means tests that construct
+    // TuiRuntime directly don't accidentally spawn background tasks.
+    if let Some(feed_runner) = rt.feed_runner.take() {
+        feed_runner.start();
+    }
+
     loop {
         // Draw the current frame
         terminal.draw(|frame| tui::ui::render(frame, app))?;
@@ -346,7 +353,6 @@ async fn run_loop(
 
             // Periodic tick for tmux capture and feed polling
             _ = tick_interval.tick() => {
-                rt.feed_runner.tick();
                 app.update(Message::Tick)
             }
         };
