@@ -376,7 +376,7 @@ fn x_key_on_epic_enters_confirm_archive_epic() {
 }
 
 #[test]
-fn x_key_on_epic_with_non_done_subtasks_rejects_archive() {
+fn x_key_on_epic_with_non_done_subtasks_shows_confirmation() {
     let mut app = App::new(
         vec![
             {
@@ -402,23 +402,17 @@ fn x_key_on_epic_with_non_done_subtasks_rejects_archive() {
     app.selection_mut().set_row(2, 0);
     let cmds = app.handle_key(make_key(KeyCode::Char('x')));
     assert!(cmds.is_empty());
-    assert_eq!(app.input.mode, InputMode::Normal);
+    assert_eq!(app.input.mode, InputMode::ConfirmArchiveEpic);
     assert!(app
         .status
         .message
         .as_deref()
         .unwrap()
-        .contains("Cannot archive epic"));
-    assert!(app
-        .status
-        .message
-        .as_deref()
-        .unwrap()
-        .contains("2 subtasks not done"));
+        .contains("2 non-done subtasks"));
 }
 
 #[test]
-fn x_key_on_epic_with_mixed_subtasks_rejects_archive_with_count() {
+fn x_key_on_epic_with_mixed_subtasks_shows_confirmation_with_count() {
     let mut app = App::new(
         vec![
             {
@@ -448,13 +442,13 @@ fn x_key_on_epic_with_mixed_subtasks_rejects_archive_with_count() {
     app.selection_mut().set_row(2, 0);
     let cmds = app.handle_key(make_key(KeyCode::Char('x')));
     assert!(cmds.is_empty());
-    assert_eq!(app.input.mode, InputMode::Normal);
+    assert_eq!(app.input.mode, InputMode::ConfirmArchiveEpic);
     assert!(app
         .status
         .message
         .as_deref()
         .unwrap()
-        .contains("1 subtask not done"));
+        .contains("1 non-done subtask"));
 }
 
 #[test]

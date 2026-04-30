@@ -392,20 +392,21 @@ impl App {
                 .iter()
                 .filter(|s| **s != TaskStatus::Done)
                 .count();
-            if not_done_count > 0 {
+            let msg = if not_done_count > 0 {
                 let noun = if not_done_count == 1 {
                     "subtask"
                 } else {
                     "subtasks"
                 };
-                self.set_status(format!(
-                    "Cannot archive epic: {} {} not done",
+                format!(
+                    "Archive epic with {} non-done {}? [y/n]",
                     not_done_count, noun
-                ));
-                return vec![];
-            }
+                )
+            } else {
+                "Archive epic and all subtasks? [y/n]".to_string()
+            };
             self.input.mode = InputMode::ConfirmArchiveEpic;
-            self.set_status("Archive epic and all subtasks? [y/n]".to_string());
+            self.set_status(msg);
         }
         vec![]
     }
