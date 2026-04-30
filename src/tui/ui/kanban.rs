@@ -245,18 +245,17 @@ fn render_summary(frame: &mut Frame, app: &App, epic_stats: &EpicStatsMap, area:
         let label = format!("{}{} {}", prefix, status.as_str(), count);
 
         let checkbox = if is_focused {
-            let selectable: Vec<_> = items
-                .iter()
-                .filter(|i| !matches!(i, ColumnItem::EpicHeader(_)))
-                .collect();
-            let all_selected = !selectable.is_empty()
-                && selectable.iter().all(|item| match item {
+            let selectable = items.iter().filter(|i| !matches!(i, ColumnItem::EpicHeader(_)));
+            let (n, all_selected) = selectable.fold((0usize, true), |(n, all), item| {
+                let selected = match item {
                     ColumnItem::Task(t) => app.selected_tasks().contains(&t.id),
                     ColumnItem::Epic(e) => app.selected_epics().contains(&e.id),
                     ColumnItem::EpicHeader(_) => unreachable!(),
-                });
+                };
+                (n + 1, all && selected)
+            });
             CheckboxInfo::Task {
-                all_selected,
+                all_selected: n > 0 && all_selected,
                 on_select_all: app.on_select_all(),
                 status,
             }

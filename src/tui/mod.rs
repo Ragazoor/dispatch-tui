@@ -414,19 +414,8 @@ impl App {
 
         if self.board.flattened {
             // Build epic lookup: epic_id -> &Epic (only epics present in board.epics).
-            let epic_lookup: std::collections::HashMap<EpicId, &Epic> =
+            let epic_lookup: HashMap<EpicId, &Epic> =
                 self.board.epics.iter().map(|e| (e.id, e)).collect();
-
-            // Determine which epics have at least one task in this column.
-            let mut epics_with_tasks: std::collections::HashSet<EpicId> =
-                std::collections::HashSet::new();
-            for t in &tasks {
-                if let Some(eid) = t.epic_id {
-                    if epic_lookup.contains_key(&eid) {
-                        epics_with_tasks.insert(eid);
-                    }
-                }
-            }
 
             // Sort key for a task: orphan tasks (epic not in board) are standalone.
             let group_key = |t: &Task| -> i64 {
@@ -436,10 +425,17 @@ impl App {
                 }
             };
 
+            // Single pass: emit one EpicHeader per epic the first time a task from
+            // that epic appears, then emit the task itself.
+            let mut seen_epics: HashSet<EpicId> = HashSet::new();
             let mut items: Vec<ColumnItem<'_>> = Vec::new();
-            for &eid in &epics_with_tasks {
-                if let Some(&epic) = epic_lookup.get(&eid) {
-                    items.push(ColumnItem::EpicHeader(epic));
+            for t in &tasks {
+                if let Some(eid) = t.epic_id {
+                    if let Some(&epic) = epic_lookup.get(&eid) {
+                        if seen_epics.insert(eid) {
+                            items.push(ColumnItem::EpicHeader(epic));
+                        }
+                    }
                 }
             }
             for t in tasks {
