@@ -22,74 +22,85 @@ pub fn expand_tilde(path: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// ProjectId / Project
+// ID newtypes
 // ---------------------------------------------------------------------------
 
-/// ```compile_fail
-/// use dispatch_tui::models::{ProjectId, EpicId};
-/// fn takes_epic(id: EpicId) {}
-/// takes_epic(ProjectId(1)); // must not compile
-/// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct ProjectId(pub i64);
+/// Generate a zero-cost i64 newtype with Display, From/Into<i64>, FromStr,
+/// Serialize/Deserialize, and basic unit tests.
+macro_rules! define_id_newtype {
+    ($(#[$attr:meta])* $name:ident, $test_mod:ident) => {
+        $(#[$attr])*
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        pub struct $name(pub i64);
 
-impl std::fmt::Display for ProjectId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
+        impl std::fmt::Display for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}", self.0)
+            }
+        }
+
+        impl From<i64> for $name {
+            fn from(v: i64) -> Self {
+                $name(v)
+            }
+        }
+
+        impl From<$name> for i64 {
+            fn from(id: $name) -> Self {
+                id.0
+            }
+        }
+
+        impl std::str::FromStr for $name {
+            type Err = std::num::ParseIntError;
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                s.parse::<i64>().map($name)
+            }
+        }
+
+        #[cfg(test)]
+        mod $test_mod {
+            use super::$name;
+
+            #[test]
+            fn display() {
+                assert_eq!($name(42).to_string(), "42");
+            }
+
+            #[test]
+            fn copy_eq_hash() {
+                let a = $name(1);
+                let b = a;
+                assert_eq!(a, b);
+                let mut set = std::collections::HashSet::new();
+                set.insert(a);
+                assert!(set.contains(&b));
+            }
+
+            #[test]
+            fn debug_contains_value() {
+                assert!(format!("{:?}", $name(7)).contains("7"));
+            }
+
+            #[test]
+            fn from_into_i64() {
+                let id = $name::from(5i64);
+                let raw: i64 = id.into();
+                assert_eq!(raw, 5);
+            }
+        }
+    };
 }
 
-impl From<i64> for ProjectId {
-    fn from(v: i64) -> Self {
-        ProjectId(v)
-    }
-}
-
-impl From<ProjectId> for i64 {
-    fn from(id: ProjectId) -> Self {
-        id.0
-    }
-}
-
-impl std::str::FromStr for ProjectId {
-    type Err = std::num::ParseIntError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        s.parse::<i64>().map(ProjectId)
-    }
-}
-
-#[cfg(test)]
-mod project_id_tests {
-    use super::ProjectId;
-
-    #[test]
-    fn project_id_display() {
-        assert_eq!(ProjectId(42).to_string(), "42");
-    }
-
-    #[test]
-    fn project_id_copy_eq_hash() {
-        let a = ProjectId(1);
-        let b = a; // Copy
-        assert_eq!(a, b);
-        let mut set = std::collections::HashSet::new();
-        set.insert(a);
-        assert!(set.contains(&b));
-    }
-
-    #[test]
-    fn project_id_debug() {
-        let s = format!("{:?}", ProjectId(7));
-        assert!(s.contains("7"));
-    }
-
-    #[test]
-    fn project_id_from_into_i64() {
-        let id = ProjectId::from(5i64);
-        let raw: i64 = id.into();
-        assert_eq!(raw, 5);
-    }
-}
+define_id_newtype!(
+    #[doc = "```compile_fail"]
+    #[doc = "use dispatch_tui::models::{ProjectId, EpicId};"]
+    #[doc = "fn takes_epic(id: EpicId) {}"]
+    #[doc = "takes_epic(ProjectId(1)); // must not compile"]
+    #[doc = "```"]
+    ProjectId,
+    project_id_tests
+);
 
 #[derive(Debug, Clone)]
 pub struct Project {
@@ -470,30 +481,11 @@ impl VisualColumn {
 }
 
 // ---------------------------------------------------------------------------
-// TaskId
+// TaskId / EpicId
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TaskId(pub i64);
-
-impl std::fmt::Display for TaskId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// EpicId
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct EpicId(pub i64);
-
-impl std::fmt::Display for EpicId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
+define_id_newtype!(TaskId, task_id_tests);
+define_id_newtype!(EpicId, epic_id_tests);
 
 // ---------------------------------------------------------------------------
 // Epic
@@ -3373,66 +3365,7 @@ mod security_tests {
 // Learning domain types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct LearningId(pub i64);
-
-impl std::fmt::Display for LearningId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl From<i64> for LearningId {
-    fn from(v: i64) -> Self {
-        LearningId(v)
-    }
-}
-
-impl From<LearningId> for i64 {
-    fn from(id: LearningId) -> Self {
-        id.0
-    }
-}
-
-impl std::str::FromStr for LearningId {
-    type Err = std::num::ParseIntError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        s.parse::<i64>().map(LearningId)
-    }
-}
-
-#[cfg(test)]
-mod learning_id_tests {
-    use super::LearningId;
-
-    #[test]
-    fn learning_id_display() {
-        assert_eq!(LearningId(99).to_string(), "99");
-    }
-
-    #[test]
-    fn learning_id_copy_eq_hash() {
-        let a = LearningId(5);
-        let b = a;
-        assert_eq!(a, b);
-        let mut set = std::collections::HashSet::new();
-        set.insert(a);
-        assert!(set.contains(&b));
-    }
-
-    #[test]
-    fn learning_id_debug() {
-        let s = format!("{:?}", LearningId(7));
-        assert!(s.contains("7"));
-    }
-
-    #[test]
-    fn learning_id_from_into_i64() {
-        let id = LearningId::from(11i64);
-        let raw: i64 = id.into();
-        assert_eq!(raw, 11);
-    }
-}
+define_id_newtype!(LearningId, learning_id_tests);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
