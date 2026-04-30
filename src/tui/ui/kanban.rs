@@ -246,6 +246,7 @@ fn render_summary(frame: &mut Frame, app: &App, epic_stats: &EpicStatsMap, area:
                 && items.iter().all(|item| match item {
                     ColumnItem::Task(t) => app.selected_tasks().contains(&t.id),
                     ColumnItem::Epic(e) => app.selected_epics().contains(&e.id),
+                    ColumnItem::EpicHeader(_) => true,
                 });
             CheckboxInfo::Task {
                 all_selected,
@@ -695,6 +696,7 @@ fn render_task_column(
                     .get(&e.id)
                     .map(|s| s.substatus.column_priority())
                     .unwrap_or(0),
+                ColumnItem::EpicHeader(_) => 0,
             };
             if Some(priority) != current_priority {
                 current_priority = Some(priority);
@@ -708,6 +710,7 @@ fn render_task_column(
                         .map(|s| s.substatus.header_label())
                         .unwrap_or_default()
                         .to_string(),
+                    ColumnItem::EpicHeader(_) => String::new(),
                 };
                 list_items.push(render_substatus_header(&label, list_items.is_empty()));
             }
@@ -724,6 +727,10 @@ fn render_task_column(
             }
             ColumnItem::Epic(epic) => {
                 render_epic_item(epic, is_cursor, app, epic_stats, status, col_area.width)
+            }
+            ColumnItem::EpicHeader(epic) => {
+                // EpicHeader rendering is implemented in Task 5; placeholder for now.
+                ListItem::new(ratatui::text::Line::raw(epic.title.clone()))
             }
         });
     }

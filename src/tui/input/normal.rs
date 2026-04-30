@@ -222,6 +222,7 @@ impl App {
                     let id = epic.id;
                     self.update(Message::EditEpic(id))
                 }
+                Some(ColumnItem::EpicHeader(_)) => vec![],
                 None => {
                     if let ViewMode::Epic { epic_id, .. } = &self.board.view_mode {
                         let id = *epic_id;

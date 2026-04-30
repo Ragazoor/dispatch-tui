@@ -474,6 +474,9 @@ impl App {
                 };
                 (priority, e.sort_order.unwrap_or(e.id.0), e.id.0)
             }
+            ColumnItem::EpicHeader(_) => {
+                unreachable!("EpicHeader never produced in non-flat mode")
+            }
         });
 
         items
@@ -585,6 +588,9 @@ impl App {
             let (sort_order, id) = match item {
                 ColumnItem::Task(t) => (t.sort_order, t.id.0),
                 ColumnItem::Epic(e) => (e.sort_order, e.id.0),
+                ColumnItem::EpicHeader(_) => {
+                    unreachable!("EpicHeader never produced by column_items_for_visual_column")
+                }
             };
             (sort_order.unwrap_or(i64::MAX), id)
         });
@@ -613,7 +619,10 @@ impl App {
         let status = TaskStatus::from_column_index(col - 1)?;
         let items = self.column_items_for_status(status);
         let row = self.selection().row(col);
-        items.into_iter().nth(row)
+        items
+            .into_iter()
+            .filter(|i| !matches!(i, ColumnItem::EpicHeader(_)))
+            .nth(row)
     }
 
     /// Look up the title of an epic by ID.
@@ -671,10 +680,12 @@ impl App {
         let new_anchor = self
             .column_items_for_status(status)
             .into_iter()
+            .filter(|i| !matches!(i, ColumnItem::EpicHeader(_)))
             .nth(row)
             .map(|item| match item {
                 ColumnItem::Task(t) => ColumnAnchor::Task(t.id),
                 ColumnItem::Epic(e) => ColumnAnchor::Epic(e.id),
+                ColumnItem::EpicHeader(_) => unreachable!(),
             });
         self.selection_mut().anchor = new_anchor;
     }
@@ -724,15 +735,18 @@ impl App {
         'outer: for (idx, &status) in TaskStatus::ALL.iter().enumerate() {
             let nav_col = idx + 1;
             let items = self.column_items_for_status_with_stats(status, Some(&stats));
-            for (row, item) in items.into_iter().enumerate() {
+            let mut selectable_row: usize = 0;
+            for item in items.into_iter() {
                 let item_anchor = match item {
                     ColumnItem::Task(t) => ColumnAnchor::Task(t.id),
                     ColumnItem::Epic(e) => ColumnAnchor::Epic(e.id),
+                    ColumnItem::EpicHeader(_) => continue,
                 };
                 if item_anchor == anchor {
-                    found = Some((nav_col, row));
+                    found = Some((nav_col, selectable_row));
                     break 'outer;
                 }
+                selectable_row += 1;
             }
         }
 
