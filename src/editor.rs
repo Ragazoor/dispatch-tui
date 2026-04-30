@@ -16,6 +16,8 @@ pub struct EditorFields {
 }
 
 use crate::models::{Epic, Learning, LearningKind, Task};
+#[cfg(test)]
+use crate::models::ProjectId;
 use crate::service::FieldUpdate;
 
 pub struct EpicEditorFields {
@@ -278,7 +280,7 @@ mod tests {
             feed_interval_secs: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            project_id: 1,
+            project_id: ProjectId(1),
         }
     }
 
@@ -349,7 +351,7 @@ mod tests {
             external_id: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            project_id: 1,
+            project_id: ProjectId(1),
         }
     }
 

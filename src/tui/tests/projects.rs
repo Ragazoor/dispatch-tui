@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 
-use crate::models::{Project, Task, TaskStatus};
+use crate::models::{Project, ProjectId, Task, TaskStatus};
 use crate::tui::types::{Command, InputMode};
 use crate::tui::{App, Message};
 
@@ -9,7 +9,7 @@ use super::helpers::{
     TEST_TIMEOUT,
 };
 
-fn make_task_with_project(id: i64, status: TaskStatus, project_id: i64) -> Task {
+fn make_task_with_project(id: i64, status: TaskStatus, project_id: ProjectId) -> Task {
     Task {
         project_id,
         ..make_task(id, status)
@@ -18,10 +18,10 @@ fn make_task_with_project(id: i64, status: TaskStatus, project_id: i64) -> Task 
 
 #[test]
 fn project_matches_hides_tasks_from_other_project() {
-    let t1 = make_task_with_project(1, TaskStatus::Backlog, 1);
-    let t2 = make_task_with_project(2, TaskStatus::Backlog, 2);
+    let t1 = make_task_with_project(1, TaskStatus::Backlog, ProjectId(1));
+    let t2 = make_task_with_project(2, TaskStatus::Backlog, ProjectId(2));
 
-    let app = App::new(vec![t1, t2], 1, TEST_TIMEOUT);
+    let app = App::new(vec![t1, t2], ProjectId(1), TEST_TIMEOUT);
     // active_project = 1 → only t1 should appear in Backlog
     let visible = app.column_items_for_status(TaskStatus::Backlog);
     assert_eq!(
@@ -33,7 +33,7 @@ fn project_matches_hides_tasks_from_other_project() {
 
     // Switch to project 2 → only t2
     let mut app = app;
-    app.update(Message::SelectProject(2));
+    app.update(Message::SelectProject(ProjectId(2)));
     let visible = app.column_items_for_status(TaskStatus::Backlog);
     assert_eq!(
         visible.len(),
@@ -45,8 +45,8 @@ fn project_matches_hides_tasks_from_other_project() {
 
 #[test]
 fn archived_tasks_filtered_by_active_project() {
-    let t = make_task_with_project(1, TaskStatus::Archived, 2);
-    let app = App::new(vec![t], 1, TEST_TIMEOUT);
+    let t = make_task_with_project(1, TaskStatus::Archived, ProjectId(2));
+    let app = App::new(vec![t], ProjectId(1), TEST_TIMEOUT);
     // active_project = 1, task is in project 2 → archived_tasks returns empty
     assert_eq!(app.archived_tasks().len(), 0);
 }
@@ -57,17 +57,17 @@ fn select_project_clamps_cursor() {
     // Cursor is at row 2 (third item in Backlog). Switching to project 2
     // should clamp cursor to row 0.
     let tasks = vec![
-        make_task_with_project(1, TaskStatus::Backlog, 1),
-        make_task_with_project(2, TaskStatus::Backlog, 1),
-        make_task_with_project(3, TaskStatus::Backlog, 1),
-        make_task_with_project(4, TaskStatus::Backlog, 2),
+        make_task_with_project(1, TaskStatus::Backlog, ProjectId(1)),
+        make_task_with_project(2, TaskStatus::Backlog, ProjectId(1)),
+        make_task_with_project(3, TaskStatus::Backlog, ProjectId(1)),
+        make_task_with_project(4, TaskStatus::Backlog, ProjectId(2)),
     ];
-    let mut app = App::new(tasks, 1, TEST_TIMEOUT);
+    let mut app = App::new(tasks, ProjectId(1), TEST_TIMEOUT);
     // Move cursor to row 2 in column 1 (Backlog)
     app.selection_mut().set_row(1, 2);
     app.update_anchor_from_current();
 
-    app.update(Message::SelectProject(2));
+    app.update(Message::SelectProject(ProjectId(2)));
 
     let row = app.selected_row()[0];
     assert_eq!(
@@ -81,16 +81,16 @@ fn select_project_clamps_cursor() {
 // ---------------------------------------------------------------------------
 
 fn two_project_app() -> App {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
     app.update(Message::ProjectsUpdated(vec![
         Project {
-            id: 1,
+            id: ProjectId(1),
             name: "Default".to_string(),
             sort_order: 0,
             is_default: true,
         },
         Project {
-            id: 2,
+            id: ProjectId(2),
             name: "Backend".to_string(),
             sort_order: 1,
             is_default: false,
@@ -193,7 +193,7 @@ fn j_moves_cursor_down_in_panel() {
     assert_eq!(app.selected_project_row(), 1);
     assert_eq!(
         app.active_project(),
-        2,
+        ProjectId(2),
         "j should auto-select Backend (id=2)"
     );
 }
@@ -207,7 +207,7 @@ fn k_moves_cursor_up_in_panel() {
     assert_eq!(app.selected_project_row(), 0);
     assert_eq!(
         app.active_project(),
-        1,
+        ProjectId(1),
         "k should auto-select Default (id=1)"
     );
 }
@@ -255,7 +255,7 @@ fn enter_closes_projects_panel() {
     assert_eq!(app.selected_column(), 1, "focus should return to Backlog");
     assert_eq!(
         app.active_project(),
-        2,
+        ProjectId(2),
         "active project should still be Backend"
     );
 }
@@ -281,7 +281,7 @@ fn r_in_panel_enters_rename_mode_with_buffer() {
     assert!(matches!(
         app.mode(),
         InputMode::InputProjectName {
-            editing_id: Some(1)
+            editing_id: Some(ProjectId(1))
         }
     ));
     assert_eq!(app.input_buffer(), "Default");
@@ -296,7 +296,7 @@ fn d_in_panel_enters_confirm_delete_non_default() {
     app.handle_key(make_key(KeyCode::Char('d')));
     assert!(matches!(
         app.mode(),
-        InputMode::ConfirmDeleteProject1 { id: 2 }
+        InputMode::ConfirmDeleteProject1 { id: ProjectId(2) }
     ));
 }
 
@@ -343,7 +343,7 @@ fn input_project_name_enter_renames_project() {
     assert!(matches!(app.mode(), InputMode::Normal));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::RenameProject { id: 1, name } if name == "Renamed")));
+        .any(|c| matches!(c, Command::RenameProject { id: ProjectId(1), name } if name == "Renamed")));
 }
 
 #[test]
@@ -377,7 +377,7 @@ fn confirm_delete_project1_y_transitions_to_confirm2() {
     app.handle_key(make_key(KeyCode::Char('y')));
     assert!(matches!(
         app.mode(),
-        InputMode::ConfirmDeleteProject2 { id: 2, .. }
+        InputMode::ConfirmDeleteProject2 { id: ProjectId(2), .. }
     ));
 }
 
@@ -403,7 +403,7 @@ fn confirm_delete_project2_y_emits_delete_command() {
     assert!(!app.projects_panel_visible());
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::DeleteProject { id: 2 })));
+        .any(|c| matches!(c, Command::DeleteProject { id: ProjectId(2) })));
 }
 
 #[test]
@@ -429,19 +429,19 @@ fn shift_j_cursor_follows_moved_project_down() {
 
     app.update(Message::ProjectsUpdated(vec![
         Project {
-            id: 2,
+            id: ProjectId(2),
             name: "Backend".to_string(),
             sort_order: 0,
             is_default: false,
         },
         Project {
-            id: 1,
+            id: ProjectId(1),
             name: "Default".to_string(),
             sort_order: 1,
             is_default: true,
         },
     ]));
-    app.update(Message::FollowProject(1));
+    app.update(Message::FollowProject(ProjectId(1)));
 
     assert_eq!(
         app.selected_project_row(),
@@ -459,19 +459,19 @@ fn shift_k_cursor_follows_moved_project_up() {
 
     app.update(Message::ProjectsUpdated(vec![
         Project {
-            id: 2,
+            id: ProjectId(2),
             name: "Backend".to_string(),
             sort_order: 0,
             is_default: false,
         },
         Project {
-            id: 1,
+            id: ProjectId(1),
             name: "Default".to_string(),
             sort_order: 1,
             is_default: true,
         },
     ]));
-    app.update(Message::FollowProject(2));
+    app.update(Message::FollowProject(ProjectId(2)));
 
     assert_eq!(
         app.selected_project_row(),
@@ -483,7 +483,7 @@ fn shift_k_cursor_follows_moved_project_up() {
 #[test]
 fn follow_project_unknown_id_does_not_panic() {
     let mut app = two_project_app();
-    app.update(Message::FollowProject(99));
+    app.update(Message::FollowProject(ProjectId(99)));
     assert_eq!(app.selected_project_row(), 0);
 }
 
@@ -492,7 +492,7 @@ fn follow_project_at_boundary_does_not_move_cursor() {
     let mut app = two_project_app();
     app.handle_key(make_key(KeyCode::Char('h')));
     assert_eq!(app.selected_project_row(), 0);
-    app.update(Message::FollowProject(1));
+    app.update(Message::FollowProject(ProjectId(1)));
     assert_eq!(app.selected_project_row(), 0, "cursor should stay at 0");
 }
 
@@ -502,24 +502,24 @@ fn follow_project_updates_list_state_and_selection_in_sync() {
     app.handle_key(make_key(KeyCode::Char('h')));
     app.update(Message::ProjectsUpdated(vec![
         Project {
-            id: 2,
+            id: ProjectId(2),
             name: "Backend".to_string(),
             sort_order: 0,
             is_default: false,
         },
         Project {
-            id: 1,
+            id: ProjectId(1),
             name: "Default".to_string(),
             sort_order: 1,
             is_default: true,
         },
     ]));
-    app.update(Message::FollowProject(2));
+    app.update(Message::FollowProject(ProjectId(2)));
 
     assert_eq!(app.selected_project_row(), 0, "selection row should be 0");
     assert_eq!(
         app.selected_project().map(|p| p.id),
-        Some(2),
+        Some(ProjectId(2)),
         "selected_project() should return Backend (id=2) after FollowProject"
     );
 }
@@ -534,14 +534,14 @@ fn g_closes_projects_panel() {
     assert_eq!(app.selected_column(), 1, "focus should return to Backlog");
     assert_eq!(
         app.active_project(),
-        2,
+        ProjectId(2),
         "active project should still be Backend"
     );
 }
 
 #[test]
 fn g_in_empty_projects_panel_closes_panel() {
-    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.update(Message::ProjectsUpdated(vec![]));
     app.update(Message::NavigateColumn(-1));
     assert!(app.projects_panel_visible(), "precondition: panel open");
@@ -560,7 +560,7 @@ fn shift_j_emits_reorder_project_down() {
     let cmds = app.handle_key(KeyEvent::new(KeyCode::Char('J'), KeyModifiers::NONE));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::ReorderProject { id: 1, delta: 1 })));
+        .any(|c| matches!(c, Command::ReorderProject { id: ProjectId(1), delta: 1 })));
 }
 
 #[test]
@@ -572,7 +572,7 @@ fn shift_k_emits_reorder_project_up() {
     let cmds = app.handle_key(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::NONE));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::ReorderProject { id: 2, delta: -1 })));
+        .any(|c| matches!(c, Command::ReorderProject { id: ProjectId(2), delta: -1 })));
 }
 
 // ---------------------------------------------------------------------------
@@ -582,7 +582,7 @@ fn shift_k_emits_reorder_project_up() {
 fn make_app_with_default_project() -> App {
     let mut app = make_app();
     app.board.projects.push(Project {
-        id: 1,
+        id: ProjectId(1),
         name: "Default".to_string(),
         is_default: true,
         sort_order: 0,
@@ -686,7 +686,7 @@ fn refresh_preserves_archive_column() {
 #[test]
 fn select_project_emits_persist_string_setting() {
     let mut app = two_project_app();
-    let cmds = app.update(Message::SelectProject(2));
+    let cmds = app.update(Message::SelectProject(ProjectId(2)));
     assert!(
         cmds.iter().any(|c| matches!(
             c,
@@ -729,18 +729,18 @@ fn q_from_projects_panel_triggers_quit_prompt() {
 // ---------------------------------------------------------------------------
 
 fn app_with_default_and_custom_projects() -> App {
-    let t1 = make_task_with_project(1, TaskStatus::Backlog, 1); // Default
-    let t2 = make_task_with_project(2, TaskStatus::Backlog, 2); // Custom
-    let mut app = App::new(vec![t1, t2], 1, TEST_TIMEOUT);
+    let t1 = make_task_with_project(1, TaskStatus::Backlog, ProjectId(1)); // Default
+    let t2 = make_task_with_project(2, TaskStatus::Backlog, ProjectId(2)); // Custom
+    let mut app = App::new(vec![t1, t2], ProjectId(1), TEST_TIMEOUT);
     app.update(Message::ProjectsUpdated(vec![
         Project {
-            id: 1,
+            id: ProjectId(1),
             name: "Default".to_string(),
             sort_order: 0,
             is_default: true,
         },
         Project {
-            id: 2,
+            id: ProjectId(2),
             name: "Custom".to_string(),
             sort_order: 1,
             is_default: false,
@@ -764,7 +764,7 @@ fn default_project_shows_all_tasks() {
 #[test]
 fn non_default_project_shows_only_its_own_tasks() {
     let mut app = app_with_default_and_custom_projects();
-    app.update(Message::SelectProject(2));
+    app.update(Message::SelectProject(ProjectId(2)));
     let visible = app.column_items_for_status(TaskStatus::Backlog);
     assert_eq!(
         visible.len(),
@@ -777,8 +777,8 @@ fn non_default_project_shows_only_its_own_tasks() {
 fn default_project_shows_archived_from_all_projects() {
     let mut app = app_with_default_and_custom_projects();
     app.board.tasks = vec![
-        make_task_with_project(1, TaskStatus::Archived, 1),
-        make_task_with_project(2, TaskStatus::Archived, 2),
+        make_task_with_project(1, TaskStatus::Archived, ProjectId(1)),
+        make_task_with_project(2, TaskStatus::Archived, ProjectId(2)),
     ];
     assert_eq!(
         app.archived_tasks().len(),

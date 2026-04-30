@@ -65,7 +65,7 @@ pub(in crate::tui) fn make_task(id: i64, status: TaskStatus) -> Task {
         external_id: None,
         created_at: now,
         updated_at: now,
-        project_id: 1,
+        project_id: ProjectId(1),
     }
 }
 
@@ -77,7 +77,7 @@ pub(in crate::tui) fn make_app() -> App {
             make_task(3, TaskStatus::Running),
             make_task(4, TaskStatus::Done),
         ],
-        1,
+        ProjectId(1),
         TEST_TIMEOUT,
     )
 }
@@ -111,7 +111,7 @@ pub(in crate::tui) fn make_epic(id: i64) -> Epic {
         feed_interval_secs: None,
         created_at: now,
         updated_at: now,
-        project_id: 1,
+        project_id: ProjectId(1),
     }
 }
 
@@ -132,7 +132,7 @@ pub(in crate::tui) fn make_app_with_archived_task() -> App {
 
 /// Helper: create an app with one task + one epic in Backlog, cursor on the epic.
 pub(in crate::tui) fn make_app_with_epic_selected() -> App {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     // Same priority (5), task (id=1) at row 0, epic (id=10) at row 1
     app.selection_mut().set_column(1); // Backlog = nav col 1
@@ -141,7 +141,7 @@ pub(in crate::tui) fn make_app_with_epic_selected() -> App {
 }
 
 pub(in crate::tui) fn make_app_confirm_archive_epic() -> App {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     app.selection_mut().set_column(1); // Backlog = nav col 1
     app.selection_mut().set_row(1, 1); // cursor on epic (same priority as task, sorts after by id)

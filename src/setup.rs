@@ -8,6 +8,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use crate::db::{Database, EpicCrud, EpicPatch};
+use crate::models::ProjectId;
 use crate::process::RealProcessRunner;
 use crate::tmux;
 
@@ -344,7 +345,7 @@ pub fn seed_feed_epics(db: &Database) -> Result<()> {
     let has_dependabot = epics.iter().any(|e| e.title == "Dependabot");
 
     if !has_reviews {
-        let epic = db.create_epic("Reviews", "", "", None, 1)?;
+        let epic = db.create_epic("Reviews", "", "", None, ProjectId(1))?;
         db.patch_epic(
             epic.id,
             &EpicPatch::new()
@@ -355,7 +356,7 @@ pub fn seed_feed_epics(db: &Database) -> Result<()> {
     }
 
     if !has_security {
-        let epic = db.create_epic("Security", "", "", None, 1)?;
+        let epic = db.create_epic("Security", "", "", None, ProjectId(1))?;
         db.patch_epic(
             epic.id,
             &EpicPatch::new()
@@ -366,7 +367,7 @@ pub fn seed_feed_epics(db: &Database) -> Result<()> {
     }
 
     if !has_dependabot {
-        let epic = db.create_epic("Dependabot", "", "", None, 1)?;
+        let epic = db.create_epic("Dependabot", "", "", None, ProjectId(1))?;
         db.patch_epic(epic.id, &EpicPatch::new().sort_order(Some(0)))?;
     }
 

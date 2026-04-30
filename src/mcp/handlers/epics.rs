@@ -2,7 +2,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::mcp::McpState;
-use crate::models::{EpicId, TaskStatus};
+use crate::models::{EpicId, ProjectId, TaskStatus};
 use crate::service::{CreateEpicParams, EpicService, ServiceError, UpdateEpicParams};
 
 use super::types::{
@@ -218,7 +218,7 @@ pub(super) fn handle_update_epic(
             .list_projects()
             .unwrap_or_default()
             .iter()
-            .any(|p| p.id == project_id)
+            .any(|p| p.id == ProjectId(project_id))
         {
             return service_err_to_response(
                 id,
@@ -241,7 +241,7 @@ pub(super) fn handle_update_epic(
             None => crate::service::FieldUpdate::Clear,
         }),
         feed_interval_secs: parsed.feed_interval_secs,
-        project_id: parsed.project_id,
+        project_id: parsed.project_id.map(ProjectId),
     };
     let field_names: Vec<String> = params
         .updated_field_names()

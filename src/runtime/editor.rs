@@ -9,6 +9,8 @@ use std::time::Duration;
 use tempfile::Builder as TempfileBuilder;
 
 use super::{TuiRuntime, TUI_WINDOW_NAME};
+#[cfg(test)]
+use crate::models::ProjectId;
 use crate::editor::{
     apply_epic_editor_fields, apply_task_editor_fields, format_description_for_editor,
     format_editor_content, format_epic_for_editor, parse_editor_content, parse_epic_editor_output,
@@ -461,7 +463,7 @@ mod learning_editor_tests {
         let learning = make_learning(id);
         let rt = make_runtime(db.clone());
         // Put app into ProposedLearnings view
-        let mut app = App::new(vec![], 1, std::time::Duration::from_secs(300));
+        let mut app = App::new(vec![], ProjectId(1), std::time::Duration::from_secs(300));
         app.update(Message::ShowProposedLearnings(vec![learning.clone()]));
 
         let updated_content = "--- SUMMARY ---\nnew summary\n--- KIND ---\npitfall\n--- TAGS ---\nrust\n--- DETAIL ---\nsome detail\n".to_string();
@@ -501,7 +503,7 @@ mod learning_editor_tests {
             .unwrap();
         let learning = make_learning(id);
         let rt = make_runtime(db.clone());
-        let mut app = App::new(vec![], 1, std::time::Duration::from_secs(300));
+        let mut app = App::new(vec![], ProjectId(1), std::time::Duration::from_secs(300));
         app.update(Message::ShowProposedLearnings(vec![learning.clone()]));
 
         let content_empty_summary =
@@ -535,7 +537,7 @@ mod learning_editor_tests {
             .unwrap();
         let learning = make_learning(id);
         let rt = make_runtime(db.clone());
-        let mut app = App::new(vec![], 1, std::time::Duration::from_secs(300));
+        let mut app = App::new(vec![], ProjectId(1), std::time::Duration::from_secs(300));
 
         rt.exec_finalize_editor_result(
             &mut app,
@@ -569,7 +571,7 @@ mod learning_editor_tests {
             .unwrap();
         let learning = make_learning(id);
         let rt = make_runtime(db.clone());
-        let mut app = App::new(vec![], 1, std::time::Duration::from_secs(300));
+        let mut app = App::new(vec![], ProjectId(1), std::time::Duration::from_secs(300));
 
         rt.exec_finalize_editor_result(
             &mut app,
@@ -727,7 +729,7 @@ mod tests {
             runner,
             editor_session: Arc::new(Mutex::new(None)),
         };
-        let app = App::new(vec![], 1, Duration::from_secs(300));
+        let app = App::new(vec![], ProjectId(1), Duration::from_secs(300));
         (rt, app)
     }
 
@@ -767,7 +769,7 @@ mod tests {
                 None,
                 None,
                 None,
-                1,
+                ProjectId(1),
             )
             .unwrap();
         db.get_task(id).unwrap().unwrap()
@@ -790,7 +792,7 @@ mod tests {
             runner,
             editor_session: Arc::new(Mutex::new(None)),
         };
-        let mut app = App::new(vec![task.clone()], 1, Duration::from_secs(300));
+        let mut app = App::new(vec![task.clone()], ProjectId(1), Duration::from_secs(300));
 
         let edited_text = "--- TITLE ---\nNew title\n\
             --- DESCRIPTION ---\nNew description\n\
@@ -834,7 +836,7 @@ mod tests {
             runner,
             editor_session: Arc::new(Mutex::new(None)),
         };
-        let mut app = App::new(vec![task.clone()], 1, Duration::from_secs(300));
+        let mut app = App::new(vec![task.clone()], ProjectId(1), Duration::from_secs(300));
 
         rt.exec_finalize_editor_result(
             &mut app,

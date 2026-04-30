@@ -2,6 +2,7 @@
 
 use crossterm::event::{KeyCode, KeyEvent};
 
+use crate::models::ProjectId;
 use super::super::types::*;
 use super::super::App;
 
@@ -86,7 +87,7 @@ impl App {
     pub(in crate::tui) fn handle_key_input_project_name(
         &mut self,
         key: KeyEvent,
-        editing_id: Option<i64>,
+        editing_id: Option<ProjectId>,
     ) -> Vec<Command> {
         match key.code {
             KeyCode::Enter => {
@@ -121,7 +122,7 @@ impl App {
     pub(in crate::tui) fn handle_key_confirm_delete_project1(
         &mut self,
         key: KeyEvent,
-        id: i64,
+        id: ProjectId,
     ) -> Vec<Command> {
         match key.code {
             KeyCode::Char('y') => {
@@ -151,7 +152,7 @@ impl App {
     pub(in crate::tui) fn handle_key_confirm_delete_project2(
         &mut self,
         key: KeyEvent,
-        id: i64,
+        id: ProjectId,
         _item_count: u64, // read by the renderer via InputMode::ConfirmDeleteProject2 { item_count }
     ) -> Vec<Command> {
         match key.code {

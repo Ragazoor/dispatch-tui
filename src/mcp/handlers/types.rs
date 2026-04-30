@@ -205,7 +205,7 @@ pub(super) fn resolve_project_id(
     db: &dyn crate::db::ProjectCrud,
 ) -> Result<crate::models::ProjectId, JsonRpcResponse> {
     match opt_project_id {
-        Some(pid) => Ok(pid),
+        Some(pid) => Ok(crate::models::ProjectId(pid)),
         None => db.get_default_project().map(|p| p.id).map_err(|e| {
             JsonRpcResponse::err(
                 id.clone(),

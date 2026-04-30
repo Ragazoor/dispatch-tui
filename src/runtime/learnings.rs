@@ -1,6 +1,8 @@
 use super::*;
 use crate::db;
 use crate::models::{LearningId, LearningScope, LearningStatus};
+#[cfg(test)]
+use crate::models::ProjectId;
 use crate::service::LearningService;
 
 impl TuiRuntime {
@@ -124,7 +126,7 @@ mod tests {
         let db = Arc::new(Database::open_in_memory().unwrap());
         let id = insert_proposed_learning(&db);
         let rt = make_runtime(db.clone());
-        let mut app = App::new(vec![], 1, std::time::Duration::from_secs(300));
+        let mut app = App::new(vec![], ProjectId(1), std::time::Duration::from_secs(300));
         // Put the app in ProposedLearnings view with the learning
         let learning = make_learning(id);
         app.update(Message::ShowProposedLearnings(vec![learning]));
@@ -146,7 +148,7 @@ mod tests {
         let db = Arc::new(Database::open_in_memory().unwrap());
         let id = insert_proposed_learning(&db);
         let rt = make_runtime(db.clone());
-        let mut app = App::new(vec![], 1, std::time::Duration::from_secs(300));
+        let mut app = App::new(vec![], ProjectId(1), std::time::Duration::from_secs(300));
         let learning = make_learning(id);
         app.update(Message::ShowProposedLearnings(vec![learning]));
 
@@ -164,7 +166,7 @@ mod tests {
     fn exec_approve_on_nonexistent_id_shows_status_info() {
         let db = Arc::new(Database::open_in_memory().unwrap());
         let rt = make_runtime(db);
-        let mut app = App::new(vec![], 1, std::time::Duration::from_secs(300));
+        let mut app = App::new(vec![], ProjectId(1), std::time::Duration::from_secs(300));
 
         rt.exec_approve_learning(&mut app, 999);
 
@@ -203,7 +205,7 @@ mod tests {
             .unwrap();
 
         let rt = make_runtime(db.clone());
-        let mut app = App::new(vec![], 1, std::time::Duration::from_secs(300));
+        let mut app = App::new(vec![], ProjectId(1), std::time::Duration::from_secs(300));
 
         rt.exec_load_proposed_learnings(&mut app);
 

@@ -25,7 +25,71 @@ pub fn expand_tilde(path: &str) -> String {
 // ProjectId / Project
 // ---------------------------------------------------------------------------
 
-pub type ProjectId = i64;
+/// ```compile_fail
+/// use dispatch_tui::models::{ProjectId, EpicId};
+/// fn takes_epic(id: EpicId) {}
+/// takes_epic(ProjectId(1)); // must not compile
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ProjectId(pub i64);
+
+impl std::fmt::Display for ProjectId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<i64> for ProjectId {
+    fn from(v: i64) -> Self {
+        ProjectId(v)
+    }
+}
+
+impl From<ProjectId> for i64 {
+    fn from(id: ProjectId) -> Self {
+        id.0
+    }
+}
+
+impl std::str::FromStr for ProjectId {
+    type Err = std::num::ParseIntError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.parse::<i64>().map(ProjectId)
+    }
+}
+
+#[cfg(test)]
+mod project_id_tests {
+    use super::ProjectId;
+
+    #[test]
+    fn project_id_display() {
+        assert_eq!(ProjectId(42).to_string(), "42");
+    }
+
+    #[test]
+    fn project_id_copy_eq_hash() {
+        let a = ProjectId(1);
+        let b = a; // Copy
+        assert_eq!(a, b);
+        let mut set = std::collections::HashSet::new();
+        set.insert(a);
+        assert!(set.contains(&b));
+    }
+
+    #[test]
+    fn project_id_debug() {
+        let s = format!("{:?}", ProjectId(7));
+        assert!(s.contains("7"));
+    }
+
+    #[test]
+    fn project_id_from_into_i64() {
+        let id = ProjectId::from(5i64);
+        let raw: i64 = id.into();
+        assert_eq!(raw, 5);
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Project {
@@ -2242,7 +2306,7 @@ mod tests {
             external_id: None,
             created_at: now,
             updated_at: now,
-            project_id: 1,
+            project_id: ProjectId(1),
         };
         assert!(task.epic_id.is_none());
     }
@@ -2268,7 +2332,7 @@ mod tests {
             external_id: None,
             created_at: now,
             updated_at: now,
-            project_id: 1,
+            project_id: ProjectId(1),
         };
         assert_eq!(task.epic_id, Some(EpicId(5)));
     }
@@ -2290,7 +2354,7 @@ mod tests {
             feed_interval_secs: None,
             created_at: now,
             updated_at: now,
-            project_id: 1,
+            project_id: ProjectId(1),
         };
         assert_eq!(epic.id, EpicId(1));
         assert_eq!(epic.status, TaskStatus::Backlog);
@@ -2315,7 +2379,7 @@ mod tests {
             feed_interval_secs: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            project_id: 1,
+            project_id: ProjectId(1),
         }
     }
 
@@ -2593,7 +2657,7 @@ mod tests {
             feed_interval_secs: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            project_id: 1,
+            project_id: ProjectId(1),
         }
     }
 
@@ -2616,7 +2680,7 @@ mod tests {
             external_id: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            project_id: 1,
+            project_id: ProjectId(1),
         }
     }
 
@@ -2815,7 +2879,7 @@ mod tests {
             external_id: None,
             created_at: now,
             updated_at: now,
-            project_id: 1,
+            project_id: ProjectId(1),
         }
     }
 
@@ -2853,7 +2917,7 @@ mod tests {
             feed_interval_secs: None,
             created_at: now,
             updated_at: now,
-            project_id: 1,
+            project_id: ProjectId(1),
         }
     }
 
@@ -2877,7 +2941,7 @@ mod tests {
             external_id: None,
             created_at: now,
             updated_at: now,
-            project_id: 1,
+            project_id: ProjectId(1),
         }
     }
 

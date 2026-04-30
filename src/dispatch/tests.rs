@@ -8,7 +8,8 @@ use super::worktree::provision_worktree;
 use super::*;
 
 use crate::models::{
-    EpicId, Learning, LearningKind, LearningScope, LearningStatus, Task, TaskId, TaskStatus,
+    EpicId, Learning, LearningKind, LearningScope, LearningStatus, ProjectId, Task, TaskId,
+    TaskStatus,
 };
 use crate::process::{exit_fail, MockProcessRunner};
 use chrono::Utc;
@@ -263,7 +264,7 @@ fn make_task(repo_path: &str) -> Task {
         external_id: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
-        project_id: 1,
+        project_id: ProjectId(1),
     }
 }
 

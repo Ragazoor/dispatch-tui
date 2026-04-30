@@ -48,7 +48,7 @@ impl super::TaskCrud for Database {
                 epic_id.map(|e| e.0),
                 sort_order,
                 tag.map(|t| t.as_str()),
-                project_id,
+                project_id.0,
             ],
         )
         .context("Failed to insert task")?;
@@ -207,7 +207,7 @@ impl super::TaskCrud for Database {
         }
         if let Some(pid) = patch.project_id {
             sets.push("project_id = ?");
-            values.push(Box::new(pid));
+            values.push(Box::new(pid.0));
         }
 
         sets.push("updated_at = datetime('now')");
@@ -312,7 +312,7 @@ impl super::TaskCrud for Database {
             .query_row(
                 "SELECT project_id FROM epics WHERE id = ?1",
                 params![epic_id.0],
-                |row| row.get(0),
+                |row| row.get::<_, i64>(0).map(ProjectId),
             )
             .with_context(|| format!("Epic {} not found for upsert_feed_tasks", epic_id))?;
 
@@ -338,7 +338,7 @@ impl super::TaskCrud for Database {
                     sub_status,
                     epic_id.0,
                     item.external_id,
-                    project_id,
+                    project_id.0,
                 ],
             )
             .with_context(|| format!("Failed to upsert feed task '{}'", item.external_id))?;
@@ -584,7 +584,7 @@ impl super::EpicCrud for Database {
                 conn.execute(
                 "INSERT INTO epics (title, description, repo_path, parent_epic_id, project_id) \
                  VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![title, description, repo_path, parent_epic_id.map(|e| e.0), project_id],
+                params![title, description, repo_path, parent_epic_id.map(|e| e.0), project_id.0],
             )
             .context("Failed to insert epic")?;
                 EpicId(conn.last_insert_rowid())
@@ -703,7 +703,7 @@ impl super::EpicCrud for Database {
         }
         if let Some(pid) = patch.project_id {
             sets.push("project_id = ?");
-            values.push(Box::new(pid));
+            values.push(Box::new(pid.0));
         }
 
         sets.push("updated_at = datetime('now')");
@@ -1572,7 +1572,7 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
             .unwrap_or(None)
             .unwrap_or_else(|| "main".to_string()),
         external_id: row.get::<_, Option<String>>("external_id").unwrap_or(None),
-        project_id: row.get("project_id")?,
+        project_id: ProjectId(row.get::<_, i64>("project_id")?),
         created_at: parse_datetime(&created_str),
         updated_at: parse_datetime(&updated_str),
     })
@@ -1600,7 +1600,7 @@ fn row_to_epic(row: &rusqlite::Row<'_>) -> rusqlite::Result<Epic> {
         feed_interval_secs: row
             .get::<_, Option<i64>>("feed_interval_secs")
             .unwrap_or(None),
-        project_id: row.get("project_id")?,
+        project_id: ProjectId(row.get::<_, i64>("project_id")?),
         created_at: parse_datetime(&created_str),
         updated_at: parse_datetime(&updated_str),
     })
@@ -1626,7 +1626,7 @@ impl super::ProjectCrud for Database {
             params![name, sort_order],
         )
         .context("Failed to create project")?;
-        let id = conn.last_insert_rowid();
+        let id = ProjectId(conn.last_insert_rowid());
         Ok(Project {
             id,
             name: name.to_string(),
@@ -1646,7 +1646,7 @@ impl super::ProjectCrud for Database {
         let projects = stmt
             .query_map([], |row| {
                 Ok(Project {
-                    id: row.get(0)?,
+                    id: ProjectId(row.get::<_, i64>(0)?),
                     name: row.get(1)?,
                     sort_order: row.get(2)?,
                     is_default: row.get::<_, i64>(3)? != 0,
@@ -1665,7 +1665,7 @@ impl super::ProjectCrud for Database {
             [],
             |row| {
                 Ok(Project {
-                    id: row.get(0)?,
+                    id: ProjectId(row.get::<_, i64>(0)?),
                     name: row.get(1)?,
                     sort_order: row.get(2)?,
                     is_default: true,
@@ -1680,7 +1680,7 @@ impl super::ProjectCrud for Database {
         let rows = conn
             .execute(
                 "UPDATE projects SET name = ?1 WHERE id = ?2",
-                params![name, id],
+                params![name, id.0],
             )
             .context("Failed to rename project")?;
         if rows == 0 {
@@ -1695,7 +1695,7 @@ impl super::ProjectCrud for Database {
         let is_default: bool = conn
             .query_row(
                 "SELECT is_default FROM projects WHERE id = ?1",
-                params![id],
+                params![id.0],
                 |row| row.get::<_, i64>(0),
             )
             .optional()
@@ -1722,7 +1722,7 @@ impl super::ProjectCrud for Database {
         let rows = conn
             .execute(
                 "UPDATE projects SET sort_order = ?1 WHERE id = ?2",
-                params![new_sort_order, id],
+                params![new_sort_order, id.0],
             )
             .context("Failed to reorder project")?;
         if rows == 0 {

@@ -2,7 +2,7 @@ use ratatui::buffer::Buffer;
 
 use super::super::App;
 use super::{make_app, make_key, make_task, render_to_buffer, TEST_TIMEOUT};
-use crate::models::TaskStatus;
+use crate::models::{ProjectId, TaskStatus};
 use crossterm::event::KeyCode;
 
 fn buffer_to_string(buf: &Buffer) -> String {
@@ -25,7 +25,7 @@ fn render_to_string(app: &mut App, width: u16, height: u16) -> String {
 
 #[test]
 fn snapshot_empty_kanban_board() {
-    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);
 }
@@ -121,13 +121,13 @@ fn make_feed_epic(id: i64, title: &str, sort_order: i64) -> crate::models::Epic 
         feed_interval_secs: Some(30),
         created_at: now,
         updated_at: now,
-        project_id: 1,
+        project_id: ProjectId(1),
     }
 }
 
 #[test]
 fn snapshot_tab_bar_with_feed_epics_board_active() {
-    let mut app = App::new(vec![], 1, super::TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1), super::TEST_TIMEOUT);
     app.board.epics = vec![
         make_feed_epic(1, "My Feed", -2),
         make_feed_epic(2, "Another Feed", -1),
@@ -139,7 +139,7 @@ fn snapshot_tab_bar_with_feed_epics_board_active() {
 #[test]
 fn snapshot_tab_bar_with_feed_epics_feed_active() {
     use super::super::types::Message;
-    let mut app = App::new(vec![], 1, super::TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1), super::TEST_TIMEOUT);
     app.board.epics = vec![
         make_feed_epic(1, "My Feed", -2),
         make_feed_epic(2, "Another Feed", -1),
@@ -163,7 +163,7 @@ fn snapshot_kanban_with_projects_focused() {
     let mut app = make_app();
     // Add a project so the Projects column has content
     app.board.projects.push(crate::models::Project {
-        id: 1,
+        id: ProjectId(1),
         name: "Default".to_string(),
         is_default: true,
         sort_order: 0,
@@ -195,7 +195,7 @@ fn snapshot_kanban_with_archive_focused() {
 #[test]
 fn snapshot_task_detail_overlay_peek() {
     use crate::tui::Message;
-    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     let mut task = make_task(1, TaskStatus::Backlog);
     task.description = "First line of description.\nSecond line.\nThird line.".to_string();
     task.repo_path = "/repo/my-project".to_string();
@@ -209,7 +209,7 @@ fn snapshot_task_detail_overlay_peek() {
 #[test]
 fn snapshot_task_detail_overlay_zoomed() {
     use crate::tui::{Message, ViewMode};
-    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     let mut task = make_task(1, TaskStatus::Backlog);
     task.description = "First line of description.\nSecond line.\nThird line.".to_string();
     task.repo_path = "/repo/my-project".to_string();
@@ -225,7 +225,7 @@ fn snapshot_task_detail_overlay_zoomed() {
 #[test]
 fn snapshot_task_detail_overlay_empty_optional_fields() {
     use crate::tui::Message;
-    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     let mut task = make_task(1, TaskStatus::Backlog);
     task.description = "Just a description.".to_string();
     task.repo_path = "/repo/path".to_string();
@@ -251,7 +251,7 @@ fn snapshot_input_project_name_rename() {
     use super::super::types::InputMode;
     let mut app = make_app();
     app.input.mode = InputMode::InputProjectName {
-        editing_id: Some(1),
+        editing_id: Some(ProjectId(1)),
     };
     app.input.buffer = "Renamed Project".to_string();
     let rendered = render_to_string(&mut app, 120, 40);
@@ -262,7 +262,7 @@ fn snapshot_input_project_name_rename() {
 fn snapshot_confirm_delete_project1() {
     use super::super::types::InputMode;
     let mut app = make_app();
-    app.input.mode = InputMode::ConfirmDeleteProject1 { id: 2 };
+    app.input.mode = InputMode::ConfirmDeleteProject1 { id: ProjectId(2) };
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);
 }
@@ -272,7 +272,7 @@ fn snapshot_confirm_delete_project2() {
     use super::super::types::InputMode;
     let mut app = make_app();
     app.input.mode = InputMode::ConfirmDeleteProject2 {
-        id: 2,
+        id: ProjectId(2),
         item_count: 3,
     };
     let rendered = render_to_string(&mut app, 120, 40);

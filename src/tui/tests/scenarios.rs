@@ -2,7 +2,7 @@ use crossterm::event::KeyCode;
 
 use super::super::{App, Command, InputMode, Message};
 use super::{make_app, make_epic, make_key, make_task};
-use crate::models::{TaskId, TaskStatus};
+use crate::models::{ProjectId, TaskId, TaskStatus};
 
 /// Drives an `App` through a sequence of key events, collecting all `Command`s emitted.
 struct Scenario {
@@ -208,7 +208,7 @@ fn make_feed_epic(id: i64) -> crate::models::Epic {
 
 fn make_app_with_feed_epic_selected() -> super::App {
     use super::{App, TEST_TIMEOUT};
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
     app.board.epics = vec![make_feed_epic(10)];
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 1);
@@ -217,7 +217,7 @@ fn make_app_with_feed_epic_selected() -> super::App {
 
 fn make_app_with_non_feed_epic_selected() -> super::App {
     use super::{App, TEST_TIMEOUT};
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], 1, TEST_TIMEOUT);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)]; // no feed_command
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 1);
@@ -253,7 +253,7 @@ fn r_in_epic_view_of_feed_epic_emits_trigger_command() {
     use super::{App, TEST_TIMEOUT};
     use crate::tui::{BoardSelection, ViewMode};
 
-    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.board.epics = vec![make_feed_epic(10)];
     app.board.view_mode = ViewMode::Epic {
         epic_id: crate::models::EpicId(10),
@@ -276,7 +276,7 @@ fn r_in_epic_view_of_non_feed_epic_does_nothing() {
     use super::{App, TEST_TIMEOUT};
     use crate::tui::{BoardSelection, ViewMode};
 
-    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)]; // no feed_command
     app.board.view_mode = ViewMode::Epic {
         epic_id: crate::models::EpicId(10),

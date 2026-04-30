@@ -8,7 +8,8 @@ use super::shared::{
 };
 
 use crate::models::{
-    format_age, Epic, EpicId, EpicSubstatus, Project, Staleness, SubStatus, Task, TaskStatus,
+    format_age, Epic, EpicId, EpicSubstatus, Project, ProjectId, Staleness, SubStatus, Task,
+    TaskStatus,
 };
 use crate::tui::{
     is_edge_column, App, ColumnItem, ColumnLayout, EpicStatsMap, InputMode, RepoFilterMode,
@@ -958,7 +959,7 @@ fn render_projects_column(frame: &mut Frame, app: &mut App, area: Rect) {
     let bg_block = Block::default().style(Style::default().bg(PROJECTS_COL_BG));
     frame.render_widget(bg_block, area);
 
-    let task_counts: std::collections::HashMap<i64, usize> = app
+    let task_counts: std::collections::HashMap<ProjectId, usize> = app
         .tasks()
         .iter()
         .filter(|t| t.status != TaskStatus::Archived)
@@ -2158,7 +2159,7 @@ mod tests {
     use std::time::Duration;
 
     fn make_test_app() -> App {
-        App::new(vec![], 1, Duration::from_secs(300))
+        App::new(vec![], ProjectId(1), Duration::from_secs(300))
     }
 
     fn dummy_style() -> Style {

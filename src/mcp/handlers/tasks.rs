@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use crate::db;
 use crate::dispatch;
 use crate::mcp::McpState;
-use crate::models::{DispatchMode, EpicId, SubStatus, Task, TaskId, TaskStatus, TaskTag};
+use crate::models::{DispatchMode, EpicId, ProjectId, SubStatus, Task, TaskId, TaskStatus, TaskTag};
 use crate::service::{
     ClaimTaskParams, CreateTaskParams, ListTasksFilter, ServiceError, TaskService, UpdateTaskParams,
 };
@@ -325,7 +325,7 @@ pub(super) fn handle_update_task(
             .list_projects()
             .unwrap_or_default()
             .iter()
-            .any(|p| p.id == project_id)
+            .any(|p| p.id == ProjectId(project_id))
         {
             return service_err_to_response(
                 id,
@@ -334,7 +334,7 @@ pub(super) fn handle_update_task(
                 )),
             );
         }
-        params = params.project_id(project_id);
+        params = params.project_id(ProjectId(project_id));
     }
     let fields_display = params.updated_field_names().join(", ");
 
@@ -484,7 +484,7 @@ pub(super) fn handle_list_tasks(
     };
 
     let epic_id = parsed.epic_id.map(EpicId).or(derived_epic_id);
-    let project_id = parsed.project_id.or(derived_project_id);
+    let project_id = parsed.project_id.map(ProjectId).or(derived_project_id);
 
     let svc = TaskService::new(state.db.clone());
     match svc.list_tasks(ListTasksFilter {

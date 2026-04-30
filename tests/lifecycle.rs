@@ -3,12 +3,12 @@
 use std::time::Duration;
 
 use dispatch_tui::db::{self, Database, TaskCrud};
-use dispatch_tui::models::{DispatchMode, Task, TaskId, TaskStatus};
+use dispatch_tui::models::{DispatchMode, ProjectId, Task, TaskId, TaskStatus};
 use dispatch_tui::tui::{App, Command, Message, MoveDirection};
 
 fn make_app() -> (App, Database) {
     let db = Database::open_in_memory().unwrap();
-    let app = App::new(vec![], 1, Duration::from_secs(300));
+    let app = App::new(vec![], dispatch_tui::models::ProjectId(1), Duration::from_secs(300));
     (app, db)
 }
 
@@ -49,7 +49,7 @@ fn full_lifecycle() {
             None,
             None,
             None,
-            1,
+            ProjectId(1),
         )
         .unwrap();
     let now = chrono::Utc::now();
@@ -72,7 +72,7 @@ fn full_lifecycle() {
             external_id: None,
             created_at: now,
             updated_at: now,
-            project_id: 1,
+            project_id: dispatch_tui::models::ProjectId(1),
         },
     });
     assert!(cmds.is_empty());
