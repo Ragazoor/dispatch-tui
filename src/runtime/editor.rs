@@ -300,7 +300,7 @@ impl TuiRuntime {
 
         let task_id = task.id;
         let plan = applied.plan_path.clone();
-        let params = UpdateTaskParams::for_task(task_id.0)
+        let params = UpdateTaskParams::for_task(task_id)
             .status(applied.status)
             .plan_path(plan.clone())
             .title(applied.title.clone())

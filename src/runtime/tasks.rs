@@ -86,7 +86,7 @@ impl TuiRuntime {
 
     pub(super) fn exec_persist_task(&self, app: &mut App, task: models::Task) {
         use crate::service::UpdateTaskParams;
-        let mut p = UpdateTaskParams::for_task(task.id.0)
+        let mut p = UpdateTaskParams::for_task(task.id)
             .status(task.status)
             .sub_status(task.sub_status)
             .pr_url(option_to_field_update(task.pr_url.clone()))
@@ -109,7 +109,7 @@ impl TuiRuntime {
         use crate::service::UpdateTaskParams;
         if let Err(e) = self
             .task_svc
-            .update_task(UpdateTaskParams::for_task(id.0).sub_status(sub_status))
+            .update_task(UpdateTaskParams::for_task(id).sub_status(sub_status))
         {
             app.update(Message::Error(Self::db_error("patching sub_status", e)));
         }
@@ -250,7 +250,7 @@ impl TuiRuntime {
             // Other active tasks share this worktree — just detach this task
             tracing::info!(task_id = id.0, "worktree shared, detaching only");
             if let Err(e) = self.task_svc.update_task(
-                crate::service::UpdateTaskParams::for_task(id.0)
+                crate::service::UpdateTaskParams::for_task(id)
                     .worktree(FieldUpdate::Clear)
                     .tmux_window(FieldUpdate::Clear),
             ) {
@@ -294,7 +294,7 @@ impl TuiRuntime {
                 "worktree shared, detaching only (no rebase)"
             );
             if let Err(e) = self.task_svc.update_task(
-                crate::service::UpdateTaskParams::for_task(id.0)
+                crate::service::UpdateTaskParams::for_task(id)
                     .worktree(FieldUpdate::Clear)
                     .tmux_window(FieldUpdate::Clear),
             ) {

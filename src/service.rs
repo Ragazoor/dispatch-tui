@@ -49,7 +49,7 @@ pub enum FieldUpdate {
 // ---------------------------------------------------------------------------
 
 pub struct UpdateTaskParams {
-    pub task_id: i64,
+    pub task_id: TaskId,
     pub status: Option<TaskStatus>,
     pub plan_path: Option<String>,
     pub title: Option<String>,
@@ -59,7 +59,7 @@ pub struct UpdateTaskParams {
     pub pr_url: Option<FieldUpdate>,
     pub tag: Option<TaskTag>,
     pub sub_status: Option<SubStatus>,
-    pub epic_id: Option<i64>,
+    pub epic_id: Option<EpicId>,
     pub worktree: Option<FieldUpdate>,
     pub tmux_window: Option<FieldUpdate>,
     pub base_branch: Option<String>,
@@ -119,7 +119,7 @@ impl UpdateTaskParams {
     }
 
     /// Create params with all optional fields unset (no-op except task_id).
-    pub fn for_task(task_id: i64) -> Self {
+    pub fn for_task(task_id: TaskId) -> Self {
         Self {
             task_id,
             status: None,
@@ -184,7 +184,7 @@ impl UpdateTaskParams {
         self
     }
 
-    pub fn epic_id(mut self, epic_id: i64) -> Self {
+    pub fn epic_id(mut self, epic_id: EpicId) -> Self {
         self.epic_id = Some(epic_id);
         self
     }
@@ -341,7 +341,7 @@ impl TaskService {
             ));
         }
 
-        let task_id = TaskId(params.task_id);
+        let task_id = params.task_id;
         let expanded_repo_path = params.repo_path.as_deref().map(crate::models::expand_tilde);
         let validated_sub_status = self.validate_sub_status(task_id, &params)?;
         let patch = build_task_patch(&params, expanded_repo_path.as_deref(), validated_sub_status);
@@ -358,12 +358,12 @@ impl TaskService {
                 .flatten()
                 .and_then(|t| t.epic_id);
             self.db
-                .set_task_epic_id(task_id, Some(EpicId(new_epic_id)))
+                .set_task_epic_id(task_id, Some(new_epic_id))
                 .map_err(|e| ServiceError::Internal(format!("Failed to link task to epic: {e}")))?;
             if let Some(old) = old_epic_id {
                 self.recalculate_epic(old);
             }
-            self.recalculate_epic(EpicId(new_epic_id));
+            self.recalculate_epic(new_epic_id);
         }
 
         if params.status.is_some() {
@@ -1254,7 +1254,7 @@ mod tests {
             })
             .unwrap();
 
-        svc.update_task(UpdateTaskParams::for_task(id.0).status(TaskStatus::Running))
+        svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Running))
             .unwrap();
 
         let task = svc.get_task(id.0).unwrap();
@@ -1284,7 +1284,7 @@ mod tests {
             .unwrap();
 
         let err = svc
-            .update_task(UpdateTaskParams::for_task(id.0))
+            .update_task(UpdateTaskParams::for_task(id))
             .unwrap_err();
         assert!(matches!(err, ServiceError::Validation(_)));
     }
@@ -1308,7 +1308,7 @@ mod tests {
             })
             .unwrap();
 
-        svc.update_task(UpdateTaskParams::for_task(id.0).status(TaskStatus::Running))
+        svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Running))
             .unwrap();
 
         let task = svc.get_task(id.0).unwrap();
@@ -1336,7 +1336,7 @@ mod tests {
 
         // active is not valid for backlog
         let err = svc
-            .update_task(UpdateTaskParams::for_task(id.0).sub_status(SubStatus::Active))
+            .update_task(UpdateTaskParams::for_task(id).sub_status(SubStatus::Active))
             .unwrap_err();
         assert!(matches!(err, ServiceError::Validation(_)));
     }
@@ -1424,7 +1424,7 @@ mod tests {
             .unwrap();
 
         // Move to running first
-        svc.update_task(UpdateTaskParams::for_task(id.0).status(TaskStatus::Running))
+        svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Running))
             .unwrap();
 
         let err = svc
@@ -1532,7 +1532,7 @@ mod tests {
             .unwrap();
 
         task_svc
-            .update_task(UpdateTaskParams::for_task(id.0).epic_id(epic.id.0))
+            .update_task(UpdateTaskParams::for_task(id).epic_id(epic.id))
             .unwrap();
 
         let task = task_svc.get_task(id.0).unwrap();
@@ -1575,7 +1575,7 @@ mod tests {
             .unwrap();
 
         task_svc
-            .update_task(UpdateTaskParams::for_task(id.0).status(TaskStatus::Running))
+            .update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Running))
             .unwrap();
 
         let refreshed = epic_svc.get_epic(epic.id.0).unwrap();
@@ -1630,7 +1630,7 @@ mod tests {
             })
             .unwrap();
         task_svc
-            .update_task(UpdateTaskParams::for_task(id.0).status(TaskStatus::Running))
+            .update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Running))
             .unwrap();
 
         // Sanity: epic A is now Running.
@@ -1640,7 +1640,7 @@ mod tests {
         );
 
         task_svc
-            .update_task(UpdateTaskParams::for_task(id.0).epic_id(epic_b.id.0))
+            .update_task(UpdateTaskParams::for_task(id).epic_id(epic_b.id))
             .unwrap();
 
         assert_eq!(
@@ -1911,7 +1911,7 @@ mod tests {
 
         // Mark T1 as done
         task_svc
-            .update_task(UpdateTaskParams::for_task(t1.0).status(TaskStatus::Done))
+            .update_task(UpdateTaskParams::for_task(t1).status(TaskStatus::Done))
             .unwrap();
 
         let list = epic_svc.list_epics_with_progress().unwrap();
@@ -1958,7 +1958,7 @@ mod tests {
             .unwrap();
 
         task_svc
-            .update_task(UpdateTaskParams::for_task(task_id.0).status(TaskStatus::Done))
+            .update_task(UpdateTaskParams::for_task(task_id).status(TaskStatus::Done))
             .unwrap();
 
         let updated_epic = epic_svc.get_epic(epic.id.0).unwrap();
@@ -2091,7 +2091,7 @@ mod tests {
 
         // Move to running
         task_svc
-            .update_task(UpdateTaskParams::for_task(id.0).status(TaskStatus::Running))
+            .update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Running))
             .unwrap();
 
         let next = task_svc.next_backlog_task(epic.id.0).unwrap();
@@ -2264,7 +2264,7 @@ mod tests {
             .unwrap();
 
         svc.update_task(
-            UpdateTaskParams::for_task(id.0)
+            UpdateTaskParams::for_task(id)
                 .status(TaskStatus::Running)
                 .worktree(FieldUpdate::Set("/repo/.worktrees/feat".into()))
                 .tmux_window(FieldUpdate::Set("task-1".into())),
@@ -2297,7 +2297,7 @@ mod tests {
 
         // Set worktree
         svc.update_task(
-            UpdateTaskParams::for_task(id.0)
+            UpdateTaskParams::for_task(id)
                 .status(TaskStatus::Running)
                 .worktree(FieldUpdate::Set("/repo/.worktrees/feat".into()))
                 .tmux_window(FieldUpdate::Set("task-1".into())),
@@ -2306,7 +2306,7 @@ mod tests {
 
         // Clear worktree via FieldUpdate::Clear
         svc.update_task(
-            UpdateTaskParams::for_task(id.0)
+            UpdateTaskParams::for_task(id)
                 .status(TaskStatus::Done)
                 .worktree(FieldUpdate::Clear)
                 .tmux_window(FieldUpdate::Clear),
@@ -2339,7 +2339,7 @@ mod tests {
             })
             .unwrap();
 
-        svc.update_task(UpdateTaskParams::for_task(id.0).status(TaskStatus::Done))
+        svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Done))
             .unwrap();
 
         let task = svc.get_task(id.0).unwrap();
@@ -2412,7 +2412,7 @@ mod tests {
             })
             .unwrap();
         svc.update_task(
-            UpdateTaskParams::for_task(id.0)
+            UpdateTaskParams::for_task(id)
                 .status(TaskStatus::Running)
                 .worktree(FieldUpdate::Set("/wt".to_string()))
                 .tmux_window(FieldUpdate::Set("win".to_string())),
@@ -2442,7 +2442,7 @@ mod tests {
             .unwrap();
         // First set a value
         svc.update_task(
-            UpdateTaskParams::for_task(id.0)
+            UpdateTaskParams::for_task(id)
                 .status(TaskStatus::Running)
                 .worktree(FieldUpdate::Set("/wt".to_string()))
                 .tmux_window(FieldUpdate::Set("win".to_string())),
@@ -2450,7 +2450,7 @@ mod tests {
         .unwrap();
         // Then clear it
         svc.update_task(
-            UpdateTaskParams::for_task(id.0)
+            UpdateTaskParams::for_task(id)
                 .worktree(FieldUpdate::Clear)
                 .tmux_window(FieldUpdate::Clear),
         )
@@ -2478,7 +2478,7 @@ mod tests {
             })
             .unwrap();
         // Set PR URL
-        svc.update_task(UpdateTaskParams::for_task(id.0).pr_url(FieldUpdate::Set(
+        svc.update_task(UpdateTaskParams::for_task(id).pr_url(FieldUpdate::Set(
             "https://github.com/org/repo/pull/1".to_string(),
         )))
         .unwrap();
@@ -2488,7 +2488,7 @@ mod tests {
             Some("https://github.com/org/repo/pull/1")
         );
         // Clear PR URL
-        svc.update_task(UpdateTaskParams::for_task(id.0).pr_url(FieldUpdate::Clear))
+        svc.update_task(UpdateTaskParams::for_task(id).pr_url(FieldUpdate::Clear))
             .unwrap();
         let task = db.get_task(TaskId(id.0)).unwrap().unwrap();
         assert_eq!(task.pr_url, None);
@@ -2570,7 +2570,7 @@ mod tests {
             })
             .unwrap();
 
-        svc.update_task(UpdateTaskParams::for_task(id.0).status(TaskStatus::Archived))
+        svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Archived))
             .unwrap();
 
         let tasks = svc
@@ -2779,7 +2779,7 @@ mod tests {
 
         // Set worktree but not tmux_window
         svc.update_task(
-            UpdateTaskParams::for_task(to_id.0)
+            UpdateTaskParams::for_task(to_id)
                 .status(TaskStatus::Running)
                 .worktree(FieldUpdate::Set("/repo/.worktrees/feat".into())),
         )
@@ -2818,7 +2818,7 @@ mod tests {
     #[test]
     fn update_task_params_field_names_returns_str_slices() {
         // Verify return type is Vec<&str> (not Vec<String>) — consistent with UpdateEpicParams.
-        let params = UpdateTaskParams::for_task(1).title("x".to_string());
+        let params = UpdateTaskParams::for_task(TaskId(1)).title("x".to_string());
         let names: Vec<&str> = params.updated_field_names();
         assert!(names.contains(&"title"));
     }
@@ -2830,7 +2830,7 @@ mod tests {
         // When a field is set, both has_any_field() and updated_field_names() must agree.
         // If a new field is added to UpdateTaskParams without updating both methods,
         // this test will catch the divergence.
-        let with_field = UpdateTaskParams::for_task(1).title("x".to_string());
+        let with_field = UpdateTaskParams::for_task(TaskId(1)).title("x".to_string());
         assert!(
             with_field.has_any_field(),
             "has_any_field should be true when title is set"
@@ -2840,7 +2840,7 @@ mod tests {
             "updated_field_names should be non-empty when title is set"
         );
 
-        let empty = UpdateTaskParams::for_task(1);
+        let empty = UpdateTaskParams::for_task(TaskId(1));
         assert!(
             !empty.has_any_field(),
             "has_any_field should be false when no fields are set"
@@ -2905,20 +2905,20 @@ mod tests {
         // updated_field_names(). Add a case here whenever a new field is added
         // to UpdateTaskParams so both methods stay in sync.
         let cases: Vec<UpdateTaskParams> = vec![
-            UpdateTaskParams::for_task(1).status(TaskStatus::Backlog),
-            UpdateTaskParams::for_task(1).plan_path(Some("p".to_string())),
-            UpdateTaskParams::for_task(1).title("t".to_string()),
-            UpdateTaskParams::for_task(1).description("d".to_string()),
-            UpdateTaskParams::for_task(1).repo_path("r".to_string()),
-            UpdateTaskParams::for_task(1).sort_order(0),
-            UpdateTaskParams::for_task(1).pr_url(FieldUpdate::Set("u".to_string())),
-            UpdateTaskParams::for_task(1).tag(Some(TaskTag::Bug)),
-            UpdateTaskParams::for_task(1).sub_status(SubStatus::Active),
-            UpdateTaskParams::for_task(1).epic_id(1),
-            UpdateTaskParams::for_task(1).worktree(FieldUpdate::Set("w".to_string())),
-            UpdateTaskParams::for_task(1).tmux_window(FieldUpdate::Set("tw".to_string())),
-            UpdateTaskParams::for_task(1).base_branch(Some("main".to_string())),
-            UpdateTaskParams::for_task(1).project_id(ProjectId(1)),
+            UpdateTaskParams::for_task(TaskId(1)).status(TaskStatus::Backlog),
+            UpdateTaskParams::for_task(TaskId(1)).plan_path(Some("p".to_string())),
+            UpdateTaskParams::for_task(TaskId(1)).title("t".to_string()),
+            UpdateTaskParams::for_task(TaskId(1)).description("d".to_string()),
+            UpdateTaskParams::for_task(TaskId(1)).repo_path("r".to_string()),
+            UpdateTaskParams::for_task(TaskId(1)).sort_order(0),
+            UpdateTaskParams::for_task(TaskId(1)).pr_url(FieldUpdate::Set("u".to_string())),
+            UpdateTaskParams::for_task(TaskId(1)).tag(Some(TaskTag::Bug)),
+            UpdateTaskParams::for_task(TaskId(1)).sub_status(SubStatus::Active),
+            UpdateTaskParams::for_task(TaskId(1)).epic_id(EpicId(1)),
+            UpdateTaskParams::for_task(TaskId(1)).worktree(FieldUpdate::Set("w".to_string())),
+            UpdateTaskParams::for_task(TaskId(1)).tmux_window(FieldUpdate::Set("tw".to_string())),
+            UpdateTaskParams::for_task(TaskId(1)).base_branch(Some("main".to_string())),
+            UpdateTaskParams::for_task(TaskId(1)).project_id(ProjectId(1)),
         ];
         for params in &cases {
             assert!(
@@ -3169,7 +3169,7 @@ mod tests {
             })
             .unwrap();
 
-        svc.update_task(UpdateTaskParams::for_task(id.0).project_id(other.id))
+        svc.update_task(UpdateTaskParams::for_task(id).project_id(other.id))
             .unwrap();
 
         let db2: Arc<dyn db::TaskCrud> = db.clone();

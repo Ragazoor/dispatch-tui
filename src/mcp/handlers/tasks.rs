@@ -284,7 +284,7 @@ pub(super) fn handle_update_task(
         );
     }
 
-    let mut params = UpdateTaskParams::for_task(parsed.task_id)
+    let mut params = UpdateTaskParams::for_task(TaskId(parsed.task_id))
         .tag(parsed.tag)
         .base_branch(parsed.base_branch);
     if let Some(status) = parsed.status {
@@ -317,7 +317,7 @@ pub(super) fn handle_update_task(
         params = params.sub_status(sub_status);
     }
     if let Some(epic_id) = parsed.epic_id {
-        params = params.epic_id(epic_id);
+        params = params.epic_id(EpicId(epic_id));
     }
     if let Some(project_id) = parsed.project_id {
         if !state
