@@ -544,7 +544,7 @@ fn build_task_list_item<'a>(
 
     let line1 = Line::from(line1_spans);
 
-    let mut line2 = render_card_indicator(classify_card_indicator(task, status, app, now));
+    let line2 = render_card_indicator(classify_card_indicator(task, status, app, now));
 
     let rule_color = if is_cursor || has_message_flash {
         col_color
