@@ -23,7 +23,7 @@ pub(super) fn make_learning(id: LearningId) -> Learning {
 
 fn make_app_with_learnings() -> App {
     let mut app = make_app();
-    let learnings = vec![make_learning(1), make_learning(2), make_learning(3)];
+    let learnings = vec![make_learning(LearningId(1)), make_learning(LearningId(2)), make_learning(LearningId(3))];
     app.update(Message::ShowProposedLearnings(learnings));
     app
 }
@@ -96,29 +96,29 @@ fn navigate_up_clamps_at_zero() {
 #[test]
 fn approve_learning_returns_command() {
     let mut app = make_app_with_learnings();
-    let cmds = app.update(Message::ApproveLearning(1));
+    let cmds = app.update(Message::ApproveLearning(LearningId(1)));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::ApproveLearning(id) if *id == 1)));
+        .any(|c| matches!(c, Command::ApproveLearning(id) if *id == LearningId(1))));
 }
 
 #[test]
 fn reject_learning_returns_command() {
     let mut app = make_app_with_learnings();
-    let cmds = app.update(Message::RejectLearning(1));
+    let cmds = app.update(Message::RejectLearning(LearningId(1)));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::RejectLearning(id) if *id == 1)));
+        .any(|c| matches!(c, Command::RejectLearning(id) if *id == LearningId(1))));
 }
 
 #[test]
 fn learning_actioned_removes_entry_from_list() {
     let mut app = make_app_with_learnings();
-    app.update(Message::LearningActioned(2));
+    app.update(Message::LearningActioned(LearningId(2)));
     assert!(matches!(
         &app.board.view_mode,
         ViewMode::ProposedLearnings { learnings, .. } if learnings.len() == 2
-            && !learnings.iter().any(|l| l.id == 2)
+            && !learnings.iter().any(|l| l.id == LearningId(2))
     ));
 }
 
@@ -128,7 +128,7 @@ fn learning_actioned_clamps_selected_when_last_removed() {
     // Move cursor to last entry (index 2)
     app.update(Message::NavigateProposedLearning(10));
     // Remove last entry (id=3)
-    app.update(Message::LearningActioned(3));
+    app.update(Message::LearningActioned(LearningId(3)));
     assert!(matches!(
         &app.board.view_mode,
         ViewMode::ProposedLearnings { selected, learnings, .. }
@@ -139,20 +139,20 @@ fn learning_actioned_clamps_selected_when_last_removed() {
 #[test]
 fn learning_edited_replaces_entry_in_snapshot() {
     let mut app = make_app_with_learnings();
-    let mut updated = make_learning(2);
+    let mut updated = make_learning(LearningId(2));
     updated.summary = "Updated summary".to_string();
     app.update(Message::LearningEdited(updated));
     assert!(matches!(
         &app.board.view_mode,
         ViewMode::ProposedLearnings { learnings, .. }
-            if learnings.iter().find(|l| l.id == 2).map(|l| l.summary.as_str()) == Some("Updated summary")
+            if learnings.iter().find(|l| l.id == LearningId(2)).map(|l| l.summary.as_str()) == Some("Updated summary")
     ));
 }
 
 #[test]
 fn learning_edited_with_unknown_id_is_noop() {
     let mut app = make_app_with_learnings();
-    let unknown = make_learning(99);
+    let unknown = make_learning(LearningId(99));
     app.update(Message::LearningEdited(unknown));
     assert!(matches!(
         &app.board.view_mode,
@@ -179,18 +179,18 @@ fn refresh_tasks_does_not_update_learnings_snapshot() {
 #[test]
 fn edit_learning_returns_pop_out_editor_command() {
     let mut app = make_app_with_learnings();
-    let cmds = app.update(Message::EditLearning(2));
+    let cmds = app.update(Message::EditLearning(LearningId(2)));
     assert!(cmds.iter().any(|c| matches!(
         c,
-        Command::PopOutEditor(EditKind::Learning(l)) if l.id == 2
+        Command::PopOutEditor(EditKind::Learning(l)) if l.id == LearningId(2)
     )));
 }
 
 #[test]
 fn learning_actioned_on_single_entry_empties_list() {
     let mut app = make_app();
-    app.update(Message::ShowProposedLearnings(vec![make_learning(1)]));
-    app.update(Message::LearningActioned(1));
+    app.update(Message::ShowProposedLearnings(vec![make_learning(LearningId(1))]));
+    app.update(Message::LearningActioned(LearningId(1)));
     assert!(matches!(
         &app.board.view_mode,
         ViewMode::ProposedLearnings { learnings, selected, .. }
@@ -202,7 +202,7 @@ fn learning_actioned_on_single_entry_empties_list() {
 fn approve_on_empty_list_is_noop() {
     let mut app = make_app();
     app.update(Message::ShowProposedLearnings(vec![]));
-    let cmds = app.update(Message::ApproveLearning(1));
+    let cmds = app.update(Message::ApproveLearning(LearningId(1)));
     assert!(cmds.is_empty());
 }
 
@@ -247,7 +247,7 @@ fn a_key_emits_approve_command() {
     // selected=0, first learning has id=1
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::ApproveLearning(id) if *id == 1)));
+        .any(|c| matches!(c, Command::ApproveLearning(id) if *id == LearningId(1))));
 }
 
 #[test]
@@ -257,7 +257,7 @@ fn r_key_emits_reject_command() {
     // selected=0, first learning has id=1
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::RejectLearning(id) if *id == 1)));
+        .any(|c| matches!(c, Command::RejectLearning(id) if *id == LearningId(1))));
 }
 
 #[test]
@@ -267,7 +267,7 @@ fn e_key_emits_pop_out_editor_command() {
     // selected=0, first learning has id=1
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::PopOutEditor(EditKind::Learning(l)) if l.id == 1)));
+        .any(|c| matches!(c, Command::PopOutEditor(EditKind::Learning(l)) if l.id == LearningId(1))));
 }
 
 #[test]

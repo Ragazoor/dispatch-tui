@@ -1804,7 +1804,7 @@ fn row_to_learning(row: &rusqlite::Row<'_>) -> rusqlite::Result<Learning> {
     };
 
     Ok(Learning {
-        id: row.get(0)?,
+        id: LearningId(row.get::<_, i64>(0)?),
         kind: LearningKind::parse(&kind_str).unwrap_or(LearningKind::Convention),
         summary: row.get(2)?,
         detail: row.get(3)?,
@@ -1848,14 +1848,14 @@ impl LearningStore for Database {
             ],
         )
         .context("Failed to insert learning")?;
-        Ok(conn.last_insert_rowid())
+        Ok(LearningId(conn.last_insert_rowid()))
     }
 
     fn get_learning(&self, id: LearningId) -> Result<Option<Learning>> {
         let conn = self.conn()?;
         conn.query_row(
             &format!("SELECT {LEARNING_COLUMNS} FROM learnings WHERE id = ?1"),
-            params![id],
+            params![id.0],
             row_to_learning,
         )
         .optional()
@@ -1949,7 +1949,7 @@ impl LearningStore for Database {
         }
 
         sets.push("updated_at = datetime('now')".to_string());
-        bind.push(Box::new(id));
+        bind.push(Box::new(id.0));
 
         let sql = format!(
             "UPDATE learnings SET {} WHERE id = ?{}",
@@ -1966,7 +1966,7 @@ impl LearningStore for Database {
 
     fn delete_learning(&self, id: LearningId) -> Result<()> {
         let conn = self.conn()?;
-        conn.execute("DELETE FROM learnings WHERE id = ?1", params![id])
+        conn.execute("DELETE FROM learnings WHERE id = ?1", params![id.0])
             .context("Failed to delete learning")?;
         Ok(())
     }
@@ -1979,7 +1979,7 @@ impl LearningStore for Database {
                  last_confirmed_at = datetime('now'),
                  updated_at = datetime('now')
              WHERE id = ?1",
-            params![id],
+            params![id.0],
         )
         .context("Failed to confirm learning")?;
         Ok(())

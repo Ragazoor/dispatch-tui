@@ -791,9 +791,9 @@ mod tests {
         use super::*;
 
         fn make_learning() -> Learning {
-            use crate::models::{LearningScope, LearningStatus};
+            use crate::models::{LearningId, LearningScope, LearningStatus};
             Learning {
-                id: 1,
+                id: LearningId(1),
                 kind: LearningKind::Convention,
                 summary: "Use LearningService not raw db".to_string(),
                 detail: Some("Ensures validation runs.".to_string()),

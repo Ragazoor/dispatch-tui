@@ -9,10 +9,10 @@ expression: rendered
   ▌ #1 Task 1                 │───────────────────────────│                              │  ▎ #4 Task 4
    ◦ <╭ Proposed Learnings (3) ──────────────────────────────────────────────────────────────────────────────────╮
 ──────│── user ───────────────────────────────────────────────────────────────────────────────────────────────── │──────
-  ▎ #2│> [  1] Preference        Prefer concise responses over verbose ones  #style                              │
+  ▎ #2│> [1] Preference        Prefer concise responses over verbose ones  #style                                │
    ◦ <│── repo (/repo) ───────────────────────────────────────────────────────────────────────────────────────── │
-──────│  [  2] Pitfall           tokio::spawn needs explicit error logging  #async                               │
-      │  [  3] Convention        Use LearningService not raw db for learnings                                    │
+──────│  [2] Pitfall           tokio::spawn needs explicit error logging  #async                                 │
+      │  [3] Convention        Use LearningService not raw db for learnings                                      │
       │                                                                                                          │
       │                                                                                                          │
       │                                                                                                          │

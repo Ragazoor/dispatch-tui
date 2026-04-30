@@ -8,8 +8,8 @@ use super::worktree::provision_worktree;
 use super::*;
 
 use crate::models::{
-    EpicId, Learning, LearningKind, LearningScope, LearningStatus, ProjectId, Task, TaskId,
-    TaskStatus,
+    EpicId, Learning, LearningId, LearningKind, LearningScope, LearningStatus, ProjectId, Task,
+    TaskId, TaskStatus,
 };
 use crate::process::{exit_fail, MockProcessRunner};
 use chrono::Utc;
@@ -292,7 +292,7 @@ fn make_test_repo_with_worktree(slug: &str) -> (tempfile::TempDir, String, std::
 
 fn make_learning(kind: LearningKind, summary: &str) -> Learning {
     Learning {
-        id: 1,
+        id: LearningId(1),
         kind,
         summary: summary.to_string(),
         detail: None,

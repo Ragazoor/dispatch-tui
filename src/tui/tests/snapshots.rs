@@ -281,7 +281,7 @@ fn snapshot_confirm_delete_project2() {
 
 #[test]
 fn snapshot_proposed_learnings_overlay() {
-    use crate::models::{Learning, LearningKind, LearningScope, LearningStatus};
+    use crate::models::{Learning, LearningId, LearningKind, LearningScope, LearningStatus};
     use chrono::Utc;
 
     let mut app = make_app();
@@ -289,7 +289,7 @@ fn snapshot_proposed_learnings_overlay() {
     let now = Utc::now();
     let learnings = vec![
         Learning {
-            id: 1,
+            id: LearningId(1),
             kind: LearningKind::Preference,
             summary: "Prefer concise responses over verbose ones".to_string(),
             detail: None,
@@ -304,7 +304,7 @@ fn snapshot_proposed_learnings_overlay() {
             updated_at: now,
         },
         Learning {
-            id: 2,
+            id: LearningId(2),
             kind: LearningKind::Pitfall,
             summary: "tokio::spawn needs explicit error logging".to_string(),
             detail: None,
@@ -319,7 +319,7 @@ fn snapshot_proposed_learnings_overlay() {
             updated_at: now,
         },
         Learning {
-            id: 3,
+            id: LearningId(3),
             kind: LearningKind::Convention,
             summary: "Use LearningService not raw db for learnings".to_string(),
             detail: None,

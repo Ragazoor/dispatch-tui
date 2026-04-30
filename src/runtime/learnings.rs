@@ -168,7 +168,7 @@ mod tests {
         let rt = make_runtime(db);
         let mut app = App::new(vec![], ProjectId(1), std::time::Duration::from_secs(300));
 
-        rt.exec_approve_learning(&mut app, 999);
+        rt.exec_approve_learning(&mut app, LearningId(999));
 
         // Should show a status message, not panic
         assert!(app.status_message().is_some());

@@ -3373,7 +3373,66 @@ mod security_tests {
 // Learning domain types
 // ---------------------------------------------------------------------------
 
-pub type LearningId = i64;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct LearningId(pub i64);
+
+impl std::fmt::Display for LearningId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<i64> for LearningId {
+    fn from(v: i64) -> Self {
+        LearningId(v)
+    }
+}
+
+impl From<LearningId> for i64 {
+    fn from(id: LearningId) -> Self {
+        id.0
+    }
+}
+
+impl std::str::FromStr for LearningId {
+    type Err = std::num::ParseIntError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.parse::<i64>().map(LearningId)
+    }
+}
+
+#[cfg(test)]
+mod learning_id_tests {
+    use super::LearningId;
+
+    #[test]
+    fn learning_id_display() {
+        assert_eq!(LearningId(99).to_string(), "99");
+    }
+
+    #[test]
+    fn learning_id_copy_eq_hash() {
+        let a = LearningId(5);
+        let b = a;
+        assert_eq!(a, b);
+        let mut set = std::collections::HashSet::new();
+        set.insert(a);
+        assert!(set.contains(&b));
+    }
+
+    #[test]
+    fn learning_id_debug() {
+        let s = format!("{:?}", LearningId(7));
+        assert!(s.contains("7"));
+    }
+
+    #[test]
+    fn learning_id_from_into_i64() {
+        let id = LearningId::from(11i64);
+        let raw: i64 = id.into();
+        assert_eq!(raw, 11);
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

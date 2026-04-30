@@ -3229,7 +3229,7 @@ mod tests {
 mod learning_tests {
     use super::{CreateLearningParams, LearningService, ServiceError, UpdateLearningParams};
     use crate::db::Database;
-    use crate::models::{LearningKind, LearningScope, LearningStatus};
+    use crate::models::{LearningId, LearningKind, LearningScope, LearningStatus};
     use std::sync::Arc;
 
     fn service() -> LearningService {
@@ -3515,7 +3515,7 @@ mod learning_tests {
     #[test]
     fn get_learning_not_found_returns_error() {
         let svc = service();
-        let err = svc.get_learning(99999).unwrap_err();
+        let err = svc.get_learning(LearningId(99999)).unwrap_err();
         assert!(matches!(err, ServiceError::NotFound(_)));
     }
 }

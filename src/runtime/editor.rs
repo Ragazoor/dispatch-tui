@@ -439,7 +439,7 @@ mod learning_editor_tests {
 
     #[test]
     fn initial_content_includes_summary_and_kind() {
-        let l = make_learning(1);
+        let l = make_learning(LearningId(1));
         let (prefix, content) = initial_content_for(&EditKind::Learning(l));
         assert!(content.contains("original summary"));
         assert!(content.contains("convention"));

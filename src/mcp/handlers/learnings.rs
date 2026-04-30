@@ -2,7 +2,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::mcp::McpState;
-use crate::models::{LearningKind, LearningScope};
+use crate::models::{LearningId, LearningKind, LearningScope};
 use crate::service::LearningService;
 
 use super::types::{
@@ -192,7 +192,7 @@ pub(super) fn handle_confirm_learning(
     };
 
     let svc = LearningService::new(state.db.clone());
-    match svc.confirm_learning(parsed.learning_id) {
+    match svc.confirm_learning(LearningId(parsed.learning_id)) {
         Ok(()) => JsonRpcResponse::ok(
             id,
             json!({
