@@ -411,44 +411,97 @@ impl App {
         stats: Option<&EpicStatsMap>,
     ) -> Vec<ColumnItem<'a>> {
         let tasks = self.tasks_by_status(status);
+
+        if self.board.flattened {
+            // Build epic lookup: epic_id -> &Epic (only epics present in board.epics).
+            let epic_lookup: std::collections::HashMap<EpicId, &Epic> =
+                self.board.epics.iter().map(|e| (e.id, e)).collect();
+
+            // Determine which epics have at least one task in this column.
+            let mut epics_with_tasks: std::collections::HashSet<EpicId> =
+                std::collections::HashSet::new();
+            for t in &tasks {
+                if let Some(eid) = t.epic_id {
+                    if epic_lookup.contains_key(&eid) {
+                        epics_with_tasks.insert(eid);
+                    }
+                }
+            }
+
+            // Sort key for a task: orphan tasks (epic not in board) are standalone.
+            let group_key = |t: &Task| -> i64 {
+                match t.epic_id.and_then(|eid| epic_lookup.get(&eid)) {
+                    Some(e) => e.sort_order.unwrap_or(e.id.0),
+                    None => t.sort_order.unwrap_or(t.id.0),
+                }
+            };
+
+            let mut items: Vec<ColumnItem<'_>> = Vec::new();
+            for &eid in &epics_with_tasks {
+                if let Some(&epic) = epic_lookup.get(&eid) {
+                    items.push(ColumnItem::EpicHeader(epic));
+                }
+            }
+            for t in tasks {
+                items.push(ColumnItem::Task(t));
+            }
+
+            // Sort key: (group_key, item_key, id)
+            // EpicHeader: item_key = i64::MIN so it always precedes its group's tasks.
+            // Task in epic: group_key = epic.sort_order, item_key = task.sort_order.
+            // Standalone task: group_key = task.sort_order, item_key = task.sort_order.
+            items.sort_by_key(|item| match item {
+                ColumnItem::EpicHeader(e) => {
+                    (e.sort_order.unwrap_or(e.id.0), i64::MIN, e.id.0)
+                }
+                ColumnItem::Task(t) => {
+                    let gk = group_key(t);
+                    let ik = t.sort_order.unwrap_or(t.id.0);
+                    (gk, ik, t.id.0)
+                }
+                ColumnItem::Epic(_) => unreachable!("Epic never produced in flat mode"),
+            });
+
+            return items;
+        }
+
+        // --- Non-flat path (unchanged) ---
         let mut items: Vec<ColumnItem<'_>> = tasks.into_iter().map(ColumnItem::Task).collect();
 
-        if !self.board.flattened {
-            match self.effective_view_mode() {
-                ViewMode::Board(_) => {
-                    // Main board: show only root epics (no parent)
-                    for epic in &self.board.epics {
-                        if epic.parent_epic_id.is_some() {
-                            continue;
-                        }
-                        if !self.repo_matches(&epic.repo_path) {
-                            continue;
-                        }
-                        if !self.project_matches(epic.project_id) {
-                            continue;
-                        }
-                        if epic.status == status {
-                            items.push(ColumnItem::Epic(epic));
-                        }
+        match self.effective_view_mode() {
+            ViewMode::Board(_) => {
+                // Main board: show only root epics (no parent)
+                for epic in &self.board.epics {
+                    if epic.parent_epic_id.is_some() {
+                        continue;
+                    }
+                    if !self.repo_matches(&epic.repo_path) {
+                        continue;
+                    }
+                    if !self.project_matches(epic.project_id) {
+                        continue;
+                    }
+                    if epic.status == status {
+                        items.push(ColumnItem::Epic(epic));
                     }
                 }
-                ViewMode::Epic { epic_id, .. } => {
-                    // Inside an epic: show sub-epics whose parent_epic_id matches
-                    let current = *epic_id;
-                    for epic in &self.board.epics {
-                        if epic.parent_epic_id != Some(current) {
-                            continue;
-                        }
-                        if epic.status == status {
-                            items.push(ColumnItem::Epic(epic));
-                        }
+            }
+            ViewMode::Epic { epic_id, .. } => {
+                // Inside an epic: show sub-epics whose parent_epic_id matches
+                let current = *epic_id;
+                for epic in &self.board.epics {
+                    if epic.parent_epic_id != Some(current) {
+                        continue;
+                    }
+                    if epic.status == status {
+                        items.push(ColumnItem::Epic(epic));
                     }
                 }
-                ViewMode::TaskDetail { .. } | ViewMode::ProposedLearnings { .. } => {
-                    unreachable!(
-                        "effective_view_mode never returns TaskDetail or ProposedLearnings"
-                    )
-                }
+            }
+            ViewMode::TaskDetail { .. } | ViewMode::ProposedLearnings { .. } => {
+                unreachable!(
+                    "effective_view_mode never returns TaskDetail or ProposedLearnings"
+                )
             }
         }
 

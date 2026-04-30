@@ -181,8 +181,10 @@ fn flattened_board_hides_all_epic_cards() {
     ] {
         let items = app.column_items_for_status(status);
         assert!(
-            items.iter().all(|i| matches!(i, ColumnItem::Task(_))),
-            "flattened view should emit no epic cards in {status:?} column"
+            items
+                .iter()
+                .all(|i| matches!(i, ColumnItem::Task(_) | ColumnItem::EpicHeader(_))),
+            "flattened view should emit no navigable Epic cards in {status:?} column"
         );
     }
 }
@@ -2217,5 +2219,181 @@ fn epic_action_hints_no_refresh_for_non_feed_epic() {
     assert!(
         !keys.contains(&"[r]"),
         "non-feed epic should NOT show [r] refresh hint"
+    );
+}
+
+#[test]
+fn flat_view_inserts_epic_header_before_group() {
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    let epic = make_epic(10);
+    app.board.epics = vec![epic];
+    let mut t1 = make_task(1, TaskStatus::Backlog);
+    t1.epic_id = Some(EpicId(10));
+    let mut t2 = make_task(2, TaskStatus::Backlog);
+    t2.epic_id = Some(EpicId(10));
+    app.board.tasks = vec![t1, t2];
+    app.board.flattened = true;
+
+    let items = app.column_items_for_status(TaskStatus::Backlog);
+    assert_eq!(items.len(), 3, "header + 2 tasks");
+    assert!(
+        matches!(items[0], ColumnItem::EpicHeader(e) if e.id == EpicId(10)),
+        "first item must be EpicHeader"
+    );
+    assert!(matches!(items[1], ColumnItem::Task(_)));
+    assert!(matches!(items[2], ColumnItem::Task(_)));
+}
+
+#[test]
+fn flat_view_header_sorts_before_its_tasks() {
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    let mut epic = make_epic(10);
+    epic.sort_order = Some(50);
+    app.board.epics = vec![epic];
+    let mut t = make_task(1, TaskStatus::Backlog);
+    t.epic_id = Some(EpicId(10));
+    t.sort_order = Some(100);
+    app.board.tasks = vec![t];
+    app.board.flattened = true;
+
+    let items = app.column_items_for_status(TaskStatus::Backlog);
+    assert!(matches!(items[0], ColumnItem::EpicHeader(_)), "header precedes task");
+    assert!(matches!(items[1], ColumnItem::Task(_)));
+}
+
+#[test]
+fn flat_view_standalone_task_interleaves_by_sort_order() {
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    let mut epic = make_epic(10);
+    epic.sort_order = Some(200);
+    app.board.epics = vec![epic];
+
+    let mut standalone = make_task(1, TaskStatus::Backlog);
+    standalone.sort_order = Some(100); // before the epic group
+
+    let mut subtask = make_task(2, TaskStatus::Backlog);
+    subtask.epic_id = Some(EpicId(10));
+    subtask.sort_order = Some(300);
+
+    app.board.tasks = vec![standalone, subtask];
+    app.board.flattened = true;
+
+    let items = app.column_items_for_status(TaskStatus::Backlog);
+    // standalone (100) < epic header (200) < subtask (300)
+    assert!(matches!(items[0], ColumnItem::Task(t) if t.id == TaskId(1)));
+    assert!(matches!(items[1], ColumnItem::EpicHeader(_)));
+    assert!(matches!(items[2], ColumnItem::Task(t) if t.id == TaskId(2)));
+}
+
+#[test]
+fn flat_view_two_epics_get_two_headers() {
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    let mut epic_a = make_epic(10);
+    epic_a.sort_order = Some(10);
+    let mut epic_b = make_epic(20);
+    epic_b.sort_order = Some(20);
+    app.board.epics = vec![epic_a, epic_b];
+
+    let mut ta = make_task(1, TaskStatus::Backlog);
+    ta.epic_id = Some(EpicId(10));
+    let mut tb = make_task(2, TaskStatus::Backlog);
+    tb.epic_id = Some(EpicId(20));
+    app.board.tasks = vec![ta, tb];
+    app.board.flattened = true;
+
+    let items = app.column_items_for_status(TaskStatus::Backlog);
+    let headers: Vec<_> = items
+        .iter()
+        .filter(|i| matches!(i, ColumnItem::EpicHeader(_)))
+        .collect();
+    assert_eq!(headers.len(), 2, "one header per epic");
+}
+
+#[test]
+fn flat_view_no_header_when_epic_has_no_tasks_in_column() {
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    // Epic 10 has a task in Running, not Backlog
+    app.board.epics = vec![make_epic(10)];
+    let mut t = make_task(1, TaskStatus::Running);
+    t.epic_id = Some(EpicId(10));
+    app.board.tasks = vec![t];
+    app.board.flattened = true;
+
+    let backlog = app.column_items_for_status(TaskStatus::Backlog);
+    assert!(
+        backlog.iter().all(|i| !matches!(i, ColumnItem::EpicHeader(_))),
+        "no header in Backlog when epic has no Backlog tasks"
+    );
+}
+
+#[test]
+fn flat_view_orphan_task_treated_as_standalone() {
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    // No epics in board.epics, but a task references epic id 99
+    let mut orphan = make_task(1, TaskStatus::Backlog);
+    orphan.epic_id = Some(EpicId(99));
+    app.board.tasks = vec![orphan];
+    app.board.flattened = true;
+
+    let items = app.column_items_for_status(TaskStatus::Backlog);
+    assert_eq!(items.len(), 1, "orphan renders without a header");
+    assert!(matches!(items[0], ColumnItem::Task(_)));
+}
+
+#[test]
+fn flat_view_tie_break_by_epic_id_when_sort_orders_equal() {
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    let mut epic_a = make_epic(10);
+    epic_a.sort_order = Some(50);
+    let mut epic_b = make_epic(20);
+    epic_b.sort_order = Some(50); // same sort_order, tie-broken by id
+    app.board.epics = vec![epic_a, epic_b];
+
+    let mut ta = make_task(1, TaskStatus::Backlog);
+    ta.epic_id = Some(EpicId(10));
+    let mut tb = make_task(2, TaskStatus::Backlog);
+    tb.epic_id = Some(EpicId(20));
+    app.board.tasks = vec![ta, tb];
+    app.board.flattened = true;
+
+    let items = app.column_items_for_status(TaskStatus::Backlog);
+    // Both headers cluster together (i64::MIN item_key), tie-broken by epic id.
+    assert!(matches!(items[0], ColumnItem::EpicHeader(e) if e.id == EpicId(10)));
+    assert!(matches!(items[1], ColumnItem::EpicHeader(e) if e.id == EpicId(20)));
+}
+
+#[test]
+fn non_flat_mode_has_no_epic_headers() {
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    app.board.epics = vec![make_epic(10)];
+    let mut t = make_task(1, TaskStatus::Backlog);
+    t.epic_id = Some(EpicId(10));
+    app.board.tasks = vec![t];
+    // flattened = false (default)
+
+    let items = app.column_items_for_status(TaskStatus::Backlog);
+    assert!(
+        items.iter().all(|i| !matches!(i, ColumnItem::EpicHeader(_))),
+        "non-flat mode must never emit EpicHeader"
+    );
+}
+
+#[test]
+fn flat_view_selected_column_item_skips_headers() {
+    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    app.board.epics = vec![make_epic(10)];
+    let mut t = make_task(1, TaskStatus::Backlog);
+    t.epic_id = Some(EpicId(10));
+    app.board.tasks = vec![t];
+    app.board.flattened = true;
+
+    // Items are [EpicHeader(10), Task(1)]. selected_row=0 should give Task(1).
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
+
+    let item = app.selected_column_item();
+    assert!(
+        matches!(item, Some(ColumnItem::Task(t)) if t.id == TaskId(1)),
+        "row 0 should resolve to Task(1), not the header"
     );
 }
