@@ -1001,6 +1001,9 @@ impl Default for ViewMode {
 pub enum ColumnItem<'a> {
     Task(&'a Task),
     Epic(&'a Epic),
+    /// Non-selectable group header in flat view. Carries the epic so the renderer
+    /// can read its title without an extra lookup.
+    EpicHeader(&'a Epic),
 }
 
 // ---------------------------------------------------------------------------
