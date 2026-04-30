@@ -2257,7 +2257,10 @@ fn flat_view_header_sorts_before_its_tasks() {
     app.board.flattened = true;
 
     let items = app.column_items_for_status(TaskStatus::Backlog);
-    assert!(matches!(items[0], ColumnItem::EpicHeader(_)), "header precedes task");
+    assert!(
+        matches!(items[0], ColumnItem::EpicHeader(_)),
+        "header precedes task"
+    );
     assert!(matches!(items[1], ColumnItem::Task(_)));
 }
 
@@ -2321,7 +2324,9 @@ fn flat_view_no_header_when_epic_has_no_tasks_in_column() {
 
     let backlog = app.column_items_for_status(TaskStatus::Backlog);
     assert!(
-        backlog.iter().all(|i| !matches!(i, ColumnItem::EpicHeader(_))),
+        backlog
+            .iter()
+            .all(|i| !matches!(i, ColumnItem::EpicHeader(_))),
         "no header in Backlog when epic has no Backlog tasks"
     );
 }
@@ -2373,7 +2378,9 @@ fn non_flat_mode_has_no_epic_headers() {
 
     let items = app.column_items_for_status(TaskStatus::Backlog);
     assert!(
-        items.iter().all(|i| !matches!(i, ColumnItem::EpicHeader(_))),
+        items
+            .iter()
+            .all(|i| !matches!(i, ColumnItem::EpicHeader(_))),
         "non-flat mode must never emit EpicHeader"
     );
 }

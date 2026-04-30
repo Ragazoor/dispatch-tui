@@ -451,9 +451,7 @@ impl App {
             // Task in epic: group_key = epic.sort_order, item_key = task.sort_order.
             // Standalone task: group_key = task.sort_order, item_key = task.sort_order.
             items.sort_by_key(|item| match item {
-                ColumnItem::EpicHeader(e) => {
-                    (e.sort_order.unwrap_or(e.id.0), i64::MIN, e.id.0)
-                }
+                ColumnItem::EpicHeader(e) => (e.sort_order.unwrap_or(e.id.0), i64::MIN, e.id.0),
                 ColumnItem::Task(t) => {
                     let gk = group_key(t);
                     let ik = t.sort_order.unwrap_or(t.id.0);
@@ -499,9 +497,7 @@ impl App {
                 }
             }
             ViewMode::TaskDetail { .. } | ViewMode::ProposedLearnings { .. } => {
-                unreachable!(
-                    "effective_view_mode never returns TaskDetail or ProposedLearnings"
-                )
+                unreachable!("effective_view_mode never returns TaskDetail or ProposedLearnings")
             }
         }
 
