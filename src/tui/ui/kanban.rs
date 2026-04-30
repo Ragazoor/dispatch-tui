@@ -235,18 +235,25 @@ fn render_summary(frame: &mut Frame, app: &App, epic_stats: &EpicStatsMap, area:
     for (idx, &status) in TaskStatus::ALL.iter().enumerate() {
         let nav_col = idx + 1;
         let items = layout.get(status);
-        let count = items.len();
+        let count = items
+            .iter()
+            .filter(|i| !matches!(i, ColumnItem::EpicHeader(_)))
+            .count();
         let is_focused = sel == nav_col;
         let color = column_color(status);
         let prefix = if is_focused { "\u{25b8} " } else { "\u{25e6} " };
         let label = format!("{}{} {}", prefix, status.as_str(), count);
 
         let checkbox = if is_focused {
-            let all_selected = !items.is_empty()
-                && items.iter().all(|item| match item {
+            let selectable: Vec<_> = items
+                .iter()
+                .filter(|i| !matches!(i, ColumnItem::EpicHeader(_)))
+                .collect();
+            let all_selected = !selectable.is_empty()
+                && selectable.iter().all(|item| match item {
                     ColumnItem::Task(t) => app.selected_tasks().contains(&t.id),
                     ColumnItem::Epic(e) => app.selected_epics().contains(&e.id),
-                    ColumnItem::EpicHeader(_) => true,
+                    ColumnItem::EpicHeader(_) => unreachable!(),
                 });
             CheckboxInfo::Task {
                 all_selected,
