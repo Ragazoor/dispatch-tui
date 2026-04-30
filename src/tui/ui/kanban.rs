@@ -478,6 +478,19 @@ fn card_rule_line(color: Color, width: u16) -> Line<'static> {
     Line::from(Span::styled(rule, Style::default().fg(color)))
 }
 
+/// Render a decorative epic-header separator row (non-selectable).
+/// Looks like: ── Epic Title ──────────────
+fn render_epic_header_item(epic: &Epic, col_width: u16) -> ListItem<'static> {
+    let title = crate::tui::ui::shared::truncate(&epic.title, 38);
+    let rule_count = (col_width as usize).saturating_sub(title.chars().count() + 5);
+    let right_rule = "\u{2500}".repeat(rule_count);
+    ListItem::new(Line::from(vec![
+        Span::styled("\u{2500}\u{2500} ", Style::default().fg(MUTED)),
+        Span::styled(title, Style::default().fg(PURPLE)),
+        Span::styled(format!(" {}", right_rule), Style::default().fg(MUTED)),
+    ]))
+}
+
 /// Build a styled two-line ListItem for a task card in a kanban column.
 /// Line 1: stripe + title
 /// Line 2: status icon + age/activity metadata
@@ -532,18 +545,6 @@ fn build_task_list_item<'a>(
     let line1 = Line::from(line1_spans);
 
     let mut line2 = render_card_indicator(classify_card_indicator(task, status, app, now));
-
-    // When flattened, append the task's epic id to line 2 (purple) so epic
-    // membership remains visible on the card.
-    if app.board.flattened {
-        if let Some(eid) = task.epic_id {
-            line2.spans.push(Span::raw("  "));
-            line2.spans.push(Span::styled(
-                format!("#{}", eid.0),
-                Style::default().fg(PURPLE),
-            ));
-        }
-    }
 
     let rule_color = if is_cursor || has_message_flash {
         col_color
@@ -695,7 +696,16 @@ fn render_task_column(
     let mut list_selection_idx: Option<usize> = None;
     let mut current_priority: Option<u8> = None;
 
-    for (item_idx, item) in column_items.iter().enumerate() {
+    let mut selectable_idx: usize = 0;
+    for item in column_items.iter() {
+        // EpicHeader items are decorative — render immediately, don't affect
+        // substatus grouping or cursor selection.
+        if let ColumnItem::EpicHeader(epic) = item {
+            list_items.push(render_epic_header_item(epic, col_area.width));
+            continue;
+        }
+
+        // Substatus grouping headers (Running / Review columns only).
         if show_headers {
             let priority = match item {
                 ColumnItem::Task(t) => t.sub_status.column_priority_detached(t.is_detached()),
@@ -703,7 +713,7 @@ fn render_task_column(
                     .get(&e.id)
                     .map(|s| s.substatus.column_priority())
                     .unwrap_or(0),
-                ColumnItem::EpicHeader(_) => 0,
+                ColumnItem::EpicHeader(_) => unreachable!(),
             };
             if Some(priority) != current_priority {
                 current_priority = Some(priority);
@@ -717,17 +727,19 @@ fn render_task_column(
                         .map(|s| s.substatus.header_label())
                         .unwrap_or_default()
                         .to_string(),
-                    ColumnItem::EpicHeader(_) => String::new(),
+                    ColumnItem::EpicHeader(_) => unreachable!(),
                 };
                 list_items.push(render_substatus_header(&label, list_items.is_empty()));
             }
         }
 
-        if item_idx == selected_row {
+        // Selection: cursor tracks selectable_idx, not the raw list position.
+        if selectable_idx == selected_row {
             list_selection_idx = Some(list_items.len());
         }
+        let is_cursor = is_focused && !app.on_select_all() && selectable_idx == selected_row;
+        selectable_idx += 1;
 
-        let is_cursor = is_focused && !app.on_select_all() && item_idx == selected_row;
         list_items.push(match item {
             ColumnItem::Task(task) => {
                 build_task_list_item(task, status, app, now, is_cursor, color, col_area.width)
@@ -735,10 +747,7 @@ fn render_task_column(
             ColumnItem::Epic(epic) => {
                 render_epic_item(epic, is_cursor, app, epic_stats, status, col_area.width)
             }
-            ColumnItem::EpicHeader(epic) => {
-                // EpicHeader rendering is implemented in Task 5; placeholder for now.
-                ListItem::new(ratatui::text::Line::raw(epic.title.clone()))
-            }
+            ColumnItem::EpicHeader(_) => unreachable!(),
         });
     }
 
