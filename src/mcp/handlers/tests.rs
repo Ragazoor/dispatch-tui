@@ -8083,3 +8083,46 @@ async fn exit_session_task_without_window_returns_error() {
 
     assert_error(&resp, "no active session");
 }
+
+#[tokio::test]
+async fn exit_session_pending_cleared_on_redispatch() {
+    let state = test_state();
+    let task_id = create_running_task_with_window(&state);
+
+    // First exit_session call — inserts into pending set
+    call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "exit_session",
+            "arguments": { "task_id": task_id.0 }
+        })),
+    )
+    .await;
+
+    // Verify it's in the set right now
+    {
+        let pending = state.exit_session_pending.lock().unwrap();
+        assert!(pending.contains(&task_id), "should be pending before clear");
+    }
+
+    // Patch task back to backlog so dispatch_task accepts it
+    let patch = crate::db::TaskPatch::new().status(crate::models::TaskStatus::Backlog);
+    state.db.patch_task(task_id, &patch).unwrap();
+
+    // Call dispatch_task — this should clear the pending state
+    call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "dispatch_task",
+            "arguments": { "task_id": task_id.0 }
+        })),
+    )
+    .await;
+
+    {
+        let pending = state.exit_session_pending.lock().unwrap();
+        assert!(!pending.contains(&task_id), "pending should be cleared after dispatch");
+    }
+}

@@ -893,6 +893,14 @@ pub(super) async fn handle_dispatch_next(
     };
 
     let next_id = next_task.id;
+
+    // Clear any pending exit_session state — if this task is being re-dispatched
+    // after a partial exit, the new agent must go through the two-step again.
+    {
+        let mut pending = state.exit_session_pending.lock().unwrap_or_else(|e| e.into_inner());
+        pending.remove(&next_id);
+    }
+
     let next_title = next_task.title.clone();
     let db = state.db.clone();
     let runner = state.runner.clone();
@@ -951,6 +959,13 @@ pub(super) async fn handle_dispatch_task(
         Err(resp) => return resp,
     };
     let task_id = crate::models::TaskId(parsed.task_id);
+
+    // Clear any pending exit_session state — if this task is being re-dispatched
+    // after a partial exit, the new agent must go through the two-step again.
+    {
+        let mut pending = state.exit_session_pending.lock().unwrap_or_else(|e| e.into_inner());
+        pending.remove(&task_id);
+    }
 
     let task = match state.db.get_task(task_id) {
         Ok(Some(t)) => t,
