@@ -15,8 +15,8 @@ use super::review::{
     ListReviewPrsArgs, ListSecurityAlertsArgs,
 };
 use super::tasks::{
-    ClaimTaskArgs, CreateTaskWithEpicArgs, DispatchNextArgs, GetTaskArgs, ListTasksArgs,
-    ReportUsageArgs, SendMessageArgs, UpdateTaskArgs, WrapUpArgs,
+    ClaimTaskArgs, CreateTaskWithEpicArgs, DispatchNextArgs, ExitSessionArgs, GetTaskArgs,
+    ListTasksArgs, ReportUsageArgs, SendMessageArgs, UpdateTaskArgs, WrapUpArgs,
 };
 use super::types::{JsonRpcRequest, JsonRpcResponse};
 
@@ -1530,6 +1530,12 @@ fn tool_schemas_match_arg_structs() {
             BTreeSet::from(["learning_id", "task_id"]),
             json!({"learning_id": 1, "task_id": 1}),
         ),
+        (
+            "exit_session",
+            BTreeSet::from(["task_id"]),
+            BTreeSet::from(["task_id"]),
+            json!({"task_id": 1}),
+        ),
     ];
 
     // Verify we cover exactly the tools that exist
@@ -1626,6 +1632,9 @@ fn tool_schemas_match_arg_structs() {
             "confirm_learning" => {
                 serde_json::from_value::<super::learnings::ConfirmLearningArgs>(payload.clone())
                     .unwrap();
+            }
+            "exit_session" => {
+                serde_json::from_value::<ExitSessionArgs>(payload.clone()).unwrap();
             }
             other => panic!("No deserialization check for tool: {other}"),
         }

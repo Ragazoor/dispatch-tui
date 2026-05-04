@@ -592,6 +592,19 @@ mcp_tools! {
                 }
             },
             "required": ["learning_id", "task_id"]
+        };
+
+    sync "exit_session" => tasks::handle_exit_session,
+        "Close your agent session. Two-step: first call prompts for learning reflection, second call kills the session.",
+        {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "integer",
+                    "description": "The ID of the task whose session to close"
+                }
+            },
+            "required": ["task_id"]
         }
 }
 

@@ -125,6 +125,12 @@ pub(super) struct WrapUpArgs {
 }
 
 #[derive(Deserialize)]
+pub(super) struct ExitSessionArgs {
+    #[serde(deserialize_with = "deserialize_flexible_i64")]
+    pub(super) task_id: i64,
+}
+
+#[derive(Deserialize)]
 pub(super) struct SendMessageArgs {
     #[serde(deserialize_with = "deserialize_flexible_i64")]
     pub(super) from_task_id: i64,
@@ -728,6 +734,79 @@ pub(super) async fn handle_wrap_up(
             }
             JsonRpcResponse::err(id, -32603, format!("wrap_up failed: {e}"))
         }
+    }
+}
+
+pub(super) fn handle_exit_session(
+    state: &McpState,
+    id: Option<Value>,
+    args: Value,
+) -> JsonRpcResponse {
+    let parsed = match parse_args::<ExitSessionArgs>(&id, args) {
+        Ok(a) => a,
+        Err(resp) => return resp,
+    };
+    let task_id = TaskId(parsed.task_id);
+
+    let task = match state.db.get_task(task_id) {
+        Ok(Some(t)) => t,
+        Ok(None) => {
+            return JsonRpcResponse::err(
+                id,
+                -32602,
+                format!("task #{} not found", parsed.task_id),
+            )
+        }
+        Err(e) => return JsonRpcResponse::err(id, -32603, format!("internal error: {e}")),
+    };
+
+    if task.tmux_window.is_none() {
+        return JsonRpcResponse::err(
+            id,
+            -32602,
+            format!("task #{} has no active session", parsed.task_id),
+        );
+    }
+
+    let is_second_call = {
+        let mut pending = state.exit_session_pending.lock().unwrap_or_else(|e| e.into_inner());
+        if pending.contains(&task_id) {
+            pending.remove(&task_id);
+            true
+        } else {
+            pending.insert(task_id);
+            false
+        }
+    };
+
+    if is_second_call {
+        let patch = crate::db::TaskPatch::new().tmux_window(None);
+        if let Err(e) = state.db.patch_task(task_id, &patch) {
+            tracing::warn!(task_id = task_id.0, "exit_session: failed to clear tmux_window: {e}");
+        }
+        let tmux_window = task.tmux_window.clone();
+        let runner = state.runner.clone();
+        let notify_tx = state.notify_tx.clone();
+        tokio::task::spawn_blocking(move || {
+            if let Some(window) = &tmux_window {
+                let _ = crate::tmux::kill_window(window, &*runner);
+            }
+            if let Some(tx) = notify_tx {
+                let _ = tx.send(crate::mcp::McpEvent::Refresh);
+            }
+        });
+        JsonRpcResponse::ok(
+            id,
+            json!({"content": [{"type": "text", "text": "Session closed."}]}),
+        )
+    } else {
+        JsonRpcResponse::ok(
+            id,
+            json!({"content": [{"type": "text", "text": "Reflect on your work — call \
+`record_learning` with any non-obvious discoveries (pitfalls, conventions, preferences). \
+Check with `query_learnings` if these learnings are already added to avoid duplicates. \
+Call `exit_session` again when you're ready to close your session."}]}),
+        )
     }
 }
 
