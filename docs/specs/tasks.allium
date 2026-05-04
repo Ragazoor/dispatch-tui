@@ -1468,27 +1468,40 @@ rule WrapUpReflection {
     when: WrapUp(task, action)
 
     requires: config.learning_reflection_enabled = true
+    requires: action = pr
 
     ensures: WrapUpReflectionNudged(task: task)
 
     @guidance
-        -- A reflection nudge is appended to the MCP response that
-        -- finalises a wrap-up:
-        --   "Before finishing, did you discover anything non-obvious
-        --    about this repo or task? If so, call record_learning
-        --    with a brief summary."
-        --
-        -- Emission points:
-        --   * Rebase wrap-up: handle_wrap_up appends the nudge to the
-        --     successful rebase response.
-        --   * PR wrap-up: handle_update_task appends the nudge when a
-        --     call transitions pr_url from null → set AND the patch
-        --     also moves status to review (i.e. the agent-driven PR
-        --     finalisation path; see WrapUpPr).
-        --
-        -- This is prompt encouragement, not a hard gate. The agent may
-        -- proceed to wrap up without proposing a learning. Gated by
-        -- config.learning_reflection_enabled (default: true).
+        -- The MCP wrap_up handler appends a reflection nudge to its response for
+        -- the PR action only. For the rebase action, reflection is delegated to
+        -- ExitSession (see below).
+        -- Gated by config.learning_reflection_enabled (default: true).
+        -- Implemented in handle_wrap_up() (src/mcp/handlers/tasks.rs).
+}
+
+rule ExitSession {
+    when: ExitSession(task)
+
+    let is_first_call = not ExitSessionPending(task)
+
+    ensures:
+        if is_first_call:
+            ExitSessionPendingSet(task: task)
+            ExitSessionReflectionNudged(task: task)
+        else:
+            ExitSessionCompleted(task: task)
+            TmuxWindowKilled(task: task)
+
+    @guidance
+        -- Two-step call controlled by McpState.exit_session_pending (in-memory
+        -- Mutex<HashSet<TaskId>>).
+        -- First call: insert task_id into set, return reflection nudge asking the
+        -- agent to call record_learning and query_learnings before finishing.
+        -- Second call: remove from set, kill tmux window, clear tmux_window in DB.
+        -- The pending set is cleared when the task is re-dispatched, so a
+        -- resurrected agent always goes through the two-step again.
+        -- Implemented in handle_exit_session() (src/mcp/handlers/tasks.rs).
 }
 
 rule RecordLearningViaMcp {
