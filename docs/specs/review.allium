@@ -1,0 +1,309 @@
+-- allium: 3
+-- review.allium
+--
+-- Scope: Review and fix agents — dispatched Claude Code sessions that analyze
+--        PRs and security alerts, signal findings via MCP, and wait for human
+--        interaction before the long-lived session ends.
+-- Includes: ReviewAgentStatus enum, ReviewPr and SecurityAlert external entities,
+--           agent dispatch rules (dispatch_review_agent, dispatch_fix_agent),
+--           status update contract (update_review_status MCP tool), detach and
+--           re-review rules, TUI integration, invariants.
+-- Excludes: PR metadata polling, CI status, GitHub API integration, the task-based
+--           agent lifecycle (see tasks.allium), feed-epic-based review ingestion
+--           (see feeds.allium).
+
+use "./core.allium" as core
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+-- ReviewAgentStatus tracks whether a dispatched review or fix agent is active
+-- and what phase it is in. NULL means no agent has been dispatched for this item.
+enum ReviewAgentStatus { reviewing | findings_ready | idle }
+
+-- DB representation: "reviewing" | "findings_ready" | "idle" | NULL
+-- Display representation: "reviewing" | "ready" | "idle"
+--
+-- reviewing     — agent session is alive; the agent is actively analyzing the PR/alert
+-- findings_ready — agent completed analysis and has signalled via update_review_status;
+--                  the TUI card flashes green to prompt the user to jump in
+-- idle          — agent is alive but waiting; the user has reviewed findings and
+--                  the agent is ready for further instructions or re-review
+
+------------------------------------------------------------
+-- External Entities
+------------------------------------------------------------
+
+-- ReviewPr and SecurityAlert are managed outside this specification. Their full
+-- schemas live in src/models.rs. The agent-tracking fields are:
+--
+--   ReviewPr {
+--     number: Integer
+--     repo: String               -- GitHub owner/repo (e.g. "acme/app")
+--     title: String
+--     head_ref: String           -- the PR's head branch name
+--     is_draft: Boolean
+--     tmux_window: String?       -- non-null when an agent session is active
+--     worktree: String?          -- filesystem path to the agent's worktree
+--     agent_status: ReviewAgentStatus?  -- null when tmux_window is null
+--     -- plus: author, url, additions, deletions, review_decision, labels,
+--     --       body, ci_status, reviewers, created_at, updated_at
+--   }
+--
+--   SecurityAlert {
+--     number: Integer
+--     repo: String
+--     kind: dependabot | code_scanning
+--     title: String
+--     severity: critical | high | medium | low
+--     tmux_window: String?
+--     worktree: String?
+--     agent_status: ReviewAgentStatus?
+--     -- plus: package, vulnerable_range, fixed_version, cvss_score, url,
+--     --       created_at, state, description
+--   }
+--
+-- PRs are stored in review_prs (assigned to the user as reviewer) and
+-- my_prs (user's own PRs) and bot_prs (dependabot/automation PRs).
+-- Alerts are stored in security_alerts.
+-- agent_status is stored in each table as a nullable TEXT column.
+
+external entity ReviewPr {
+    number: Integer
+    repo: String
+    head_ref: String
+    is_draft: Boolean
+    tmux_window: String?
+    worktree: String?
+    agent_status: ReviewAgentStatus?
+}
+
+external entity SecurityAlert {
+    number: Integer
+    repo: String
+    kind: String           -- "dependabot" or "code_scanning"
+    title: String
+    tmux_window: String?
+    worktree: String?
+    agent_status: ReviewAgentStatus?
+}
+
+------------------------------------------------------------
+-- State Machine
+------------------------------------------------------------
+
+-- Agent lifecycle for both ReviewPr and SecurityAlert:
+--
+--   [no agent]
+--      │
+--      │ dispatch (d key → MCP dispatch_review_agent or dispatch_fix_agent)
+--      ▼
+--   reviewing   ─────────── detach (T key or PR merge) ──────────► [no agent]
+--      │
+--      │ agent calls update_review_status("findings_ready")
+--      ▼
+--   findings_ready  ──────── detach ────────────────────────────► [no agent]
+--      │
+--      │ agent calls update_review_status("idle")
+--      ▼
+--   idle  ────────────────── detach ────────────────────────────► [no agent]
+--      │
+--      │ re-review (r key)
+--      └──────────────────────────────────────────────────────► reviewing
+--
+-- Constraints:
+-- • reviewing blocks a second dispatch: dispatch is refused when agent_status = reviewing.
+-- • findings_ready does NOT block re-dispatch: the user can initiate a fresh review
+--   pass from the findings_ready state (same mechanism as from idle).
+-- • Detach (T) clears tmux_window, worktree, and agent_status atomically.
+-- • PR merge detected via GitHub polling also clears all three fields.
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- == Dispatch ==
+
+rule DispatchReviewAgent {
+    when: DispatchReviewAgent(pr, local_repo)
+
+    requires: pr.tmux_window = null or pr.agent_status != reviewing
+
+    ensures:
+        pr.worktree = create_worktree(local_repo, pr.head_ref)
+        pr.tmux_window = spawn_tmux_session(pr.worktree, review_prompt(pr))
+        pr.agent_status = reviewing
+
+    @guidance
+        -- MCP tool: dispatch_review_agent(repo, number, local_repo)
+        -- local_repo is the filesystem path to the local clone of the PR's repo.
+        -- The agent prompt instructs the agent to:
+        --   1. Run /review-pr {number}
+        --   2. Call update_review_status(status="findings_ready") when done
+        --   3. Wait for user interaction
+        -- Precondition: agent_status != reviewing (FindingsReady and Idle are
+        --   intentionally allowed — a second dispatch is a fresh review pass).
+        -- Implementation: src/mcp/handlers/review.rs::handle_dispatch_review_agent
+        --   + src/dispatch.rs::dispatch_review_agent.
+        -- set_pr_agent() in the DB layer sets tmux_window, worktree, and
+        --   agent_status = 'reviewing' atomically.
+}
+
+rule DispatchFixAgent {
+    when: DispatchFixAgent(alert, local_repo)
+
+    requires: alert.tmux_window = null or alert.agent_status != reviewing
+
+    ensures:
+        alert.worktree = create_worktree(local_repo, default_branch)
+        alert.tmux_window = spawn_tmux_session(alert.worktree, fix_prompt(alert))
+        alert.agent_status = reviewing
+
+    @guidance
+        -- MCP tool: dispatch_fix_agent(repo, number, kind, local_repo)
+        -- kind is "dependabot" or "code_scanning".
+        -- The fix prompt (build_fix_prompt in src/dispatch.rs) includes package name,
+        --   vulnerable_range, fixed_version, and instructions to open a PR.
+        -- set_alert_agent() in the DB layer is the write path.
+        -- Implementation: src/mcp/handlers/review.rs::handle_dispatch_fix_agent
+        --   + src/dispatch.rs::dispatch_fix_agent.
+}
+
+-- == Agent Status Update (MCP) ==
+
+rule AgentReportsStatus {
+    when: McpUpdateReviewStatus(repo, number, status)
+
+    -- The handler searches review_prs, bot_prs, and security_alerts for
+    -- (repo, number) WHERE tmux_window IS NOT NULL. Exactly one must match.
+
+    requires: status in {reviewing, findings_ready, idle}
+
+    ensures:
+        update_agent_status(repo, number, status)
+
+    @guidance
+        -- MCP tool: update_review_status(repo, number, status)
+        -- update_agent_status() (src/db/queries.rs) updates agent_status across
+        --   all PR tables and security_alerts using the (repo, number) key.
+        -- When status = findings_ready, the handler additionally upserts
+        --   pr_workflow_states to ActionRequired/FindingsReady so the review board
+        --   column reflects the new state, and calls state.notify() to trigger
+        --   a TUI refresh + card flash.
+        -- The tool is called by the agent (not the user) within its tmux session.
+        -- Implementation: src/mcp/handlers/tasks.rs::handle_update_review_status.
+}
+
+-- == Detach ==
+
+rule DetachReviewAgent {
+    when: UserDetachesReviewAgent(pr)
+
+    requires: pr.tmux_window != null
+
+    ensures:
+        kill_tmux_window(pr.tmux_window)
+        pr.tmux_window = null
+        pr.worktree = null
+        pr.agent_status = null
+
+    @guidance
+        -- Triggered by the T key (uppercase) on a PR or alert card with an active agent.
+        -- Clears tmux_window, worktree, and agent_status in a single DB update.
+        -- The worktree itself is not deleted — it remains on disk for manual inspection.
+        -- Implementation: TUI key handler → Command::DetachReviewAgent
+        --   → exec_detach_review_agent() (src/runtime.rs or src/runtime/review.rs).
+}
+
+rule MergeDetachesReviewAgent {
+    when: PrMergeDetected(pr)
+
+    requires: pr.tmux_window != null
+
+    ensures:
+        pr.tmux_window = null
+        pr.worktree = null
+        pr.agent_status = null
+
+    @guidance
+        -- PR merge detection runs during the GitHub PR polling tick (pr_poll_interval = 30s).
+        -- When a PR is found to be merged, its agent fields are cleared.
+        -- Complements the task-based WrapUpMerge rule (tasks.allium): review PRs are
+        -- not Tasks, so they have a separate merge-detection path.
+}
+
+-- == Re-review ==
+
+rule ReReviewAgent {
+    when: UserReReviews(pr)
+
+    requires: pr.agent_status = idle
+    requires: pr.tmux_window != null
+
+    ensures:
+        send_keys_to_tmux(pr.tmux_window, "/review-pr {pr.number}")
+        pr.agent_status = reviewing
+
+    @guidance
+        -- Triggered by the r key on a PR card with an idle agent.
+        -- send_keys_to_tmux sends the /review-pr slash command to the live
+        --   tmux session, resuming the agent's analysis loop.
+        -- The r key binding is only shown when agent_status = idle.
+        -- No new worktree or tmux window is created.
+        -- Implementation: TUI key handler → Command::ReReviewAgent.
+}
+
+------------------------------------------------------------
+-- TUI Integration
+------------------------------------------------------------
+
+-- PR/alert cards with an active agent display a colored status badge:
+--
+--   [reviewing]   — yellow — agent is analyzing the PR/alert
+--   [ready]       — green  — findings ready; card flashes on transition
+--   [idle]        — dim    — agent is alive but waiting for user action
+--
+-- Key bindings per agent state:
+--
+--   state            keys shown
+--   ---------------  -----------------------------------------
+--   no agent         [d] review  [p] open  [↵] detail  ...
+--   reviewing        [g]o to  [T] detach  ...
+--   findings_ready   [g]o to  [T] detach  ...  (card is flashing green)
+--   idle             [g]o to  [r]e-review  [T] detach  ...
+--
+-- Key bindings (all states):
+--   d   — dispatch review/fix agent (blocked when agent_status = reviewing)
+--   g   — jump to the active tmux session
+--   T   — detach/kill the agent session (clears all agent fields)
+--   r   — re-review (only when agent_status = idle)
+--
+-- The card flash on findings_ready uses the existing message_flash mechanism
+-- (same channel as MessageSent for tasks) via McpEvent::ReviewReady.
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+invariant AgentStatusRequiresTmux {
+    for pr in ReviewPrs:
+        pr.agent_status != null implies pr.tmux_window != null
+}
+
+-- The same invariant applies to SecurityAlerts (agent_status != null implies
+-- tmux_window != null). Enforced at the service/DB layer: set_pr_agent and
+-- set_alert_agent write tmux_window and agent_status atomically; DetachReviewAgent
+-- and MergeDetachesReviewAgent clear both atomically.
+
+-- AtMostOneActiveReviewAgent: for any given (repo, number), at most one agent
+-- can be in the reviewing state at a time. Enforced by the DispatchReviewAgent
+-- and DispatchFixAgent preconditions: dispatch is refused when
+-- agent_status = reviewing. FindingsReady and Idle allow re-dispatch.
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+open question "Should the r key (re-review) also send /review-pr for alerts, or use a different command?"
+open question "When agent_status = findings_ready and the user dispatches again (fresh pass), should the old worktree be reused or a new one created?"

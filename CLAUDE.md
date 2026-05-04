@@ -12,6 +12,18 @@ cargo test
 cargo run -- tui
 ```
 
+Other useful CLI subcommands:
+
+```bash
+cargo run -- setup              # configure Claude Code MCP integration
+cargo run -- add --from-plan path/to/plan.md  # create a task from a plan file
+cargo run -- fetch-reviews      # fetch reviewer PRs as FeedItem JSON (stdout)
+cargo run -- fetch-security     # fetch security alerts as FeedItem JSON (stdout)
+cargo run -- verify-feed 'gh api ...'  # run a feed command and validate its JSON output
+```
+
+`verify-feed` runs the given shell command (via `sh -c`) and checks that stdout parses as a JSON array of `FeedItem` objects. Use it when writing or debugging a custom `feed_command` for an epic.
+
 Pre-push hook runs `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test` automatically before each push. One-time setup:
 
 ```bash
@@ -119,6 +131,35 @@ Key patterns that aren't obvious from reading the code:
 - **Command queue draining**: `execute_commands` (`src/runtime.rs`) loads the initial `Vec<Command>` into a `VecDeque` and drains it iteratively. Any handler that produces additional commands (e.g. error-path `app.update()` calls that return extra commands) extends the queue with `queue.extend(extra)`, so a single message can cascade into multiple commands without recursive calls.
 - **Editor session invariant**: `TuiRuntime` holds an `editor_session: Arc<Mutex<Option<EditorSession>>>` (`src/runtime/mod.rs`). At most one pop-out editor can be open at a time — the runtime refuses to start a new one while the slot is occupied. The slot is `None` when idle.
 
+### Review/Security Agent State Machine
+
+Review agents (dispatched for PRs) and fix agents (dispatched for security alerts) track their lifecycle via `ReviewAgentStatus` (`src/models.rs`):
+
+| Status | DB value | Card badge | Meaning |
+|--------|----------|------------|---------|
+| `Reviewing` | `"reviewing"` | `[reviewing]` yellow | Agent session is active; agent is analyzing |
+| `FindingsReady` | `"findings_ready"` | `[ready]` green (flashes) | Agent completed analysis; user should review |
+| `Idle` | `"idle"` | `[idle]` dim | Agent is alive but waiting for user input |
+| *(none)* | `NULL` | *(no badge)* | No agent dispatched |
+
+State transitions:
+
+```
+dispatch (d) → Reviewing → findings_ready (agent MCP call) → idle (agent MCP call)
+                                                                  ↓
+                                          re-review (r) → Reviewing → ...
+
+detach (T) or PR merge → NULL (agent_status cleared)
+```
+
+Key bindings on a PR/alert card:
+- `d` — dispatch agent (blocked when `Reviewing`; allowed from `FindingsReady` and `Idle` for a fresh pass)
+- `g` — jump to the active tmux session
+- `r` — re-review (only when `Idle`; sends `/review-pr {number}` to the live session)
+- `T` — detach: kills the tmux window and clears `tmux_window`, `worktree`, and `agent_status` atomically
+
+The agent calls `update_review_status` (MCP tool) to advance its own status. When status becomes `findings_ready`, the runtime also upserts `pr_workflow_states` to `ActionRequired/FindingsReady` and flashes the card. See `docs/specs/review.allium` for the full specification.
+
 ### Error Handling
 
 The codebase uses three error types at different layers:
@@ -222,6 +263,73 @@ Use `JsonRpcResponse::err(id, -32602, msg)` for anything the caller can fix; use
 Feed epics are epics whose tasks are populated externally by a shell command rather than by a human. When an epic has a `feed_command` set, the runtime runs it periodically (`feed_interval_secs`) and calls `upsert_feed_tasks()` to sync the results. Each feed task has an `external_id` that is used as the upsert key — tasks are created on first appearance and updated (but not deleted) on subsequent runs.
 
 Feed tasks appear in their own column on the kanban board (`SubStatus::Feed`). The schema is backed by migration v38. See `docs/specs/feeds.allium` for the full specification.
+
+## Learnings Flow
+
+The Learnings system lets dispatched agents propose knowledge entries that, once approved by a human, are automatically injected into future dispatch prompts.
+
+### End-to-end lifecycle
+
+1. **Agent proposes** — calls `record_learning(task_id, kind, summary, scope, ...)` during a task or at wrap-up. The entry lands as `proposed` and has no effect on other agents yet.
+2. **Human reviews** — opens the Learnings overlay (`L` key from the main board) and approves, rejects, or edits entries. Only approved entries enter the active pool.
+3. **Future dispatches** — when an agent is launched, `dispatch_with_prompt()` queries approved learnings for the task's context and prepends them to the prompt (see `docs/specs/learnings.allium`).
+4. **Agent confirms** — calls `confirm_learning(learning_id, task_id)` when a retrieved learning proves correct. This increments `confirmed_count`, which raises the learning's priority in future results.
+
+### Scope model
+
+Each learning has a `scope` that determines which tasks receive it:
+
+| Scope | Included when | `scope_ref` |
+|-------|---------------|-------------|
+| `user` | Always | `null` |
+| `project` | Task belongs to this project | `str(project_id)` |
+| `repo` | Task's repo path matches | `repo_path` |
+| `epic` | Task belongs to this epic | `str(epic_id)` |
+| `task` | Only via explicit `query_learnings` | `str(task_id)` |
+
+`scope_ref` is auto-derived from the task context when omitted. `task`-scoped learnings are excluded from auto-injection (they capture past-task outcomes and must be fetched on demand).
+
+### Prompt priority order
+
+Within an injected prompt, learnings are ordered (highest first):
+
+1. `procedural` — prepended as verbatim prompt-prefix instructions before the normal learnings block
+2. `epic` — most specific to the current work
+3. `repo` — repository-wide conventions
+4. `project` — project-wide preferences
+5. `user` — global preferences
+
+Within each level, entries are sorted by `confirmed_count DESC`.
+
+### Status lifecycle
+
+```
+proposed → approved → archived (terminal)
+        ↘ rejected (terminal)
+approved → rejected (terminal)
+```
+
+Approved entries affect dispatch. Rejected and archived entries do not.
+
+### Key bindings in the Learnings overlay
+
+| Key | Action |
+|-----|--------|
+| `L` | Open overlay |
+| `j` / `k` | Navigate list |
+| `a` | Approve selected |
+| `x` | Reject selected |
+| `A` | Archive selected (approved only) |
+| `e` | Edit (opens `$EDITOR`) |
+| `Esc` / `q` | Close |
+
+### Implementation references
+
+- `src/mcp/handlers/learnings.rs` — MCP tool handlers
+- `src/service.rs` — `LearningService` (approval, rejection, archive, edit)
+- `src/db/` — `LearningStore` trait, `LearningPatch`, `LearningFilter`
+- `src/dispatch.rs` — prompt augmentation in `dispatch_with_prompt()`
+- `docs/specs/learnings.allium` — full domain specification
 
 ## Visibility Convention
 
@@ -332,6 +440,32 @@ Avoid `#[allow(dead_code)]` — dead code should be removed, not suppressed. If 
 5. **Handle messages** in `src/tui/mod.rs` `update()` — process your new messages, return commands.
 6. **Render** in the appropriate `src/tui/ui/` module (`kanban.rs`, `review.rs`, or `security.rs`) — add a rendering branch for your view mode in `kanban.rs::render()`.
 
+### Adding a New Entity (with patch builder and sub-trait)
+
+Adding a fully integrated entity involves five layers. Work through them in order:
+
+1. **Domain model** (`src/models.rs`) — define the struct and any enums. For nullable fields that agents or the TUI can set/clear, plan to use `FieldUpdate` (service layer) and `Option<Option<T>>` double-Option (DB layer); see the [FieldUpdate](#fieldupdate--nullable-string-fields) and [TaskPatch/EpicPatch](#taskpatch--epicpatch--double-option-in-the-db-layer) conventions.
+
+2. **Database migration** (`src/db/migrations.rs`) — write `migrate_vN_description(conn)` and register it in `MIGRATIONS`. See [Adding a Database Migration](#adding-a-database-migration) for the full procedure.
+
+3. **DB trait and queries** (`src/db/mod.rs`, `src/db/queries.rs`):
+   - Define a narrow sub-trait (e.g., `trait NewEntityCrud`) with CRUD methods. Follow the [trait-narrowing convention](#db-trait-narrowing--take-the-narrowest-sub-trait-you-need).
+   - Add `NewEntityCrud` as a supertrait of `TaskStore` so existing holders (`McpState`, `TuiRuntime`) get it automatically.
+   - Implement `impl NewEntityCrud for Database` in `src/db/queries.rs` using `self.conn()?`.
+   - Define a `NewEntityPatch` builder struct with `Option<Option<T>>` for nullable fields; implement the `UPDATE` query.
+   - Write a corresponding `NewEntityFilter` if list queries need filtering.
+
+4. **Service layer** (`src/service.rs`) — create `NewEntityService` holding `Arc<dyn NewEntityCrud>`. Add `create_`, `get_`, `list_`, `update_`, and any lifecycle methods. Use `ServiceError::Validation` for input errors, `ServiceError::NotFound` for missing rows, and `anyhow` for DB I/O errors. Accept `FieldUpdate` for nullable string fields, map to `Option<Option<T>>` before writing the patch.
+
+5. **MCP handler** (if agents need to interact) — follow [Adding a New MCP Tool](#adding-a-new-mcp-tool). For read-only tools, hold the narrowest sub-trait; for mutating tools, call `state.notify()` after the write.
+
+6. **Tests**:
+   - DB-layer tests in `src/db/tests.rs` using `Database::open_in_memory()`.
+   - Service-layer tests inline in `src/service.rs` (or a `mod tests` block there).
+   - MCP handler tests in `src/mcp/handlers/tests.rs` for any new tools.
+
+7. **Spec** (`docs/specs/`) — write or extend an Allium spec to document the entity's lifecycle, rules, and invariants. Use the `allium:tend` skill and run `allium check` to validate syntax.
+
 ### Adding a Database Migration
 
 Migrations live in `src/db/migrations.rs` as standalone functions. We do **not** squash migrations — see the module-level doc comment in `src/db/migrations.rs` for the policy.
@@ -343,14 +477,35 @@ Migrations live in `src/db/migrations.rs` as standalone functions. We do **not**
 
 ### Projects Feature
 
-Projects group tasks and epics for filtering. Key behaviors:
+Projects group tasks and epics for board filtering. See `docs/specs/projects.allium` for the full domain specification.
 
-- `active_project: ProjectId` on `App` is the current filter — only tasks/epics with a matching `project_id` appear in any column (tasks view, archive, epics). The filter is applied in `project_matches()` at four call sites in `tui/mod.rs`.
-- The Default project (seeded by migration v39, `is_default = 1`) cannot be deleted. Deleting any other project moves its tasks/epics to Default in the same DB transaction (`delete_project_and_move_items`).
+**Filter semantics:**
+- `App.active_project: ProjectId` is the active board filter.
+- **Default project active** → show all tasks/epics regardless of `project_id` (catch-all view).
+- **Any other project active** → show only items where `item.project_id == active_project.id`.
+- The filter is applied in `project_matches()` at four call sites in `tui/mod.rs`: task column rendering, epic column rendering, archive view, and search results.
+
+**Default project pinning:**
+- The Default project is seeded at DB init (migration v39, `is_default = 1`). There is exactly one default.
+- The Default project cannot be deleted. `delete_project_and_move_items` checks `is_default` before proceeding.
+- Deleting any other project moves all its tasks and epics to Default in a single DB transaction, preventing orphaned items.
+- Users can rename the Default project but cannot change `is_default`.
+
+**Why TUI-only admin state:**
+- Projects are never mutated by MCP agents — there are no MCP tools for project management. Only humans create, rename, reorder, and delete projects from the TUI panel.
+- The project list is refreshed only after explicit project-mutating commands (`CreateProject`, `RenameProject`, `DeleteProject`, `ReorderProject`), not on every MCP tick.
+
+**Panel behavior:**
 - The projects panel is a left-side overlay opened with `h` (or `Left`) from column 0 (Backlog). While visible it intercepts all input before normal board key handling.
-- `ProjectId = i64` (type alias, not newtype) — simpler rusqlite integration. There is no FK constraint in the schema; integrity is enforced at the service/runtime layer.
-- The project list is **not** refreshed on every MCP tick — only after explicit project-mutating commands (`CreateProject`, `RenameProject`, `DeleteProject`, `ReorderProject`). Projects are TUI-only admin state not mutated by agents.
-- `exec_refresh_projects_from_db` follows the same `exec_refresh_*_from_db` naming pattern as epic and usage refresh helpers in `src/runtime/tasks.rs`.
+- Moving the cursor with `j`/`k` immediately activates the hovered project (hover-to-filter). `Enter`, `g`, `l`, `Right`, and `Esc` close the panel, keeping the currently activated project.
+- The panel cursor resets to the active project on each open.
+
+**Delete confirmation:**
+- Deleting a project is a two-step confirmation: first `D` opens `ConfirmDeleteProject1`; after confirming, `ConfirmDeleteProject2` shows the count of tasks/epics that will be moved to Default. The user types `y` or presses Enter to proceed.
+
+**Implementation details:**
+- `ProjectId = i64` (type alias, not newtype) — simpler rusqlite integration. No FK constraint in the schema; integrity is enforced at the service/runtime layer.
+- `exec_refresh_projects_from_db` follows the `exec_refresh_*_from_db` naming pattern (see `src/runtime/tasks.rs`).
 
 ### Learning Store MCP Tools
 

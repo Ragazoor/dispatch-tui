@@ -1,0 +1,182 @@
+-- allium: 3
+-- learnings.allium
+--
+-- Scope: The Learnings system — agents propose knowledge entries; humans approve
+--        them; approved learnings are injected into future dispatch prompts for
+--        the matching scope.
+-- Includes: Scope model and priority ordering, approval lifecycle summary, MCP
+--           tool contracts, dispatch prompt augmentation, TUI review surface,
+--           invariants.
+-- Excludes: Core entity/enum definitions (see core.allium — Learning,
+--           LearningScope, LearningKind, LearningStatus); task-context rule
+--           implementations (see tasks.allium — RecordLearningViaMcp,
+--           QueryLearningsViaMcp, ConfirmLearningViaMcp, AugmentDispatchPromptWithLearnings,
+--           WrapUpReflection, ApproveLearning, RejectLearning, ArchiveLearning,
+--           EditLearning, ProposedLearningsReview surface).
+
+use "./core.allium" as core
+
+-- Entity and enum definitions live in core.allium:
+--   core/Learning         — persisted knowledge entry (full field set + transition graph)
+--   core/LearningScope    — user | project | repo | epic | task
+--   core/LearningKind     — pitfall | convention | preference |
+--                           tool_recommendation | procedural | episodic
+--   core/LearningStatus   — proposed | approved | rejected | archived
+
+------------------------------------------------------------
+-- Scope Model
+------------------------------------------------------------
+
+-- A learning's scope determines which agents receive it in their dispatch prompts.
+-- When retrieving learnings for a dispatch (list_learnings_for_dispatch), the runtime
+-- unions all learnings that match any of the task's contextual anchors:
+--
+--   scope     scope_ref must equal          included when
+--   --------  ----------------------------  --------------------------------
+--   user      null (no qualifier)           always
+--   project   str(task.project_id)         always (every task has a project)
+--   repo      task.repo_path               always (every task has a repo_path)
+--   epic      str(task.epic_id)            task belongs to an epic
+--
+-- task-scoped learnings (scope = task) are excluded from auto-injection into
+-- dispatch prompts. They capture past-task episodic outcomes and must be
+-- retrieved explicitly via query_learnings (QueryLearningsViaMcp in tasks.allium).
+--
+-- Scope resolution when scope_ref is omitted from record_learning:
+--   scope=user    → scope_ref = null
+--   scope=repo    → scope_ref = task.repo_path
+--   scope=project → scope_ref = str(task.project_id)
+--   scope=epic    → scope_ref = str(task.epic_id)  [error if task has no epic]
+--   scope=task    → scope_ref = str(task.id)
+
+------------------------------------------------------------
+-- Priority Ordering
+------------------------------------------------------------
+
+-- Within a dispatch prompt, learnings are ordered by scope priority (highest first):
+--
+--   1. procedural  — prepended verbatim as prompt-prefix instructions ahead of
+--                    the normal learnings section (regardless of other scope)
+--   2. epic        — most specific to the current work context
+--   3. repo        — repository-wide conventions
+--   4. project     — project-wide preferences
+--   5. user        — global preferences
+--
+-- Within the same priority level, entries are ordered by confirmed_count DESC
+-- (most-confirmed first), so well-validated learnings surface earliest.
+--
+-- kind=procedural learnings are segregated from the rest regardless of their
+-- other scope: they appear as prompt-prefix instructions before any "Relevant
+-- learnings" section. Non-procedural entries appear under "Relevant learnings"
+-- in the priority order above.
+
+------------------------------------------------------------
+-- Lifecycle
+------------------------------------------------------------
+
+-- Agents propose learnings via record_learning during task execution or at wrap-up.
+-- Entries always land as proposed — they do not affect dispatch prompts until a
+-- human approves them in the TUI ProposedLearningsReview surface.
+--
+-- Human review transitions (implemented in tasks.allium):
+--
+--   proposed  --[ApproveLearning]→  approved
+--   proposed  --[RejectLearning]→   rejected   (terminal)
+--   approved  --[RejectLearning]→   rejected   (terminal)
+--   approved  --[ArchiveLearning]→  archived   (terminal)
+--
+-- Editing (EditLearning) updates summary/detail/kind/tags without changing status.
+-- Editing is available for both proposed and approved entries.
+--
+-- confirmed_count is incremented by ConfirmLearning when an agent acts on a
+-- learning and it proves correct. No status change occurs on confirmation; the
+-- count feeds the priority ordering within a scope level.
+--
+-- The transition graph is declared on core/Learning (see core.allium).
+
+------------------------------------------------------------
+-- MCP Tools
+------------------------------------------------------------
+
+-- Full rule implementations live in tasks.allium. The contracts are reproduced
+-- here for discoverability.
+
+-- record_learning(task_id, kind, summary, scope, detail?, scope_ref?, tags?)
+--   Creates a core/Learning with status = proposed and source_task = task.
+--   scope_ref is auto-derived from task context when omitted (see Scope Model).
+--   summary must be non-empty.
+--   tags defaults to the empty set.
+--   Return: the new learning_id.
+--
+-- query_learnings(task_id, tag_filter?, limit?)
+--   Returns approved learnings for the task's scope union.
+--   Excludes task-scoped entries from the auto-retrieved set.
+--   When tag_filter is provided, only entries whose tags set contains tag_filter.
+--   Ordered by scope_priority(scope) then confirmed_count DESC.
+--   limit capped at 50 (default: 20).
+--
+-- confirm_learning(learning_id, task_id)
+--   Requires: learning.status = approved
+--   Increments confirmed_count; updates last_confirmed_at and updated_at.
+--   No status change.
+
+------------------------------------------------------------
+-- Dispatch Prompt Augmentation
+------------------------------------------------------------
+
+-- After every agent launch (AgentLaunched event), the dispatch prompt is augmented
+-- with relevant approved learnings. The flow (AugmentDispatchPromptWithLearnings
+-- in tasks.allium):
+--
+--   1. Retrieve list_learnings_for_dispatch(task) — union of user + project +
+--      repo + epic-scoped approved learnings.
+--   2. Partition by kind: procedural vs. all others.
+--   3. Prepend procedural entries as prompt-prefix instructions (verbatim text,
+--      in scope-priority then confirmed_count order).
+--   4. Append remaining entries under a "Relevant learnings" section.
+--   5. If the relevant set is empty, no augmentation occurs (no section appended).
+--
+-- Wrap-up nudge (WrapUpReflection in tasks.allium): when
+-- config.learning_reflection_enabled = true, the MCP wrap_up response appends
+-- a nudge asking the agent to call record_learning if it discovered anything
+-- non-obvious. The agent may proceed without proposing.
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+-- Entity-level ScopeRefConsistency is declared on core/Learning:
+--   (scope = user implies scope_ref = null)
+--   and (scope != user implies scope_ref != null)
+--
+-- This is enforced at the service layer (LearningService.create_learning) and
+-- by the entity-level invariant declared in core.allium.
+
+invariant ApprovedLearningsHaveScopeRef {
+    for l in core/Learnings:
+        l.status = approved and l.scope != user implies l.scope_ref != null
+}
+
+-- No two approved learnings may have the same (kind, summary, scope, scope_ref)
+-- tuple. This is a soft constraint enforced by convention: the service layer does
+-- not deduplicate, but the TUI review surface surfaces similar entries during
+-- approval to encourage curation.
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+-- ProposedLearningsReview surface is declared in tasks.allium. It is reproduced
+-- here in summary for discoverability:
+--
+--   surface ProposedLearningsReview — TUI overlay (opened with 'L' from main board)
+--     exposes: learnings where status = proposed, ordered by scope asc, created_at desc
+--     provides: Navigate(delta), Approve(learning), Reject(learning), Edit(learning), Close
+--
+-- The surface also exposes approved learnings for Archive. Key binding summary:
+--   L       — open ProposedLearningsReview
+--   a       — approve selected learning
+--   x       — reject selected learning
+--   A       — archive selected (approved) learning
+--   e       — edit selected learning (opens $EDITOR)
+--   Esc/q   — close overlay
