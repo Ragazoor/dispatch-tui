@@ -658,7 +658,6 @@ pub(super) async fn handle_wrap_up(
 
     let repo_path = task.repo_path.clone();
     let base_branch = task.base_branch.clone();
-    let tmux_window = task.tmux_window.clone();
     let runner = state.runner.clone();
     let notify_tx = state.notify_tx.clone();
     let task_id = task.id;
@@ -693,9 +692,7 @@ pub(super) async fn handle_wrap_up(
 
     match rebase_result {
         Ok(()) => {
-            let patch = db::TaskPatch::new()
-                .status(TaskStatus::Done)
-                .tmux_window(None);
+            let patch = db::TaskPatch::new().status(TaskStatus::Done);
             if let Err(e) = db.patch_task(task_id, &patch) {
                 tracing::warn!(
                     task_id = task_id.0,
@@ -710,18 +707,13 @@ pub(super) async fn handle_wrap_up(
                     );
                 }
             }
-            let ad_runner = state.runner.clone();
-            tokio::task::spawn_blocking(move || {
-                if let Some(window) = &tmux_window {
-                    let _ = crate::tmux::kill_window(window, &*ad_runner);
-                }
-                if let Some(tx) = notify_tx {
-                    let _ = tx.send(crate::mcp::McpEvent::Refresh);
-                }
-            });
+            state.notify();
             JsonRpcResponse::ok(
                 id,
-                json!({"content": [{"type": "text", "text": format!("wrap_up complete (task {}, action: rebase){}", parsed.task_id, reflection_nudge(&*state.db))}]}),
+                json!({"content": [{"type": "text", "text": format!(
+                    "wrap_up complete (task {}, action: rebase). Call `exit_session` to close your session when ready.",
+                    parsed.task_id
+                )}]}),
             )
         }
         Err(e) => {

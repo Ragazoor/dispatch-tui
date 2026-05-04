@@ -5133,14 +5133,13 @@ async fn update_review_status_findings_ready_without_workflow_row() {
 }
 
 #[tokio::test]
-async fn wrap_up_rebase_clears_tmux_window() {
+async fn wrap_up_rebase_preserves_tmux_window() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse --abbrev-ref HEAD
         MockProcessRunner::fail(""),                  // git remote get-url (no remote)
         MockProcessRunner::ok(),                      // git rebase main
         MockProcessRunner::ok(),                      // git merge --ff-only
-        MockProcessRunner::ok(),                      // tmux kill-window
     ]));
     let state = Arc::new(McpState {
         db: db.clone(),
@@ -5151,7 +5150,7 @@ async fn wrap_up_rebase_clears_tmux_window() {
 
     let task_id = db
         .create_task(
-            "Rebase Clear Window",
+            "Rebase Preserve Window",
             "desc",
             "/repo",
             None,
@@ -5166,7 +5165,7 @@ async fn wrap_up_rebase_clears_tmux_window() {
     db.patch_task(
         task_id,
         &db::TaskPatch::new()
-            .worktree(Some("/repo/.worktrees/1-rebase-clear"))
+            .worktree(Some("/repo/.worktrees/1-rebase-preserve"))
             .tmux_window(Some("task-99")),
     )
     .unwrap();
@@ -5182,12 +5181,16 @@ async fn wrap_up_rebase_clears_tmux_window() {
     .await;
     let text = extract_response_text(&resp);
     assert!(text.contains("wrap_up complete"));
+    assert!(
+        text.contains("exit_session"),
+        "response should instruct agent to call exit_session; got: {text}"
+    );
 
     let task = db.get_task(task_id).unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Done);
     assert!(
-        task.tmux_window.is_none(),
-        "tmux_window should be cleared in DB after successful rebase"
+        task.tmux_window.is_some(),
+        "tmux_window must NOT be cleared — exit_session owns the window kill"
     );
 }
 
@@ -7694,7 +7697,10 @@ fn seed_task_with_worktree(db: &Arc<dyn db::TaskStore>, suffix: &str) -> crate::
 }
 
 #[tokio::test]
-async fn wrap_up_rebase_appends_reflection_nudge_by_default() {
+async fn wrap_up_rebase_directs_to_exit_session_not_reflection_nudge() {
+    // After the behavioral change, wrap_up(rebase) no longer emits the
+    // reflection nudge inline. Instead it tells the agent to call exit_session,
+    // which handles the reflection prompt on first call.
     let (db, state) = make_rebase_state();
     let task_id = seed_task_with_worktree(&db, "nudge-default");
 
@@ -7710,41 +7716,23 @@ async fn wrap_up_rebase_appends_reflection_nudge_by_default() {
 
     let text = extract_response_text(&resp);
     assert!(
-        text.contains("record_learning"),
-        "nudge should appear by default; got: {text}"
+        text.contains("exit_session"),
+        "response should direct agent to call exit_session; got: {text}"
+    );
+    assert!(
+        !text.contains("record_learning"),
+        "reflection nudge must not appear in wrap_up(rebase) response; got: {text}"
     );
 }
 
 #[tokio::test]
-async fn wrap_up_rebase_appends_reflection_nudge_when_enabled() {
+async fn wrap_up_rebase_omits_reflection_nudge_regardless_of_setting() {
+    // The learning_reflection_enabled setting no longer affects wrap_up(rebase)
+    // — the nudge has moved to exit_session.
     let (db, state) = make_rebase_state();
     db.set_setting_bool("learning_reflection_enabled", true)
         .unwrap();
-    let task_id = seed_task_with_worktree(&db, "nudge-enabled");
-
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "wrap_up",
-            "arguments": { "task_id": task_id.0, "action": "rebase" }
-        })),
-    )
-    .await;
-
-    let text = extract_response_text(&resp);
-    assert!(
-        text.contains("record_learning"),
-        "nudge should appear when enabled=true; got: {text}"
-    );
-}
-
-#[tokio::test]
-async fn wrap_up_rebase_omits_reflection_nudge_when_disabled() {
-    let (db, state) = make_rebase_state();
-    db.set_setting_bool("learning_reflection_enabled", false)
-        .unwrap();
-    let task_id = seed_task_with_worktree(&db, "nudge-disabled");
+    let task_id = seed_task_with_worktree(&db, "nudge-setting-irrelevant");
 
     let resp = call(
         &state,
@@ -7759,7 +7747,11 @@ async fn wrap_up_rebase_omits_reflection_nudge_when_disabled() {
     let text = extract_response_text(&resp);
     assert!(
         !text.contains("record_learning"),
-        "nudge must not appear when disabled; got: {text}"
+        "nudge must not appear in wrap_up(rebase) even when setting=true; got: {text}"
+    );
+    assert!(
+        text.contains("exit_session"),
+        "response should direct to exit_session; got: {text}"
     );
 }
 
@@ -8125,4 +8117,51 @@ async fn exit_session_pending_cleared_on_redispatch() {
         let pending = state.exit_session_pending.lock().unwrap();
         assert!(!pending.contains(&task_id), "pending should be cleared after dispatch");
     }
+}
+
+#[tokio::test]
+async fn wrap_up_rebase_does_not_kill_window() {
+    let state = test_state();
+    let task_id = state
+        .db
+        .create_task(
+            "Rebase Task",
+            "description",
+            "/repo",
+            None,
+            TaskStatus::Running,
+            "main",
+            None,
+            None,
+            None,
+            ProjectId(1),
+        )
+        .unwrap();
+
+    // Set up worktree + tmux_window so is_wrappable passes.
+    let patch = crate::db::TaskPatch::new()
+        .worktree(Some("/repo/.worktrees/task-rebase"))
+        .tmux_window(Some("task-rebase-window"));
+    state.db.patch_task(task_id, &patch).unwrap();
+
+    // wrap_up calls finish_task which runs git commands. With MockProcessRunner
+    // the git operations will fail, but the key assertion holds for BOTH paths:
+    // neither the success path nor the error path should clear tmux_window
+    // after this change.
+    call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "wrap_up",
+            "arguments": { "task_id": task_id.0, "action": "rebase" }
+        })),
+    )
+    .await;
+
+    let task = state.db.get_task(task_id).unwrap().unwrap();
+    // tmux_window must NOT be cleared — exit_session owns the window kill.
+    assert!(
+        task.tmux_window.is_some(),
+        "wrap_up(rebase) must not clear tmux_window — exit_session is responsible"
+    );
 }
