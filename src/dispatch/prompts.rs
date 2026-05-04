@@ -403,14 +403,7 @@ mod tests {
 
     #[test]
     fn learning_instruction_in_task_prompts_no_plan() {
-        let text = build_prompt(
-            TaskId(1),
-            "title",
-            "desc",
-            None,
-            None,
-            None,
-        );
+        let text = build_prompt(TaskId(1), "title", "desc", None, None, None);
         assert!(
             text.contains("query_learnings"),
             "build_prompt (no plan) should mention query_learnings"

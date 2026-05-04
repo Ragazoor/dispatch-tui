@@ -743,11 +743,7 @@ pub(super) fn handle_exit_session(
     let task = match state.db.get_task(task_id) {
         Ok(Some(t)) => t,
         Ok(None) => {
-            return JsonRpcResponse::err(
-                id,
-                -32602,
-                format!("task #{} not found", parsed.task_id),
-            )
+            return JsonRpcResponse::err(id, -32602, format!("task #{} not found", parsed.task_id))
         }
         Err(e) => return JsonRpcResponse::err(id, -32603, format!("internal error: {e}")),
     };
@@ -761,7 +757,10 @@ pub(super) fn handle_exit_session(
     }
 
     let is_second_call = {
-        let mut pending = state.exit_session_pending.lock().unwrap_or_else(|e| e.into_inner());
+        let mut pending = state
+            .exit_session_pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         if pending.contains(&task_id) {
             pending.remove(&task_id);
             true
@@ -774,7 +773,10 @@ pub(super) fn handle_exit_session(
     if is_second_call {
         let patch = crate::db::TaskPatch::new().tmux_window(None);
         if let Err(e) = state.db.patch_task(task_id, &patch) {
-            tracing::warn!(task_id = task_id.0, "exit_session: failed to clear tmux_window: {e}");
+            tracing::warn!(
+                task_id = task_id.0,
+                "exit_session: failed to clear tmux_window: {e}"
+            );
         }
         state.notify(); // notify immediately after DB write
         let tmux_window = task.tmux_window;
@@ -889,7 +891,10 @@ pub(super) async fn handle_dispatch_next(
     // Clear any pending exit_session state — if this task is being re-dispatched
     // after a partial exit, the new agent must go through the two-step again.
     {
-        let mut pending = state.exit_session_pending.lock().unwrap_or_else(|e| e.into_inner());
+        let mut pending = state
+            .exit_session_pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         pending.remove(&next_id);
     }
 
@@ -955,7 +960,10 @@ pub(super) async fn handle_dispatch_task(
     // Clear any pending exit_session state — if this task is being re-dispatched
     // after a partial exit, the new agent must go through the two-step again.
     {
-        let mut pending = state.exit_session_pending.lock().unwrap_or_else(|e| e.into_inner());
+        let mut pending = state
+            .exit_session_pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         pending.remove(&task_id);
     }
 

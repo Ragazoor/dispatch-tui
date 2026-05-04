@@ -7997,13 +7997,25 @@ async fn exit_session_first_call_returns_reflection_nudge() {
     .await;
 
     let text = extract_response_text(&resp);
-    assert!(text.contains("record_learning"), "expected reflection nudge, got: {text}");
-    assert!(text.contains("query_learnings"), "expected query_learnings mention, got: {text}");
-    assert!(text.contains("exit_session"), "expected exit_session call instruction, got: {text}");
+    assert!(
+        text.contains("record_learning"),
+        "expected reflection nudge, got: {text}"
+    );
+    assert!(
+        text.contains("query_learnings"),
+        "expected query_learnings mention, got: {text}"
+    );
+    assert!(
+        text.contains("exit_session"),
+        "expected exit_session call instruction, got: {text}"
+    );
 
     // Window must NOT be killed on first call
     let task = state.db.get_task(task_id).unwrap().unwrap();
-    assert!(task.tmux_window.is_some(), "tmux_window should still be set after first call");
+    assert!(
+        task.tmux_window.is_some(),
+        "tmux_window should still be set after first call"
+    );
 }
 
 #[tokio::test]
@@ -8034,11 +8046,17 @@ async fn exit_session_second_call_clears_window_and_returns_closed() {
     .await;
 
     let text = extract_response_text(&resp);
-    assert_eq!(text, "Session closed.", "expected 'Session closed.' message, got: {text}");
+    assert_eq!(
+        text, "Session closed.",
+        "expected 'Session closed.' message, got: {text}"
+    );
 
     // tmux_window must be cleared in DB
     let task = state.db.get_task(task_id).unwrap().unwrap();
-    assert!(task.tmux_window.is_none(), "tmux_window should be cleared after second call");
+    assert!(
+        task.tmux_window.is_none(),
+        "tmux_window should be cleared after second call"
+    );
 }
 
 #[tokio::test]
@@ -8115,7 +8133,10 @@ async fn exit_session_pending_cleared_on_redispatch() {
 
     {
         let pending = state.exit_session_pending.lock().unwrap();
-        assert!(!pending.contains(&task_id), "pending should be cleared after dispatch");
+        assert!(
+            !pending.contains(&task_id),
+            "pending should be cleared after dispatch"
+        );
     }
 }
 
