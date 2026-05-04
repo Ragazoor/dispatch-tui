@@ -43,8 +43,6 @@ pub(super) struct QueryLearningsArgs {
 pub(super) struct ConfirmLearningArgs {
     #[serde(deserialize_with = "deserialize_flexible_i64")]
     pub(super) learning_id: i64,
-    // Carried for context / future logging; not used by the handler body.
-    #[allow(dead_code)]
     #[serde(deserialize_with = "deserialize_flexible_i64")]
     pub(super) task_id: i64,
 }
@@ -190,6 +188,12 @@ pub(super) fn handle_confirm_learning(
         Ok(a) => a,
         Err(e) => return e,
     };
+
+    tracing::debug!(
+        task_id = parsed.task_id,
+        learning_id = parsed.learning_id,
+        "confirm_learning called"
+    );
 
     let svc = LearningService::new(state.db.clone());
     match svc.confirm_learning(LearningId(parsed.learning_id)) {

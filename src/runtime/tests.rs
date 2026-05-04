@@ -5,7 +5,7 @@ use crate::models::ProjectId;
 use crate::process::MockProcessRunner;
 
 /// Timeout for async receive assertions in tests.
-const TEST_TIMEOUT: Duration = TEST_TIMEOUT;
+const TEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[test]
 fn db_error_formats_consistently() {

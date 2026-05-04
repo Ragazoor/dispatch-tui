@@ -25,7 +25,7 @@ const POLL_INTERVAL: Duration = Duration::from_millis(300);
 
 /// Inactivity timeout used when constructing `App` in tests.
 #[cfg(test)]
-const EDITOR_TEST_INACTIVITY_TIMEOUT: Duration = EDITOR_TEST_INACTIVITY_TIMEOUT;
+const EDITOR_TEST_INACTIVITY_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Message shown when a second editor is requested while one is already open.
 pub const EDITOR_ALREADY_OPEN_MSG: &str = "Editor already open — close it first";
@@ -796,7 +796,11 @@ mod tests {
             runner,
             editor_session: Arc::new(Mutex::new(None)),
         };
-        let mut app = App::new(vec![task.clone()], ProjectId(1), EDITOR_TEST_INACTIVITY_TIMEOUT);
+        let mut app = App::new(
+            vec![task.clone()],
+            ProjectId(1),
+            EDITOR_TEST_INACTIVITY_TIMEOUT,
+        );
 
         let edited_text = "--- TITLE ---\nNew title\n\
             --- DESCRIPTION ---\nNew description\n\
@@ -840,7 +844,11 @@ mod tests {
             runner,
             editor_session: Arc::new(Mutex::new(None)),
         };
-        let mut app = App::new(vec![task.clone()], ProjectId(1), EDITOR_TEST_INACTIVITY_TIMEOUT);
+        let mut app = App::new(
+            vec![task.clone()],
+            ProjectId(1),
+            EDITOR_TEST_INACTIVITY_TIMEOUT,
+        );
 
         rt.exec_finalize_editor_result(
             &mut app,
