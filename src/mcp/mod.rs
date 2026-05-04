@@ -42,6 +42,16 @@ impl McpState {
             let _ = tx.send(McpEvent::MessageSent { to_task_id });
         }
     }
+
+    /// Removes task_id from the exit_session_pending set.
+    /// Called on re-dispatch so the new agent always goes through the two-step.
+    pub fn clear_exit_session_pending(&self, task_id: TaskId) {
+        let mut pending = self
+            .exit_session_pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        pending.remove(&task_id);
+    }
 }
 
 pub fn router(
