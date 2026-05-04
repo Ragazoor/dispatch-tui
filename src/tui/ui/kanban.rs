@@ -245,7 +245,9 @@ fn render_summary(frame: &mut Frame, app: &App, epic_stats: &EpicStatsMap, area:
         let label = format!("{}{} {}", prefix, status.as_str(), count);
 
         let checkbox = if is_focused {
-            let selectable = items.iter().filter(|i| !matches!(i, ColumnItem::EpicHeader(_)));
+            let selectable = items
+                .iter()
+                .filter(|i| !matches!(i, ColumnItem::EpicHeader(_)));
             let (n, all_selected) = selectable.fold((0usize, true), |(n, all), item| {
                 let selected = match item {
                     ColumnItem::Task(t) => app.selected_tasks().contains(&t.id),
