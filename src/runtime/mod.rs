@@ -18,6 +18,12 @@ use tokio::time::interval;
 /// Interval between TUI tick events (captures tmux output, checks staleness, etc.).
 const TICK_INTERVAL: Duration = Duration::from_secs(2);
 
+/// Sleep duration when the input thread is paused (e.g. while an editor is open).
+const INPUT_PAUSE_SLEEP: Duration = Duration::from_millis(100);
+
+/// Poll timeout for crossterm input events.
+const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(50);
+
 /// Name used for the TUI's tmux window (visible in tmux status bar).
 const TUI_WINDOW_NAME: &str = "TUI";
 
@@ -156,10 +162,10 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     let resize_tx = msg_tx.clone();
     tokio::task::spawn_blocking(move || loop {
         if paused_clone.load(Ordering::Relaxed) {
-            std::thread::sleep(Duration::from_millis(100));
+            std::thread::sleep(INPUT_PAUSE_SLEEP);
             continue;
         }
-        if event::poll(Duration::from_millis(50)).unwrap_or(false) {
+        if event::poll(EVENT_POLL_INTERVAL).unwrap_or(false) {
             match event::read() {
                 Ok(Event::Key(key)) if key_tx.send(key).is_err() => break,
                 Ok(Event::Key(_)) => {}
