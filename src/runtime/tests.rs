@@ -4,6 +4,9 @@ use crate::db::Database;
 use crate::models::ProjectId;
 use crate::process::MockProcessRunner;
 
+/// Timeout for async receive assertions in tests.
+const TEST_TIMEOUT: Duration = TEST_TIMEOUT;
+
 #[test]
 fn db_error_formats_consistently() {
     assert_eq!(
@@ -351,7 +354,7 @@ async fn exec_dispatch_sends_dispatched_message() {
     .unwrap();
     rt.exec_dispatch_agent(task, models::DispatchMode::Dispatch);
 
-    let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
         .unwrap();
@@ -381,7 +384,7 @@ async fn exec_dispatch_sends_error_on_failure() {
     .unwrap();
     rt.exec_dispatch_agent(task.clone(), models::DispatchMode::Dispatch);
 
-    let msg1 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+    let msg1 = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
         .unwrap();
@@ -390,7 +393,7 @@ async fn exec_dispatch_sends_error_on_failure() {
         "Expected DispatchFailed, got: {msg1:?}"
     );
 
-    let msg2 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+    let msg2 = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
         .unwrap();
@@ -416,7 +419,7 @@ async fn exec_capture_tmux_sends_output() {
 
     rt.exec_capture_tmux(TaskId(1), "test-window".to_string());
 
-    let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
         .unwrap();
@@ -445,7 +448,7 @@ async fn exec_capture_tmux_window_gone() {
 
     rt.exec_capture_tmux(TaskId(1), "gone-window".to_string());
 
-    let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
         .unwrap();
@@ -568,7 +571,7 @@ async fn exec_finish_happy_path_sends_complete() {
         None,
     );
 
-    let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
         .unwrap();
@@ -619,7 +622,7 @@ async fn exec_finish_conflict_sends_failed() {
         None,
     );
 
-    let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
         .unwrap();
@@ -694,7 +697,7 @@ async fn exec_finish_not_on_main_sends_failed() {
         None,
     );
 
-    let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
         .unwrap();
@@ -772,7 +775,7 @@ async fn exec_check_pr_status_sends_merged() {
 
     rt.exec_check_pr_status(TaskId(1), "https://github.com/org/repo/pull/42".to_string());
 
-    let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
         .unwrap();
@@ -790,7 +793,7 @@ async fn exec_check_pr_status_open_sends_review_state() {
 
     rt.exec_check_pr_status(TaskId(1), "https://github.com/org/repo/pull/42".to_string());
 
-    let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
         .unwrap();
@@ -859,7 +862,7 @@ async fn exec_quick_dispatch_creates_task_and_dispatches() {
     assert!(app.repo_paths().contains(&repo.to_string()));
 
     // Dispatch message arrives asynchronously
-    let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
         .unwrap();
@@ -914,7 +917,7 @@ async fn exec_quick_dispatch_with_epic_dispatches_successfully() {
     assert_eq!(app.tasks().len(), 1);
     assert_eq!(app.tasks()[0].epic_id, Some(epic.id));
 
-    let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
         .unwrap();
@@ -948,7 +951,7 @@ async fn exec_quick_dispatch_sends_error_on_failure() {
         None,
     );
 
-    let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
         .unwrap();
@@ -984,7 +987,7 @@ async fn exec_quick_dispatch_failure_sends_dispatch_failed_and_error() {
     // The task was created synchronously
     let created_id = app.tasks()[0].id;
 
-    let msg1 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+    let msg1 = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
         .unwrap();
@@ -992,7 +995,7 @@ async fn exec_quick_dispatch_failure_sends_dispatch_failed_and_error() {
         matches!(msg1, Message::DispatchFailed(id) if id == created_id),
         "Expected DispatchFailed, got: {msg1:?}"
     );
-    let msg2 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+    let msg2 = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
         .unwrap();
@@ -1029,7 +1032,7 @@ async fn exec_resume_sends_resumed_message() {
 
     rt.exec_resume(task);
 
-    let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
         .unwrap();
@@ -1064,7 +1067,7 @@ async fn exec_resume_sends_error_on_failure() {
     .unwrap();
     rt.exec_resume(task);
 
-    let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
         .unwrap();
@@ -1519,7 +1522,7 @@ async fn exec_merge_pr_happy_path() {
 
     rt.exec_merge_pr(TaskId(1), "https://github.com/org/repo/pull/42".into());
 
-    let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
         .unwrap();
@@ -1540,7 +1543,7 @@ async fn exec_merge_pr_failure() {
 
     rt.exec_merge_pr(TaskId(1), "https://github.com/org/repo/pull/42".into());
 
-    let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
         .unwrap();
@@ -1645,7 +1648,7 @@ async fn exec_brainstorm_sends_dispatched_message() {
     .unwrap();
     rt.exec_dispatch_agent(task, models::DispatchMode::Brainstorm);
 
-    let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
         .unwrap();
@@ -1675,7 +1678,7 @@ async fn exec_brainstorm_sends_error_on_failure() {
     .unwrap();
     rt.exec_dispatch_agent(task.clone(), models::DispatchMode::Brainstorm);
 
-    let msg1 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+    let msg1 = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
         .unwrap();
@@ -1714,7 +1717,7 @@ async fn exec_plan_sends_dispatched_message() {
     .unwrap();
     rt.exec_dispatch_agent(task, models::DispatchMode::Plan);
 
-    let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
         .unwrap();
@@ -1744,7 +1747,7 @@ async fn exec_plan_sends_error_on_failure() {
     .unwrap();
     rt.exec_dispatch_agent(task.clone(), models::DispatchMode::Plan);
 
-    let msg1 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+    let msg1 = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
         .unwrap();
@@ -1946,7 +1949,7 @@ async fn exec_trigger_epic_feed_success() {
         cmd.to_string(),
     );
 
-    let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .expect("timed out waiting for FeedRefreshed")
         .expect("channel closed");
@@ -1968,7 +1971,7 @@ async fn exec_trigger_epic_feed_zero_items() {
 
     rt.exec_trigger_epic_feed(epic.id, "Empty Feed".to_string(), "echo '[]'".to_string());
 
-    let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .expect("timed out")
         .expect("channel closed");
@@ -1990,7 +1993,7 @@ async fn exec_trigger_epic_feed_command_fails() {
 
     rt.exec_trigger_epic_feed(epic.id, "Failing Feed".to_string(), "exit 1".to_string());
 
-    let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .expect("timed out")
         .expect("channel closed");
@@ -2016,7 +2019,7 @@ async fn exec_trigger_epic_feed_malformed_json() {
         "echo 'not-json'".to_string(),
     );
 
-    let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .expect("timed out")
         .expect("channel closed");
