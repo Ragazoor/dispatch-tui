@@ -4,10 +4,9 @@ use std::path::PathBuf;
 use tracing::Level;
 use tracing_subscriber::EnvFilter;
 
-use dispatch_tui::db::{ProjectCrud, SettingsStore, TaskCrud};
-use dispatch_tui::process::RealProcessRunner;
+use dispatch_tui::db::{ProjectCrud, TaskCrud};
 use dispatch_tui::tui::ui::truncate;
-use dispatch_tui::{db, feed, github, models, plan, runtime, service};
+use dispatch_tui::{db, models, plan, runtime, service};
 
 #[derive(Parser)]
 #[command(name = "dispatch")]
@@ -102,10 +101,6 @@ enum Commands {
         #[arg(long)]
         purge: bool,
     },
-    /// Fetch reviewer PRs and print as FeedItem JSON to stdout
-    FetchReviews,
-    /// Fetch security alerts and print as FeedItem JSON to stdout
-    FetchSecurity,
     /// Run a feed command and validate its output as FeedItem JSON
     VerifyFeed {
         /// Shell command to run (executed via sh -c)
@@ -117,42 +112,6 @@ fn parse_status(s: &str) -> anyhow::Result<models::TaskStatus> {
     models::TaskStatus::parse(s).ok_or_else(|| {
         anyhow::anyhow!("Unknown status: {s}. Valid values: backlog, running, review, done")
     })
-}
-
-fn load_setting_lines(db: &db::Database, key: &str) -> Vec<String> {
-    db.get_setting_string(key)
-        .ok()
-        .flatten()
-        .map(|s| {
-            s.lines()
-                .map(str::trim)
-                .filter(|l| !l.is_empty() && !l.starts_with('#'))
-                .map(String::from)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn load_dependabot_queries(db: &db::Database) -> Vec<String> {
-    use dispatch_tui::github::{
-        assemble_dependabot_queries, migrate_bot_queries_to_dependabot_config,
-        parse_dependabot_config,
-    };
-
-    let raw = db
-        .get_setting_string("dependabot_config")
-        .ok()
-        .flatten()
-        .or_else(|| {
-            let old = db.get_setting_string("github_queries_bot").ok().flatten();
-            old.and_then(|o| migrate_bot_queries_to_dependabot_config(Some(o.as_str())))
-                .map(|cfg| dispatch_tui::github::format_dependabot_config(&cfg))
-        })
-        .unwrap_or_default();
-
-    let config = parse_dependabot_config(&raw);
-    let (queries, _warnings) = assemble_dependabot_queries(&config);
-    queries
 }
 
 fn default_db_path() -> PathBuf {
@@ -312,52 +271,6 @@ async fn main() -> Result<()> {
         }
         Commands::Uninstall { yes, purge } => {
             dispatch_tui::setup::run_uninstall(yes, purge)?;
-        }
-        Commands::FetchReviews => {
-            let db = db::Database::open(&cli.db)?;
-            let runner = RealProcessRunner;
-            let review_queries = load_setting_lines(&db, "github_queries_review");
-            let bot_queries = load_dependabot_queries(&db);
-            let mut items: Vec<models::FeedItem> = Vec::new();
-            if !review_queries.is_empty() {
-                match github::fetch_prs(&runner, &review_queries) {
-                    Ok(prs) => items.extend(prs.iter().map(feed::review_pr_to_feed_item)),
-                    Err(e) => {
-                        eprintln!("fetch-reviews: {e}");
-                        std::process::exit(1);
-                    }
-                }
-            }
-            if !bot_queries.is_empty() {
-                match github::fetch_prs(&runner, &bot_queries) {
-                    Ok(prs) => items.extend(prs.iter().map(feed::bot_pr_to_feed_item)),
-                    Err(e) => {
-                        eprintln!("fetch-reviews (bot): {e}");
-                        std::process::exit(1);
-                    }
-                }
-            }
-            println!("{}", serde_json::to_string(&items)?);
-        }
-        Commands::FetchSecurity => {
-            let db = db::Database::open(&cli.db)?;
-            let runner = RealProcessRunner;
-            let repos = load_setting_lines(&db, "github_queries_security");
-            if repos.is_empty() {
-                println!("[]");
-                return Ok(());
-            }
-            match github::fetch_security_alerts(&runner, &repos) {
-                Ok(alerts) => {
-                    let items: Vec<models::FeedItem> =
-                        alerts.iter().map(feed::alert_to_feed_item).collect();
-                    println!("{}", serde_json::to_string(&items)?);
-                }
-                Err(e) => {
-                    eprintln!("fetch-security: {e}");
-                    std::process::exit(1);
-                }
-            }
         }
         Commands::VerifyFeed { command } => {
             let output = std::process::Command::new("sh")

@@ -471,36 +471,10 @@ impl super::SettingsStore for Database {
 
     fn seed_github_query_defaults(&self) -> Result<()> {
         let conn = self.conn()?;
-        let defaults: &[(&str, &str)] = &[
-            (
-                "github_queries_review",
-                "is:pr is:open review-requested:@me -is:draft -author:app/dependabot -author:app/renovate archived:false\n\
-                 is:pr is:open reviewed-by:@me -author:@me -is:draft -author:app/dependabot -author:app/renovate archived:false\n\
-                 is:pr is:open commenter:@me -author:@me -is:draft -author:app/dependabot -author:app/renovate archived:false",
-            ),
-            (
-                "github_queries_my_prs",
-                "is:pr is:open author:@me -is:draft archived:false",
-            ),
-            (
-                "github_queries_bot",
-                "# Uncomment and edit one or more lines below to configure the Dependabot board.\n\
-                 # Each uncommented line becomes a separate GitHub search query.\n\
-                 #\n\
-                 # Dependabot PRs in a specific repo:\n\
-                 # is:pr is:open author:app/dependabot repo:myorg/myrepo -is:draft archived:false\n\
-                 #\n\
-                 # Dependabot PRs across an org:\n\
-                 # is:pr is:open author:app/dependabot org:myorg -is:draft archived:false\n\
-                 #\n\
-                 # Renovate PRs across an org:\n\
-                 # is:pr is:open author:app/renovate org:myorg -is:draft archived:false\n\
-                 #\n\
-                 # Renovate PRs in a specific repo:\n\
-                 # is:pr is:open author:app/renovate repo:myorg/myrepo -is:draft archived:false",
-            ),
-            ("github_queries_security", ""),
-        ];
+        let defaults: &[(&str, &str)] = &[(
+            "github_queries_my_prs",
+            "is:pr is:open author:@me -is:draft archived:false",
+        )];
         for (key, value) in defaults {
             conn.execute(
                 "INSERT OR IGNORE INTO settings (key, value) VALUES (?1, ?2)",

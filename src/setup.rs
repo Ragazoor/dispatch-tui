@@ -4,7 +4,7 @@ use rusqlite;
 use serde_json::{json, Map, Value};
 use std::fs;
 use std::io::Write;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use crate::db::{Database, EpicCrud, EpicPatch};
@@ -331,46 +331,62 @@ pub fn remove_database(db_path: &std::path::Path) -> Result<bool> {
 }
 
 // ---------------------------------------------------------------------------
-// Feed epic seeding
+// Example feed script + epic seeding
 // ---------------------------------------------------------------------------
 
-pub fn seed_feed_epics(db: &Database) -> Result<()> {
-    let epics = db.list_epics()?;
-    let has_reviews = epics
+const EXAMPLE_FEED_SCRIPT: &str = include_str!("../scripts/fetch-dependabot.sh");
+
+/// Write the embedded example feed script to `<data_dir>/scripts/fetch-dependabot.sh`,
+/// chmod 0755. Idempotent: if the target file already exists, it is left
+/// untouched so user edits survive across `dispatch setup` runs.
+pub fn install_example_script(data_dir: &Path) -> Result<PathBuf> {
+    let scripts_dir = data_dir.join("scripts");
+    fs::create_dir_all(&scripts_dir)
+        .with_context(|| format!("Failed to create {}", scripts_dir.display()))?;
+
+    let path = scripts_dir.join("fetch-dependabot.sh");
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o755)
+        .open(&path)
+    {
+        Ok(mut file) => file
+            .write_all(EXAMPLE_FEED_SCRIPT.as_bytes())
+            .with_context(|| format!("Failed to write {}", path.display()))?,
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => {
+            return Err(anyhow::Error::new(e)
+                .context(format!("Failed to create {}", path.display())))
+        }
+    }
+    Ok(path)
+}
+
+/// Seed exactly one example feed epic ("Dependabot") wired to the installed
+/// example script. Idempotent: re-running does not duplicate the epic.
+pub fn seed_feed_epics(db: &Database, data_dir: &Path) -> Result<()> {
+    let script_path = install_example_script(data_dir)?;
+    let cmd = script_path
+        .to_str()
+        .context("example script path is not valid UTF-8")?;
+
+    let already_seeded = db
+        .list_epics()?
         .iter()
-        .any(|e| e.feed_command.as_deref() == Some("dispatch fetch-reviews"));
-    let has_security = epics
-        .iter()
-        .any(|e| e.feed_command.as_deref() == Some("dispatch fetch-security"));
-    let has_dependabot = epics.iter().any(|e| e.title == "Dependabot");
-
-    if !has_reviews {
-        let epic = db.create_epic("Reviews", "", "", None, ProjectId(1))?;
-        db.patch_epic(
-            epic.id,
-            &EpicPatch::new()
-                .feed_command(Some("dispatch fetch-reviews"))
-                .feed_interval_secs(Some(30))
-                .sort_order(Some(-2)),
-        )?;
+        .any(|e| e.feed_command.as_deref() == Some(cmd));
+    if already_seeded {
+        return Ok(());
     }
 
-    if !has_security {
-        let epic = db.create_epic("Security", "", "", None, ProjectId(1))?;
-        db.patch_epic(
-            epic.id,
-            &EpicPatch::new()
-                .feed_command(Some("dispatch fetch-security"))
-                .feed_interval_secs(Some(300))
-                .sort_order(Some(-1)),
-        )?;
-    }
-
-    if !has_dependabot {
-        let epic = db.create_epic("Dependabot", "", "", None, ProjectId(1))?;
-        db.patch_epic(epic.id, &EpicPatch::new().sort_order(Some(0)))?;
-    }
-
+    let epic = db.create_epic("Dependabot", "", "", None, ProjectId(1))?;
+    db.patch_epic(
+        epic.id,
+        &EpicPatch::new()
+            .feed_command(Some(cmd))
+            .feed_interval_secs(Some(300))
+            .sort_order(Some(0)),
+    )?;
     Ok(())
 }
 
@@ -380,7 +396,10 @@ pub fn seed_feed_epics(db: &Database) -> Result<()> {
 
 pub fn run_setup(port: u16, yes: bool, db_path: &Path) -> Result<()> {
     let db = Database::open(db_path)?;
-    seed_feed_epics(&db)?;
+    let data_dir = db_path
+        .parent()
+        .context("database path has no parent directory")?;
+    seed_feed_epics(&db, data_dir)?;
     let claude_dir = claude_dir()?;
     fs::create_dir_all(&claude_dir)
         .with_context(|| format!("Failed to create {}", claude_dir.display()))?;
@@ -607,80 +626,101 @@ mod tests {
     // -- seed_feed_epics --
 
     #[test]
-    fn seeds_dependabot_epic() {
+    fn seed_feed_epics_creates_single_example_epic() {
         let db = Database::open_in_memory().unwrap();
-        seed_feed_epics(&db).unwrap();
+        let data_dir = tempfile::tempdir().unwrap();
+        seed_feed_epics(&db, data_dir.path()).unwrap();
 
         let epics = db.list_epics().unwrap();
-        let dependabot = epics
-            .iter()
-            .find(|e| e.title == "Dependabot")
-            .expect("Dependabot epic should be seeded");
-
-        assert_eq!(dependabot.sort_order, Some(0));
-        assert!(
-            dependabot.feed_command.is_none(),
-            "Dependabot epic should have no feed_command at seed time"
-        );
-    }
-
-    #[test]
-    fn seed_feed_epics_idempotent_dependabot() {
-        let db = Database::open_in_memory().unwrap();
-        seed_feed_epics(&db).unwrap();
-        seed_feed_epics(&db).unwrap();
-
-        let epics = db.list_epics().unwrap();
-        let count = epics.iter().filter(|e| e.title == "Dependabot").count();
-        assert_eq!(count, 1, "Dependabot epic must not be duplicated");
-    }
-
-    #[test]
-    fn seed_feed_epics_creates_both_epics_when_empty() {
-        let db = Database::open_in_memory().unwrap();
-        seed_feed_epics(&db).unwrap();
-        let epics = db.list_epics().unwrap();
-        assert_eq!(epics.len(), 3);
-        let commands: Vec<_> = epics
-            .iter()
-            .filter_map(|e| e.feed_command.as_deref())
-            .collect();
-        assert!(
-            commands.contains(&"dispatch fetch-reviews"),
-            "missing fetch-reviews"
-        );
-        assert!(
-            commands.contains(&"dispatch fetch-security"),
-            "missing fetch-security"
+        assert_eq!(
+            epics.len(),
+            1,
+            "setup must seed exactly one example feed epic"
         );
 
-        let reviews = epics
-            .iter()
-            .find(|e| e.feed_command.as_deref() == Some("dispatch fetch-reviews"))
-            .unwrap();
-        assert_eq!(reviews.feed_interval_secs, Some(30));
-        assert_eq!(reviews.sort_order, Some(-2));
+        let epic = &epics[0];
+        assert_eq!(epic.title, "Dependabot");
+        assert_eq!(epic.sort_order, Some(0));
+        assert_eq!(epic.feed_interval_secs, Some(300));
 
-        let security = epics
-            .iter()
-            .find(|e| e.feed_command.as_deref() == Some("dispatch fetch-security"))
-            .unwrap();
-        assert_eq!(security.feed_interval_secs, Some(300));
-        assert_eq!(security.sort_order, Some(-1));
+        let expected_path = data_dir.path().join("scripts").join("fetch-dependabot.sh");
+        assert_eq!(
+            epic.feed_command.as_deref(),
+            Some(expected_path.to_str().unwrap())
+        );
     }
 
     #[test]
     fn seed_feed_epics_is_idempotent() {
         let db = Database::open_in_memory().unwrap();
-        seed_feed_epics(&db).unwrap();
-        seed_feed_epics(&db).unwrap();
+        let data_dir = tempfile::tempdir().unwrap();
+        seed_feed_epics(&db, data_dir.path()).unwrap();
+        seed_feed_epics(&db, data_dir.path()).unwrap();
+
         let epics = db.list_epics().unwrap();
+        assert_eq!(epics.len(), 1, "Dependabot epic must not be duplicated");
+    }
+
+    // -- install_example_script --
+
+    #[test]
+    fn install_example_script_writes_executable_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let data_dir = tempfile::tempdir().unwrap();
+        let path = install_example_script(data_dir.path()).unwrap();
+        assert!(path.exists());
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
         assert_eq!(
-            epics.len(),
-            3,
-            "expected exactly 3 epics, got {}",
-            epics.len()
+            mode & 0o111,
+            0o111,
+            "example script must be executable for owner/group/other"
         );
+    }
+
+    #[test]
+    fn install_example_script_is_idempotent() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let p1 = install_example_script(data_dir.path()).unwrap();
+        let c1 = std::fs::read_to_string(&p1).unwrap();
+        let p2 = install_example_script(data_dir.path()).unwrap();
+        let c2 = std::fs::read_to_string(&p2).unwrap();
+        assert_eq!(p1, p2);
+        assert_eq!(c1, c2);
+    }
+
+    #[test]
+    fn install_example_script_preserves_user_edits() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let path = install_example_script(data_dir.path()).unwrap();
+        std::fs::write(&path, "#!/usr/bin/env bash\nexit 0\n").unwrap();
+        let after = install_example_script(data_dir.path()).unwrap();
+        assert_eq!(path, after);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "#!/usr/bin/env bash\nexit 0\n",
+            "install must not overwrite user edits to the example script"
+        );
+    }
+
+    #[test]
+    fn installed_example_script_emits_empty_feed_item_array() {
+        // The shipped example must be inert (REPOS empty) so a fresh install
+        // does not flood the kanban board with someone else's repos.
+        let data_dir = tempfile::tempdir().unwrap();
+        let path = install_example_script(data_dir.path()).unwrap();
+
+        let output = std::process::Command::new("bash")
+            .arg(&path)
+            .output()
+            .expect("running the installed example script must not fail");
+        assert!(
+            output.status.success(),
+            "example script exited non-zero: stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let parsed: Vec<crate::models::FeedItem> = serde_json::from_slice(&output.stdout)
+            .expect("example script must emit a JSON array of FeedItem");
+        assert!(parsed.is_empty(), "example script must emit [] by default");
     }
 
     // -- MCP config merging --

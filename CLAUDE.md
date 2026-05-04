@@ -17,12 +17,22 @@ Other useful CLI subcommands:
 ```bash
 cargo run -- setup              # configure Claude Code MCP integration
 cargo run -- add --from-plan path/to/plan.md  # create a task from a plan file
-cargo run -- fetch-reviews      # fetch reviewer PRs as FeedItem JSON (stdout)
-cargo run -- fetch-security     # fetch security alerts as FeedItem JSON (stdout)
 cargo run -- verify-feed 'gh api ...'  # run a feed command and validate its JSON output
 ```
 
-`verify-feed` runs the given shell command (via `sh -c`) and checks that stdout parses as a JSON array of `FeedItem` objects. Use it when writing or debugging a custom `feed_command` for an epic.
+Feed epics are wired to user-owned shell scripts that emit a `FeedItem` JSON
+array on stdout. Reference templates live in `scripts/`:
+
+- `scripts/fetch-dependabot.sh` — open Dependabot PRs (gh + jq). The same
+  script is embedded in the binary and `dispatch setup` installs it to
+  `<data_dir>/scripts/fetch-dependabot.sh` as a working example, wired to a
+  seeded "Dependabot" feed epic.
+- `scripts/fetch-security.sh` — open Dependabot vulnerability alerts.
+
+Both ship with empty `REPOS` placeholders — fill them in to populate the
+feed. `verify-feed` runs the given shell command (via `sh -c`) and checks
+that stdout parses as a JSON array of `FeedItem` objects; use it when
+writing or debugging a custom `feed_command`.
 
 Pre-push hook runs `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test` automatically before each push. One-time setup:
 
@@ -212,7 +222,6 @@ A task with a plan always dispatches directly regardless of tag. Tags are select
 | `src/dispatch.rs` | Worktree creation, tmux session management, agent lifecycle (dispatch/brainstorm/plan/resume/review) |
 | `src/process.rs` | `ProcessRunner` trait + `RealProcessRunner` / `MockProcessRunner` for testable shell execution |
 | `src/tmux.rs` | Tmux API: create windows, send keys, capture pane output, kill windows |
-| `src/github.rs` | GitHub CLI (`gh`) integration: PR creation, review status polling, CI status |
 | `src/editor.rs` | External `$EDITOR` integration for editing task/epic fields |
 | `src/plan.rs` | Plan file parsing (extract title/description from markdown) |
 | `src/setup.rs` | First-run setup: MCP config merging, plugin installation (hooks, skills, commands) |

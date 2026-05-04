@@ -442,47 +442,45 @@ fn update_unknown_status_fails() {
 }
 
 // ---------------------------------------------------------------------------
-// fetch-reviews
+// fetch-reviews / fetch-security have been removed; users wire their own
+// shell scripts as feed_command. These tests pin the removal so a future
+// re-introduction has to opt back in deliberately.
 // ---------------------------------------------------------------------------
 
 #[test]
-fn fetch_reviews_no_settings_prints_empty_array() {
+fn fetch_reviews_subcommand_removed() {
     let db = NamedTempFile::new().unwrap();
     let out = binary()
         .args(["--db", db.path().to_str().unwrap(), "fetch-reviews"])
         .output()
         .unwrap();
     assert!(
-        out.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
+        !out.status.success(),
+        "fetch-reviews must no longer be a recognised subcommand"
     );
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let items: Vec<serde_json::Value> =
-        serde_json::from_str(stdout.trim()).expect("output must be valid JSON array");
-    assert!(items.is_empty(), "expected empty array, got: {stdout}");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("unrecognized subcommand") || stderr.contains("invalid value"),
+        "expected clap rejection, got stderr: {stderr}"
+    );
 }
 
-// ---------------------------------------------------------------------------
-// fetch-security
-// ---------------------------------------------------------------------------
-
 #[test]
-fn fetch_security_no_settings_prints_empty_array() {
+fn fetch_security_subcommand_removed() {
     let db = NamedTempFile::new().unwrap();
     let out = binary()
         .args(["--db", db.path().to_str().unwrap(), "fetch-security"])
         .output()
         .unwrap();
     assert!(
-        out.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
+        !out.status.success(),
+        "fetch-security must no longer be a recognised subcommand"
     );
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let items: Vec<serde_json::Value> =
-        serde_json::from_str(stdout.trim()).expect("output must be valid JSON array");
-    assert!(items.is_empty(), "expected empty array, got: {stdout}");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("unrecognized subcommand") || stderr.contains("invalid value"),
+        "expected clap rejection, got stderr: {stderr}"
+    );
 }
 
 // ---------------------------------------------------------------------------

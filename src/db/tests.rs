@@ -3038,15 +3038,9 @@ fn save_security_alerts_preserves_agent_fields() {
 }
 
 #[test]
-fn seed_github_query_defaults_sets_all_three() {
+fn seed_github_query_defaults_sets_my_prs() {
     let db = in_memory_db();
     db.seed_github_query_defaults().unwrap();
-
-    let review = db
-        .get_setting_string("github_queries_review")
-        .unwrap()
-        .expect("review queries should be set");
-    assert!(review.contains("review-requested:@me"));
 
     let my_prs = db
         .get_setting_string("github_queries_my_prs")
@@ -3054,12 +3048,17 @@ fn seed_github_query_defaults_sets_all_three() {
         .expect("my_prs queries should be set");
     assert!(my_prs.contains("author:@me"));
 
-    let bot = db
-        .get_setting_string("github_queries_bot")
-        .unwrap()
-        .expect("bot queries should be set");
-    assert!(bot.contains("app/dependabot"));
-    assert!(bot.contains("app/renovate"));
+    for key in [
+        "github_queries_review",
+        "github_queries_security",
+        "github_queries_bot",
+        "dependabot_config",
+    ] {
+        assert!(
+            db.get_setting_string(key).unwrap().is_none(),
+            "{key} must not be seeded after the fetch-* CLI removal",
+        );
+    }
 }
 
 #[test]
@@ -3067,18 +3066,18 @@ fn seed_github_query_defaults_does_not_overwrite_user_edits() {
     let db = in_memory_db();
     db.seed_github_query_defaults().unwrap();
 
-    // User edits the review queries
-    db.set_setting_string("github_queries_review", "my custom query")
+    // User edits the surviving setting.
+    db.set_setting_string("github_queries_my_prs", "my custom query")
         .unwrap();
 
-    // Re-seed should not overwrite
+    // Re-seed should not overwrite.
     db.seed_github_query_defaults().unwrap();
 
-    let review = db
-        .get_setting_string("github_queries_review")
+    let my_prs = db
+        .get_setting_string("github_queries_my_prs")
         .unwrap()
         .unwrap();
-    assert_eq!(review, "my custom query");
+    assert_eq!(my_prs, "my custom query");
 }
 
 #[test]

@@ -7,7 +7,6 @@ pub mod db;
 pub mod dispatch;
 pub mod editor;
 pub mod feed;
-pub mod github;
 pub mod mcp;
 pub mod models;
 pub mod plan;

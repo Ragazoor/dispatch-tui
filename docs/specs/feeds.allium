@@ -5,11 +5,13 @@
 --        items (PRs, security alerts, anything emitting JSON) as tasks under
 --        an Epic.
 -- Includes: FeedItem schema, upsert semantics, status preservation, polling
---           cadence, error handling.
--- Excludes: Specific feed scripts (`dispatch fetch-reviews`, `dispatch
---           fetch-security`); those are runtime artefacts. The legacy
---           Review Board and Security Board UIs are removed entirely —
---           their behaviour is subsumed by feed epics.
+--           cadence, error handling, the seeded example epic, and the
+--           verify-feed validator CLI.
+-- Excludes: Specific feed scripts. dispatch ships reference shell-script
+--           templates under `scripts/`, but the runtime never embeds
+--           upstream-specific knowledge — feed scripts are user-owned
+--           executables. The legacy Review Board and Security Board UIs
+--           remain removed; their behaviour is subsumed by feed epics.
 
 use "./core.allium" as core
 
@@ -35,6 +37,94 @@ concept FeedItem {
                               -- list, the runner uses it to resolve a repo_path
                               -- for the inserted Task. See UpsertFeedTasks.
     status: core/TaskStatus   -- desired column for newly-inserted tasks
+}
+
+------------------------------------------------------------
+-- Producing FeedItems
+------------------------------------------------------------
+
+-- Feed scripts are user-owned executables that write a JSON array of
+-- FeedItem objects to stdout, exit 0 on success, and emit any errors on
+-- stderr with non-zero exit. The dispatch binary never knows about the
+-- specific upstream — every feed source (PRs, security alerts, calendar
+-- events, anything else) is a script the user authors or installs.
+--
+-- The dispatch repo ships reference templates under `scripts/`:
+--
+--   - scripts/fetch-dependabot.sh — open Dependabot PRs via `gh pr list`
+--   - scripts/fetch-security.sh   — open Dependabot vulnerability alerts
+--                                   via the `gh api` Dependabot endpoint
+--
+-- Both templates ship with empty REPOS placeholders and are inert until
+-- the user edits them. They are reference implementations, not part of
+-- the feed runtime.
+
+-- == verify-feed CLI ==
+
+rule VerifyFeed {
+    when: User runs `dispatch verify-feed <command>`
+
+    -- The verify-feed subcommand spawns <command> via `sh -c`, captures
+    -- stdout, and validates that it parses as Vec<FeedItem>. On success
+    -- it prints a table of (external_id, title, status) and exits 0. On
+    -- failure (non-zero exit, parse failure) it prints the error to
+    -- stderr and exits 1.
+    --
+    -- This is the supported way to debug a feed script before wiring it
+    -- onto an epic's feed_command. It performs no DB writes.
+
+    ensures:
+        let output = Spawn(command)
+        if output.exit_code != 0:
+            print_stderr("verify-feed: command exited with {output.exit_code}")
+            exit(1)
+        let items = parse_feed_items(output.stdout)
+        if items = error:
+            print_stderr("verify-feed: failed to parse output as FeedItem array")
+            exit(1)
+        print_table(items)
+        exit(0)
+
+    @guidance
+        -- Implementation: src/main.rs Commands::VerifyFeed match arm.
+        -- Coverage: tests/cli.rs verify_feed_*.
+}
+
+-- == Setup seeding ==
+
+rule SeedExampleFeedEpic {
+    when: User runs `dispatch setup`
+
+    -- On first-run setup, dispatch creates exactly one example feed epic
+    -- so the kanban board is not empty and the user has a working
+    -- reference for the script + epic plumbing. The seeding is
+    -- idempotent: if any epic already has feed_command pointing at the
+    -- installed example script, no new epic is created.
+    --
+    -- The example script (scripts/fetch-dependabot.sh) is embedded in
+    -- the dispatch binary at compile time and written to
+    -- <data_dir>/scripts/fetch-dependabot.sh on setup. The installer
+    -- never overwrites a file that already exists at the target path,
+    -- so user edits are preserved across re-runs of `dispatch setup`.
+    -- (`<data_dir>` is the parent directory of the dispatch sqlite DB.)
+
+    ensures:
+        let script_path = install_example_script(data_dir)
+        if not exists Epic where Epic.feed_command = script_path:
+            Epic.created(
+                title:              "Dependabot",
+                feed_command:       script_path,
+                feed_interval_secs: 300,
+                sort_order:         0
+            )
+
+    @guidance
+        -- Implementation: src/setup.rs::seed_feed_epics calls
+        -- src/setup.rs::install_example_script(data_dir).
+        -- The embedded script source: scripts/fetch-dependabot.sh
+        -- (included via include_str!).
+        -- Coverage: src/setup.rs tests prefixed with seed_feed_epics_
+        -- and install_example_script_.
 }
 
 ------------------------------------------------------------

@@ -13,10 +13,10 @@
 #   [{"external_id":"dep:owner/repo#42","title":"#42 Bump foo","description":"...","url":"...","status":"backlog"}]
 
 # ---------------------------------------------------------------------------
-# Configure your repositories here (space-separated "owner/repo" slugs):
-REPOS="annotell/airflow-dags annotell/scala-common"
-# Example:
-# REPOS="myorg/frontend myorg/backend myorg/infra"
+# Configure your repositories here (space-separated "owner/repo" slugs).
+# Empty by default — fill in the repos you want surfaced as feed tasks.
+# Example: REPOS="myorg/frontend myorg/backend myorg/infra"
+REPOS=""
 # ---------------------------------------------------------------------------
 
 if [ -z "$REPOS" ]; then

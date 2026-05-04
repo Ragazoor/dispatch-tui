@@ -16,9 +16,9 @@
 set -euo pipefail
 
 REPOS=(
-  "annotell/airflow-dags"
-  "annotell/scala-common"
-  # add more repos here
+  # Add "owner/repo" slugs here, one per line. Example:
+  #   "myorg/frontend"
+  #   "myorg/backend"
 )
 
 if [[ ${#REPOS[@]} -eq 0 ]]; then
