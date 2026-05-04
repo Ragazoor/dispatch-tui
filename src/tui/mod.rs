@@ -1098,6 +1098,7 @@ impl App {
             Message::CloseRepoFilter => self.handle_close_repo_filter(),
             Message::ToggleRepoFilter(path) => self.handle_toggle_repo_filter(path),
             Message::ToggleAllRepoFilter => self.handle_toggle_all_repo_filter(),
+            Message::ToggleRepoFilterMode => self.handle_toggle_repo_filter_mode(),
             Message::MoveRepoCursor(delta) => self.handle_move_repo_cursor(delta),
             Message::StartSavePreset => self.handle_start_save_preset(),
             Message::SaveFilterPreset(name) => self.handle_save_filter_preset(name),

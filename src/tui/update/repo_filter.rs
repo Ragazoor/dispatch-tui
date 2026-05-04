@@ -58,6 +58,15 @@ impl App {
         vec![]
     }
 
+    pub(in crate::tui) fn handle_toggle_repo_filter_mode(&mut self) -> Vec<Command> {
+        self.filter.mode = match self.filter.mode {
+            RepoFilterMode::Include => RepoFilterMode::Exclude,
+            RepoFilterMode::Exclude => RepoFilterMode::Include,
+        };
+        self.sync_board_selection();
+        vec![]
+    }
+
     pub(in crate::tui) fn handle_toggle_all_repo_filter(&mut self) -> Vec<Command> {
         if self.filter.repos.len() == self.board.repo_paths.len() {
             self.filter.repos.clear();

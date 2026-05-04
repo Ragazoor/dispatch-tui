@@ -304,6 +304,7 @@ pub enum Message {
     CloseRepoFilter,
     ToggleRepoFilter(String),
     ToggleAllRepoFilter,
+    ToggleRepoFilterMode,
     MoveRepoCursor(isize),
     // Filter presets
     StartSavePreset,

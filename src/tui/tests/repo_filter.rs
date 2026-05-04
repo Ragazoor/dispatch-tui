@@ -788,6 +788,40 @@ fn handle_key_repo_filter_unknown_key_is_noop() {
 }
 
 #[test]
+fn toggle_repo_filter_mode_switches() {
+    let mut app = make_app();
+    assert_eq!(app.filter.mode, RepoFilterMode::Include);
+    app.update(Message::ToggleRepoFilterMode);
+    assert_eq!(app.filter.mode, RepoFilterMode::Exclude);
+    app.update(Message::ToggleRepoFilterMode);
+    assert_eq!(app.filter.mode, RepoFilterMode::Include);
+}
+
+#[test]
+fn tab_key_toggles_repo_filter_mode() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+    assert_eq!(app.filter.mode, RepoFilterMode::Include);
+    app.handle_key(make_key(KeyCode::Tab));
+    assert_eq!(app.filter.mode, RepoFilterMode::Exclude);
+    app.handle_key(make_key(KeyCode::Tab));
+    assert_eq!(app.filter.mode, RepoFilterMode::Include);
+}
+
+#[test]
+fn repo_filter_overlay_shows_tab_hint() {
+    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    app.board.repo_paths = vec!["/repo/a".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+    let buf = render_to_buffer(&mut app, 100, 30);
+    assert!(
+        buffer_contains(&buf, "Tab"),
+        "repo filter overlay should show [Tab] hint for toggling include/exclude"
+    );
+}
+
+#[test]
 fn handle_key_confirm_delete_repo_path_y_deletes() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];

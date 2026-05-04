@@ -32,6 +32,7 @@ impl App {
                     vec![]
                 }
             }
+            KeyCode::Tab => self.update(Message::ToggleRepoFilterMode),
             KeyCode::Backspace | KeyCode::Delete => self.update(Message::StartDeleteRepoPath),
             KeyCode::Char('s') => self.update(Message::StartSavePreset),
             KeyCode::Char('x') => self.update(Message::StartDeletePreset),

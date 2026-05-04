@@ -1745,12 +1745,12 @@ fn render_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
                 Span::styled(format!(" {a_label}  "), note_style),
             ]));
             lines.push(Line::from(vec![
-                Span::styled("  [s]", key_style),
+                Span::styled("  [Tab]", key_style),
+                Span::styled(" incl/excl  ", note_style),
+                Span::styled("[s]", key_style),
                 Span::styled(" save preset  ", note_style),
                 Span::styled("[x]", key_style),
                 Span::styled(" del preset  ", note_style),
-                Span::styled("[Bksp]", key_style),
-                Span::styled(" del repo  ", note_style),
                 Span::styled("[q/Esc]", key_style),
                 Span::styled(" close", note_style),
             ]));
