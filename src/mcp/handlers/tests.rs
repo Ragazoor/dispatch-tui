@@ -63,6 +63,30 @@ fn create_task_fixture(state: &Arc<McpState>) -> crate::models::TaskId {
         .unwrap()
 }
 
+/// Create a Running task with worktree and tmux_window set — ready for exit_session.
+fn create_running_task_with_window(state: &Arc<McpState>) -> crate::models::TaskId {
+    let task_id = state
+        .db
+        .create_task(
+            "Running Task",
+            "description",
+            "/repo",
+            None,
+            TaskStatus::Running,
+            "main",
+            None,
+            None,
+            None,
+            ProjectId(1),
+        )
+        .unwrap();
+    let patch = crate::db::TaskPatch::new()
+        .worktree(Some("/repo/.worktrees/task-123"))
+        .tmux_window(Some("task-123"));
+    state.db.patch_task(task_id, &patch).unwrap();
+    task_id
+}
+
 /// Assert response is an error whose message contains `substr`.
 fn assert_error(resp: &JsonRpcResponse, substr: &str) {
     let err = resp.error.as_ref().unwrap_or_else(|| {
@@ -2589,6 +2613,7 @@ async fn wrap_up_accepts_running_blocked_task() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let task_id = db
@@ -2644,6 +2669,7 @@ async fn wrap_up_accepts_running_active_task() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let task_id = db
@@ -2765,6 +2791,7 @@ async fn wrap_up_rebase_returns_started() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let task_id = db
@@ -3153,6 +3180,7 @@ async fn wrap_up_rebase_conflict_returns_error() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let task_id = db
@@ -3205,6 +3233,7 @@ async fn wrap_up_rebase_not_on_main_returns_error() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let task_id = db
@@ -3309,6 +3338,7 @@ async fn send_message_writes_file_and_sends_keys() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     // Create sender and receiver tasks
@@ -3585,6 +3615,7 @@ fn test_state_with_notify() -> (
         db,
         notify_tx: Some(tx),
         runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
     (state, rx)
 }
@@ -4085,6 +4116,7 @@ async fn wrap_up_rebase_sets_task_to_done() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let task_id = db
@@ -4140,6 +4172,7 @@ async fn wrap_up_rebase_recalculates_epic_status() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let epic = db
@@ -4200,6 +4233,7 @@ async fn wrap_up_accepts_string_task_id() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let task_id = db
@@ -4618,6 +4652,7 @@ async fn dispatch_next_picks_first_backlog_subtask() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let epic = db
@@ -4710,6 +4745,7 @@ async fn dispatch_next_respects_sort_order() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let epic = db
@@ -4797,6 +4833,7 @@ async fn dispatch_next_respects_tag_routing() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let epic = db
@@ -5100,6 +5137,7 @@ async fn wrap_up_rebase_clears_tmux_window() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let task_id = db
@@ -5157,6 +5195,7 @@ async fn wrap_up_rebase_conflict_sets_conflict_substatus() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let task_id = db
@@ -5220,6 +5259,7 @@ async fn wrap_up_rebase_clears_conflict_substatus_on_non_conflict_error() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let task_id = db
@@ -6035,6 +6075,7 @@ async fn dispatch_review_agent_success() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     insert_review_pr_fixture(&state, 42, "acme/app");
@@ -6092,6 +6133,7 @@ async fn dispatch_fix_agent_success() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let alert = SecurityAlert {
@@ -6167,6 +6209,7 @@ async fn dispatch_task_dispatches_backlog_task() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let task_id = db
@@ -6288,6 +6331,7 @@ async fn dispatch_task_respects_tag_routing() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     // Feature-tagged task with no plan → should route to Plan mode
@@ -6355,6 +6399,7 @@ async fn dispatch_task_returns_error_when_dispatch_fails() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let task_id = db
@@ -6406,6 +6451,7 @@ async fn create_task_with_project_id_assigns_correctly() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let resp = call(
@@ -6441,6 +6487,7 @@ async fn create_epic_without_project_id_assigns_to_default() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let resp = call(
@@ -6472,6 +6519,7 @@ async fn create_epic_with_project_id_assigns_correctly() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let resp = call(
@@ -6508,6 +6556,7 @@ async fn list_projects_returns_all_projects() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let resp = call(
@@ -6543,6 +6592,7 @@ async fn update_task_project_id_moves_task() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let task_id = create_task_fixture(&state);
@@ -6596,6 +6646,7 @@ async fn update_epic_project_id_moves_epic() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let epic = db
@@ -6634,6 +6685,7 @@ async fn update_epic_invalid_project_id_returns_error() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let epic = db
@@ -7601,6 +7653,7 @@ fn make_rebase_state() -> (Arc<dyn db::TaskStore>, Arc<McpState>) {
         db: db.clone(),
         notify_tx: None,
         runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
     (db, state)
 }
@@ -7923,4 +7976,101 @@ async fn update_task_pr_url_already_set_does_not_nudge_again() {
         !text.contains("record_learning"),
         "nudge must not fire when pr_url was already set; got: {text}"
     );
+}
+
+// -- exit_session tests -------------------------------------------------------
+
+#[tokio::test]
+async fn exit_session_first_call_returns_reflection_nudge() {
+    let state = test_state();
+    let task_id = create_running_task_with_window(&state);
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "exit_session",
+            "arguments": { "task_id": task_id.0 }
+        })),
+    )
+    .await;
+
+    let text = extract_response_text(&resp);
+    assert!(text.contains("record_learning"), "expected reflection nudge, got: {text}");
+    assert!(text.contains("query_learnings"), "expected query_learnings mention, got: {text}");
+    assert!(text.contains("exit_session"), "expected exit_session call instruction, got: {text}");
+
+    // Window must NOT be killed on first call
+    let task = state.db.get_task(task_id).unwrap().unwrap();
+    assert!(task.tmux_window.is_some(), "tmux_window should still be set after first call");
+}
+
+#[tokio::test]
+async fn exit_session_second_call_clears_window_and_returns_closed() {
+    let state = test_state();
+    let task_id = create_running_task_with_window(&state);
+
+    // First call
+    call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "exit_session",
+            "arguments": { "task_id": task_id.0 }
+        })),
+    )
+    .await;
+
+    // Second call
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "exit_session",
+            "arguments": { "task_id": task_id.0 }
+        })),
+    )
+    .await;
+
+    let text = extract_response_text(&resp);
+    assert!(text.contains("closed") || text.contains("Session"), "expected closed message, got: {text}");
+
+    // tmux_window must be cleared in DB
+    let task = state.db.get_task(task_id).unwrap().unwrap();
+    assert!(task.tmux_window.is_none(), "tmux_window should be cleared after second call");
+}
+
+#[tokio::test]
+async fn exit_session_unknown_task_returns_error() {
+    let state = test_state();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "exit_session",
+            "arguments": { "task_id": 9999 }
+        })),
+    )
+    .await;
+
+    assert_error(&resp, "not found");
+}
+
+#[tokio::test]
+async fn exit_session_task_without_window_returns_error() {
+    let state = test_state();
+    let task_id = create_task_fixture(&state); // Backlog task, no tmux_window
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "exit_session",
+            "arguments": { "task_id": task_id.0 }
+        })),
+    )
+    .await;
+
+    assert_error(&resp, "no active session");
 }
