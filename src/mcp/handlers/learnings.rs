@@ -189,10 +189,10 @@ pub(super) fn handle_confirm_learning(
         Err(e) => return e,
     };
 
-    tracing::debug!(
+    tracing::info!(
         task_id = parsed.task_id,
         learning_id = parsed.learning_id,
-        "confirm_learning called"
+        "MCP confirm_learning"
     );
 
     let svc = LearningService::new(state.db.clone());

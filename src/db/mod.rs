@@ -68,9 +68,7 @@ macro_rules! patch_struct {
 // ---------------------------------------------------------------------------
 
 patch_struct! {
-    /// Builder for partial task updates. Each field is `None` by default (= don't
-    /// change). For nullable columns we use a double-Option:
-    /// `None` = don't change, `Some(None)` = set NULL, `Some(Some(x))` = set value.
+    /// Builder for selective task field updates.
     pub struct TaskPatch<'a> {
         plain    status:       TaskStatus,
         nullable plan_path:    &'a str,
@@ -94,10 +92,7 @@ patch_struct! {
 // ---------------------------------------------------------------------------
 
 patch_struct! {
-    /// Builder for partial epic updates, mirroring `TaskPatch`. Each field is
-    /// `None` by default (= don't change). For nullable columns we use a
-    /// double-Option: `None` = don't change, `Some(None)` = set NULL,
-    /// `Some(Some(x))` = set value.
+    /// Builder for selective epic field updates.
     ///
     /// # Why `parent_epic_id` is absent
     ///
@@ -382,53 +377,14 @@ pub trait ProjectCrud: Send + Sync {
 // LearningPatch — builder for partial learning updates
 // ---------------------------------------------------------------------------
 
-/// `None` = don't change. For nullable fields (`detail`), use double-Option:
-/// `None` = don't change, `Some(None)` = set NULL, `Some(Some(v))` = set value.
-#[derive(Debug, Default)]
-pub struct LearningPatch<'a> {
-    pub status: Option<LearningStatus>,
-    pub summary: Option<&'a str>,
-    pub detail: Option<Option<&'a str>>,
-    pub kind: Option<LearningKind>,
-    pub tags: Option<&'a [String]>,
-}
-
-impl<'a> LearningPatch<'a> {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn status(mut self, status: LearningStatus) -> Self {
-        self.status = Some(status);
-        self
-    }
-
-    pub fn summary(mut self, summary: &'a str) -> Self {
-        self.summary = Some(summary);
-        self
-    }
-
-    pub fn detail(mut self, detail: Option<&'a str>) -> Self {
-        self.detail = Some(detail);
-        self
-    }
-
-    pub fn kind(mut self, kind: LearningKind) -> Self {
-        self.kind = Some(kind);
-        self
-    }
-
-    pub fn tags(mut self, tags: &'a [String]) -> Self {
-        self.tags = Some(tags);
-        self
-    }
-
-    pub fn has_changes(&self) -> bool {
-        self.status.is_some()
-            || self.summary.is_some()
-            || self.detail.is_some()
-            || self.kind.is_some()
-            || self.tags.is_some()
+patch_struct! {
+    /// Builder for selective learning field updates.
+    pub struct LearningPatch<'a> {
+        plain    status:  LearningStatus,
+        plain    summary: &'a str,
+        nullable detail:  &'a str,
+        plain    kind:    LearningKind,
+        plain    tags:    &'a [String],
     }
 }
 
