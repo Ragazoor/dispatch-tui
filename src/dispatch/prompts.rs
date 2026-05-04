@@ -126,6 +126,14 @@ pub(super) fn mcp_tools_instruction() -> &'static str {
     "The dispatch MCP tools are available — use them to query and update this task (get_task, update_task)."
 }
 
+/// Learning tools availability notice for implementation agents.
+pub(super) fn learning_tools_instruction() -> &'static str {
+    "Learning MCP tools are available — call `query_learnings` to \
+surface relevant past experience when needed, `record_learning` when you discover something \
+non-obvious worth capturing, and `confirm_learning` when a retrieved learning \
+proves useful."
+}
+
 /// Instructions for writing a plan and attaching it to the task via MCP.
 pub(super) fn plan_and_attach_instruction() -> &'static str {
     "Use /brainstorming to design the solution, then save the plan to docs/plans/ \
@@ -176,12 +184,15 @@ pub(super) fn build_prompt(
 \n\
 {allium}\n\
 \n\
-{mcp}",
+{mcp}\n\
+\n\
+{learning}",
                 block = block,
                 attach = plan_or_brainstorm_instruction(),
                 tdd = tdd_instruction(),
                 allium = allium_instruction(),
                 mcp = mcp_tools_instruction(),
+                learning = learning_tools_instruction(),
             )
         }
         Some(path) => {
@@ -203,12 +214,15 @@ making any changes.\n\
 \n\
 {mcp}\n\
 \n\
+{learning}\n\
+\n\
 {wrap_up}",
                 block = block,
                 path = path,
                 tdd = tdd_instruction(),
                 allium = allium_instruction(),
                 mcp = mcp_tools_instruction(),
+                learning = learning_tools_instruction(),
                 wrap_up = wrap_up_instruction(),
             )
         }
@@ -241,12 +255,15 @@ Then write a focused plan before making any changes:\n\
 \n\
 {allium}\n\
 \n\
-{mcp}",
+{mcp}\n\
+\n\
+{learning}",
         block = block,
         attach = plan_and_attach_instruction(),
         tdd = tdd_instruction(),
         allium = allium_instruction(),
         mcp = mcp_tools_instruction(),
+        learning = learning_tools_instruction(),
     )
 }
 
@@ -354,4 +371,83 @@ IMPORTANT: Do NOT start implementing. Your job ends after creating the work pack
         tdd = tdd_instruction(),
         allium = allium_instruction(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn learning_instruction_in_task_prompts_with_plan() {
+        let text = build_prompt(
+            TaskId(1),
+            "title",
+            "desc",
+            Some("/path/to/plan.md"),
+            None,
+            None,
+        );
+        assert!(
+            text.contains("query_learnings"),
+            "build_prompt (with plan) should mention query_learnings"
+        );
+        assert!(
+            text.contains("record_learning"),
+            "build_prompt (with plan) should mention record_learning"
+        );
+        assert!(
+            text.contains("confirm_learning"),
+            "build_prompt (with plan) should mention confirm_learning"
+        );
+    }
+
+    #[test]
+    fn learning_instruction_in_task_prompts_no_plan() {
+        let text = build_prompt(
+            TaskId(1),
+            "title",
+            "desc",
+            None,
+            None,
+            None,
+        );
+        assert!(
+            text.contains("query_learnings"),
+            "build_prompt (no plan) should mention query_learnings"
+        );
+        assert!(
+            text.contains("record_learning"),
+            "build_prompt (no plan) should mention record_learning"
+        );
+        assert!(
+            text.contains("confirm_learning"),
+            "build_prompt (no plan) should mention confirm_learning"
+        );
+    }
+
+    #[test]
+    fn learning_instruction_in_quick_dispatch_prompt() {
+        let text = build_quick_dispatch_prompt(TaskId(1), "title", "desc", None, None);
+        assert!(
+            text.contains("query_learnings"),
+            "quick dispatch prompt should mention query_learnings"
+        );
+        assert!(
+            text.contains("record_learning"),
+            "quick dispatch prompt should mention record_learning"
+        );
+        assert!(
+            text.contains("confirm_learning"),
+            "quick dispatch prompt should mention confirm_learning"
+        );
+    }
+
+    #[test]
+    fn learning_instruction_not_in_brainstorm_prompt() {
+        let text = build_brainstorm_prompt(TaskId(1), "title", "desc", None, None);
+        assert!(
+            !text.contains("query_learnings"),
+            "brainstorm prompt should not mention learning tools"
+        );
+    }
 }
