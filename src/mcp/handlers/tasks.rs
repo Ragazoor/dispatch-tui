@@ -6,13 +6,15 @@ use serde_json::{json, Value};
 use crate::db;
 use crate::dispatch;
 use crate::mcp::McpState;
-use crate::models::{DispatchMode, EpicId, ProjectId, SubStatus, Task, TaskId, TaskStatus, TaskTag};
+use crate::models::{
+    DispatchMode, EpicId, ProjectId, SubStatus, Task, TaskId, TaskStatus, TaskTag,
+};
 use crate::service::{
     ClaimTaskParams, CreateTaskParams, ListTasksFilter, ServiceError, TaskService, UpdateTaskParams,
 };
 
 use super::types::{
-    deserialize_flexible_i64, deserialize_optional_flexible_i64, parse_args, resolve_project_id,
+    deserialize_flexible_i64, deserialize_optional_flexible_i64, parse_args,
     service_err_to_response, JsonRpcResponse,
 };
 
@@ -94,6 +96,8 @@ pub(super) struct ReportUsageArgs {
 pub(super) struct CreateTaskWithEpicArgs {
     pub(super) title: String,
     pub(super) repo_path: String,
+    #[serde(deserialize_with = "deserialize_flexible_i64")]
+    pub(super) project_id: i64,
     #[serde(default)]
     pub(super) description: String,
     pub(super) plan_path: Option<String>,
@@ -105,8 +109,6 @@ pub(super) struct CreateTaskWithEpicArgs {
     pub(super) tag: Option<TaskTag>,
     #[serde(default)]
     pub(super) base_branch: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
-    pub(super) project_id: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -263,6 +265,26 @@ fn format_task_line(t: &Task, epic_titles: &HashMap<EpicId, String>, goal: &str)
 // Task tool handlers (thin wrappers over TaskService)
 // ---------------------------------------------------------------------------
 
+fn validate_project_id(
+    state: &McpState,
+    id: &Option<Value>,
+    project_id: i64,
+) -> Result<(), JsonRpcResponse> {
+    if state
+        .db
+        .list_projects()
+        .unwrap_or_default()
+        .iter()
+        .any(|p| p.id == ProjectId(project_id))
+    {
+        return Ok(());
+    }
+    Err(service_err_to_response(
+        id.clone(),
+        crate::service::ServiceError::Validation(format!("project {project_id} does not exist")),
+    ))
+}
+
 pub(super) fn handle_update_task(
     state: &McpState,
     id: Option<Value>,
@@ -320,19 +342,8 @@ pub(super) fn handle_update_task(
         params = params.epic_id(EpicId(epic_id));
     }
     if let Some(project_id) = parsed.project_id {
-        if !state
-            .db
-            .list_projects()
-            .unwrap_or_default()
-            .iter()
-            .any(|p| p.id == ProjectId(project_id))
-        {
-            return service_err_to_response(
-                id,
-                crate::service::ServiceError::Validation(format!(
-                    "project {project_id} does not exist"
-                )),
-            );
+        if let Err(resp) = validate_project_id(state, &id, project_id) {
+            return resp;
         }
         params = params.project_id(ProjectId(project_id));
     }
@@ -360,12 +371,16 @@ pub(super) fn handle_create_task(
         Ok(a) => a,
         Err(resp) => return resp,
     };
-    tracing::info!(title = %parsed.title, epic_id = ?parsed.epic_id, "MCP create_task");
+    tracing::info!(
+        title = %parsed.title,
+        epic_id = ?parsed.epic_id,
+        project_id = parsed.project_id,
+        "MCP create_task"
+    );
 
-    let project_id = match resolve_project_id(&id, parsed.project_id, &*state.db) {
-        Ok(pid) => pid,
-        Err(resp) => return resp,
-    };
+    if let Err(resp) = validate_project_id(state, &id, parsed.project_id) {
+        return resp;
+    }
 
     let svc = TaskService::new(state.db.clone());
     match svc.create_task(CreateTaskParams {
@@ -377,7 +392,7 @@ pub(super) fn handle_create_task(
         sort_order: parsed.sort_order,
         tag: parsed.tag,
         base_branch: parsed.base_branch,
-        project_id,
+        project_id: ProjectId(parsed.project_id),
     }) {
         Ok(task_id) => {
             state.notify();
@@ -765,6 +780,7 @@ fn do_dispatch(
     runner: &dyn crate::process::ProcessRunner,
 ) -> anyhow::Result<crate::models::DispatchResult> {
     let epic_ctx = dispatch::EpicContext::from_db(task, db);
+    let project_ctx = dispatch::ProjectContext::from_db(task, db);
     let learnings: Vec<crate::models::Learning> = db
         .list_learnings_for_dispatch(Some(task.project_id), &task.repo_path, task.epic_id)
         .unwrap_or_else(|e| {
@@ -772,13 +788,27 @@ fn do_dispatch(
             vec![]
         });
     match DispatchMode::for_task(task) {
-        DispatchMode::Dispatch => {
-            dispatch::dispatch_agent(task, runner, epic_ctx.as_ref(), &learnings)
-        }
-        DispatchMode::Brainstorm => {
-            dispatch::brainstorm_agent(task, runner, epic_ctx.as_ref(), &learnings)
-        }
-        DispatchMode::Plan => dispatch::plan_agent(task, runner, epic_ctx.as_ref(), &learnings),
+        DispatchMode::Dispatch => dispatch::dispatch_agent(
+            task,
+            runner,
+            epic_ctx.as_ref(),
+            Some(&project_ctx),
+            &learnings,
+        ),
+        DispatchMode::Brainstorm => dispatch::brainstorm_agent(
+            task,
+            runner,
+            epic_ctx.as_ref(),
+            Some(&project_ctx),
+            &learnings,
+        ),
+        DispatchMode::Plan => dispatch::plan_agent(
+            task,
+            runner,
+            epic_ctx.as_ref(),
+            Some(&project_ctx),
+            &learnings,
+        ),
     }
 }
 

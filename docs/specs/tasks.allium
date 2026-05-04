@@ -1132,6 +1132,43 @@ rule UpdateTaskViaMcp {
         -- returns a -32602 validation error.
 }
 
+rule CreateTaskViaMcp {
+    when: McpCreateTask(title, repo_path, project_id, description?, plan?,
+                        epic_id?, sort_order?, tag?, base_branch?)
+
+    -- project_id is mandatory and must refer to an existing project
+    requires: core/Project.exists(project_id)
+
+    -- epic_id, when given, must refer to an existing epic
+    requires:
+        if epic_id != null: core/Epic.exists(epic_id)
+
+    ensures: core/Task.created(
+        title: title,
+        description: description ?? "",
+        repo_path: repo_path,
+        status: backlog,
+        sub_status: core/SubStatus.default_for(backlog),
+        plan_path: plan,
+        epic: if epic_id != null then core/Epic.find(epic_id) else null,
+        tag: tag,
+        sort_order: sort_order,
+        base_branch: base_branch ?? config.default_branch,
+        project_id: project_id,
+        created_at: now,
+        updated_at: now
+    )
+
+    @guidance
+        -- project_id is required. The dispatched agent reads its own
+        -- task's project from the dispatch prompt (ProjectId: <id>) and
+        -- passes it on every create_task call so sub-tasks land in the
+        -- same project as their parent task.
+        -- An unknown project_id returns a -32602 validation error.
+        -- Unlike the TUI CreateTask rule, this rule does not fire
+        -- RecordRepoPath — MCP task creation skips repo path persistence.
+}
+
 rule ListTasksViaMcp {
     when: McpListTasks(epic_id?, project_id?, repo_paths?, status?, caller_task_id?)
 

@@ -13,7 +13,7 @@ use super::finish::detect_default_branch;
 use super::prompts::{
     build_brainstorm_prompt, build_epic_planning_prompt, build_plan_prompt, build_prompt,
     build_quick_dispatch_prompt, build_tmux_window_name, rebase_preamble, EpicContext,
-    DISPATCH_PLUGIN_DIR,
+    ProjectContext, DISPATCH_PLUGIN_DIR,
 };
 use super::stderr_str;
 use super::worktree::provision_worktree;
@@ -117,6 +117,7 @@ pub fn dispatch_agent(
     task: &Task,
     runner: &dyn ProcessRunner,
     epic: Option<&EpicContext>,
+    project: Option<&ProjectContext>,
     learnings: &[Learning],
 ) -> Result<DispatchResult> {
     let prompt = build_prompt(
@@ -125,6 +126,7 @@ pub fn dispatch_agent(
         &task.description,
         task.plan_path.as_deref(),
         epic,
+        project,
     );
     dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch), learnings)
 }
@@ -133,9 +135,10 @@ pub fn brainstorm_agent(
     task: &Task,
     runner: &dyn ProcessRunner,
     epic: Option<&EpicContext>,
+    project: Option<&ProjectContext>,
     learnings: &[Learning],
 ) -> Result<DispatchResult> {
-    let prompt = build_brainstorm_prompt(task.id, &task.title, &task.description, epic);
+    let prompt = build_brainstorm_prompt(task.id, &task.title, &task.description, epic, project);
     dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch), learnings)
 }
 
@@ -143,9 +146,10 @@ pub fn plan_agent(
     task: &Task,
     runner: &dyn ProcessRunner,
     epic: Option<&EpicContext>,
+    project: Option<&ProjectContext>,
     learnings: &[Learning],
 ) -> Result<DispatchResult> {
-    let prompt = build_plan_prompt(task.id, &task.title, &task.description, epic);
+    let prompt = build_plan_prompt(task.id, &task.title, &task.description, epic, project);
     dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch), learnings)
 }
 
@@ -153,9 +157,11 @@ pub fn quick_dispatch_agent(
     task: &Task,
     runner: &dyn ProcessRunner,
     epic: Option<&EpicContext>,
+    project: Option<&ProjectContext>,
     learnings: &[Learning],
 ) -> Result<DispatchResult> {
-    let prompt = build_quick_dispatch_prompt(task.id, &task.title, &task.description, epic);
+    let prompt =
+        build_quick_dispatch_prompt(task.id, &task.title, &task.description, epic, project);
     dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch), learnings)
 }
 
@@ -164,10 +170,11 @@ pub fn epic_planning_agent(
     epic_id: EpicId,
     epic_title: &str,
     epic_description: &str,
+    project: &ProjectContext,
     runner: &dyn ProcessRunner,
     learnings: &[Learning],
 ) -> Result<DispatchResult> {
-    let prompt = build_epic_planning_prompt(epic_id, epic_title, epic_description);
+    let prompt = build_epic_planning_prompt(epic_id, epic_title, epic_description, project);
     dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch), learnings)
 }
 

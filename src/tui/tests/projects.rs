@@ -81,7 +81,11 @@ fn select_project_clamps_cursor() {
 // ---------------------------------------------------------------------------
 
 fn two_project_app() -> App {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Backlog)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.update(Message::ProjectsUpdated(vec![
         Project {
             id: ProjectId(1),
@@ -341,9 +345,9 @@ fn input_project_name_enter_renames_project() {
     }
     let cmds = app.handle_key(make_key(KeyCode::Enter));
     assert!(matches!(app.mode(), InputMode::Normal));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::RenameProject { id: ProjectId(1), name } if name == "Renamed")));
+    assert!(cmds.iter().any(
+        |c| matches!(c, Command::RenameProject { id: ProjectId(1), name } if name == "Renamed")
+    ));
 }
 
 #[test]
@@ -377,7 +381,10 @@ fn confirm_delete_project1_y_transitions_to_confirm2() {
     app.handle_key(make_key(KeyCode::Char('y')));
     assert!(matches!(
         app.mode(),
-        InputMode::ConfirmDeleteProject2 { id: ProjectId(2), .. }
+        InputMode::ConfirmDeleteProject2 {
+            id: ProjectId(2),
+            ..
+        }
     ));
 }
 
@@ -558,9 +565,13 @@ fn shift_j_emits_reorder_project_down() {
     let mut app = two_project_app();
     app.handle_key(make_key(KeyCode::Char('h')));
     let cmds = app.handle_key(KeyEvent::new(KeyCode::Char('J'), KeyModifiers::NONE));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::ReorderProject { id: ProjectId(1), delta: 1 })));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::ReorderProject {
+            id: ProjectId(1),
+            delta: 1
+        }
+    )));
 }
 
 #[test]
@@ -570,9 +581,13 @@ fn shift_k_emits_reorder_project_up() {
     app.handle_key(make_key(KeyCode::Char('h')));
     app.handle_key(make_key(KeyCode::Char('j')));
     let cmds = app.handle_key(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::NONE));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::ReorderProject { id: ProjectId(2), delta: -1 })));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::ReorderProject {
+            id: ProjectId(2),
+            delta: -1
+        }
+    )));
 }
 
 // ---------------------------------------------------------------------------
@@ -833,7 +848,7 @@ fn opening_projects_panel_positions_cursor_on_active_project() {
     // Select Backend via j while in the panel.
     app.handle_key(make_key(KeyCode::Char('h')));
     app.handle_key(make_key(KeyCode::Char('j')));
-    assert_eq!(app.active_project(), 2);
+    assert_eq!(app.active_project(), ProjectId(2));
     app.handle_key(make_key(KeyCode::Char('l'))); // close panel
 
     // Simulate stale cursor (as happens after app load from persisted settings).
@@ -875,7 +890,7 @@ fn opening_projects_panel_first_time_with_non_default_active_project() {
     // SelectProject updates active_project and list_state but not projects_row,
     // so the cursor is stale until the panel is opened.
     let mut app = two_project_app();
-    app.update(Message::SelectProject(2)); // Backend, idx=1; projects_row stays 0
+    app.update(Message::SelectProject(ProjectId(2))); // Backend, idx=1; projects_row stays 0
 
     app.handle_key(make_key(KeyCode::Char('h')));
     assert_eq!(

@@ -133,6 +133,7 @@ impl TuiRuntime {
                 tracing::warn!(error = %e, "failed to fetch learnings for dispatch");
                 vec![]
             });
+        let project_ctx = dispatch::ProjectContext::from_db(&task, &*self.database);
 
         // Dispatch the planning subtask asynchronously
         let tx = self.msg_tx.clone();
@@ -153,6 +154,7 @@ impl TuiRuntime {
                 epic_id,
                 &epic_title,
                 &epic_description,
+                &project_ctx,
                 &*runner,
                 &learnings,
             ) {

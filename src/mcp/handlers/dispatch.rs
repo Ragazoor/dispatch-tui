@@ -188,10 +188,10 @@ mcp_tools! {
                 },
                 "project_id": {
                     "type": "integer",
-                    "description": "Project to assign the task to. Omit to use the Default project."
+                    "description": "Project the task belongs to. Read from the dispatch prompt's `ProjectId:` line so sub-tasks land in the same project as the parent task."
                 }
             },
-            "required": ["title", "repo_path"]
+            "required": ["title", "repo_path", "project_id"]
         };
 
     sync "list_tasks" => tasks::handle_list_tasks,

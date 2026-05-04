@@ -13,7 +13,7 @@ pub use agents::{
     epic_planning_agent, is_wrappable, plan_agent, quick_dispatch_agent, resume_agent,
 };
 pub use finish::{finish_task, FinishError};
-pub use prompts::EpicContext;
+pub use prompts::{EpicContext, ProjectContext};
 pub use worktree::{branch_from_worktree, cleanup_task, validate_repo_path};
 
 /// Extract stderr from a process `Output` as a trimmed `String`.

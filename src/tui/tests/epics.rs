@@ -2,7 +2,8 @@
 
 use super::*;
 use crate::models::{
-    DispatchMode, Epic, EpicId, SubStatus, TaskId, TaskStatus, TaskTag, DEFAULT_QUICK_TASK_TITLE,
+    DispatchMode, Epic, EpicId, ProjectId, SubStatus, TaskId, TaskStatus, TaskTag,
+    DEFAULT_QUICK_TASK_TITLE,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
@@ -364,7 +365,11 @@ fn exit_epic_when_on_board_is_noop() {
 
 #[test]
 fn column_items_board_view_includes_epics() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Backlog)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.board.epics = vec![make_epic(10)]; // epic with no subtasks = Backlog
 
     let items = app.column_items_for_status(TaskStatus::Backlog);
@@ -390,7 +395,11 @@ fn column_items_epic_view_no_epics() {
 
 #[test]
 fn selected_column_item_returns_epic() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Backlog)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.board.epics = vec![make_epic(10)];
 
     // Same priority (5), task (id=1) at row 0, epic (id=10) at row 1
@@ -779,7 +788,11 @@ fn epic_repo_path_digit_with_nonempty_buffer_appends() {
 }
 
 fn make_app_confirm_delete_epic() -> App {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Backlog)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.board.epics = vec![make_epic(10)];
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 1); // cursor on epic (same priority as task, sorts after by id)
@@ -790,7 +803,11 @@ fn make_app_confirm_delete_epic() -> App {
 
 #[test]
 fn confirm_delete_epic_enters_mode_with_title() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Backlog)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.board.epics = vec![make_epic(10)];
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 1); // cursor on epic (same priority as task, sorts after by id)
@@ -837,7 +854,11 @@ fn confirm_delete_epic_other_key_cancels() {
 
 #[test]
 fn confirm_delete_epic_no_epic_selected_is_noop() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Backlog)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.selection_mut().set_column(1); // cursor on task, not epic
     app.input.mode = InputMode::ConfirmDeleteEpic;
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
@@ -1134,7 +1155,11 @@ fn space_on_empty_column_no_epics_is_noop() {
 
 #[test]
 fn select_all_column_includes_epics() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Backlog)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.board.epics = vec![make_epic(10)];
 
     app.update(Message::SelectAllColumn);
@@ -1144,7 +1169,11 @@ fn select_all_column_includes_epics() {
 
 #[test]
 fn select_all_deselects_all_including_epics() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Backlog)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.board.epics = vec![make_epic(10)];
 
     // Select all
@@ -1266,7 +1295,11 @@ fn render_batch_hints_with_epic_selection() {
 
 #[test]
 fn render_column_header_checked_with_epics() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Backlog)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.board.epics = vec![make_epic(10)];
 
     // Select both the task and the epic
@@ -2224,7 +2257,7 @@ fn epic_action_hints_no_refresh_for_non_feed_epic() {
 
 #[test]
 fn flat_view_inserts_epic_header_before_group() {
-    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     let epic = make_epic(10);
     app.board.epics = vec![epic];
     let mut t1 = make_task(1, TaskStatus::Backlog);
@@ -2246,7 +2279,7 @@ fn flat_view_inserts_epic_header_before_group() {
 
 #[test]
 fn flat_view_header_sorts_before_its_tasks() {
-    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.sort_order = Some(50);
     app.board.epics = vec![epic];
@@ -2266,7 +2299,7 @@ fn flat_view_header_sorts_before_its_tasks() {
 
 #[test]
 fn flat_view_standalone_task_interleaves_by_sort_order() {
-    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.sort_order = Some(200);
     app.board.epics = vec![epic];
@@ -2290,7 +2323,7 @@ fn flat_view_standalone_task_interleaves_by_sort_order() {
 
 #[test]
 fn flat_view_two_epics_get_two_headers() {
-    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     let mut epic_a = make_epic(10);
     epic_a.sort_order = Some(10);
     let mut epic_b = make_epic(20);
@@ -2314,7 +2347,7 @@ fn flat_view_two_epics_get_two_headers() {
 
 #[test]
 fn flat_view_no_header_when_epic_has_no_tasks_in_column() {
-    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     // Epic 10 has a task in Running, not Backlog
     app.board.epics = vec![make_epic(10)];
     let mut t = make_task(1, TaskStatus::Running);
@@ -2333,7 +2366,7 @@ fn flat_view_no_header_when_epic_has_no_tasks_in_column() {
 
 #[test]
 fn flat_view_orphan_task_treated_as_standalone() {
-    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     // No epics in board.epics, but a task references epic id 99
     let mut orphan = make_task(1, TaskStatus::Backlog);
     orphan.epic_id = Some(EpicId(99));
@@ -2347,7 +2380,7 @@ fn flat_view_orphan_task_treated_as_standalone() {
 
 #[test]
 fn flat_view_tie_break_by_epic_id_when_sort_orders_equal() {
-    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     let mut epic_a = make_epic(10);
     epic_a.sort_order = Some(50);
     let mut epic_b = make_epic(20);
@@ -2369,7 +2402,7 @@ fn flat_view_tie_break_by_epic_id_when_sort_orders_equal() {
 
 #[test]
 fn non_flat_mode_has_no_epic_headers() {
-    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     let mut t = make_task(1, TaskStatus::Backlog);
     t.epic_id = Some(EpicId(10));
@@ -2387,7 +2420,7 @@ fn non_flat_mode_has_no_epic_headers() {
 
 #[test]
 fn flat_view_selected_column_item_skips_headers() {
-    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     let mut t = make_task(1, TaskStatus::Backlog);
     t.epic_id = Some(EpicId(10));

@@ -353,7 +353,7 @@ fn flat_view_epic_headers() {
     use crate::models::EpicId;
     use crate::tui::tests::make_epic_with_title;
 
-    let mut app = App::new(vec![], 1, TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     let epic = make_epic_with_title(10, "My Feature");
     app.board.epics = vec![epic];
     let mut t1 = make_task(1, TaskStatus::Backlog);

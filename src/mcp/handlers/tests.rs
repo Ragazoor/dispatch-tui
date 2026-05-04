@@ -293,12 +293,17 @@ async fn unknown_method() {
 #[tokio::test]
 async fn create_task_minimal() {
     let state = test_state();
+    let default_id = state.db.get_default_project().unwrap().id;
     let resp = call(
         &state,
         "tools/call",
         Some(json!({
             "name": "create_task",
-            "arguments": { "title": "New Task", "repo_path": "/my/repo" }
+            "arguments": {
+                "title": "New Task",
+                "repo_path": "/my/repo",
+                "project_id": default_id,
+            }
         })),
     )
     .await;
@@ -322,6 +327,7 @@ async fn create_task_with_plan_stays_backlog() {
     std::fs::write(&plan_file, "# Plan").unwrap();
 
     let state = test_state();
+    let default_id = state.db.get_default_project().unwrap().id;
     let resp = call(
         &state,
         "tools/call",
@@ -330,7 +336,8 @@ async fn create_task_with_plan_stays_backlog() {
             "arguments": {
                 "title": "Planned Task",
                 "repo_path": "/my/repo",
-                "plan_path": plan_file.to_string_lossy()
+                "plan_path": plan_file.to_string_lossy(),
+                "project_id": default_id,
             }
         })),
     )
@@ -354,6 +361,7 @@ async fn create_task_with_plan_stays_backlog() {
 #[tokio::test]
 async fn create_task_with_description() {
     let state = test_state();
+    let default_id = state.db.get_default_project().unwrap().id;
     let resp = call(
         &state,
         "tools/call",
@@ -362,7 +370,8 @@ async fn create_task_with_description() {
             "arguments": {
                 "title": "Described Task",
                 "repo_path": "/repo",
-                "description": "Some details"
+                "description": "Some details",
+                "project_id": default_id,
             }
         })),
     )
@@ -376,16 +385,80 @@ async fn create_task_with_description() {
 #[tokio::test]
 async fn create_task_missing_title() {
     let state = test_state();
+    let default_id = state.db.get_default_project().unwrap().id;
     let resp = call(
         &state,
         "tools/call",
         Some(json!({
             "name": "create_task",
-            "arguments": { "repo_path": "/repo" }
+            "arguments": { "repo_path": "/repo", "project_id": default_id }
         })),
     )
     .await;
     assert!(resp.error.is_some());
+}
+
+#[tokio::test]
+async fn create_task_missing_project_id_is_invalid_params() {
+    let state = test_state();
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "create_task",
+            "arguments": { "title": "No project", "repo_path": "/repo" }
+        })),
+    )
+    .await;
+    assert_error(&resp, "project_id");
+    assert_eq!(resp.error.as_ref().unwrap().code, -32602);
+    let tasks = state.db.list_all().unwrap();
+    assert!(tasks.is_empty(), "no task should be created");
+}
+
+#[tokio::test]
+async fn create_task_with_unknown_project_id_is_invalid_params() {
+    let state = test_state();
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "create_task",
+            "arguments": {
+                "title": "Bogus project",
+                "repo_path": "/repo",
+                "project_id": 999_999,
+            }
+        })),
+    )
+    .await;
+    assert_error(&resp, "project");
+    assert_eq!(resp.error.as_ref().unwrap().code, -32602);
+    let tasks = state.db.list_all().unwrap();
+    assert!(tasks.is_empty(), "no task should be created");
+}
+
+#[tokio::test]
+async fn create_task_assigns_to_provided_project() {
+    let state = test_state();
+    let other = state.db.create_project("Other", 1).unwrap();
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "create_task",
+            "arguments": {
+                "title": "Project task",
+                "repo_path": "/repo",
+                "project_id": other.id,
+            }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "got error: {:?}", resp.error);
+    let tasks = state.db.list_all().unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].project_id, other.id);
 }
 
 // -- String task_id coercion (Claude Code sends integers as strings) ------
@@ -1268,8 +1341,8 @@ fn tool_schemas_match_arg_structs() {
                 "base_branch",
                 "project_id",
             ]),
-            BTreeSet::from(["title", "repo_path"]),
-            json!({"title": "t", "repo_path": "/r", "description": "d", "plan_path": "/p.md", "sort_order": 10, "tag": "feature"}),
+            BTreeSet::from(["title", "repo_path", "project_id"]),
+            json!({"title": "t", "repo_path": "/r", "project_id": 1, "description": "d", "plan_path": "/p.md", "sort_order": 10, "tag": "feature"}),
         ),
         (
             "list_tasks",
@@ -2148,6 +2221,7 @@ async fn claim_task_worktree_without_worktrees_dir() {
 #[tokio::test]
 async fn create_task_with_epic_id() {
     let state = test_state();
+    let default_id = state.db.get_default_project().unwrap().id;
     let epic = state
         .db
         .create_epic("Parent Epic", "", "/repo", None, ProjectId(1))
@@ -2161,7 +2235,8 @@ async fn create_task_with_epic_id() {
             "arguments": {
                 "title": "Epic Child",
                 "repo_path": "/repo",
-                "epic_id": epic.id.0
+                "epic_id": epic.id.0,
+                "project_id": default_id,
             }
         })),
     )
@@ -2176,6 +2251,7 @@ async fn create_task_with_epic_id() {
 #[tokio::test]
 async fn create_task_with_string_epic_id() {
     let state = test_state();
+    let default_id = state.db.get_default_project().unwrap().id;
     let epic = state
         .db
         .create_epic("Parent", "", "/repo", None, ProjectId(1))
@@ -2189,7 +2265,8 @@ async fn create_task_with_string_epic_id() {
             "arguments": {
                 "title": "String Epic Child",
                 "repo_path": "/repo",
-                "epic_id": epic.id.0.to_string()
+                "epic_id": epic.id.0.to_string(),
+                "project_id": default_id,
             }
         })),
     )
@@ -3591,13 +3668,14 @@ async fn update_task_sends_refresh_notification() {
 #[tokio::test]
 async fn create_task_sends_refresh_notification() {
     let (state, mut rx) = test_state_with_notify();
+    let default_id = state.db.get_default_project().unwrap().id;
 
     let resp = call(
         &state,
         "tools/call",
         Some(json!({
             "name": "create_task",
-            "arguments": { "title": "Notified Task", "repo_path": "/repo" }
+            "arguments": { "title": "Notified Task", "repo_path": "/repo", "project_id": default_id }
         })),
     )
     .await;
@@ -3777,12 +3855,13 @@ async fn update_task_sort_order() {
 #[tokio::test]
 async fn create_task_invalid_tag() {
     let state = test_state();
+    let default_id = state.db.get_default_project().unwrap().id;
     let resp = call(
         &state,
         "tools/call",
         Some(json!({
             "name": "create_task",
-            "arguments": { "title": "Tagged", "repo_path": "/repo", "tag": "bogus" }
+            "arguments": { "title": "Tagged", "repo_path": "/repo", "tag": "bogus", "project_id": default_id }
         })),
     )
     .await;
@@ -3792,12 +3871,13 @@ async fn create_task_invalid_tag() {
 #[tokio::test]
 async fn create_task_valid_tag() {
     let state = test_state();
+    let default_id = state.db.get_default_project().unwrap().id;
     let resp = call(
         &state,
         "tools/call",
         Some(json!({
             "name": "create_task",
-            "arguments": { "title": "Bug Task", "repo_path": "/repo", "tag": "bug" }
+            "arguments": { "title": "Bug Task", "repo_path": "/repo", "tag": "bug", "project_id": default_id }
         })),
     )
     .await;
@@ -3810,12 +3890,13 @@ async fn create_task_valid_tag() {
 #[tokio::test]
 async fn create_task_with_sort_order() {
     let state = test_state();
+    let default_id = state.db.get_default_project().unwrap().id;
     let resp = call(
         &state,
         "tools/call",
         Some(json!({
             "name": "create_task",
-            "arguments": { "title": "Ordered Task", "repo_path": "/repo", "sort_order": 99 }
+            "arguments": { "title": "Ordered Task", "repo_path": "/repo", "sort_order": 99, "project_id": default_id }
         })),
     )
     .await;
@@ -3828,12 +3909,13 @@ async fn create_task_with_sort_order() {
 #[tokio::test]
 async fn create_task_with_nonexistent_epic() {
     let state = test_state();
+    let default_id = state.db.get_default_project().unwrap().id;
     let resp = call(
         &state,
         "tools/call",
         Some(json!({
             "name": "create_task",
-            "arguments": { "title": "Orphan", "repo_path": "/repo", "epic_id": 9999 }
+            "arguments": { "title": "Orphan", "repo_path": "/repo", "epic_id": 9999, "project_id": default_id }
         })),
     )
     .await;
@@ -5438,6 +5520,7 @@ async fn wrap_up_rebase_clears_conflict_substatus_on_non_conflict_error() {
 #[tokio::test]
 async fn create_task_with_base_branch_stores_it() {
     let state = test_state();
+    let default_id = state.db.get_default_project().unwrap().id;
 
     let resp = call(
         &state,
@@ -5447,7 +5530,8 @@ async fn create_task_with_base_branch_stores_it() {
             "arguments": {
                 "title": "My Feature",
                 "repo_path": "/repo",
-                "base_branch": "develop"
+                "base_branch": "develop",
+                "project_id": default_id,
             }
         })),
     )
@@ -5462,6 +5546,7 @@ async fn create_task_with_base_branch_stores_it() {
 #[tokio::test]
 async fn create_task_without_base_branch_defaults_to_main() {
     let state = test_state();
+    let default_id = state.db.get_default_project().unwrap().id;
 
     let resp = call(
         &state,
@@ -5470,7 +5555,8 @@ async fn create_task_without_base_branch_defaults_to_main() {
             "name": "create_task",
             "arguments": {
                 "title": "Default Branch Task",
-                "repo_path": "/repo"
+                "repo_path": "/repo",
+                "project_id": default_id,
             }
         })),
     )
@@ -6554,37 +6640,6 @@ async fn dispatch_task_returns_error_when_dispatch_fails() {
 // ---------------------------------------------------------------------------
 // create_task project_id tests
 // ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn create_task_without_project_id_assigns_to_default() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
-    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-    });
-
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "create_task",
-            "arguments": {
-                "title": "T",
-                "description": "",
-                "repo_path": "/r"
-            }
-        })),
-    )
-    .await;
-    assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
-
-    let tasks = db.list_all().unwrap();
-    assert_eq!(tasks.len(), 1);
-    let default_id = db.get_default_project().unwrap().id;
-    assert_eq!(tasks[0].project_id, default_id);
-}
 
 #[tokio::test]
 async fn create_task_with_project_id_assigns_correctly() {

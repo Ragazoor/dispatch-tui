@@ -2,7 +2,7 @@ use super::prompts::{
     allium_instruction, build_brainstorm_prompt, build_epic_planning_prompt, build_plan_prompt,
     build_prompt, build_quick_dispatch_prompt, build_tmux_window_name, epic_preamble,
     mcp_tools_instruction, plan_and_attach_instruction, rebase_preamble, task_block,
-    tdd_instruction, wrap_up_instruction, EpicContext,
+    tdd_instruction, wrap_up_instruction, EpicContext, ProjectContext,
 };
 use super::worktree::provision_worktree;
 use super::*;
@@ -21,7 +21,7 @@ use std::process::Output;
 
 #[test]
 fn task_block_contains_id_title_description() {
-    let block = task_block(TaskId(5), "My title", "My description", None);
+    let block = task_block(TaskId(5), "My title", "My description", None, None);
     assert!(block.contains("5"));
     assert!(block.contains("My title"));
     assert!(block.contains("My description"));
@@ -33,9 +33,35 @@ fn task_block_includes_epic_section_when_present() {
         epic_id: EpicId(3),
         epic_title: "Big Epic".to_string(),
     };
-    let block = task_block(TaskId(1), "T", "D", Some(&ctx));
+    let block = task_block(TaskId(1), "T", "D", Some(&ctx), None);
     assert!(block.contains("EpicId: 3"));
     assert!(block.contains("Big Epic"));
+}
+
+#[test]
+fn task_block_includes_project_section_when_present() {
+    let ctx = ProjectContext {
+        project_id: ProjectId(42),
+        project_name: "My Project".to_string(),
+    };
+    let block = task_block(TaskId(1), "T", "D", None, Some(&ctx));
+    assert!(block.contains("ProjectId: 42"), "block was: {block}");
+    assert!(block.contains("My Project"), "block was: {block}");
+    assert!(
+        block.contains("project_id=42"),
+        "should tell agent to pass project_id=42"
+    );
+}
+
+#[test]
+fn build_prompt_includes_project_context() {
+    let ctx = ProjectContext {
+        project_id: ProjectId(7),
+        project_name: "Dispatch".to_string(),
+    };
+    let prompt = build_prompt(TaskId(1), "Task", "Desc", None, None, Some(&ctx));
+    assert!(prompt.contains("ProjectId: 7"));
+    assert!(prompt.contains("Dispatch"));
 }
 
 #[test]
@@ -53,7 +79,7 @@ fn mcp_tools_instruction_mentions_get_and_update() {
 
 #[test]
 fn plan_and_attach_instruction_mentions_docs_plans_and_update_task() {
-    let instr = plan_and_attach_instruction(TaskId(9));
+    let instr = plan_and_attach_instruction();
     assert!(instr.contains("docs/plans/"));
     assert!(instr.contains("update_task"));
 }
@@ -183,7 +209,7 @@ fn dispatch_agent_prepends_procedural_learnings_to_prompt() {
         LearningKind::Procedural,
         "Always run cargo fmt --check before pushing.",
     );
-    let result = dispatch_agent(&task, &mock, None, &[learning]).unwrap();
+    let result = dispatch_agent(&task, &mock, None, None, &[learning]).unwrap();
     let written =
         std::fs::read_to_string(format!("{}/.claude-prompt", result.worktree_path)).unwrap();
     assert!(
@@ -207,7 +233,7 @@ fn dispatch_agent_with_no_learnings_omits_preamble() {
         MockProcessRunner::ok(), // tmux send-keys Enter
     ]);
     let task = make_task(&repo_path);
-    let result = dispatch_agent(&task, &mock, None, &[]).unwrap();
+    let result = dispatch_agent(&task, &mock, None, None, &[]).unwrap();
     let written =
         std::fs::read_to_string(format!("{}/.claude-prompt", result.worktree_path)).unwrap();
     assert!(
@@ -232,7 +258,7 @@ fn dispatch_agent_relevant_learnings_section_uses_kind_labels() {
     ]);
     let task = make_task(&repo_path);
     let learning = make_learning(LearningKind::Pitfall, "Watch out for X.");
-    let result = dispatch_agent(&task, &mock, None, &[learning]).unwrap();
+    let result = dispatch_agent(&task, &mock, None, None, &[learning]).unwrap();
     let written =
         std::fs::read_to_string(format!("{}/.claude-prompt", result.worktree_path)).unwrap();
     assert!(
@@ -373,7 +399,7 @@ fn resolve_repo_path_handles_empty_paths() {
 
 #[test]
 fn build_prompt_contains_task_info() {
-    let prompt = build_prompt(TaskId(42), "Fix bug", "A nasty crash", None, None);
+    let prompt = build_prompt(TaskId(42), "Fix bug", "A nasty crash", None, None, None);
     assert!(prompt.contains("42"));
     assert!(prompt.contains("Fix bug"));
     assert!(prompt.contains("A nasty crash"));
@@ -382,7 +408,7 @@ fn build_prompt_contains_task_info() {
 
 #[test]
 fn build_prompt_mentions_tdd() {
-    let prompt = build_prompt(TaskId(7), "Title", "Desc", None, None);
+    let prompt = build_prompt(TaskId(7), "Title", "Desc", None, None, None);
     assert!(prompt.contains("TDD"));
     assert!(prompt.contains("behaviour as tests first"));
 }
@@ -390,7 +416,14 @@ fn build_prompt_mentions_tdd() {
 #[test]
 fn build_prompt_mentions_wrap_up_skill() {
     // wrap-up instruction only appears when a plan exists (agent is implementing)
-    let prompt = build_prompt(TaskId(7), "Title", "Desc", Some("docs/plans/p.md"), None);
+    let prompt = build_prompt(
+        TaskId(7),
+        "Title",
+        "Desc",
+        Some("docs/plans/p.md"),
+        None,
+        None,
+    );
     assert!(
         prompt.contains("/wrap-up"),
         "with-plan prompt should tell agent to use /wrap-up skill"
@@ -403,7 +436,7 @@ fn build_prompt_mentions_wrap_up_skill() {
 
 #[test]
 fn build_prompt_without_plan_omits_wrap_up() {
-    let prompt = build_prompt(TaskId(7), "Title", "Desc", None, None);
+    let prompt = build_prompt(TaskId(7), "Title", "Desc", None, None, None);
     assert!(
         !prompt.contains("/wrap-up"),
         "no-plan prompt should not mention /wrap-up (agent isn't implementing yet)"
@@ -412,7 +445,7 @@ fn build_prompt_without_plan_omits_wrap_up() {
 
 #[test]
 fn build_prompt_without_plan_includes_planning_instruction() {
-    let prompt = build_prompt(TaskId(1), "Task", "Desc", None, None);
+    let prompt = build_prompt(TaskId(1), "Task", "Desc", None, None, None);
     assert!(
         prompt.contains("docs/plans/"),
         "no-plan prompt should instruct agent to write a plan"
@@ -429,7 +462,7 @@ fn build_prompt_without_plan_includes_planning_instruction() {
 
 #[test]
 fn build_prompt_without_plan_mentions_brainstorm_if_vague() {
-    let prompt = build_prompt(TaskId(1), "Task", "Desc", None, None);
+    let prompt = build_prompt(TaskId(1), "Task", "Desc", None, None, None);
     assert!(
         prompt.contains("/brainstorming"),
         "no-plan prompt should mention /brainstorming for vague descriptions"
@@ -442,7 +475,7 @@ fn build_prompt_without_plan_mentions_brainstorm_if_vague() {
 
 #[test]
 fn build_prompt_without_plan_mentions_direct_plan_alternative() {
-    let prompt = build_prompt(TaskId(1), "Task", "Desc", None, None);
+    let prompt = build_prompt(TaskId(1), "Task", "Desc", None, None, None);
     assert!(
         prompt.contains("implementation plan directly"),
         "no-plan prompt should offer writing a plan directly for clear descriptions"
@@ -451,7 +484,14 @@ fn build_prompt_without_plan_mentions_direct_plan_alternative() {
 
 #[test]
 fn build_prompt_with_plan_asks_permission_before_implementing() {
-    let prompt = build_prompt(TaskId(1), "Task", "Desc", Some("docs/plans/plan.md"), None);
+    let prompt = build_prompt(
+        TaskId(1),
+        "Task",
+        "Desc",
+        Some("docs/plans/plan.md"),
+        None,
+        None,
+    );
     assert!(prompt.contains("docs/plans/plan.md"));
     assert!(
         prompt.contains("Shall I proceed")
@@ -467,7 +507,7 @@ fn build_prompt_with_plan_asks_permission_before_implementing() {
 
 #[test]
 fn build_prompt_mentions_mcp_tools() {
-    let prompt = build_prompt(TaskId(1), "Task", "Desc", None, None);
+    let prompt = build_prompt(TaskId(1), "Task", "Desc", None, None, None);
     assert!(
         prompt.contains("dispatch MCP tools"),
         "standard dispatch prompt should mention MCP tools"
@@ -547,19 +587,20 @@ fn build_prompt_includes_plan_path() {
         "Desc",
         Some("docs/plans/my-plan.md"),
         None,
+        None,
     );
     assert!(prompt.contains("Plan: docs/plans/my-plan.md"));
 }
 
 #[test]
 fn build_prompt_without_plan_omits_plan_section() {
-    let prompt = build_prompt(TaskId(1), "Task", "Desc", None, None);
+    let prompt = build_prompt(TaskId(1), "Task", "Desc", None, None, None);
     assert!(!prompt.contains("Plan:"));
 }
 
 #[test]
 fn build_quick_dispatch_prompt_includes_planning_instruction() {
-    let prompt = build_quick_dispatch_prompt(TaskId(42), "Quick task", "", None);
+    let prompt = build_quick_dispatch_prompt(TaskId(42), "Quick task", "", None, None);
     assert!(
         prompt.contains("docs/plans/") || prompt.contains("plan"),
         "quick dispatch prompt should instruct agent to write a plan before implementing"
@@ -572,7 +613,7 @@ fn build_quick_dispatch_prompt_includes_planning_instruction() {
 
 #[test]
 fn build_quick_dispatch_prompt_contains_rename_instruction() {
-    let prompt = build_quick_dispatch_prompt(TaskId(42), "Quick task", "", None);
+    let prompt = build_quick_dispatch_prompt(TaskId(42), "Quick task", "", None, None);
     assert!(prompt.contains("42"));
     assert!(prompt.contains("Quick task"));
     assert!(prompt.contains("update_task"));
@@ -582,7 +623,7 @@ fn build_quick_dispatch_prompt_contains_rename_instruction() {
 
 #[test]
 fn build_quick_dispatch_prompt_mentions_mcp() {
-    let prompt = build_quick_dispatch_prompt(TaskId(1), "Quick task", "", None);
+    let prompt = build_quick_dispatch_prompt(TaskId(1), "Quick task", "", None, None);
     assert!(prompt.contains("dispatch MCP tools"));
     assert!(prompt.contains("update_task"));
     assert!(!prompt.contains("add_note"));
@@ -590,8 +631,8 @@ fn build_quick_dispatch_prompt_mentions_mcp() {
 
 #[test]
 fn build_quick_dispatch_prompt_differs_from_regular() {
-    let regular = build_prompt(TaskId(1), "Task", "Desc", None, None);
-    let quick = build_quick_dispatch_prompt(TaskId(1), "Task", "Desc", None);
+    let regular = build_prompt(TaskId(1), "Task", "Desc", None, None, None);
+    let quick = build_quick_dispatch_prompt(TaskId(1), "Task", "Desc", None, None);
     assert!(quick.contains("placeholder"));
     assert!(!regular.contains("placeholder"));
 }
@@ -602,7 +643,7 @@ fn build_quick_dispatch_prompt_includes_epic_context() {
         epic_id: EpicId(7),
         epic_title: "My Epic".to_string(),
     };
-    let prompt = build_quick_dispatch_prompt(TaskId(42), "Quick task", "", Some(&ctx));
+    let prompt = build_quick_dispatch_prompt(TaskId(42), "Quick task", "", Some(&ctx), None);
     assert!(prompt.contains("EpicId: 7"), "should include epic ID");
     assert!(prompt.contains("My Epic"), "should include epic title");
     assert!(
@@ -613,7 +654,7 @@ fn build_quick_dispatch_prompt_includes_epic_context() {
 
 #[test]
 fn rebase_preamble_prepended_to_all_prompts() {
-    let body = build_prompt(TaskId(1), "Task", "Desc", None, None);
+    let body = build_prompt(TaskId(1), "Task", "Desc", None, None, None);
     let full = format!(
         "{}\n\n\
          Always work from this worktree folder — do not `cd` to the parent repo \
@@ -628,7 +669,8 @@ fn rebase_preamble_prepended_to_all_prompts() {
 
 #[test]
 fn build_brainstorm_prompt_contains_task_info() {
-    let prompt = build_brainstorm_prompt(TaskId(7), "Design auth", "Rework the auth flow", None);
+    let prompt =
+        build_brainstorm_prompt(TaskId(7), "Design auth", "Rework the auth flow", None, None);
     assert!(prompt.contains("7"));
     assert!(prompt.contains("Design auth"));
     assert!(prompt.contains("Rework the auth flow"));
@@ -638,7 +680,7 @@ fn build_brainstorm_prompt_contains_task_info() {
 
 #[test]
 fn build_plan_prompt_contains_task_info() {
-    let prompt = build_plan_prompt(TaskId(8), "Add feature", "Small improvement", None);
+    let prompt = build_plan_prompt(TaskId(8), "Add feature", "Small improvement", None, None);
     assert!(prompt.contains("8"));
     assert!(prompt.contains("Add feature"));
     assert!(prompt.contains("Small improvement"));
@@ -648,8 +690,8 @@ fn build_plan_prompt_contains_task_info() {
 
 #[test]
 fn build_plan_prompt_differs_from_brainstorm() {
-    let plan = build_plan_prompt(TaskId(1), "T", "D", None);
-    let brainstorm = build_brainstorm_prompt(TaskId(1), "T", "D", None);
+    let plan = build_plan_prompt(TaskId(1), "T", "D", None, None);
+    let brainstorm = build_brainstorm_prompt(TaskId(1), "T", "D", None, None);
     assert_ne!(plan, brainstorm);
     assert!(plan.contains("planning"));
     assert!(brainstorm.contains("brainstorm"));
@@ -657,7 +699,7 @@ fn build_plan_prompt_differs_from_brainstorm() {
 
 #[test]
 fn brainstorm_prompt_omits_tdd() {
-    let prompt = build_brainstorm_prompt(TaskId(7), "Design auth", "Rework auth", None);
+    let prompt = build_brainstorm_prompt(TaskId(7), "Design auth", "Rework auth", None, None);
     assert!(
         !prompt.contains("TDD"),
         "brainstorm prompt should not include TDD — no code is written at design stage"
@@ -666,7 +708,7 @@ fn brainstorm_prompt_omits_tdd() {
 
 #[test]
 fn brainstorm_prompt_omits_clarifying_questions_opener() {
-    let prompt = build_brainstorm_prompt(TaskId(7), "Design auth", "Rework auth", None);
+    let prompt = build_brainstorm_prompt(TaskId(7), "Design auth", "Rework auth", None, None);
     assert!(
         !prompt.contains("clarifying questions"),
         "brainstorm prompt should not have a clarifying-questions opener — /brainstorming skill handles it"
@@ -675,10 +717,10 @@ fn brainstorm_prompt_omits_clarifying_questions_opener() {
 
 #[test]
 fn all_planning_prompts_reference_brainstorming_skill() {
-    let brainstorm = build_brainstorm_prompt(TaskId(1), "T", "D", None);
-    let plan = build_plan_prompt(TaskId(1), "T", "D", None);
-    let standard = build_prompt(TaskId(1), "T", "D", None, None);
-    let quick = build_quick_dispatch_prompt(TaskId(1), "T", "D", None);
+    let brainstorm = build_brainstorm_prompt(TaskId(1), "T", "D", None, None);
+    let plan = build_plan_prompt(TaskId(1), "T", "D", None, None);
+    let standard = build_prompt(TaskId(1), "T", "D", None, None, None);
+    let quick = build_quick_dispatch_prompt(TaskId(1), "T", "D", None, None);
 
     for (name, prompt) in [
         ("brainstorm", brainstorm),
@@ -695,7 +737,7 @@ fn all_planning_prompts_reference_brainstorming_skill() {
 
 #[test]
 fn plan_and_attach_instruction_is_concise() {
-    let instruction = plan_and_attach_instruction(TaskId(42));
+    let instruction = plan_and_attach_instruction();
     assert!(
         instruction.len() < 200,
         "plan_and_attach_instruction should be concise (< 200 chars), got {} chars",
@@ -751,7 +793,7 @@ fn dispatch_reuses_existing_worktree() {
     ]);
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None, &[]).unwrap();
+    dispatch_agent(&task, &mock, None, None, &[]).unwrap();
 
     let calls = mock.recorded_calls();
     assert!(
@@ -782,7 +824,7 @@ fn dispatch_sends_claude_command() {
     ]);
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None, &[]).unwrap();
+    dispatch_agent(&task, &mock, None, None, &[]).unwrap();
 
     let calls = mock.recorded_calls();
     // The literal send-keys call (index 3) carries the claude invocation
@@ -813,7 +855,7 @@ fn dispatch_agent_uses_plan_mode() {
     ]);
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None, &[]).unwrap();
+    dispatch_agent(&task, &mock, None, None, &[]).unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, 3, "claude");
@@ -837,7 +879,7 @@ fn plan_agent_uses_plan_mode() {
     ]);
 
     let task = make_task(&repo_path);
-    plan_agent(&task, &mock, None, &[]).unwrap();
+    plan_agent(&task, &mock, None, None, &[]).unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, 3, "claude");
@@ -1159,7 +1201,7 @@ fn dispatch_uses_task_base_branch_in_prompt() {
 
     let mut task = make_task(&repo_path);
     task.base_branch = "master".to_string();
-    dispatch_agent(&task, &mock, None, &[]).unwrap();
+    dispatch_agent(&task, &mock, None, None, &[]).unwrap();
 
     // Verify the prompt uses task.base_branch directly — no symbolic-ref call needed
     let prompt_file = worktree_dir.join(".claude-prompt");
@@ -1184,7 +1226,7 @@ fn dispatch_fails_fast_if_git_fails() {
     ]);
 
     let task = make_task(&repo_path);
-    let result = dispatch_agent(&task, &mock, None, &[]);
+    let result = dispatch_agent(&task, &mock, None, None, &[]);
     assert!(result.is_err());
     let calls = mock.recorded_calls();
     assert_eq!(
@@ -1209,7 +1251,7 @@ fn brainstorm_reuses_existing_worktree() {
     ]);
 
     let task = make_task(&repo_path);
-    brainstorm_agent(&task, &mock, None, &[]).unwrap();
+    brainstorm_agent(&task, &mock, None, None, &[]).unwrap();
 
     let calls = mock.recorded_calls();
     assert!(
@@ -1236,7 +1278,7 @@ fn brainstorm_sends_brainstorm_prompt() {
     ]);
 
     let task = make_task(&repo_path);
-    brainstorm_agent(&task, &mock, None, &[]).unwrap();
+    brainstorm_agent(&task, &mock, None, None, &[]).unwrap();
 
     // Verify the prompt file was written with brainstorm content
     let prompt_file = worktree_dir.join(".claude-prompt");
@@ -1266,7 +1308,7 @@ fn quick_dispatch_reuses_existing_worktree() {
     ]);
 
     let task = make_task(&repo_path);
-    quick_dispatch_agent(&task, &mock, None, &[]).unwrap();
+    quick_dispatch_agent(&task, &mock, None, None, &[]).unwrap();
 
     let calls = mock.recorded_calls();
     assert!(
@@ -1293,7 +1335,7 @@ fn quick_dispatch_sends_rename_prompt() {
     ]);
 
     let task = make_task(&repo_path);
-    quick_dispatch_agent(&task, &mock, None, &[]).unwrap();
+    quick_dispatch_agent(&task, &mock, None, None, &[]).unwrap();
 
     let prompt_file = worktree_dir.join(".claude-prompt");
     let prompt = std::fs::read_to_string(prompt_file).unwrap();
@@ -1311,7 +1353,16 @@ fn quick_dispatch_sends_rename_prompt() {
 
 #[test]
 fn epic_planning_prompt_contains_epic_context() {
-    let prompt = build_epic_planning_prompt(EpicId(42), "Redesign auth", "Rework the login flow");
+    let project = ProjectContext {
+        project_id: ProjectId(3),
+        project_name: "My Project".to_string(),
+    };
+    let prompt = build_epic_planning_prompt(
+        EpicId(42),
+        "Redesign auth",
+        "Rework the login flow",
+        &project,
+    );
     assert!(prompt.contains("42"));
     assert!(prompt.contains("Redesign auth"));
     assert!(prompt.contains("Rework the login flow"));
@@ -1344,6 +1395,14 @@ fn epic_planning_prompt_contains_epic_context() {
     assert!(
         prompt.contains("work package"),
         "prompt should use 'work package' terminology"
+    );
+    assert!(
+        prompt.contains("ProjectId: 3"),
+        "prompt should include the ProjectId line"
+    );
+    assert!(
+        prompt.contains("project_id=3"),
+        "prompt should tell agent to set project_id on work packages"
     );
 }
 
@@ -1552,7 +1611,7 @@ fn dispatch_agent_fails_fast_with_empty_repo_path() {
     let mock = MockProcessRunner::new(vec![]);
     let mut task = make_task("/some/repo");
     task.repo_path = "".to_string();
-    let result = dispatch_agent(&task, &mock, None, &[]);
+    let result = dispatch_agent(&task, &mock, None, None, &[]);
     assert!(result.is_err());
     let msg = result.unwrap_err().to_string();
     assert!(
@@ -1892,7 +1951,7 @@ fn dispatch_agent_uses_task_base_branch_in_prompt() {
 
     let mut task = make_task(&repo_path);
     task.base_branch = "develop".to_string();
-    dispatch_agent(&task, &mock, None, &[]).unwrap();
+    dispatch_agent(&task, &mock, None, None, &[]).unwrap();
 
     let prompt_file = worktree_dir.join(".claude-prompt");
     let prompt = std::fs::read_to_string(prompt_file).unwrap();
@@ -2122,7 +2181,7 @@ fn dispatch_agent_includes_plugin_dir() {
     ]);
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None, &[]).unwrap();
+    dispatch_agent(&task, &mock, None, None, &[]).unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, 3, "claude");

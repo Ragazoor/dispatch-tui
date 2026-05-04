@@ -1,5 +1,5 @@
 use crate::db;
-use crate::models::{EpicId, Task, TaskId};
+use crate::models::{EpicId, ProjectId, Task, TaskId};
 
 /// Plugin dir flag added to all Claude agent invocations so dispatched agents
 /// discover the dispatch plugin's skills and commands (e.g. /wrap-up).
@@ -32,6 +32,45 @@ impl EpicContext {
     }
 }
 
+/// Project context passed to prompt builders so agents know which project to
+/// assign sub-tasks to. The MCP `create_task` tool requires `project_id`; the
+/// agent reads it from the `ProjectId:` line in the task block.
+pub struct ProjectContext {
+    pub project_id: ProjectId,
+    pub project_name: String,
+}
+
+impl ProjectContext {
+    /// Build project context for a task. Looks up the task's project_id; falls
+    /// back to a synthetic name if the project record is missing (should not
+    /// happen in practice — every task is FK-bound to a real project).
+    pub fn from_db(task: &Task, db: &dyn db::TaskStore) -> Self {
+        let lookup = db
+            .list_projects()
+            .ok()
+            .and_then(|projects| projects.into_iter().find(|p| p.id == task.project_id));
+        match lookup {
+            Some(p) => ProjectContext {
+                project_id: p.id,
+                project_name: p.name,
+            },
+            None => ProjectContext {
+                project_id: task.project_id,
+                project_name: format!("project #{}", task.project_id),
+            },
+        }
+    }
+
+    pub(super) fn prompt_section(&self) -> String {
+        format!(
+            "\n\nThis task is in project #{}: {}.\n\
+            When creating sub-tasks via the create_task MCP tool, pass project_id={} \
+            so the new task lands in the same project as this one.",
+            self.project_id, self.project_name, self.project_id
+        )
+    }
+}
+
 pub(super) fn build_tmux_window_name(task_id: TaskId) -> String {
     format!("task-{task_id}")
 }
@@ -52,17 +91,28 @@ pub(super) fn epic_preamble(epic: Option<&EpicContext>) -> (String, String) {
     (id_line, section)
 }
 
+/// Returns `(project_id_line, project_section)` for embedding in agent prompts.
+pub(super) fn project_preamble(project: Option<&ProjectContext>) -> (String, String) {
+    let id_line = project.map_or(String::new(), |p| {
+        format!("\n  ProjectId: {}", p.project_id)
+    });
+    let section = project.map_or(String::new(), |p| p.prompt_section());
+    (id_line, section)
+}
+
 /// Standard task identification block shared by all task agent prompts.
 pub(super) fn task_block(
     task_id: TaskId,
     title: &str,
     description: &str,
     epic: Option<&EpicContext>,
+    project: Option<&ProjectContext>,
 ) -> String {
     let (epic_id_line, epic_section) = epic_preamble(epic);
+    let (project_id_line, project_section) = project_preamble(project);
     format!(
         "Task:\n  ID: {task_id}\n  Title: {title}\n  Description: {description}\
-         {epic_id_line}{epic_section}"
+         {project_id_line}{epic_id_line}{epic_section}{project_section}"
     )
 }
 
@@ -77,10 +127,9 @@ pub(super) fn mcp_tools_instruction() -> &'static str {
 }
 
 /// Instructions for writing a plan and attaching it to the task via MCP.
-pub(super) fn plan_and_attach_instruction(_task_id: TaskId) -> String {
+pub(super) fn plan_and_attach_instruction() -> &'static str {
     "Use /brainstorming to design the solution, then save the plan to docs/plans/ \
 and call update_task to attach it."
-        .to_string()
 }
 
 /// Dispatch instruction for no-plan tasks: conditionally suggests brainstorming
@@ -110,8 +159,9 @@ pub(super) fn build_prompt(
     description: &str,
     plan: Option<&str>,
     epic: Option<&EpicContext>,
+    project: Option<&ProjectContext>,
 ) -> String {
-    let block = task_block(task_id, title, description, epic);
+    let block = task_block(task_id, title, description, epic, project);
 
     match plan {
         None => {
@@ -170,8 +220,9 @@ pub(super) fn build_quick_dispatch_prompt(
     title: &str,
     description: &str,
     epic: Option<&EpicContext>,
+    project: Option<&ProjectContext>,
 ) -> String {
-    let block = task_block(task_id, title, description, epic);
+    let block = task_block(task_id, title, description, epic, project);
 
     format!(
         "You are working interactively with the user.\n\
@@ -192,7 +243,7 @@ Then write a focused plan before making any changes:\n\
 \n\
 {mcp}",
         block = block,
-        attach = plan_and_attach_instruction(task_id),
+        attach = plan_and_attach_instruction(),
         tdd = tdd_instruction(),
         allium = allium_instruction(),
         mcp = mcp_tools_instruction(),
@@ -204,8 +255,9 @@ pub(super) fn build_brainstorm_prompt(
     title: &str,
     description: &str,
     epic: Option<&EpicContext>,
+    project: Option<&ProjectContext>,
 ) -> String {
-    let block = task_block(task_id, title, description, epic);
+    let block = task_block(task_id, title, description, epic, project);
 
     format!(
         "You are starting a brainstorming session.\n\
@@ -218,7 +270,7 @@ pub(super) fn build_brainstorm_prompt(
 \n\
 {mcp}",
         block = block,
-        attach = plan_and_attach_instruction(task_id),
+        attach = plan_and_attach_instruction(),
         allium = allium_instruction(),
         mcp = mcp_tools_instruction(),
     )
@@ -229,8 +281,9 @@ pub(super) fn build_plan_prompt(
     title: &str,
     description: &str,
     epic: Option<&EpicContext>,
+    project: Option<&ProjectContext>,
 ) -> String {
-    let block = task_block(task_id, title, description, epic);
+    let block = task_block(task_id, title, description, epic, project);
 
     format!(
         "You are starting a planning session.\n\
@@ -245,7 +298,7 @@ pub(super) fn build_plan_prompt(
 \n\
 {mcp}",
         block = block,
-        attach = plan_and_attach_instruction(task_id),
+        attach = plan_and_attach_instruction(),
         tdd = tdd_instruction(),
         allium = allium_instruction(),
         mcp = mcp_tools_instruction(),
@@ -256,7 +309,9 @@ pub(super) fn build_epic_planning_prompt(
     epic_id: EpicId,
     title: &str,
     description: &str,
+    project: &ProjectContext,
 ) -> String {
+    let project_section = project.prompt_section();
     format!(
         "You are starting a planning session.\n\
 \n\
@@ -264,7 +319,8 @@ Epic:\n\
   ID: {epic_id}\n\
   Title: {title}\n\
   Description: {description}\n\
-\n\
+  ProjectId: {project_id}\n\
+{project_section}\n\
 Your goal is to explore the codebase, write an implementation plan, and break \
 it into work packages on the kanban board.\n\
 \n\
@@ -275,6 +331,7 @@ Steps:\n\
 3. Create work packages from the plan using create_task. Work packages are kanban \
 tasks — do not confuse them with subtasks inside the plan document itself:\n\
    - Set epic_id={epic_id} on every work package\n\
+   - Set project_id={project_id} on every work package\n\
    - Use sort_order to control execution order (1, 2, 3, \u{2026})\n\
    - Work packages at the same sort_order in different repositories run in parallel\n\
    - Work packages in the same repository must have different sort_order values\n\
@@ -292,6 +349,8 @@ IMPORTANT: Do NOT start implementing. Your job ends after creating the work pack
         epic_id = epic_id,
         title = title,
         description = description,
+        project_id = project.project_id,
+        project_section = project_section,
         tdd = tdd_instruction(),
         allium = allium_instruction(),
     )
