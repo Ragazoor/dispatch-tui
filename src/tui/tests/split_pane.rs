@@ -518,34 +518,6 @@ fn retry_resume_respawns_split_pane() {
 }
 
 #[test]
-fn pr_created_does_not_respawn_split_pane() {
-    let mut task = make_task(1, TaskStatus::Running);
-    task.tmux_window = Some("task-1".to_string());
-    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-    let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
-    app.board.split.active = true;
-    app.board.split.right_pane_id = Some("%5".to_string());
-    app.board.split.pinned_task_id = Some(TaskId(1));
-
-    let cmds = app.update(Message::PrCreated {
-        id: TaskId(1),
-        pr_url: "https://github.com/org/repo/pull/42".to_string(),
-    });
-
-    assert!(
-        !cmds
-            .iter()
-            .any(|c| matches!(c, Command::RespawnSplitPane { .. })),
-        "should NOT respawn — agent keeps running after PR creation"
-    );
-    assert_eq!(
-        app.board.split.pinned_task_id,
-        Some(TaskId(1)),
-        "pinned task should remain"
-    );
-}
-
-#[test]
 fn confirm_quit_with_split_no_pinned_task_kills_pane() {
     let mut app = make_app();
 

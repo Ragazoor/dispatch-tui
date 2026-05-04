@@ -154,18 +154,7 @@ pub(super) fn dispatch(
             rt.exec_delete_repo_path(app, &path);
             vec![]
         }
-        // PR commands
-        CreatePr {
-            id,
-            repo_path,
-            branch,
-            base_branch,
-            title,
-            description,
-        } => {
-            rt.exec_create_pr(id, repo_path, branch, base_branch, title, description);
-            vec![]
-        }
+        // PR commands (creation is agent-driven via the /wrap-up skill)
         CheckPrStatus { id, pr_url } => {
             rt.exec_check_pr_status(id, pr_url);
             vec![]

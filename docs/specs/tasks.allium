@@ -392,13 +392,13 @@ rule CreatePr {
     ensures: PrCreated(base: task.base_branch, head: task.worktree.branch)
 
     @guidance
-        -- Low-level PR creation path shared by the TUI wrap-up flow
-        -- and the MCP wrap_up tool (action: pr). Identical to
-        -- WrapUpPr — this rule names the inner transition. See
-        -- WrapUpPr for the command sequence (git push -u origin then
-        -- gh pr create --draft). The task always transitions to review
-        -- with sub_status = awaiting_review regardless of the starting
-        -- status (Running or Review).
+        -- The PR-creation transition. The pr_url is supplied by the
+        -- agent (via update_task) after the agent itself runs
+        -- `gh pr create --draft`. Dispatch no longer drives the push
+        -- or the gh invocation — see WrapUpPr for the rationale and
+        -- the agent-side command sequence. The task always transitions
+        -- to review with sub_status = awaiting_review regardless of
+        -- the starting status (Running or Review).
 }
 
 rule MergePr {
@@ -538,23 +538,32 @@ rule WrapUpPr {
     ensures: PrCreated(base: task.base_branch, head: task.worktree.branch)
 
     @guidance
-        -- Pushes the branch to origin (`git push -u origin <branch>`)
-        -- and creates a GitHub PR as a draft
-        -- (`gh pr create --draft --base task.base_branch --head owner:branch
-        -- --repo owner/repo`) to avoid triggering review requests before
-        -- the agent's work is fully reviewed. The --head uses the owner:branch
-        -- format so `gh` resolves the branch in the same repo as --repo
-        -- (rather than the authenticated user's namespace).
-        -- The PR base is task.base_branch (not hardcoded "main").
-        -- The task transitions to review and PR status polling
-        -- (PollPrStatus) takes over from there.
-        -- The operation runs in the background via ProcessRunner
-        -- (spawn_blocking). On failure, PrFailed is fired and the error
-        -- is shown in the status bar without changing task state.
-        -- Available from both the TUI (W then p) and MCP (wrap_up
-        -- tool with action "pr"). The existing tmux window is NOT
-        -- killed by this flow (it is preserved alongside the worktree,
-        -- so the agent can continue working — e.g., self-review).
+        -- Agent-driven PR creation. The /wrap-up skill instructs the
+        -- agent to inspect its own diff, draft a title and body that
+        -- reflect the actual work, run
+        --   git push -u origin <branch>
+        --   gh pr create --draft --base <task.base_branch>
+        --     --head <owner>:<branch> --repo <owner>/<repo>
+        --     --title <agent-authored> --body <agent-authored>
+        -- and then call MCP update_task with pr_url=<url> and
+        -- status=review to trigger this rule. The --head uses the
+        -- owner:branch format so `gh` resolves the branch in the same
+        -- repo as --repo (rather than the authenticated user's
+        -- namespace). The PR base is task.base_branch (not hardcoded
+        -- "main"). PR status polling (PollPrStatus) takes over once
+        -- the URL is recorded.
+        --
+        -- Rationale: previously dispatch's Rust code ran `gh pr create`
+        -- using task.title and task.description for the title and body.
+        -- That body was set at task-creation time and rarely matched
+        -- the work actually shipped. Letting the agent author the PR
+        -- after implementation produces materially better PRs.
+        --
+        -- The MCP wrap_up tool no longer accepts action="pr"; the
+        -- TUI W+p shortcut and the epic-merge MergeAction::Pr have
+        -- both been removed. Rebase remains as a TUI/MCP path (see
+        -- WrapUpRebase). The tmux window is preserved across PR
+        -- creation so the agent can continue working (e.g., self-review).
 }
 
 -- == Split Pane Lifecycle ==
@@ -1463,13 +1472,23 @@ rule WrapUpReflection {
     ensures: WrapUpReflectionNudged(task: task)
 
     @guidance
-        -- The MCP wrap_up handler appends a nudge to its response: "Before
-        -- finishing, did you discover anything non-obvious about this repo or
-        -- task? If so, call record_learning with a brief summary."
-        -- This is prompt encouragement, not a hard gate. The agent may proceed
-        -- to wrap up without proposing a learning.
-        -- Gated by config.learning_reflection_enabled (default: true).
-        -- Implemented in handle_wrap_up() (src/mcp/handlers/tasks.rs) in WP8.
+        -- A reflection nudge is appended to the MCP response that
+        -- finalises a wrap-up:
+        --   "Before finishing, did you discover anything non-obvious
+        --    about this repo or task? If so, call record_learning
+        --    with a brief summary."
+        --
+        -- Emission points:
+        --   * Rebase wrap-up: handle_wrap_up appends the nudge to the
+        --     successful rebase response.
+        --   * PR wrap-up: handle_update_task appends the nudge when a
+        --     call transitions pr_url from null → set AND the patch
+        --     also moves status to review (i.e. the agent-driven PR
+        --     finalisation path; see WrapUpPr).
+        --
+        -- This is prompt encouragement, not a hard gate. The agent may
+        -- proceed to wrap up without proposing a learning. Gated by
+        -- config.learning_reflection_enabled (default: true).
 }
 
 rule RecordLearningViaMcp {

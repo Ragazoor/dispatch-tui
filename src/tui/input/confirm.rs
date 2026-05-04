@@ -159,7 +159,19 @@ impl App {
     pub(in crate::tui) fn handle_key_confirm_wrap_up(&mut self, key: KeyEvent) -> Vec<Command> {
         match key.code {
             KeyCode::Char('r') => self.update(Message::WrapUpRebase),
-            KeyCode::Char('p') => self.update(Message::WrapUpPr),
+            KeyCode::Char('p') => {
+                // PR creation moved to the agent /wrap-up skill so the
+                // body actually reflects the diff rather than the stale
+                // task description. Exit the prompt and point the user
+                // at the skill.
+                self.input.mode = InputMode::Normal;
+                self.set_status(
+                    "PR creation is agent-driven \
+\u{2014} run the /wrap-up skill from the agent session"
+                        .to_string(),
+                );
+                vec![]
+            }
             KeyCode::Esc => self.update(Message::CancelWrapUp),
             _ => vec![],
         }
@@ -171,7 +183,18 @@ impl App {
     ) -> Vec<Command> {
         match key.code {
             KeyCode::Char('r') => self.update(Message::EpicWrapUpRebase),
-            KeyCode::Char('p') => self.update(Message::EpicWrapUpPr),
+            KeyCode::Char('p') => {
+                // Epic-merge batched PR creation had the same defect as
+                // W+p (auto-generated bodies). Removed; the user can
+                // PR each subtask via its own agent /wrap-up.
+                self.input.mode = InputMode::Normal;
+                self.set_status(
+                    "Epic batch PR removed \
+\u{2014} PR each subtask via its agent /wrap-up skill"
+                        .to_string(),
+                );
+                vec![]
+            }
             KeyCode::Esc => self.update(Message::CancelEpicWrapUp),
             _ => vec![],
         }

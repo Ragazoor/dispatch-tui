@@ -857,42 +857,6 @@ fn dispatch_is_noop_when_on_select_all() {
 }
 
 #[test]
-fn pr_created_stores_url() {
-    let task = make_task(1, TaskStatus::Review);
-    let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
-
-    let cmds = app.update(Message::PrCreated {
-        id: TaskId(1),
-        pr_url: "https://github.com/org/repo/pull/42".to_string(),
-    });
-
-    let task = app.find_task(TaskId(1)).unwrap();
-    assert_eq!(
-        task.pr_url.as_deref(),
-        Some("https://github.com/org/repo/pull/42")
-    );
-    assert!(cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
-}
-
-#[test]
-fn pr_failed_shows_error() {
-    let task = make_task(1, TaskStatus::Review);
-    let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
-
-    app.update(Message::PrFailed {
-        id: TaskId(1),
-        error: "Push failed".to_string(),
-    });
-
-    assert!(app
-        .status
-        .message
-        .as_deref()
-        .unwrap()
-        .contains("Push failed"));
-}
-
-#[test]
 fn pr_merged_moves_to_done_and_detaches() {
     let mut task = make_task(1, TaskStatus::Review);
     task.tmux_window = Some("task-1".to_string());

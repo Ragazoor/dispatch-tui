@@ -255,7 +255,10 @@ fn wrap_up_r_emits_finish_command() {
 }
 
 #[test]
-fn wrap_up_p_emits_create_pr_command() {
+fn wrap_up_p_emits_no_command_and_points_at_skill() {
+    // PR creation is agent-driven now (see the /wrap-up skill).
+    // Pressing `p` in ConfirmWrapUp must not dispatch a PR command;
+    // it just exits the prompt and shows a hint.
     let mut app = App::new(
         vec![{
             let mut t = make_task(1, TaskStatus::Review);
@@ -269,9 +272,22 @@ fn wrap_up_p_emits_create_pr_command() {
     app.update(Message::NavigateColumn(4));
 
     app.update(Message::StartWrapUp(TaskId(1)));
-    let cmds = app.update(Message::WrapUpPr);
-    assert!(cmds.iter().any(|c| matches!(c, Command::CreatePr { .. })));
+    app.input.mode = InputMode::ConfirmWrapUp(TaskId(1));
+    let cmds = app.handle_key(make_key(KeyCode::Char('p')));
+    assert!(
+        cmds.is_empty(),
+        "p should not dispatch any command; got: {cmds:?}"
+    );
     assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(
+        app.status
+            .message
+            .as_deref()
+            .unwrap_or("")
+            .contains("/wrap-up"),
+        "status should point the user at the /wrap-up skill; got: {:?}",
+        app.status.message
+    );
 }
 
 #[test]
@@ -397,7 +413,6 @@ fn epic_wrap_up_rebase_creates_queue_and_emits_first_finish() {
 
     assert_eq!(app.input.mode, InputMode::Normal);
     let queue = app.merge_queue.as_ref().expect("merge queue should exist");
-    assert_eq!(queue.action, MergeAction::Rebase);
     // Task 2 has sort_order 1, so it comes first
     assert_eq!(queue.task_ids, vec![TaskId(2), TaskId(1)]);
     assert_eq!(queue.current, Some(TaskId(2)));
@@ -476,7 +491,6 @@ fn epic_wrap_up_cancel_clears_queue() {
     app.board.epics = vec![make_epic(10)];
     app.merge_queue = Some(MergeQueue {
         epic_id: EpicId(10),
-        action: MergeAction::Rebase,
         task_ids: vec![TaskId(1)],
         completed: 0,
         current: Some(TaskId(1)),
@@ -486,30 +500,6 @@ fn epic_wrap_up_cancel_clears_queue() {
     app.update(Message::CancelMergeQueue);
 
     assert!(app.merge_queue.is_none());
-}
-
-#[test]
-fn epic_wrap_up_pr_mode_advances_on_pr_created() {
-    let mut app = App::new(
-        vec![make_review_subtask(1, 10, 2), make_review_subtask(2, 10, 1)],
-        ProjectId(1),
-        TEST_TIMEOUT,
-    );
-    app.board.epics = vec![make_epic(10)];
-    app.input.mode = InputMode::ConfirmEpicWrapUp(EpicId(10));
-    app.update(Message::EpicWrapUpPr);
-
-    let cmds = app.update(Message::PrCreated {
-        id: TaskId(2),
-        pr_url: "https://github.com/org/repo/pull/1".to_string(),
-    });
-
-    let queue = app.merge_queue.as_ref().expect("queue should still exist");
-    assert_eq!(queue.completed, 1);
-    assert_eq!(queue.current, Some(TaskId(1)));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::CreatePr { id, .. } if *id == TaskId(1))));
 }
 
 #[test]
@@ -555,7 +545,8 @@ fn handle_key_confirm_wrap_up_rebase() {
 }
 
 #[test]
-fn handle_key_confirm_wrap_up_pr() {
+fn handle_key_confirm_wrap_up_pr_no_longer_dispatches() {
+    // PR creation is agent-driven; the TUI shortcut emits no command.
     let mut app = make_app();
     let mut task = make_task(10, TaskStatus::Review);
     task.worktree = Some("/repo/.worktrees/10-test".to_string());
@@ -564,9 +555,7 @@ fn handle_key_confirm_wrap_up_pr() {
     app.input.mode = InputMode::ConfirmWrapUp(TaskId(10));
 
     let cmds = app.handle_key(make_key(KeyCode::Char('p')));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::CreatePr { id, .. } if *id == TaskId(10))));
+    assert!(cmds.is_empty(), "p should not dispatch a command anymore");
     assert_eq!(*app.mode(), InputMode::Normal);
 }
 
@@ -597,10 +586,6 @@ fn render_status_bar_confirm_wrap_up() {
     assert!(
         buffer_contains(&buf, "rebase"),
         "ConfirmWrapUp should show 'rebase'"
-    );
-    assert!(
-        buffer_contains(&buf, "PR"),
-        "ConfirmWrapUp should show 'PR'"
     );
 }
 
@@ -747,11 +732,15 @@ fn confirm_epic_wrap_up_r_sends_rebase() {
 }
 
 #[test]
-fn confirm_epic_wrap_up_p_sends_pr() {
+fn confirm_epic_wrap_up_p_no_longer_dispatches() {
+    // Epic-merge PR batching is gone — the same defect as W+p
+    // (auto-generated bodies). Pressing `p` exits the prompt with a
+    // hint pointing at the agent /wrap-up flow.
     let mut app = make_app();
     app.input.mode = InputMode::ConfirmEpicWrapUp(EpicId(1));
     let cmds = app.handle_key(make_key(KeyCode::Char('p')));
-    assert!(!cmds.is_empty() || app.input.mode == InputMode::Normal);
+    assert!(cmds.is_empty(), "epic-merge p should not dispatch");
+    assert_eq!(app.input.mode, InputMode::Normal);
 }
 
 #[test]

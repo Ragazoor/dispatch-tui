@@ -943,7 +943,6 @@ impl App {
             Message::CancelDone => self.handle_cancel_done(),
             Message::StartWrapUp(id) => self.handle_start_wrap_up(id),
             Message::WrapUpRebase => self.handle_wrap_up_rebase(),
-            Message::WrapUpPr => self.handle_wrap_up_pr(),
             Message::CancelWrapUp => self.handle_cancel_wrap_up(),
             Message::DetachTmux(id) => self.handle_detach_tmux(vec![id]),
             Message::BatchDetachTmux(ids) => self.handle_detach_tmux(ids),
@@ -992,8 +991,7 @@ impl App {
             Message::SubmitEpicDescription(v) => self.handle_submit_epic_description(v),
             Message::SubmitEpicRepoPath(v) => self.handle_submit_epic_repo_path(v),
             Message::StartEpicWrapUp(id) => self.handle_start_epic_wrap_up(id),
-            Message::EpicWrapUpRebase => self.handle_epic_wrap_up(MergeAction::Rebase),
-            Message::EpicWrapUpPr => self.handle_epic_wrap_up(MergeAction::Pr),
+            Message::EpicWrapUpRebase => self.handle_epic_wrap_up(),
             Message::CancelEpicWrapUp => self.handle_cancel_epic_wrap_up(),
             Message::CancelMergeQueue => self.handle_cancel_merge_queue(),
             Message::ToggleSelectEpic(id) => self.handle_toggle_select_epic(id),
@@ -1001,8 +999,6 @@ impl App {
             Message::ToggleEpicAutoDispatch(id) => self.handle_toggle_epic_auto_dispatch(id),
 
             // ── PR flow: creation, merge, review state ──
-            Message::PrCreated { id, pr_url } => self.handle_pr_created(id, pr_url),
-            Message::PrFailed { id, error } => self.handle_pr_failed(id, error),
             Message::PrMerged(id) => self.handle_pr_merged(id),
             Message::StartMergePr(id) => self.handle_start_merge_pr(id),
             Message::ConfirmMergePr => self.handle_confirm_merge_pr(),

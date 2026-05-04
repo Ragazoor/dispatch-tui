@@ -762,58 +762,6 @@ fn exec_persist_setting_writes_to_db() {
 }
 
 #[tokio::test]
-async fn exec_create_pr_happy_path() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let mock = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::ok(), // git push
-        MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // git remote get-url
-        MockProcessRunner::ok_with_stdout(b"https://github.com/org/repo/pull/42\n"), // gh pr create
-    ]));
-    let rt = make_runtime(db, tx, mock);
-
-    rt.exec_create_pr(
-        TaskId(1),
-        "/repo".to_string(),
-        "1-task".to_string(),
-        "main".to_string(),
-        "Fix bug".to_string(),
-        "Description".to_string(),
-    );
-
-    let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    assert!(matches!(msg, Message::PrCreated { id: TaskId(1), .. }));
-}
-
-#[tokio::test]
-async fn exec_create_pr_push_fails() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let mock = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::fail("fatal: no remote"), // git push fails
-    ]));
-    let rt = make_runtime(db, tx, mock);
-
-    rt.exec_create_pr(
-        TaskId(1),
-        "/repo".to_string(),
-        "1-task".to_string(),
-        "main".to_string(),
-        "Fix bug".to_string(),
-        "Description".to_string(),
-    );
-
-    let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    assert!(matches!(msg, Message::PrFailed { .. }));
-}
-
-#[tokio::test]
 async fn exec_check_pr_status_sends_merged() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let (tx, mut rx) = mpsc::unbounded_channel();

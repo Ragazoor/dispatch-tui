@@ -27,14 +27,14 @@ impl App {
 
         self.input.mode = InputMode::ConfirmEpicWrapUp(epic_id);
         self.set_status(format!(
-            "Wrap up {} review task{}: [r] rebase all  [p] PR all  [Esc] cancel",
+            "Wrap up {} review task{}: [r] rebase all  [Esc] cancel  (PR: agent /wrap-up skill per task)",
             review_count,
             if review_count == 1 { "" } else { "s" },
         ));
         vec![]
     }
 
-    pub(in crate::tui) fn handle_epic_wrap_up(&mut self, action: MergeAction) -> Vec<Command> {
+    pub(in crate::tui) fn handle_epic_wrap_up(&mut self) -> Vec<Command> {
         let epic_id = match self.input.mode {
             InputMode::ConfirmEpicWrapUp(id) => id,
             _ => return vec![],
@@ -59,7 +59,6 @@ impl App {
 
         self.merge_queue = Some(MergeQueue {
             epic_id,
-            action,
             task_ids,
             completed: 0,
             current: None,
@@ -71,13 +70,10 @@ impl App {
 
     pub(in crate::tui) fn advance_merge_queue(&mut self) -> Vec<Command> {
         loop {
-            let (total, next_idx, next_id, action) = match &self.merge_queue {
-                Some(q) if q.completed < q.task_ids.len() => (
-                    q.task_ids.len(),
-                    q.completed,
-                    q.task_ids[q.completed],
-                    q.action.clone(),
-                ),
+            let (total, next_idx, next_id) = match &self.merge_queue {
+                Some(q) if q.completed < q.task_ids.len() => {
+                    (q.task_ids.len(), q.completed, q.task_ids[q.completed])
+                }
                 Some(q) => {
                     let total = q.task_ids.len();
                     self.merge_queue = None;
@@ -95,29 +91,15 @@ impl App {
                         let branch = dispatch::branch_from_worktree(&worktree);
                         let repo_path = t.repo_path.clone();
                         let base_branch = t.base_branch.clone();
-                        let title = t.title.clone();
-                        let description = t.description.clone();
                         let tmux_window = t.tmux_window.clone();
-                        branch.map(|b| {
-                            (
-                                worktree,
-                                b,
-                                repo_path,
-                                base_branch,
-                                title,
-                                description,
-                                tmux_window,
-                            )
-                        })
+                        branch.map(|b| (worktree, b, repo_path, base_branch, tmux_window))
                     }
                     None => None,
                 },
                 _ => None,
             };
 
-            let Some((worktree, branch, repo_path, base_branch, title, description, tmux_window)) =
-                task_data
-            else {
+            let Some((worktree, branch, repo_path, base_branch, tmux_window)) = task_data else {
                 // Skip this task — no longer eligible
                 if let Some(q) = &mut self.merge_queue {
                     q.completed += 1;
@@ -134,26 +116,14 @@ impl App {
                 next_id
             ));
 
-            return match action {
-                MergeAction::Rebase => {
-                    vec![Command::Finish {
-                        id: next_id,
-                        repo_path,
-                        branch,
-                        base_branch,
-                        worktree,
-                        tmux_window,
-                    }]
-                }
-                MergeAction::Pr => vec![Command::CreatePr {
-                    id: next_id,
-                    repo_path,
-                    branch,
-                    base_branch,
-                    title,
-                    description,
-                }],
-            };
+            return vec![Command::Finish {
+                id: next_id,
+                repo_path,
+                branch,
+                base_branch,
+                worktree,
+                tmux_window,
+            }];
         }
     }
 

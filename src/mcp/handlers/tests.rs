@@ -2801,24 +2801,16 @@ async fn wrap_up_rebase_returns_started() {
 }
 
 #[tokio::test]
-async fn wrap_up_pr_succeeds_with_complete_message() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
-    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        // task.base_branch = "main" is passed explicitly to create_pr; no symbolic-ref call
-        MockProcessRunner::ok(), // git push
-        MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // git remote get-url
-        MockProcessRunner::ok_with_stdout(b"https://github.com/org/repo/pull/7\n"), // gh pr create
-    ]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-    });
-
-    let task_id = db
+async fn wrap_up_rejects_pr_action() {
+    // PR creation is now agent-driven. The /wrap-up skill instructs the
+    // agent to author the title/body, run gh pr create itself, and
+    // record the result via update_task. wrap_up only handles rebase.
+    let state = test_state();
+    let task_id = state
+        .db
         .create_task(
-            "My Feature",
-            "desc",
+            "T",
+            "d",
             "/repo",
             None,
             TaskStatus::Review,
@@ -2829,11 +2821,13 @@ async fn wrap_up_pr_succeeds_with_complete_message() {
             ProjectId(1),
         )
         .unwrap();
-    db.patch_task(
-        task_id,
-        &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-my-feature")),
-    )
-    .unwrap();
+    state
+        .db
+        .patch_task(
+            task_id,
+            &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
+        )
+        .unwrap();
 
     let resp = call(
         &state,
@@ -2844,12 +2838,10 @@ async fn wrap_up_pr_succeeds_with_complete_message() {
         })),
     )
     .await;
-
-    let text = extract_response_text(&resp);
-    assert!(
-        text.contains("wrap_up complete"),
-        "Expected 'wrap_up complete', got: {text}"
-    );
+    // Serde rejects the unknown variant — the message includes "pr"
+    // and lists the valid variants. The skill ensures agents no longer
+    // pass this argument.
+    assert_error(&resp, "unknown variant `pr`");
 }
 
 // ---------------------------------------------------------------------------
@@ -3248,58 +3240,6 @@ async fn wrap_up_rebase_not_on_main_returns_error() {
         TaskStatus::Review,
         "Task should remain Review on error"
     );
-}
-
-#[tokio::test]
-async fn wrap_up_pr_push_fails_returns_error() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
-    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::fail("remote: Permission denied"), // git push fails
-    ]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-    });
-
-    let task_id = db
-        .create_task(
-            "Push Fail",
-            "desc",
-            "/repo",
-            None,
-            TaskStatus::Review,
-            "main",
-            None,
-            None,
-            None,
-            ProjectId(1),
-        )
-        .unwrap();
-    db.patch_task(
-        task_id,
-        &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-push-fail")),
-    )
-    .unwrap();
-
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "wrap_up",
-            "arguments": { "task_id": task_id.0, "action": "pr" }
-        })),
-    )
-    .await;
-
-    assert_error(&resp, "wrap_up failed");
-    let task = db.get_task(task_id).unwrap().unwrap();
-    assert_eq!(
-        task.status,
-        TaskStatus::Review,
-        "Task should remain Review on push failure"
-    );
-    assert!(task.pr_url.is_none(), "No PR URL should be set on failure");
 }
 
 #[tokio::test]
@@ -4177,202 +4117,6 @@ async fn wrap_up_rebase_sets_task_to_done() {
         task.status,
         TaskStatus::Done,
         "Task should be Done after successful rebase"
-    );
-}
-
-#[tokio::test]
-async fn wrap_up_pr_sets_review_and_pr_url() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
-    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::ok(), // git push
-        MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // git remote get-url
-        MockProcessRunner::ok_with_stdout(b"https://github.com/org/repo/pull/42\n"), // gh pr create
-    ]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-    });
-
-    let task_id = db
-        .create_task(
-            "PR Review",
-            "desc",
-            "/repo",
-            None,
-            TaskStatus::Running,
-            "main",
-            None,
-            None,
-            None,
-            ProjectId(1),
-        )
-        .unwrap();
-    db.patch_task(
-        task_id,
-        &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-pr-review")),
-    )
-    .unwrap();
-
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "wrap_up",
-            "arguments": { "task_id": task_id.0, "action": "pr" }
-        })),
-    )
-    .await;
-    let text = extract_response_text(&resp);
-    assert!(text.contains("wrap_up complete"));
-    assert!(
-        text.contains("https://github.com/org/repo/pull/42"),
-        "response should include PR URL"
-    );
-
-    let task = db.get_task(task_id).unwrap().unwrap();
-    assert_eq!(
-        task.status,
-        TaskStatus::Review,
-        "Task should be Review after PR creation"
-    );
-    assert_eq!(
-        task.pr_url.as_deref(),
-        Some("https://github.com/org/repo/pull/42"),
-        "PR URL should be stored"
-    );
-}
-
-#[tokio::test]
-async fn wrap_up_pr_does_not_inject_review_command() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
-    let mock = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::ok(), // git push
-        MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // git remote get-url
-        MockProcessRunner::ok_with_stdout(b"https://github.com/org/repo/pull/42\n"), // gh pr create
-                                 // No send-keys mock — injection must not occur
-    ]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner: mock.clone() as Arc<dyn ProcessRunner>,
-    });
-
-    let task_id = db
-        .create_task(
-            "Feature",
-            "desc",
-            "/repo",
-            None,
-            TaskStatus::Running,
-            "main",
-            None,
-            None,
-            None,
-            ProjectId(1),
-        )
-        .unwrap();
-    db.patch_task(
-        task_id,
-        &db::TaskPatch::new()
-            .worktree(Some("/repo/.worktrees/1-feature"))
-            .tmux_window(Some("task-1")),
-    )
-    .unwrap();
-
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "wrap_up",
-            "arguments": { "task_id": task_id.0, "action": "pr" }
-        })),
-    )
-    .await;
-
-    assert!(resp.error.is_none(), "expected success: {:?}", resp.error);
-
-    // Give any spawned background tasks time to complete so their calls are recorded.
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-    let calls = mock.recorded_calls();
-    assert!(
-        !calls
-            .iter()
-            .any(|(cmd, args)| cmd == "tmux" && args.iter().any(|a| a == "send-keys")),
-        "wrap_up pr must not inject a review command via send-keys; got calls: {calls:?}"
-    );
-}
-
-#[tokio::test]
-async fn wrap_up_pr_returns_existing_url_on_duplicate() {
-    // When gh pr create fails because the PR already exists, wrap_up should treat
-    // it as success and return the URL from the error message.
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
-    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::ok(), // git push
-        MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // git remote get-url
-        MockProcessRunner::fail(
-            "a pull request for branch '1-feature' already exists:\nhttps://github.com/org/repo/pull/7",
-        ), // gh pr create — already exists
-    ]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-    });
-
-    let task_id = db
-        .create_task(
-            "Feature",
-            "desc",
-            "/repo",
-            None,
-            TaskStatus::Running,
-            "main",
-            None,
-            None,
-            None,
-            ProjectId(1),
-        )
-        .unwrap();
-    db.patch_task(
-        task_id,
-        &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-feature")),
-    )
-    .unwrap();
-
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "wrap_up",
-            "arguments": { "task_id": task_id.0, "action": "pr" }
-        })),
-    )
-    .await;
-
-    assert!(
-        resp.error.is_none(),
-        "expected success when PR already exists, got error: {:?}",
-        resp.error
-    );
-    let text = extract_response_text(&resp);
-    assert!(
-        text.contains("https://github.com/org/repo/pull/7"),
-        "response should include existing PR URL, got: {text}"
-    );
-
-    let task = db.get_task(task_id).unwrap().unwrap();
-    assert_eq!(
-        task.status,
-        TaskStatus::Review,
-        "Task should move to Review even when PR already exists"
-    );
-    assert_eq!(
-        task.pr_url.as_deref(),
-        Some("https://github.com/org/repo/pull/7"),
-        "Existing PR URL should be saved"
     );
 }
 
@@ -7846,21 +7590,6 @@ fn make_rebase_state() -> (Arc<dyn db::TaskStore>, Arc<McpState>) {
     (db, state)
 }
 
-fn make_pr_state() -> (Arc<dyn db::TaskStore>, Arc<McpState>) {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
-    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::ok(), // git push
-        MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // git remote get-url
-        MockProcessRunner::ok_with_stdout(b"https://github.com/org/repo/pull/7\n"), // gh pr create
-    ]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-    });
-    (db, state)
-}
-
 fn seed_task_with_worktree(db: &Arc<dyn db::TaskStore>, suffix: &str) -> crate::models::TaskId {
     let task_id = db
         .create_task(
@@ -7957,17 +7686,42 @@ async fn wrap_up_rebase_omits_reflection_nudge_when_disabled() {
     );
 }
 
+// -- update_task PR-finalisation nudge tests -------------------------------
+//
+// When the agent records a freshly-created PR via update_task (per the
+// agent-driven /wrap-up flow), the response should append the same
+// reflection nudge that the rebase wrap_up emits — i.e. when pr_url
+// transitions from null to a value AND status is being set to review.
+
 #[tokio::test]
-async fn wrap_up_pr_appends_reflection_nudge_by_default() {
-    let (db, state) = make_pr_state();
-    let task_id = seed_task_with_worktree(&db, "pr-nudge");
+async fn update_task_pr_finalisation_appends_reflection_nudge_by_default() {
+    let state = test_state();
+    let task_id = state
+        .db
+        .create_task(
+            "PR finalise",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Running,
+            "main",
+            None,
+            None,
+            None,
+            ProjectId(1),
+        )
+        .unwrap();
 
     let resp = call(
         &state,
         "tools/call",
         Some(json!({
-            "name": "wrap_up",
-            "arguments": { "task_id": task_id.0, "action": "pr" }
+            "name": "update_task",
+            "arguments": {
+                "task_id": task_id.0,
+                "pr_url": "https://github.com/org/repo/pull/7",
+                "status": "review"
+            }
         })),
     )
     .await;
@@ -7975,6 +7729,183 @@ async fn wrap_up_pr_appends_reflection_nudge_by_default() {
     let text = extract_response_text(&resp);
     assert!(
         text.contains("record_learning"),
-        "nudge should appear on PR wrap_up by default; got: {text}"
+        "nudge should appear when finalising a PR via update_task; got: {text}"
+    );
+}
+
+#[tokio::test]
+async fn update_task_pr_finalisation_omits_nudge_when_disabled() {
+    let state = test_state();
+    state
+        .db
+        .set_setting_bool("learning_reflection_enabled", false)
+        .unwrap();
+    let task_id = state
+        .db
+        .create_task(
+            "PR finalise disabled",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Running,
+            "main",
+            None,
+            None,
+            None,
+            ProjectId(1),
+        )
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_task",
+            "arguments": {
+                "task_id": task_id.0,
+                "pr_url": "https://github.com/org/repo/pull/7",
+                "status": "review"
+            }
+        })),
+    )
+    .await;
+
+    let text = extract_response_text(&resp);
+    assert!(
+        !text.contains("record_learning"),
+        "nudge must not appear when reflection disabled; got: {text}"
+    );
+}
+
+#[tokio::test]
+async fn update_task_pr_set_without_status_does_not_nudge() {
+    // Agent setting only pr_url (no status transition) is not a wrap-up
+    // finalisation — don't nudge. This preserves current update_task UX
+    // for non-wrap-up callers tweaking the URL.
+    let state = test_state();
+    let task_id = state
+        .db
+        .create_task(
+            "PR set no status",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Running,
+            "main",
+            None,
+            None,
+            None,
+            ProjectId(1),
+        )
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_task",
+            "arguments": {
+                "task_id": task_id.0,
+                "pr_url": "https://github.com/org/repo/pull/7"
+            }
+        })),
+    )
+    .await;
+
+    let text = extract_response_text(&resp);
+    assert!(
+        !text.contains("record_learning"),
+        "nudge must not appear when status is not transitioning; got: {text}"
+    );
+}
+
+#[tokio::test]
+async fn update_task_status_review_without_pr_url_change_does_not_nudge() {
+    // Re-confirming a task to review without setting a new pr_url is
+    // not a wrap-up finalisation. No nudge.
+    let state = test_state();
+    let task_id = state
+        .db
+        .create_task(
+            "Already in review",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Running,
+            "main",
+            None,
+            None,
+            None,
+            ProjectId(1),
+        )
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_task",
+            "arguments": {
+                "task_id": task_id.0,
+                "status": "review"
+            }
+        })),
+    )
+    .await;
+
+    let text = extract_response_text(&resp);
+    assert!(
+        !text.contains("record_learning"),
+        "nudge must not appear without pr_url transition; got: {text}"
+    );
+}
+
+#[tokio::test]
+async fn update_task_pr_url_already_set_does_not_nudge_again() {
+    // The nudge should fire only on the first null->set transition.
+    // Subsequent updates to pr_url (e.g. correcting the URL) must not
+    // re-nudge.
+    let state = test_state();
+    let task_id = state
+        .db
+        .create_task(
+            "PR already set",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Review,
+            "main",
+            None,
+            None,
+            None,
+            ProjectId(1),
+        )
+        .unwrap();
+    state
+        .db
+        .patch_task(
+            task_id,
+            &db::TaskPatch::new().pr_url(Some("https://github.com/org/repo/pull/1")),
+        )
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_task",
+            "arguments": {
+                "task_id": task_id.0,
+                "pr_url": "https://github.com/org/repo/pull/2",
+                "status": "review"
+            }
+        })),
+    )
+    .await;
+
+    let text = extract_response_text(&resp);
+    assert!(
+        !text.contains("record_learning"),
+        "nudge must not fire when pr_url was already set; got: {text}"
     );
 }

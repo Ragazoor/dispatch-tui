@@ -93,7 +93,7 @@ impl App {
 
         self.input.mode = InputMode::ConfirmWrapUp(id);
         self.set_status(format!(
-            "Wrap up {}: [r] rebase onto main  [p] create PR  [Esc] cancel",
+            "Wrap up {}: [r] rebase onto main  [Esc] cancel  (PR: agent /wrap-up skill)",
             branch
         ));
         vec![]
@@ -129,36 +129,6 @@ impl App {
                 base_branch: task.base_branch.clone(),
                 worktree,
                 tmux_window: task.tmux_window.clone(),
-            }]
-        } else {
-            vec![]
-        }
-    }
-
-    pub(in crate::tui) fn handle_wrap_up_pr(&mut self) -> Vec<Command> {
-        let id = match self.input.mode {
-            InputMode::ConfirmWrapUp(id) => id,
-            _ => return vec![],
-        };
-        self.input.mode = InputMode::Normal;
-        self.set_status("Creating PR...".to_string());
-
-        if let Some(task) = self.find_task(id) {
-            let worktree = match &task.worktree {
-                Some(wt) => wt.clone(),
-                None => return vec![],
-            };
-            let branch = match dispatch::branch_from_worktree(&worktree) {
-                Some(b) => b,
-                None => return vec![],
-            };
-            vec![Command::CreatePr {
-                id,
-                repo_path: task.repo_path.clone(),
-                branch,
-                base_branch: task.base_branch.clone(),
-                title: task.title.clone(),
-                description: task.description.clone(),
             }]
         } else {
             vec![]

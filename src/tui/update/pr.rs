@@ -1,4 +1,4 @@
-//! PR-related message handlers: PR creation, merge flow, review state polling.
+//! PR-related message handlers: merge flow, review state polling.
 
 use crate::models::{ReviewDecision, SubStatus, TaskId, TaskStatus};
 
@@ -6,56 +6,6 @@ use super::super::types::*;
 use super::super::{truncate_title, App, TITLE_DISPLAY_LENGTH};
 
 impl App {
-    pub(in crate::tui) fn handle_pr_created(&mut self, id: TaskId, pr_url: String) -> Vec<Command> {
-        let in_queue = self
-            .merge_queue
-            .as_ref()
-            .is_some_and(|q| q.current == Some(id));
-
-        let mut cmds = if let Some(task) = self.find_task_mut(id) {
-            task.pr_url = Some(pr_url.clone());
-            task.status = TaskStatus::Review;
-            task.sub_status = SubStatus::default_for(TaskStatus::Review);
-            let task_clone = task.clone();
-            if !in_queue {
-                let pr_num = crate::models::pr_number_from_url(&pr_url);
-                let label = pr_num.map_or("PR".to_string(), |n| format!("PR #{n}"));
-                self.set_status(format!("{label} created: {pr_url}"));
-            }
-            vec![Command::PersistTask(task_clone)]
-        } else {
-            vec![]
-        };
-
-        if in_queue {
-            if let Some(q) = &mut self.merge_queue {
-                q.completed += 1;
-                q.current = None;
-            }
-            cmds.extend(self.advance_merge_queue());
-        }
-
-        cmds
-    }
-
-    pub(in crate::tui) fn handle_pr_failed(&mut self, id: TaskId, error: String) -> Vec<Command> {
-        if let Some(q) = &mut self.merge_queue {
-            if q.current == Some(id) {
-                q.current = None;
-                q.failed = Some(id);
-                let completed = q.completed;
-                let total = q.task_ids.len();
-                self.set_status(format!(
-                    "Epic merge paused ({completed}/{total}): PR #{id} \u{2014} {error}"
-                ));
-                return vec![];
-            }
-        }
-
-        self.set_status(error);
-        vec![]
-    }
-
     pub(in crate::tui) fn handle_pr_merged(&mut self, id: TaskId) -> Vec<Command> {
         let mut cmds = Vec::new();
 

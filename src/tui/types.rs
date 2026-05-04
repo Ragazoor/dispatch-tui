@@ -277,15 +277,9 @@ pub enum Message {
         error: String,
         is_conflict: bool,
     },
-    // PR flow
-    PrCreated {
-        id: TaskId,
-        pr_url: String,
-    },
-    PrFailed {
-        id: TaskId,
-        error: String,
-    },
+    // PR flow (creation is now agent-driven via the /wrap-up skill;
+    // see plugin/skills/wrap-up/SKILL.md). PrMerged/MergePrFailed are
+    // still needed for status polling and the [P] merge action.
     PrMerged(TaskId),
     StartMergePr(TaskId),
     ConfirmMergePr,
@@ -321,15 +315,14 @@ pub enum Message {
     DeleteRepoPath(String),
     CancelPresetInput,
     FilterPresetsLoaded(Vec<(String, HashSet<String>, RepoFilterMode)>),
-    // Wrap up (replaces finish + PR)
+    // Wrap up (rebase only — PR creation is agent-driven via the
+    // /wrap-up skill; see plugin/skills/wrap-up/SKILL.md)
     StartWrapUp(TaskId),
     WrapUpRebase,
-    WrapUpPr,
     CancelWrapUp,
-    // Epic batch wrap-up
+    // Epic batch wrap-up (rebase only)
     StartEpicWrapUp(EpicId),
     EpicWrapUpRebase,
-    EpicWrapUpPr,
     CancelEpicWrapUp,
     CancelMergeQueue,
     // Detach tmux panel (Review tasks only)
@@ -499,14 +492,6 @@ pub enum Command {
     },
     DeleteFilterPreset(String),
     DeleteRepoPath(String),
-    CreatePr {
-        id: TaskId,
-        repo_path: String,
-        branch: String,
-        base_branch: String,
-        title: String,
-        description: String,
-    },
     CheckPrStatus {
         id: TaskId,
         pr_url: String,
@@ -1063,16 +1048,9 @@ pub struct EpicDraft {
 // MergeQueue — state for batch epic wrap-up
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MergeAction {
-    Rebase,
-    Pr,
-}
-
 #[derive(Debug, Clone)]
 pub struct MergeQueue {
     pub epic_id: EpicId,
-    pub action: MergeAction,
     pub task_ids: Vec<TaskId>,
     pub completed: usize,
     pub current: Option<TaskId>,

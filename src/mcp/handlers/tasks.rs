@@ -115,7 +115,6 @@ pub(super) struct CreateTaskWithEpicArgs {
 #[serde(rename_all = "lowercase")]
 pub(super) enum WrapUpAction {
     Rebase,
-    Pr,
 }
 
 #[derive(Deserialize)]
@@ -349,13 +348,32 @@ pub(super) fn handle_update_task(
     }
     let fields_display = params.updated_field_names().join(", ");
 
+    // Detect the PR-finalisation transition (null pr_url -> set + status
+    // moves to Review) so we can append the reflection nudge that the
+    // rebase wrap_up emits. The DB read is gated by the cheap field
+    // checks first, so it only runs on actual finalisations.
+    let is_pr_finalisation = parsed.status == Some(TaskStatus::Review)
+        && matches!(
+            params.pr_url.as_ref(),
+            Some(crate::service::FieldUpdate::Set(s)) if !s.is_empty()
+        )
+        && matches!(
+            state.db.get_task(TaskId(parsed.task_id)),
+            Ok(Some(ref t)) if t.pr_url.is_none()
+        );
+
     let svc = TaskService::new(state.db.clone());
     match svc.update_task(params) {
         Ok(task_id) => {
             state.notify();
+            let nudge = if is_pr_finalisation {
+                reflection_nudge(&*state.db)
+            } else {
+                ""
+            };
             JsonRpcResponse::ok(
                 id,
-                json!({"content": [{"type": "text", "text": format!("Task {} updated ({})", task_id, fields_display)}]}),
+                json!({"content": [{"type": "text", "text": format!("Task {} updated ({}){}", task_id, fields_display, nudge)}]}),
             )
         }
         Err(e) => service_err_to_response(id, e),
@@ -639,137 +657,76 @@ pub(super) async fn handle_wrap_up(
     let notify_tx = state.notify_tx.clone();
     let task_id = task.id;
 
-    match parsed.action {
-        WrapUpAction::Rebase => {
-            let db = state.db.clone();
-            // Optimistically clear conflict sub_status before rebasing,
-            // matching the TUI behavior.
-            if task.sub_status == SubStatus::Conflict {
-                let clear_patch =
-                    db::TaskPatch::new().sub_status(SubStatus::default_for(task.status));
-                let _ = db.patch_task(task_id, &clear_patch);
-            }
-            let rebase_runner = runner.clone();
-            let rebase_base = base_branch.clone();
-            let rebase_result = match tokio::task::spawn_blocking(move || {
-                tracing::info!(task_id = task_id.0, %branch, "MCP wrap_up rebase starting");
-                dispatch::finish_task(
-                    &repo_path,
-                    &worktree,
-                    &branch,
-                    &rebase_base,
-                    None,
-                    &*rebase_runner,
-                )
-            })
-            .await
-            {
-                Ok(r) => r,
-                Err(e) => return JsonRpcResponse::err(id, -32603, format!("internal error: {e}")),
-            };
+    // Only WrapUpAction::Rebase is supported; PR creation is agent-driven
+    // (see plugin/skills/wrap-up/SKILL.md).
+    let db = state.db.clone();
+    // Optimistically clear conflict sub_status before rebasing,
+    // matching the TUI behavior.
+    if task.sub_status == SubStatus::Conflict {
+        let clear_patch = db::TaskPatch::new().sub_status(SubStatus::default_for(task.status));
+        let _ = db.patch_task(task_id, &clear_patch);
+    }
+    let rebase_runner = runner.clone();
+    let rebase_base = base_branch.clone();
+    let rebase_result = match tokio::task::spawn_blocking(move || {
+        tracing::info!(task_id = task_id.0, %branch, "MCP wrap_up rebase starting");
+        dispatch::finish_task(
+            &repo_path,
+            &worktree,
+            &branch,
+            &rebase_base,
+            None,
+            &*rebase_runner,
+        )
+    })
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => return JsonRpcResponse::err(id, -32603, format!("internal error: {e}")),
+    };
 
-            match rebase_result {
-                Ok(()) => {
-                    let patch = db::TaskPatch::new()
-                        .status(TaskStatus::Done)
-                        .tmux_window(None);
-                    if let Err(e) = db.patch_task(task_id, &patch) {
-                        tracing::warn!(
-                            task_id = task_id.0,
-                            "MCP wrap_up: failed to set task to done: {e}"
-                        );
-                    }
-                    if let Some(epic_id) = task.epic_id {
-                        if let Err(err) = db.recalculate_epic_status(epic_id) {
-                            tracing::warn!(
-                                "failed to recalculate epic status for epic {}: {err}",
-                                epic_id.0
-                            );
-                        }
-                    }
-                    let ad_runner = state.runner.clone();
-                    tokio::task::spawn_blocking(move || {
-                        if let Some(window) = &tmux_window {
-                            let _ = crate::tmux::kill_window(window, &*ad_runner);
-                        }
-                        if let Some(tx) = notify_tx {
-                            let _ = tx.send(crate::mcp::McpEvent::Refresh);
-                        }
-                    });
-                    JsonRpcResponse::ok(
-                        id,
-                        json!({"content": [{"type": "text", "text": format!("wrap_up complete (task {}, action: rebase){}", parsed.task_id, reflection_nudge(&*state.db))}]}),
-                    )
-                }
-                Err(e) => {
-                    if matches!(e, dispatch::FinishError::RebaseConflict(_)) {
-                        let patch = db::TaskPatch::new().sub_status(SubStatus::Conflict);
-                        let _ = db.patch_task(task_id, &patch);
-                    }
-                    if let Some(tx) = notify_tx {
-                        let _ = tx.send(crate::mcp::McpEvent::Refresh);
-                    }
-                    JsonRpcResponse::err(id, -32603, format!("wrap_up failed: {e}"))
+    match rebase_result {
+        Ok(()) => {
+            let patch = db::TaskPatch::new()
+                .status(TaskStatus::Done)
+                .tmux_window(None);
+            if let Err(e) = db.patch_task(task_id, &patch) {
+                tracing::warn!(
+                    task_id = task_id.0,
+                    "MCP wrap_up: failed to set task to done: {e}"
+                );
+            }
+            if let Some(epic_id) = task.epic_id {
+                if let Err(err) = db.recalculate_epic_status(epic_id) {
+                    tracing::warn!(
+                        "failed to recalculate epic status for epic {}: {err}",
+                        epic_id.0
+                    );
                 }
             }
+            let ad_runner = state.runner.clone();
+            tokio::task::spawn_blocking(move || {
+                if let Some(window) = &tmux_window {
+                    let _ = crate::tmux::kill_window(window, &*ad_runner);
+                }
+                if let Some(tx) = notify_tx {
+                    let _ = tx.send(crate::mcp::McpEvent::Refresh);
+                }
+            });
+            JsonRpcResponse::ok(
+                id,
+                json!({"content": [{"type": "text", "text": format!("wrap_up complete (task {}, action: rebase){}", parsed.task_id, reflection_nudge(&*state.db))}]}),
+            )
         }
-        WrapUpAction::Pr => {
-            let db = state.db.clone();
-            let pr_runner = runner.clone();
-            let title = task.title.clone();
-            let description = task.description.clone();
-            let pr_result = match tokio::task::spawn_blocking(move || {
-                tracing::info!(task_id = task_id.0, %branch, "MCP wrap_up pr starting");
-                dispatch::create_pr(
-                    &worktree,
-                    &branch,
-                    &title,
-                    &description,
-                    &base_branch,
-                    &*pr_runner,
-                )
-            })
-            .await
-            {
-                Ok(r) => r,
-                Err(e) => return JsonRpcResponse::err(id, -32603, format!("internal error: {e}")),
-            };
-
-            match pr_result {
-                Ok(result) => {
-                    let patch = db::TaskPatch::new()
-                        .status(TaskStatus::Review)
-                        .pr_url(Some(result.pr_url.as_str()));
-                    if let Err(e) = db.patch_task(task_id, &patch) {
-                        tracing::warn!(
-                            task_id = task_id.0,
-                            "MCP wrap_up: failed to save PR fields: {e}"
-                        );
-                    }
-                    if let Some(epic_id) = task.epic_id {
-                        if let Err(err) = db.recalculate_epic_status(epic_id) {
-                            tracing::warn!(
-                                "failed to recalculate epic status for epic {}: {err}",
-                                epic_id.0
-                            );
-                        }
-                    }
-                    let pr_url = result.pr_url.clone();
-                    if let Some(tx) = notify_tx {
-                        let _ = tx.send(crate::mcp::McpEvent::Refresh);
-                    }
-                    JsonRpcResponse::ok(
-                        id,
-                        json!({"content": [{"type": "text", "text": format!("wrap_up complete (task {}, action: pr, pr_url: {}){}", parsed.task_id, pr_url, reflection_nudge(&*state.db))}]}),
-                    )
-                }
-                Err(e) => {
-                    if let Some(tx) = notify_tx {
-                        let _ = tx.send(crate::mcp::McpEvent::Refresh);
-                    }
-                    JsonRpcResponse::err(id, -32603, format!("wrap_up failed: {e}"))
-                }
+        Err(e) => {
+            if matches!(e, dispatch::FinishError::RebaseConflict(_)) {
+                let patch = db::TaskPatch::new().sub_status(SubStatus::Conflict);
+                let _ = db.patch_task(task_id, &patch);
             }
+            if let Some(tx) = notify_tx {
+                let _ = tx.send(crate::mcp::McpEvent::Refresh);
+            }
+            JsonRpcResponse::err(id, -32603, format!("wrap_up failed: {e}"))
         }
     }
 }

@@ -23,7 +23,7 @@
 | `d` | Dispatch agent — behavior depends on tag (see README) / resume (Running task whose window is gone) |
 | `D` | Quick dispatch — pick repo and dispatch immediately |
 | `Shift+L` / `Shift+H` | Move task forward / backward |
-| `W` | Wrap up — commit, rebase, open PR |
+| `W` | Wrap up — commit and rebase. PR creation is agent-driven (run the `/wrap-up` skill from the agent session) |
 | `g` | Jump to the agent's tmux window (swap pane in split view) |
 | `G` | Jump to the agent's tmux window (always, ignoring split view) |
 | `S` | Toggle split view — side-by-side TUI + agent pane |
@@ -91,7 +91,7 @@ The setup is idempotent — safe to run on every install or upgrade.
 
 | Component | Purpose |
 |-----------|---------|
-| `/wrap-up` skill | Commit, rebase or PR when a task is complete |
+| `/wrap-up` skill | Commit, rebase, or author + create a draft PR when a task is complete (PR title and body are written by the agent based on the actual diff) |
 | `/queue-plan` command | Queue a plan file as a task |
 | `task-status-hook` | Automatically transitions task status (running/review/needs_input) |
 | `task-usage-hook` | Reports token usage per task |

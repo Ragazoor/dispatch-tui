@@ -296,7 +296,7 @@ mcp_tools! {
         };
 
     async "wrap_up" => tasks::handle_wrap_up,
-        "Wrap up a running or review task. Blocks until the operation completes. rebase: rebases the task branch onto base_branch, fast-forwards base_branch, kills the tmux window, and moves the task to Done — your session ends. pr: pushes the branch, creates a draft GitHub PR targeting base_branch, and moves the task to Review; the response includes the PR URL. If a PR already exists for the branch, returns the existing URL.",
+        "Wrap up a running or review task by rebasing onto its base_branch. Blocks until the rebase completes, then fast-forwards base_branch, kills the tmux window, and moves the task to Done — your session ends. For PR creation, follow the /wrap-up skill: author the title and body yourself, run `gh pr create --draft`, and record the URL via update_task with pr_url + status='review'.",
         {
             "type": "object",
             "properties": {
@@ -306,8 +306,8 @@ mcp_tools! {
                 },
                 "action": {
                     "type": "string",
-                    "enum": ["rebase", "pr"],
-                    "description": "rebase: rebase branch onto main and fast-forward. pr: push branch and create a GitHub PR."
+                    "enum": ["rebase"],
+                    "description": "Only 'rebase' is supported. To create a PR, follow the /wrap-up skill (agent runs `gh pr create` with an authored title and body, then calls update_task to record pr_url + status='review')."
                 }
             },
             "required": ["task_id", "action"]

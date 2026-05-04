@@ -183,9 +183,11 @@ rule DispatchEpicSubtask {
 }
 
 rule EpicBatchWrapUp {
-    when: EpicBatchWrapUp(epic, action)
+    when: EpicBatchWrapUp(epic, rebase)
 
-    -- action: rebase | pr
+    -- Rebase-only batch. PR creation is no longer batched from the
+    -- TUI — see WrapUpPr in tasks.allium. Author bespoke PRs from
+    -- the agent /wrap-up skill instead.
 
     let review_tasks = epic.subtasks where status = review and worktree != null
 
@@ -193,15 +195,12 @@ rule EpicBatchWrapUp {
 
     ensures:
         for task in sort_by_order(review_tasks):
-            if action = rebase:
-                WrapUpRebase(task)
-            else:
-                WrapUpPr(task)
+            WrapUpRebase(task)
 
     @guidance
-        -- Sequences rebase or PR creation across all review tasks in an
-        -- epic that have a worktree. Tasks are processed one at a time
-        -- in sort_order (sort_order ascending, nulls treated as the task
+        -- Sequences rebase across all review tasks in an epic that
+        -- have a worktree. Tasks are processed one at a time in
+        -- sort_order (sort_order ascending, nulls treated as the task
         -- id; no secondary id tie-break). On success, the next task is
         -- processed automatically. On conflict or failure, the queue
         -- pauses and reports the failing task — the user can resolve
