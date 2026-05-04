@@ -823,3 +823,64 @@ fn q_in_epic_view_exits_epic_not_projects_panel() {
         crate::tui::types::ViewMode::Board(_)
     ));
 }
+
+#[test]
+fn opening_projects_panel_positions_cursor_on_active_project() {
+    // Two projects: Default (id=1, idx=0), Backend (id=2, idx=1).
+    // Active project is Backend. Opening the panel should start at row 1.
+    let mut app = two_project_app();
+
+    // Select Backend via j while in the panel.
+    app.handle_key(make_key(KeyCode::Char('h')));
+    app.handle_key(make_key(KeyCode::Char('j')));
+    assert_eq!(app.active_project(), 2);
+    app.handle_key(make_key(KeyCode::Char('l'))); // close panel
+
+    // Simulate stale cursor (as happens after app load from persisted settings).
+    app.selection_mut().set_row(0, 0);
+    app.projects_panel.list_state.select(Some(0));
+
+    // Re-open: cursor must jump to Backend's row (1).
+    app.handle_key(make_key(KeyCode::Char('h')));
+    assert_eq!(
+        app.selected_project_row(),
+        1,
+        "cursor should be on Backend (row 1), not Default (row 0)"
+    );
+}
+
+#[test]
+fn opening_projects_panel_with_default_project_active_starts_at_row0() {
+    // Default project (id=1) is at row 0. Opening the panel should start there
+    // even if the cursor was left at a different row.
+    let mut app = two_project_app();
+    // active_project is Default (id=1) from two_project_app().
+
+    // Simulate stale cursor at row 1.
+    app.selection_mut().set_row(0, 1);
+    app.projects_panel.list_state.select(Some(1));
+
+    app.handle_key(make_key(KeyCode::Char('h')));
+    assert_eq!(
+        app.selected_project_row(),
+        0,
+        "cursor should be on Default (row 0)"
+    );
+}
+
+#[test]
+fn opening_projects_panel_first_time_with_non_default_active_project() {
+    // Simulates app startup where active_project was restored from persisted
+    // settings but the panel has never been opened (projects_row defaults to 0).
+    // SelectProject updates active_project and list_state but not projects_row,
+    // so the cursor is stale until the panel is opened.
+    let mut app = two_project_app();
+    app.update(Message::SelectProject(2)); // Backend, idx=1; projects_row stays 0
+
+    app.handle_key(make_key(KeyCode::Char('h')));
+    assert_eq!(
+        app.selected_project_row(),
+        1,
+        "first open should land on Backend (row 1), not Default (row 0)"
+    );
+}

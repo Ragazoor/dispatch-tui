@@ -98,10 +98,7 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_follow_project(&mut self, project_id: ProjectId) -> Vec<Command> {
-        if let Some(idx) = self.board.projects.iter().position(|p| p.id == project_id) {
-            self.selection_mut().set_row(0, idx);
-            self.projects_panel.list_state.select(Some(idx));
-        }
+        self.sync_project_cursor(project_id);
         vec![]
     }
 }

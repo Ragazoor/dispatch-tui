@@ -29,6 +29,11 @@ impl App {
             *self.archive.list_state.selected_mut() = Some(0);
         }
 
+        // Sync projects panel cursor to the active project when entering it.
+        if new_col == 0 {
+            self.sync_project_cursor(self.active_project);
+        }
+
         self.clamp_selection();
         self.update_anchor_from_current();
         vec![]

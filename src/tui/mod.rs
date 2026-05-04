@@ -688,6 +688,15 @@ impl App {
         }
     }
 
+    /// Move the projects-panel cursor to the row of `project_id`. No-op if
+    /// the project is not in the list.
+    pub(in crate::tui) fn sync_project_cursor(&mut self, project_id: ProjectId) {
+        if let Some(idx) = self.board.projects.iter().position(|p| p.id == project_id) {
+            self.selection_mut().set_row(0, idx);
+            self.projects_panel.list_state.select(Some(idx));
+        }
+    }
+
     /// Clamp all selected_row values to be within bounds for each column.
     pub fn clamp_selection(&mut self) {
         for (idx, &status) in TaskStatus::ALL.iter().enumerate() {
