@@ -15,121 +15,77 @@ use crate::models::{
 };
 
 // ---------------------------------------------------------------------------
+// patch_struct! — declarative macro for selective-update builder structs
+// ---------------------------------------------------------------------------
+
+/// Generates a lifetime-parameterised builder struct for partial DB updates.
+///
+/// Each field is wrapped in `Option<…>` (default `None` = don't touch).
+/// Two field kinds:
+/// - `plain    field: Type` — `Option<Type>` storage; setter takes `Type`.
+/// - `nullable field: Type` — `Option<Option<Type>>` storage (double-Option);
+///   setter takes `Option<Type>` (allows NULL vs value distinction).
+///
+/// Also generates `new()` (alias for `Default::default()`) and
+/// `has_changes()` (true if any field is `Some`).
+macro_rules! patch_struct {
+    (
+        $(#[$meta:meta])*
+        $vis:vis struct $name:ident < $lt:lifetime > {
+            $( $kind:ident $field:ident : $ty:ty ),* $(,)?
+        }
+    ) => {
+        $(#[$meta])*
+        #[derive(Debug, Default)]
+        $vis struct $name<$lt> {
+            $( pub $field: patch_struct!(@field_type $kind $ty), )*
+        }
+
+        impl<$lt> $name<$lt> {
+            pub fn new() -> Self { Self::default() }
+
+            $( patch_struct!(@setter $kind $field $ty); )*
+
+            pub fn has_changes(&self) -> bool {
+                false $(|| self.$field.is_some())*
+            }
+        }
+    };
+
+    (@field_type plain    $ty:ty) => { Option<$ty> };
+    (@field_type nullable $ty:ty) => { Option<Option<$ty>> };
+
+    (@setter plain    $field:ident $ty:ty) => {
+        pub fn $field(mut self, v: $ty) -> Self { self.$field = Some(v); self }
+    };
+    (@setter nullable $field:ident $ty:ty) => {
+        pub fn $field(mut self, v: Option<$ty>) -> Self { self.$field = Some(v); self }
+    };
+}
+
+// ---------------------------------------------------------------------------
 // TaskPatch — builder for selective field updates
 // ---------------------------------------------------------------------------
 
-/// Builder for partial task updates. Each field is `None` by default (= don't
-/// change). For nullable columns (`plan_path`, `worktree`, `tmux_window`) we use
-/// a double-Option: `None` = don't change, `Some(None)` = set NULL,
-/// `Some(Some(x))` = set value.
-#[derive(Debug, Default)]
-pub struct TaskPatch<'a> {
-    pub status: Option<TaskStatus>,
-    pub plan_path: Option<Option<&'a str>>,
-    pub title: Option<&'a str>,
-    pub description: Option<&'a str>,
-    pub repo_path: Option<&'a str>,
-    pub worktree: Option<Option<&'a str>>,
-    pub tmux_window: Option<Option<&'a str>>,
-    pub sub_status: Option<SubStatus>,
-    pub pr_url: Option<Option<&'a str>>,
-    pub tag: Option<Option<TaskTag>>,
-    pub sort_order: Option<Option<i64>>,
-    pub base_branch: Option<&'a str>,
-    pub external_id: Option<Option<&'a str>>,
-    pub project_id: Option<ProjectId>,
-}
-
-impl<'a> TaskPatch<'a> {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn status(mut self, status: TaskStatus) -> Self {
-        self.status = Some(status);
-        self
-    }
-
-    pub fn plan_path(mut self, plan_path: Option<&'a str>) -> Self {
-        self.plan_path = Some(plan_path);
-        self
-    }
-
-    pub fn title(mut self, title: &'a str) -> Self {
-        self.title = Some(title);
-        self
-    }
-
-    pub fn description(mut self, description: &'a str) -> Self {
-        self.description = Some(description);
-        self
-    }
-
-    pub fn repo_path(mut self, repo_path: &'a str) -> Self {
-        self.repo_path = Some(repo_path);
-        self
-    }
-
-    pub fn worktree(mut self, worktree: Option<&'a str>) -> Self {
-        self.worktree = Some(worktree);
-        self
-    }
-
-    pub fn tmux_window(mut self, tmux_window: Option<&'a str>) -> Self {
-        self.tmux_window = Some(tmux_window);
-        self
-    }
-
-    pub fn sub_status(mut self, sub_status: SubStatus) -> Self {
-        self.sub_status = Some(sub_status);
-        self
-    }
-
-    pub fn pr_url(mut self, pr_url: Option<&'a str>) -> Self {
-        self.pr_url = Some(pr_url);
-        self
-    }
-
-    pub fn tag(mut self, tag: Option<TaskTag>) -> Self {
-        self.tag = Some(tag);
-        self
-    }
-
-    pub fn sort_order(mut self, sort_order: Option<i64>) -> Self {
-        self.sort_order = Some(sort_order);
-        self
-    }
-
-    pub fn base_branch(mut self, base_branch: &'a str) -> Self {
-        self.base_branch = Some(base_branch);
-        self
-    }
-
-    pub fn external_id(mut self, external_id: Option<&'a str>) -> Self {
-        self.external_id = Some(external_id);
-        self
-    }
-
-    pub fn project_id(mut self, id: ProjectId) -> Self {
-        self.project_id = Some(id);
-        self
-    }
-
-    pub fn has_changes(&self) -> bool {
-        self.status.is_some()
-            || self.plan_path.is_some()
-            || self.title.is_some()
-            || self.description.is_some()
-            || self.repo_path.is_some()
-            || self.worktree.is_some()
-            || self.tmux_window.is_some()
-            || self.sub_status.is_some()
-            || self.pr_url.is_some()
-            || self.tag.is_some()
-            || self.sort_order.is_some()
-            || self.base_branch.is_some()
-            || self.external_id.is_some()
-            || self.project_id.is_some()
+patch_struct! {
+    /// Builder for partial task updates. Each field is `None` by default (= don't
+    /// change). For nullable columns we use a double-Option:
+    /// `None` = don't change, `Some(None)` = set NULL, `Some(Some(x))` = set value.
+    pub struct TaskPatch<'a> {
+        plain    status:       TaskStatus,
+        nullable plan_path:    &'a str,
+        plain    title:        &'a str,
+        plain    description:  &'a str,
+        plain    repo_path:    &'a str,
+        nullable worktree:     &'a str,
+        nullable tmux_window:  &'a str,
+        plain    sub_status:   SubStatus,
+        nullable pr_url:       &'a str,
+        nullable tag:          TaskTag,
+        nullable sort_order:   i64,
+        plain    base_branch:  &'a str,
+        nullable external_id:  &'a str,
+        plain    project_id:   ProjectId,
     }
 }
 
@@ -137,98 +93,30 @@ impl<'a> TaskPatch<'a> {
 // EpicPatch — builder for selective epic field updates
 // ---------------------------------------------------------------------------
 
-/// Builder for partial epic updates, mirroring `TaskPatch`. Each field is
-/// `None` by default (= don't change). For nullable columns (`plan_path`) we use
-/// a double-Option: `None` = don't change, `Some(None)` = set NULL,
-/// `Some(Some(x))` = set value.
-///
-/// # Why `parent_epic_id` is absent
-///
-/// Reparenting an epic is not supported. `parent_epic_id` is set once at
-/// creation time via [`EpicCrud::create_epic`] and never changed afterward.
-/// This keeps the parent chain immutable and prevents accidental cycle
-/// introduction. The database enforces `CHECK (parent_epic_id != id)` (added
-/// in migration v35) as a final guard against self-loops.
-#[derive(Debug, Default)]
-pub struct EpicPatch<'a> {
-    pub title: Option<&'a str>,
-    pub description: Option<&'a str>,
-    pub status: Option<TaskStatus>,
-    pub plan_path: Option<Option<&'a str>>,
-    pub sort_order: Option<Option<i64>>,
-    pub repo_path: Option<&'a str>,
-    pub auto_dispatch: Option<bool>,
-    pub feed_command: Option<Option<&'a str>>,
-    pub feed_interval_secs: Option<Option<i64>>,
-    pub project_id: Option<ProjectId>,
-}
-
-impl<'a> EpicPatch<'a> {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn title(mut self, title: &'a str) -> Self {
-        self.title = Some(title);
-        self
-    }
-
-    pub fn description(mut self, description: &'a str) -> Self {
-        self.description = Some(description);
-        self
-    }
-
-    pub fn status(mut self, status: TaskStatus) -> Self {
-        self.status = Some(status);
-        self
-    }
-
-    pub fn plan_path(mut self, plan_path: Option<&'a str>) -> Self {
-        self.plan_path = Some(plan_path);
-        self
-    }
-
-    pub fn sort_order(mut self, sort_order: Option<i64>) -> Self {
-        self.sort_order = Some(sort_order);
-        self
-    }
-
-    pub fn repo_path(mut self, repo_path: &'a str) -> Self {
-        self.repo_path = Some(repo_path);
-        self
-    }
-
-    pub fn auto_dispatch(mut self, auto_dispatch: bool) -> Self {
-        self.auto_dispatch = Some(auto_dispatch);
-        self
-    }
-
-    pub fn feed_command(mut self, feed_command: Option<&'a str>) -> Self {
-        self.feed_command = Some(feed_command);
-        self
-    }
-
-    pub fn feed_interval_secs(mut self, feed_interval_secs: Option<i64>) -> Self {
-        self.feed_interval_secs = Some(feed_interval_secs);
-        self
-    }
-
-    pub fn project_id(mut self, id: ProjectId) -> Self {
-        self.project_id = Some(id);
-        self
-    }
-
-    pub fn has_changes(&self) -> bool {
-        self.title.is_some()
-            || self.description.is_some()
-            || self.status.is_some()
-            || self.plan_path.is_some()
-            || self.sort_order.is_some()
-            || self.repo_path.is_some()
-            || self.auto_dispatch.is_some()
-            || self.feed_command.is_some()
-            || self.feed_interval_secs.is_some()
-            || self.project_id.is_some()
+patch_struct! {
+    /// Builder for partial epic updates, mirroring `TaskPatch`. Each field is
+    /// `None` by default (= don't change). For nullable columns we use a
+    /// double-Option: `None` = don't change, `Some(None)` = set NULL,
+    /// `Some(Some(x))` = set value.
+    ///
+    /// # Why `parent_epic_id` is absent
+    ///
+    /// Reparenting an epic is not supported. `parent_epic_id` is set once at
+    /// creation time via [`EpicCrud::create_epic`] and never changed afterward.
+    /// This keeps the parent chain immutable and prevents accidental cycle
+    /// introduction. The database enforces `CHECK (parent_epic_id != id)` (added
+    /// in migration v35) as a final guard against self-loops.
+    pub struct EpicPatch<'a> {
+        plain    title:              &'a str,
+        plain    description:        &'a str,
+        plain    status:             TaskStatus,
+        nullable plan_path:          &'a str,
+        nullable sort_order:         i64,
+        plain    repo_path:          &'a str,
+        plain    auto_dispatch:      bool,
+        nullable feed_command:       &'a str,
+        nullable feed_interval_secs: i64,
+        plain    project_id:         ProjectId,
     }
 }
 

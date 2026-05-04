@@ -6239,3 +6239,60 @@ fn list_learnings_for_dispatch_excludes_non_approved() {
     assert!(!ids.contains(&proposed));
     assert!(ids.contains(&approved));
 }
+
+// ---------------------------------------------------------------------------
+// patch_struct! macro correctness — has_changes() and setter coverage
+// ---------------------------------------------------------------------------
+
+#[test]
+fn task_patch_default_has_no_changes() {
+    assert!(!TaskPatch::default().has_changes());
+}
+
+#[test]
+fn task_patch_each_setter_marks_has_changes() {
+    assert!(TaskPatch::new().status(TaskStatus::Running).has_changes());
+    assert!(TaskPatch::new().plan_path(Some("p")).has_changes());
+    assert!(TaskPatch::new().plan_path(None).has_changes());
+    assert!(TaskPatch::new().title("t").has_changes());
+    assert!(TaskPatch::new().description("d").has_changes());
+    assert!(TaskPatch::new().repo_path("/r").has_changes());
+    assert!(TaskPatch::new().worktree(Some("w")).has_changes());
+    assert!(TaskPatch::new().worktree(None).has_changes());
+    assert!(TaskPatch::new().tmux_window(Some("tw")).has_changes());
+    assert!(TaskPatch::new().tmux_window(None).has_changes());
+    assert!(TaskPatch::new().sub_status(SubStatus::Active).has_changes());
+    assert!(TaskPatch::new().pr_url(Some("u")).has_changes());
+    assert!(TaskPatch::new().pr_url(None).has_changes());
+    assert!(TaskPatch::new().tag(Some(TaskTag::Bug)).has_changes());
+    assert!(TaskPatch::new().tag(None).has_changes());
+    assert!(TaskPatch::new().sort_order(Some(1)).has_changes());
+    assert!(TaskPatch::new().sort_order(None).has_changes());
+    assert!(TaskPatch::new().base_branch("main").has_changes());
+    assert!(TaskPatch::new().external_id(Some("x")).has_changes());
+    assert!(TaskPatch::new().external_id(None).has_changes());
+    assert!(TaskPatch::new().project_id(ProjectId(1)).has_changes());
+}
+
+#[test]
+fn epic_patch_default_has_no_changes() {
+    assert!(!EpicPatch::default().has_changes());
+}
+
+#[test]
+fn epic_patch_each_setter_marks_has_changes() {
+    assert!(EpicPatch::new().title("t").has_changes());
+    assert!(EpicPatch::new().description("d").has_changes());
+    assert!(EpicPatch::new().status(TaskStatus::Running).has_changes());
+    assert!(EpicPatch::new().plan_path(Some("p")).has_changes());
+    assert!(EpicPatch::new().plan_path(None).has_changes());
+    assert!(EpicPatch::new().sort_order(Some(1)).has_changes());
+    assert!(EpicPatch::new().sort_order(None).has_changes());
+    assert!(EpicPatch::new().repo_path("/r").has_changes());
+    assert!(EpicPatch::new().auto_dispatch(true).has_changes());
+    assert!(EpicPatch::new().feed_command(Some("cmd")).has_changes());
+    assert!(EpicPatch::new().feed_command(None).has_changes());
+    assert!(EpicPatch::new().feed_interval_secs(Some(60)).has_changes());
+    assert!(EpicPatch::new().feed_interval_secs(None).has_changes());
+    assert!(EpicPatch::new().project_id(ProjectId(1)).has_changes());
+}
