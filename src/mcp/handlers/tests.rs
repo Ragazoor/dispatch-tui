@@ -27,6 +27,7 @@ fn test_state() -> Arc<McpState> {
         db,
         notify_tx: None,
         runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
     })
 }
 

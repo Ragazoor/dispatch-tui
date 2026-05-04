@@ -1,6 +1,7 @@
 pub mod handlers;
 
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 
 use axum::{routing::post, Router};
 use tokio::sync::mpsc;
@@ -24,6 +25,9 @@ pub struct McpState {
     pub notify_tx: Option<mpsc::UnboundedSender<McpEvent>>,
     /// Process runner shared with TuiRuntime for executing git/tmux operations.
     pub runner: Arc<dyn ProcessRunner>,
+    /// Tracks which task IDs have made their first call to exit_session.
+    /// Second call kills the window; cleared on re-dispatch.
+    pub exit_session_pending: Mutex<HashSet<TaskId>>,
 }
 
 impl McpState {
@@ -49,6 +53,7 @@ pub fn router(
         db,
         notify_tx,
         runner,
+        exit_session_pending: Mutex::new(HashSet::new()),
     });
     Router::new()
         .route("/mcp", post(handlers::handle_mcp))
