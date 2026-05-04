@@ -784,15 +784,12 @@ pub(super) fn handle_exit_session(
         if let Err(e) = state.db.patch_task(task_id, &patch) {
             tracing::warn!(task_id = task_id.0, "exit_session: failed to clear tmux_window: {e}");
         }
-        let tmux_window = task.tmux_window.clone();
+        state.notify(); // notify immediately after DB write
+        let tmux_window = task.tmux_window;
         let runner = state.runner.clone();
-        let notify_tx = state.notify_tx.clone();
         tokio::task::spawn_blocking(move || {
             if let Some(window) = &tmux_window {
                 let _ = crate::tmux::kill_window(window, &*runner);
-            }
-            if let Some(tx) = notify_tx {
-                let _ = tx.send(crate::mcp::McpEvent::Refresh);
             }
         });
         JsonRpcResponse::ok(

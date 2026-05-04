@@ -8042,7 +8042,7 @@ async fn exit_session_second_call_clears_window_and_returns_closed() {
     .await;
 
     let text = extract_response_text(&resp);
-    assert!(text.contains("closed") || text.contains("Session"), "expected closed message, got: {text}");
+    assert_eq!(text, "Session closed.", "expected 'Session closed.' message, got: {text}");
 
     // tmux_window must be cleared in DB
     let task = state.db.get_task(task_id).unwrap().unwrap();
