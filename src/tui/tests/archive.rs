@@ -101,7 +101,11 @@ fn archive_targets_task_at_x_press_not_at_y_press() {
 
 #[test]
 fn archive_task_sets_status_and_emits_persist() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Done)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Done)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     let cmds = app.update(Message::ArchiveTask(TaskId(1)));
     let task = app.board.tasks.iter().find(|t| t.id == TaskId(1)).unwrap();
     assert_eq!(task.status, TaskStatus::Archived);
@@ -127,7 +131,11 @@ fn archive_task_with_worktree_emits_cleanup() {
 
 #[test]
 fn archive_task_without_worktree_no_cleanup() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Backlog)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     let cmds = app.update(Message::ArchiveTask(TaskId(1)));
     assert!(!cmds.iter().any(|c| matches!(c, Command::Cleanup { .. })));
     assert!(cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
@@ -181,7 +189,11 @@ fn archive_panel_j_k_navigation() {
 
 #[test]
 fn archive_panel_x_enters_confirm_delete() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Archived)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Archived)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.selection_mut().set_column(5);
 
     app.handle_key(make_key(KeyCode::Char('x')));
@@ -194,7 +206,11 @@ fn archive_panel_x_enters_confirm_delete() {
 
 #[test]
 fn archive_panel_confirm_delete_removes_task() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Archived)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Archived)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.selection_mut().set_column(5);
 
     app.handle_key(make_key(KeyCode::Char('x')));
@@ -538,7 +554,11 @@ fn confirm_archive_epic_other_key_cancels() {
 
 #[test]
 fn confirm_archive_epic_no_epic_selected_is_noop() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Backlog)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.selection_mut().set_column(1); // Backlog = nav col 1
     app.input.mode = InputMode::ConfirmArchiveEpic;
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
@@ -580,7 +600,11 @@ fn archive_panel_up_arrow_navigates() {
 
 #[test]
 fn archive_panel_esc_closes() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Archived)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Archived)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.selection_mut().set_column(5);
     app.handle_key(make_key(KeyCode::Esc));
     assert!(!app.show_archived());
@@ -588,7 +612,11 @@ fn archive_panel_esc_closes() {
 
 #[test]
 fn archive_panel_e_edits_task() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Archived)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Archived)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.selection_mut().set_column(5);
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
     assert!(cmds.is_empty());
@@ -619,7 +647,11 @@ fn archive_panel_x_on_empty_is_noop() {
 
 #[test]
 fn archive_panel_q_enters_confirm_quit() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Archived)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Archived)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.selection_mut().set_column(5);
     app.handle_key(make_key(KeyCode::Char('q')));
     assert!(!app.should_quit);
@@ -628,7 +660,11 @@ fn archive_panel_q_enters_confirm_quit() {
 
 #[test]
 fn archive_panel_unrecognized_key_is_noop() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Archived)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Archived)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.selection_mut().set_column(5);
     let cmds = app.handle_key(make_key(KeyCode::Char('z')));
     assert!(cmds.is_empty());
@@ -662,7 +698,11 @@ fn confirm_archive_esc_cancels() {
 
 #[test]
 fn d_key_on_archived_shows_warning() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Archived)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Archived)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     // Archived tasks don't appear in columns, but test dispatch routing directly
     app.selection_mut().set_column(0);
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
@@ -753,7 +793,11 @@ fn batch_archive_skips_epics_with_non_done_subtasks() {
 
 #[test]
 fn batch_archive_mixed_tasks_and_epics() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Backlog)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.board.epics = vec![make_epic(10)];
     app.update(Message::ToggleSelect(TaskId(1)));
     app.update(Message::ToggleSelectEpic(EpicId(10)));

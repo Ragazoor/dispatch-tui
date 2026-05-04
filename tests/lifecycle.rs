@@ -8,7 +8,11 @@ use dispatch_tui::tui::{App, Command, Message, MoveDirection};
 
 fn make_app() -> (App, Database) {
     let db = Database::open_in_memory().unwrap();
-    let app = App::new(vec![], dispatch_tui::models::ProjectId(1), Duration::from_secs(300));
+    let app = App::new(
+        vec![],
+        dispatch_tui::models::ProjectId(1),
+        Duration::from_secs(300),
+    );
     (app, db)
 }
 

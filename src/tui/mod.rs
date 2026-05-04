@@ -28,6 +28,14 @@ pub(in crate::tui) const PR_POLL_INTERVAL: Duration = Duration::from_secs(30);
 /// Max character width for task titles shown in confirmation popups and status messages.
 pub(in crate::tui) const TITLE_DISPLAY_LENGTH: usize = 30;
 
+/// Maximum time a task may remain in the `dispatching` set before the watchdog
+/// force-fails it. Defence-in-depth against a stuck dispatch worker.
+pub(in crate::tui) const DISPATCH_WATCHDOG_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Number of braille spinner frames for the per-card "dispatching…" indicator.
+/// Must match the length of `DISPATCHING_SPINNER` in `kanban.rs`.
+pub(in crate::tui) const DISPATCH_SPINNER_FRAMES: u8 = 10;
+
 /// Returns true for the two edge navigation columns (Projects=0 and Archive=5) that
 /// don't hold regular task data and must be excluded from task-operation hotkeys.
 pub(in crate::tui) fn is_edge_column(col: usize) -> bool {
@@ -52,9 +60,12 @@ pub struct App {
     pub(in crate::tui) select: SelectionState,
     pub(in crate::tui) filter: FilterState,
     pub(in crate::tui) merge_queue: Option<MergeQueue>,
-    /// Task IDs with an in-flight dispatch (worktree + tmux setup running).
-    /// Prevents duplicate dispatches when the user presses Enter rapidly.
-    pub(in crate::tui) dispatching: HashSet<TaskId>,
+    /// Task IDs with an in-flight dispatch, mapped to their start time.
+    /// Membership prevents duplicate dispatches; start times drive the 60-second watchdog.
+    pub(in crate::tui) dispatching: HashMap<TaskId, Instant>,
+    /// Spinner frame index (0..DISPATCH_SPINNER_FRAMES) for the per-card "dispatching…" indicator.
+    /// Advanced by `Tick` only while `dispatching` is non-empty.
+    pub(in crate::tui) spinner_tick: u8,
     pub(in crate::tui) tips: Option<TipsOverlayState>,
 }
 
@@ -123,7 +134,8 @@ impl App {
             select: SelectionState::default(),
             filter: FilterState::default(),
             merge_queue: None,
-            dispatching: HashSet::new(),
+            dispatching: HashMap::new(),
+            spinner_tick: 0,
             tips: None,
         };
         app.update_anchor_from_current();
@@ -132,7 +144,7 @@ impl App {
 
     /// Returns true if the given task has an in-flight dispatch.
     pub fn is_dispatching(&self, id: TaskId) -> bool {
-        self.dispatching.contains(&id)
+        self.dispatching.contains_key(&id)
     }
 
     /// Get the current selection state (from whichever view mode is active).
@@ -294,12 +306,84 @@ impl App {
     pub(in crate::tui) fn set_status(&mut self, msg: String) {
         self.status.message = Some(msg);
         self.status.message_set_at = Some(Instant::now());
+        self.status.message_sticky = false;
+    }
+
+    /// Set a sticky status message that bypasses the 5-second TTL.
+    /// The message persists until `clear_status` is called explicitly.
+    pub(in crate::tui) fn set_status_sticky(&mut self, msg: String) {
+        self.status.message = Some(msg);
+        self.status.message_set_at = Some(Instant::now());
+        self.status.message_sticky = true;
     }
 
     /// Clear the status message and its timestamp.
     pub(in crate::tui) fn clear_status(&mut self) {
         self.status.message = None;
         self.status.message_set_at = None;
+        self.status.message_sticky = false;
+    }
+
+    /// Compute the sticky status text for the current `dispatching` set.
+    /// Returns `None` when no dispatch is in flight.
+    pub(in crate::tui) fn dispatching_status_text(&self) -> Option<String> {
+        let count = self.dispatching.len();
+        if count == 0 {
+            return None;
+        }
+        if count == 1 {
+            let (&id, _) = self.dispatching.iter().next()?;
+            let label = self
+                .find_task(id)
+                .map(|t| {
+                    let trimmed = t.title.trim();
+                    if trimmed.is_empty() {
+                        format!("task #{}", id.0)
+                    } else if trimmed.chars().count() <= TITLE_DISPLAY_LENGTH {
+                        format!("'{trimmed}'")
+                    } else {
+                        let truncated: String =
+                            trimmed.chars().take(TITLE_DISPLAY_LENGTH - 1).collect();
+                        format!("'{truncated}…'")
+                    }
+                })
+                .unwrap_or_else(|| format!("task #{}", id.0));
+            Some(format!("Dispatching {label}…"))
+        } else {
+            Some(format!("Dispatching {count} tasks…"))
+        }
+    }
+
+    /// Mark a task as mid-dispatch and update the sticky status text.
+    /// This is the single side-effect path for adding to `dispatching`.
+    /// No-op if the task ID is not present in the task list.
+    pub(in crate::tui) fn mark_dispatching(&mut self, id: TaskId) {
+        if self.find_task(id).is_none() {
+            return;
+        }
+        self.dispatching.insert(id, Instant::now());
+        if let Some(msg) = self.dispatching_status_text() {
+            self.set_status_sticky(msg);
+        }
+    }
+
+    /// Remove a task from the dispatching map and recompute the sticky status.
+    pub(in crate::tui) fn unmark_dispatching(&mut self, id: TaskId) {
+        self.dispatching.remove(&id);
+        self.refresh_dispatching_status();
+    }
+
+    /// Recompute the sticky status text after `dispatching` has been mutated.
+    /// Clears the status if no dispatches remain.
+    pub(in crate::tui) fn refresh_dispatching_status(&mut self) {
+        match self.dispatching_status_text() {
+            Some(msg) => self.set_status_sticky(msg),
+            None => {
+                if self.status.message_sticky {
+                    self.clear_status();
+                }
+            }
+        }
     }
 
     pub(in crate::tui) fn repo_matches(&self, repo_path: &str) -> bool {

@@ -1,8 +1,8 @@
 use super::*;
 use crate::db;
-use crate::models::{LearningId, LearningScope, LearningStatus};
 #[cfg(test)]
 use crate::models::ProjectId;
+use crate::models::{LearningId, LearningScope, LearningStatus};
 use crate::service::LearningService;
 
 impl TuiRuntime {

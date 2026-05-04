@@ -1881,19 +1881,31 @@ mod resolve_initial_project_tests {
 
     #[test]
     fn falls_back_to_default_when_no_saved_setting() {
-        let projects = vec![make_project(ProjectId(1), true), make_project(ProjectId(2), false)];
+        let projects = vec![
+            make_project(ProjectId(1), true),
+            make_project(ProjectId(2), false),
+        ];
         assert_eq!(resolve_initial_project(&projects, None), ProjectId(1));
     }
 
     #[test]
     fn uses_saved_project_when_it_exists() {
-        let projects = vec![make_project(ProjectId(1), true), make_project(ProjectId(2), false)];
-        assert_eq!(resolve_initial_project(&projects, Some("2".to_string())), ProjectId(2));
+        let projects = vec![
+            make_project(ProjectId(1), true),
+            make_project(ProjectId(2), false),
+        ];
+        assert_eq!(
+            resolve_initial_project(&projects, Some("2".to_string())),
+            ProjectId(2)
+        );
     }
 
     #[test]
     fn falls_back_to_default_when_saved_project_deleted() {
-        let projects = vec![make_project(ProjectId(1), true), make_project(ProjectId(2), false)];
+        let projects = vec![
+            make_project(ProjectId(1), true),
+            make_project(ProjectId(2), false),
+        ];
         assert_eq!(
             resolve_initial_project(&projects, Some("99".to_string())),
             ProjectId(1)
@@ -1902,7 +1914,10 @@ mod resolve_initial_project_tests {
 
     #[test]
     fn falls_back_to_default_when_saved_value_invalid() {
-        let projects = vec![make_project(ProjectId(1), true), make_project(ProjectId(2), false)];
+        let projects = vec![
+            make_project(ProjectId(1), true),
+            make_project(ProjectId(2), false),
+        ];
         assert_eq!(
             resolve_initial_project(&projects, Some("not_a_number".to_string())),
             ProjectId(1)
@@ -1944,7 +1959,9 @@ async fn exec_trigger_epic_feed_success() {
 #[tokio::test]
 async fn exec_trigger_epic_feed_zero_items() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
-    let epic = db.create_epic("Empty Feed", "", "/repo", None, ProjectId(1)).unwrap();
+    let epic = db
+        .create_epic("Empty Feed", "", "/repo", None, ProjectId(1))
+        .unwrap();
 
     let (tx, mut rx) = mpsc::unbounded_channel();
     let rt = make_runtime(db, tx, Arc::new(MockProcessRunner::new(vec![])));

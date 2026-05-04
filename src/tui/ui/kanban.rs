@@ -339,9 +339,15 @@ fn format_task_title(task: &Task, max_title: usize) -> String {
 // ---------------------------------------------------------------------------
 
 /// Classifies a task's current state into a single display indicator.
-/// Priority order matters: conflict > detached-review > crashed > stale >
-/// blocked > detached-running > running > review-pr > done-merged > idle.
+/// Priority order matters: dispatching > conflict > detached-review >
+/// crashed > stale > blocked > detached-running > running > review-pr >
+/// done-merged > idle. The `Dispatching` variant is reachable only for
+/// pre-dispatch (Backlog) tasks and is removed automatically when the
+/// dispatch worker reports success or failure.
 enum CardIndicator {
+    Dispatching {
+        spinner_frame: u8,
+    },
     Conflict,
     DetachedReview {
         pr_label: String,
@@ -374,6 +380,16 @@ fn classify_card_indicator(
     app: &App,
     now: DateTime<Utc>,
 ) -> CardIndicator {
+    if app.dispatching.contains_key(&task.id) {
+        debug_assert_eq!(
+            task.status,
+            TaskStatus::Backlog,
+            "dispatching set should only contain pre-dispatch (Backlog) tasks"
+        );
+        return CardIndicator::Dispatching {
+            spinner_frame: app.spinner_tick,
+        };
+    }
     if task.sub_status == SubStatus::Conflict {
         return CardIndicator::Conflict;
     }
@@ -435,8 +451,20 @@ fn classify_card_indicator(
     }
 }
 
+/// Braille spinner glyphs (10 frames). Indexed by `App::spinner_tick`,
+/// advanced once per Tick while a dispatch is in flight.
+const DISPATCHING_SPINNER: [&str; 10] = [
+    "\u{280B}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283C}", "\u{2834}", "\u{2826}", "\u{2827}",
+    "\u{2807}", "\u{280F}",
+];
+
 fn render_card_indicator(indicator: CardIndicator) -> Line<'static> {
     let (label, color) = match indicator {
+        CardIndicator::Dispatching { spinner_frame } => {
+            let glyph = DISPATCHING_SPINNER
+                [(spinner_frame as usize) % crate::tui::DISPATCH_SPINNER_FRAMES as usize];
+            (format!("{glyph} dispatching\u{2026}"), Color::Yellow)
+        }
         CardIndicator::Conflict => ("\u{26a0} rebase conflict".to_string(), Color::Red),
         CardIndicator::DetachedReview { pr_label } => (format!("\u{25cb} {pr_label}"), Color::Cyan),
         CardIndicator::Detached => ("\u{25cb} detached".to_string(), MUTED),

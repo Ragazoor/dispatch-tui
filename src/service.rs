@@ -1283,9 +1283,7 @@ mod tests {
             })
             .unwrap();
 
-        let err = svc
-            .update_task(UpdateTaskParams::for_task(id))
-            .unwrap_err();
+        let err = svc.update_task(UpdateTaskParams::for_task(id)).unwrap_err();
         assert!(matches!(err, ServiceError::Validation(_)));
     }
 

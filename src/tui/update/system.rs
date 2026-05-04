@@ -109,12 +109,12 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_dispatch_failed(&mut self, id: TaskId) -> Vec<Command> {
-        self.dispatching.remove(&id);
+        self.unmark_dispatching(id);
         vec![]
     }
 
     pub(in crate::tui) fn handle_mark_dispatching(&mut self, id: TaskId) -> Vec<Command> {
-        self.dispatching.insert(id);
+        self.mark_dispatching(id);
         vec![]
     }
 

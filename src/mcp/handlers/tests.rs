@@ -2284,7 +2284,10 @@ async fn create_task_with_string_epic_id() {
 #[tokio::test]
 async fn update_epic_no_fields_errors() {
     let state = test_state();
-    let epic = state.db.create_epic("Test", "", "/repo", None, ProjectId(1)).unwrap();
+    let epic = state
+        .db
+        .create_epic("Test", "", "/repo", None, ProjectId(1))
+        .unwrap();
 
     let resp = call(
         &state,
@@ -3245,7 +3248,10 @@ async fn wrap_up_rebase_not_on_main_returns_error() {
 #[tokio::test]
 async fn update_task_status_recalculates_epic_status() {
     let state = test_state();
-    let epic = state.db.create_epic("E", "", "/repo", None, ProjectId(1)).unwrap();
+    let epic = state
+        .db
+        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .unwrap();
     let task_id = state
         .db
         .create_task(
@@ -4135,7 +4141,9 @@ async fn wrap_up_rebase_recalculates_epic_status() {
         runner,
     });
 
-    let epic = db.create_epic("E", "", "/repo", None, ProjectId(1)).unwrap();
+    let epic = db
+        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .unwrap();
     let task_id = db
         .create_task(
             "Only Task",
@@ -5358,7 +5366,10 @@ async fn dispatch_next_returns_disabled_when_auto_dispatch_off() {
     let state = test_state();
 
     // Create epic with auto_dispatch = false
-    let epic = state.db.create_epic("E", "desc", "/repo", None, ProjectId(1)).unwrap();
+    let epic = state
+        .db
+        .create_epic("E", "desc", "/repo", None, ProjectId(1))
+        .unwrap();
     state
         .db
         .patch_epic(epic.id, &db::EpicPatch::new().auto_dispatch(false))
@@ -7303,7 +7314,10 @@ async fn list_tasks_explicit_scope_overrides_caller_derived_scope() {
     let state = test_state();
 
     // Create epic directly via DB
-    let epic = state.db.create_epic("Epic", "", "/repo", None, ProjectId(1)).unwrap();
+    let epic = state
+        .db
+        .create_epic("Epic", "", "/repo", None, ProjectId(1))
+        .unwrap();
 
     // Caller is in the epic
     let id_a = state

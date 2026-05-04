@@ -285,8 +285,15 @@ impl TuiRuntime {
         tokio::task::spawn_blocking(move || {
             let id = task.id;
             tracing::info!(task_id = id.0, label, "dispatching");
-            match dispatch_fn(&task, &*runner) {
-                Ok(result) => {
+            // Catch panics so a buggy dispatch path can't leave the task
+            // stuck in `app.dispatching` forever (the UI would otherwise
+            // show a perpetual "Dispatching…" status). The watchdog in
+            // `handle_tick` is the second line of defence.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                dispatch_fn(&task, &*runner)
+            }));
+            match result {
+                Ok(Ok(result)) => {
                     // receiver dropped = app shutting down; nothing to log
                     let _ = tx.send(Message::Dispatched {
                         id,
@@ -295,9 +302,19 @@ impl TuiRuntime {
                         switch_focus: false,
                     });
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     let _ = tx.send(Message::DispatchFailed(id));
                     let _ = tx.send(Message::Error(format!("{label} failed: {e:#}")));
+                }
+                Err(panic) => {
+                    let detail = panic
+                        .downcast_ref::<&'static str>()
+                        .map(|s| s.to_string())
+                        .or_else(|| panic.downcast_ref::<String>().cloned())
+                        .unwrap_or_else(|| "unknown".to_string());
+                    tracing::error!(task_id = id.0, label, "dispatch panicked: {detail}");
+                    let _ = tx.send(Message::DispatchFailed(id));
+                    let _ = tx.send(Message::Error(format!("{label} panicked: {detail}")));
                 }
             }
         });

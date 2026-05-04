@@ -95,6 +95,20 @@ fn snapshot_confirm_retry_form() {
 }
 
 #[test]
+fn snapshot_card_dispatching_indicator() {
+    use super::super::types::Message;
+    use crate::models::TaskId;
+
+    let mut app = make_app();
+    app.update(Message::MarkDispatching(TaskId(1)));
+    // Pin the spinner frame so the rendered glyph is deterministic.
+    app.spinner_tick = 0;
+
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
 fn snapshot_input_epic_title_form() {
     use super::super::types::{EpicDraft, InputMode};
     let mut app = make_app();

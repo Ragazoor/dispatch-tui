@@ -636,6 +636,11 @@ pub struct StatusState {
     pub(in crate::tui) message: Option<String>,
     pub(in crate::tui) message_set_at: Option<Instant>,
     pub(in crate::tui) error_popup: Option<String>,
+    /// When true, the status message survives the [`STATUS_MESSAGE_TTL`]
+    /// auto-clear in `handle_tick`. Used for in-flight dispatch feedback —
+    /// the message must persist for the multi-second `git fetch` window
+    /// rather than vanish mid-flight.
+    pub(in crate::tui) message_sticky: bool,
 }
 
 // ---------------------------------------------------------------------------

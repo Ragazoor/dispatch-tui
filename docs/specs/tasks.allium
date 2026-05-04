@@ -1724,6 +1724,56 @@ surface RepoPathPicker {
         -- shown, letting them pick with a single keystroke.
 }
 
+surface DispatchingFeedback {
+    facing user: User
+
+    -- This surface tracks tasks that are mid-dispatch — between the
+    -- user pressing Enter / Shift+D and the dispatch worker reporting
+    -- success or failure. Set membership and per-task start time are
+    -- implementation-internal (`app.dispatching` HashSet plus a
+    -- sibling start-time map); the surface contract is the visible
+    -- behaviour of the status bar and card line-2 indicator.
+
+    @guarantee StickyUntilEmpty
+        -- status_text persists across Tick events while `dispatching` is
+        -- non-empty. The 5-second STATUS_MESSAGE_TTL that applies to ad-hoc
+        -- status messages is bypassed for dispatching feedback.
+
+    @guarantee ClearedWhenEmpty
+        -- status_text becomes null the moment `dispatching` drains,
+        -- regardless of how the last entry was removed (Dispatched,
+        -- DispatchFailed, or watchdog timeout).
+
+    @guarantee DispatchingTimeout
+        -- A task that remains in `dispatching` for more than 60 seconds is
+        -- removed by the next Tick and a "dispatch timed out" failure toast
+        -- is shown. Defence-in-depth against a stuck dispatch worker
+        -- (e.g. an agent panic that escapes catch_unwind).
+
+    @guarantee DeletedTaskPruned
+        -- If a task referenced in `dispatching` is deleted from the task
+        -- list (e.g. via `d`), the next Tick removes the stale ID so the
+        -- status text never references a vanished task.
+
+    @guarantee SinglePathMutation
+        -- Mutation of `dispatching` flows through a single helper so the
+        -- sticky status text is always kept in sync with set membership.
+        -- Routing through `app.update(MarkDispatching)` from another
+        -- update handler is forbidden (recursive update hazard).
+
+    @guidance
+        -- Dispatch is asynchronous: the worker runs `git fetch origin
+        -- <base_branch>`, creates the worktree and tmux window, then
+        -- starts the agent. On a slow network this takes several seconds.
+        -- The DispatchingFeedback surface gives the user continuous
+        -- evidence that the work is in flight rather than a non-responsive
+        -- UI. It is rendered in two places: the status bar (full
+        -- status_text) and each affected task card's secondary line
+        -- (spinner glyph + "dispatching…"). Once `dispatching` is empty
+        -- the status bar reverts to its idle state and cards return to
+        -- their normal indicator.
+}
+
 ------------------------------------------------------------
 -- Invariants
 ------------------------------------------------------------

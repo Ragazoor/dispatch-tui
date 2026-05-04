@@ -9,12 +9,12 @@ use std::time::Duration;
 use tempfile::Builder as TempfileBuilder;
 
 use super::{TuiRuntime, TUI_WINDOW_NAME};
-#[cfg(test)]
-use crate::models::ProjectId;
 use crate::editor::{
     apply_epic_editor_fields, apply_task_editor_fields, format_description_for_editor,
     format_editor_content, format_epic_for_editor, parse_editor_content, parse_epic_editor_output,
 };
+#[cfg(test)]
+use crate::models::ProjectId;
 use crate::process::ProcessRunner;
 use crate::service::{UpdateEpicParams, UpdateTaskParams};
 use crate::tui::{App, Command, EditKind, EditorOutcome, Message};

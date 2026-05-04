@@ -7,11 +7,11 @@ use tokio::sync::mpsc;
 use crate::db::TaskStore;
 use crate::dispatch::resolve_feed_item_repo_paths;
 use crate::mcp::McpEvent;
+#[cfg(test)]
+use crate::models::ProjectId;
 use crate::models::{
     AlertKind, AlertSeverity, EpicId, FeedItem, ReviewDecision, ReviewPr, SecurityAlert, TaskStatus,
 };
-#[cfg(test)]
-use crate::models::ProjectId;
 
 /// Map a reviewer PR to a FeedItem for feed output.
 pub fn review_pr_to_feed_item(pr: &ReviewPr) -> FeedItem {
@@ -492,7 +492,9 @@ mod tests {
     #[tokio::test]
     async fn tick_does_not_block_event_loop() {
         let db = Arc::new(Database::open_in_memory().unwrap());
-        let epic = db.create_epic("Slow Epic", "", "/repo", None, ProjectId(1)).unwrap();
+        let epic = db
+            .create_epic("Slow Epic", "", "/repo", None, ProjectId(1))
+            .unwrap();
         db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some("sleep 5")))
             .unwrap();
 
@@ -511,7 +513,9 @@ mod tests {
     #[tokio::test]
     async fn tick_background_task_upserts_tasks() {
         let db = Arc::new(Database::open_in_memory().unwrap());
-        let epic = db.create_epic("BG Epic", "", "/repo", None, ProjectId(1)).unwrap();
+        let epic = db
+            .create_epic("BG Epic", "", "/repo", None, ProjectId(1))
+            .unwrap();
         db.patch_epic(
             epic.id,
             &EpicPatch::new().feed_command(Some(
@@ -536,7 +540,9 @@ mod tests {
     #[tokio::test]
     async fn tick_valid_json_upserts_tasks() {
         let db = Arc::new(Database::open_in_memory().unwrap());
-        let epic = db.create_epic("My Epic", "", "/repo", None, ProjectId(1)).unwrap();
+        let epic = db
+            .create_epic("My Epic", "", "/repo", None, ProjectId(1))
+            .unwrap();
         db.patch_epic(
             epic.id,
             &EpicPatch::new().feed_command(Some(
@@ -562,7 +568,9 @@ mod tests {
     #[tokio::test]
     async fn tick_nonzero_exit_no_panic() {
         let db = Arc::new(Database::open_in_memory().unwrap());
-        let epic = db.create_epic("Err Epic", "", "/repo", None, ProjectId(1)).unwrap();
+        let epic = db
+            .create_epic("Err Epic", "", "/repo", None, ProjectId(1))
+            .unwrap();
         db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some("exit 1")))
             .unwrap();
 
@@ -647,7 +655,9 @@ mod tests {
     async fn tick_null_feed_command_skipped() {
         let db = Arc::new(Database::open_in_memory().unwrap());
         // Epic with no feed_command (default)
-        let epic = db.create_epic("Plain Epic", "", "/repo", None, ProjectId(1)).unwrap();
+        let epic = db
+            .create_epic("Plain Epic", "", "/repo", None, ProjectId(1))
+            .unwrap();
 
         let (mut runner, mut rx) = make_runner(db.clone());
         runner.tick().await;
@@ -666,7 +676,9 @@ mod tests {
     #[tokio::test]
     async fn start_returns_immediately_without_blocking() {
         let db = Arc::new(Database::open_in_memory().unwrap());
-        let epic = db.create_epic("Slow Epic", "", "/repo", None, ProjectId(1)).unwrap();
+        let epic = db
+            .create_epic("Slow Epic", "", "/repo", None, ProjectId(1))
+            .unwrap();
         // A command that would block for 5 seconds if awaited inline.
         db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some("sleep 5")))
             .unwrap();

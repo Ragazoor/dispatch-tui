@@ -163,19 +163,20 @@ impl App {
                 .filter(|t| {
                     t.epic_id == Some(id)
                         && t.status == TaskStatus::Backlog
-                        && !self.dispatching.contains(&t.id)
+                        && !self.dispatching.contains_key(&t.id)
                 })
                 .collect();
             backlog_subtasks.sort_by_key(|t| (t.sort_order.unwrap_or(t.id.0), t.id.0));
 
-            match backlog_subtasks.first() {
-                Some(task) => {
-                    self.dispatching.insert(task.id);
-                    let mode = DispatchMode::for_task(task);
-                    vec![Command::DispatchAgent {
-                        task: (*task).clone(),
-                        mode,
-                    }]
+            let next = backlog_subtasks
+                .first()
+                .map(|t| (t.id, DispatchMode::for_task(t), (*t).clone()));
+            drop(backlog_subtasks);
+
+            match next {
+                Some((task_id, mode, task)) => {
+                    self.mark_dispatching(task_id);
+                    vec![Command::DispatchAgent { task, mode }]
                 }
                 None => {
                     self.set_status("No backlog subtasks in epic".to_string());

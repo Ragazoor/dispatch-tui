@@ -208,7 +208,11 @@ fn make_feed_epic(id: i64) -> crate::models::Epic {
 
 fn make_app_with_feed_epic_selected() -> super::App {
     use super::{App, TEST_TIMEOUT};
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Backlog)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.board.epics = vec![make_feed_epic(10)];
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 1);
@@ -217,7 +221,11 @@ fn make_app_with_feed_epic_selected() -> super::App {
 
 fn make_app_with_non_feed_epic_selected() -> super::App {
     use super::{App, TEST_TIMEOUT};
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Backlog)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.board.epics = vec![make_epic(10)]; // no feed_command
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 1);

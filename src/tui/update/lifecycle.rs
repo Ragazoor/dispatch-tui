@@ -113,7 +113,7 @@ impl App {
         id: TaskId,
         mode: DispatchMode,
     ) -> Vec<Command> {
-        if self.dispatching.contains(&id) {
+        if self.dispatching.contains_key(&id) {
             return vec![];
         }
         let task = self
@@ -121,7 +121,7 @@ impl App {
             .filter(|t| t.status == TaskStatus::Backlog)
             .cloned();
         if let Some(task) = task {
-            self.dispatching.insert(id);
+            self.mark_dispatching(id);
             return vec![Command::DispatchAgent { task, mode }];
         }
         vec![]
@@ -134,7 +134,7 @@ impl App {
         tmux_window: String,
         switch_focus: bool,
     ) -> Vec<Command> {
-        self.dispatching.remove(&id);
+        self.unmark_dispatching(id);
         if let Some(task) = self.find_task_mut(id) {
             task.worktree = Some(worktree);
             task.tmux_window = Some(tmux_window.clone());

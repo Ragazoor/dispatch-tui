@@ -6,7 +6,9 @@ use std::time::Instant;
 use crate::models::{SubStatus, Task, TaskId, TaskStatus};
 
 use super::super::types::*;
-use super::super::{App, PR_POLL_INTERVAL, STATUS_MESSAGE_TTL};
+use super::super::{
+    App, DISPATCH_SPINNER_FRAMES, DISPATCH_WATCHDOG_TIMEOUT, PR_POLL_INTERVAL, STATUS_MESSAGE_TTL,
+};
 
 impl App {
     pub(in crate::tui) fn handle_tmux_output(
@@ -133,13 +135,46 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_tick(&mut self) -> Vec<Command> {
-        // Auto-clear transient status messages after 5 seconds (only in Normal mode)
-        if self.input.mode == InputMode::Normal {
+        // Auto-clear transient status messages after 5 seconds (only in Normal
+        // mode). Sticky messages (in-flight dispatch feedback) are exempt.
+        if self.input.mode == InputMode::Normal && !self.status.message_sticky {
             if let Some(set_at) = self.status.message_set_at {
                 if set_at.elapsed() > STATUS_MESSAGE_TTL {
                     self.clear_status();
                 }
             }
+        }
+
+        if !self.dispatching.is_empty() {
+            // Drop dispatching IDs whose task has been deleted from the list.
+            let live_ids: HashSet<TaskId> = self.board.tasks.iter().map(|t| t.id).collect();
+            let before = self.dispatching.len();
+            self.dispatching.retain(|id, _| live_ids.contains(id));
+            if self.dispatching.len() != before {
+                self.refresh_dispatching_status();
+            }
+
+            // Watchdog: force-fail any dispatch that has exceeded the timeout.
+            let timed_out: Vec<TaskId> = self
+                .dispatching
+                .iter()
+                .filter(|(_, started)| started.elapsed() > DISPATCH_WATCHDOG_TIMEOUT)
+                .map(|(id, _)| *id)
+                .collect();
+            for id in &timed_out {
+                self.dispatching.remove(id);
+            }
+            if !timed_out.is_empty() {
+                self.refresh_dispatching_status();
+                let label = if timed_out.len() == 1 {
+                    format!("Dispatch for task #{} timed out", timed_out[0].0)
+                } else {
+                    format!("{} dispatches timed out", timed_out.len())
+                };
+                self.status.error_popup = Some(label);
+            }
+
+            self.spinner_tick = (self.spinner_tick + 1) % DISPATCH_SPINNER_FRAMES;
         }
 
         // Clear expired message flash indicators

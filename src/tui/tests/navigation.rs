@@ -252,7 +252,11 @@ fn g_key_with_live_window_jumps() {
 
 #[test]
 fn g_key_without_window_shows_message() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Backlog)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.selection_mut().set_column(1); // Backlog = nav col 1
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert!(cmds.is_empty());
@@ -307,7 +311,11 @@ fn resumed_sets_tmux_window() {
 
 #[test]
 fn resumed_unknown_id_is_noop() {
-    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(4, TaskStatus::Running)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     let cmds = app.update(Message::Resumed {
         id: TaskId(999),
         tmux_window: "win".to_string(),
@@ -648,7 +656,11 @@ fn help_overlay_hidden_in_normal_mode() {
 
 #[test]
 fn move_review_to_done_enters_confirm_mode() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Review)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Review)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.selection_mut().set_column(3); // Review = nav col 3
 
     let cmds = app.handle_key(make_key(KeyCode::Char('L')));
@@ -659,7 +671,11 @@ fn move_review_to_done_enters_confirm_mode() {
 
 #[test]
 fn move_backlog_to_running_no_confirmation() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Backlog)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.selection_mut().set_column(1); // Backlog = nav col 1
 
     let cmds = app.handle_key(make_key(KeyCode::Char('L')));
@@ -1049,7 +1065,11 @@ fn summary_row_shows_excl_prefix_in_exclude_mode() {
 
 #[test]
 fn w_key_on_non_review_task_is_noop() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Backlog)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
 
     app.handle_key(make_key(KeyCode::Char('W')));
     assert_eq!(app.input.mode, InputMode::Normal);
@@ -1074,7 +1094,11 @@ fn handle_refresh_usage_stores_by_task_id() {
 
 #[test]
 fn recovery_from_stale_resets_substatus_to_active() {
-    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(3, TaskStatus::Running)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.board.tasks[0].sub_status = SubStatus::Stale;
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
 
@@ -1092,7 +1116,11 @@ fn recovery_from_stale_resets_substatus_to_active() {
 
 #[test]
 fn recovery_from_crashed_resets_substatus_to_active() {
-    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(3, TaskStatus::Running)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.board.tasks[0].sub_status = SubStatus::Crashed;
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
 
@@ -1110,7 +1138,11 @@ fn recovery_from_crashed_resets_substatus_to_active() {
 
 #[test]
 fn active_task_output_does_not_emit_persist() {
-    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(3, TaskStatus::Running)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.board.tasks[0].sub_status = SubStatus::Active;
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
 
@@ -1127,7 +1159,11 @@ fn active_task_output_does_not_emit_persist() {
 
 #[test]
 fn tick_skips_already_stale_tasks() {
-    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(3, TaskStatus::Running)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
     app.board.tasks[0].sub_status = SubStatus::Stale;
     app.agents
@@ -1142,7 +1178,11 @@ fn tick_skips_already_stale_tasks() {
 
 #[test]
 fn tick_skips_already_crashed_tasks() {
-    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(3, TaskStatus::Running)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
     app.board.tasks[0].sub_status = SubStatus::Crashed;
     app.agents
@@ -1155,7 +1195,11 @@ fn tick_skips_already_crashed_tasks() {
 
 #[test]
 fn tick_skips_conflict_tasks_for_stale_detection() {
-    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(3, TaskStatus::Running)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
     app.board.tasks[0].sub_status = SubStatus::Conflict;
     app.agents
@@ -1169,7 +1213,11 @@ fn tick_skips_conflict_tasks_for_stale_detection() {
 
 #[test]
 fn refresh_from_stale_to_active_resets_last_active_at() {
-    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(3, TaskStatus::Running)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.board.tasks[0].sub_status = SubStatus::Stale;
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
     app.agents
@@ -1187,7 +1235,11 @@ fn refresh_from_stale_to_active_resets_last_active_at() {
 
 #[test]
 fn refresh_staying_stale_does_not_reset_last_active_at() {
-    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(3, TaskStatus::Running)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.board.tasks[0].sub_status = SubStatus::Stale;
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
     let old_instant = Instant::now() - Duration::from_secs(300);
@@ -1207,7 +1259,11 @@ fn refresh_staying_stale_does_not_reset_last_active_at() {
 
 #[test]
 fn refresh_from_crashed_to_active_resets_last_active_at() {
-    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(3, TaskStatus::Running)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.board.tasks[0].sub_status = SubStatus::Crashed;
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
     app.agents
@@ -1252,7 +1308,11 @@ fn move_task_backward_resets_substatus() {
 
 #[test]
 fn shift_l_with_mixed_selection_moves_tasks_only() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Backlog)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.board.epics = vec![make_epic(10)];
     app.update(Message::ToggleSelect(TaskId(1)));
     app.update(Message::ToggleSelectEpic(EpicId(10)));
@@ -1270,7 +1330,11 @@ fn shift_l_with_mixed_selection_moves_tasks_only() {
 
 #[test]
 fn detach_tmux_single_sets_confirm_mode() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Review)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Review)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.board.tasks[0].tmux_window = Some("task-1".to_string());
 
     app.update(Message::DetachTmux(TaskId(1)));
@@ -1285,7 +1349,11 @@ fn detach_tmux_single_sets_confirm_mode() {
 
 #[test]
 fn detach_tmux_noop_on_task_without_window() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Review)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Review)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     // tmux_window is None by default from make_task
 
     let cmds = app.update(Message::DetachTmux(TaskId(1)));
@@ -1354,7 +1422,11 @@ fn move_repo_cursor_up_wraps() {
 
 #[test]
 fn repo_cursor_resets_on_quick_dispatch_entry() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Backlog)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.board.repo_paths = vec!["/a".to_string(), "/b".to_string()];
     app.input.repo_cursor = 1;
     app.update(Message::StartQuickDispatchSelection);
@@ -1454,10 +1526,10 @@ fn is_detached_returns_false_for_conflict() {
 #[test]
 fn mark_dispatching_sets_guard_and_returns_no_commands() {
     let mut app = make_app();
-    assert!(!app.is_dispatching(TaskId(99)));
-    let cmds = app.update(Message::MarkDispatching(TaskId(99)));
+    assert!(!app.is_dispatching(TaskId(1)));
+    let cmds = app.update(Message::MarkDispatching(TaskId(1)));
     assert!(cmds.is_empty());
-    assert!(app.is_dispatching(TaskId(99)));
+    assert!(app.is_dispatching(TaskId(1)));
 }
 
 #[test]

@@ -138,7 +138,11 @@ fn repo_path_nonempty_used_as_is() {
 
 #[test]
 fn task_edited_updates_fields() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Backlog)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.update(Message::TaskEdited(TaskEdit {
         id: TaskId(1),
         title: "New".into(),
@@ -449,7 +453,11 @@ fn e_key_on_empty_column_is_noop() {
 
 #[test]
 fn e_key_enters_confirm_edit_mode() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Backlog)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.selection_mut().set_column(1);
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
     assert!(cmds.is_empty());
@@ -462,7 +470,11 @@ fn e_key_enters_confirm_edit_mode() {
 
 #[test]
 fn e_key_confirm_y_emits_edit_task() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Backlog)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.selection_mut().set_column(1);
     app.handle_key(make_key(KeyCode::Char('e')));
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
@@ -473,7 +485,11 @@ fn e_key_confirm_y_emits_edit_task() {
 
 #[test]
 fn e_key_confirm_n_cancels() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Backlog)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.selection_mut().set_column(1);
     app.handle_key(make_key(KeyCode::Char('e')));
     let cmds = app.handle_key(make_key(KeyCode::Char('n')));
@@ -484,7 +500,11 @@ fn e_key_confirm_n_cancels() {
 
 #[test]
 fn confirm_retry_r_key_emits_resume() {
-    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(4, TaskStatus::Running)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
     app.board.tasks[0].worktree = Some("/repo/.worktrees/4-task-4".to_string());
     app.input.mode = InputMode::ConfirmRetry(TaskId(4));
@@ -496,7 +516,11 @@ fn confirm_retry_r_key_emits_resume() {
 
 #[test]
 fn confirm_retry_f_key_emits_fresh() {
-    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(4, TaskStatus::Running)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
     app.board.tasks[0].worktree = Some("/repo/.worktrees/4-task-4".to_string());
     app.input.mode = InputMode::ConfirmRetry(TaskId(4));
@@ -510,7 +534,11 @@ fn confirm_retry_f_key_emits_fresh() {
 
 #[test]
 fn confirm_retry_esc_returns_to_normal() {
-    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(4, TaskStatus::Running)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.input.mode = InputMode::ConfirmRetry(TaskId(4));
 
     let cmds = app.handle_key(make_key(KeyCode::Esc));
@@ -1298,7 +1326,11 @@ fn handle_key_normal_open_pr_url_missing() {
 
 #[test]
 fn esc_clears_mixed_selection() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Backlog)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.board.epics = vec![make_epic(10)];
     app.update(Message::ToggleSelect(TaskId(1)));
     app.update(Message::ToggleSelectEpic(EpicId(10)));
@@ -1310,7 +1342,11 @@ fn esc_clears_mixed_selection() {
 
 #[test]
 fn confirm_detach_tmux_clears_window() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Review)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Review)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.board.tasks[0].tmux_window = Some("task-1".to_string());
     app.board.tasks[0].sub_status = SubStatus::Stale;
     app.agents

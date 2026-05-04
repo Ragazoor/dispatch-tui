@@ -281,7 +281,11 @@ fn review_card_with_pr_attached_shows_filled_circle() {
 
 #[test]
 fn render_does_not_panic_on_small_terminal() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Backlog)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     // Very small terminal — should not panic
     let _ = render_to_buffer(&mut app, 20, 5);
 }
@@ -306,7 +310,11 @@ fn truncate_respects_max_length() {
 
 #[test]
 fn render_v2_task_card_shows_stripe() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Backlog)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     let buf = render_to_buffer(&mut app, 120, 20);
     // Cursor card uses thicker stripe ▌ (U+258C), non-cursor uses ▎ (U+258E)
     assert!(
@@ -317,7 +325,11 @@ fn render_v2_task_card_shows_stripe() {
 
 #[test]
 fn render_v2_backlog_task_shows_status_icon() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Backlog)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     let buf = render_to_buffer(&mut app, 120, 20);
     assert!(
         buffer_contains(&buf, "\u{25e6}"),
@@ -363,14 +375,22 @@ fn render_v2_unfocused_columns_show_dot() {
 fn render_task_detail_overlay_shows_metadata() {
     // The old fixed detail panel is replaced by the TaskDetail overlay (Task 6).
     // Placeholder: verify that opening the overlay does not crash the renderer.
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Backlog)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.update(Message::OpenTaskDetail(1));
     let _buf = render_to_buffer(&mut app, 120, 20);
 }
 
 #[test]
 fn render_v2_done_task_shows_checkmark() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Done)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Done)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     // Navigate to Done column (index 3)
     for _ in 0..3 {
         app.update(Message::NavigateColumn(1));
@@ -435,7 +455,11 @@ fn render_columns_appear_left_to_right() {
 fn render_columns_fill_terminal_width() {
     // Regression test: columns must use the full terminal width, not leave a gap on the right.
     // A previous bug reserved a 34-char right sidebar in the column content area.
-    let mut app = App::new(vec![make_task(1, TaskStatus::Done)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Done)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     let width: u16 = 120;
     let buf = render_to_buffer(&mut app, width, 20);
 
@@ -489,7 +513,11 @@ fn render_help_overlay_shows_keybindings_help() {
 
 #[test]
 fn render_1x1_terminal_does_not_panic() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Running)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Running)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     let _ = render_to_buffer(&mut app, 1, 1);
 }
 

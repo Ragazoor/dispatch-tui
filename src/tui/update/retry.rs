@@ -71,7 +71,7 @@ impl App {
                 cmds.push(c);
             }
             cmds.push(Command::PersistTask(task_clone.clone()));
-            self.dispatching.insert(id);
+            self.mark_dispatching(id);
             cmds.push(Command::DispatchAgent {
                 task: task_clone,
                 mode: DispatchMode::Dispatch,

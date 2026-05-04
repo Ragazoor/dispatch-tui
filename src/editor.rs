@@ -15,9 +15,9 @@ pub struct EditorFields {
     pub base_branch: String,
 }
 
-use crate::models::{Epic, Learning, LearningKind, Task};
 #[cfg(test)]
 use crate::models::ProjectId;
+use crate::models::{Epic, Learning, LearningKind, Task};
 use crate::service::FieldUpdate;
 
 pub struct EpicEditorFields {

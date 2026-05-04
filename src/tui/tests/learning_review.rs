@@ -23,7 +23,11 @@ pub(super) fn make_learning(id: LearningId) -> Learning {
 
 fn make_app_with_learnings() -> App {
     let mut app = make_app();
-    let learnings = vec![make_learning(LearningId(1)), make_learning(LearningId(2)), make_learning(LearningId(3))];
+    let learnings = vec![
+        make_learning(LearningId(1)),
+        make_learning(LearningId(2)),
+        make_learning(LearningId(3)),
+    ];
     app.update(Message::ShowProposedLearnings(learnings));
     app
 }
@@ -189,7 +193,9 @@ fn edit_learning_returns_pop_out_editor_command() {
 #[test]
 fn learning_actioned_on_single_entry_empties_list() {
     let mut app = make_app();
-    app.update(Message::ShowProposedLearnings(vec![make_learning(LearningId(1))]));
+    app.update(Message::ShowProposedLearnings(vec![make_learning(
+        LearningId(1),
+    )]));
     app.update(Message::LearningActioned(LearningId(1)));
     assert!(matches!(
         &app.board.view_mode,
@@ -265,9 +271,9 @@ fn e_key_emits_pop_out_editor_command() {
     let mut app = make_app_with_learnings();
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
     // selected=0, first learning has id=1
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::PopOutEditor(EditKind::Learning(l)) if l.id == LearningId(1))));
+    assert!(cmds.iter().any(
+        |c| matches!(c, Command::PopOutEditor(EditKind::Learning(l)) if l.id == LearningId(1))
+    ));
 }
 
 #[test]

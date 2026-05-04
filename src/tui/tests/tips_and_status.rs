@@ -54,7 +54,11 @@ fn render_status_bar_shows_keybindings() {
 
 #[test]
 fn render_status_bar_uses_bracket_format() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Backlog)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     let buf = render_to_buffer(&mut app, 220, 20);
     // Hints should use [key] bracket format
     assert!(
@@ -1091,4 +1095,219 @@ fn startup_always_no_new_tips_returns_some_index() {
 #[test]
 fn startup_always_empty_tips_returns_none() {
     assert!(determine_tips_start(&[], 0, crate::models::TipsShowMode::Always).is_none());
+}
+
+// ---------------------------------------------------------------------------
+// Sticky dispatching status (Task #500)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn set_status_sticky_overrides_existing_status() {
+    let mut app = make_app();
+    app.set_status("plain message".to_string());
+    assert!(!app.status.message_sticky);
+
+    app.set_status_sticky("sticky message".to_string());
+    assert_eq!(app.status.message.as_deref(), Some("sticky message"));
+    assert!(app.status.message_sticky);
+}
+
+#[test]
+fn clear_status_resets_message_sticky() {
+    let mut app = make_app();
+    app.set_status_sticky("sticky".to_string());
+    assert!(app.status.message_sticky);
+
+    app.clear_status();
+    assert!(app.status.message.is_none());
+    assert!(!app.status.message_sticky);
+}
+
+#[test]
+fn dispatching_status_message_set_on_mark_dispatching() {
+    let mut app = make_app(); // task 1 has title "Task 1"
+    app.update(Message::MarkDispatching(TaskId(1)));
+
+    let msg = app.status.message.as_deref().expect("status set");
+    assert!(msg.contains("Task 1"), "got: {msg}");
+    assert!(msg.contains("Dispatching"), "got: {msg}");
+    assert!(app.status.message_sticky);
+}
+
+#[test]
+fn dispatching_status_does_not_expire_on_tick() {
+    let mut app = make_app();
+    app.update(Message::MarkDispatching(TaskId(1)));
+    // Backdate so a non-sticky message would auto-clear
+    app.status.message_set_at = Some(Instant::now() - Duration::from_secs(10));
+
+    app.update(Message::Tick);
+    assert!(
+        app.status.message.is_some(),
+        "sticky dispatching status should survive Tick"
+    );
+}
+
+#[test]
+fn dispatching_status_cleared_on_dispatched() {
+    let mut app = make_app();
+    app.update(Message::MarkDispatching(TaskId(1)));
+    assert!(app.status.message.is_some());
+
+    app.update(Message::Dispatched {
+        id: TaskId(1),
+        worktree: "/wt".to_string(),
+        tmux_window: "win-1".to_string(),
+        switch_focus: false,
+    });
+
+    assert!(app.status.message.is_none());
+    assert!(!app.status.message_sticky);
+}
+
+#[test]
+fn dispatching_status_cleared_on_dispatch_failed() {
+    let mut app = make_app();
+    app.update(Message::MarkDispatching(TaskId(1)));
+    assert!(app.status.message.is_some());
+
+    app.update(Message::DispatchFailed(TaskId(1)));
+
+    assert!(app.status.message.is_none());
+    assert!(!app.status.message_sticky);
+}
+
+#[test]
+fn dispatching_status_pluralizes_when_multiple() {
+    let mut app = make_app();
+    app.update(Message::MarkDispatching(TaskId(1)));
+    app.update(Message::MarkDispatching(TaskId(2)));
+
+    let msg = app.status.message.as_deref().expect("status set");
+    assert!(msg.contains("2 tasks"), "got: {msg}");
+    assert!(msg.contains("Dispatching"), "got: {msg}");
+}
+
+#[test]
+fn dispatching_status_persists_when_one_completes() {
+    let mut app = make_app();
+    app.update(Message::MarkDispatching(TaskId(1)));
+    app.update(Message::MarkDispatching(TaskId(2)));
+    assert!(app.status.message.as_deref().unwrap().contains("2 tasks"));
+
+    app.update(Message::Dispatched {
+        id: TaskId(1),
+        worktree: "/wt".to_string(),
+        tmux_window: "win-1".to_string(),
+        switch_focus: false,
+    });
+
+    let msg = app.status.message.as_deref().expect("still set");
+    assert!(msg.contains("Task 2"), "got: {msg}");
+    assert!(app.status.message_sticky);
+}
+
+#[test]
+fn dispatching_status_handles_empty_title() {
+    let mut app = make_app();
+    if let Some(t) = app.find_task_mut(TaskId(1)) {
+        t.title = "   ".to_string();
+    }
+
+    app.update(Message::MarkDispatching(TaskId(1)));
+
+    let msg = app.status.message.as_deref().expect("status set");
+    assert!(msg.contains("#1"), "expected ID fallback, got: {msg}");
+    assert!(msg.contains("Dispatching"), "got: {msg}");
+}
+
+#[test]
+fn dispatching_status_skips_deleted_task() {
+    let mut app = make_app();
+    app.update(Message::MarkDispatching(TaskId(1)));
+    // Task is deleted while dispatching is in flight.
+    app.board.tasks.retain(|t| t.id != TaskId(1));
+
+    app.update(Message::Tick);
+
+    assert!(
+        !app.dispatching.contains_key(&TaskId(1)),
+        "Tick should drop dispatching IDs that no longer exist in tasks"
+    );
+    assert!(
+        app.status.message.is_none(),
+        "with no remaining dispatching IDs, sticky status should clear"
+    );
+}
+
+#[test]
+fn mark_dispatching_for_unknown_task_id_is_noop() {
+    let mut app = make_app();
+    app.update(Message::MarkDispatching(TaskId(9999)));
+
+    // Unknown ID should not pollute the dispatching set with a phantom entry
+    // that the next Tick would have to clean up.
+    assert!(
+        !app.dispatching.contains_key(&TaskId(9999)),
+        "MarkDispatching for unknown task should be a no-op"
+    );
+    assert!(app.status.message.is_none());
+}
+
+mod property_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    #[derive(Debug, Clone)]
+    enum DispatchOp {
+        Mark(i64),
+        Done(i64),
+        Failed(i64),
+    }
+
+    fn op_strategy() -> impl Strategy<Value = DispatchOp> {
+        prop_oneof![
+            (1i64..=4).prop_map(DispatchOp::Mark),
+            (1i64..=4).prop_map(DispatchOp::Done),
+            (1i64..=4).prop_map(DispatchOp::Failed),
+        ]
+    }
+
+    proptest! {
+        #[test]
+        fn sticky_status_iff_dispatching_nonempty(
+            ops in proptest::collection::vec(op_strategy(), 0..30)
+        ) {
+            let mut app = make_app();
+            for op in ops {
+                match op {
+                    DispatchOp::Mark(id) => {
+                        app.update(Message::MarkDispatching(TaskId(id)));
+                    }
+                    DispatchOp::Done(id) => {
+                        app.update(Message::Dispatched {
+                            id: TaskId(id),
+                            worktree: format!("/wt/{id}"),
+                            tmux_window: format!("win-{id}"),
+                            switch_focus: false,
+                        });
+                    }
+                    DispatchOp::Failed(id) => {
+                        app.update(Message::DispatchFailed(TaskId(id)));
+                    }
+                }
+            }
+
+            // Invariant: status is sticky exactly when dispatching is non-empty
+            prop_assert_eq!(
+                app.dispatching.is_empty(),
+                !app.status.message_sticky,
+                "dispatching set membership and sticky-flag must agree"
+            );
+            // When sticky, a message is present; when not, nothing claims to be sticky
+            if app.status.message_sticky {
+                prop_assert!(app.status.message.is_some());
+            }
+        }
+    }
 }

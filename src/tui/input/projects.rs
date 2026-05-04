@@ -2,9 +2,9 @@
 
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::models::ProjectId;
 use super::super::types::*;
 use super::super::App;
+use crate::models::ProjectId;
 
 impl App {
     pub(in crate::tui) fn handle_key_projects_panel(&mut self, key: KeyEvent) -> Vec<Command> {

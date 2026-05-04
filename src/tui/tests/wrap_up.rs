@@ -88,7 +88,11 @@ fn finish_failed_without_conflict_does_not_set_flag() {
 
 #[test]
 fn confirm_done_y_moves_task() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Review)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Review)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.selection_mut().set_column(3);
 
     app.input.mode = InputMode::ConfirmDone(TaskId(1));
@@ -101,7 +105,11 @@ fn confirm_done_y_moves_task() {
 
 #[test]
 fn confirm_done_n_cancels() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Review)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Review)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.selection_mut().set_column(3);
 
     app.input.mode = InputMode::ConfirmDone(TaskId(1));
@@ -351,7 +359,11 @@ fn wrap_up_available_on_running_active() {
 
 #[test]
 fn w_key_on_epic_starts_epic_wrap_up() {
-    let mut app = App::new(vec![make_review_subtask(1, 10, 1)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_review_subtask(1, 10, 1)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Review;
     app.board.epics = vec![epic];
@@ -487,7 +499,11 @@ fn epic_wrap_up_finish_failed_pauses_queue() {
 
 #[test]
 fn epic_wrap_up_cancel_clears_queue() {
-    let mut app = App::new(vec![make_review_subtask(1, 10, 1)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_review_subtask(1, 10, 1)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.board.epics = vec![make_epic(10)];
     app.merge_queue = Some(MergeQueue {
         epic_id: EpicId(10),
@@ -610,7 +626,11 @@ fn make_approved_review_task(id: i64) -> Task {
 
 #[test]
 fn merge_pr_key_on_approved_task_enters_confirm_mode() {
-    let mut app = App::new(vec![make_approved_review_task(1)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_approved_review_task(1)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     // Navigate to review column
     app.update(Message::NavigateColumn(1)); // running
     app.update(Message::NavigateColumn(1)); // review
@@ -625,7 +645,11 @@ fn merge_pr_key_on_approved_task_enters_confirm_mode() {
 
 #[test]
 fn merge_pr_key_on_non_review_task_shows_status() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Backlog)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
 
     let cmds = app.handle_key(make_key(KeyCode::Char('P')));
     assert!(cmds.is_empty());
@@ -683,7 +707,11 @@ fn merge_pr_key_on_awaiting_review_shows_status() {
 
 #[test]
 fn confirm_merge_pr_emits_merge_command() {
-    let mut app = App::new(vec![make_approved_review_task(1)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_approved_review_task(1)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.input.mode = InputMode::ConfirmMergePr(TaskId(1));
 
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
@@ -697,7 +725,11 @@ fn confirm_merge_pr_emits_merge_command() {
 
 #[test]
 fn cancel_merge_pr_resets_mode() {
-    let mut app = App::new(vec![make_approved_review_task(1)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_approved_review_task(1)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
     app.input.mode = InputMode::ConfirmMergePr(TaskId(1));
 
     let cmds = app.handle_key(make_key(KeyCode::Char('n')));
@@ -707,7 +739,11 @@ fn cancel_merge_pr_resets_mode() {
 
 #[test]
 fn merge_pr_failed_sets_status_message() {
-    let mut app = App::new(vec![make_approved_review_task(1)], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(
+        vec![make_approved_review_task(1)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
 
     let cmds = app.update(Message::MergePrFailed {
         id: TaskId(1),
