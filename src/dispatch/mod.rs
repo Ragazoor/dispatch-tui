@@ -10,7 +10,8 @@ mod worktree;
 
 pub use agents::{
     brainstorm_agent, build_fix_prompt, dispatch_agent, dispatch_fix_agent, dispatch_review_agent,
-    epic_planning_agent, is_wrappable, plan_agent, quick_dispatch_agent, resume_agent,
+    epic_planning_agent, fix_task_agent, is_wrappable, plan_agent, pr_review_agent,
+    quick_dispatch_agent, research_agent, resume_agent,
 };
 pub use finish::{finish_task, FinishError};
 pub use prompts::{EpicContext, ProjectContext};

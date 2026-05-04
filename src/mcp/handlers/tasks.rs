@@ -836,6 +836,27 @@ fn do_dispatch(
             Some(&project_ctx),
             &learnings,
         ),
+        DispatchMode::PrReview => dispatch::pr_review_agent(
+            task,
+            runner,
+            epic_ctx.as_ref(),
+            Some(&project_ctx),
+            &learnings,
+        ),
+        DispatchMode::Research => dispatch::research_agent(
+            task,
+            runner,
+            epic_ctx.as_ref(),
+            Some(&project_ctx),
+            &learnings,
+        ),
+        DispatchMode::Fix => dispatch::fix_task_agent(
+            task,
+            runner,
+            epic_ctx.as_ref(),
+            Some(&project_ctx),
+            &learnings,
+        ),
     }
 }
 

@@ -1209,9 +1209,23 @@ pub enum DispatchMode {
     Dispatch,
     Brainstorm,
     Plan,
+    PrReview,
+    Research,
+    Fix,
 }
 
 impl DispatchMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            DispatchMode::Dispatch => "Dispatch",
+            DispatchMode::Brainstorm => "Brainstorm",
+            DispatchMode::Plan => "Plan",
+            DispatchMode::PrReview => "PR Review",
+            DispatchMode::Research => "Research",
+            DispatchMode::Fix => "Fix",
+        }
+    }
+
     /// Select the dispatch mode for a task: tasks with a plan always get
     /// `Dispatch`; otherwise the tag drives the choice.
     pub fn for_task(task: &Task) -> Self {
@@ -1221,6 +1235,9 @@ impl DispatchMode {
             match task.tag {
                 Some(TaskTag::Epic) => DispatchMode::Brainstorm,
                 Some(TaskTag::Feature) => DispatchMode::Plan,
+                Some(TaskTag::PrReview) => DispatchMode::PrReview,
+                Some(TaskTag::Research) => DispatchMode::Research,
+                Some(TaskTag::Fix) => DispatchMode::Fix,
                 _ => DispatchMode::Dispatch,
             }
         }
@@ -1238,6 +1255,10 @@ pub enum TaskTag {
     Feature,
     Chore,
     Epic,
+    #[serde(rename = "pr-review")]
+    PrReview,
+    Research,
+    Fix,
 }
 
 impl TaskTag {
@@ -1247,6 +1268,9 @@ impl TaskTag {
             TaskTag::Feature => "feature",
             TaskTag::Chore => "chore",
             TaskTag::Epic => "epic",
+            TaskTag::PrReview => "pr-review",
+            TaskTag::Research => "research",
+            TaskTag::Fix => "fix",
         }
     }
 
@@ -1256,6 +1280,9 @@ impl TaskTag {
             "feature" => Some(TaskTag::Feature),
             "chore" => Some(TaskTag::Chore),
             "epic" => Some(TaskTag::Epic),
+            "pr-review" => Some(TaskTag::PrReview),
+            "research" => Some(TaskTag::Research),
+            "fix" => Some(TaskTag::Fix),
             _ => None,
         }
     }
@@ -1266,6 +1293,9 @@ impl TaskTag {
             TaskTag::Feature => "feat",
             TaskTag::Chore => "chore",
             TaskTag::Epic => "epic",
+            TaskTag::PrReview => "pr-rev",
+            TaskTag::Research => "research",
+            TaskTag::Fix => "fix",
         }
     }
 }
@@ -2889,6 +2919,50 @@ mod tests {
             DispatchMode::for_task(&make_task_with(Some("a plan"), Some(TaskTag::Feature))),
             DispatchMode::Dispatch
         );
+        // New tags with plan still dispatch normally
+        assert_eq!(
+            DispatchMode::for_task(&make_task_with(Some("a plan"), Some(TaskTag::PrReview))),
+            DispatchMode::Dispatch
+        );
+        assert_eq!(
+            DispatchMode::for_task(&make_task_with(Some("a plan"), Some(TaskTag::Research))),
+            DispatchMode::Dispatch
+        );
+        assert_eq!(
+            DispatchMode::for_task(&make_task_with(Some("a plan"), Some(TaskTag::Fix))),
+            DispatchMode::Dispatch
+        );
+    }
+
+    #[test]
+    fn task_tag_parse_roundtrip_new_tags() {
+        for (tag, expected_str, expected_short) in [
+            (TaskTag::PrReview, "pr-review", "pr-rev"),
+            (TaskTag::Research, "research", "research"),
+            (TaskTag::Fix, "fix", "fix"),
+        ] {
+            assert_eq!(tag.as_str(), expected_str, "as_str mismatch for {tag:?}");
+            assert_eq!(
+                TaskTag::parse(expected_str),
+                Some(tag),
+                "parse mismatch for {expected_str}"
+            );
+            assert_eq!(
+                tag.short_label(),
+                expected_short,
+                "short_label mismatch for {tag:?}"
+            );
+            assert_eq!(
+                tag.to_string(),
+                expected_str,
+                "Display mismatch for {tag:?}"
+            );
+            assert_eq!(
+                expected_str.parse::<TaskTag>().unwrap(),
+                tag,
+                "FromStr mismatch for {expected_str}"
+            );
+        }
     }
 
     // --- descendant_task_ids / descendant_epic_ids ---
@@ -3005,6 +3079,19 @@ mod tests {
             DispatchMode::for_task(&make_task_with(None, None)),
             DispatchMode::Dispatch
         );
+        // New tags route to their dedicated modes when no plan is attached
+        assert_eq!(
+            DispatchMode::for_task(&make_task_with(None, Some(TaskTag::PrReview))),
+            DispatchMode::PrReview
+        );
+        assert_eq!(
+            DispatchMode::for_task(&make_task_with(None, Some(TaskTag::Research))),
+            DispatchMode::Research
+        );
+        assert_eq!(
+            DispatchMode::for_task(&make_task_with(None, Some(TaskTag::Fix))),
+            DispatchMode::Fix
+        );
     }
 
     mod property_tests {
@@ -3023,6 +3110,9 @@ mod tests {
             TaskTag::Feature,
             TaskTag::Chore,
             TaskTag::Epic,
+            TaskTag::PrReview,
+            TaskTag::Research,
+            TaskTag::Fix,
         ];
 
         fn task_status_strategy() -> impl Strategy<Value = TaskStatus> {

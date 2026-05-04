@@ -322,6 +322,106 @@ pub(super) fn build_plan_prompt(
     )
 }
 
+pub(super) fn build_pr_review_prompt(
+    task_id: TaskId,
+    title: &str,
+    description: &str,
+    epic: Option<&EpicContext>,
+    project: Option<&ProjectContext>,
+) -> String {
+    let block = task_block(task_id, title, description, epic, project);
+
+    format!(
+        "You are a PR reviewer.\n\
+\n\
+{block}\n\
+\n\
+1. Extract the PR URL or number from the task description.\n\
+2. Run `gh pr diff <number> | wc -l` to assess the diff size.\n\
+3. Run `/anthropic-review-pr:review-pr <number>` to perform a comprehensive review. \
+This skill orchestrates security, code-quality, test-coverage, performance, and documentation \
+sub-reviewers. The number of sub-reviewers launched scales with the diff size.\n\
+4. When the review is complete, call wrap_up to finish this task.\n\
+\n\
+Do NOT make code changes. Your job is to review, not to implement.\n\
+\n\
+{mcp}",
+        block = block,
+        mcp = mcp_tools_instruction(),
+    )
+}
+
+pub(super) fn build_research_prompt(
+    task_id: TaskId,
+    title: &str,
+    description: &str,
+    epic: Option<&EpicContext>,
+    project: Option<&ProjectContext>,
+) -> String {
+    let block = task_block(task_id, title, description, epic, project);
+
+    format!(
+        "You are a research agent.\n\
+\n\
+{block}\n\
+\n\
+Investigate the topic described above. You may read the codebase, documentation, and \
+external resources.\n\
+\n\
+When you have gathered sufficient information, present your findings clearly to the user \
+and wait for further instructions. Do NOT wrap up autonomously — that is for the user to \
+decide.\n\
+\n\
+Do NOT make code changes.\n\
+\n\
+{mcp}",
+        block = block,
+        mcp = mcp_tools_instruction(),
+    )
+}
+
+pub(super) fn build_fix_task_prompt(
+    task_id: TaskId,
+    title: &str,
+    description: &str,
+    epic: Option<&EpicContext>,
+    project: Option<&ProjectContext>,
+) -> String {
+    let block = task_block(task_id, title, description, epic, project);
+
+    format!(
+        "You are a security fix agent.\n\
+\n\
+{block}\n\
+\n\
+Research the CVE or vulnerability described above, then apply a minimal targeted fix.\n\
+\n\
+TDD approach:\n\
+  1. Write a failing test that reproduces the vulnerability (if feasible)\n\
+  2. Apply the minimal fix to make the test pass\n\
+  3. Run the full test suite to verify nothing else breaks\n\
+  4. Commit and open a PR: gh pr create\n\
+\n\
+Focus on the smallest safe change. Avoid broad refactors.\n\
+\n\
+{tdd}\n\
+\n\
+{allium}\n\
+\n\
+{learning}\n\
+\n\
+{mcp}\n\
+\n\
+{wrap_up}",
+        block = block,
+        tdd = tdd_instruction(),
+        allium = allium_instruction(),
+        learning = learning_tools_instruction(),
+        mcp = mcp_tools_instruction(),
+        wrap_up = wrap_up_instruction(),
+    )
+}
+
 pub(super) fn build_epic_planning_prompt(
     epic_id: EpicId,
     title: &str,
@@ -441,6 +541,96 @@ mod tests {
         assert!(
             !text.contains("query_learnings"),
             "brainstorm prompt should not mention learning tools"
+        );
+    }
+
+    #[test]
+    fn pr_review_prompt_content() {
+        let text = build_pr_review_prompt(
+            TaskId(42),
+            "Review my PR",
+            "https://github.com/foo/bar/pull/99",
+            None,
+            None,
+        );
+        assert!(
+            text.contains("PR reviewer"),
+            "pr_review prompt should identify the agent role"
+        );
+        assert!(
+            text.contains("review-pr"),
+            "pr_review prompt should reference the review-pr skill"
+        );
+        assert!(
+            text.contains("wrap-up") || text.contains("wrap_up"),
+            "pr_review prompt should instruct wrap up"
+        );
+        assert!(
+            text.contains("Do NOT make code changes")
+                || text.contains("do not make code changes")
+                || text.contains("no code changes"),
+            "pr_review prompt should prohibit code changes"
+        );
+    }
+
+    #[test]
+    fn research_prompt_content() {
+        let text = build_research_prompt(
+            TaskId(7),
+            "Research async runtimes",
+            "Compare tokio vs async-std",
+            None,
+            None,
+        );
+        assert!(
+            text.contains("research agent"),
+            "research prompt should identify the agent role"
+        );
+        assert!(
+            text.contains("present") || text.contains("findings"),
+            "research prompt should instruct presenting findings"
+        );
+        assert!(
+            text.contains("Do NOT make code changes")
+                || text.contains("do not make code changes")
+                || text.contains("no code changes"),
+            "research prompt should prohibit code changes"
+        );
+    }
+
+    #[test]
+    fn fix_task_prompt_content() {
+        let text = build_fix_task_prompt(
+            TaskId(5),
+            "Fix CVE-2024-1234",
+            "Heap overflow in serde",
+            None,
+            None,
+        );
+        assert!(
+            text.contains("security fix") || text.contains("fix agent"),
+            "fix_task prompt should identify the agent role"
+        );
+        assert!(
+            text.contains("minimal"),
+            "fix_task prompt should emphasise minimal fix"
+        );
+        assert!(
+            text.contains("gh pr create"),
+            "fix_task prompt should instruct creating a PR"
+        );
+        assert!(
+            text.contains("wrap-up") || text.contains("wrap_up"),
+            "fix_task prompt should instruct wrap up"
+        );
+    }
+
+    #[test]
+    fn fix_task_prompt_has_learning_tools() {
+        let text = build_fix_task_prompt(TaskId(5), "Fix CVE", "desc", None, None);
+        assert!(
+            text.contains("query_learnings"),
+            "fix_task prompt should mention query_learnings"
         );
     }
 }

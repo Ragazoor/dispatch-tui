@@ -11,9 +11,9 @@ use crate::tui::{FixAgentRequest, ReviewAgentRequest};
 
 use super::finish::detect_default_branch;
 use super::prompts::{
-    build_brainstorm_prompt, build_epic_planning_prompt, build_plan_prompt, build_prompt,
-    build_quick_dispatch_prompt, build_tmux_window_name, rebase_preamble, EpicContext,
-    ProjectContext, DISPATCH_PLUGIN_DIR,
+    build_brainstorm_prompt, build_epic_planning_prompt, build_fix_task_prompt, build_plan_prompt,
+    build_pr_review_prompt, build_prompt, build_quick_dispatch_prompt, build_research_prompt,
+    build_tmux_window_name, rebase_preamble, EpicContext, ProjectContext, DISPATCH_PLUGIN_DIR,
 };
 use super::stderr_str;
 use super::worktree::provision_worktree;
@@ -150,6 +150,39 @@ pub fn plan_agent(
     learnings: &[Learning],
 ) -> Result<DispatchResult> {
     let prompt = build_plan_prompt(task.id, &task.title, &task.description, epic, project);
+    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch), learnings)
+}
+
+pub fn pr_review_agent(
+    task: &Task,
+    runner: &dyn ProcessRunner,
+    epic: Option<&EpicContext>,
+    project: Option<&ProjectContext>,
+    learnings: &[Learning],
+) -> Result<DispatchResult> {
+    let prompt = build_pr_review_prompt(task.id, &task.title, &task.description, epic, project);
+    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch), learnings)
+}
+
+pub fn research_agent(
+    task: &Task,
+    runner: &dyn ProcessRunner,
+    epic: Option<&EpicContext>,
+    project: Option<&ProjectContext>,
+    learnings: &[Learning],
+) -> Result<DispatchResult> {
+    let prompt = build_research_prompt(task.id, &task.title, &task.description, epic, project);
+    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch), learnings)
+}
+
+pub fn fix_task_agent(
+    task: &Task,
+    runner: &dyn ProcessRunner,
+    epic: Option<&EpicContext>,
+    project: Option<&ProjectContext>,
+    learnings: &[Learning],
+) -> Result<DispatchResult> {
+    let prompt = build_fix_task_prompt(task.id, &task.title, &task.description, epic, project);
     dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch), learnings)
 }
 

@@ -1933,3 +1933,51 @@ fn enter_with_typed_filter_selects_filtered_item() {
     assert_eq!(app.input.mode, InputMode::InputBaseBranch);
     assert_eq!(app.input.task_draft.as_ref().unwrap().repo_path, "/var");
 }
+
+#[test]
+fn handle_key_tag_selects_pr_review() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputTag;
+    app.input.task_draft = Some(TaskDraft {
+        title: "Test".to_string(),
+        ..Default::default()
+    });
+
+    app.handle_key(make_key(KeyCode::Char('p')));
+    assert_eq!(
+        app.input.task_draft.as_ref().unwrap().tag,
+        Some(TaskTag::PrReview)
+    );
+}
+
+#[test]
+fn handle_key_tag_selects_research() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputTag;
+    app.input.task_draft = Some(TaskDraft {
+        title: "Test".to_string(),
+        ..Default::default()
+    });
+
+    app.handle_key(make_key(KeyCode::Char('r')));
+    assert_eq!(
+        app.input.task_draft.as_ref().unwrap().tag,
+        Some(TaskTag::Research)
+    );
+}
+
+#[test]
+fn handle_key_tag_selects_fix() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputTag;
+    app.input.task_draft = Some(TaskDraft {
+        title: "Test".to_string(),
+        ..Default::default()
+    });
+
+    app.handle_key(make_key(KeyCode::Char('x')));
+    assert_eq!(
+        app.input.task_draft.as_ref().unwrap().tag,
+        Some(TaskTag::Fix)
+    );
+}

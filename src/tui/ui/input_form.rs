@@ -74,7 +74,7 @@ pub(in crate::tui) fn input_tag_lines(
     vec![
         Line::from(Span::styled(format!("  Title: {title}"), completed)),
         Line::from(Span::styled(
-            "  Tag: [b]ug  [f]eature  [c]hore  [e]pic  [Enter] none",
+            "  Tag: [b]ug  [f]eature  [c]hore  [e]pic  [p]r-review  [r]esearch  [x]fix  [Enter] none",
             active,
         )),
         Line::from(""),

@@ -138,11 +138,7 @@ impl TuiRuntime {
                 tracing::warn!(error = %e, "failed to fetch learnings for dispatch");
                 vec![]
             });
-        let label = match mode {
-            models::DispatchMode::Dispatch => "Dispatch",
-            models::DispatchMode::Brainstorm => "Brainstorm",
-            models::DispatchMode::Plan => "Plan",
-        };
+        let label = mode.label();
         self.spawn_dispatch(
             task,
             move |t, r| match mode {
@@ -163,6 +159,27 @@ impl TuiRuntime {
                 models::DispatchMode::Plan => {
                     dispatch::plan_agent(t, r, epic_ctx.as_ref(), Some(&project_ctx), &learnings)
                 }
+                models::DispatchMode::PrReview => dispatch::pr_review_agent(
+                    t,
+                    r,
+                    epic_ctx.as_ref(),
+                    Some(&project_ctx),
+                    &learnings,
+                ),
+                models::DispatchMode::Research => dispatch::research_agent(
+                    t,
+                    r,
+                    epic_ctx.as_ref(),
+                    Some(&project_ctx),
+                    &learnings,
+                ),
+                models::DispatchMode::Fix => dispatch::fix_task_agent(
+                    t,
+                    r,
+                    epic_ctx.as_ref(),
+                    Some(&project_ctx),
+                    &learnings,
+                ),
             },
             label,
         );
