@@ -24,7 +24,7 @@ pub struct UpdateEpicParams {
 }
 
 impl UpdateEpicParams {
-    pub(super) fn has_any_field(&self) -> bool {
+    fn has_any_field(&self) -> bool {
         !self.updated_field_names().is_empty()
     }
 
