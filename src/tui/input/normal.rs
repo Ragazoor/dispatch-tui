@@ -9,7 +9,7 @@ use super::super::App;
 
 impl App {
     pub(in crate::tui) fn handle_key_proposed_learnings(&mut self, key: KeyEvent) -> Vec<Command> {
-        let selected_id = if let ViewMode::ProposedLearnings {
+        let selected_id = if let ViewMode::Learnings {
             selected,
             ref learnings,
             ..
@@ -21,12 +21,12 @@ impl App {
         };
 
         match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => self.update(Message::CloseProposedLearnings),
-            KeyCode::Char('j') | KeyCode::Down => self.update(Message::NavigateProposedLearning(1)),
-            KeyCode::Char('k') | KeyCode::Up => self.update(Message::NavigateProposedLearning(-1)),
+            KeyCode::Char('q') | KeyCode::Esc => self.update(Message::CloseLearnings),
+            KeyCode::Char('j') | KeyCode::Down => self.update(Message::NavigateLearning(1)),
+            KeyCode::Char('k') | KeyCode::Up => self.update(Message::NavigateLearning(-1)),
             KeyCode::Char('a') => {
                 if let Some(id) = selected_id {
-                    self.update(Message::ApproveLearning(id))
+                    self.update(Message::ArchiveLearning(id))
                 } else {
                     vec![]
                 }
@@ -56,7 +56,7 @@ impl App {
         }
 
         // ProposedLearnings overlay captures all input when visible
-        if matches!(self.board.view_mode, ViewMode::ProposedLearnings { .. }) {
+        if matches!(self.board.view_mode, ViewMode::Learnings { .. }) {
             return self.handle_key_proposed_learnings(key);
         }
 
@@ -284,7 +284,7 @@ impl App {
 
             KeyCode::Char('F') => self.update(Message::ToggleFlattened),
 
-            KeyCode::Char('I') => self.update(Message::OpenProposedLearnings),
+            KeyCode::Char('I') => self.update(Message::OpenLearnings),
 
             KeyCode::Char('?') => self.update(Message::ToggleHelp),
 

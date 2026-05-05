@@ -24,6 +24,7 @@ include_dir = "0.7"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 tempfile = "3"
+tui-tree-widget = "0.23"
 
 [dev-dependencies]
 insta = "1"

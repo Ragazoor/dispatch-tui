@@ -28,17 +28,17 @@ fn make_app_with_learnings() -> App {
         make_learning(LearningId(2)),
         make_learning(LearningId(3)),
     ];
-    app.update(Message::ShowProposedLearnings(learnings));
+    app.update(Message::ShowLearnings(learnings));
     app
 }
 
 #[test]
 fn open_proposed_learnings_returns_load_command() {
     let mut app = make_app();
-    let cmds = app.update(Message::OpenProposedLearnings);
+    let cmds = app.update(Message::OpenLearnings);
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::LoadProposedLearnings)));
+        .any(|c| matches!(c, Command::LoadLearnings)));
 }
 
 #[test]
@@ -46,7 +46,7 @@ fn show_proposed_learnings_sets_view_mode() {
     let app = make_app_with_learnings();
     assert!(matches!(
         &app.board.view_mode,
-        ViewMode::ProposedLearnings { learnings, .. } if learnings.len() == 3
+        ViewMode::Learnings { learnings, .. } if learnings.len() == 3
     ));
 }
 
@@ -55,7 +55,7 @@ fn show_proposed_learnings_stores_previous() {
     let app = make_app_with_learnings();
     assert!(matches!(
         &app.board.view_mode,
-        ViewMode::ProposedLearnings { previous, .. }
+        ViewMode::Learnings { previous, .. }
             if matches!(previous.as_ref(), ViewMode::Board(_))
     ));
 }
@@ -63,47 +63,47 @@ fn show_proposed_learnings_stores_previous() {
 #[test]
 fn close_proposed_learnings_restores_board() {
     let mut app = make_app_with_learnings();
-    app.update(Message::CloseProposedLearnings);
+    app.update(Message::CloseLearnings);
     assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
 }
 
 #[test]
 fn navigate_down_increments_selected() {
     let mut app = make_app_with_learnings();
-    app.update(Message::NavigateProposedLearning(1));
+    app.update(Message::NavigateLearning(1));
     assert!(matches!(
         &app.board.view_mode,
-        ViewMode::ProposedLearnings { selected, .. } if *selected == 1
+        ViewMode::Learnings { selected, .. } if *selected == 1
     ));
 }
 
 #[test]
 fn navigate_down_clamps_at_last() {
     let mut app = make_app_with_learnings(); // 3 entries
-    app.update(Message::NavigateProposedLearning(100));
+    app.update(Message::NavigateLearning(100));
     assert!(matches!(
         &app.board.view_mode,
-        ViewMode::ProposedLearnings { selected, .. } if *selected == 2
+        ViewMode::Learnings { selected, .. } if *selected == 2
     ));
 }
 
 #[test]
 fn navigate_up_clamps_at_zero() {
     let mut app = make_app_with_learnings();
-    app.update(Message::NavigateProposedLearning(-5));
+    app.update(Message::NavigateLearning(-5));
     assert!(matches!(
         &app.board.view_mode,
-        ViewMode::ProposedLearnings { selected, .. } if *selected == 0
+        ViewMode::Learnings { selected, .. } if *selected == 0
     ));
 }
 
 #[test]
 fn approve_learning_returns_command() {
     let mut app = make_app_with_learnings();
-    let cmds = app.update(Message::ApproveLearning(LearningId(1)));
+    let cmds = app.update(Message::ArchiveLearning(LearningId(1)));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::ApproveLearning(id) if *id == LearningId(1))));
+        .any(|c| matches!(c, Command::ArchiveLearning(id) if *id == LearningId(1))));
 }
 
 #[test]
@@ -121,7 +121,7 @@ fn learning_actioned_removes_entry_from_list() {
     app.update(Message::LearningActioned(LearningId(2)));
     assert!(matches!(
         &app.board.view_mode,
-        ViewMode::ProposedLearnings { learnings, .. } if learnings.len() == 2
+        ViewMode::Learnings { learnings, .. } if learnings.len() == 2
             && !learnings.iter().any(|l| l.id == LearningId(2))
     ));
 }
@@ -130,12 +130,12 @@ fn learning_actioned_removes_entry_from_list() {
 fn learning_actioned_clamps_selected_when_last_removed() {
     let mut app = make_app_with_learnings();
     // Move cursor to last entry (index 2)
-    app.update(Message::NavigateProposedLearning(10));
+    app.update(Message::NavigateLearning(10));
     // Remove last entry (id=3)
     app.update(Message::LearningActioned(LearningId(3)));
     assert!(matches!(
         &app.board.view_mode,
-        ViewMode::ProposedLearnings { selected, learnings, .. }
+        ViewMode::Learnings { selected, learnings, .. }
             if *selected == learnings.len() - 1
     ));
 }
@@ -148,7 +148,7 @@ fn learning_edited_replaces_entry_in_snapshot() {
     app.update(Message::LearningEdited(updated));
     assert!(matches!(
         &app.board.view_mode,
-        ViewMode::ProposedLearnings { learnings, .. }
+        ViewMode::Learnings { learnings, .. }
             if learnings.iter().find(|l| l.id == LearningId(2)).map(|l| l.summary.as_str()) == Some("Updated summary")
     ));
 }
@@ -160,14 +160,14 @@ fn learning_edited_with_unknown_id_is_noop() {
     app.update(Message::LearningEdited(unknown));
     assert!(matches!(
         &app.board.view_mode,
-        ViewMode::ProposedLearnings { learnings, .. } if learnings.len() == 3
+        ViewMode::Learnings { learnings, .. } if learnings.len() == 3
     ));
 }
 
 #[test]
 fn refresh_tasks_does_not_update_learnings_snapshot() {
     let mut app = make_app_with_learnings();
-    let original_len = if let ViewMode::ProposedLearnings { learnings, .. } = &app.board.view_mode {
+    let original_len = if let ViewMode::Learnings { learnings, .. } = &app.board.view_mode {
         learnings.len()
     } else {
         panic!("expected ProposedLearnings")
@@ -176,7 +176,7 @@ fn refresh_tasks_does_not_update_learnings_snapshot() {
     app.update(Message::RefreshTasks(app.board.tasks.clone()));
     assert!(matches!(
         &app.board.view_mode,
-        ViewMode::ProposedLearnings { learnings, .. } if learnings.len() == original_len
+        ViewMode::Learnings { learnings, .. } if learnings.len() == original_len
     ));
 }
 
@@ -193,13 +193,13 @@ fn edit_learning_returns_pop_out_editor_command() {
 #[test]
 fn learning_actioned_on_single_entry_empties_list() {
     let mut app = make_app();
-    app.update(Message::ShowProposedLearnings(vec![make_learning(
+    app.update(Message::ShowLearnings(vec![make_learning(
         LearningId(1),
     )]));
     app.update(Message::LearningActioned(LearningId(1)));
     assert!(matches!(
         &app.board.view_mode,
-        ViewMode::ProposedLearnings { learnings, selected, .. }
+        ViewMode::Learnings { learnings, selected, .. }
             if learnings.is_empty() && *selected == 0
     ));
 }
@@ -207,8 +207,8 @@ fn learning_actioned_on_single_entry_empties_list() {
 #[test]
 fn approve_on_empty_list_is_noop() {
     let mut app = make_app();
-    app.update(Message::ShowProposedLearnings(vec![]));
-    let cmds = app.update(Message::ApproveLearning(LearningId(1)));
+    app.update(Message::ShowLearnings(vec![]));
+    let cmds = app.update(Message::ArchiveLearning(LearningId(1)));
     assert!(cmds.is_empty());
 }
 
@@ -218,7 +218,7 @@ fn j_key_navigates_down_in_overlay() {
     app.handle_key(make_key(KeyCode::Char('j')));
     assert!(matches!(
         &app.board.view_mode,
-        ViewMode::ProposedLearnings { selected, .. } if *selected == 1
+        ViewMode::Learnings { selected, .. } if *selected == 1
     ));
 }
 
@@ -228,7 +228,7 @@ fn k_key_at_top_stays_at_zero() {
     app.handle_key(make_key(KeyCode::Char('k')));
     assert!(matches!(
         &app.board.view_mode,
-        ViewMode::ProposedLearnings { selected, .. } if *selected == 0
+        ViewMode::Learnings { selected, .. } if *selected == 0
     ));
 }
 
@@ -253,7 +253,7 @@ fn a_key_emits_approve_command() {
     // selected=0, first learning has id=1
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::ApproveLearning(id) if *id == LearningId(1))));
+        .any(|c| matches!(c, Command::ArchiveLearning(id) if *id == LearningId(1))));
 }
 
 #[test]
@@ -283,7 +283,7 @@ fn board_keys_inert_when_overlay_open() {
     app.handle_key(make_key(KeyCode::Char('d')));
     assert!(matches!(
         app.board.view_mode,
-        ViewMode::ProposedLearnings { .. }
+        ViewMode::Learnings { .. }
     ));
 }
 
@@ -293,17 +293,17 @@ fn i_key_from_board_emits_load_command() {
     let cmds = app.handle_key(make_key(KeyCode::Char('I')));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::LoadProposedLearnings)));
+        .any(|c| matches!(c, Command::LoadLearnings)));
 }
 
 #[test]
 fn a_key_on_empty_overlay_is_inert() {
     let mut app = make_app();
-    app.update(Message::ShowProposedLearnings(vec![]));
+    app.update(Message::ShowLearnings(vec![]));
     let cmds = app.handle_key(make_key(KeyCode::Char('a')));
     assert!(cmds.is_empty());
     assert!(matches!(
         app.board.view_mode,
-        ViewMode::ProposedLearnings { .. }
+        ViewMode::Learnings { .. }
     ));
 }

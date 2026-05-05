@@ -25,7 +25,7 @@ impl TuiRuntime {
                     };
                     (scope_ord, std::cmp::Reverse(l.created_at))
                 });
-                app.update(Message::ShowProposedLearnings(learnings));
+                app.update(Message::ShowLearnings(learnings));
             }
             Err(e) => {
                 app.update(Message::StatusInfo(format!(
@@ -140,14 +140,14 @@ mod tests {
         let mut app = App::new(vec![], ProjectId(1), APP_INACTIVITY_TIMEOUT);
         // Put the app in ProposedLearnings view with the learning
         let learning = make_learning(id);
-        app.update(Message::ShowProposedLearnings(vec![learning]));
+        app.update(Message::ShowLearnings(vec![learning]));
 
         rt.exec_approve_learning(&mut app, id);
 
         // Learning should be removed from the overlay list
         assert!(matches!(
             app.view_mode(),
-            ViewMode::ProposedLearnings { learnings, .. } if learnings.is_empty()
+            ViewMode::Learnings { learnings, .. } if learnings.is_empty()
         ));
         // DB should show approved
         let updated = db.get_learning(id).unwrap().unwrap();
@@ -161,13 +161,13 @@ mod tests {
         let rt = make_runtime(db.clone());
         let mut app = App::new(vec![], ProjectId(1), APP_INACTIVITY_TIMEOUT);
         let learning = make_learning(id);
-        app.update(Message::ShowProposedLearnings(vec![learning]));
+        app.update(Message::ShowLearnings(vec![learning]));
 
         rt.exec_reject_learning(&mut app, id);
 
         assert!(matches!(
             app.view_mode(),
-            ViewMode::ProposedLearnings { learnings, .. } if learnings.is_empty()
+            ViewMode::Learnings { learnings, .. } if learnings.is_empty()
         ));
         let updated = db.get_learning(id).unwrap().unwrap();
         assert_eq!(updated.status, LearningStatus::Rejected);
@@ -221,7 +221,7 @@ mod tests {
         rt.exec_load_proposed_learnings(&mut app);
 
         // User scope (0) must come before Repo scope (2)
-        if let ViewMode::ProposedLearnings { learnings, .. } = app.view_mode() {
+        if let ViewMode::Learnings { learnings, .. } = app.view_mode() {
             assert_eq!(learnings.len(), 2);
             assert_eq!(learnings[0].id, user_id, "user scope should sort first");
             assert_eq!(learnings[1].id, repo_id, "repo scope should sort second");

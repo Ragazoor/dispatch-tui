@@ -33,7 +33,7 @@ fn scope_label(learning: &Learning) -> String {
 }
 
 pub fn render_proposed_learnings(frame: &mut Frame, app: &App, area: Rect) {
-    let ViewMode::ProposedLearnings {
+    let ViewMode::Learnings {
         selected,
         ref learnings,
         ..

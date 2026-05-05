@@ -167,7 +167,7 @@ impl App {
     pub(in crate::tui) fn effective_view_mode(&self) -> &ViewMode {
         match &self.board.view_mode {
             ViewMode::TaskDetail { previous, .. } => previous.as_ref(),
-            ViewMode::ProposedLearnings { previous, .. } => previous.as_ref(),
+            ViewMode::Learnings { previous, .. } => previous.as_ref(),
             other => other,
         }
     }
@@ -469,7 +469,7 @@ impl App {
                         .collect()
                 }
             }
-            ViewMode::TaskDetail { .. } | ViewMode::ProposedLearnings { .. } => {
+            ViewMode::TaskDetail { .. } | ViewMode::Learnings { .. } => {
                 unreachable!("effective_view_mode never returns TaskDetail or ProposedLearnings")
             }
         }
@@ -619,7 +619,7 @@ impl App {
                     }
                 }
             }
-            ViewMode::TaskDetail { .. } | ViewMode::ProposedLearnings { .. } => {
+            ViewMode::TaskDetail { .. } | ViewMode::Learnings { .. } => {
                 unreachable!("effective_view_mode never returns TaskDetail or ProposedLearnings")
             }
         }
@@ -681,7 +681,7 @@ impl App {
                     .filter(|e| e.parent_epic_id == Some(current) && e.status == status)
                     .count()
             }
-            ViewMode::TaskDetail { .. } | ViewMode::ProposedLearnings { .. } => {
+            ViewMode::TaskDetail { .. } | ViewMode::Learnings { .. } => {
                 unreachable!("effective_view_mode never returns TaskDetail or ProposedLearnings")
             }
         };
@@ -721,7 +721,7 @@ impl App {
                     .filter(|e| e.parent_epic_id == Some(current))
                     .collect()
             }
-            ViewMode::TaskDetail { .. } | ViewMode::ProposedLearnings { .. } => {
+            ViewMode::TaskDetail { .. } | ViewMode::Learnings { .. } => {
                 unreachable!("effective_view_mode never returns TaskDetail or ProposedLearnings")
             }
         };
@@ -901,7 +901,7 @@ impl App {
 
         let anchor = match self.effective_view_mode() {
             ViewMode::Board(sel) | ViewMode::Epic { selection: sel, .. } => sel.anchor,
-            ViewMode::TaskDetail { .. } | ViewMode::ProposedLearnings { .. } => {
+            ViewMode::TaskDetail { .. } | ViewMode::Learnings { .. } => {
                 unreachable!("effective_view_mode never returns TaskDetail or ProposedLearnings")
             }
         };
@@ -1174,15 +1174,17 @@ impl App {
                 self.handle_feed_refreshed(epic_title, count)
             }
             Message::FeedFailed { epic_title, error } => self.handle_feed_failed(epic_title, error),
-            Message::OpenProposedLearnings => vec![Command::LoadProposedLearnings],
-            Message::ShowProposedLearnings(learnings) => {
+            Message::OpenLearnings => vec![Command::LoadLearnings],
+            Message::ShowLearnings(learnings) => {
                 self.handle_show_proposed_learnings(learnings)
             }
-            Message::CloseProposedLearnings => self.handle_close_proposed_learnings(),
-            Message::NavigateProposedLearning(delta) => {
+            Message::CloseLearnings => self.handle_close_proposed_learnings(),
+            Message::NavigateLearning(delta) => {
                 self.handle_navigate_proposed_learning(delta)
             }
-            Message::ApproveLearning(id) => self.handle_approve_learning(id),
+            Message::ArchiveLearning(id) => self.handle_approve_learning(id),
+            Message::ToggleLearningsView => vec![],
+            Message::NavigateTreeLearning(_) => vec![],
             Message::RejectLearning(id) => self.handle_reject_learning(id),
             Message::EditLearning(id) => self.handle_edit_learning(id),
             Message::LearningActioned(id) => self.handle_learning_actioned(id),

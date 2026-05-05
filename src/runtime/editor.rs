@@ -474,7 +474,7 @@ mod learning_editor_tests {
         let rt = make_runtime(db.clone());
         // Put app into ProposedLearnings view
         let mut app = App::new(vec![], ProjectId(1), EDITOR_TEST_INACTIVITY_TIMEOUT);
-        app.update(Message::ShowProposedLearnings(vec![learning.clone()]));
+        app.update(Message::ShowLearnings(vec![learning.clone()]));
 
         let updated_content = "--- SUMMARY ---\nnew summary\n--- KIND ---\npitfall\n--- TAGS ---\nrust\n--- DETAIL ---\nsome detail\n".to_string();
         rt.exec_finalize_editor_result(
@@ -490,7 +490,7 @@ mod learning_editor_tests {
         // Snapshot in overlay should be updated
         assert!(matches!(
             app.view_mode(),
-            ViewMode::ProposedLearnings { learnings, .. }
+            ViewMode::Learnings { learnings, .. }
                 if learnings.iter().find(|l| l.id == id)
                     .map(|l| l.summary.as_str()) == Some("new summary")
         ));
@@ -514,7 +514,7 @@ mod learning_editor_tests {
         let learning = make_learning(id);
         let rt = make_runtime(db.clone());
         let mut app = App::new(vec![], ProjectId(1), EDITOR_TEST_INACTIVITY_TIMEOUT);
-        app.update(Message::ShowProposedLearnings(vec![learning.clone()]));
+        app.update(Message::ShowLearnings(vec![learning.clone()]));
 
         let content_empty_summary =
             "--- SUMMARY ---\n\n--- KIND ---\npitfall\n--- TAGS ---\n\n--- DETAIL ---\n\n"

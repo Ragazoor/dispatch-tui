@@ -149,6 +149,29 @@ pub enum EditorOutcome {
 }
 
 // ---------------------------------------------------------------------------
+// LearningsView — list vs tree display mode for the Learnings overlay
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(in crate::tui) enum LearningsView {
+    #[default]
+    List,
+    Tree,
+}
+
+// ---------------------------------------------------------------------------
+// TreeNav — directional navigation within the tree view
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy)]
+pub(in crate::tui) enum TreeNav {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+// ---------------------------------------------------------------------------
 // Message
 // ---------------------------------------------------------------------------
 
@@ -343,15 +366,17 @@ pub enum Message {
     PrevTip,
     SetTipsMode(TipsShowMode),
     CloseTips,
-    OpenProposedLearnings,
-    ShowProposedLearnings(Vec<crate::models::Learning>),
-    CloseProposedLearnings,
-    NavigateProposedLearning(isize),
-    ApproveLearning(crate::models::LearningId),
+    OpenLearnings,
+    ShowLearnings(Vec<crate::models::Learning>),
+    CloseLearnings,
+    NavigateLearning(isize),
+    ArchiveLearning(crate::models::LearningId),
     RejectLearning(crate::models::LearningId),
     EditLearning(crate::models::LearningId),
     LearningActioned(crate::models::LearningId),
     LearningEdited(crate::models::Learning),
+    ToggleLearningsView,
+    NavigateTreeLearning(TreeNav),
     // Project messages
     ProjectsUpdated(Vec<Project>),
     SelectProject(ProjectId),
@@ -529,8 +554,8 @@ pub enum Command {
         id: ProjectId,
         delta: i8,
     },
-    LoadProposedLearnings,
-    ApproveLearning(crate::models::LearningId),
+    LoadLearnings,
+    ArchiveLearning(crate::models::LearningId),
     RejectLearning(crate::models::LearningId),
 }
 
@@ -931,7 +956,7 @@ impl Default for BoardSelection {
 // ViewMode — board vs epic view with preserved selection state
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum ViewMode {
     Board(BoardSelection),
     Epic {
@@ -951,11 +976,58 @@ pub enum ViewMode {
         max_scroll: u16,
         previous: Box<ViewMode>,
     },
-    ProposedLearnings {
+    Learnings {
         selected: usize,
         learnings: Vec<crate::models::Learning>,
+        view: LearningsView,
+        // RefCell allows render_stateful_widget to borrow_mut without &mut App
+        tree_state: std::cell::RefCell<tui_tree_widget::TreeState<String>>,
         previous: Box<ViewMode>,
     },
+}
+
+impl Clone for ViewMode {
+    fn clone(&self) -> Self {
+        match self {
+            ViewMode::Board(sel) => ViewMode::Board(sel.clone()),
+            ViewMode::Epic {
+                epic_id,
+                selection,
+                parent,
+            } => ViewMode::Epic {
+                epic_id: *epic_id,
+                selection: selection.clone(),
+                parent: parent.clone(),
+            },
+            ViewMode::TaskDetail {
+                task_id,
+                scroll,
+                zoomed,
+                max_scroll,
+                previous,
+            } => ViewMode::TaskDetail {
+                task_id: *task_id,
+                scroll: *scroll,
+                zoomed: *zoomed,
+                max_scroll: *max_scroll,
+                previous: previous.clone(),
+            },
+            ViewMode::Learnings {
+                selected,
+                learnings,
+                view,
+                previous,
+                // TreeState does not implement Clone — create a fresh one on clone.
+                tree_state: _,
+            } => ViewMode::Learnings {
+                selected: *selected,
+                learnings: learnings.clone(),
+                view: *view,
+                tree_state: std::cell::RefCell::new(tui_tree_widget::TreeState::default()),
+                previous: previous.clone(),
+            },
+        }
+    }
 }
 
 impl ViewMode {
@@ -964,7 +1036,7 @@ impl ViewMode {
             ViewMode::Board(sel) => sel,
             ViewMode::Epic { selection, .. } => selection,
             ViewMode::TaskDetail { previous, .. } => previous.selection(),
-            ViewMode::ProposedLearnings { previous, .. } => previous.selection(),
+            ViewMode::Learnings { previous, .. } => previous.selection(),
         }
     }
 
@@ -973,7 +1045,7 @@ impl ViewMode {
             ViewMode::Board(sel) => sel,
             ViewMode::Epic { selection, .. } => selection,
             ViewMode::TaskDetail { previous, .. } => previous.selection_mut(),
-            ViewMode::ProposedLearnings { previous, .. } => previous.selection_mut(),
+            ViewMode::Learnings { previous, .. } => previous.selection_mut(),
         }
     }
 }

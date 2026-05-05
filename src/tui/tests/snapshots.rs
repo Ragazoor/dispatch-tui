@@ -348,7 +348,7 @@ fn snapshot_proposed_learnings_overlay() {
             updated_at: now,
         },
     ];
-    app.update(crate::tui::Message::ShowProposedLearnings(learnings));
+    app.update(crate::tui::Message::ShowLearnings(learnings));
 
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);
@@ -357,7 +357,7 @@ fn snapshot_proposed_learnings_overlay() {
 #[test]
 fn snapshot_proposed_learnings_empty_state() {
     let mut app = make_app();
-    app.update(crate::tui::Message::ShowProposedLearnings(vec![]));
+    app.update(crate::tui::Message::ShowLearnings(vec![]));
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);
 }

@@ -9,16 +9,18 @@ impl App {
         learnings: Vec<crate::models::Learning>,
     ) -> Vec<Command> {
         let previous = Box::new(self.board.view_mode.clone());
-        self.board.view_mode = ViewMode::ProposedLearnings {
+        self.board.view_mode = ViewMode::Learnings {
             selected: 0,
             learnings,
+            view: LearningsView::List,
+            tree_state: std::cell::RefCell::new(tui_tree_widget::TreeState::default()),
             previous,
         };
         vec![]
     }
 
     pub(in crate::tui) fn handle_close_proposed_learnings(&mut self) -> Vec<Command> {
-        if let ViewMode::ProposedLearnings { previous, .. } =
+        if let ViewMode::Learnings { previous, .. } =
             std::mem::take(&mut self.board.view_mode)
         {
             self.board.view_mode = *previous;
@@ -30,7 +32,7 @@ impl App {
         &mut self,
         delta: isize,
     ) -> Vec<Command> {
-        if let ViewMode::ProposedLearnings {
+        if let ViewMode::Learnings {
             ref mut selected,
             ref learnings,
             ..
@@ -48,9 +50,9 @@ impl App {
         &mut self,
         id: crate::models::LearningId,
     ) -> Vec<Command> {
-        if let ViewMode::ProposedLearnings { ref learnings, .. } = self.board.view_mode {
+        if let ViewMode::Learnings { ref learnings, .. } = self.board.view_mode {
             if learnings.iter().any(|l| l.id == id) {
-                return vec![Command::ApproveLearning(id)];
+                return vec![Command::ArchiveLearning(id)];
             }
         }
         vec![]
@@ -60,7 +62,7 @@ impl App {
         &mut self,
         id: crate::models::LearningId,
     ) -> Vec<Command> {
-        if let ViewMode::ProposedLearnings { ref learnings, .. } = self.board.view_mode {
+        if let ViewMode::Learnings { ref learnings, .. } = self.board.view_mode {
             if learnings.iter().any(|l| l.id == id) {
                 return vec![Command::RejectLearning(id)];
             }
@@ -72,7 +74,7 @@ impl App {
         &mut self,
         id: crate::models::LearningId,
     ) -> Vec<Command> {
-        if let ViewMode::ProposedLearnings { ref learnings, .. } = self.board.view_mode {
+        if let ViewMode::Learnings { ref learnings, .. } = self.board.view_mode {
             if let Some(learning) = learnings.iter().find(|l| l.id == id).cloned() {
                 return vec![Command::PopOutEditor(EditKind::Learning(learning))];
             }
@@ -84,7 +86,7 @@ impl App {
         &mut self,
         id: crate::models::LearningId,
     ) -> Vec<Command> {
-        if let ViewMode::ProposedLearnings {
+        if let ViewMode::Learnings {
             ref mut learnings,
             ref mut selected,
             ..
@@ -104,7 +106,7 @@ impl App {
         &mut self,
         updated: crate::models::Learning,
     ) -> Vec<Command> {
-        if let ViewMode::ProposedLearnings {
+        if let ViewMode::Learnings {
             ref mut learnings, ..
         } = self.board.view_mode
         {

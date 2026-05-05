@@ -241,11 +241,11 @@ pub(super) fn dispatch(
             rt.exec_reorder_project(app, id, delta);
             vec![]
         }
-        LoadProposedLearnings => {
+        LoadLearnings => {
             rt.exec_load_proposed_learnings(app);
             vec![]
         }
-        ApproveLearning(id) => {
+        ArchiveLearning(id) => {
             rt.exec_approve_learning(app, id);
             vec![]
         }
