@@ -6,15 +6,8 @@ use super::*;
 
 #[tokio::test]
 async fn create_task_with_project_id_assigns_correctly() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let (state, db) = test_state_with_db();
     let other = db.create_project("Other", 1).unwrap();
-    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-    });
 
     let resp = call(
         &state,
@@ -43,14 +36,7 @@ async fn create_task_with_project_id_assigns_correctly() {
 
 #[tokio::test]
 async fn create_epic_without_project_id_assigns_to_default() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
-    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-    });
+    let (state, db) = test_state_with_db();
 
     let resp = call(
         &state,
@@ -74,15 +60,8 @@ async fn create_epic_without_project_id_assigns_to_default() {
 
 #[tokio::test]
 async fn create_epic_with_project_id_assigns_correctly() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let (state, db) = test_state_with_db();
     let other = db.create_project("Other", 1).unwrap();
-    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-    });
 
     let resp = call(
         &state,
@@ -110,16 +89,9 @@ async fn create_epic_with_project_id_assigns_correctly() {
 
 #[tokio::test]
 async fn list_projects_returns_all_projects() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let (state, db) = test_state_with_db();
     db.create_project("Dispatch", 1).unwrap();
     db.create_project("wizard_game", 2).unwrap();
-    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-    });
 
     let resp = call(
         &state,
@@ -147,15 +119,8 @@ async fn list_projects_returns_all_projects() {
 
 #[tokio::test]
 async fn update_task_project_id_moves_task() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let (state, db) = test_state_with_db();
     let other = db.create_project("Dispatch", 1).unwrap();
-    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-    });
 
     let task_id = create_task_fixture(&state);
     let default_id = db.get_default_project().unwrap().id;
@@ -201,15 +166,8 @@ async fn update_task_invalid_project_id_returns_error() {
 
 #[tokio::test]
 async fn update_epic_project_id_moves_epic() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let (state, db) = test_state_with_db();
     let other = db.create_project("Dispatch", 1).unwrap();
-    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-    });
 
     let epic = db
         .create_epic(
@@ -241,14 +199,7 @@ async fn update_epic_project_id_moves_epic() {
 
 #[tokio::test]
 async fn update_epic_invalid_project_id_returns_error() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
-    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-    });
+    let (state, db) = test_state_with_db();
 
     let epic = db
         .create_epic("E", "", "/r", None, db.get_default_project().unwrap().id)

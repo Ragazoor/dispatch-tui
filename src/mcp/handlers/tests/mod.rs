@@ -37,6 +37,18 @@ fn test_state() -> Arc<McpState> {
     })
 }
 
+fn test_state_with_db() -> (Arc<McpState>, Arc<dyn db::TaskStore>) {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+    let state = Arc::new(McpState {
+        db: db.clone(),
+        notify_tx: None,
+        runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
+    });
+    (state, db)
+}
+
 async fn call(state: &Arc<McpState>, method: &str, params: Option<Value>) -> JsonRpcResponse {
     let req = JsonRpcRequest {
         jsonrpc: "2.0".to_string(),
