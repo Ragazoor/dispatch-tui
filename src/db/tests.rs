@@ -334,7 +334,69 @@ fn fresh_db_has_latest_schema_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 41);
+    assert_eq!(version, 42);
+}
+
+#[test]
+fn migration_v42_nulls_out_epic_tag() {
+    use rusqlite::Connection as RawConn;
+    let conn = RawConn::open_in_memory().unwrap();
+    conn.execute_batch(
+        "PRAGMA journal_mode=WAL;
+         PRAGMA foreign_keys=ON;
+         CREATE TABLE tasks (
+             id INTEGER PRIMARY KEY,
+             title TEXT NOT NULL,
+             description TEXT NOT NULL DEFAULT '',
+             repo_path TEXT NOT NULL,
+             status TEXT NOT NULL CHECK (status IN ('backlog','running','review','done','archived')),
+             sub_status TEXT NOT NULL DEFAULT 'none',
+             worktree TEXT,
+             tmux_window TEXT,
+             plan_path TEXT,
+             epic_id INTEGER,
+             pr_url TEXT,
+             tag TEXT,
+             sort_order INTEGER,
+             base_branch TEXT NOT NULL DEFAULT 'main',
+             created_at TEXT NOT NULL,
+             updated_at TEXT NOT NULL,
+             agent_pid INTEGER,
+             agent_status TEXT,
+             external_id TEXT,
+             project_id INTEGER NOT NULL DEFAULT 1
+         );
+         INSERT INTO tasks (id, title, repo_path, status, sub_status, tag, base_branch, created_at, updated_at)
+             VALUES (1, 'epic-tagged', '/r', 'backlog', 'none', 'epic', 'main', '2026-01-01', '2026-01-01');
+         INSERT INTO tasks (id, title, repo_path, status, sub_status, tag, base_branch, created_at, updated_at)
+             VALUES (2, 'feature-tagged', '/r', 'backlog', 'none', 'feature', 'main', '2026-01-01', '2026-01-01');
+         INSERT INTO tasks (id, title, repo_path, status, sub_status, tag, base_branch, created_at, updated_at)
+             VALUES (3, 'bug-tagged', '/r', 'backlog', 'none', 'bug', 'main', '2026-01-01', '2026-01-01');
+         PRAGMA user_version = 41;",
+    )
+    .unwrap();
+
+    super::migrations::migrate_v42_drop_epic_tag(&conn).unwrap();
+
+    let mut stmt = conn
+        .prepare("SELECT id, tag FROM tasks ORDER BY id")
+        .unwrap();
+    let rows: Vec<(i64, Option<String>)> = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect();
+    assert_eq!(rows[0], (1, None), "epic-tagged task should have tag NULL");
+    assert_eq!(
+        rows[1],
+        (2, Some("feature".to_string())),
+        "feature tag must be untouched"
+    );
+    assert_eq!(
+        rows[2],
+        (3, Some("bug".to_string())),
+        "bug tag must be untouched"
+    );
 }
 
 #[test]
@@ -491,7 +553,7 @@ fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 41);
+    assert_eq!(version, 42);
 }
 
 #[test]
@@ -580,7 +642,7 @@ fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 41);
+    assert_eq!(version, 42);
 }
 
 #[test]
@@ -691,7 +753,7 @@ fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 41);
+    assert_eq!(version, 42);
 }
 
 #[test]
@@ -2231,7 +2293,7 @@ fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 41);
+    assert_eq!(version, 42);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -2517,7 +2579,7 @@ fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 41);
+    assert_eq!(version, 42);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -4604,7 +4666,7 @@ fn migration_31_re_expands_tilde_paths() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 41);
+    assert_eq!(version, 42);
 }
 
 #[test]
@@ -4680,7 +4742,7 @@ fn migrate_v32_adds_base_branch_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 41);
+    assert_eq!(version, 42);
 }
 
 #[test]
@@ -5217,7 +5279,7 @@ fn migration_v38_feed_epic_columns() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 41);
+    assert_eq!(version, 42);
 }
 
 // ---------------------------------------------------------------------------
@@ -5805,7 +5867,7 @@ fn fresh_db_schema_version_is_40() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 41);
+    assert_eq!(version, 42);
 }
 
 #[test]
@@ -5875,7 +5937,7 @@ fn migration_v40_creates_learnings_table() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 41);
+    assert_eq!(version, 42);
 }
 
 #[test]
@@ -5925,7 +5987,7 @@ fn migration_v41_drops_cost_usd_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 41);
+    assert_eq!(version, 42);
     // Original token data is preserved
     let row: (i64, i64, i64, i64, i64) = conn
         .query_row(

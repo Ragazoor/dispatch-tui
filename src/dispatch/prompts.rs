@@ -148,10 +148,13 @@ underspecified. Otherwise write an implementation plan directly, save it to docs
 and call update_task to attach it."
 }
 
-/// Wrap-up instruction for when implementation is complete.
+/// Wrap-up instruction shared by every dispatched task agent. Wording is
+/// intentionally universal — the same line covers attaching a plan,
+/// creating work packages on an epic, and finishing implementation.
 pub(super) fn wrap_up_instruction() -> &'static str {
-    "When implementation is complete, use the /wrap-up skill to commit remaining \
-changes and ask the user whether to rebase onto main or create a PR."
+    "When your work is done — attaching a plan, creating work packages, \
+or finishing implementation — use the /wrap-up skill to commit any \
+remaining changes and finalise the task."
 }
 
 /// Allium spec instruction — shared across all agents that may touch domain behaviour.
@@ -159,6 +162,28 @@ pub(super) fn allium_instruction() -> &'static str {
     "The Allium specs in `docs/specs/` are the source of truth for domain logic \
 Consult them before changing core behaviour. If your implementation changes domain behaviour, \
 update the spec using the `allium:tend` skill and verify alignment with `allium:weed`."
+}
+
+/// Trailing metadata shared by every dispatched task agent prompt:
+/// `tdd + allium + mcp + learning + wrap_up`, separated by blank lines.
+/// Each `format!` in a builder ends with `{trailing}` where this helper plugs in.
+pub(super) fn trailing_block() -> String {
+    format!(
+        "{tdd}\n\
+\n\
+{allium}\n\
+\n\
+{mcp}\n\
+\n\
+{learning}\n\
+\n\
+{wrap_up}",
+        tdd = tdd_instruction(),
+        allium = allium_instruction(),
+        mcp = mcp_tools_instruction(),
+        learning = learning_tools_instruction(),
+        wrap_up = wrap_up_instruction(),
+    )
 }
 
 pub(super) fn build_prompt(
@@ -170,63 +195,27 @@ pub(super) fn build_prompt(
     project: Option<&ProjectContext>,
 ) -> String {
     let block = task_block(task_id, title, description, epic, project);
-
-    match plan {
-        None => {
-            // No plan yet — agent brainstorms (if vague) or writes a plan directly.
-            format!(
-                "Your task is:\n\
-{block}\n\
-\n\
-{attach}\n\
-\n\
-{tdd}\n\
-\n\
-{allium}\n\
-\n\
-{mcp}\n\
-\n\
-{learning}",
-                block = block,
-                attach = plan_or_brainstorm_instruction(),
-                tdd = tdd_instruction(),
-                allium = allium_instruction(),
-                mcp = mcp_tools_instruction(),
-                learning = learning_tools_instruction(),
-            )
-        }
-        Some(path) => {
-            // Plan exists — review it and ask for permission before implementing.
-            format!(
-                "Your task is:\n\
-{block}\n\
-\n\
-Plan: {path}\n\
+    let addendum = match plan {
+        None => plan_or_brainstorm_instruction().to_string(),
+        Some(path) => format!(
+            "Plan: {path}\n\
 Read this file for the full implementation plan.\n\
 \n\
 Review the plan carefully. Summarise your intended approach in 3–5 bullet points, \
 then ask: 'Shall I proceed with implementation?' Wait for confirmation before \
-making any changes.\n\
+making any changes."
+        ),
+    };
+
+    format!(
+        "Your task is:\n\
+{block}\n\
 \n\
-{tdd}\n\
+{addendum}\n\
 \n\
-{allium}\n\
-\n\
-{mcp}\n\
-\n\
-{learning}\n\
-\n\
-{wrap_up}",
-                block = block,
-                path = path,
-                tdd = tdd_instruction(),
-                allium = allium_instruction(),
-                mcp = mcp_tools_instruction(),
-                learning = learning_tools_instruction(),
-                wrap_up = wrap_up_instruction(),
-            )
-        }
-    }
+{trailing}",
+        trailing = trailing_block(),
+    )
 }
 
 pub(super) fn build_quick_dispatch_prompt(
@@ -237,88 +226,26 @@ pub(super) fn build_quick_dispatch_prompt(
     project: Option<&ProjectContext>,
 ) -> String {
     let block = task_block(task_id, title, description, epic, project);
+    let addendum = format!(
+        "This is a quick-dispatched task with a placeholder title. Start by asking the user \
+what they want to achieve. Once you understand the goal, call `update_task` with a \
+descriptive `title` (and optionally `description`) to rename the task on the kanban board.\n\
+\n\
+Then write a focused plan before making any changes:\n\
+\n\
+{attach}",
+        attach = plan_and_attach_instruction(),
+    );
 
     format!(
         "You are working interactively with the user.\n\
 \n\
 {block}\n\
 \n\
-This is a quick-dispatched task with a placeholder title. Start by asking the user \
-what they want to achieve. Once you understand the goal, call `update_task` with a \
-descriptive `title` (and optionally `description`) to rename the task on the kanban board.\n\
+{addendum}\n\
 \n\
-Then write a focused plan before making any changes:\n\
-\n\
-{attach}\n\
-\n\
-{tdd}\n\
-\n\
-{allium}\n\
-\n\
-{mcp}\n\
-\n\
-{learning}",
-        block = block,
-        attach = plan_and_attach_instruction(),
-        tdd = tdd_instruction(),
-        allium = allium_instruction(),
-        mcp = mcp_tools_instruction(),
-        learning = learning_tools_instruction(),
-    )
-}
-
-pub(super) fn build_brainstorm_prompt(
-    task_id: TaskId,
-    title: &str,
-    description: &str,
-    epic: Option<&EpicContext>,
-    project: Option<&ProjectContext>,
-) -> String {
-    let block = task_block(task_id, title, description, epic, project);
-
-    format!(
-        "You are starting a brainstorming session.\n\
-\n\
-{block}\n\
-\n\
-{attach}\n\
-\n\
-{allium}\n\
-\n\
-{mcp}",
-        block = block,
-        attach = plan_and_attach_instruction(),
-        allium = allium_instruction(),
-        mcp = mcp_tools_instruction(),
-    )
-}
-
-pub(super) fn build_plan_prompt(
-    task_id: TaskId,
-    title: &str,
-    description: &str,
-    epic: Option<&EpicContext>,
-    project: Option<&ProjectContext>,
-) -> String {
-    let block = task_block(task_id, title, description, epic, project);
-
-    format!(
-        "You are starting a planning session.\n\
-\n\
-{block}\n\
-\n\
-{attach}\n\
-\n\
-{tdd}\n\
-\n\
-{allium}\n\
-\n\
-{mcp}",
-        block = block,
-        attach = plan_and_attach_instruction(),
-        tdd = tdd_instruction(),
-        allium = allium_instruction(),
-        mcp = mcp_tools_instruction(),
+{trailing}",
+        trailing = trailing_block(),
     )
 }
 
@@ -423,53 +350,52 @@ Focus on the smallest safe change. Avoid broad refactors.\n\
 }
 
 pub(super) fn build_epic_planning_prompt(
-    epic_id: EpicId,
-    title: &str,
-    description: &str,
+    task_id: TaskId,
+    task_title: &str,
+    task_description: &str,
+    epic: &EpicContext,
     project: &ProjectContext,
 ) -> String {
-    let project_section = project.prompt_section();
-    format!(
-        "You are starting a planning session.\n\
-\n\
-Epic:\n\
-  ID: {epic_id}\n\
-  Title: {title}\n\
-  Description: {description}\n\
-  ProjectId: {project_id}\n\
-{project_section}\n\
-Your goal is to explore the codebase, write an implementation plan, and break \
+    let block = task_block(
+        task_id,
+        task_title,
+        task_description,
+        Some(epic),
+        Some(project),
+    );
+    let addendum = format!(
+        "Your goal is to explore the codebase, write an implementation plan, and break \
 it into work packages on the kanban board.\n\
 \n\
 Steps:\n\
 1. Explore the codebase to understand what needs to change.\n\
-2. Use the /brainstorm skill to write the plan. When done, attach it to the epic:\n\
-   Call update_epic with epic_id={epic_id} and plan=<absolute path to plan file>\n\
-3. Create work packages from the plan using create_task. Work packages are kanban \
+2. Use /brainstorming to write the plan. When done, attach it to the epic by calling \
+`update_epic` with `epic_id={epic_id}` and `plan=<absolute path to plan file>`.\n\
+3. Create work packages from the plan using `create_task`. Work packages are kanban \
 tasks — do not confuse them with subtasks inside the plan document itself:\n\
-   - Set epic_id={epic_id} on every work package\n\
-   - Set project_id={project_id} on every work package\n\
-   - Use sort_order to control execution order (1, 2, 3, \u{2026})\n\
+   - Set `epic_id={epic_id}` on every work package\n\
+   - Set `project_id={project_id}` on every work package\n\
+   - Use `sort_order` to control execution order (1, 2, 3, \u{2026})\n\
    - Work packages at the same sort_order in different repositories run in parallel\n\
    - Work packages in the same repository must have different sort_order values\n\
-   - Set repo_path to the absolute path of the repository each work package targets\n\
+   - Set `repo_path` to the absolute path of the repository each work package targets\n\
 \n\
 After creating the work packages, confirm with the user before doing anything further.\n\
 \n\
-{tdd}\n\
-\n\
-{allium}\n\
-\n\
-Use the dispatch MCP tools to query tasks and epics. Relevant tools: create_task, update_epic, list_tasks.\n\
-\n\
 IMPORTANT: Do NOT start implementing. Your job ends after creating the work packages.",
-        epic_id = epic_id,
-        title = title,
-        description = description,
+        epic_id = epic.epic_id,
         project_id = project.project_id,
-        project_section = project_section,
-        tdd = tdd_instruction(),
-        allium = allium_instruction(),
+    );
+
+    format!(
+        "You are planning an epic.\n\
+\n\
+{block}\n\
+\n\
+{addendum}\n\
+\n\
+{trailing}",
+        trailing = trailing_block(),
     )
 }
 
@@ -532,15 +458,6 @@ mod tests {
         assert!(
             text.contains("confirm_learning"),
             "quick dispatch prompt should mention confirm_learning"
-        );
-    }
-
-    #[test]
-    fn learning_instruction_not_in_brainstorm_prompt() {
-        let text = build_brainstorm_prompt(TaskId(1), "title", "desc", None, None);
-        assert!(
-            !text.contains("query_learnings"),
-            "brainstorm prompt should not mention learning tools"
         );
     }
 

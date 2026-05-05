@@ -103,15 +103,15 @@ fn d_key_on_running_no_window_resumes() {
 }
 
 #[test]
-fn d_key_on_backlog_brainstorms() {
+fn d_key_on_backlog_dispatches() {
     let mut task = make_task(1, TaskStatus::Backlog);
-    task.tag = Some(TaskTag::Epic); // tag=epic triggers brainstorm
+    task.tag = Some(TaskTag::Feature);
     let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
     app.selection_mut().set_column(1); // Backlog column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert_eq!(cmds.len(), 1);
     assert!(
-        matches!(&cmds[0], Command::DispatchAgent { task, mode: DispatchMode::Brainstorm } if task.id == TaskId(1))
+        matches!(&cmds[0], Command::DispatchAgent { task, mode: DispatchMode::Dispatch } if task.id == TaskId(1))
     );
 }
 
@@ -143,26 +143,6 @@ fn d_key_on_running_no_worktree_no_window_shows_warning() {
         .as_deref()
         .unwrap()
         .contains("No worktree"));
-}
-
-#[test]
-fn brainstorm_only_backlog_tasks() {
-    let mut app = make_app();
-
-    // Task 1 is Backlog — should brainstorm
-    let cmds = app.update(Message::DispatchTask(TaskId(1), DispatchMode::Brainstorm));
-    assert_eq!(cmds.len(), 1);
-    assert!(
-        matches!(&cmds[0], Command::DispatchAgent { task, mode: DispatchMode::Brainstorm } if task.id == TaskId(1))
-    );
-
-    // Task 3 is Running — should not brainstorm
-    let cmds = app.update(Message::DispatchTask(TaskId(3), DispatchMode::Brainstorm));
-    assert!(cmds.is_empty());
-
-    // Task 4 is Done — should not brainstorm
-    let cmds = app.update(Message::DispatchTask(TaskId(4), DispatchMode::Brainstorm));
-    assert!(cmds.is_empty());
 }
 
 #[test]
@@ -818,16 +798,14 @@ fn dispatch_epic_with_plan_dispatches_next_backlog_subtask() {
 }
 
 #[test]
-fn dispatch_epic_with_plan_brainstorms_subtask_without_plan() {
+fn dispatch_epic_with_plan_dispatches_subtask_without_plan() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.plan_path = Some("docs/plan.md".to_string());
     app.board.epics = vec![epic];
 
-    // Subtask without a plan, tagged as "epic" to trigger brainstorm
     let mut task1 = make_task(1, TaskStatus::Backlog);
     task1.epic_id = Some(EpicId(10));
-    task1.tag = Some(TaskTag::Epic);
     app.board.tasks = vec![task1];
 
     app.selection_mut().set_column(1);
@@ -836,7 +814,7 @@ fn dispatch_epic_with_plan_brainstorms_subtask_without_plan() {
     let cmds = app.update(Message::DispatchEpic(EpicId(10)));
     assert_eq!(cmds.len(), 1);
     assert!(
-        matches!(cmds[0], Command::DispatchAgent { ref task, mode: DispatchMode::Brainstorm } if task.id == TaskId(1))
+        matches!(cmds[0], Command::DispatchAgent { ref task, mode: DispatchMode::Dispatch } if task.id == TaskId(1))
     );
 }
 
@@ -1495,43 +1473,6 @@ fn dispatch_in_flight_blocks_second_dispatch() {
     assert!(matches!(cmds[0], Command::DispatchAgent { .. }));
     // Second dispatch of same task is blocked
     let cmds = app.update(Message::DispatchTask(TaskId(1), DispatchMode::Dispatch));
-    assert!(cmds.is_empty());
-}
-
-#[test]
-fn brainstorm_in_flight_blocks_second_brainstorm() {
-    let mut task = make_task(1, TaskStatus::Backlog);
-    task.tag = Some(TaskTag::Feature);
-    let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
-    // First brainstorm succeeds (feature without plan → brainstorm)
-    let cmds = app.update(Message::DispatchTask(TaskId(1), DispatchMode::Brainstorm));
-    assert!(matches!(
-        cmds[0],
-        Command::DispatchAgent {
-            mode: DispatchMode::Brainstorm,
-            ..
-        }
-    ));
-    // Second brainstorm of same task is blocked
-    let cmds = app.update(Message::DispatchTask(TaskId(1), DispatchMode::Brainstorm));
-    assert!(cmds.is_empty());
-}
-
-#[test]
-fn plan_in_flight_blocks_second_plan() {
-    let mut task = make_task(1, TaskStatus::Backlog);
-    task.tag = Some(TaskTag::Feature);
-    let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
-    let cmds = app.update(Message::DispatchTask(TaskId(1), DispatchMode::Plan));
-    assert!(matches!(
-        cmds[0],
-        Command::DispatchAgent {
-            mode: DispatchMode::Plan,
-            ..
-        }
-    ));
-    // Second plan of same task is blocked
-    let cmds = app.update(Message::DispatchTask(TaskId(1), DispatchMode::Plan));
     assert!(cmds.is_empty());
 }
 

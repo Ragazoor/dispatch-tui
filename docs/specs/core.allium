@@ -29,7 +29,7 @@ external entity TmuxPane {
 -- Enumerations
 ------------------------------------------------------------
 
-enum TaskTag { bug | feature | chore | epic | pr_review | research | fix }
+enum TaskTag { bug | feature | chore | pr_review | research | fix }
 
 enum TipsShowMode { always | new_only | never }
 
@@ -142,7 +142,6 @@ entity Task {
     has_plan: plan_path != null
     is_stale: sub_status = stale
     is_crashed: sub_status = crashed
-    is_epic: tag = epic
     is_detached: worktree != null and tmux_window = null
                  and status in {running, review}
                  and sub_status != conflict

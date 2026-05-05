@@ -12,6 +12,16 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 pub(super) type Migration = (i64, fn(&Connection) -> Result<()>);
 
+fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
+    conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name = ?2",
+        params![table, column],
+        |r| r.get::<_, i64>(0),
+    )
+    .unwrap_or(0)
+        > 0
+}
+
 pub(super) const MIGRATIONS: &[Migration] = &[
     (1, migrate_v1_add_plan_column),
     (2, migrate_v2_drop_notes_table),
@@ -54,6 +64,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (39, migrate_v39_add_projects),
     (40, migrate_v40_create_learnings),
     (41, migrate_v41_drop_cost_usd),
+    (42, migrate_v42_drop_epic_tag),
 ];
 
 fn migrate_v1_add_plan_column(conn: &Connection) -> Result<()> {
@@ -883,15 +894,7 @@ fn migrate_v40_create_learnings(conn: &Connection) -> Result<()> {
 }
 
 fn migrate_v41_drop_cost_usd(conn: &Connection) -> Result<()> {
-    let has_cost_usd: bool = conn
-        .query_row(
-            "SELECT COUNT(*) FROM pragma_table_info('task_usage') WHERE name = 'cost_usd'",
-            [],
-            |r| r.get::<_, i64>(0),
-        )
-        .unwrap_or(0)
-        > 0;
-    if !has_cost_usd {
+    if !column_exists(conn, "task_usage", "cost_usd") {
         return Ok(());
     }
     conn.execute_batch(
@@ -910,4 +913,18 @@ fn migrate_v41_drop_cost_usd(conn: &Connection) -> Result<()> {
         ALTER TABLE task_usage_new RENAME TO task_usage;",
     )
     .context("Failed to drop cost_usd from task_usage (migration v41)")
+}
+
+pub(super) fn migrate_v42_drop_epic_tag(conn: &Connection) -> Result<()> {
+    // Some migration tests build a pre-v13 schema with no `tag` column.
+    if !column_exists(conn, "tasks", "tag") {
+        return Ok(());
+    }
+    let cleared = conn
+        .execute("UPDATE tasks SET tag = NULL WHERE tag = 'epic'", [])
+        .context("Failed to drop epic tag from tasks (migration v42)")?;
+    if cleared > 0 {
+        tracing::info!("Migration v42: cleared `epic` tag on {cleared} task(s)");
+    }
+    Ok(())
 }

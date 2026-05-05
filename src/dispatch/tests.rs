@@ -1,8 +1,7 @@
 use super::prompts::{
-    allium_instruction, build_brainstorm_prompt, build_epic_planning_prompt, build_plan_prompt,
-    build_prompt, build_quick_dispatch_prompt, build_tmux_window_name, epic_preamble,
-    mcp_tools_instruction, plan_and_attach_instruction, rebase_preamble, task_block,
-    tdd_instruction, wrap_up_instruction, EpicContext, ProjectContext,
+    allium_instruction, build_epic_planning_prompt, build_prompt, build_quick_dispatch_prompt,
+    build_tmux_window_name, epic_preamble, mcp_tools_instruction, plan_and_attach_instruction,
+    rebase_preamble, task_block, tdd_instruction, wrap_up_instruction, EpicContext, ProjectContext,
 };
 use super::worktree::provision_worktree;
 use super::*;
@@ -415,7 +414,6 @@ fn build_prompt_mentions_tdd() {
 
 #[test]
 fn build_prompt_mentions_wrap_up_skill() {
-    // wrap-up instruction only appears when a plan exists (agent is implementing)
     let prompt = build_prompt(
         TaskId(7),
         "Title",
@@ -429,17 +427,20 @@ fn build_prompt_mentions_wrap_up_skill() {
         "with-plan prompt should tell agent to use /wrap-up skill"
     );
     assert!(
-        prompt.contains("rebase") || prompt.contains("PR"),
-        "with-plan prompt should mention rebase/PR choice"
+        prompt.contains("finalise the task"),
+        "with-plan prompt should use the universal wrap-up wording"
     );
 }
 
 #[test]
-fn build_prompt_without_plan_omits_wrap_up() {
+fn build_prompt_without_plan_includes_wrap_up_universally() {
+    // wrap_up_instruction is universal across every dispatched-agent prompt
+    // — no-plan agents may end by attaching a plan and need the same finalise
+    // step (commit/finalise) as implementing agents.
     let prompt = build_prompt(TaskId(7), "Title", "Desc", None, None, None);
     assert!(
-        !prompt.contains("/wrap-up"),
-        "no-plan prompt should not mention /wrap-up (agent isn't implementing yet)"
+        prompt.contains("/wrap-up"),
+        "no-plan prompt should mention /wrap-up (universal, covers plan-attach finish)"
     );
 }
 
@@ -668,71 +669,181 @@ fn rebase_preamble_prepended_to_all_prompts() {
 }
 
 #[test]
-fn build_brainstorm_prompt_contains_task_info() {
-    let prompt =
-        build_brainstorm_prompt(TaskId(7), "Design auth", "Rework the auth flow", None, None);
-    assert!(prompt.contains("7"));
-    assert!(prompt.contains("Design auth"));
-    assert!(prompt.contains("Rework the auth flow"));
-    assert!(prompt.contains("brainstorm"));
-    assert!(prompt.contains("update_task"));
-}
-
-#[test]
-fn build_plan_prompt_contains_task_info() {
-    let prompt = build_plan_prompt(TaskId(8), "Add feature", "Small improvement", None, None);
-    assert!(prompt.contains("8"));
-    assert!(prompt.contains("Add feature"));
-    assert!(prompt.contains("Small improvement"));
-    assert!(prompt.contains("/plan"));
-    assert!(prompt.contains("update_task"));
-}
-
-#[test]
-fn build_plan_prompt_differs_from_brainstorm() {
-    let plan = build_plan_prompt(TaskId(1), "T", "D", None, None);
-    let brainstorm = build_brainstorm_prompt(TaskId(1), "T", "D", None, None);
-    assert_ne!(plan, brainstorm);
-    assert!(plan.contains("planning"));
-    assert!(brainstorm.contains("brainstorm"));
-}
-
-#[test]
-fn brainstorm_prompt_omits_tdd() {
-    let prompt = build_brainstorm_prompt(TaskId(7), "Design auth", "Rework auth", None, None);
-    assert!(
-        !prompt.contains("TDD"),
-        "brainstorm prompt should not include TDD — no code is written at design stage"
-    );
-}
-
-#[test]
-fn brainstorm_prompt_omits_clarifying_questions_opener() {
-    let prompt = build_brainstorm_prompt(TaskId(7), "Design auth", "Rework auth", None, None);
-    assert!(
-        !prompt.contains("clarifying questions"),
-        "brainstorm prompt should not have a clarifying-questions opener — /brainstorming skill handles it"
-    );
-}
-
-#[test]
-fn all_planning_prompts_reference_brainstorming_skill() {
-    let brainstorm = build_brainstorm_prompt(TaskId(1), "T", "D", None, None);
-    let plan = build_plan_prompt(TaskId(1), "T", "D", None, None);
+fn no_plan_prompts_reference_brainstorming_skill() {
     let standard = build_prompt(TaskId(1), "T", "D", None, None, None);
     let quick = build_quick_dispatch_prompt(TaskId(1), "T", "D", None, None);
 
-    for (name, prompt) in [
-        ("brainstorm", brainstorm),
-        ("plan", plan),
-        ("standard-no-plan", standard),
-        ("quick", quick),
-    ] {
+    for (name, prompt) in [("standard-no-plan", standard), ("quick", quick)] {
         assert!(
             prompt.contains("/brainstorming"),
             "{name} prompt should reference /brainstorming skill"
         );
     }
+}
+
+const SHARED_TRAILING_LINES: &[&str] = &[
+    "TDD",                           // tdd_instruction
+    "Allium specs in `docs/specs/`", // allium_instruction
+    "dispatch MCP tools",            // mcp_tools_instruction
+    "/wrap-up",                      // wrap_up_instruction (universal)
+];
+
+fn project_ctx() -> ProjectContext {
+    ProjectContext {
+        project_id: ProjectId(1),
+        project_name: "Default".to_string(),
+    }
+}
+
+fn epic_ctx() -> EpicContext {
+    EpicContext {
+        epic_id: EpicId(7),
+        epic_title: "My Epic".to_string(),
+    }
+}
+
+fn all_aligned_prompts() -> [(&'static str, String); 4] {
+    let project = project_ctx();
+    let epic = epic_ctx();
+    [
+        (
+            "standard-no-plan",
+            build_prompt(TaskId(1), "Task", "Desc", None, None, None),
+        ),
+        (
+            "standard-with-plan",
+            build_prompt(
+                TaskId(1),
+                "Task",
+                "Desc",
+                Some("docs/plans/p.md"),
+                None,
+                None,
+            ),
+        ),
+        (
+            "quick-dispatch",
+            build_quick_dispatch_prompt(TaskId(1), "Quick task", "", None, None),
+        ),
+        (
+            "epic-planning",
+            build_epic_planning_prompt(
+                TaskId(42),
+                "Plan: My Epic",
+                "Planning subtask for epic",
+                &epic,
+                &project,
+            ),
+        ),
+    ]
+}
+
+#[test]
+fn every_prompt_includes_shared_trailing_metadata() {
+    for (name, prompt) in all_aligned_prompts() {
+        for needle in SHARED_TRAILING_LINES {
+            assert!(
+                prompt.contains(needle),
+                "{name} prompt missing shared trailing line: {needle}\n--- prompt ---\n{prompt}"
+            );
+        }
+    }
+}
+
+#[test]
+fn every_prompt_uses_task_block_format() {
+    for (name, prompt) in all_aligned_prompts() {
+        assert!(
+            prompt.contains("Task:"),
+            "{name} prompt should open task block with `Task:` (no `Epic:` header)\n{prompt}"
+        );
+        assert!(prompt.contains("ID:"), "{name} prompt should have `ID:`");
+        assert!(
+            prompt.contains("Title:"),
+            "{name} prompt should have `Title:`"
+        );
+        assert!(
+            prompt.contains("Description:"),
+            "{name} prompt should have `Description:`"
+        );
+    }
+}
+
+#[test]
+fn epic_planning_prompt_uses_task_block_not_epic_header() {
+    let project = project_ctx();
+    let epic = epic_ctx();
+    let prompt = build_epic_planning_prompt(
+        TaskId(42),
+        "Plan: My Epic",
+        "Planning subtask",
+        &epic,
+        &project,
+    );
+    assert!(
+        prompt.starts_with("You are planning an epic."),
+        "epic-planning prompt should open with the planning preamble, got: {}",
+        prompt.lines().next().unwrap_or("(empty)")
+    );
+    assert!(
+        prompt.contains("Task:"),
+        "epic-planning should reuse task_block (Task: header), not custom Epic: header"
+    );
+    assert!(
+        !prompt.contains("\nEpic:\n  ID:"),
+        "epic-planning must not use the legacy `Epic:` header in the task block"
+    );
+    assert!(
+        prompt.contains("EpicId: 7"),
+        "epic-planning should surface the epic id via the task_block EpicId line"
+    );
+    assert!(
+        prompt.contains("ID: 42"),
+        "epic-planning should use the planning subtask's real id, not a placeholder"
+    );
+}
+
+#[test]
+fn epic_planning_prompt_includes_work_package_steps_and_no_implement_guard() {
+    let project = project_ctx();
+    let epic = epic_ctx();
+    let prompt = build_epic_planning_prompt(TaskId(1), "Plan", "Desc", &epic, &project);
+    assert!(prompt.contains("create_task"), "should mention create_task");
+    assert!(prompt.contains("update_epic"), "should mention update_epic");
+    assert!(prompt.contains("sort_order"), "should mention sort_order");
+    assert!(prompt.contains("repo_path"), "should mention repo_path");
+    assert!(
+        prompt.contains("Do NOT") || prompt.contains("do not start implementing"),
+        "epic-planning should keep the do-not-implement guard"
+    );
+}
+
+#[test]
+fn quick_dispatch_uses_unconditional_plan_and_attach_instruction() {
+    let prompt = build_quick_dispatch_prompt(TaskId(1), "Quick task", "", None, None);
+    assert!(
+        prompt.contains(plan_and_attach_instruction()),
+        "quick-dispatch prompt should embed plan_and_attach_instruction verbatim"
+    );
+    assert!(
+        !prompt.contains("vague or"),
+        "quick-dispatch must not use the conditional plan_or_brainstorm wording"
+    );
+}
+
+#[test]
+fn wrap_up_instruction_universal_wording() {
+    let text = wrap_up_instruction();
+    assert!(
+        text.contains("/wrap-up"),
+        "wrap_up_instruction should reference the /wrap-up skill"
+    );
+    assert!(
+        text.contains("attaching a plan")
+            || text.contains("creating work packages")
+            || text.contains("your work is done"),
+        "wrap_up_instruction should describe the universal trigger (plan attach / work-packages / impl), got: {text}"
+    );
 }
 
 #[test]
@@ -862,30 +973,6 @@ fn dispatch_agent_uses_plan_mode() {
     assert!(
         send_keys_arg.contains("--permission-mode plan"),
         "dispatch_agent should use plan mode, got: {send_keys_arg}"
-    );
-}
-
-#[test]
-fn plan_agent_uses_plan_mode() {
-    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
-
-    let mock = MockProcessRunner::new(vec![
-        // No detect_default_branch call — task.base_branch is used directly
-        MockProcessRunner::ok(), // tmux new-window
-        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
-        MockProcessRunner::ok(), // tmux set-hook
-        MockProcessRunner::ok(), // tmux send-keys -l
-        MockProcessRunner::ok(), // tmux send-keys Enter
-    ]);
-
-    let task = make_task(&repo_path);
-    plan_agent(&task, &mock, None, None, &[]).unwrap();
-
-    let calls = mock.recorded_calls();
-    let send_keys_arg = find_call_arg(&calls, 3, "claude");
-    assert!(
-        send_keys_arg.contains("--permission-mode plan"),
-        "plan_agent should use plan mode, got: {send_keys_arg}"
     );
 }
 
@@ -1237,63 +1324,6 @@ fn dispatch_fails_fast_if_git_fails() {
 }
 
 #[test]
-fn brainstorm_reuses_existing_worktree() {
-    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
-
-    let mock = MockProcessRunner::new(vec![
-        // No detect_default_branch call — task.base_branch is used directly
-        // git worktree add is skipped (dir exists)
-        MockProcessRunner::ok(), // tmux new-window
-        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
-        MockProcessRunner::ok(), // tmux set-hook (after-split-window)
-        MockProcessRunner::ok(), // tmux send-keys -l
-        MockProcessRunner::ok(), // tmux send-keys Enter
-    ]);
-
-    let task = make_task(&repo_path);
-    brainstorm_agent(&task, &mock, None, None, &[]).unwrap();
-
-    let calls = mock.recorded_calls();
-    assert!(
-        calls
-            .iter()
-            .all(|(prog, args)| !(prog == "git" && args.iter().any(|a| a == "worktree"))),
-        "git worktree add should be skipped for existing worktree"
-    );
-    assert_eq!(calls[0].0, "tmux");
-    assert_eq!(calls[0].1[0], "new-window");
-}
-
-#[test]
-fn brainstorm_sends_brainstorm_prompt() {
-    let (_dir, repo_path, worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
-
-    let mock = MockProcessRunner::new(vec![
-        // No detect_default_branch call — task.base_branch is used directly
-        MockProcessRunner::ok(), // tmux new-window
-        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
-        MockProcessRunner::ok(), // tmux set-hook (after-split-window)
-        MockProcessRunner::ok(), // tmux send-keys -l
-        MockProcessRunner::ok(), // tmux send-keys Enter
-    ]);
-
-    let task = make_task(&repo_path);
-    brainstorm_agent(&task, &mock, None, None, &[]).unwrap();
-
-    // Verify the prompt file was written with brainstorm content
-    let prompt_file = worktree_dir.join(".claude-prompt");
-    let prompt = std::fs::read_to_string(prompt_file).unwrap();
-    assert!(
-        prompt.contains("brainstorm"),
-        "prompt should mention brainstorming"
-    );
-    assert!(
-        prompt.contains("/brainstorming"),
-        "prompt should reference /brainstorming skill"
-    );
-}
-
-#[test]
 fn quick_dispatch_reuses_existing_worktree() {
     let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
 
@@ -1357,13 +1387,18 @@ fn epic_planning_prompt_contains_epic_context() {
         project_id: ProjectId(3),
         project_name: "My Project".to_string(),
     };
+    let epic = EpicContext {
+        epic_id: EpicId(42),
+        epic_title: "Redesign auth".to_string(),
+    };
     let prompt = build_epic_planning_prompt(
-        EpicId(42),
-        "Redesign auth",
+        TaskId(99),
+        "Plan: Redesign auth",
         "Rework the login flow",
+        &epic,
         &project,
     );
-    assert!(prompt.contains("42"));
+    assert!(prompt.contains("EpicId: 42"));
     assert!(prompt.contains("Redesign auth"));
     assert!(prompt.contains("Rework the login flow"));
     assert!(prompt.contains("Do NOT start implementing"));

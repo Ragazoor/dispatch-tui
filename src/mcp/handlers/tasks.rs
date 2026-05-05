@@ -822,20 +822,6 @@ fn do_dispatch(
             Some(&project_ctx),
             &learnings,
         ),
-        DispatchMode::Brainstorm => dispatch::brainstorm_agent(
-            task,
-            runner,
-            epic_ctx.as_ref(),
-            Some(&project_ctx),
-            &learnings,
-        ),
-        DispatchMode::Plan => dispatch::plan_agent(
-            task,
-            runner,
-            epic_ctx.as_ref(),
-            Some(&project_ctx),
-            &learnings,
-        ),
         DispatchMode::PrReview => dispatch::pr_review_agent(
             task,
             runner,

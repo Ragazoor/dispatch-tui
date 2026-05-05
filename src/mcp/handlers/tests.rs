@@ -3764,7 +3764,7 @@ async fn update_task_valid_tag() {
     let state = test_state();
     let task_id = create_task_fixture(&state);
 
-    for tag in &["bug", "feature", "chore", "epic"] {
+    for tag in &["bug", "feature", "chore"] {
         let resp = call(
             &state,
             "tools/call",
@@ -3783,7 +3783,27 @@ async fn update_task_valid_tag() {
 
     // Verify last tag persisted
     let task = state.db.get_task(task_id).unwrap().unwrap();
-    assert_eq!(task.tag, Some(crate::models::TaskTag::Epic));
+    assert_eq!(task.tag, Some(crate::models::TaskTag::Chore));
+}
+
+#[tokio::test]
+async fn update_task_rejects_epic_tag() {
+    let state = test_state();
+    let task_id = create_task_fixture(&state);
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_task",
+            "arguments": { "task_id": task_id.0, "tag": "epic" }
+        })),
+    )
+    .await;
+    assert!(
+        resp.error.is_some(),
+        "tag=epic should be rejected; the variant was removed"
+    );
 }
 
 #[tokio::test]

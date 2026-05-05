@@ -152,16 +152,6 @@ impl TuiRuntime {
                     Some(&project_ctx),
                     &learnings,
                 ),
-                models::DispatchMode::Brainstorm => dispatch::brainstorm_agent(
-                    t,
-                    r,
-                    epic_ctx.as_ref(),
-                    Some(&project_ctx),
-                    &learnings,
-                ),
-                models::DispatchMode::Plan => {
-                    dispatch::plan_agent(t, r, epic_ctx.as_ref(), Some(&project_ctx), &learnings)
-                }
                 models::DispatchMode::PrReview => dispatch::pr_review_agent(
                     t,
                     r,

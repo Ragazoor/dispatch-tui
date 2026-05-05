@@ -1202,13 +1202,13 @@ pub struct FeedItem {
 // DispatchMode
 // ---------------------------------------------------------------------------
 
-/// Determines how a backlog task should be dispatched based on whether it has
-/// a plan and its tag.
+/// Determines how a backlog task should be dispatched. Most tasks route to
+/// `Dispatch`, which produces the unified prompt skeleton (with-plan or
+/// no-plan variant). The `pr_review`, `research`, and `fix` tags route to
+/// dedicated agents whose prompts are intentionally different.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DispatchMode {
     Dispatch,
-    Brainstorm,
-    Plan,
     PrReview,
     Research,
     Fix,
@@ -1218,23 +1218,21 @@ impl DispatchMode {
     pub fn label(self) -> &'static str {
         match self {
             DispatchMode::Dispatch => "Dispatch",
-            DispatchMode::Brainstorm => "Brainstorm",
-            DispatchMode::Plan => "Plan",
             DispatchMode::PrReview => "PR Review",
             DispatchMode::Research => "Research",
             DispatchMode::Fix => "Fix",
         }
     }
 
-    /// Select the dispatch mode for a task: tasks with a plan always get
-    /// `Dispatch`; otherwise the tag drives the choice.
+    /// Select the dispatch mode for a task: tasks with a plan always go
+    /// through the unified `Dispatch` path; otherwise the tag drives whether
+    /// the task uses the unified path or a dedicated agent (pr_review /
+    /// research / fix).
     pub fn for_task(task: &Task) -> Self {
         if task.plan_path.is_some() {
             DispatchMode::Dispatch
         } else {
             match task.tag {
-                Some(TaskTag::Epic) => DispatchMode::Brainstorm,
-                Some(TaskTag::Feature) => DispatchMode::Plan,
                 Some(TaskTag::PrReview) => DispatchMode::PrReview,
                 Some(TaskTag::Research) => DispatchMode::Research,
                 Some(TaskTag::Fix) => DispatchMode::Fix,
@@ -1254,7 +1252,6 @@ pub enum TaskTag {
     Bug,
     Feature,
     Chore,
-    Epic,
     #[serde(rename = "pr-review")]
     PrReview,
     Research,
@@ -1267,7 +1264,6 @@ impl TaskTag {
             TaskTag::Bug => "bug",
             TaskTag::Feature => "feature",
             TaskTag::Chore => "chore",
-            TaskTag::Epic => "epic",
             TaskTag::PrReview => "pr-review",
             TaskTag::Research => "research",
             TaskTag::Fix => "fix",
@@ -1279,7 +1275,6 @@ impl TaskTag {
             "bug" => Some(TaskTag::Bug),
             "feature" => Some(TaskTag::Feature),
             "chore" => Some(TaskTag::Chore),
-            "epic" => Some(TaskTag::Epic),
             "pr-review" => Some(TaskTag::PrReview),
             "research" => Some(TaskTag::Research),
             "fix" => Some(TaskTag::Fix),
@@ -1292,7 +1287,6 @@ impl TaskTag {
             TaskTag::Bug => "bug",
             TaskTag::Feature => "feat",
             TaskTag::Chore => "chore",
-            TaskTag::Epic => "epic",
             TaskTag::PrReview => "pr-rev",
             TaskTag::Research => "research",
             TaskTag::Fix => "fix",
@@ -2912,14 +2906,9 @@ mod tests {
             DispatchMode::Dispatch
         );
         assert_eq!(
-            DispatchMode::for_task(&make_task_with(Some("a plan"), Some(TaskTag::Epic))),
-            DispatchMode::Dispatch
-        );
-        assert_eq!(
             DispatchMode::for_task(&make_task_with(Some("a plan"), Some(TaskTag::Feature))),
             DispatchMode::Dispatch
         );
-        // New tags with plan still dispatch normally
         assert_eq!(
             DispatchMode::for_task(&make_task_with(Some("a plan"), Some(TaskTag::PrReview))),
             DispatchMode::Dispatch
@@ -3062,24 +3051,19 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_mode_without_plan_uses_tag() {
-        assert_eq!(
-            DispatchMode::for_task(&make_task_with(None, Some(TaskTag::Epic))),
-            DispatchMode::Brainstorm
-        );
-        assert_eq!(
-            DispatchMode::for_task(&make_task_with(None, Some(TaskTag::Feature))),
-            DispatchMode::Plan
-        );
-        assert_eq!(
-            DispatchMode::for_task(&make_task_with(None, Some(TaskTag::Chore))),
-            DispatchMode::Dispatch
-        );
-        assert_eq!(
-            DispatchMode::for_task(&make_task_with(None, None)),
-            DispatchMode::Dispatch
-        );
-        // New tags route to their dedicated modes when no plan is attached
+    fn dispatch_mode_without_plan_routes_only_dedicated_tags() {
+        for tag in [
+            None,
+            Some(TaskTag::Feature),
+            Some(TaskTag::Bug),
+            Some(TaskTag::Chore),
+        ] {
+            assert_eq!(
+                DispatchMode::for_task(&make_task_with(None, tag)),
+                DispatchMode::Dispatch,
+                "tag {tag:?} should fall through to Dispatch"
+            );
+        }
         assert_eq!(
             DispatchMode::for_task(&make_task_with(None, Some(TaskTag::PrReview))),
             DispatchMode::PrReview
@@ -3109,7 +3093,6 @@ mod tests {
             TaskTag::Bug,
             TaskTag::Feature,
             TaskTag::Chore,
-            TaskTag::Epic,
             TaskTag::PrReview,
             TaskTag::Research,
             TaskTag::Fix,

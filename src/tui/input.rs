@@ -300,7 +300,6 @@ impl App {
             KeyCode::Char('b') => self.update(Message::SubmitTag(Some(TaskTag::Bug))),
             KeyCode::Char('f') => self.update(Message::SubmitTag(Some(TaskTag::Feature))),
             KeyCode::Char('c') => self.update(Message::SubmitTag(Some(TaskTag::Chore))),
-            KeyCode::Char('e') => self.update(Message::SubmitTag(Some(TaskTag::Epic))),
             KeyCode::Char('p') => self.update(Message::SubmitTag(Some(TaskTag::PrReview))),
             KeyCode::Char('r') => self.update(Message::SubmitTag(Some(TaskTag::Research))),
             KeyCode::Char('x') => self.update(Message::SubmitTag(Some(TaskTag::Fix))),

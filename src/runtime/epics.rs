@@ -140,7 +140,6 @@ impl TuiRuntime {
         let runner = self.runner.clone();
         let epic_id = epic.id;
         let epic_title = epic.title.clone();
-        let epic_description = epic.description.clone();
 
         tokio::task::spawn_blocking(move || {
             let id = task.id;
@@ -153,7 +152,6 @@ impl TuiRuntime {
                 &task,
                 epic_id,
                 &epic_title,
-                &epic_description,
                 &project_ctx,
                 &*runner,
                 &learnings,

@@ -126,6 +126,18 @@ rule DispatchEpicPlanning {
         -- neither this rule nor DispatchEpicSubtask applies. The TUI
         -- shows "Epic has subtasks but no plan" without taking any
         -- action.
+        --
+        -- Prompt: build_epic_planning_prompt produces a prompt that
+        -- shares the unified task skeleton (preamble + task_block +
+        -- addendum + tdd + allium + mcp_tools + wrap_up) with all
+        -- other dispatched agents. The task_block surfaces the
+        -- planning subtask's id/title/description plus its EpicId,
+        -- so the agent has a clean reference to the parent epic. The
+        -- mode-specific bits are: preamble "You are planning an
+        -- epic." and a work-package-creation addendum that lists the
+        -- explore → /brainstorming → attach via update_epic →
+        -- create_task work-package steps and ends with an explicit
+        -- "do NOT implement" guard.
 }
 
 rule DispatchEpicSubtask {
@@ -141,14 +153,7 @@ rule DispatchEpicSubtask {
         let candidates = epic.active_subtasks where status = backlog
         let next = sort_by_order(candidates).first
         if next != null:
-            if next.has_plan:
-                AgentLaunched(task: next, mode: implementation)
-            else if next.tag = epic:
-                AgentLaunched(task: next, mode: brainstorm)
-            else if next.tag = feature:
-                AgentLaunched(task: next, mode: plan)
-            else:
-                AgentLaunched(task: next, mode: standard)
+            AgentLaunched(task: next, mode: standard)
 
     @guidance
         -- The TUI considers only active subtasks (Task) as dispatch
@@ -169,15 +174,12 @@ rule DispatchEpicSubtask {
         -- `dispatching` set to avoid racing a second dispatch while the
         -- first is still provisioning its worktree.
         --
-        -- Task routing (mirrors DispatchMode.for_task):
-        --   has_plan        → implementation mode
-        --   tag = epic      → brainstorm mode
-        --   tag = feature   → plan mode
-        --   other           → standard mode (dispatch without plan)
-        -- Implementation note: the code's DispatchMode enum collapses
-        -- "implementation" and "standard" into a single Dispatch
-        -- variant; the distinction is preserved at the spec level for
-        -- clarity but both share the same dispatch_agent code path.
+        -- All subtasks dispatch via the same standard path: the unified
+        -- prompt skeleton (build_prompt) handles both has_plan = true
+        -- (review the plan, ask permission, implement) and has_plan = false
+        -- (use /brainstorming if vague, else write a plan and attach it
+        -- via update_task) without any tag-based branching at the
+        -- dispatch layer.
         -- When no backlog subtasks remain, the TUI shows a status
         -- message instead of dispatching.
 }
@@ -400,22 +402,16 @@ rule DispatchNextViaMcp {
         let candidates = epic.active_subtasks where status = backlog
         let next = sort_by_order(candidates).first
         if next != null:
-            if next.has_plan:
-                AgentLaunched(task: next, mode: implementation)
-            else if next.tag = epic:
-                AgentLaunched(task: next, mode: brainstorm)
-            else if next.tag = feature:
-                AgentLaunched(task: next, mode: plan)
-            else:
-                AgentLaunched(task: next, mode: standard)
+            AgentLaunched(task: next, mode: standard)
 
     @guidance
         -- MCP tool for agents to dispatch the next backlog subtask of
-        -- their epic. Uses the same dispatch mode routing as the TUI's
-        -- DispatchEpicSubtask (plan/tag based). The task is
-        -- transitioned to running with a provisioned worktree and tmux
-        -- window; the parent epic's status is recalculated after the
-        -- dispatch completes.
+        -- their epic. Routes through the same single dispatch path as
+        -- DispatchEpicSubtask: build_prompt produces the unified prompt
+        -- skeleton with the appropriate addendum based on has_plan.
+        -- The task is transitioned to running with a provisioned worktree
+        -- and tmux window; the parent epic's status is recalculated after
+        -- the dispatch completes.
         -- Sub-epics are not auto-dispatched by this tool: only direct
         -- Task children with status = backlog are considered. If an
         -- epic's remaining work is nested inside a sub-epic, the human

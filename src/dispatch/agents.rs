@@ -11,9 +11,9 @@ use crate::tmux;
 use crate::tui::{FixAgentRequest, ReviewAgentRequest};
 
 use super::prompts::{
-    build_brainstorm_prompt, build_epic_planning_prompt, build_fix_task_prompt, build_plan_prompt,
-    build_pr_review_prompt, build_prompt, build_quick_dispatch_prompt, build_research_prompt,
-    build_tmux_window_name, rebase_preamble, EpicContext, ProjectContext, DISPATCH_PLUGIN_DIR,
+    build_epic_planning_prompt, build_fix_task_prompt, build_pr_review_prompt, build_prompt,
+    build_quick_dispatch_prompt, build_research_prompt, build_tmux_window_name, rebase_preamble,
+    EpicContext, ProjectContext, DISPATCH_PLUGIN_DIR,
 };
 use super::stderr_str;
 use super::worktree::provision_worktree;
@@ -131,28 +131,6 @@ pub fn dispatch_agent(
     dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch), learnings)
 }
 
-pub fn brainstorm_agent(
-    task: &Task,
-    runner: &dyn ProcessRunner,
-    epic: Option<&EpicContext>,
-    project: Option<&ProjectContext>,
-    learnings: &[Learning],
-) -> Result<DispatchResult> {
-    let prompt = build_brainstorm_prompt(task.id, &task.title, &task.description, epic, project);
-    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch), learnings)
-}
-
-pub fn plan_agent(
-    task: &Task,
-    runner: &dyn ProcessRunner,
-    epic: Option<&EpicContext>,
-    project: Option<&ProjectContext>,
-    learnings: &[Learning],
-) -> Result<DispatchResult> {
-    let prompt = build_plan_prompt(task.id, &task.title, &task.description, epic, project);
-    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch), learnings)
-}
-
 pub fn pr_review_agent(
     task: &Task,
     runner: &dyn ProcessRunner,
@@ -202,12 +180,16 @@ pub fn epic_planning_agent(
     task: &Task,
     epic_id: EpicId,
     epic_title: &str,
-    epic_description: &str,
     project: &ProjectContext,
     runner: &dyn ProcessRunner,
     learnings: &[Learning],
 ) -> Result<DispatchResult> {
-    let prompt = build_epic_planning_prompt(epic_id, epic_title, epic_description, project);
+    let epic = EpicContext {
+        epic_id,
+        epic_title: epic_title.to_string(),
+    };
+    let prompt =
+        build_epic_planning_prompt(task.id, &task.title, &task.description, &epic, project);
     dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch), learnings)
 }
 

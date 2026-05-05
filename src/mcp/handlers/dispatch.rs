@@ -111,8 +111,8 @@ mcp_tools! {
                 },
                 "tag": {
                     "type": "string",
-                    "description": "Task tag: bug, feature, chore, or epic. Controls dispatch behavior.",
-                    "enum": ["bug", "feature", "chore", "epic"]
+                    "description": "Task tag: bug, feature, or chore. Controls dispatch behavior.",
+                    "enum": ["bug", "feature", "chore"]
                 },
                 "sub_status": {
                     "type": "string",
@@ -179,8 +179,8 @@ mcp_tools! {
                 },
                 "tag": {
                     "type": "string",
-                    "description": "Task tag: bug, feature, chore, or epic. Controls dispatch behavior.",
-                    "enum": ["bug", "feature", "chore", "epic"]
+                    "description": "Task tag: bug, feature, or chore. Controls dispatch behavior.",
+                    "enum": ["bug", "feature", "chore"]
                 },
                 "base_branch": {
                     "type": "string",

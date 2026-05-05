@@ -106,10 +106,10 @@ rule DispatchTask {
 
     requires: task.status = backlog
     -- Tasks with a plan always dispatch. Tasks without a plan dispatch
-    -- if their tag is bug, chore or unset. Epic and feature tags route
-    -- to BrainstormTask and PlanTask respectively.
+    -- unless they carry a tag that routes to a dedicated agent
+    -- (pr_review, research, fix).
     requires: task.has_plan = true
-              or task.tag not in {epic, feature, pr_review, research, fix}
+              or task.tag not in {pr_review, research, fix}
 
     ensures: task.status = running
     ensures: task.sub_status = core/SubStatus.default_for(running)
@@ -135,56 +135,48 @@ rule DispatchTask {
         -- The agent prompt is prepended with a `git rebase <base>`
         -- preamble so the agent picks up latest base changes on first
         -- run (also useful when an agent is resumed after time passes).
-        -- All task dispatches use --permission-mode plan
-        -- (see PlanTask guidance for the full rationale).
-        -- Tasks with pr_review, research, or fix tags route to their
-        -- dedicated dispatch rules (DispatchPrReviewTask, DispatchResearchTask,
-        -- DispatchFixTask) unless they have a plan attached.
-}
+        -- All task-agent dispatches (Dispatch, QuickDispatch, EpicPlanning)
+        -- launch Claude with --permission-mode plan; the prompt content —
+        -- not the permission flag — differentiates the modes. (Review and
+        -- fix agents dispatched via MCP tools use --permission-mode
+        -- acceptEdits instead.)
 
-rule BrainstormTask {
-    when: BrainstormTask(task)
-
-    requires: task.status = backlog
-    requires: task.has_plan = false
-
-    ensures: task.status = running
-    ensures: task.sub_status = core/SubStatus.default_for(running)
-    ensures: task.worktree = core/Worktree.created(
-        path: task.repo_path + "/.worktrees/" + task.id + "-" + slugify(task.title),
-        branch: task.id + "-" + slugify(task.title)
-    )
-    ensures: task.tmux_window = core/TmuxWindow.created(name: "task-" + task.id)
-    ensures: AgentLaunched(task: task, mode: brainstorm)
-}
-
-rule PlanTask {
-    when: PlanTask(task)
-
-    requires: task.status = backlog
-    requires: task.has_plan = false
-    requires: task.tag = feature
-
-    ensures: task.status = running
-    ensures: task.sub_status = core/SubStatus.default_for(running)
-    ensures: task.worktree = core/Worktree.created(
-        path: task.repo_path + "/.worktrees/" + task.id + "-" + slugify(task.title),
-        branch: task.id + "-" + slugify(task.title)
-    )
-    ensures: task.tmux_window = core/TmuxWindow.created(name: "task-" + task.id)
-    ensures: AgentLaunched(task: task, mode: plan)
-
-    @guidance
-        -- Plan mode is selected for feature-tagged tasks that do not
-        -- yet have a plan. The agent is given a planning-oriented
-        -- prompt (build_plan_prompt) that asks it to explore the
-        -- codebase and produce an implementation plan in docs/plans/,
-        -- then attach the plan via update_task before implementation.
-        -- All task-agent dispatches (Dispatch, Brainstorm, Plan, and
-        -- QuickDispatch) launch Claude with --permission-mode plan;
-        -- the prompt content — not the permission flag — differentiates
-        -- the modes. (Review and fix agents dispatched via MCP tools
-        -- use --permission-mode acceptEdits instead.)
+        -- == Unified prompt skeleton ==
+        -- Every task-agent prompt produced by build_prompt /
+        -- build_quick_dispatch_prompt / build_epic_planning_prompt has
+        -- the same shape:
+        --
+        --   {preamble}                     (one line, mode-specific)
+        --   <blank>
+        --   Task:                          (shared task_block, always)
+        --     ID: ...
+        --     Title: ...
+        --     Description: ...
+        --     EpicId: ...                  (only if task.epic != null)
+        --   {epic sibling-communication}   (only if task.epic != null)
+        --   <blank>
+        --   {mode_addendum}                (mode-specific block)
+        --   <blank>
+        --   {tdd_instruction}              (shared verbatim)
+        --   {allium_instruction}           (shared verbatim)
+        --   {mcp_tools_instruction}        (shared verbatim)
+        --   {wrap_up_instruction}          (shared verbatim, universal)
+        --
+        -- DispatchTask emits one of two variants of build_prompt:
+        --   * has_plan = false: preamble "Your task is:" and the addendum
+        --     is plan_or_brainstorm_instruction (conditional: if vague
+        --     use /brainstorming, else write the plan directly under
+        --     docs/plans/ and attach via update_task).
+        --   * has_plan = true: preamble "Your task is:" and the addendum
+        --     references the plan path with a "review and ask permission
+        --     before implementing" instruction.
+        -- task_block does NOT include a Tag: line — tag is metadata for
+        -- the kanban board, not for prompt context (it would invite the
+        -- agent to over-fit on labels rather than the description).
+        -- wrap_up_instruction is shared by every dispatched agent so the
+        -- whole task lifecycle terminates the same way regardless of
+        -- mode (the wording covers plan-attach, work-package-creation,
+        -- and implementation completion).
 }
 
 rule DispatchPrReviewTask {
@@ -1140,9 +1132,9 @@ rule RetryFresh {
 
     @guidance
         -- RetryFresh dispatches directly via the standard dispatch
-        -- path, bypassing the DispatchTask rule's has_plan precondition.
-        -- This means a task without a plan will be dispatched in
-        -- standard mode rather than brainstorm mode.
+        -- path. The unified prompt skeleton handles both has_plan = true
+        -- (review-and-implement) and has_plan = false (brainstorm-or-plan
+        -- conditional) variants without any branch in this rule.
 }
 
 -- == MCP Task Tools ==
@@ -1353,13 +1345,7 @@ rule DispatchNextViaMcp {
         else if next = null:
             UserInformed(about: no_backlog_tasks, epic: epic)
         else:
-            let mode = DispatchMode.for_task(next)
-            if mode = dispatch:
-                DispatchTask(next)
-            else if mode = brainstorm:
-                BrainstormTask(next)
-            else if mode = plan:
-                PlanTask(next)
+            DispatchTask(next)
 
     @guidance
         -- When epic.auto_dispatch is false, the call returns an
@@ -1371,7 +1357,9 @@ rule DispatchNextViaMcp {
         -- not block dispatch; the flag defaults to treated-as-true on
         -- read failure (fail-open). Returns success immediately; the
         -- dispatch runs in the background via spawn_blocking.
-        -- Internally delegates to the same dispatch logic as DispatchTaskViaMcp.
+        -- Internally delegates to the same dispatch logic as DispatchTaskViaMcp:
+        -- a single DispatchTask call, since the unified prompt skeleton
+        -- handles both has_plan branches without tag-based routing.
 }
 
 rule DispatchTaskViaMcp {
@@ -1379,19 +1367,13 @@ rule DispatchTaskViaMcp {
 
     requires: task.status = backlog
 
-    ensures:
-        let mode = DispatchMode.for_task(task)
-        if mode = dispatch:
-            DispatchTask(task)
-        else if mode = brainstorm:
-            BrainstormTask(task)
-        else if mode = plan:
-            PlanTask(task)
+    ensures: DispatchTask(task)
 
     @guidance
         -- Returns an error if task.status != backlog.
-        -- Routes to the appropriate dispatch mode based on tag and plan presence,
-        -- identical to DispatchNextViaMcp but targeting a specific task by ID.
+        -- A single DispatchTask call covers both has_plan = true
+        -- (with-plan prompt) and has_plan = false (brainstorm-or-plan
+        -- prompt) variants — the prompt builder branches internally.
         -- Unlike DispatchNextViaMcp, this call is synchronous: it waits for
         -- worktree creation and agent launch to complete before returning.
         -- On success, the worktree path and tmux window are returned to the caller.
@@ -1522,7 +1504,7 @@ rule HookNotification {
 rule AugmentDispatchPromptWithLearnings {
     when: AgentLaunched(task, mode)
 
-    requires: mode in {standard, brainstorm, plan, resume, quick}
+    requires: mode in {standard, resume, quick, epic_planning}
 
     let relevant = core/Learnings where applies_to_dispatch(task)
 
@@ -1872,10 +1854,10 @@ surface DispatchingFeedback {
 ------------------------------------------------------------
 
 @invariant RunningTaskHasWorktree
-    -- Tasks dispatched via DispatchTask, BrainstormTask, or ClaimTaskViaMcp
-    -- always have a worktree. However, manual forward movement (m key)
-    -- can move a task to running without provisioning a worktree.
-    -- The dispatch flow is the canonical path; manual moves are overrides.
+    -- Tasks dispatched via DispatchTask or ClaimTaskViaMcp always have a
+    -- worktree. However, manual forward movement (m key) can move a task
+    -- to running without provisioning a worktree. The dispatch flow is
+    -- the canonical path; manual moves are overrides.
 
 @invariant DoneRequiresHumanConfirmation
     -- The Done status transition requires explicit human confirmation

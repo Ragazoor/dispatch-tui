@@ -1651,7 +1651,7 @@ fn handle_key_epic_repo_path_enter_selects_cursor() {
 }
 
 #[test]
-fn handle_key_tag_selects_epic() {
+fn handle_key_e_in_tag_input_does_not_set_a_tag() {
     let mut app = make_app();
     app.input.mode = InputMode::InputTag;
     app.input.task_draft = Some(TaskDraft {
@@ -1660,10 +1660,7 @@ fn handle_key_tag_selects_epic() {
     });
 
     app.handle_key(make_key(KeyCode::Char('e')));
-    assert_eq!(
-        app.input.task_draft.as_ref().unwrap().tag,
-        Some(TaskTag::Epic)
-    );
+    assert_eq!(app.input.task_draft.as_ref().unwrap().tag, None);
 }
 
 #[test]

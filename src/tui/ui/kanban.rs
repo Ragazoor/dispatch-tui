@@ -439,7 +439,6 @@ fn classify_card_indicator(
         Some(crate::models::TaskTag::Bug) => " [bug]",
         Some(crate::models::TaskTag::Feature) => " [feat]",
         Some(crate::models::TaskTag::Chore) => " [chore]",
-        Some(crate::models::TaskTag::Epic) => " [epic]",
         Some(crate::models::TaskTag::PrReview) => " [pr-rev]",
         Some(crate::models::TaskTag::Research) => " [research]",
         Some(crate::models::TaskTag::Fix) => " [fix]",
