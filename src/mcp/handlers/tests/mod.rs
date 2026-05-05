@@ -34,6 +34,7 @@ fn test_state() -> Arc<McpState> {
         notify_tx: None,
         runner,
         exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
+        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     })
 }
 
@@ -45,6 +46,7 @@ fn test_state_with_db() -> (Arc<McpState>, Arc<dyn db::TaskStore>) {
         notify_tx: None,
         runner,
         exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
+        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
     (state, db)
 }
@@ -145,6 +147,7 @@ fn test_state_with_notify() -> (
         notify_tx: Some(tx),
         runner,
         exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
+        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
     (state, rx)
 }
@@ -437,7 +440,7 @@ fn tool_schemas_match_arg_structs() {
         ),
         (
             "exit_session",
-            BTreeSet::from(["task_id"]),
+            BTreeSet::from(["task_id", "has_learnings"]),
             BTreeSet::from(["task_id"]),
             json!({"task_id": 1}),
         ),

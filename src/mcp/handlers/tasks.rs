@@ -128,6 +128,8 @@ pub(super) struct WrapUpArgs {
 pub(super) struct ExitSessionArgs {
     #[serde(deserialize_with = "deserialize_flexible_i64")]
     pub(super) task_id: i64,
+    #[serde(default)]
+    pub(super) has_learnings: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -741,59 +743,96 @@ pub(super) fn handle_exit_session(
         );
     }
 
-    let is_second_call = {
-        let mut pending = state
-            .exit_session_pending
+    enum Phase {
+        AskQuestion,
+        RecordPrompt,
+        CloseSession,
+    }
+
+    let phase = {
+        let mut reflecting = state
+            .exit_session_reflecting
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        if pending.contains(&task_id) {
-            pending.remove(&task_id);
-            true
+        if reflecting.contains(&task_id) {
+            reflecting.remove(&task_id);
+            Phase::CloseSession
         } else {
-            pending.insert(task_id);
-            false
+            let mut pending = state
+                .exit_session_pending
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            if pending.contains(&task_id) {
+                pending.remove(&task_id);
+                if parsed.has_learnings == Some(true) {
+                    reflecting.insert(task_id);
+                    Phase::RecordPrompt
+                } else {
+                    Phase::CloseSession
+                }
+            } else {
+                pending.insert(task_id);
+                Phase::AskQuestion
+            }
         }
     };
 
-    if is_second_call {
-        let patch = crate::db::TaskPatch::new()
-            .status(TaskStatus::Done)
-            .sub_status(SubStatus::default_for(TaskStatus::Done))
-            .tmux_window(None);
-        if let Err(e) = state.db.patch_task(task_id, &patch) {
-            tracing::warn!(
-                task_id = task_id.0,
-                "exit_session: failed to apply closing patch: {e}"
-            );
-        }
-        if let Some(epic_id) = task.epic_id {
-            if let Err(err) = state.db.recalculate_epic_status(epic_id) {
+    match phase {
+        Phase::AskQuestion => JsonRpcResponse::ok(
+            id,
+            json!({"content": [{"type": "text", "text": "\
+Before closing, reflect on this session.\n\
+\n\
+Did you encounter any of the following?\n\
+  \u{2022} A pitfall \u{2014} something that wasted time or caused surprise\n\
+  \u{2022} A convention \u{2014} a pattern worth following consistently\n\
+  \u{2022} A tool tip or preference\n\
+\n\
+Call exit_session(has_learnings=true) if yes, or exit_session(has_learnings=false) to close now."}]}),
+        ),
+        Phase::RecordPrompt => JsonRpcResponse::ok(
+            id,
+            json!({"content": [{"type": "text", "text": "\
+Record each finding with record_learning before closing:\n\
+  \u{2022} kind: pitfall | convention | preference | tool_recommendation\n\
+  \u{2022} summary: one clear sentence\n\
+  \u{2022} scope: repo | project | user | epic | task\n\
+\n\
+Check query_learnings first to avoid duplicates.\n\
+Call exit_session again when done."}]}),
+        ),
+        Phase::CloseSession => {
+            let patch = crate::db::TaskPatch::new()
+                .status(TaskStatus::Done)
+                .sub_status(SubStatus::default_for(TaskStatus::Done))
+                .tmux_window(None);
+            if let Err(e) = state.db.patch_task(task_id, &patch) {
                 tracing::warn!(
-                    "failed to recalculate epic status for epic {}: {err}",
-                    epic_id.0
+                    task_id = task_id.0,
+                    "exit_session: failed to apply closing patch: {e}"
                 );
             }
-        }
-        state.notify();
-        let tmux_window = task.tmux_window;
-        let runner = state.runner.clone();
-        tokio::task::spawn_blocking(move || {
-            if let Some(window) = &tmux_window {
-                let _ = crate::tmux::kill_window(window, &*runner);
+            if let Some(epic_id) = task.epic_id {
+                if let Err(err) = state.db.recalculate_epic_status(epic_id) {
+                    tracing::warn!(
+                        "failed to recalculate epic status for epic {}: {err}",
+                        epic_id.0
+                    );
+                }
             }
-        });
-        JsonRpcResponse::ok(
-            id,
-            json!({"content": [{"type": "text", "text": "Session closed."}]}),
-        )
-    } else {
-        JsonRpcResponse::ok(
-            id,
-            json!({"content": [{"type": "text", "text": "Reflect on your work — call \
-`record_learning` with any non-obvious discoveries (pitfalls, conventions, preferences). \
-Check with `query_learnings` if these learnings are already added to avoid duplicates. \
-Call `exit_session` again when you're ready to close your session."}]}),
-        )
+            state.notify();
+            let tmux_window = task.tmux_window;
+            let runner = state.runner.clone();
+            tokio::task::spawn_blocking(move || {
+                if let Some(window) = &tmux_window {
+                    let _ = crate::tmux::kill_window(window, &*runner);
+                }
+            });
+            JsonRpcResponse::ok(
+                id,
+                json!({"content": [{"type": "text", "text": "Session closed."}]}),
+            )
+        }
     }
 }
 
