@@ -2,48 +2,91 @@
 
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::models::{SubStatus, TaskStatus};
+use crate::models::{LearningId, SubStatus, TaskStatus};
 
 use super::super::types::*;
 use super::super::App;
 
+/// Extract the learning id of the currently-selected node in the tree view.
+///
+/// Leaf node identifiers are encoded as `"learning:<id>"`. Returns `None` when
+/// nothing is selected or the selected item is a scope-group header.
+fn selected_learning_id_from_tree(
+    tree_state: &std::cell::RefCell<tui_tree_widget::TreeState<String>>,
+) -> Option<LearningId> {
+    let state = tree_state.borrow();
+    let selected = state.selected();
+    selected
+        .last()?
+        .strip_prefix("learning:")?
+        .parse::<i64>()
+        .ok()
+        .map(LearningId)
+}
+
 impl App {
     pub(in crate::tui) fn handle_key_proposed_learnings(&mut self, key: KeyEvent) -> Vec<Command> {
-        let selected_id = if let ViewMode::Learnings {
+        // Extract view and selected-id data before any mutable borrows.
+        let (current_view, selected_id) = if let ViewMode::Learnings {
             selected,
             ref learnings,
+            view,
+            ref tree_state,
             ..
         } = self.board.view_mode
         {
-            learnings.get(selected).map(|l| l.id)
+            let id = match view {
+                LearningsView::List => learnings.get(selected).map(|l| l.id),
+                LearningsView::Tree => selected_learning_id_from_tree(tree_state),
+            };
+            (view, id)
         } else {
             return vec![];
         };
 
         match key.code {
+            KeyCode::Tab => self.update(Message::ToggleLearningsView),
             KeyCode::Char('q') | KeyCode::Esc => self.update(Message::CloseLearnings),
-            KeyCode::Char('j') | KeyCode::Down => self.update(Message::NavigateLearning(1)),
-            KeyCode::Char('k') | KeyCode::Up => self.update(Message::NavigateLearning(-1)),
-            KeyCode::Char('a') => {
-                if let Some(id) = selected_id {
-                    self.update(Message::ArchiveLearning(id))
-                } else {
-                    vec![]
-                }
-            }
-            KeyCode::Char('r') => {
-                if let Some(id) = selected_id {
-                    self.update(Message::RejectLearning(id))
-                } else {
-                    vec![]
-                }
-            }
             KeyCode::Char('e') => {
                 if let Some(id) = selected_id {
                     self.update(Message::EditLearning(id))
                 } else {
                     vec![]
                 }
+            }
+            KeyCode::Char('x') => {
+                if let Some(id) = selected_id {
+                    self.update(Message::RejectLearning(id))
+                } else {
+                    vec![]
+                }
+            }
+            KeyCode::Char('A') => {
+                if let Some(id) = selected_id {
+                    self.update(Message::ArchiveLearning(id))
+                } else {
+                    vec![]
+                }
+            }
+            // List-view navigation
+            KeyCode::Char('j') | KeyCode::Down if matches!(current_view, LearningsView::List) => {
+                self.update(Message::NavigateLearning(1))
+            }
+            KeyCode::Char('k') | KeyCode::Up if matches!(current_view, LearningsView::List) => {
+                self.update(Message::NavigateLearning(-1))
+            }
+            // Tree-view navigation (j/k/Up/Down fall through here when in Tree view)
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.update(Message::NavigateTreeLearning(TreeNav::Down))
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.update(Message::NavigateTreeLearning(TreeNav::Up))
+            }
+            KeyCode::Char('l') | KeyCode::Right => {
+                self.update(Message::NavigateTreeLearning(TreeNav::Right))
+            }
+            KeyCode::Char('h') | KeyCode::Left => {
+                self.update(Message::NavigateTreeLearning(TreeNav::Left))
             }
             _ => vec![],
         }

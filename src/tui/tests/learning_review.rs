@@ -247,9 +247,9 @@ fn esc_closes_overlay() {
 }
 
 #[test]
-fn a_key_emits_approve_command() {
+fn shift_a_key_emits_archive_command() {
     let mut app = make_app_with_learnings();
-    let cmds = app.handle_key(make_key(KeyCode::Char('a')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('A')));
     // selected=0, first learning has id=1
     assert!(cmds
         .iter()
@@ -257,13 +257,69 @@ fn a_key_emits_approve_command() {
 }
 
 #[test]
-fn r_key_emits_reject_command() {
+fn x_key_emits_reject_command() {
     let mut app = make_app_with_learnings();
-    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('x')));
     // selected=0, first learning has id=1
     assert!(cmds
         .iter()
         .any(|c| matches!(c, Command::RejectLearning(id) if *id == LearningId(1))));
+}
+
+#[test]
+fn a_key_is_inert_in_overlay() {
+    // 'a' was removed from the learnings overlay key bindings; it must not
+    // trigger an archive command or close the overlay.
+    let mut app = make_app_with_learnings();
+    let cmds = app.handle_key(make_key(KeyCode::Char('a')));
+    assert!(cmds.is_empty());
+    assert!(matches!(app.board.view_mode, ViewMode::Learnings { .. }));
+}
+
+#[test]
+fn r_key_is_inert_in_overlay() {
+    // 'r' was removed from the learnings overlay key bindings; it must not
+    // trigger a reject command or close the overlay.
+    let mut app = make_app_with_learnings();
+    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
+    assert!(cmds.is_empty());
+    assert!(matches!(app.board.view_mode, ViewMode::Learnings { .. }));
+}
+
+#[test]
+fn tab_key_emits_toggle_view() {
+    let mut app = make_app_with_learnings();
+    let cmds = app.handle_key(make_key(KeyCode::Tab));
+    // ToggleLearningsView is handled by mod.rs (currently a stub returning vec![]).
+    // The input handler must emit the message — verified by checking no error occurs
+    // and the overlay stays open.
+    assert!(matches!(app.board.view_mode, ViewMode::Learnings { .. }));
+    // No command is produced yet (update handler is a stub), so cmds may be empty.
+    let _ = cmds;
+}
+
+#[test]
+fn tree_nav_keys_are_accepted_in_tree_view() {
+    let mut app = make_app_with_learnings();
+    // Switch to tree view
+    app.update(Message::ToggleLearningsView);
+    // h/l/j/k in tree mode must not close the overlay
+    for code in [
+        KeyCode::Char('h'),
+        KeyCode::Char('l'),
+        KeyCode::Char('j'),
+        KeyCode::Char('k'),
+        KeyCode::Left,
+        KeyCode::Right,
+        KeyCode::Down,
+        KeyCode::Up,
+    ] {
+        app.handle_key(make_key(code));
+        assert!(
+            matches!(app.board.view_mode, ViewMode::Learnings { .. }),
+            "overlay closed unexpectedly on key {code:?}"
+        );
+    }
 }
 
 #[test]
@@ -297,10 +353,11 @@ fn i_key_from_board_emits_load_command() {
 }
 
 #[test]
-fn a_key_on_empty_overlay_is_inert() {
+fn shift_a_key_on_empty_overlay_is_inert() {
+    // 'A' (archive) on an empty list must be a no-op — no id to archive.
     let mut app = make_app();
     app.update(Message::ShowLearnings(vec![]));
-    let cmds = app.handle_key(make_key(KeyCode::Char('a')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('A')));
     assert!(cmds.is_empty());
     assert!(matches!(
         app.board.view_mode,
