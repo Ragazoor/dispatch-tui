@@ -111,7 +111,7 @@ impl App {
         let items: Vec<_> = self
             .column_items_for_status(status)
             .into_iter()
-            .filter(|i| !matches!(i, ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_)))
+            .filter(|i| i.is_selectable())
             .collect();
         let target_row = row as isize + direction;
         if target_row < 0 || target_row >= items.len() as isize {

@@ -1071,7 +1071,15 @@ pub enum ColumnItem<'a> {
     /// `column_items_for_status_with_stats`. Only produced in flat view for
     /// Running and Review columns. The renderer must not also inject its own
     /// substatus header for the same group transition.
-    SubstatusLabel(String),
+    SubstatusLabel(&'static str),
+}
+
+impl ColumnItem<'_> {
+    /// Returns `true` for `Task` and `Epic` items that can hold the cursor.
+    /// `EpicHeader` and `SubstatusLabel` are decorative and non-selectable.
+    pub fn is_selectable(&self) -> bool {
+        matches!(self, ColumnItem::Task(_) | ColumnItem::Epic(_))
+    }
 }
 
 // ---------------------------------------------------------------------------

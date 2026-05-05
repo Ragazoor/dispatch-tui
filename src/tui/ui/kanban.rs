@@ -238,7 +238,7 @@ fn render_summary(frame: &mut Frame, app: &App, epic_stats: &EpicStatsMap, area:
         let items = layout.get(status);
         let count = items
             .iter()
-            .filter(|i| !matches!(i, ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_)))
+            .filter(|i| i.is_selectable())
             .count();
         let is_focused = sel == nav_col;
         let color = column_color(status);
@@ -248,7 +248,7 @@ fn render_summary(frame: &mut Frame, app: &App, epic_stats: &EpicStatsMap, area:
         let checkbox = if is_focused {
             let selectable = items
                 .iter()
-                .filter(|i| !matches!(i, ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_)));
+                .filter(|i| i.is_selectable());
             let (n, all_selected) = selectable.fold((0usize, true), |(n, all), item| {
                 let selected = match item {
                     ColumnItem::Task(t) => app.selected_tasks().contains(&t.id),

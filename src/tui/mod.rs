@@ -560,26 +560,31 @@ impl App {
             });
 
             // Single pass: emit SubstatusLabel on priority change (Running/Review only),
-            // EpicHeader once per (priority, epic_id) pair, then the task itself.
+            // EpicHeader when (priority, epic_id) changes, then the task itself.
+            // Tasks are sorted so all items in the same (priority, epic) group are
+            // contiguous — no HashSet needed, just track the last-seen pair.
             let mut items: Vec<ColumnItem<'_>> = Vec::new();
-            let mut seen_groups: HashSet<(u8, EpicId)> = HashSet::new();
             let mut current_priority: Option<u8> = None;
+            let mut current_epic_id: Option<EpicId> = None;
 
             for t in sorted_tasks {
-                let priority = t.sub_status.column_priority_detached(t.is_detached());
-
-                if show_substatus_labels && Some(priority) != current_priority {
+                let detached = t.is_detached();
+                let priority = t.sub_status.column_priority_detached(detached);
+                let priority_changed = Some(priority) != current_priority;
+                if priority_changed {
                     current_priority = Some(priority);
-                    let label = t
-                        .sub_status
-                        .header_label_detached(t.is_detached())
-                        .to_string();
-                    items.push(ColumnItem::SubstatusLabel(label));
+                    current_epic_id = None;
+                    if show_substatus_labels {
+                        items.push(ColumnItem::SubstatusLabel(
+                            t.sub_status.header_label_detached(detached),
+                        ));
+                    }
                 }
 
                 if let Some(eid) = t.epic_id {
                     if let Some(&epic) = epic_lookup.get(&eid) {
-                        if seen_groups.insert((priority, eid)) {
+                        if Some(eid) != current_epic_id {
+                            current_epic_id = Some(eid);
                             items.push(ColumnItem::EpicHeader(epic));
                         }
                     }
@@ -801,7 +806,7 @@ impl App {
         let row = self.selection().row(col);
         items
             .into_iter()
-            .filter(|i| !matches!(i, ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_)))
+            .filter(|i| i.is_selectable())
             .nth(row)
     }
 
@@ -869,7 +874,7 @@ impl App {
         let new_anchor = self
             .column_items_for_status(status)
             .into_iter()
-            .filter(|i| !matches!(i, ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_)))
+            .filter(|i| i.is_selectable())
             .nth(row)
             .map(|item| match item {
                 ColumnItem::Task(t) => ColumnAnchor::Task(t.id),
