@@ -1533,7 +1533,7 @@ fn tool_schemas_match_arg_structs() {
         ),
         (
             "exit_session",
-            BTreeSet::from(["task_id"]),
+            BTreeSet::from(["has_learnings", "task_id"]),
             BTreeSet::from(["task_id"]),
             json!({"task_id": 1}),
         ),
