@@ -1688,59 +1688,133 @@ fn load_notifications_pref_sets_true_when_enabled() {
     assert!(app.notifications_enabled());
 }
 
+fn make_app_with_two_projects() -> App {
+    let mut app = App::new(vec![], ProjectId(1), Duration::from_secs(300));
+    app.update(Message::ProjectsUpdated(vec![
+        crate::models::Project {
+            id: ProjectId(1),
+            name: "Default".into(),
+            sort_order: 0,
+            is_default: true,
+        },
+        crate::models::Project {
+            id: ProjectId(2),
+            name: "B".into(),
+            sort_order: 1,
+            is_default: false,
+        },
+    ]));
+    app
+}
+
 #[test]
-fn load_repo_filter_mode_defaults_to_include_when_not_set() {
+fn load_per_project_repo_filters_no_op_when_nothing_saved() {
     let db = Database::open_in_memory().unwrap();
-    let mut app = make_app();
-    load_repo_filter_mode(&db, &mut app);
+    let mut app = make_app_with_two_projects();
+    load_per_project_repo_filters(&db, &mut app);
+    assert!(app.repo_filter().is_empty());
     assert_eq!(app.repo_filter_mode(), RepoFilterMode::Include);
 }
 
 #[test]
-fn load_repo_filter_mode_restores_exclude() {
+fn load_per_project_repo_filters_restores_active_project() {
     let db = Database::open_in_memory().unwrap();
-    db.set_setting_string("repo_filter_mode", "exclude")
+    db.set_setting_string(
+        "repo_filter:1",
+        &serde_json::to_string(&["/repo/a"]).unwrap(),
+    )
+    .unwrap();
+    db.set_setting_string("repo_filter_mode:1", "exclude")
         .unwrap();
-    let mut app = make_app();
-    load_repo_filter_mode(&db, &mut app);
+    let mut app = make_app_with_two_projects();
+    app.update(Message::RepoPathsUpdated(vec!["/repo/a".into()]));
+    load_per_project_repo_filters(&db, &mut app);
+    // Active project is 1 → its filter is in app.filter
+    assert_eq!(app.repo_filter(), &HashSet::from(["/repo/a".to_string()]));
     assert_eq!(app.repo_filter_mode(), RepoFilterMode::Exclude);
 }
 
 #[test]
-fn load_repo_filter_no_op_when_not_set() {
+fn load_per_project_repo_filters_holds_other_project_filter_in_map() {
     let db = Database::open_in_memory().unwrap();
-    let mut app = make_app();
-    load_repo_filter(&db, &mut app);
-    assert!(app.repo_filter().is_empty());
-}
-
-#[test]
-fn load_repo_filter_restores_saved_filter() {
-    let db = Database::open_in_memory().unwrap();
-    db.save_repo_path("/repo/a").unwrap();
-    db.save_repo_path("/repo/b").unwrap();
-    // register paths in app so filter intersection works
-    let mut app = App::new(vec![], ProjectId(1), Duration::from_secs(300));
+    // Project 2's filter saved; project 1 has nothing.
+    db.set_setting_string(
+        "repo_filter:2",
+        &serde_json::to_string(&["/repo/b"]).unwrap(),
+    )
+    .unwrap();
+    db.set_setting_string("repo_filter_mode:2", "include")
+        .unwrap();
+    let mut app = make_app_with_two_projects();
     app.update(Message::RepoPathsUpdated(vec![
         "/repo/a".into(),
         "/repo/b".into(),
     ]));
-    let filter = serde_json::to_string(&["/repo/a"]).unwrap();
-    db.set_setting_string("repo_filter", &filter).unwrap();
-    load_repo_filter(&db, &mut app);
+    load_per_project_repo_filters(&db, &mut app);
+    // Active project (1) has empty filter; project 2's slot is staged.
+    assert!(app.repo_filter().is_empty());
+    assert!(app.has_per_project_filter(ProjectId(2)));
+
+    // Switching to project 2 restores its filter.
+    app.update(Message::SelectProject(ProjectId(2)));
+    assert_eq!(app.repo_filter(), &HashSet::from(["/repo/b".to_string()]));
+}
+
+#[test]
+fn load_per_project_repo_filters_prunes_stale_paths() {
+    let db = Database::open_in_memory().unwrap();
+    db.set_setting_string(
+        "repo_filter:1",
+        &serde_json::to_string(&["/repo/a", "/gone"]).unwrap(),
+    )
+    .unwrap();
+    let mut app = make_app_with_two_projects();
+    app.update(Message::RepoPathsUpdated(vec!["/repo/a".into()]));
+    load_per_project_repo_filters(&db, &mut app);
     assert_eq!(app.repo_filter(), &HashSet::from(["/repo/a".to_string()]));
 }
 
 #[test]
-fn load_repo_filter_prunes_stale_paths() {
+fn load_per_project_repo_filters_migrates_legacy_global_keys() {
     let db = Database::open_in_memory().unwrap();
-    // Only /repo/a is in the app's known paths; /gone is stale
-    let mut app = App::new(vec![], ProjectId(1), Duration::from_secs(300));
+    // Old global keys (pre-555) — should land in default project's slot.
+    db.set_setting_string("repo_filter", &serde_json::to_string(&["/repo/a"]).unwrap())
+        .unwrap();
+    db.set_setting_string("repo_filter_mode", "exclude")
+        .unwrap();
+    let mut app = make_app_with_two_projects();
     app.update(Message::RepoPathsUpdated(vec!["/repo/a".into()]));
-    let filter = serde_json::to_string(&["/repo/a", "/gone"]).unwrap();
-    db.set_setting_string("repo_filter", &filter).unwrap();
-    load_repo_filter(&db, &mut app);
+    load_per_project_repo_filters(&db, &mut app);
+    // Default project (1) is active → its filter restored from legacy keys.
     assert_eq!(app.repo_filter(), &HashSet::from(["/repo/a".to_string()]));
+    assert_eq!(app.repo_filter_mode(), RepoFilterMode::Exclude);
+}
+
+#[test]
+fn load_per_project_repo_filters_prefers_per_project_over_legacy() {
+    let db = Database::open_in_memory().unwrap();
+    // Both per-project key and legacy key set for default project.
+    // Per-project should win (legacy is only fallback for empty slots).
+    db.set_setting_string(
+        "repo_filter:1",
+        &serde_json::to_string(&["/repo/per-project"]).unwrap(),
+    )
+    .unwrap();
+    db.set_setting_string(
+        "repo_filter",
+        &serde_json::to_string(&["/repo/legacy"]).unwrap(),
+    )
+    .unwrap();
+    let mut app = make_app_with_two_projects();
+    app.update(Message::RepoPathsUpdated(vec![
+        "/repo/per-project".into(),
+        "/repo/legacy".into(),
+    ]));
+    load_per_project_repo_filters(&db, &mut app);
+    assert_eq!(
+        app.repo_filter(),
+        &HashSet::from(["/repo/per-project".to_string()])
+    );
 }
 
 #[test]

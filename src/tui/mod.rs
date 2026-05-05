@@ -59,6 +59,11 @@ pub struct App {
     pub(in crate::tui) active_is_default: bool,
     pub(in crate::tui) select: SelectionState,
     pub(in crate::tui) filter: FilterState,
+    /// Snapshot of (repos, mode) for projects other than the active one.
+    /// On project switch, the outgoing project's tuple is stashed here and
+    /// the incoming project's tuple is restored into `filter`. Only `repos`
+    /// and `mode` swap — presets stay on `filter` and are global.
+    pub(in crate::tui) per_project_filter: HashMap<ProjectId, (HashSet<String>, RepoFilterMode)>,
     pub(in crate::tui) merge_queue: Option<MergeQueue>,
     /// Task IDs with an in-flight dispatch, mapped to their start time.
     /// Membership prevents duplicate dispatches; start times drive the 60-second watchdog.
@@ -133,6 +138,7 @@ impl App {
             active_is_default: false,
             select: SelectionState::default(),
             filter: FilterState::default(),
+            per_project_filter: HashMap::new(),
             merge_queue: None,
             dispatching: HashMap::new(),
             spinner_tick: 0,
@@ -300,6 +306,32 @@ impl App {
     pub fn set_repo_filter_mode(&mut self, mode: RepoFilterMode) {
         self.filter.mode = mode;
         self.sync_board_selection();
+    }
+
+    /// Insert a saved filter snapshot for `project_id` into the per-project
+    /// map. Used by the runtime loader to restore per-project filters at
+    /// startup.
+    pub(crate) fn set_per_project_filter(
+        &mut self,
+        project_id: ProjectId,
+        repos: HashSet<String>,
+        mode: RepoFilterMode,
+    ) {
+        self.per_project_filter.insert(project_id, (repos, mode));
+    }
+
+    pub(crate) fn has_per_project_filter(&self, project_id: ProjectId) -> bool {
+        self.per_project_filter.contains_key(&project_id)
+    }
+
+    /// Copy the active project's saved filter from `per_project_filter` into
+    /// `self.filter`. No-op if there is no entry for the active project.
+    pub(crate) fn activate_filter_for_active_project(&mut self) {
+        if let Some((repos, mode)) = self.per_project_filter.get(&self.active_project) {
+            self.filter.repos = repos.clone();
+            self.filter.mode = *mode;
+            self.sync_board_selection();
+        }
     }
 
     /// Set a transient status message with auto-clear timestamp.

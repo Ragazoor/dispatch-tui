@@ -176,6 +176,34 @@ rule FilterBoardByProject {
         --   project_matches() helper.
 }
 
+-- == Repo Filter Scoping ==
+
+rule RepoFilterScopedToActiveProject {
+    when: SetRepoFilter(repos, mode)
+
+    -- The repo filter applies only while the project that was active when
+    -- it was set remains active. Switching projects swaps in that
+    -- project's own repo filter (or an empty filter if none has been set).
+    -- Other projects' filters are unaffected by this rule.
+
+    ensures:
+        for project in core/Projects where project.id = active_project.id:
+            project.repo_filter_repos = repos
+            project.repo_filter_mode = mode
+
+    @guidance
+        -- Triggered from the filter overlay opened by [f].
+        -- App keeps the active project's filter in App.filter and snapshots
+        --   non-active projects' filters in App.per_project_filter
+        --   (HashMap<ProjectId, (HashSet<String>, RepoFilterMode)>).
+        -- handle_select_project saves the outgoing filter and restores the
+        --   incoming one.
+        -- Persistence: settings keys repo_filter:<project_id> and
+        --   repo_filter_mode:<project_id>.
+        -- Presets (saved named filters) stay global — they are not
+        --   scoped to a project.
+}
+
 -- == Panel Navigation ==
 
 rule OpenProjectsPanel {

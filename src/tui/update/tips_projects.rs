@@ -81,6 +81,21 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_select_project(&mut self, project_id: ProjectId) -> Vec<Command> {
+        if project_id != self.active_project {
+            let outgoing = self.active_project;
+            let outgoing_repos = std::mem::take(&mut self.filter.repos);
+            self.per_project_filter
+                .insert(outgoing, (outgoing_repos, self.filter.mode));
+            match self.per_project_filter.get(&project_id) {
+                Some((repos, mode)) => {
+                    self.filter.repos = repos.clone();
+                    self.filter.mode = *mode;
+                }
+                None => {
+                    self.filter.mode = RepoFilterMode::default();
+                }
+            }
+        }
         self.active_project = project_id;
         self.active_is_default = self
             .board

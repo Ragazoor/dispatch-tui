@@ -104,8 +104,7 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     }
 
     load_notifications_pref(&*database, &mut app);
-    load_repo_filter(&*database, &mut app);
-    load_repo_filter_mode(&*database, &mut app);
+    load_per_project_repo_filters(&*database, &mut app);
     for msg in [
         load_filter_presets(&*database, &mut app),
         apply_tmux_focus_warning(&*runner),
@@ -420,28 +419,78 @@ fn load_notifications_pref(db: &dyn db::SettingsStore, app: &mut App) {
     app.set_notifications_enabled(enabled);
 }
 
-/// Intersect the saved repo filter with the app's known repo paths to prune
-/// stale entries. No-op when no filter has been saved.
-fn load_repo_filter(db: &dyn db::SettingsStore, app: &mut App) {
-    let Some(filter_str) = db.get_setting_string("repo_filter").unwrap_or(None) else {
-        return;
-    };
-    if filter_str.is_empty() {
-        return;
-    }
-    let known: HashSet<&str> = app.repo_paths().iter().map(|s| s.as_str()).collect();
-    let paths: Vec<String> = serde_json::from_str(&filter_str).unwrap_or_default();
-    let filter: HashSet<String> = paths
+fn parse_filter_setting(
+    raw_repos: Option<String>,
+    raw_mode: Option<String>,
+    known: &HashSet<String>,
+) -> (HashSet<String>, RepoFilterMode) {
+    let repos = raw_repos
+        .as_deref()
+        .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok())
+        .unwrap_or_default()
         .into_iter()
-        .filter(|s| known.contains(s.as_str()))
+        .filter(|p| known.contains(p))
         .collect();
-    app.set_repo_filter(filter);
+    let mode = raw_mode
+        .as_deref()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_default();
+    (repos, mode)
 }
 
-fn load_repo_filter_mode(db: &dyn db::SettingsStore, app: &mut App) {
-    if let Some(mode_str) = db.get_setting_string("repo_filter_mode").unwrap_or(None) {
-        app.set_repo_filter_mode(mode_str.parse().unwrap_or_default());
+/// Load each known project's saved repo filter (settings keyed
+/// `repo_filter:<project_id>` and `repo_filter_mode:<project_id>`) into the
+/// app's `per_project_filter` map, then restore the active project's slot
+/// into `App.filter`.
+///
+/// Legacy migration: if the old global `repo_filter` / `repo_filter_mode`
+/// keys exist and the seeded default project has no per-project entry yet,
+/// copy them into the default project's slot. Legacy keys are left in place.
+pub(super) fn load_per_project_repo_filters(db: &(dyn db::SettingsStore + Sync), app: &mut App) {
+    let known_repos: HashSet<String> = app.repo_paths().iter().cloned().collect();
+
+    // Per-project saved filters. Cloning the project list is required because
+    // the loop body mutably borrows `app` via `set_per_project_filter`.
+    for project in app.projects().to_vec() {
+        let pid = project.id;
+        let raw_repos = db
+            .get_setting_string(&format!("repo_filter:{}", pid.0))
+            .unwrap_or(None);
+        let raw_mode = db
+            .get_setting_string(&format!("repo_filter_mode:{}", pid.0))
+            .unwrap_or(None);
+        if raw_repos.is_none() && raw_mode.is_none() {
+            continue;
+        }
+        let (repos, mode) = parse_filter_setting(raw_repos, raw_mode, &known_repos);
+        app.set_per_project_filter(pid, repos, mode);
     }
+
+    migrate_legacy_global_filter(db, app, &known_repos);
+    app.activate_filter_for_active_project();
+}
+
+/// Fold the pre-555 global `repo_filter` / `repo_filter_mode` keys into the
+/// default project's slot, but only when no per-project entry exists yet
+/// (so a subsequent save under the new keying always wins).
+fn migrate_legacy_global_filter(
+    db: &dyn db::SettingsStore,
+    app: &mut App,
+    known_repos: &HashSet<String>,
+) {
+    let legacy_repos = db.get_setting_string("repo_filter").unwrap_or(None);
+    let legacy_mode = db.get_setting_string("repo_filter_mode").unwrap_or(None);
+    if legacy_repos.is_none() && legacy_mode.is_none() {
+        return;
+    }
+    let Some(default_id) = app.projects().iter().find(|p| p.is_default).map(|p| p.id) else {
+        return;
+    };
+    if app.has_per_project_filter(default_id) {
+        return;
+    }
+    let (repos, mode) = parse_filter_setting(legacy_repos, legacy_mode, known_repos);
+    app.set_per_project_filter(default_id, repos, mode);
 }
 
 fn load_filter_presets(db: &dyn db::SettingsStore, app: &mut App) -> Option<Message> {

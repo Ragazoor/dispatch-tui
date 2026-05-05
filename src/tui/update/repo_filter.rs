@@ -36,13 +36,14 @@ impl App {
         paths.sort();
         let value = serde_json::to_string(&paths).unwrap_or_else(|_| "[]".to_string());
         let mode_value = self.filter.mode.as_str();
+        let pid = self.active_project.0;
         vec![
             Command::PersistStringSetting {
-                key: "repo_filter".to_string(),
+                key: format!("repo_filter:{pid}"),
                 value,
             },
             Command::PersistStringSetting {
-                key: "repo_filter_mode".to_string(),
+                key: format!("repo_filter_mode:{pid}"),
                 value: mode_value.to_string(),
             },
         ]
