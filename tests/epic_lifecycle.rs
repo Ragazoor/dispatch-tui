@@ -1,4 +1,4 @@
-use dispatch_tui::db::{Database, EpicCrud, EpicPatch, TaskCrud, TaskPatch};
+use dispatch_tui::db::{Database, EpicCrud, EpicPatch, LearningStore, TaskCrud, TaskPatch};
 use dispatch_tui::models::*;
 
 #[test]
@@ -90,9 +90,6 @@ fn full_epic_lifecycle() {
 /// `DELETE FROM tasks WHERE epic_id = ?` which failed with FK violations.
 #[test]
 fn soft_archive_epic_does_not_violate_foreign_keys() {
-    use dispatch_tui::db::LearningStore;
-    use dispatch_tui::models::{LearningKind, LearningScope, UsageReport};
-
     let db = Database::open_in_memory().unwrap();
 
     let epic = db

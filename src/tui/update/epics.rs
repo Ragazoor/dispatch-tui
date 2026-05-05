@@ -3,7 +3,9 @@
 use std::collections::HashSet;
 
 use crate::dispatch;
-use crate::models::{DispatchMode, Epic, EpicId, Task, TaskId, TaskStatus, TaskUsage};
+use crate::models::{
+    descendant_epic_ids, DispatchMode, Epic, EpicId, Task, TaskId, TaskStatus, TaskUsage,
+};
 
 use super::super::types::*;
 use super::super::{truncate_title, App, TITLE_DISPLAY_LENGTH};
@@ -341,12 +343,9 @@ impl App {
         // learnings.source_task_id (which would block a hard delete).
         let mut cmds = Vec::new();
 
-        // Collect the entire epic subtree (root + all transitive descendants).
-        let subtree: Vec<EpicId> = self.collect_epic_subtree(id);
+        let subtree = descendant_epic_ids(id, &self.board.epics);
 
         for epic_id in &subtree {
-            // Archive every active subtask of this epic — handle_archive_task
-            // mutates state and emits PersistTask.
             let subtask_ids: Vec<TaskId> = self
                 .board
                 .tasks
@@ -358,7 +357,6 @@ impl App {
                 cmds.extend(self.handle_archive_task(task_id));
             }
 
-            // Mutate the epic in-memory and persist its new status.
             if let Some(epic) = self.board.epics.iter_mut().find(|e| e.id == *epic_id) {
                 if epic.status != TaskStatus::Archived {
                     epic.status = TaskStatus::Archived;
@@ -376,26 +374,6 @@ impl App {
         }
         self.sync_board_selection();
         cmds
-    }
-
-    /// Walk the in-memory epic tree starting at `root` and return `root` plus
-    /// every transitive child epic (depth-first, parents before children).
-    fn collect_epic_subtree(&self, root: EpicId) -> Vec<EpicId> {
-        let mut out = Vec::new();
-        let mut stack = vec![root];
-        let mut seen = HashSet::new();
-        while let Some(id) = stack.pop() {
-            if !seen.insert(id) {
-                continue;
-            }
-            out.push(id);
-            for child in &self.board.epics {
-                if child.parent_epic_id == Some(id) {
-                    stack.push(child.id);
-                }
-            }
-        }
-        out
     }
 
     pub(in crate::tui) fn handle_confirm_archive_epic(&mut self) -> Vec<Command> {
