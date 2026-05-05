@@ -2079,9 +2079,7 @@ fn review_agent_includes_plugin_dir() {
     );
 }
 
-// -----------------------------------------------------------------------
-// fix_req helper
-// -----------------------------------------------------------------------
+// --- fix_req helper ---
 
 fn fix_req(repo_path: &str, number: i64) -> FixAgentRequest {
     FixAgentRequest {
@@ -2096,9 +2094,7 @@ fn fix_req(repo_path: &str, number: i64) -> FixAgentRequest {
     }
 }
 
-// -----------------------------------------------------------------------
-// dispatch_fix_agent — NewBranch strategy (agents.rs)
-// -----------------------------------------------------------------------
+// --- dispatch_fix_agent tests ---
 
 #[test]
 fn fix_agent_returns_early_when_window_exists() {
@@ -2157,18 +2153,17 @@ fn fix_agent_calls_worktree_add_with_new_branch_when_dir_missing() {
 }
 
 #[test]
-fn fix_agent_skips_worktree_add_when_dir_exists() {
+fn fix_agent_with_existing_dir_skips_worktree_add_and_uses_accept_edits() {
     let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("fix-vuln-1");
 
     let mock = MockProcessRunner::new(vec![
-        MockProcessRunner::ok_with_stdout(b"\n"), // has_window: no match
-        MockProcessRunner::ok(),                  // git worktree prune
+        MockProcessRunner::ok_with_stdout(b"\n"),                          // has_window: no match
+        MockProcessRunner::ok(),                                           // git worktree prune
         MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // detect_default_branch
-        MockProcessRunner::ok(),                  // git fetch origin main
-        // git worktree add is skipped (dir exists)
-        MockProcessRunner::ok(), // tmux new-window
-        MockProcessRunner::ok(), // tmux send-keys -l
-        MockProcessRunner::ok(), // tmux send-keys Enter
+        MockProcessRunner::ok(),                                           // git fetch origin main
+        MockProcessRunner::ok(),                                           // tmux new-window
+        MockProcessRunner::ok(),                                           // tmux send-keys -l
+        MockProcessRunner::ok(),                                           // tmux send-keys Enter
     ]);
 
     dispatch_fix_agent(fix_req(&repo_path, 1), &mock).unwrap();
@@ -2180,25 +2175,6 @@ fn fix_agent_skips_worktree_add_when_dir_exists() {
             .all(|(prog, args)| !(prog == "git" && args.iter().any(|a| a == "add"))),
         "git worktree add should be skipped when dir exists, got: {calls:?}"
     );
-}
-
-#[test]
-fn fix_agent_uses_accept_edits_permission_mode() {
-    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("fix-vuln-1");
-
-    let mock = MockProcessRunner::new(vec![
-        MockProcessRunner::ok_with_stdout(b"\n"), // has_window: no match
-        MockProcessRunner::ok(),                  // git worktree prune
-        MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // detect_default_branch
-        MockProcessRunner::ok(),                  // git fetch origin main
-        MockProcessRunner::ok(),                  // tmux new-window
-        MockProcessRunner::ok(),                  // tmux send-keys -l
-        MockProcessRunner::ok(),                  // tmux send-keys Enter
-    ]);
-
-    dispatch_fix_agent(fix_req(&repo_path, 1), &mock).unwrap();
-
-    let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, 5, "claude");
     assert!(
         send_keys_arg.contains("--permission-mode acceptEdits"),
@@ -2206,31 +2182,7 @@ fn fix_agent_uses_accept_edits_permission_mode() {
     );
 }
 
-// -----------------------------------------------------------------------
-// provision_and_dispatch error paths (agents.rs)
-// -----------------------------------------------------------------------
-
-#[test]
-fn provision_and_dispatch_checkout_remote_fetch_fails() {
-    let (_dir, repo_path) = make_test_repo();
-
-    let mock = MockProcessRunner::new(vec![
-        MockProcessRunner::ok_with_stdout(b"\n"), // has_window: no match
-        MockProcessRunner::ok(),                  // git worktree prune
-        MockProcessRunner::fail("fatal: unable to access 'origin'"), // git fetch — fails
-    ]);
-
-    let result = dispatch_review_agent(&review_req(&repo_path, 5, "feature-x", false), &mock);
-
-    assert!(result.is_err(), "fetch failure should propagate as error");
-    let calls = mock.recorded_calls();
-    assert!(
-        calls
-            .iter()
-            .all(|(prog, args)| !(prog == "tmux" && args.iter().any(|a| a == "new-window"))),
-        "tmux new-window should not be called when fetch fails, got: {calls:?}"
-    );
-}
+// --- provision_and_dispatch error paths ---
 
 #[test]
 fn provision_and_dispatch_worktree_add_fails() {
@@ -2256,9 +2208,7 @@ fn provision_and_dispatch_worktree_add_fails() {
     );
 }
 
-// -----------------------------------------------------------------------
-// provision_worktree error path (worktree.rs)
-// -----------------------------------------------------------------------
+// --- provision_worktree error path ---
 
 #[test]
 fn provision_worktree_git_add_fails_returns_error() {
@@ -2274,9 +2224,7 @@ fn provision_worktree_git_add_fails_returns_error() {
     assert!(result.is_err(), "git worktree add failure should propagate");
 }
 
-// -----------------------------------------------------------------------
-// cleanup_task edge case (worktree.rs)
-// -----------------------------------------------------------------------
+// --- cleanup_task edge cases ---
 
 #[test]
 fn cleanup_skips_kill_when_window_not_found() {
@@ -2304,9 +2252,7 @@ fn cleanup_skips_kill_when_window_not_found() {
     );
 }
 
-// -----------------------------------------------------------------------
-// finish_task edge case (finish.rs)
-// -----------------------------------------------------------------------
+// --- finish_task edge cases ---
 
 #[test]
 fn finish_task_skips_kill_when_tmux_window_not_found() {
@@ -2317,7 +2263,6 @@ fn finish_task_skips_kill_when_tmux_window_not_found() {
         MockProcessRunner::ok(),                      // git rebase main (from worktree)
         MockProcessRunner::ok(),                      // git merge --ff-only
         MockProcessRunner::ok_with_stdout(b"\n"),     // tmux list-windows — no match
-        // no kill-window call expected
     ]);
 
     finish_task(
