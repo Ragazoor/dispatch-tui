@@ -7648,7 +7648,10 @@ async fn exit_session_third_call_after_reflecting_closes_session() {
     );
 
     let task = state.db.get_task(task_id).unwrap().unwrap();
-    assert!(task.tmux_window.is_none(), "tmux_window should be cleared after third call");
+    assert!(
+        task.tmux_window.is_none(),
+        "tmux_window should be cleared after third call"
+    );
     assert_eq!(task.status, TaskStatus::Done);
 }
 
@@ -7679,7 +7682,10 @@ async fn exit_session_reflecting_cleared_on_redispatch() {
     // Verify it's in reflecting
     {
         let reflecting = state.exit_session_reflecting.lock().unwrap();
-        assert!(reflecting.contains(&task_id), "should be in reflecting state");
+        assert!(
+            reflecting.contains(&task_id),
+            "should be in reflecting state"
+        );
     }
 
     // Patch task back to backlog so dispatch_task accepts it

@@ -674,11 +674,13 @@ impl TaskService {
 mod tests {
     use std::sync::Arc;
 
+    use super::{
+        ClaimTaskParams, CreateTaskParams, ListTasksFilter, TaskService, UpdateTaskParams,
+    };
     use crate::db::{self, Database, ProjectCrud, TaskCrud};
     use crate::models::{EpicId, ProjectId, SubStatus, TaskId, TaskStatus, TaskTag, UsageReport};
     use crate::service::epics::{CreateEpicParams, EpicService, UpdateEpicParams};
     use crate::service::{FieldUpdate, ServiceError};
-    use super::{ClaimTaskParams, CreateTaskParams, ListTasksFilter, TaskService, UpdateTaskParams};
 
     fn test_db() -> Arc<dyn db::TaskStore> {
         Arc::new(Database::open_in_memory().unwrap())

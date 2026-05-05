@@ -134,24 +134,6 @@ fn extract_response_text(resp: &JsonRpcResponse) -> String {
         .to_string()
 }
 
-/// Helper: creates a test state with a real notification channel.
-fn test_state_with_notify() -> (
-    Arc<McpState>,
-    tokio::sync::mpsc::UnboundedReceiver<crate::mcp::McpEvent>,
-) {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
-    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-    let state = Arc::new(McpState {
-        db,
-        notify_tx: Some(tx),
-        runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
-    });
-    (state, rx)
-}
-
 // -- Dispatch-level tests --------------------------------------------------
 
 #[tokio::test]

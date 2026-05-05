@@ -84,10 +84,7 @@ impl LearningService {
             .ok_or_else(|| ServiceError::NotFound(format!("learning {id} not found")))
     }
 
-    pub fn list_learnings(
-        &self,
-        filter: LearningFilter,
-    ) -> Result<Vec<Learning>, ServiceError> {
+    pub fn list_learnings(&self, filter: LearningFilter) -> Result<Vec<Learning>, ServiceError> {
         self.db
             .list_learnings(filter)
             .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
@@ -102,10 +99,7 @@ impl LearningService {
             )));
         }
         self.db
-            .patch_learning(
-                id,
-                &LearningPatch::new().status(LearningStatus::Rejected),
-            )
+            .patch_learning(id, &LearningPatch::new().status(LearningStatus::Rejected))
             .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
     }
 
@@ -118,10 +112,7 @@ impl LearningService {
             )));
         }
         self.db
-            .patch_learning(
-                id,
-                &LearningPatch::new().status(LearningStatus::Archived),
-            )
+            .patch_learning(id, &LearningPatch::new().status(LearningStatus::Archived))
             .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
     }
 
@@ -180,10 +171,10 @@ impl LearningService {
 mod learning_tests {
     use std::sync::Arc;
 
+    use super::{CreateLearningParams, LearningService, UpdateLearningParams};
     use crate::db::Database;
     use crate::models::{LearningId, LearningKind, LearningScope, LearningStatus};
     use crate::service::ServiceError;
-    use super::{CreateLearningParams, LearningService, UpdateLearningParams};
 
     fn service() -> LearningService {
         let db = Arc::new(Database::open_in_memory().unwrap());

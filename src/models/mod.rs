@@ -1,4 +1,3 @@
-
 // ---------------------------------------------------------------------------
 // Path utilities
 // ---------------------------------------------------------------------------
@@ -186,6 +185,7 @@ impl VisualColumn {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
     use proptest::prelude::*;
 
     // --- expand_tilde ---
