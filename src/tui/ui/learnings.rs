@@ -1,7 +1,7 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 
 use super::palette::{CYAN, GREEN, MUTED, PURPLE, RED, YELLOW};
@@ -63,11 +63,34 @@ pub fn render_learnings(frame: &mut Frame, app: &App, area: Rect) {
         return;
     };
 
-    // Split: 70% top (list or tree), 30% bottom (detail pane)
+    // ── Centered overlay (80% × 80%) ──────────────────────────────────────────
+    let overlay_width = (area.width * 80 / 100).clamp(40, 120);
+    let overlay_height = (area.height * 80 / 100).clamp(16, 40);
+    let x = area.x + (area.width.saturating_sub(overlay_width)) / 2;
+    let y = area.y + (area.height.saturating_sub(overlay_height)) / 2;
+    let overlay_area = Rect::new(x, y, overlay_width, overlay_height);
+
+    frame.render_widget(Clear, overlay_area);
+
+    let outer_block = Block::default()
+        .title(" Learnings ")
+        .title_style(
+            Style::default()
+                .fg(CYAN)
+                .add_modifier(Modifier::BOLD),
+        )
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(CYAN));
+
+    let inner_area = outer_block.inner(overlay_area);
+    frame.render_widget(outer_block, overlay_area);
+
+    // Split inner area: 70% top (list or tree), 30% bottom (detail pane)
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
-        .split(area);
+        .split(inner_area);
 
     let top_area = chunks[0];
     let bottom_area = chunks[1];
@@ -77,8 +100,59 @@ pub fn render_learnings(frame: &mut Frame, app: &App, area: Rect) {
         LearningsView::Tree => render_tree(frame, app, learnings, tree_state, top_area),
     }
 
-    let selected_learning = learnings.get(selected);
-    render_detail(frame, selected_learning, bottom_area);
+    // ── Detail pane: pick the selected learning based on the active view ──────
+    let selected_learning = match view {
+        LearningsView::List => learnings.get(selected),
+        LearningsView::Tree => {
+            let state = tree_state.borrow();
+            let selected_path = state.selected();
+            selected_path
+                .last()
+                .and_then(|id| id.strip_prefix("learning:"))
+                .and_then(|s| s.parse::<i64>().ok())
+                .and_then(|id| learnings.iter().find(|l| l.id.0 == id))
+        }
+    };
+
+    // Check whether a scope node (not a leaf) is selected in tree view
+    let scope_node_count: Option<usize> = if view == LearningsView::Tree {
+        let state = tree_state.borrow();
+        let selected_path = state.selected();
+        if let Some(last) = selected_path.last() {
+            if !last.starts_with("learning:") && !last.is_empty() {
+                // Count children of this scope node
+                let count = learnings
+                    .iter()
+                    .filter(|l| {
+                        // Match learnings that belong to this scope node identifier
+                        let badge = match l.scope {
+                            LearningScope::User => "user".to_string(),
+                            LearningScope::Task => "tasks".to_string(),
+                            LearningScope::Repo => {
+                                l.scope_ref.as_ref().map(|r| format!("repo:{r}")).unwrap_or_default()
+                            }
+                            LearningScope::Project => {
+                                l.scope_ref.as_ref().map(|r| format!("project:{r}")).unwrap_or_default()
+                            }
+                            LearningScope::Epic => {
+                                l.scope_ref.as_ref().map(|r| format!("epic:{r}")).unwrap_or_default()
+                            }
+                        };
+                        badge == *last
+                    })
+                    .count();
+                Some(count)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    render_detail(frame, selected_learning, scope_node_count, bottom_area);
 }
 
 fn render_list(frame: &mut Frame, learnings: &[Learning], selected: usize, area: Rect) {
@@ -126,10 +200,25 @@ fn render_list(frame: &mut Frame, learnings: &[Learning], selected: usize, area:
     frame.render_widget(hints, footer_area);
 }
 
-fn render_detail(frame: &mut Frame, learning: Option<&Learning>, area: Rect) {
+fn render_detail(
+    frame: &mut Frame,
+    learning: Option<&Learning>,
+    scope_node_count: Option<usize>,
+    area: Rect,
+) {
     let block = Block::default().borders(Borders::TOP).title(" Detail ");
     let inner = block.inner(area);
     frame.render_widget(block, area);
+
+    // When a scope node is selected in tree view, show a summary instead of learning detail.
+    if let Some(count) = scope_node_count {
+        let text = Text::from(Line::from(Span::styled(
+            format!("{count} learning{} in this scope", if count == 1 { "" } else { "s" }),
+            Style::default().fg(Color::DarkGray),
+        )));
+        frame.render_widget(Paragraph::new(text), inner);
+        return;
+    }
 
     let text = match learning {
         None => Text::raw("No learning selected"),

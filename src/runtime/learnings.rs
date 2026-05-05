@@ -2,7 +2,7 @@ use super::*;
 use crate::db;
 #[cfg(test)]
 use crate::models::ProjectId;
-use crate::models::{LearningId, LearningScope, LearningStatus};
+use crate::models::{LearningId, LearningStatus};
 use crate::service::LearningService;
 
 impl TuiRuntime {
@@ -13,18 +13,7 @@ impl TuiRuntime {
             ..Default::default()
         };
         match db.list_learnings(filter) {
-            Ok(mut learnings) => {
-                // Sort: user < project < repo < epic < task, then created_at desc within scope
-                learnings.sort_by_key(|l| {
-                    let scope_ord = match l.scope {
-                        LearningScope::User => 0,
-                        LearningScope::Project => 1,
-                        LearningScope::Repo => 2,
-                        LearningScope::Epic => 3,
-                        LearningScope::Task => 4,
-                    };
-                    (scope_ord, std::cmp::Reverse(l.created_at))
-                });
+            Ok(learnings) => {
                 app.update(Message::ShowLearnings(learnings));
             }
             Err(e) => {
@@ -116,7 +105,7 @@ mod tests {
         }
     }
 
-    fn insert_proposed_learning(db: &Arc<Database>) -> LearningId {
+    fn insert_learning(db: &Arc<Database>) -> LearningId {
         db.create_learning(
             LearningKind::Convention,
             "test learning",
@@ -132,7 +121,7 @@ mod tests {
     #[test]
     fn exec_archive_learning_updates_db_and_sends_actioned_message() {
         let db = Arc::new(Database::open_in_memory().unwrap());
-        let id = insert_proposed_learning(&db);
+        let id = insert_learning(&db);
         let rt = make_runtime(db.clone());
         let mut app = App::new(vec![], ProjectId(1), APP_INACTIVITY_TIMEOUT);
         // Put the app in Learnings view with the learning
@@ -154,7 +143,7 @@ mod tests {
     #[test]
     fn exec_reject_learning_updates_db_and_sends_actioned_message() {
         let db = Arc::new(Database::open_in_memory().unwrap());
-        let id = insert_proposed_learning(&db);
+        let id = insert_learning(&db);
         let rt = make_runtime(db.clone());
         let mut app = App::new(vec![], ProjectId(1), APP_INACTIVITY_TIMEOUT);
         let learning = make_learning(id);
@@ -171,16 +160,14 @@ mod tests {
     }
 
     #[test]
-    fn exec_load_sorts_by_scope_then_created_at_desc() {
+    fn exec_load_passes_learnings_to_show_learnings_sorted_by_confirmed_count() {
         let db = Arc::new(Database::open_in_memory().unwrap());
 
-        // Insert two repo learnings and one user learning.
-        // We can't control created_at directly via create_learning (it uses NOW()),
-        // so insert them in order and verify scope ordering overrides insertion order.
-        let repo_id = db
+        // Insert two learnings; bump the second one's confirmed_count via patch.
+        let id1 = db
             .create_learning(
                 LearningKind::Convention,
-                "repo learning 1",
+                "learning 1",
                 None,
                 LearningScope::Repo,
                 Some("/repo"),
@@ -188,10 +175,10 @@ mod tests {
                 None,
             )
             .unwrap();
-        let user_id = db
+        let id2 = db
             .create_learning(
                 LearningKind::Convention,
-                "user learning",
+                "learning 2",
                 None,
                 LearningScope::User,
                 None,
@@ -199,17 +186,21 @@ mod tests {
                 None,
             )
             .unwrap();
+        // Bump id2's confirmed_count so it sorts first.
+        db.confirm_learning(id2).unwrap();
+        db.confirm_learning(id2).unwrap();
+        db.confirm_learning(id2).unwrap();
 
         let rt = make_runtime(db.clone());
         let mut app = App::new(vec![], ProjectId(1), APP_INACTIVITY_TIMEOUT);
 
         rt.exec_load_learnings(&mut app);
 
-        // User scope (0) must come before Repo scope (2)
+        // TUI handler sorts by confirmed_count DESC: id2 (count=3) before id1 (count=0).
         if let ViewMode::Learnings { learnings, .. } = app.view_mode() {
             assert_eq!(learnings.len(), 2);
-            assert_eq!(learnings[0].id, user_id, "user scope should sort first");
-            assert_eq!(learnings[1].id, repo_id, "repo scope should sort second");
+            assert_eq!(learnings[0].id, id2, "higher confirmed_count should sort first");
+            assert_eq!(learnings[1].id, id1, "lower confirmed_count should sort second");
         } else {
             panic!("expected Learnings view mode");
         }
