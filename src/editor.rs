@@ -800,7 +800,7 @@ mod tests {
                 scope: LearningScope::Repo,
                 scope_ref: Some("/repo".to_string()),
                 tags: vec!["arch".to_string(), "service".to_string()],
-                status: LearningStatus::Proposed,
+                status: LearningStatus::Approved,
                 source_task_id: None,
                 confirmed_count: 0,
                 last_confirmed_at: None,

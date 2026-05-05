@@ -1793,7 +1793,7 @@ fn row_to_learning(row: &rusqlite::Row<'_>) -> rusqlite::Result<Learning> {
         scope: LearningScope::parse(&scope_str).unwrap_or(LearningScope::User),
         scope_ref: row.get(5)?,
         tags,
-        status: LearningStatus::parse(&status_str).unwrap_or(LearningStatus::Proposed),
+        status: LearningStatus::parse(&status_str).unwrap_or(LearningStatus::Approved),
         source_task_id: row.get::<_, Option<i64>>(8)?.map(crate::models::TaskId),
         confirmed_count: row.get(9)?,
         last_confirmed_at: last_confirmed_str.as_deref().map(parse_dt),
@@ -1817,8 +1817,8 @@ impl LearningStore for Database {
         let conn = self.conn()?;
         let tags_json = serde_json::to_string(tags).context("Failed to serialize tags")?;
         conn.execute(
-            "INSERT INTO learnings (kind, summary, detail, scope, scope_ref, tags, source_task_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO learnings (kind, summary, detail, scope, scope_ref, tags, status, source_task_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'approved', ?7)",
             params![
                 kind.as_str(),
                 summary,

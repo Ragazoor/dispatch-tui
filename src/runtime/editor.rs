@@ -417,7 +417,7 @@ mod learning_editor_tests {
             scope: LearningScope::Repo,
             scope_ref: Some("/repo".to_string()),
             tags: vec![],
-            status: LearningStatus::Proposed,
+            status: LearningStatus::Approved,
             source_task_id: None,
             confirmed_count: 0,
             last_confirmed_at: None,

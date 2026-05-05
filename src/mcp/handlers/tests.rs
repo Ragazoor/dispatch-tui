@@ -6824,7 +6824,7 @@ async fn record_learning_creates_proposed_entry() {
     assert!(text.contains("proposed"), "expected 'proposed' in: {text}");
 
     let filter = crate::db::LearningFilter {
-        status: Some(crate::models::LearningStatus::Proposed),
+        status: Some(crate::models::LearningStatus::Approved),
         ..Default::default()
     };
     let learnings = state.db.list_learnings(filter).unwrap();
@@ -6859,7 +6859,7 @@ async fn record_learning_derives_scope_ref_for_repo() {
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
 
     let filter = crate::db::LearningFilter {
-        status: Some(crate::models::LearningStatus::Proposed),
+        status: Some(crate::models::LearningStatus::Approved),
         ..Default::default()
     };
     let learnings = state.db.list_learnings(filter).unwrap();
@@ -6905,7 +6905,7 @@ async fn record_learning_derives_scope_ref_for_epic() {
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
 
     let filter = crate::db::LearningFilter {
-        status: Some(crate::models::LearningStatus::Proposed),
+        status: Some(crate::models::LearningStatus::Approved),
         ..Default::default()
     };
     let learnings = state.db.list_learnings(filter).unwrap();
@@ -6960,7 +6960,7 @@ async fn record_learning_user_scope_no_scope_ref() {
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
 
     let filter = crate::db::LearningFilter {
-        status: Some(crate::models::LearningStatus::Proposed),
+        status: Some(crate::models::LearningStatus::Approved),
         ..Default::default()
     };
     let learnings = state.db.list_learnings(filter).unwrap();

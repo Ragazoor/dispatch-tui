@@ -6163,6 +6163,17 @@ fn test_migrate_v43_proposed_to_approved() {
 }
 
 #[test]
+fn test_learning_status_no_proposed() {
+    // Proposed must no longer be a valid parse target
+    assert!(crate::models::LearningStatus::parse("proposed").is_err());
+    // Approved parses correctly
+    assert_eq!(
+        crate::models::LearningStatus::parse("approved").unwrap(),
+        crate::models::LearningStatus::Approved,
+    );
+}
+
+#[test]
 fn create_and_get_learning() {
     use crate::models::{LearningKind, LearningScope, LearningStatus};
     let db = in_memory_db();

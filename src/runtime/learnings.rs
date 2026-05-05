@@ -9,7 +9,7 @@ impl TuiRuntime {
     pub(super) fn exec_load_proposed_learnings(&self, app: &mut App) {
         let db: Arc<dyn db::LearningStore> = self.database.clone();
         let filter = db::LearningFilter {
-            status: Some(LearningStatus::Proposed),
+            status: Some(LearningStatus::Approved),
             ..Default::default()
         };
         match db.list_learnings(filter) {
@@ -107,7 +107,7 @@ mod tests {
             scope: LearningScope::Repo,
             scope_ref: Some("/repo".to_string()),
             tags: vec![],
-            status: LearningStatus::Proposed,
+            status: LearningStatus::Approved,
             source_task_id: None,
             confirmed_count: 0,
             last_confirmed_at: None,

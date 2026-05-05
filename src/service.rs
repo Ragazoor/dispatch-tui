@@ -1046,18 +1046,15 @@ impl LearningService {
 
     pub fn approve_learning(&self, id: crate::models::LearningId) -> Result<(), ServiceError> {
         let learning = self.get_learning(id)?;
-        if learning.status != crate::models::LearningStatus::Proposed {
+        if learning.status != crate::models::LearningStatus::Approved {
             return Err(ServiceError::Validation(format!(
-                "can only approve a proposed learning (current status: {})",
+                "learning is already in a terminal state (current status: {})",
                 learning.status
             )));
         }
-        self.db
-            .patch_learning(
-                id,
-                &db::LearningPatch::new().status(crate::models::LearningStatus::Approved),
-            )
-            .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
+        // Learning is already approved; no-op (approve is idempotent post-removal of Proposed).
+        let _ = learning;
+        Ok(())
     }
 
     pub fn reject_learning(&self, id: crate::models::LearningId) -> Result<(), ServiceError> {
@@ -1094,11 +1091,9 @@ impl LearningService {
 
     pub fn update_learning(&self, params: UpdateLearningParams) -> Result<(), ServiceError> {
         let learning = self.get_learning(params.id)?;
-        if learning.status != crate::models::LearningStatus::Proposed
-            && learning.status != crate::models::LearningStatus::Approved
-        {
+        if learning.status != crate::models::LearningStatus::Approved {
             return Err(ServiceError::Validation(format!(
-                "can only edit proposed or approved learnings (current status: {})",
+                "can only edit approved learnings (current status: {})",
                 learning.status
             )));
         }
@@ -3301,7 +3296,7 @@ mod learning_tests {
             })
             .unwrap();
         let learning = svc.get_learning(id).unwrap();
-        assert_eq!(learning.status, LearningStatus::Proposed);
+        assert_eq!(learning.status, LearningStatus::Approved);
     }
 
     #[test]

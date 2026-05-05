@@ -3553,7 +3553,6 @@ impl std::str::FromStr for LearningScope {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LearningStatus {
-    Proposed,
     Approved,
     Rejected,
     Archived,
@@ -3562,20 +3561,18 @@ pub enum LearningStatus {
 impl LearningStatus {
     pub fn as_str(self) -> &'static str {
         match self {
-            LearningStatus::Proposed => "proposed",
             LearningStatus::Approved => "approved",
             LearningStatus::Rejected => "rejected",
             LearningStatus::Archived => "archived",
         }
     }
 
-    pub fn parse(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Result<Self, String> {
         match s {
-            "proposed" => Some(LearningStatus::Proposed),
-            "approved" => Some(LearningStatus::Approved),
-            "rejected" => Some(LearningStatus::Rejected),
-            "archived" => Some(LearningStatus::Archived),
-            _ => None,
+            "approved" => Ok(LearningStatus::Approved),
+            "rejected" => Ok(LearningStatus::Rejected),
+            "archived" => Ok(LearningStatus::Archived),
+            other => Err(format!("unknown learning status: {other}")),
         }
     }
 
@@ -3594,7 +3591,7 @@ impl std::fmt::Display for LearningStatus {
 impl std::str::FromStr for LearningStatus {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::parse(s).ok_or_else(|| format!("unknown learning status: {s}"))
+        Self::parse(s)
     }
 }
 
