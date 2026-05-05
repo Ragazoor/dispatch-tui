@@ -50,16 +50,20 @@ impl McpState {
     /// Removes task_id from both exit_session sets.
     /// Called on re-dispatch so the new agent always starts from Phase 1.
     pub fn clear_exit_session_pending(&self, task_id: TaskId) {
-        let mut pending = self
-            .exit_session_pending
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        pending.remove(&task_id);
-        let mut reflecting = self
-            .exit_session_reflecting
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        reflecting.remove(&task_id);
+        {
+            let mut pending = self
+                .exit_session_pending
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            pending.remove(&task_id);
+        }
+        {
+            let mut reflecting = self
+                .exit_session_reflecting
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            reflecting.remove(&task_id);
+        }
     }
 }
 
