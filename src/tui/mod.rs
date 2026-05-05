@@ -540,48 +540,53 @@ impl App {
         let tasks = self.tasks_by_status(status);
 
         if self.board.flattened {
-            // Build epic lookup: epic_id -> &Epic (only epics present in board.epics).
             let epic_lookup: HashMap<EpicId, &Epic> =
                 self.board.epics.iter().map(|e| (e.id, e)).collect();
 
-            // Sort key for a task: orphan tasks (epic not in board) are standalone.
-            let group_key = |t: &Task| -> i64 {
-                match t.epic_id.and_then(|eid| epic_lookup.get(&eid)) {
-                    Some(e) => e.sort_order.unwrap_or(e.id.0),
-                    None => t.sort_order.unwrap_or(t.id.0),
-                }
-            };
+            // SubstatusLabel items only make sense in Running/Review columns.
+            let show_substatus_labels =
+                matches!(status, TaskStatus::Running | TaskStatus::Review);
 
-            // Single pass: emit one EpicHeader per epic the first time a task from
-            // that epic appears, then emit the task itself.
-            let mut seen_epics: HashSet<EpicId> = HashSet::new();
+            // Sort: (substatus_priority, epic_sort_key, task_sort_key, task_id).
+            // Orphan tasks (epic not in board) sort last within each substatus group.
+            let mut sorted_tasks = tasks;
+            sorted_tasks.sort_by_key(|t| {
+                let priority = t.sub_status.column_priority_detached(t.is_detached());
+                let epic_sk = match t.epic_id.and_then(|eid| epic_lookup.get(&eid)) {
+                    Some(e) => e.sort_order.unwrap_or(e.id.0),
+                    None => i64::MAX,
+                };
+                (priority, epic_sk, t.sort_order.unwrap_or(t.id.0), t.id.0)
+            });
+
+            // Single pass: emit SubstatusLabel on priority change (Running/Review only),
+            // EpicHeader once per (priority, epic_id) pair, then the task itself.
             let mut items: Vec<ColumnItem<'_>> = Vec::new();
-            for t in &tasks {
+            let mut seen_groups: HashSet<(u8, EpicId)> = HashSet::new();
+            let mut current_priority: Option<u8> = None;
+
+            for t in sorted_tasks {
+                let priority = t.sub_status.column_priority_detached(t.is_detached());
+
+                if show_substatus_labels && Some(priority) != current_priority {
+                    current_priority = Some(priority);
+                    let label = t
+                        .sub_status
+                        .header_label_detached(t.is_detached())
+                        .to_string();
+                    items.push(ColumnItem::SubstatusLabel(label));
+                }
+
                 if let Some(eid) = t.epic_id {
                     if let Some(&epic) = epic_lookup.get(&eid) {
-                        if seen_epics.insert(eid) {
+                        if seen_groups.insert((priority, eid)) {
                             items.push(ColumnItem::EpicHeader(epic));
                         }
                     }
                 }
-            }
-            for t in tasks {
+
                 items.push(ColumnItem::Task(t));
             }
-
-            // Sort key: (group_key, item_key, id)
-            // EpicHeader: item_key = i64::MIN so it always precedes its group's tasks.
-            // Task in epic: group_key = epic.sort_order, item_key = task.sort_order.
-            // Standalone task: group_key = task.sort_order, item_key = task.sort_order.
-            items.sort_by_key(|item| match item {
-                ColumnItem::EpicHeader(e) => (e.sort_order.unwrap_or(e.id.0), i64::MIN, e.id.0),
-                ColumnItem::Task(t) => {
-                    let gk = group_key(t);
-                    let ik = t.sort_order.unwrap_or(t.id.0);
-                    (gk, ik, t.id.0)
-                }
-                ColumnItem::Epic(_) => unreachable!("Epic never produced in flat mode"),
-            });
 
             return items;
         }
@@ -648,6 +653,9 @@ impl App {
             }
             ColumnItem::EpicHeader(_) => {
                 unreachable!("EpicHeader never produced in non-flat mode")
+            }
+            ColumnItem::SubstatusLabel(_) => {
+                unreachable!("SubstatusLabel never produced in non-flat mode")
             }
         });
 
@@ -760,8 +768,8 @@ impl App {
             let (sort_order, id) = match item {
                 ColumnItem::Task(t) => (t.sort_order, t.id.0),
                 ColumnItem::Epic(e) => (e.sort_order, e.id.0),
-                ColumnItem::EpicHeader(_) => {
-                    unreachable!("EpicHeader never produced by column_items_for_visual_column")
+                ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) => {
+                    unreachable!("EpicHeader/SubstatusLabel never produced by column_items_for_visual_column")
                 }
             };
             (sort_order.unwrap_or(i64::MAX), id)
@@ -793,7 +801,7 @@ impl App {
         let row = self.selection().row(col);
         items
             .into_iter()
-            .filter(|i| !matches!(i, ColumnItem::EpicHeader(_)))
+            .filter(|i| !matches!(i, ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_)))
             .nth(row)
     }
 
@@ -861,12 +869,12 @@ impl App {
         let new_anchor = self
             .column_items_for_status(status)
             .into_iter()
-            .filter(|i| !matches!(i, ColumnItem::EpicHeader(_)))
+            .filter(|i| !matches!(i, ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_)))
             .nth(row)
             .map(|item| match item {
                 ColumnItem::Task(t) => ColumnAnchor::Task(t.id),
                 ColumnItem::Epic(e) => ColumnAnchor::Epic(e.id),
-                ColumnItem::EpicHeader(_) => unreachable!(),
+                ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) => unreachable!(),
             });
         self.selection_mut().anchor = new_anchor;
     }
@@ -921,7 +929,7 @@ impl App {
                 let item_anchor = match item {
                     ColumnItem::Task(t) => ColumnAnchor::Task(t.id),
                     ColumnItem::Epic(e) => ColumnAnchor::Epic(e.id),
-                    ColumnItem::EpicHeader(_) => continue,
+                    ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) => continue,
                 };
                 if item_anchor == anchor {
                     found = Some((nav_col, selectable_row));

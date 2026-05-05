@@ -2302,7 +2302,7 @@ fn flat_view_standalone_task_interleaves_by_sort_order() {
     app.board.epics = vec![epic];
 
     let mut standalone = make_task(1, TaskStatus::Backlog);
-    standalone.sort_order = Some(100); // before the epic group
+    standalone.sort_order = Some(100); // orphan tasks sort last (epic_sk = i64::MAX)
 
     let mut subtask = make_task(2, TaskStatus::Backlog);
     subtask.epic_id = Some(EpicId(10));
@@ -2312,10 +2312,10 @@ fn flat_view_standalone_task_interleaves_by_sort_order() {
     app.board.flattened = true;
 
     let items = app.column_items_for_status(TaskStatus::Backlog);
-    // standalone (100) < epic header (200) < subtask (300)
-    assert!(matches!(items[0], ColumnItem::Task(t) if t.id == TaskId(1)));
-    assert!(matches!(items[1], ColumnItem::EpicHeader(_)));
-    assert!(matches!(items[2], ColumnItem::Task(t) if t.id == TaskId(2)));
+    // epic group comes first, orphan (no epic in board) sorts last with epic_sk = i64::MAX
+    assert!(matches!(items[0], ColumnItem::EpicHeader(_)));
+    assert!(matches!(items[1], ColumnItem::Task(t) if t.id == TaskId(2)));
+    assert!(matches!(items[2], ColumnItem::Task(t) if t.id == TaskId(1)));
 }
 
 #[test]
@@ -2392,9 +2392,10 @@ fn flat_view_tie_break_by_epic_id_when_sort_orders_equal() {
     app.board.flattened = true;
 
     let items = app.column_items_for_status(TaskStatus::Backlog);
-    // Both headers cluster together (i64::MIN item_key), tie-broken by epic id.
+    // Headers are emitted inline before their tasks; tie-broken by epic id.
+    // Order: EpicHeader(10), Task(ta), EpicHeader(20), Task(tb)
     assert!(matches!(items[0], ColumnItem::EpicHeader(e) if e.id == EpicId(10)));
-    assert!(matches!(items[1], ColumnItem::EpicHeader(e) if e.id == EpicId(20)));
+    assert!(matches!(items[2], ColumnItem::EpicHeader(e) if e.id == EpicId(20)));
 }
 
 #[test]
@@ -2432,5 +2433,86 @@ fn flat_view_selected_column_item_skips_headers() {
     assert!(
         matches!(item, Some(ColumnItem::Task(t)) if t.id == TaskId(1)),
         "row 0 should resolve to Task(1), not the header"
+    );
+}
+
+#[test]
+fn flat_view_review_substatus_label_precedes_epic_header() {
+    // AwaitingReview has column_priority=5; Approved has column_priority=6.
+    // Lower priority number = more urgent = sorts first.
+    // SubstatusLabel must appear BEFORE the EpicHeader in each group.
+    use crate::models::{EpicId, SubStatus};
+    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    let epic = make_epic_with_title(10, "My Epic");
+    app.board.epics = vec![epic];
+
+    let mut t1 = make_task(1, TaskStatus::Review);
+    t1.epic_id = Some(EpicId(10));
+    t1.sub_status = SubStatus::AwaitingReview; // priority 5 — sorts first
+
+    let mut t2 = make_task(2, TaskStatus::Review);
+    t2.epic_id = Some(EpicId(10));
+    t2.sub_status = SubStatus::Approved; // priority 6 — sorts after
+
+    app.board.tasks = vec![t1, t2];
+    app.board.flattened = true;
+
+    let items = app.column_items_for_status(TaskStatus::Review);
+    // Expected: SubstatusLabel, EpicHeader, Task(1), SubstatusLabel, EpicHeader, Task(2)
+    assert_eq!(items.len(), 6, "expected 6 items, got {}", items.len());
+    assert!(matches!(items[0], ColumnItem::SubstatusLabel(_)), "items[0] must be SubstatusLabel");
+    assert!(matches!(items[1], ColumnItem::EpicHeader(_)),    "items[1] must be EpicHeader");
+    assert!(matches!(items[2], ColumnItem::Task(_)),          "items[2] must be Task");
+    assert!(matches!(items[3], ColumnItem::SubstatusLabel(_)), "items[3] must be SubstatusLabel");
+    assert!(matches!(items[4], ColumnItem::EpicHeader(_)),    "items[4] must be EpicHeader");
+    assert!(matches!(items[5], ColumnItem::Task(_)),          "items[5] must be Task");
+}
+
+#[test]
+fn flat_view_epic_repeated_across_substatus_groups() {
+    // Same epic has tasks in two substatus groups.
+    // EpicHeader for that epic must appear once per group (twice total).
+    use crate::models::{EpicId, SubStatus};
+    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    let epic = make_epic_with_title(10, "Shared Epic");
+    app.board.epics = vec![epic];
+
+    let mut t1 = make_task(1, TaskStatus::Running);
+    t1.epic_id = Some(EpicId(10));
+    t1.sub_status = SubStatus::NeedsInput; // priority 3
+
+    let mut t2 = make_task(2, TaskStatus::Running);
+    t2.epic_id = Some(EpicId(10));
+    t2.sub_status = SubStatus::Active; // priority 5
+
+    app.board.tasks = vec![t1, t2];
+    app.board.flattened = true;
+
+    let items = app.column_items_for_status(TaskStatus::Running);
+    let epic_header_count = items
+        .iter()
+        .filter(|i| matches!(i, ColumnItem::EpicHeader(_)))
+        .count();
+    assert_eq!(epic_header_count, 2, "EpicHeader must appear once per substatus group; got {epic_header_count}");
+}
+
+#[test]
+fn flat_view_backlog_no_substatus_labels() {
+    // Backlog tasks don't have meaningful substatus groups — no SubstatusLabel expected.
+    use crate::models::EpicId;
+    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    let epic = make_epic_with_title(10, "Epic");
+    app.board.epics = vec![epic];
+
+    let mut t1 = make_task(1, TaskStatus::Backlog);
+    t1.epic_id = Some(EpicId(10));
+
+    app.board.tasks = vec![t1];
+    app.board.flattened = true;
+
+    let items = app.column_items_for_status(TaskStatus::Backlog);
+    assert!(
+        !items.iter().any(|i| matches!(i, ColumnItem::SubstatusLabel(_))),
+        "Backlog column must not contain SubstatusLabel items"
     );
 }

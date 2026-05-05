@@ -238,7 +238,7 @@ fn render_summary(frame: &mut Frame, app: &App, epic_stats: &EpicStatsMap, area:
         let items = layout.get(status);
         let count = items
             .iter()
-            .filter(|i| !matches!(i, ColumnItem::EpicHeader(_)))
+            .filter(|i| !matches!(i, ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_)))
             .count();
         let is_focused = sel == nav_col;
         let color = column_color(status);
@@ -248,12 +248,12 @@ fn render_summary(frame: &mut Frame, app: &App, epic_stats: &EpicStatsMap, area:
         let checkbox = if is_focused {
             let selectable = items
                 .iter()
-                .filter(|i| !matches!(i, ColumnItem::EpicHeader(_)));
+                .filter(|i| !matches!(i, ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_)));
             let (n, all_selected) = selectable.fold((0usize, true), |(n, all), item| {
                 let selected = match item {
                     ColumnItem::Task(t) => app.selected_tasks().contains(&t.id),
                     ColumnItem::Epic(e) => app.selected_epics().contains(&e.id),
-                    ColumnItem::EpicHeader(_) => unreachable!(),
+                    ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) => unreachable!(),
                 };
                 (n + 1, all && selected)
             });
@@ -718,8 +718,10 @@ fn render_task_column(
     let col_idx = nav_col - 1;
     let is_focused = app.selected_column() == nav_col;
     let color = column_color(status);
-    // Only Running and Review benefit from substatus grouping headers.
-    let show_headers = matches!(status, TaskStatus::Running | TaskStatus::Review);
+    // In flat view the data layer pre-builds SubstatusLabel items; the renderer
+    // must not also inject headers or they'd appear twice.
+    let show_headers =
+        !app.board.flattened && matches!(status, TaskStatus::Running | TaskStatus::Review);
 
     let column_items = app.column_items_for_status_with_stats(status, Some(epic_stats));
     let selected_row = app.selected_row()[col_idx];
@@ -737,6 +739,11 @@ fn render_task_column(
             continue;
         }
 
+        if let ColumnItem::SubstatusLabel(label) = item {
+            list_items.push(render_substatus_header(label, list_items.is_empty()));
+            continue;
+        }
+
         // Substatus grouping headers (Running / Review columns only).
         if show_headers {
             let priority = match item {
@@ -745,7 +752,7 @@ fn render_task_column(
                     .get(&e.id)
                     .map(|s| s.substatus.column_priority())
                     .unwrap_or(0),
-                ColumnItem::EpicHeader(_) => unreachable!(),
+                ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) => unreachable!(),
             };
             if Some(priority) != current_priority {
                 current_priority = Some(priority);
@@ -759,7 +766,7 @@ fn render_task_column(
                         .map(|s| s.substatus.header_label())
                         .unwrap_or_default()
                         .to_string(),
-                    ColumnItem::EpicHeader(_) => unreachable!(),
+                    ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) => unreachable!(),
                 };
                 list_items.push(render_substatus_header(&label, list_items.is_empty()));
             }
@@ -779,7 +786,7 @@ fn render_task_column(
             ColumnItem::Epic(epic) => {
                 render_epic_item(epic, is_cursor, app, epic_stats, status, col_area.width)
             }
-            ColumnItem::EpicHeader(_) => unreachable!(),
+            ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) => unreachable!(),
         });
     }
 

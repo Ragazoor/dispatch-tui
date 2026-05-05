@@ -1067,6 +1067,11 @@ pub enum ColumnItem<'a> {
     /// Non-selectable group header in flat view. Carries the epic so the renderer
     /// can read its title without an extra lookup.
     EpicHeader(&'a Epic),
+    /// Non-selectable substatus section header, pre-built by the flat-view path of
+    /// `column_items_for_status_with_stats`. Only produced in flat view for
+    /// Running and Review columns. The renderer must not also inject its own
+    /// substatus header for the same group transition.
+    SubstatusLabel(String),
 }
 
 // ---------------------------------------------------------------------------

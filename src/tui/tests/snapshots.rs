@@ -414,3 +414,47 @@ fn flat_view_epic_headers() {
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);
 }
+
+#[test]
+fn flat_view_substatus_indicators_above_epic_headers() {
+    use crate::models::{EpicId, SubStatus};
+    use crate::tui::tests::make_epic_with_title;
+
+    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+
+    let epic_a = make_epic_with_title(10, "Epic Alpha");
+    let epic_b = make_epic_with_title(20, "Epic Beta");
+    app.board.epics = vec![epic_a, epic_b];
+
+    // Running column: NeedsInput (priority 3) and Active (priority 5) groups.
+    // Expected column order:
+    //   ──── needs input ────
+    //   ── Epic Alpha ──────
+    //   Task 1
+    //   ──── active ─────────
+    //   ── Epic Beta ───────
+    //   Task 2
+    //   ── Epic Alpha ──────   ← Epic Alpha appears again under "active"
+    //   Task 3
+    let mut t1 = make_task(1, TaskStatus::Running);
+    t1.epic_id = Some(EpicId(10));
+    t1.sub_status = SubStatus::NeedsInput;
+    t1.sort_order = Some(10);
+
+    let mut t2 = make_task(2, TaskStatus::Running);
+    t2.epic_id = Some(EpicId(20));
+    t2.sub_status = SubStatus::Active;
+    t2.sort_order = Some(20);
+
+    let mut t3 = make_task(3, TaskStatus::Running);
+    t3.epic_id = Some(EpicId(10));
+    t3.sub_status = SubStatus::Active;
+    t3.sort_order = Some(30);
+
+    app.board.tasks = vec![t1, t2, t3];
+    app.board.flattened = true;
+    app.selection_mut().set_column(2); // Running = nav col 2
+
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}

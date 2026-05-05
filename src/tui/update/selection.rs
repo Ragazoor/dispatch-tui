@@ -46,7 +46,7 @@ impl App {
             match item {
                 ColumnItem::Task(t) => task_ids.push(t.id),
                 ColumnItem::Epic(e) => epic_ids.push(e.id),
-                ColumnItem::EpicHeader(_) => {}
+                ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) => {}
             }
         }
         if task_ids.is_empty() && epic_ids.is_empty() {

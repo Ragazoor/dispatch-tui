@@ -213,7 +213,7 @@ impl App {
                     }
                 }
             }
-            Some(ColumnItem::EpicHeader(_)) => vec![],
+            Some(ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_)) => vec![],
             None => {
                 if let ViewMode::Epic { epic_id, .. } = self.board.view_mode {
                     self.update(Message::DispatchEpic(epic_id))
@@ -363,7 +363,7 @@ impl App {
                 let id = epic.id;
                 on_epic(self, id)
             }
-            Some(ColumnItem::EpicHeader(_)) => vec![],
+            Some(ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_)) => vec![],
             None => vec![],
         }
     }
