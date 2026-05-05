@@ -1,7 +1,9 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{
+    Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap,
+};
 use ratatui::Frame;
 
 use super::palette::{CYAN, GREEN, MUTED, PURPLE, RED, YELLOW};
@@ -47,7 +49,6 @@ fn scope_badge(scope: LearningScope, scope_ref: Option<&str>) -> String {
     }
 }
 
-
 pub fn render_learnings(frame: &mut Frame, app: &App, area: Rect) {
     let ViewMode::Learnings {
         selected,
@@ -71,11 +72,7 @@ pub fn render_learnings(frame: &mut Frame, app: &App, area: Rect) {
 
     let outer_block = Block::default()
         .title(" Learnings ")
-        .title_style(
-            Style::default()
-                .fg(CYAN)
-                .add_modifier(Modifier::BOLD),
-        )
+        .title_style(Style::default().fg(CYAN).add_modifier(Modifier::BOLD))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(CYAN));
@@ -143,7 +140,11 @@ pub fn render_learnings(frame: &mut Frame, app: &App, area: Rect) {
                         identifier == *last
                     })
                     .count();
-                if n > 0 { Some(n) } else { None }
+                if n > 0 {
+                    Some(n)
+                } else {
+                    None
+                }
             });
 
             (learning, count)
@@ -211,7 +212,10 @@ fn render_detail(
     // When a scope node is selected in tree view, show a summary instead of learning detail.
     if let Some(count) = scope_node_count {
         let text = Text::from(Line::from(Span::styled(
-            format!("{count} learning{} in this scope", if count == 1 { "" } else { "s" }),
+            format!(
+                "{count} learning{} in this scope",
+                if count == 1 { "" } else { "s" }
+            ),
             Style::default().fg(Color::DarkGray),
         )));
         frame.render_widget(Paragraph::new(text), inner);
@@ -275,11 +279,8 @@ pub fn build_learning_tree(
     }
 
     // Build lookup maps once — O(N) instead of O(N²)
-    let epic_project: HashMap<i64, ProjectId> = app
-        .epics()
-        .iter()
-        .map(|e| (e.id.0, e.project_id))
-        .collect();
+    let epic_project: HashMap<i64, ProjectId> =
+        app.epics().iter().map(|e| (e.id.0, e.project_id)).collect();
     let epic_label_map: HashMap<i64, String> = app
         .epics()
         .iter()
@@ -348,8 +349,7 @@ pub fn build_learning_tree(
 
         // Direct project-scoped leaves
         for l in learnings.iter().filter(|l| {
-            l.scope == LearningScope::Project
-                && l.scope_ref.as_deref() == Some(&pid.0.to_string())
+            l.scope == LearningScope::Project && l.scope_ref.as_deref() == Some(&pid.0.to_string())
         }) {
             children.push(leaf(l));
         }
@@ -494,9 +494,10 @@ fn render_tree(
         height: 1,
         ..area
     };
-    let hints =
-        Paragraph::new(" Tab:list  h/l:collapse/expand  j/k:nav  e:edit  x:reject  A:archive  q:close")
-            .style(Style::default().fg(Color::DarkGray));
+    let hints = Paragraph::new(
+        " Tab:list  h/l:collapse/expand  j/k:nav  e:edit  x:reject  A:archive  q:close",
+    )
+    .style(Style::default().fg(Color::DarkGray));
     frame.render_widget(hints, footer_area);
 }
 

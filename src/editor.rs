@@ -214,9 +214,9 @@ pub struct LearningEditorFields {
     pub summary: String,
     pub kind: Option<LearningKind>,
     /// `None` = section absent (don't change).
-    /// `Some(None)` = section present but empty (clear to NULL).
-    /// `Some(Some(v))` = section present with text (set value).
-    pub detail: Option<Option<String>>,
+    /// `Some(FieldUpdate::Clear)` = section present but empty (clear to NULL).
+    /// `Some(FieldUpdate::Set(v))` = section present with text (set value).
+    pub detail: Option<FieldUpdate>,
     /// `None` = section absent (don't change). `Some(vec![])` = clear tags.
     pub tags: Option<Vec<String>>,
 }
@@ -247,9 +247,13 @@ pub fn parse_learning_editor_output(input: &str) -> LearningEditorFields {
                 .collect()
         }
     });
-    let detail = s
-        .remove("DETAIL")
-        .map(|d| if d.trim().is_empty() { None } else { Some(d) });
+    let detail = s.remove("DETAIL").map(|d| {
+        if d.trim().is_empty() {
+            FieldUpdate::Clear
+        } else {
+            FieldUpdate::Set(d)
+        }
+    });
     LearningEditorFields {
         summary,
         kind,
@@ -264,6 +268,10 @@ mod tests {
     use crate::models::{EpicId, TaskId, TaskStatus};
     use chrono::Utc;
     use proptest::prelude::*;
+
+    const FEED_INTERVAL_SLOW_SECS: i64 = 300;
+    const FEED_INTERVAL_MED_SECS: i64 = 120;
+    const FEED_INTERVAL_FAST_SECS: i64 = 60;
 
     fn make_epic(title: &str, description: &str, repo_path: &str) -> Epic {
         Epic {
@@ -678,7 +686,7 @@ mod tests {
     #[test]
     fn epic_editor_includes_feed_interval_section() {
         let mut epic = make_epic("T", "D", "/repo");
-        epic.feed_interval_secs = Some(300);
+        epic.feed_interval_secs = Some(FEED_INTERVAL_SLOW_SECS);
         let content = format_epic_for_editor(&epic);
         assert!(content.contains("--- FEED_INTERVAL_SECS ---"));
         assert!(content.contains("300"));
@@ -704,7 +712,7 @@ mod tests {
     #[test]
     fn epic_editor_roundtrip_feed_interval_set() {
         let mut epic = make_epic("T", "D", "/repo");
-        epic.feed_interval_secs = Some(120);
+        epic.feed_interval_secs = Some(FEED_INTERVAL_MED_SECS);
         let content = format_epic_for_editor(&epic);
         let fields = parse_epic_editor_output(&content);
         assert_eq!(fields.feed_interval_secs, "120");
@@ -751,10 +759,10 @@ mod tests {
             description: "D".into(),
             repo_path: "/repo".into(),
             feed_command: "".into(),
-            feed_interval_secs: "300".into(),
+            feed_interval_secs: FEED_INTERVAL_SLOW_SECS.to_string(),
         };
         let applied = apply_epic_editor_fields(&epic, fields);
-        assert_eq!(applied.feed_interval_secs, Some(300));
+        assert_eq!(applied.feed_interval_secs, Some(FEED_INTERVAL_SLOW_SECS));
     }
 
     #[test]
@@ -775,7 +783,7 @@ mod tests {
     fn apply_epic_editor_fields_full_roundtrip() {
         let mut epic = make_epic("E title", "E desc", "/repo");
         epic.feed_command = Some("scripts/fetch-dependabot.sh".into());
-        epic.feed_interval_secs = Some(60);
+        epic.feed_interval_secs = Some(FEED_INTERVAL_FAST_SECS);
         let content = format_epic_for_editor(&epic);
         let fields = parse_epic_editor_output(&content);
         let applied = apply_epic_editor_fields(&epic, fields);
@@ -784,7 +792,7 @@ mod tests {
             applied.feed_command,
             crate::service::FieldUpdate::Set("scripts/fetch-dependabot.sh".into())
         );
-        assert_eq!(applied.feed_interval_secs, Some(60));
+        assert_eq!(applied.feed_interval_secs, Some(FEED_INTERVAL_FAST_SECS));
     }
 
     mod learning_editor_tests {
@@ -817,7 +825,7 @@ mod tests {
             assert_eq!(f.summary, l.summary);
             assert_eq!(f.kind, Some(l.kind));
             assert_eq!(f.tags, Some(l.tags.clone()));
-            assert_eq!(f.detail, Some(Some(l.detail.clone().unwrap())));
+            assert_eq!(f.detail, Some(FieldUpdate::Set(l.detail.clone().unwrap())));
         }
 
         #[test]
@@ -826,8 +834,8 @@ mod tests {
             l.detail = None;
             let s = format_learning_for_editor(&l);
             let f = parse_learning_editor_output(&s);
-            // Empty DETAIL section → Some(None) meaning "clear"
-            assert_eq!(f.detail, Some(None));
+            // Empty DETAIL section → Some(FieldUpdate::Clear) meaning "clear"
+            assert_eq!(f.detail, Some(FieldUpdate::Clear));
         }
 
         #[test]

@@ -6336,10 +6336,16 @@ fn list_learnings_approved_filter_excludes_rejected_and_archived() {
         )
         .unwrap();
     // Transition rejected and archived
-    db.patch_learning(rejected_id, &LearningPatch::new().status(LearningStatus::Rejected))
-        .unwrap();
-    db.patch_learning(archived_id, &LearningPatch::new().status(LearningStatus::Archived))
-        .unwrap();
+    db.patch_learning(
+        rejected_id,
+        &LearningPatch::new().status(LearningStatus::Rejected),
+    )
+    .unwrap();
+    db.patch_learning(
+        archived_id,
+        &LearningPatch::new().status(LearningStatus::Archived),
+    )
+    .unwrap();
 
     let results = db
         .list_learnings(LearningFilter {

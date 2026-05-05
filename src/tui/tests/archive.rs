@@ -1,17 +1,6 @@
-#![allow(unused_imports)]
-
 use super::*;
-use crate::models::{
-    DispatchMode, Epic, EpicId, SubStatus, TaskId, TaskStatus, TaskTag, DEFAULT_QUICK_TASK_TITLE,
-};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::{
-    backend::TestBackend,
-    buffer::Buffer,
-    style::{Color, Modifier},
-    Terminal,
-};
-use std::time::{Duration, Instant};
+use crate::models::{EpicId, SubStatus, TaskId, TaskStatus};
+use crossterm::event::KeyCode;
 
 #[test]
 fn x_key_enters_confirm_archive_mode() {

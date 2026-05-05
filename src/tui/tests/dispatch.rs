@@ -1,17 +1,9 @@
-#![allow(unused_imports)]
-
 use super::*;
 use crate::models::{
-    DispatchMode, Epic, EpicId, ProjectId, SubStatus, TaskId, TaskStatus, TaskTag,
+    DispatchMode, EpicId, ProjectId, SubStatus, TaskId, TaskStatus, TaskTag,
     DEFAULT_QUICK_TASK_TITLE,
 };
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::{
-    backend::TestBackend,
-    buffer::Buffer,
-    style::{Color, Modifier},
-    Terminal,
-};
+use crossterm::event::KeyCode;
 use std::time::{Duration, Instant};
 
 #[test]

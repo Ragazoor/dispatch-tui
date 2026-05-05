@@ -1,20 +1,14 @@
-#![allow(unused_imports)]
-
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     backend::TestBackend,
     buffer::Buffer,
-    style::{Color, Modifier, Style},
-    text::Span,
+    style::{Color, Modifier},
     Terminal,
 };
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use super::*;
-use crate::models::{
-    DispatchMode, Epic, EpicId, SubStatus, TaskId, TaskStatus, TaskTag, DEFAULT_QUICK_TASK_TITLE,
-};
-use crate::tui::ViewMode;
+use crate::models::{Epic, EpicId, SubStatus, TaskId, TaskStatus};
 
 pub(in crate::tui) const TEST_TIMEOUT: Duration = Duration::from_secs(300);
 

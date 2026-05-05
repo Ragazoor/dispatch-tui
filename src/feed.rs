@@ -616,7 +616,12 @@ mod tests {
         }
 
         fn calls_for(&self, path: &str) -> usize {
-            self.calls.lock().unwrap().get(path).copied().unwrap_or(0)
+            self.calls
+                .lock()
+                .expect("feed lock poisoned")
+                .get(path)
+                .copied()
+                .unwrap_or(0)
         }
     }
 

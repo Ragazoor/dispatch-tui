@@ -199,8 +199,14 @@ mod tests {
         // TUI handler sorts by confirmed_count DESC: id2 (count=3) before id1 (count=0).
         if let ViewMode::Learnings { learnings, .. } = app.view_mode() {
             assert_eq!(learnings.len(), 2);
-            assert_eq!(learnings[0].id, id2, "higher confirmed_count should sort first");
-            assert_eq!(learnings[1].id, id1, "lower confirmed_count should sort second");
+            assert_eq!(
+                learnings[0].id, id2,
+                "higher confirmed_count should sort first"
+            );
+            assert_eq!(
+                learnings[1].id, id1,
+                "lower confirmed_count should sort second"
+            );
         } else {
             panic!("expected Learnings view mode");
         }

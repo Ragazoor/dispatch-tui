@@ -970,8 +970,8 @@ pub struct CreateLearningParams {
 pub struct UpdateLearningParams {
     pub id: crate::models::LearningId,
     pub summary: Option<String>,
-    /// `None` = don't change; `Some(None)` = clear; `Some(Some(v))` = set.
-    pub detail: Option<Option<String>>,
+    /// `None` = don't change; `Some(FieldUpdate::Clear)` = clear; `Some(FieldUpdate::Set(v))` = set.
+    pub detail: Option<FieldUpdate>,
     pub kind: Option<crate::models::LearningKind>,
     pub tags: Option<Vec<String>>,
 }
@@ -1093,7 +1093,10 @@ impl LearningService {
             patch = patch.summary(s.as_str());
         }
         if let Some(ref d) = params.detail {
-            patch = patch.detail(d.as_deref());
+            patch = match d {
+                FieldUpdate::Set(v) => patch.detail(Some(v.as_str())),
+                FieldUpdate::Clear => patch.detail(None),
+            };
         }
         if let Some(k) = params.kind {
             patch = patch.kind(k);

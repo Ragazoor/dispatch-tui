@@ -25,9 +25,7 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_close_learnings(&mut self) -> Vec<Command> {
-        if let ViewMode::Learnings { previous, .. } =
-            std::mem::take(&mut self.board.view_mode)
-        {
+        if let ViewMode::Learnings { previous, .. } = std::mem::take(&mut self.board.view_mode) {
             self.board.view_mode = *previous;
         }
         vec![]
@@ -128,10 +126,7 @@ impl App {
         vec![]
     }
 
-    pub(in crate::tui) fn handle_navigate_tree_learning(
-        &mut self,
-        nav: TreeNav,
-    ) -> Vec<Command> {
+    pub(in crate::tui) fn handle_navigate_tree_learning(&mut self, nav: TreeNav) -> Vec<Command> {
         if let ViewMode::Learnings { ref tree_state, .. } = self.board.view_mode {
             let mut state = tree_state.borrow_mut();
             match nav {

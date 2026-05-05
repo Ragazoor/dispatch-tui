@@ -1,17 +1,8 @@
-#![allow(unused_imports)]
-
 use super::*;
-use crate::models::{
-    DispatchMode, Epic, EpicId, SubStatus, TaskId, TaskStatus, TaskTag, DEFAULT_QUICK_TASK_TITLE,
-};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::{
-    backend::TestBackend,
-    buffer::Buffer,
-    style::{Color, Modifier},
-    Terminal,
-};
-use std::time::{Duration, Instant};
+use crate::models::{SubStatus, TaskId, TaskStatus, TaskTag};
+use crossterm::event::KeyCode;
+use ratatui::style::{Color, Modifier};
+use std::time::Instant;
 
 #[test]
 fn action_hints_backlog_task() {

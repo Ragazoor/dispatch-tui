@@ -1,18 +1,6 @@
-#![allow(unused_imports)]
-
 use super::*;
-use crate::models::{
-    DispatchMode, Epic, EpicId, ProjectId, SubStatus, TaskId, TaskStatus, TaskTag,
-    DEFAULT_QUICK_TASK_TITLE,
-};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::{
-    backend::TestBackend,
-    buffer::Buffer,
-    style::{Color, Modifier},
-    Terminal,
-};
-use std::time::{Duration, Instant};
+use crate::models::{EpicId, ProjectId, SubStatus, TaskId, TaskStatus};
+use crossterm::event::KeyCode;
 
 #[test]
 fn finish_complete_moves_to_done() {

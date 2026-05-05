@@ -386,7 +386,10 @@ fn snapshot_learnings_tree_view() {
     // Verify we're in tree view
     assert!(matches!(
         &app.board.view_mode,
-        crate::tui::ViewMode::Learnings { view: LearningsView::Tree, .. }
+        crate::tui::ViewMode::Learnings {
+            view: LearningsView::Tree,
+            ..
+        }
     ));
 
     let rendered = render_to_string(&mut app, 120, 40);

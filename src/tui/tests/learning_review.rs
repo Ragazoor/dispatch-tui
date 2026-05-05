@@ -36,9 +36,7 @@ fn make_app_with_learnings() -> App {
 fn open_proposed_learnings_returns_load_command() {
     let mut app = make_app();
     let cmds = app.update(Message::OpenLearnings);
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::LoadLearnings)));
+    assert!(cmds.iter().any(|c| matches!(c, Command::LoadLearnings)));
 }
 
 #[test]
@@ -193,9 +191,7 @@ fn edit_learning_returns_pop_out_editor_command() {
 #[test]
 fn learning_actioned_on_single_entry_empties_list() {
     let mut app = make_app();
-    app.update(Message::ShowLearnings(vec![make_learning(
-        LearningId(1),
-    )]));
+    app.update(Message::ShowLearnings(vec![make_learning(LearningId(1))]));
     app.update(Message::LearningActioned(LearningId(1)));
     assert!(matches!(
         &app.board.view_mode,
@@ -337,19 +333,14 @@ fn board_keys_inert_when_overlay_open() {
     let mut app = make_app_with_learnings();
     // 'd' would dispatch a task from the board — must be swallowed
     app.handle_key(make_key(KeyCode::Char('d')));
-    assert!(matches!(
-        app.board.view_mode,
-        ViewMode::Learnings { .. }
-    ));
+    assert!(matches!(app.board.view_mode, ViewMode::Learnings { .. }));
 }
 
 #[test]
 fn i_key_from_board_emits_load_command() {
     let mut app = make_app();
     let cmds = app.handle_key(make_key(KeyCode::Char('I')));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::LoadLearnings)));
+    assert!(cmds.iter().any(|c| matches!(c, Command::LoadLearnings)));
 }
 
 #[test]
@@ -359,8 +350,5 @@ fn shift_a_key_on_empty_overlay_is_inert() {
     app.update(Message::ShowLearnings(vec![]));
     let cmds = app.handle_key(make_key(KeyCode::Char('A')));
     assert!(cmds.is_empty());
-    assert!(matches!(
-        app.board.view_mode,
-        ViewMode::Learnings { .. }
-    ));
+    assert!(matches!(app.board.view_mode, ViewMode::Learnings { .. }));
 }

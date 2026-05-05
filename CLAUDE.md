@@ -223,6 +223,7 @@ A task with a plan always dispatches directly regardless of tag. Tags are select
 | `src/db/queries.rs` | `impl TaskStore for Database` — all CRUD operations, row helpers |
 | `src/db/tests.rs` | Database unit tests |
 | `src/dispatch.rs` | Worktree creation, tmux session management, agent lifecycle (dispatch/brainstorm/plan/resume/review) |
+| `src/dispatch/finish.rs` | Rebase + fast-forward branch onto base branch, kill tmux window (`finish_task`); defines `FinishError` |
 | `src/process.rs` | `ProcessRunner` trait + `RealProcessRunner` / `MockProcessRunner` for testable shell execution |
 | `src/tmux.rs` | Tmux API: create windows, send keys, capture pane output, kill windows |
 | `src/editor.rs` | External `$EDITOR` integration for editing task/epic fields |
