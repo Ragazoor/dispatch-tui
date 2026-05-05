@@ -334,7 +334,7 @@ fn fresh_db_has_latest_schema_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 42);
+    assert_eq!(version, 43);
 }
 
 #[test]
@@ -553,7 +553,7 @@ fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 42);
+    assert_eq!(version, 43);
 }
 
 #[test]
@@ -642,7 +642,7 @@ fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 42);
+    assert_eq!(version, 43);
 }
 
 #[test]
@@ -753,7 +753,7 @@ fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 42);
+    assert_eq!(version, 43);
 }
 
 #[test]
@@ -2293,7 +2293,7 @@ fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 42);
+    assert_eq!(version, 43);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -2579,7 +2579,7 @@ fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 42);
+    assert_eq!(version, 43);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -4666,7 +4666,7 @@ fn migration_31_re_expands_tilde_paths() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 42);
+    assert_eq!(version, 43);
 }
 
 #[test]
@@ -4742,7 +4742,7 @@ fn migrate_v32_adds_base_branch_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 42);
+    assert_eq!(version, 43);
 }
 
 #[test]
@@ -5279,7 +5279,7 @@ fn migration_v38_feed_epic_columns() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 42);
+    assert_eq!(version, 43);
 }
 
 // ---------------------------------------------------------------------------
@@ -5927,7 +5927,7 @@ fn fresh_db_schema_version_is_40() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 42);
+    assert_eq!(version, 43);
 }
 
 #[test]
@@ -5997,7 +5997,7 @@ fn migration_v40_creates_learnings_table() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 42);
+    assert_eq!(version, 43);
 }
 
 #[test]
@@ -6047,7 +6047,7 @@ fn migration_v41_drops_cost_usd_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 42);
+    assert_eq!(version, 43);
     // Original token data is preserved
     let row: (i64, i64, i64, i64, i64) = conn
         .query_row(
@@ -6071,6 +6071,95 @@ fn migration_v41_drops_cost_usd_column() {
         !has_cost_usd,
         "cost_usd column should have been removed by migration v41"
     );
+}
+
+#[test]
+fn test_migrate_v43_proposed_to_approved() {
+    use rusqlite::Connection as RawConn;
+    let conn = RawConn::open_in_memory().unwrap();
+    // Build a v42 database with the learnings table using DEFAULT 'proposed'
+    conn.execute_batch(
+        "PRAGMA journal_mode=WAL;
+         PRAGMA foreign_keys=ON;
+         CREATE TABLE tasks (
+             id INTEGER PRIMARY KEY,
+             title TEXT NOT NULL,
+             description TEXT NOT NULL DEFAULT '',
+             repo_path TEXT NOT NULL DEFAULT '',
+             status TEXT NOT NULL DEFAULT 'backlog',
+             worktree TEXT,
+             tmux_window TEXT,
+             plan_path TEXT,
+             tag TEXT,
+             epic_id INTEGER,
+             sub_status TEXT NOT NULL DEFAULT 'none',
+             pr_url TEXT,
+             sort_order INTEGER,
+             base_branch TEXT NOT NULL DEFAULT 'main',
+             external_id TEXT,
+             project_id INTEGER NOT NULL DEFAULT 1,
+             created_at TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         CREATE TABLE learnings (
+             id                INTEGER PRIMARY KEY,
+             kind              TEXT    NOT NULL,
+             summary           TEXT    NOT NULL,
+             detail            TEXT,
+             scope             TEXT    NOT NULL,
+             scope_ref         TEXT,
+             tags              TEXT    NOT NULL DEFAULT '[]',
+             status            TEXT    NOT NULL DEFAULT 'proposed',
+             source_task_id    INTEGER REFERENCES tasks(id),
+             confirmed_count   INTEGER NOT NULL DEFAULT 0,
+             last_confirmed_at TEXT,
+             created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+             updated_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+             CHECK (
+                 (scope = 'user' AND scope_ref IS NULL)
+                 OR (scope != 'user' AND scope_ref IS NOT NULL)
+             )
+         );
+         CREATE INDEX IF NOT EXISTS idx_learnings_scope ON learnings(scope, scope_ref);
+         CREATE INDEX IF NOT EXISTS idx_learnings_status ON learnings(status);
+         INSERT INTO learnings (kind, summary, scope, status) VALUES ('pitfall', 'test', 'user', 'proposed');
+         PRAGMA user_version = 42;",
+    )
+    .unwrap();
+
+    // Apply v43 via init_schema
+    Database::init_schema(&conn).unwrap();
+
+    // Assert: the previously proposed row is now approved
+    let status: String = conn
+        .query_row(
+            "SELECT status FROM learnings WHERE summary = 'test'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(status, "approved");
+
+    // Assert: new inserts default to approved (not proposed)
+    conn.execute(
+        "INSERT INTO learnings (kind, summary, scope) VALUES ('pitfall', 'new', 'user')",
+        [],
+    )
+    .unwrap();
+    let new_status: String = conn
+        .query_row(
+            "SELECT status FROM learnings WHERE summary = 'new'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(new_status, "approved");
+
+    // Assert: schema version bumped to 43
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, 43);
 }
 
 #[test]
@@ -6099,7 +6188,7 @@ fn create_and_get_learning() {
     assert_eq!(learning.scope, LearningScope::Repo);
     assert_eq!(learning.scope_ref.as_deref(), Some("/home/user/repo"));
     assert_eq!(learning.tags, vec!["rust", "async"]);
-    assert_eq!(learning.status, LearningStatus::Proposed);
+    assert_eq!(learning.status, LearningStatus::Approved);
     assert_eq!(learning.confirmed_count, 0);
     assert!(learning.last_confirmed_at.is_none());
     assert!(learning.source_task_id.is_none());
@@ -6171,16 +6260,16 @@ fn list_learnings_filter_by_status() {
             None,
         )
         .unwrap();
-    // approve id1
+    // Both learnings default to Approved. Archive id2 so we can filter by status.
     db.patch_learning(
-        id1,
-        &crate::db::LearningPatch::new().status(LearningStatus::Approved),
+        id2,
+        &crate::db::LearningPatch::new().status(LearningStatus::Archived),
     )
     .unwrap();
 
-    let proposed = db
+    let archived = db
         .list_learnings(LearningFilter {
-            status: Some(LearningStatus::Proposed),
+            status: Some(LearningStatus::Archived),
             ..Default::default()
         })
         .unwrap();
@@ -6191,8 +6280,8 @@ fn list_learnings_filter_by_status() {
         })
         .unwrap();
 
-    assert_eq!(proposed.len(), 1);
-    assert_eq!(proposed[0].id, id2);
+    assert_eq!(archived.len(), 1);
+    assert_eq!(archived[0].id, id2);
     assert_eq!(approved.len(), 1);
     assert_eq!(approved[0].id, id1);
 }
@@ -6396,10 +6485,11 @@ fn list_learnings_for_dispatch_excludes_non_approved() {
     use crate::models::{LearningKind, LearningScope, LearningStatus};
     let db = in_memory_db();
 
-    let proposed = db
+    // Create a learning and reject it — rejected learnings should be excluded from dispatch.
+    let rejected = db
         .create_learning(
             LearningKind::Convention,
-            "Proposed",
+            "Rejected",
             None,
             LearningScope::User,
             None,
@@ -6407,6 +6497,13 @@ fn list_learnings_for_dispatch_excludes_non_approved() {
             None,
         )
         .unwrap();
+    db.patch_learning(
+        rejected,
+        &LearningPatch::new().status(LearningStatus::Rejected),
+    )
+    .unwrap();
+
+    // Create an approved learning (default).
     let approved = db
         .create_learning(
             LearningKind::Convention,
@@ -6418,15 +6515,10 @@ fn list_learnings_for_dispatch_excludes_non_approved() {
             None,
         )
         .unwrap();
-    db.patch_learning(
-        approved,
-        &LearningPatch::new().status(LearningStatus::Approved),
-    )
-    .unwrap();
 
     let results = db.list_learnings_for_dispatch(None, "/any", None).unwrap();
     let ids: Vec<_> = results.iter().map(|l| l.id).collect();
-    assert!(!ids.contains(&proposed));
+    assert!(!ids.contains(&rejected));
     assert!(ids.contains(&approved));
 }
 

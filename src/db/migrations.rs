@@ -65,6 +65,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (40, migrate_v40_create_learnings),
     (41, migrate_v41_drop_cost_usd),
     (42, migrate_v42_drop_epic_tag),
+    (43, migrate_v43_proposed_to_approved),
 ];
 
 fn migrate_v1_add_plan_column(conn: &Connection) -> Result<()> {
@@ -927,4 +928,55 @@ pub(super) fn migrate_v42_drop_epic_tag(conn: &Connection) -> Result<()> {
         tracing::info!("Migration v42: cleared `epic` tag on {cleared} task(s)");
     }
     Ok(())
+}
+
+fn migrate_v43_proposed_to_approved(conn: &Connection) -> Result<()> {
+    // Change the default status for new learnings from 'proposed' to 'approved'
+    // and promote all existing 'proposed' learnings to 'approved'.
+    //
+    // If the learnings table doesn't exist (e.g. in tests that build minimal
+    // schemas without running v40), skip gracefully — there's nothing to migrate.
+    let table_exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='learnings'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|n| n > 0)
+        .unwrap_or(false);
+    if !table_exists {
+        return Ok(());
+    }
+
+    conn.execute_batch(
+        "CREATE TABLE learnings_new (
+            id                INTEGER PRIMARY KEY,
+            kind              TEXT    NOT NULL,
+            summary           TEXT    NOT NULL,
+            detail            TEXT,
+            scope             TEXT    NOT NULL,
+            scope_ref         TEXT,
+            tags              TEXT    NOT NULL DEFAULT '[]',
+            status            TEXT    NOT NULL DEFAULT 'approved',
+            source_task_id    INTEGER REFERENCES tasks(id),
+            confirmed_count   INTEGER NOT NULL DEFAULT 0,
+            last_confirmed_at TEXT,
+            created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+            updated_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+            CHECK (
+                (scope = 'user' AND scope_ref IS NULL)
+                OR (scope != 'user' AND scope_ref IS NOT NULL)
+            )
+        );
+        INSERT INTO learnings_new
+            SELECT id, kind, summary, detail, scope, scope_ref, tags,
+                CASE WHEN status = 'proposed' THEN 'approved' ELSE status END,
+                source_task_id, confirmed_count, last_confirmed_at, created_at, updated_at
+            FROM learnings;
+        DROP TABLE learnings;
+        ALTER TABLE learnings_new RENAME TO learnings;
+        CREATE INDEX IF NOT EXISTS idx_learnings_scope ON learnings(scope, scope_ref);
+        CREATE INDEX IF NOT EXISTS idx_learnings_status ON learnings(status);",
+    )
+    .context("Failed to migrate learnings to default 'approved' status (migration v43)")
 }
