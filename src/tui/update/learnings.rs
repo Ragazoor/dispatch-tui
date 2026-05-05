@@ -9,7 +9,7 @@ impl App {
         mut learnings: Vec<crate::models::Learning>,
     ) -> Vec<Command> {
         // Sort by confirmed_count DESC; stable sort preserves insertion order as a tiebreaker.
-        learnings.sort_by(|a, b| b.confirmed_count.cmp(&a.confirmed_count));
+        learnings.sort_by_key(|b| std::cmp::Reverse(b.confirmed_count));
         let previous = Box::new(std::mem::replace(
             &mut self.board.view_mode,
             ViewMode::Board(BoardSelection::default()),

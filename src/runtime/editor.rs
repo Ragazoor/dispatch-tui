@@ -472,7 +472,7 @@ mod learning_editor_tests {
             .unwrap();
         let learning = make_learning(id);
         let rt = make_runtime(db.clone());
-        // Put app into ProposedLearnings view
+        // Put app into Learnings view
         let mut app = App::new(vec![], ProjectId(1), EDITOR_TEST_INACTIVITY_TIMEOUT);
         app.update(Message::ShowLearnings(vec![learning.clone()]));
 

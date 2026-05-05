@@ -170,7 +170,7 @@ fn refresh_tasks_does_not_update_learnings_snapshot() {
     let original_len = if let ViewMode::Learnings { learnings, .. } = &app.board.view_mode {
         learnings.len()
     } else {
-        panic!("expected ProposedLearnings")
+        panic!("expected Learnings view mode")
     };
     // Simulate a RefreshTasks (MCP tick fires while overlay is open)
     app.update(Message::RefreshTasks(app.board.tasks.clone()));

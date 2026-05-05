@@ -211,7 +211,7 @@ mod tests {
             assert_eq!(learnings[0].id, user_id, "user scope should sort first");
             assert_eq!(learnings[1].id, repo_id, "repo scope should sort second");
         } else {
-            panic!("expected ProposedLearnings");
+            panic!("expected Learnings view mode");
         }
     }
 }

@@ -470,7 +470,7 @@ impl App {
                 }
             }
             ViewMode::TaskDetail { .. } | ViewMode::Learnings { .. } => {
-                unreachable!("effective_view_mode never returns TaskDetail or ProposedLearnings")
+                unreachable!("effective_view_mode never returns TaskDetail or Learnings")
             }
         }
     }
@@ -620,7 +620,7 @@ impl App {
                 }
             }
             ViewMode::TaskDetail { .. } | ViewMode::Learnings { .. } => {
-                unreachable!("effective_view_mode never returns TaskDetail or ProposedLearnings")
+                unreachable!("effective_view_mode never returns TaskDetail or Learnings")
             }
         }
 
@@ -682,7 +682,7 @@ impl App {
                     .count()
             }
             ViewMode::TaskDetail { .. } | ViewMode::Learnings { .. } => {
-                unreachable!("effective_view_mode never returns TaskDetail or ProposedLearnings")
+                unreachable!("effective_view_mode never returns TaskDetail or Learnings")
             }
         };
         task_count + epic_count
@@ -722,7 +722,7 @@ impl App {
                     .collect()
             }
             ViewMode::TaskDetail { .. } | ViewMode::Learnings { .. } => {
-                unreachable!("effective_view_mode never returns TaskDetail or ProposedLearnings")
+                unreachable!("effective_view_mode never returns TaskDetail or Learnings")
             }
         };
 
@@ -902,7 +902,7 @@ impl App {
         let anchor = match self.effective_view_mode() {
             ViewMode::Board(sel) | ViewMode::Epic { selection: sel, .. } => sel.anchor,
             ViewMode::TaskDetail { .. } | ViewMode::Learnings { .. } => {
-                unreachable!("effective_view_mode never returns TaskDetail or ProposedLearnings")
+                unreachable!("effective_view_mode never returns TaskDetail or Learnings")
             }
         };
 

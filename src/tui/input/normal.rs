@@ -25,7 +25,7 @@ fn selected_learning_id_from_tree(
 }
 
 impl App {
-    pub(in crate::tui) fn handle_key_proposed_learnings(&mut self, key: KeyEvent) -> Vec<Command> {
+    pub(in crate::tui) fn handle_key_learnings(&mut self, key: KeyEvent) -> Vec<Command> {
         // Extract view and selected-id data before any mutable borrows.
         let (current_view, selected_id) = if let ViewMode::Learnings {
             selected,
@@ -98,9 +98,9 @@ impl App {
             return self.handle_key_task_detail(key);
         }
 
-        // ProposedLearnings overlay captures all input when visible
+        // Learnings overlay captures all input when visible
         if matches!(self.board.view_mode, ViewMode::Learnings { .. }) {
-            return self.handle_key_proposed_learnings(key);
+            return self.handle_key_learnings(key);
         }
 
         if self.show_archived() {

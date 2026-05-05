@@ -153,7 +153,7 @@ pub enum EditorOutcome {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(in crate::tui) enum LearningsView {
+pub enum LearningsView {
     #[default]
     List,
     Tree,
@@ -164,7 +164,7 @@ pub(in crate::tui) enum LearningsView {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy)]
-pub(in crate::tui) enum TreeNav {
+pub enum TreeNav {
     Up,
     Down,
     Left,
