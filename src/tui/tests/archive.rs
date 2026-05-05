@@ -525,10 +525,19 @@ fn confirm_archive_epic_y_archives() {
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(app.status.message.is_none());
-    assert!(app.board.epics.is_empty()); // removed
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::DeleteEpic(id) if *id == EpicId(10))));
+    // Soft archive: epic stays in memory with status = Archived
+    assert_eq!(app.board.epics.len(), 1);
+    assert_eq!(app.board.epics[0].status, TaskStatus::Archived);
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::PersistEpic {
+            id,
+            status: Some(TaskStatus::Archived),
+            ..
+        } if *id == EpicId(10)
+    )));
+    // Must NOT emit DeleteEpic — that path triggers FK violations.
+    assert!(!cmds.iter().any(|c| matches!(c, Command::DeleteEpic(_))));
 }
 
 #[test]
@@ -536,10 +545,130 @@ fn confirm_archive_epic_uppercase_y_archives() {
     let mut app = make_app_confirm_archive_epic();
     let cmds = app.handle_key(make_key(KeyCode::Char('Y')));
     assert_eq!(app.input.mode, InputMode::Normal);
-    assert!(app.board.epics.is_empty());
-    assert!(cmds
+    assert_eq!(app.board.epics.len(), 1);
+    assert_eq!(app.board.epics[0].status, TaskStatus::Archived);
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::PersistEpic {
+            id,
+            status: Some(TaskStatus::Archived),
+            ..
+        } if *id == EpicId(10)
+    )));
+    assert!(!cmds.iter().any(|c| matches!(c, Command::DeleteEpic(_))));
+}
+
+#[test]
+fn archive_epic_archives_subtasks_and_persists_each() {
+    let mut app = App::new(
+        vec![
+            {
+                let mut t = make_task(1, TaskStatus::Done);
+                t.epic_id = Some(EpicId(10));
+                t
+            },
+            {
+                let mut t = make_task(2, TaskStatus::Done);
+                t.epic_id = Some(EpicId(10));
+                t
+            },
+        ],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
+    let mut epic = make_epic(10);
+    epic.status = TaskStatus::Done;
+    app.board.epics = vec![epic];
+
+    let cmds = app.update(Message::ArchiveEpic(EpicId(10)));
+
+    // Both subtasks now archived in memory
+    assert!(app
+        .board
+        .tasks
         .iter()
-        .any(|c| matches!(c, Command::DeleteEpic(id) if *id == EpicId(10))));
+        .all(|t| t.status == TaskStatus::Archived));
+    // PersistTask emitted for each subtask
+    let persist_task_ids: Vec<_> = cmds
+        .iter()
+        .filter_map(|c| match c {
+            Command::PersistTask(t) => Some(t.id),
+            _ => None,
+        })
+        .collect();
+    assert!(persist_task_ids.contains(&TaskId(1)));
+    assert!(persist_task_ids.contains(&TaskId(2)));
+    // Epic itself archived and persisted
+    assert_eq!(app.board.epics[0].status, TaskStatus::Archived);
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::PersistEpic {
+            id,
+            status: Some(TaskStatus::Archived),
+            ..
+        } if *id == EpicId(10)
+    )));
+}
+
+#[test]
+fn archive_epic_recursively_archives_sub_epics_and_their_tasks() {
+    // Parent epic 10 has child epic 20; child epic has one Done task.
+    let mut app = App::new(
+        vec![{
+            let mut t = make_task(1, TaskStatus::Done);
+            t.epic_id = Some(EpicId(20));
+            t
+        }],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
+    let mut parent = make_epic(10);
+    parent.status = TaskStatus::Backlog;
+    let mut child = make_epic(20);
+    child.parent_epic_id = Some(EpicId(10));
+    child.status = TaskStatus::Done;
+    app.board.epics = vec![parent, child];
+
+    let cmds = app.update(Message::ArchiveEpic(EpicId(10)));
+
+    // Both epics now archived
+    let parent_status = app
+        .board
+        .epics
+        .iter()
+        .find(|e| e.id == EpicId(10))
+        .unwrap()
+        .status;
+    let child_status = app
+        .board
+        .epics
+        .iter()
+        .find(|e| e.id == EpicId(20))
+        .unwrap()
+        .status;
+    assert_eq!(parent_status, TaskStatus::Archived);
+    assert_eq!(child_status, TaskStatus::Archived);
+
+    // Subtask of child epic also archived
+    assert_eq!(app.board.tasks[0].status, TaskStatus::Archived);
+
+    // PersistEpic emitted for both parent and child
+    let persisted_epic_ids: Vec<_> = cmds
+        .iter()
+        .filter_map(|c| match c {
+            Command::PersistEpic {
+                id,
+                status: Some(TaskStatus::Archived),
+                ..
+            } => Some(*id),
+            _ => None,
+        })
+        .collect();
+    assert!(persisted_epic_ids.contains(&EpicId(10)));
+    assert!(persisted_epic_ids.contains(&EpicId(20)));
+
+    // No DeleteEpic emitted on the archive path.
+    assert!(!cmds.iter().any(|c| matches!(c, Command::DeleteEpic(_))));
 }
 
 #[test]
@@ -771,7 +900,13 @@ fn batch_archive_selected_epics() {
     app.board.epics = vec![make_epic(10), make_epic(20)];
 
     let cmds = app.update(Message::BatchArchiveEpics(vec![EpicId(10), EpicId(20)]));
-    assert!(app.board.epics.is_empty(), "Both epics should be removed");
+    // Soft archive: epics stay in memory with status = Archived
+    assert_eq!(app.board.epics.len(), 2);
+    assert!(app
+        .board
+        .epics
+        .iter()
+        .all(|e| e.status == TaskStatus::Archived));
     assert!(!cmds.is_empty(), "Should emit commands");
 }
 
@@ -815,7 +950,9 @@ fn batch_archive_mixed_tasks_and_epics() {
         app.find_task(TaskId(1)).unwrap().status,
         TaskStatus::Archived
     );
-    assert!(app.board.epics.is_empty(), "Epic should be removed");
+    // Soft archive: epic stays in memory with status = Archived
+    assert_eq!(app.board.epics.len(), 1);
+    assert_eq!(app.board.epics[0].status, TaskStatus::Archived);
     assert!(app.select.tasks.is_empty());
     assert!(app.select.epics.is_empty());
     assert!(!cmds.is_empty());
@@ -829,7 +966,9 @@ fn confirm_archive_y_archives_selected_epics() {
     app.input.mode = InputMode::ConfirmArchive(None);
 
     app.handle_key(make_key(KeyCode::Char('y')));
-    assert!(app.board.epics.is_empty());
+    // Soft archive: epic stays in memory with status = Archived
+    assert_eq!(app.board.epics.len(), 1);
+    assert_eq!(app.board.epics[0].status, TaskStatus::Archived);
     assert!(app.select.epics.is_empty());
 }
 

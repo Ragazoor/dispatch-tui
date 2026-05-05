@@ -814,34 +814,50 @@ fn render_task_column(
 }
 
 fn render_archive_column(frame: &mut Frame, app: &mut App, area: Rect, now: DateTime<Utc>) {
-    let archived = app.archived_tasks();
+    let archived_epics = app.archived_epics();
+    let archived_tasks = app.archived_tasks();
     let sel_row = app.selected_archive_row();
     let color = ARCHIVE_STRIPE;
 
     let bg_block = Block::default().style(Style::default().bg(ARCHIVE_COL_BG));
     frame.render_widget(bg_block, area);
 
-    let mut items: Vec<ListItem> = archived
+    // Render epics first, then tasks. Selection still indexes archived tasks
+    // (epics are non-interactive in the archive column for now).
+    let epic_stats = app.compute_epic_stats();
+    let mut items: Vec<ListItem> = archived_epics
         .iter()
-        .enumerate()
-        .map(|(idx, task)| {
-            let is_cursor = idx == sel_row;
-            build_task_list_item(
-                task,
-                TaskStatus::Archived,
+        .map(|epic| {
+            render_epic_item(
+                epic,
+                false,
                 app,
-                now,
-                is_cursor,
-                color,
+                &epic_stats,
+                TaskStatus::Archived,
                 area.width,
             )
         })
         .collect();
+
+    items.extend(archived_tasks.iter().enumerate().map(|(idx, task)| {
+        let is_cursor = idx == sel_row;
+        build_task_list_item(
+            task,
+            TaskStatus::Archived,
+            app,
+            now,
+            is_cursor,
+            color,
+            area.width,
+        )
+    }));
+
     if !items.is_empty() {
         items.push(ListItem::new(card_rule_line(MUTED, area.width)));
     }
 
-    let title = format!(" Archive ({}) ", archived.len());
+    let total = archived_epics.len() + archived_tasks.len();
+    let title = format!(" Archive ({total}) ");
     let block = Block::default()
         .title(title)
         .title_style(Style::default().fg(color).add_modifier(Modifier::BOLD))

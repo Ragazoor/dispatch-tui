@@ -291,16 +291,24 @@ rule ArchiveEpic {
     ensures:
         for task in epic.active_subtasks:
             ArchiveTask(task)
-    ensures: not exists epic
+    ensures:
+        for sub_epic in epic.sub_epics:
+            ArchiveEpic(sub_epic)
+    ensures: epic.status = archived
 
     @guidance
-        -- The TUI archives direct subtasks (by moving each to status =
-        -- archived through ArchiveTask) and then deletes the epic row
-        -- via DeleteEpic. The database's delete cascade hard-deletes
-        -- any sub-epics and their tasks, so nested epic trees are
-        -- collapsed in one shot rather than being archived per level.
-        -- This is a deliberate simplification: archiving an epic with
-        -- nested sub-epics effectively hard-deletes the nested tree.
+        -- Archiving is a soft operation: the epic and its entire
+        -- subtree (direct subtasks plus all nested sub-epics and their
+        -- tasks) are recursively transitioned to status = archived.
+        -- Nothing is deleted from the database, so the archived tree
+        -- remains visible in the archive view and can be inspected
+        -- after the fact. To hard-delete, use DeleteEpic instead.
+        --
+        -- Implementation note: archive does not exercise the DELETE
+        -- code path, so it is unaffected by foreign-key references
+        -- from other tables (e.g. task_usage, learnings.source_task_id)
+        -- to the tasks being archived.
+        --
         -- If the currently active view is on the archived epic, the
         -- TUI exits back to the parent view.
 }

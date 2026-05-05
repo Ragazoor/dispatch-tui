@@ -335,24 +335,67 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_archive_epic(&mut self, id: EpicId) -> Vec<Command> {
+        // Soft-archive: recursively transition the epic + all sub-epics + their
+        // active subtasks to status = Archived. Nothing is deleted, so the
+        // archive path doesn't exercise FK references from task_usage /
+        // learnings.source_task_id (which would block a hard delete).
         let mut cmds = Vec::new();
-        let subtask_ids: Vec<TaskId> = self
-            .board
-            .tasks
-            .iter()
-            .filter(|t| t.epic_id == Some(id) && t.status != TaskStatus::Archived)
-            .map(|t| t.id)
-            .collect();
-        for task_id in subtask_ids {
-            cmds.extend(self.handle_archive_task(task_id));
+
+        // Collect the entire epic subtree (root + all transitive descendants).
+        let subtree: Vec<EpicId> = self.collect_epic_subtree(id);
+
+        for epic_id in &subtree {
+            // Archive every active subtask of this epic — handle_archive_task
+            // mutates state and emits PersistTask.
+            let subtask_ids: Vec<TaskId> = self
+                .board
+                .tasks
+                .iter()
+                .filter(|t| t.epic_id == Some(*epic_id) && t.status != TaskStatus::Archived)
+                .map(|t| t.id)
+                .collect();
+            for task_id in subtask_ids {
+                cmds.extend(self.handle_archive_task(task_id));
+            }
+
+            // Mutate the epic in-memory and persist its new status.
+            if let Some(epic) = self.board.epics.iter_mut().find(|e| e.id == *epic_id) {
+                if epic.status != TaskStatus::Archived {
+                    epic.status = TaskStatus::Archived;
+                    cmds.push(Command::PersistEpic {
+                        id: *epic_id,
+                        status: Some(TaskStatus::Archived),
+                        sort_order: None,
+                    });
+                }
+            }
         }
-        self.board.epics.retain(|e| e.id != id);
+
         if matches!(&self.board.view_mode, ViewMode::Epic { epic_id, .. } if *epic_id == id) {
             self.handle_exit_epic();
         }
         self.sync_board_selection();
-        cmds.push(Command::DeleteEpic(id));
         cmds
+    }
+
+    /// Walk the in-memory epic tree starting at `root` and return `root` plus
+    /// every transitive child epic (depth-first, parents before children).
+    fn collect_epic_subtree(&self, root: EpicId) -> Vec<EpicId> {
+        let mut out = Vec::new();
+        let mut stack = vec![root];
+        let mut seen = HashSet::new();
+        while let Some(id) = stack.pop() {
+            if !seen.insert(id) {
+                continue;
+            }
+            out.push(id);
+            for child in &self.board.epics {
+                if child.parent_epic_id == Some(id) {
+                    stack.push(child.id);
+                }
+            }
+        }
+        out
     }
 
     pub(in crate::tui) fn handle_confirm_archive_epic(&mut self) -> Vec<Command> {

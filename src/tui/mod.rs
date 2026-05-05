@@ -494,6 +494,17 @@ impl App {
             .collect()
     }
 
+    /// Return all archived epics, ordered as they appear in self.board.epics.
+    pub fn archived_epics(&self) -> Vec<&Epic> {
+        self.board
+            .epics
+            .iter()
+            .filter(|e| e.status == TaskStatus::Archived)
+            .filter(|e| self.repo_matches(&e.repo_path))
+            .filter(|e| self.project_matches(e.project_id))
+            .collect()
+    }
+
     /// Pre-compute subtask stats for all epics. Call once per render frame.
     pub fn compute_epic_stats(&self) -> EpicStatsMap {
         let active_merge = self.merge_queue.as_ref().map(|q| q.epic_id);
