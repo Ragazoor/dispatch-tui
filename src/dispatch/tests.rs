@@ -6,10 +6,7 @@ use super::prompts::{
 use super::worktree::provision_worktree;
 use super::*;
 
-use crate::models::{
-    AlertKind, EpicId, Learning, LearningId, LearningKind, LearningScope, LearningStatus,
-    ProjectId, Task, TaskId, TaskStatus,
-};
+use crate::models::{AlertKind, EpicId, ProjectId, Task, TaskId, TaskStatus};
 use crate::process::{exit_fail, MockProcessRunner};
 use crate::tui::FixAgentRequest;
 use chrono::Utc;
@@ -98,178 +95,6 @@ fn allium_instruction_mentions_spec_and_skills() {
     assert!(instr.contains("allium:weed"));
 }
 
-#[test]
-fn format_learnings_preamble_returns_none_for_empty_slice() {
-    assert!(super::agents::format_learnings_preamble(&[]).is_none());
-}
-
-#[test]
-fn format_learnings_preamble_procedural_only_has_instructions_section() {
-    let learning = make_learning(LearningKind::Procedural, "Always run cargo fmt --check.");
-    let preamble = super::agents::format_learnings_preamble(&[learning]).unwrap();
-    assert!(
-        preamble.contains("# Instructions from past experience"),
-        "should have instructions heading"
-    );
-    assert!(
-        preamble.contains("Always run cargo fmt --check."),
-        "should include summary"
-    );
-    assert!(
-        !preamble.contains("# Relevant learnings"),
-        "should not have relevant learnings heading"
-    );
-}
-
-#[test]
-fn format_learnings_preamble_non_procedural_only_has_relevant_section() {
-    let learning = make_learning(
-        LearningKind::Convention,
-        "Use FieldUpdate for nullable fields.",
-    );
-    let preamble = super::agents::format_learnings_preamble(&[learning]).unwrap();
-    assert!(
-        preamble.contains("# Relevant learnings"),
-        "should have relevant learnings heading"
-    );
-    assert!(
-        preamble.contains("[Convention]"),
-        "should include kind label in brackets"
-    );
-    assert!(
-        preamble.contains("Use FieldUpdate for nullable fields."),
-        "should include summary"
-    );
-    assert!(
-        !preamble.contains("# Instructions from past experience"),
-        "should not have instructions heading"
-    );
-}
-
-#[test]
-fn format_learnings_preamble_mixed_has_both_sections() {
-    let proc_l = make_learning(LearningKind::Procedural, "Run tests before committing.");
-    let conv_l = make_learning(LearningKind::Convention, "Use snake_case for file names.");
-    let preamble = super::agents::format_learnings_preamble(&[proc_l, conv_l]).unwrap();
-    assert!(
-        preamble.contains("# Instructions from past experience"),
-        "should have instructions section"
-    );
-    assert!(
-        preamble.contains("# Relevant learnings"),
-        "should have relevant learnings section"
-    );
-}
-
-#[test]
-fn format_learnings_preamble_procedural_has_no_kind_label() {
-    let learning = make_learning(LearningKind::Procedural, "Always rebase before pushing.");
-    let preamble = super::agents::format_learnings_preamble(&[learning]).unwrap();
-    assert!(
-        !preamble.contains("[Procedural]"),
-        "procedural learnings should not show a kind label"
-    );
-    assert!(
-        preamble.contains("- Always rebase before pushing."),
-        "procedural items should be plain bullets"
-    );
-}
-
-#[test]
-fn format_learnings_preamble_kind_labels_are_human_readable() {
-    let pitfall = make_learning(LearningKind::Pitfall, "Watch out for X.");
-    let tool_rec = make_learning(LearningKind::ToolRecommendation, "Use ripgrep.");
-    let episodic = make_learning(LearningKind::Episodic, "Last time we tried Y.");
-    let preference = make_learning(LearningKind::Preference, "User prefers short commits.");
-
-    let preamble =
-        super::agents::format_learnings_preamble(&[pitfall, tool_rec, episodic, preference])
-            .unwrap();
-    assert!(preamble.contains("[Pitfall]"), "Pitfall label");
-    assert!(
-        preamble.contains("[Tool recommendation]"),
-        "ToolRecommendation label"
-    );
-    assert!(preamble.contains("[Episodic]"), "Episodic label");
-    assert!(preamble.contains("[Preference]"), "Preference label");
-}
-
-#[test]
-fn dispatch_agent_prepends_procedural_learnings_to_prompt() {
-    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
-    let mock = MockProcessRunner::new(vec![
-        MockProcessRunner::ok(), // tmux new-window
-        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
-        MockProcessRunner::ok(), // tmux set-hook
-        MockProcessRunner::ok(), // tmux send-keys -l
-        MockProcessRunner::ok(), // tmux send-keys Enter
-    ]);
-    let task = make_task(&repo_path);
-    let learning = make_learning(
-        LearningKind::Procedural,
-        "Always run cargo fmt --check before pushing.",
-    );
-    let result = dispatch_agent(&task, &mock, None, None, &[learning]).unwrap();
-    let written =
-        std::fs::read_to_string(format!("{}/.claude-prompt", result.worktree_path)).unwrap();
-    assert!(
-        written.contains("# Instructions from past experience"),
-        "prompt should contain instructions section; got:\n{written}"
-    );
-    assert!(
-        written.contains("Always run cargo fmt --check before pushing."),
-        "prompt should contain learning summary"
-    );
-}
-
-#[test]
-fn dispatch_agent_with_no_learnings_omits_preamble() {
-    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
-    let mock = MockProcessRunner::new(vec![
-        MockProcessRunner::ok(), // tmux new-window
-        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
-        MockProcessRunner::ok(), // tmux set-hook
-        MockProcessRunner::ok(), // tmux send-keys -l
-        MockProcessRunner::ok(), // tmux send-keys Enter
-    ]);
-    let task = make_task(&repo_path);
-    let result = dispatch_agent(&task, &mock, None, None, &[]).unwrap();
-    let written =
-        std::fs::read_to_string(format!("{}/.claude-prompt", result.worktree_path)).unwrap();
-    assert!(
-        !written.contains("# Instructions from past experience"),
-        "empty learnings should not add instructions section"
-    );
-    assert!(
-        !written.contains("# Relevant learnings"),
-        "empty learnings should not add relevant learnings section"
-    );
-}
-
-#[test]
-fn dispatch_agent_relevant_learnings_section_uses_kind_labels() {
-    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
-    let mock = MockProcessRunner::new(vec![
-        MockProcessRunner::ok(), // tmux new-window
-        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
-        MockProcessRunner::ok(), // tmux set-hook
-        MockProcessRunner::ok(), // tmux send-keys -l
-        MockProcessRunner::ok(), // tmux send-keys Enter
-    ]);
-    let task = make_task(&repo_path);
-    let learning = make_learning(LearningKind::Pitfall, "Watch out for X.");
-    let result = dispatch_agent(&task, &mock, None, None, &[learning]).unwrap();
-    let written =
-        std::fs::read_to_string(format!("{}/.claude-prompt", result.worktree_path)).unwrap();
-    assert!(
-        written.contains("# Relevant learnings"),
-        "non-procedural learning should produce relevant learnings section"
-    );
-    assert!(
-        written.contains("[Pitfall]"),
-        "pitfall learning should have [Pitfall] label"
-    );
-}
 
 fn make_task(repo_path: &str) -> Task {
     Task {
@@ -316,23 +141,6 @@ fn make_test_repo_with_worktree(slug: &str) -> (tempfile::TempDir, String, std::
     (dir, repo_path, worktree_dir)
 }
 
-fn make_learning(kind: LearningKind, summary: &str) -> Learning {
-    Learning {
-        id: LearningId(1),
-        kind,
-        summary: summary.to_string(),
-        detail: None,
-        scope: LearningScope::User,
-        scope_ref: None,
-        tags: vec![],
-        status: LearningStatus::Approved,
-        source_task_id: None,
-        confirmed_count: 0,
-        last_confirmed_at: None,
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
-    }
-}
 
 #[test]
 fn find_call_arg_returns_matching_arg() {
@@ -905,7 +713,7 @@ fn dispatch_reuses_existing_worktree() {
     ]);
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None, None, &[]).unwrap();
+    dispatch_agent(&task, &mock, None, None).unwrap();
 
     let calls = mock.recorded_calls();
     assert!(
@@ -936,7 +744,7 @@ fn dispatch_sends_claude_command() {
     ]);
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None, None, &[]).unwrap();
+    dispatch_agent(&task, &mock, None, None).unwrap();
 
     let calls = mock.recorded_calls();
     // The literal send-keys call (index 3) carries the claude invocation
@@ -967,7 +775,7 @@ fn dispatch_agent_uses_plan_mode() {
     ]);
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None, None, &[]).unwrap();
+    dispatch_agent(&task, &mock, None, None).unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, 3, "claude");
@@ -1289,7 +1097,7 @@ fn dispatch_uses_task_base_branch_in_prompt() {
 
     let mut task = make_task(&repo_path);
     task.base_branch = "master".to_string();
-    dispatch_agent(&task, &mock, None, None, &[]).unwrap();
+    dispatch_agent(&task, &mock, None, None).unwrap();
 
     // Verify the prompt uses task.base_branch directly — no symbolic-ref call needed
     let prompt_file = worktree_dir.join(".claude-prompt");
@@ -1314,7 +1122,7 @@ fn dispatch_fails_fast_if_git_fails() {
     ]);
 
     let task = make_task(&repo_path);
-    let result = dispatch_agent(&task, &mock, None, None, &[]);
+    let result = dispatch_agent(&task, &mock, None, None);
     assert!(result.is_err());
     let calls = mock.recorded_calls();
     assert_eq!(
@@ -1339,7 +1147,7 @@ fn quick_dispatch_reuses_existing_worktree() {
     ]);
 
     let task = make_task(&repo_path);
-    quick_dispatch_agent(&task, &mock, None, None, &[]).unwrap();
+    quick_dispatch_agent(&task, &mock, None, None).unwrap();
 
     let calls = mock.recorded_calls();
     assert!(
@@ -1366,7 +1174,7 @@ fn quick_dispatch_sends_rename_prompt() {
     ]);
 
     let task = make_task(&repo_path);
-    quick_dispatch_agent(&task, &mock, None, None, &[]).unwrap();
+    quick_dispatch_agent(&task, &mock, None, None).unwrap();
 
     let prompt_file = worktree_dir.join(".claude-prompt");
     let prompt = std::fs::read_to_string(prompt_file).unwrap();
@@ -1647,7 +1455,7 @@ fn dispatch_agent_fails_fast_with_empty_repo_path() {
     let mock = MockProcessRunner::new(vec![]);
     let mut task = make_task("/some/repo");
     task.repo_path = "".to_string();
-    let result = dispatch_agent(&task, &mock, None, None, &[]);
+    let result = dispatch_agent(&task, &mock, None, None);
     assert!(result.is_err());
     let msg = result.unwrap_err().to_string();
     assert!(
@@ -1782,7 +1590,7 @@ fn dispatch_agent_uses_task_base_branch_in_prompt() {
 
     let mut task = make_task(&repo_path);
     task.base_branch = "develop".to_string();
-    dispatch_agent(&task, &mock, None, None, &[]).unwrap();
+    dispatch_agent(&task, &mock, None, None).unwrap();
 
     let prompt_file = worktree_dir.join(".claude-prompt");
     let prompt = std::fs::read_to_string(prompt_file).unwrap();
@@ -2012,7 +1820,7 @@ fn dispatch_agent_includes_plugin_dir() {
     ]);
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None, None, &[]).unwrap();
+    dispatch_agent(&task, &mock, None, None).unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, 3, "claude");

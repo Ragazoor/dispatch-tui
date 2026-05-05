@@ -3,8 +3,7 @@ use std::fs;
 
 use crate::git::detect_default_branch;
 use crate::models::{
-    expand_tilde, AlertKind, DispatchResult, EpicId, Learning, LearningKind, ResumeResult, Task,
-    TaskId, TaskStatus,
+    expand_tilde, AlertKind, DispatchResult, EpicId, ResumeResult, Task, TaskId, TaskStatus,
 };
 use crate::process::ProcessRunner;
 use crate::tmux;
@@ -18,38 +17,6 @@ use super::prompts::{
 use super::stderr_str;
 use super::worktree::provision_worktree;
 
-pub(super) fn format_learnings_preamble(learnings: &[Learning]) -> Option<String> {
-    let (procedural, other): (Vec<&Learning>, Vec<&Learning>) = learnings
-        .iter()
-        .partition(|l| l.kind == LearningKind::Procedural);
-
-    if procedural.is_empty() && other.is_empty() {
-        return None;
-    }
-
-    let mut sections = Vec::new();
-
-    if !procedural.is_empty() {
-        let items = procedural
-            .iter()
-            .map(|l| format!("- {}", l.summary))
-            .collect::<Vec<_>>()
-            .join("\n");
-        sections.push(format!("# Instructions from past experience\n{items}"));
-    }
-
-    if !other.is_empty() {
-        let items = other
-            .iter()
-            .map(|l| format!("- [{}] {}", l.kind.display_label(), l.summary))
-            .collect::<Vec<_>>()
-            .join("\n");
-        sections.push(format!("# Relevant learnings\n{items}"));
-    }
-
-    Some(sections.join("\n\n"))
-}
-
 /// Provision worktree, write prompt file, launch Claude via tmux.
 /// The prompt file is deleted after Claude reads it.
 /// Shared by all dispatch variants.
@@ -62,7 +29,6 @@ fn dispatch_with_prompt(
     prompt: &str,
     runner: &dyn ProcessRunner,
     base_branch: Option<&str>,
-    learnings: &[Learning],
 ) -> Result<DispatchResult> {
     if task.repo_path.is_empty() {
         anyhow::bail!(
@@ -83,16 +49,11 @@ fn dispatch_with_prompt(
 
     let provision = provision_worktree(task, runner, Some(resolved))?;
 
-    let preamble = format_learnings_preamble(learnings);
-    let prompt_with_learnings = match preamble {
-        Some(p) => format!("{p}\n\n{prompt}"),
-        None => prompt.to_string(),
-    };
     let full_prompt = format!(
         "{}\n\n\
          Always work from this worktree folder — do not `cd` to the parent repo \
          or other directories.\n\n\
-         {prompt_with_learnings}",
+         {prompt}",
         rebase_preamble(resolved)
     );
     let prompt_file = format!("{}/.claude-prompt", provision.worktree_path);
@@ -118,7 +79,6 @@ pub fn dispatch_agent(
     runner: &dyn ProcessRunner,
     epic: Option<&EpicContext>,
     project: Option<&ProjectContext>,
-    learnings: &[Learning],
 ) -> Result<DispatchResult> {
     let prompt = build_prompt(
         task.id,
@@ -128,7 +88,7 @@ pub fn dispatch_agent(
         epic,
         project,
     );
-    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch), learnings)
+    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch))
 }
 
 pub fn pr_review_agent(
@@ -136,10 +96,9 @@ pub fn pr_review_agent(
     runner: &dyn ProcessRunner,
     epic: Option<&EpicContext>,
     project: Option<&ProjectContext>,
-    learnings: &[Learning],
 ) -> Result<DispatchResult> {
     let prompt = build_pr_review_prompt(task.id, &task.title, &task.description, epic, project);
-    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch), learnings)
+    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch))
 }
 
 pub fn research_agent(
@@ -147,10 +106,9 @@ pub fn research_agent(
     runner: &dyn ProcessRunner,
     epic: Option<&EpicContext>,
     project: Option<&ProjectContext>,
-    learnings: &[Learning],
 ) -> Result<DispatchResult> {
     let prompt = build_research_prompt(task.id, &task.title, &task.description, epic, project);
-    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch), learnings)
+    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch))
 }
 
 pub fn fix_task_agent(
@@ -158,10 +116,9 @@ pub fn fix_task_agent(
     runner: &dyn ProcessRunner,
     epic: Option<&EpicContext>,
     project: Option<&ProjectContext>,
-    learnings: &[Learning],
 ) -> Result<DispatchResult> {
     let prompt = build_fix_task_prompt(task.id, &task.title, &task.description, epic, project);
-    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch), learnings)
+    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch))
 }
 
 pub fn quick_dispatch_agent(
@@ -169,11 +126,10 @@ pub fn quick_dispatch_agent(
     runner: &dyn ProcessRunner,
     epic: Option<&EpicContext>,
     project: Option<&ProjectContext>,
-    learnings: &[Learning],
 ) -> Result<DispatchResult> {
     let prompt =
         build_quick_dispatch_prompt(task.id, &task.title, &task.description, epic, project);
-    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch), learnings)
+    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch))
 }
 
 pub fn epic_planning_agent(
@@ -182,7 +138,6 @@ pub fn epic_planning_agent(
     epic_title: &str,
     project: &ProjectContext,
     runner: &dyn ProcessRunner,
-    learnings: &[Learning],
 ) -> Result<DispatchResult> {
     let epic = EpicContext {
         epic_id,
@@ -190,7 +145,7 @@ pub fn epic_planning_agent(
     };
     let prompt =
         build_epic_planning_prompt(task.id, &task.title, &task.description, &epic, project);
-    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch), learnings)
+    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch))
 }
 
 /// Re-open a tmux window for an existing worktree and resume the most recent

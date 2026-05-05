@@ -2398,10 +2398,6 @@ mod tests {
             project_id: None,
         };
         assert!(
-            with_field.has_any_field(),
-            "has_any_field should be true when title is set"
-        );
-        assert!(
             !with_field.updated_field_names().is_empty(),
             "updated_field_names should be non-empty when title is set"
         );
@@ -2419,10 +2415,6 @@ mod tests {
             feed_interval_secs: None,
             project_id: None,
         };
-        assert!(
-            !empty.has_any_field(),
-            "has_any_field should be false when no fields are set"
-        );
         assert!(
             empty.updated_field_names().is_empty(),
             "updated_field_names should be empty when no fields are set"
@@ -2523,10 +2515,6 @@ mod tests {
             },
         ];
         for params in &cases {
-            assert!(
-                params.has_any_field(),
-                "has_any_field() should be true when a field is set"
-            );
             assert!(
                 !params.updated_field_names().is_empty(),
                 "updated_field_names() should be non-empty when a field is set"

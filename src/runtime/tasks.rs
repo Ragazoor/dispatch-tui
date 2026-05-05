@@ -60,13 +60,6 @@ impl TuiRuntime {
         app.update(Message::RepoPathsUpdated(paths));
         let epic_ctx = dispatch::EpicContext::from_db(&task, &*self.database);
         let project_ctx = dispatch::ProjectContext::from_db(&task, &*self.database);
-        let learnings: Vec<models::Learning> = self
-            .database
-            .list_learnings_for_dispatch(Some(task.project_id), &task.repo_path, task.epic_id)
-            .unwrap_or_else(|e| {
-                tracing::warn!(error = %e, "failed to fetch learnings for dispatch");
-                vec![]
-            });
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
         tokio::task::spawn_blocking(move || {
@@ -76,7 +69,6 @@ impl TuiRuntime {
                 &*runner,
                 epic_ctx.as_ref(),
                 Some(&project_ctx),
-                &learnings,
             ) {
                 Ok(result) => {
                     let _ = tx.send(Message::Dispatched {
@@ -134,45 +126,22 @@ impl TuiRuntime {
     pub(super) fn exec_dispatch_agent(&self, task: models::Task, mode: models::DispatchMode) {
         let epic_ctx = dispatch::EpicContext::from_db(&task, &*self.database);
         let project_ctx = dispatch::ProjectContext::from_db(&task, &*self.database);
-        let learnings: Vec<models::Learning> = self
-            .database
-            .list_learnings_for_dispatch(Some(task.project_id), &task.repo_path, task.epic_id)
-            .unwrap_or_else(|e| {
-                tracing::warn!(error = %e, "failed to fetch learnings for dispatch");
-                vec![]
-            });
         let label = mode.label();
         self.spawn_dispatch(
             task,
             move |t, r| match mode {
-                models::DispatchMode::Dispatch => dispatch::dispatch_agent(
-                    t,
-                    r,
-                    epic_ctx.as_ref(),
-                    Some(&project_ctx),
-                    &learnings,
-                ),
-                models::DispatchMode::PrReview => dispatch::pr_review_agent(
-                    t,
-                    r,
-                    epic_ctx.as_ref(),
-                    Some(&project_ctx),
-                    &learnings,
-                ),
-                models::DispatchMode::Research => dispatch::research_agent(
-                    t,
-                    r,
-                    epic_ctx.as_ref(),
-                    Some(&project_ctx),
-                    &learnings,
-                ),
-                models::DispatchMode::Fix => dispatch::fix_task_agent(
-                    t,
-                    r,
-                    epic_ctx.as_ref(),
-                    Some(&project_ctx),
-                    &learnings,
-                ),
+                models::DispatchMode::Dispatch => {
+                    dispatch::dispatch_agent(t, r, epic_ctx.as_ref(), Some(&project_ctx))
+                }
+                models::DispatchMode::PrReview => {
+                    dispatch::pr_review_agent(t, r, epic_ctx.as_ref(), Some(&project_ctx))
+                }
+                models::DispatchMode::Research => {
+                    dispatch::research_agent(t, r, epic_ctx.as_ref(), Some(&project_ctx))
+                }
+                models::DispatchMode::Fix => {
+                    dispatch::fix_task_agent(t, r, epic_ctx.as_ref(), Some(&project_ctx))
+                }
             },
             label,
         );

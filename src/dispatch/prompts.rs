@@ -128,10 +128,8 @@ pub(super) fn mcp_tools_instruction() -> &'static str {
 
 /// Learning tools availability notice for implementation agents.
 pub(super) fn learning_tools_instruction() -> &'static str {
-    "Learning MCP tools are available — use them in this order:\n\
-1. Call `query_learnings` at the start of your task to surface relevant past experience before starting work.\n\
-2. Call `confirm_learning` whenever a retrieved learning proves correct during your work.\n\
-3. Call `record_learning` when you discover something non-obvious worth capturing for future agents."
+    "Learning tools: Use `/learnings` at task start to surface relevant past experience \
+and get guidance on recording new learnings."
 }
 
 /// Instructions for writing a plan and attaching it to the task via MCP.
@@ -404,6 +402,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn learning_instruction_references_learnings_skill() {
+        let text = learning_tools_instruction();
+        assert!(
+            text.contains("/learnings"),
+            "learning instruction should reference the /learnings skill, got: {text}"
+        );
+    }
+
+    #[test]
+    fn learning_instruction_mentions_task_start() {
+        let text = learning_tools_instruction();
+        assert!(
+            text.contains("task start") || text.contains("start"),
+            "learning instruction should tell agents to use /learnings at task start, got: {text}"
+        );
+    }
+
+    #[test]
     fn learning_instruction_in_task_prompts_with_plan() {
         let text = build_prompt(
             TaskId(1),
@@ -414,16 +430,8 @@ mod tests {
             None,
         );
         assert!(
-            text.contains("query_learnings"),
-            "build_prompt (with plan) should mention query_learnings"
-        );
-        assert!(
-            text.contains("record_learning"),
-            "build_prompt (with plan) should mention record_learning"
-        );
-        assert!(
-            text.contains("confirm_learning"),
-            "build_prompt (with plan) should mention confirm_learning"
+            text.contains("/learnings"),
+            "build_prompt (with plan) should reference /learnings skill"
         );
     }
 
@@ -431,16 +439,8 @@ mod tests {
     fn learning_instruction_in_task_prompts_no_plan() {
         let text = build_prompt(TaskId(1), "title", "desc", None, None, None);
         assert!(
-            text.contains("query_learnings"),
-            "build_prompt (no plan) should mention query_learnings"
-        );
-        assert!(
-            text.contains("record_learning"),
-            "build_prompt (no plan) should mention record_learning"
-        );
-        assert!(
-            text.contains("confirm_learning"),
-            "build_prompt (no plan) should mention confirm_learning"
+            text.contains("/learnings"),
+            "build_prompt (no plan) should reference /learnings skill"
         );
     }
 
@@ -448,16 +448,8 @@ mod tests {
     fn learning_instruction_in_quick_dispatch_prompt() {
         let text = build_quick_dispatch_prompt(TaskId(1), "title", "desc", None, None);
         assert!(
-            text.contains("query_learnings"),
-            "quick dispatch prompt should mention query_learnings"
-        );
-        assert!(
-            text.contains("record_learning"),
-            "quick dispatch prompt should mention record_learning"
-        );
-        assert!(
-            text.contains("confirm_learning"),
-            "quick dispatch prompt should mention confirm_learning"
+            text.contains("/learnings"),
+            "quick dispatch prompt should reference /learnings skill"
         );
     }
 
@@ -546,41 +538,8 @@ mod tests {
     fn fix_task_prompt_has_learning_tools() {
         let text = build_fix_task_prompt(TaskId(5), "Fix CVE", "desc", None, None);
         assert!(
-            text.contains("query_learnings"),
-            "fix_task prompt should mention query_learnings"
-        );
-    }
-
-    #[test]
-    fn learning_instruction_mentions_query_at_start_of_task() {
-        let text = learning_tools_instruction();
-        assert!(
-            text.contains("first") || text.contains("start"),
-            "learning instruction should tell agents to query_learnings at the start of a task, got: {text}"
-        );
-    }
-
-    #[test]
-    fn learning_instruction_mentions_confirm_whenever_proven() {
-        let text = learning_tools_instruction();
-        assert!(
-            text.contains("whenever") || text.contains("each time"),
-            "learning instruction should tell agents to confirm_learning whenever a learning proves correct, got: {text}"
-        );
-    }
-
-    #[test]
-    fn learning_instruction_query_comes_before_confirm() {
-        let text = learning_tools_instruction();
-        let query_pos = text
-            .find("query_learnings")
-            .expect("query_learnings must be present");
-        let confirm_pos = text
-            .find("confirm_learning")
-            .expect("confirm_learning must be present");
-        assert!(
-            query_pos < confirm_pos,
-            "query_learnings step should appear before confirm_learning step in the instruction"
+            text.contains("/learnings"),
+            "fix_task prompt should reference /learnings skill"
         );
     }
 }

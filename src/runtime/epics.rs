@@ -126,13 +126,6 @@ impl TuiRuntime {
 
         app.update(Message::TaskCreated { task: task.clone() });
 
-        let learnings: Vec<models::Learning> = self
-            .database
-            .list_learnings_for_dispatch(Some(task.project_id), &task.repo_path, task.epic_id)
-            .unwrap_or_else(|e| {
-                tracing::warn!(error = %e, "failed to fetch learnings for dispatch");
-                vec![]
-            });
         let project_ctx = dispatch::ProjectContext::from_db(&task, &*self.database);
 
         // Dispatch the planning subtask asynchronously
@@ -154,7 +147,6 @@ impl TuiRuntime {
                 &epic_title,
                 &project_ctx,
                 &*runner,
-                &learnings,
             ) {
                 Ok(result) => {
                     let _ = tx.send(Message::Dispatched {

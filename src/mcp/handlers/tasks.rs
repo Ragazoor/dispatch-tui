@@ -843,41 +843,19 @@ fn do_dispatch(
 ) -> anyhow::Result<crate::models::DispatchResult> {
     let epic_ctx = dispatch::EpicContext::from_db(task, db);
     let project_ctx = dispatch::ProjectContext::from_db(task, db);
-    let learnings: Vec<crate::models::Learning> = db
-        .list_learnings_for_dispatch(Some(task.project_id), &task.repo_path, task.epic_id)
-        .unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "failed to fetch learnings for dispatch");
-            vec![]
-        });
     match DispatchMode::for_task(task) {
-        DispatchMode::Dispatch => dispatch::dispatch_agent(
-            task,
-            runner,
-            epic_ctx.as_ref(),
-            Some(&project_ctx),
-            &learnings,
-        ),
-        DispatchMode::PrReview => dispatch::pr_review_agent(
-            task,
-            runner,
-            epic_ctx.as_ref(),
-            Some(&project_ctx),
-            &learnings,
-        ),
-        DispatchMode::Research => dispatch::research_agent(
-            task,
-            runner,
-            epic_ctx.as_ref(),
-            Some(&project_ctx),
-            &learnings,
-        ),
-        DispatchMode::Fix => dispatch::fix_task_agent(
-            task,
-            runner,
-            epic_ctx.as_ref(),
-            Some(&project_ctx),
-            &learnings,
-        ),
+        DispatchMode::Dispatch => {
+            dispatch::dispatch_agent(task, runner, epic_ctx.as_ref(), Some(&project_ctx))
+        }
+        DispatchMode::PrReview => {
+            dispatch::pr_review_agent(task, runner, epic_ctx.as_ref(), Some(&project_ctx))
+        }
+        DispatchMode::Research => {
+            dispatch::research_agent(task, runner, epic_ctx.as_ref(), Some(&project_ctx))
+        }
+        DispatchMode::Fix => {
+            dispatch::fix_task_agent(task, runner, epic_ctx.as_ref(), Some(&project_ctx))
+        }
     }
 }
 

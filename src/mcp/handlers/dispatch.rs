@@ -578,7 +578,7 @@ mcp_tools! {
         };
 
     sync "confirm_learning" => learnings::handle_confirm_learning,
-        "Signal that an approved learning was applicable and proved correct. Increments its confirmation count.",
+        "Signal that an approved learning proved useful during this task. Increments its confirmation count.",
         {
             "type": "object",
             "properties": {
