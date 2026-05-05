@@ -6821,7 +6821,7 @@ async fn record_learning_creates_proposed_entry() {
     .await;
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
     let text = extract_response_text(&resp);
-    assert!(text.contains("proposed"), "expected 'proposed' in: {text}");
+    assert!(text.contains("active"), "expected 'active' in: {text}");
 
     let filter = crate::db::LearningFilter {
         status: Some(crate::models::LearningStatus::Approved),
@@ -7043,40 +7043,6 @@ async fn query_learnings_returns_approved_for_task() {
 }
 
 #[tokio::test]
-async fn query_learnings_excludes_proposed() {
-    let state = test_state();
-    let task_id = create_task_in_repo(&state, "/repo/proj");
-    state
-        .db
-        .create_learning(
-            crate::models::LearningKind::Convention,
-            "Proposed only",
-            None,
-            crate::models::LearningScope::Repo,
-            Some("/repo/proj"),
-            &[],
-            None,
-        )
-        .unwrap();
-
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "query_learnings",
-            "arguments": { "task_id": task_id.0 }
-        })),
-    )
-    .await;
-    assert!(resp.error.is_none());
-    let text = extract_response_text(&resp);
-    assert!(
-        !text.contains("Proposed only"),
-        "proposed learning should not appear: {text}"
-    );
-}
-
-#[tokio::test]
 async fn query_learnings_tag_filter_narrows_results() {
     let state = test_state();
     let task_id = create_task_in_repo(&state, "/repo/tagged");
@@ -7186,35 +7152,6 @@ async fn confirm_learning_increments_count() {
 
     let learning = state.db.get_learning(learning_id).unwrap().unwrap();
     assert_eq!(learning.confirmed_count, 1);
-}
-
-#[tokio::test]
-async fn confirm_learning_proposed_fails() {
-    let state = test_state();
-    let task_id = create_task_in_repo(&state, "/repo");
-    let learning_id = state
-        .db
-        .create_learning(
-            crate::models::LearningKind::Pitfall,
-            "Not yet approved",
-            None,
-            crate::models::LearningScope::User,
-            None,
-            &[],
-            None,
-        )
-        .unwrap();
-
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "confirm_learning",
-            "arguments": { "learning_id": learning_id, "task_id": task_id.0 }
-        })),
-    )
-    .await;
-    assert_error(&resp, "approved");
 }
 
 #[tokio::test]

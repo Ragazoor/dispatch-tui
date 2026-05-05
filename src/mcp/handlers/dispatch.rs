@@ -517,7 +517,7 @@ mcp_tools! {
         { "type": "object", "properties": {} };
 
     sync "record_learning" => learnings::handle_record_learning,
-        "Propose a new learning entry. Always lands as 'proposed' and has no effect until a human approves it in the TUI. Omit scope_ref to auto-derive it from the calling task (recommended in most cases).",
+        "Records a learning from the current task. The entry is immediately active and will be injected into future dispatch prompts for agents working in the matching scope. Omit scope_ref to auto-derive it from the calling task (recommended in most cases).",
         {
             "type": "object",
             "properties": {

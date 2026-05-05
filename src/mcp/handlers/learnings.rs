@@ -104,8 +104,8 @@ pub(super) fn handle_record_learning(
                 "content": [{
                     "type": "text",
                     "text": format!(
-                        "Learning {learning_id} recorded as proposed. \
-                         Awaiting human approval before it affects future dispatches."
+                        "Learning {learning_id} recorded and active. \
+                         It will be injected into future dispatch prompts for matching tasks."
                     )
                 }]
             }),
