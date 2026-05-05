@@ -963,6 +963,7 @@ mod tests {
             "skills/wrap-up/SKILL.md",
             "skills/decompose-review/SKILL.md",
             "skills/decompose-review/references/plan-template.md",
+            "skills/learnings/SKILL.md",
             "commands/queue-plan.md",
         ];
         for path in required {
