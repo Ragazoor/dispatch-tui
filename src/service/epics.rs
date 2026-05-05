@@ -24,7 +24,7 @@ pub struct UpdateEpicParams {
 }
 
 impl UpdateEpicParams {
-    fn has_any_field(&self) -> bool {
+    pub(in crate::service) fn has_any_field(&self) -> bool {
         !self.updated_field_names().is_empty()
     }
 
