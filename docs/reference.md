@@ -66,8 +66,12 @@ dispatch tui
 # CLI — used by agents and hooks
 dispatch update <task-id> <status>
 dispatch list [--status <status>]
-dispatch create --from-plan plan.md
+dispatch plan <task-id> <plan-path>
 ```
+
+Tasks are created via the MCP `create_task` tool (e.g. through the
+`/queue-plan` slash command) — there is no CLI subcommand for task
+creation.
 
 ## Configuration
 

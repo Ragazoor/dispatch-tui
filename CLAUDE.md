@@ -16,9 +16,12 @@ Other useful CLI subcommands:
 
 ```bash
 cargo run -- setup              # configure Claude Code MCP integration
-cargo run -- add --from-plan path/to/plan.md  # create a task from a plan file
 cargo run -- verify-feed 'gh api ...'  # run a feed command and validate its JSON output
 ```
+
+Tasks are created exclusively via the MCP `create_task` tool — there is
+no CLI for task creation. Use the `/queue-plan` slash command (or call
+the MCP tool directly) to queue a plan file as a task.
 
 Feed epics are wired to user-owned shell scripts that emit a `FeedItem` JSON
 array on stdout. Reference templates live in `scripts/`:

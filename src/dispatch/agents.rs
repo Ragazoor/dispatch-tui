@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use std::fs;
 
+use crate::git::detect_default_branch;
 use crate::models::{
     expand_tilde, AlertKind, DispatchResult, EpicId, Learning, LearningKind, ResumeResult, Task,
     TaskId, TaskStatus,
@@ -9,7 +10,6 @@ use crate::process::ProcessRunner;
 use crate::tmux;
 use crate::tui::{FixAgentRequest, ReviewAgentRequest};
 
-use super::finish::detect_default_branch;
 use super::prompts::{
     build_brainstorm_prompt, build_epic_planning_prompt, build_fix_task_prompt, build_plan_prompt,
     build_pr_review_prompt, build_prompt, build_quick_dispatch_prompt, build_research_prompt,

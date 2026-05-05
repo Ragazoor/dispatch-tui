@@ -430,13 +430,19 @@ mod learning_editor_tests {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let (feed_tx, _) = tokio::sync::mpsc::unbounded_channel();
         let db_arc: Arc<dyn crate::db::TaskStore> = db.clone();
+        let runner: Arc<dyn crate::process::ProcessRunner> =
+            Arc::new(crate::process::MockProcessRunner::new(vec![]));
         TuiRuntime {
             database: db_arc.clone(),
             task_svc: crate::service::TaskService::new(db_arc.clone()),
             epic_svc: crate::service::EpicService::new(db_arc.clone()),
-            feed_runner: Some(crate::feed::FeedRunner::new(db_arc.clone(), feed_tx)),
+            feed_runner: Some(crate::feed::FeedRunner::new(
+                db_arc.clone(),
+                feed_tx,
+                runner.clone(),
+            )),
             msg_tx: tx,
-            runner: Arc::new(crate::process::MockProcessRunner::new(vec![])),
+            runner,
             editor_session: Arc::new(std::sync::Mutex::new(None)),
         }
     }
@@ -727,7 +733,11 @@ mod tests {
         let rt = TuiRuntime {
             task_svc: crate::service::TaskService::new(db.clone()),
             epic_svc: crate::service::EpicService::new(db.clone()),
-            feed_runner: Some(crate::feed::FeedRunner::new(db.clone(), feed_tx)),
+            feed_runner: Some(crate::feed::FeedRunner::new(
+                db.clone(),
+                feed_tx,
+                runner.clone(),
+            )),
             database: db,
             msg_tx: tx,
             runner,
@@ -790,7 +800,11 @@ mod tests {
         let rt = TuiRuntime {
             task_svc: crate::service::TaskService::new(db.clone()),
             epic_svc: crate::service::EpicService::new(db.clone()),
-            feed_runner: Some(crate::feed::FeedRunner::new(db.clone(), feed_tx)),
+            feed_runner: Some(crate::feed::FeedRunner::new(
+                db.clone(),
+                feed_tx,
+                runner.clone(),
+            )),
             database: db.clone(),
             msg_tx: tx,
             runner,
@@ -838,7 +852,11 @@ mod tests {
         let rt = TuiRuntime {
             task_svc: crate::service::TaskService::new(db.clone()),
             epic_svc: crate::service::EpicService::new(db.clone()),
-            feed_runner: Some(crate::feed::FeedRunner::new(db.clone(), feed_tx)),
+            feed_runner: Some(crate::feed::FeedRunner::new(
+                db.clone(),
+                feed_tx,
+                runner.clone(),
+            )),
             database: db.clone(),
             msg_tx: tx,
             runner,

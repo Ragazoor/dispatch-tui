@@ -4,26 +4,6 @@ use crate::tmux;
 
 use super::{stderr_str, stdout_str};
 
-/// Detect the default branch for a repo by inspecting `origin/HEAD`.
-/// Falls back to `"main"` when there is no remote or the ref is missing.
-pub(super) fn detect_default_branch(repo_path: &str, runner: &dyn ProcessRunner) -> String {
-    if let Ok(output) = runner.run(
-        "git",
-        &["-C", repo_path, "symbolic-ref", "refs/remotes/origin/HEAD"],
-    ) {
-        if output.status.success() {
-            let refname = stdout_str(&output);
-            // e.g. "refs/remotes/origin/master" → "master"
-            if let Some(branch) = refname.rsplit('/').next() {
-                if !branch.is_empty() {
-                    return branch.to_string();
-                }
-            }
-        }
-    }
-    "main".to_string()
-}
-
 /// Errors from the finish (rebase + cleanup) operation.
 #[derive(Debug)]
 pub enum FinishError {

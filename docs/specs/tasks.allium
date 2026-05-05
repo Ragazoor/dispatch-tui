@@ -49,7 +49,7 @@ rule CreateQuickTask {
             status: backlog,
             sub_status: core/SubStatus.default_for(backlog),
             epic: if epic_id != null then core/Epic.find(epic_id) else null,
-            base_branch: config.default_branch,
+            base_branch: detect_default_branch(repo_path),
             created_at: now,
             updated_at: now
         )
@@ -67,6 +67,10 @@ rule CreateQuickTask {
         -- goal. The quick-dispatch agent uses a dedicated prompt that
         -- asks the user what they want to achieve, then instructs the
         -- agent to write a plan in docs/plans/ and attach it.
+        -- base_branch is resolved from `git symbolic-ref
+        -- refs/remotes/origin/HEAD` against repo_path, falling back to
+        -- "main" when origin/HEAD is unavailable. This prevents
+        -- dispatch failures on repos whose default branch is not main.
         -- AgentLaunched fires immediately after creation; the task
         -- transitions through the same dispatch path as DispatchTask
         -- (Backlog -> Running, worktree and tmux window provisioned).

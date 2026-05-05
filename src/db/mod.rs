@@ -178,11 +178,17 @@ pub trait TaskCrud: Send + Sync {
     /// `repo_paths` is a parallel slice: `repo_paths[i]` is the resolved local path for
     /// `items[i]`. Pass `""` when the path could not be resolved — dispatch will be blocked
     /// until the user sets it via the task editor.
+    ///
+    /// `base_branches` is a parallel slice: `base_branches[i]` is the base branch the
+    /// inserted task should use for its worktree. The caller is expected to resolve the
+    /// repo's default branch (typically via [`crate::git::detect_default_branch`]),
+    /// falling back to `"main"` when no path is known.
     fn upsert_feed_tasks(
         &self,
         epic_id: EpicId,
         items: &[FeedItem],
         repo_paths: &[String],
+        base_branches: &[String],
     ) -> Result<()>;
 }
 

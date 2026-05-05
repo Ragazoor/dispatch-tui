@@ -198,7 +198,10 @@ rule UpsertFeedTasks {
     --     title, description, repo_path = resolved_path[item] (which
     --     may be ""), status = item.status, sub_status =
     --     SubStatus.default_for(item.status), external_id =
-    --     item.external_id, base_branch = "main", epic = epic.
+    --     item.external_id, base_branch = the resolved default branch
+    --     of resolved_path[item] (read from `origin/HEAD`, falling
+    --     back to "main" when resolved_path is empty or the ref is
+    --     missing), epic = epic.
     --
     --   - Match: title and description on the existing Task are updated
     --     to the new values; status, sub_status, AND repo_path are NOT
@@ -231,7 +234,7 @@ rule UpsertFeedTasks {
                     sub_status: core/SubStatus.default_for(item.status),
                     external_id: item.external_id,
                     epic: epic,
-                    base_branch: "main"
+                    base_branch: detect_default_branch(resolved)
                 )
             else:
                 existing.title = item.title

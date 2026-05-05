@@ -306,6 +306,7 @@ impl super::TaskCrud for Database {
         epic_id: EpicId,
         items: &[FeedItem],
         repo_paths: &[String],
+        base_branches: &[String],
     ) -> Result<()> {
         let conn = self.conn()?;
         let project_id: ProjectId = conn
@@ -318,13 +319,17 @@ impl super::TaskCrud for Database {
 
         let tx = conn.unchecked_transaction()?;
 
-        for (item, repo_path) in items.iter().zip(repo_paths.iter()) {
+        for ((item, repo_path), base_branch) in items
+            .iter()
+            .zip(repo_paths.iter())
+            .zip(base_branches.iter())
+        {
             let sub_status = SubStatus::default_for(item.status).as_str().to_string();
             tx.execute(
                 "INSERT INTO tasks
                      (title, description, repo_path, status, sub_status, base_branch,
                       epic_id, external_id, project_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 'main', ?6, ?7, ?8)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                  ON CONFLICT(epic_id, external_id) WHERE external_id IS NOT NULL
                  DO UPDATE SET
                      title       = excluded.title,
@@ -336,6 +341,7 @@ impl super::TaskCrud for Database {
                     repo_path,
                     item.status.as_str(),
                     sub_status,
+                    base_branch,
                     epic_id.0,
                     item.external_id,
                     project_id.0,

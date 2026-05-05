@@ -6,12 +6,38 @@ use tokio::sync::mpsc;
 
 use crate::db::TaskStore;
 use crate::dispatch::resolve_feed_item_repo_paths;
+use crate::git::detect_default_branch;
 use crate::mcp::McpEvent;
 #[cfg(test)]
 use crate::models::ProjectId;
 use crate::models::{EpicId, FeedItem};
+use crate::process::ProcessRunner;
 
 const DEFAULT_FEED_INTERVAL: Duration = Duration::from_secs(30);
+
+/// Resolve a base branch for each `repo_paths[i]`, caching by unique path so
+/// `git symbolic-ref` is invoked at most once per distinct repo. Empty paths
+/// (unresolved repos) get `"main"` without shelling out.
+pub(crate) fn resolve_base_branches(
+    repo_paths: &[String],
+    runner: &dyn ProcessRunner,
+) -> Vec<String> {
+    let mut cache: HashMap<&str, String> = HashMap::new();
+    repo_paths
+        .iter()
+        .map(|path| {
+            if path.is_empty() {
+                return "main".to_string();
+            }
+            if let Some(branch) = cache.get(path.as_str()) {
+                return branch.clone();
+            }
+            let branch = detect_default_branch(path, runner);
+            cache.insert(path.as_str(), branch.clone());
+            branch
+        })
+        .collect()
+}
 
 /// Poll interval for the background feed task.
 /// Kept in `feed.rs` (not reusing `TICK_INTERVAL` from `runtime`) so the two
@@ -21,14 +47,20 @@ const FEED_POLL_INTERVAL: Duration = Duration::from_secs(2);
 pub struct FeedRunner {
     db: Arc<dyn TaskStore>,
     notify: mpsc::UnboundedSender<McpEvent>,
+    runner: Arc<dyn ProcessRunner>,
     last_run: HashMap<EpicId, Instant>,
 }
 
 impl FeedRunner {
-    pub fn new(db: Arc<dyn TaskStore>, notify: mpsc::UnboundedSender<McpEvent>) -> Self {
+    pub fn new(
+        db: Arc<dyn TaskStore>,
+        notify: mpsc::UnboundedSender<McpEvent>,
+        runner: Arc<dyn ProcessRunner>,
+    ) -> Self {
         Self {
             db,
             notify,
+            runner,
             last_run: HashMap::new(),
         }
     }
@@ -81,6 +113,7 @@ impl FeedRunner {
 
             let db = self.db.clone();
             let notify = self.notify.clone();
+            let runner = self.runner.clone();
             let cmd = cmd.clone();
             let epic_id = epic.id;
             let epic_title = epic.title.clone();
@@ -136,8 +169,10 @@ impl FeedRunner {
                     }
                 };
                 let repo_paths = resolve_feed_item_repo_paths(&items, &known_paths);
+                let base_branches = resolve_base_branches(&repo_paths, &*runner);
 
-                if let Err(err) = db.upsert_feed_tasks(epic_id, &items, &repo_paths) {
+                if let Err(err) = db.upsert_feed_tasks(epic_id, &items, &repo_paths, &base_branches)
+                {
                     tracing::warn!(
                         epic_id = epic_id.0,
                         "FeedRunner: upsert_feed_tasks failed: {err:#}"
@@ -158,9 +193,27 @@ mod tests {
 
     // --- FeedRunner tests ---
 
+    /// A `ProcessRunner` that always returns a non-zero exit. Used in feed
+    /// tests that don't care about default-branch resolution — every
+    /// `git symbolic-ref` call falls back to `"main"`.
+    struct AlwaysFailRunner;
+
+    impl ProcessRunner for AlwaysFailRunner {
+        fn run(&self, _program: &str, _args: &[&str]) -> anyhow::Result<std::process::Output> {
+            crate::process::MockProcessRunner::fail("not a git repo")
+        }
+    }
+
     fn make_runner(db: Arc<Database>) -> (FeedRunner, mpsc::UnboundedReceiver<McpEvent>) {
+        make_runner_with_runner(db, Arc::new(AlwaysFailRunner))
+    }
+
+    fn make_runner_with_runner(
+        db: Arc<Database>,
+        runner: Arc<dyn ProcessRunner>,
+    ) -> (FeedRunner, mpsc::UnboundedReceiver<McpEvent>) {
         let (tx, rx) = mpsc::unbounded_channel();
-        (FeedRunner::new(db, tx), rx)
+        (FeedRunner::new(db, tx, runner), rx)
     }
 
     #[tokio::test]
@@ -358,7 +411,9 @@ mod tests {
             .unwrap();
 
         let (tx, _rx) = mpsc::unbounded_channel();
-        let runner = FeedRunner::new(db as Arc<dyn crate::db::TaskStore>, tx);
+        let proc_runner: Arc<dyn ProcessRunner> =
+            Arc::new(crate::process::MockProcessRunner::new(vec![]));
+        let runner = FeedRunner::new(db as Arc<dyn crate::db::TaskStore>, tx, proc_runner);
 
         let before = std::time::Instant::now();
         runner.start(); // must return immediately — it just spawns a task
@@ -385,7 +440,13 @@ mod tests {
         .unwrap();
 
         let (tx, _rx) = mpsc::unbounded_channel();
-        let runner = FeedRunner::new(Arc::clone(&db) as Arc<dyn crate::db::TaskStore>, tx);
+        let proc_runner: Arc<dyn ProcessRunner> =
+            Arc::new(crate::process::MockProcessRunner::new(vec![]));
+        let runner = FeedRunner::new(
+            Arc::clone(&db) as Arc<dyn crate::db::TaskStore>,
+            tx,
+            proc_runner,
+        );
         runner.start();
 
         // The tokio interval fires on the first tick almost immediately.
@@ -477,6 +538,119 @@ mod tests {
             tasks[0].repo_path, "",
             "empty url should store empty sentinel"
         );
+    }
+
+    /// A `ProcessRunner` that returns a fixed `origin/HEAD` per repo path,
+    /// counting how many times each path was queried.
+    struct PerRepoBranchRunner {
+        branches: HashMap<String, String>,
+        calls: std::sync::Mutex<HashMap<String, usize>>,
+    }
+
+    impl PerRepoBranchRunner {
+        fn new(pairs: &[(&str, &str)]) -> Self {
+            Self {
+                branches: pairs
+                    .iter()
+                    .map(|(p, b)| (p.to_string(), b.to_string()))
+                    .collect(),
+                calls: std::sync::Mutex::new(HashMap::new()),
+            }
+        }
+
+        fn calls_for(&self, path: &str) -> usize {
+            self.calls.lock().unwrap().get(path).copied().unwrap_or(0)
+        }
+    }
+
+    impl ProcessRunner for PerRepoBranchRunner {
+        fn run(&self, program: &str, args: &[&str]) -> anyhow::Result<std::process::Output> {
+            assert_eq!(program, "git");
+            // args = ["-C", <path>, "symbolic-ref", "refs/remotes/origin/HEAD"]
+            let path = args.get(1).copied().unwrap_or("");
+            *self
+                .calls
+                .lock()
+                .unwrap()
+                .entry(path.to_string())
+                .or_insert(0) += 1;
+            match self.branches.get(path) {
+                Some(branch) => crate::process::MockProcessRunner::ok_with_stdout(
+                    format!("refs/remotes/origin/{branch}\n").as_bytes(),
+                ),
+                None => crate::process::MockProcessRunner::fail("unknown repo"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn tick_resolves_default_branch_per_unique_repo() {
+        let db = Arc::new(Database::open_in_memory().unwrap());
+        db.save_repo_path("/home/user/code/repo-a").unwrap();
+        db.save_repo_path("/home/user/code/repo-b").unwrap();
+        let epic = db
+            .create_epic("Feed Epic", "", "/fallback", None, ProjectId(1))
+            .unwrap();
+        // Three items: two for repo-a (master), one for repo-b (develop).
+        let cmd = r#"echo '[
+            {"external_id":"1","title":"A1","description":"","url":"https://github.com/org/repo-a/pull/1","status":"backlog"},
+            {"external_id":"2","title":"A2","description":"","url":"https://github.com/org/repo-a/pull/2","status":"backlog"},
+            {"external_id":"3","title":"B1","description":"","url":"https://github.com/org/repo-b/pull/1","status":"backlog"}
+        ]'"#;
+        db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some(cmd)))
+            .unwrap();
+
+        let proc_runner = Arc::new(PerRepoBranchRunner::new(&[
+            ("/home/user/code/repo-a", "master"),
+            ("/home/user/code/repo-b", "develop"),
+        ]));
+        let (mut runner, _rx) = make_runner_with_runner(db.clone(), proc_runner.clone());
+        runner.tick().await;
+
+        // Wait for the spawned task to finish writing tasks.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+        assert_eq!(tasks.len(), 3);
+
+        let by_ext = |ext: &str| {
+            tasks
+                .iter()
+                .find(|t| t.external_id.as_deref() == Some(ext))
+                .unwrap()
+        };
+        assert_eq!(by_ext("1").base_branch, "master");
+        assert_eq!(by_ext("2").base_branch, "master");
+        assert_eq!(by_ext("3").base_branch, "develop");
+
+        // Cache check: each unique repo should have been queried exactly once.
+        assert_eq!(
+            proc_runner.calls_for("/home/user/code/repo-a"),
+            1,
+            "repo-a default branch should be resolved once, not per-item"
+        );
+        assert_eq!(proc_runner.calls_for("/home/user/code/repo-b"), 1);
+    }
+
+    #[tokio::test]
+    async fn tick_falls_back_to_main_when_origin_head_missing() {
+        let db = Arc::new(Database::open_in_memory().unwrap());
+        db.save_repo_path("/home/user/code/repo-a").unwrap();
+        let epic = db
+            .create_epic("Feed Epic", "", "/fallback", None, ProjectId(1))
+            .unwrap();
+        let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","url":"https://github.com/org/repo-a/pull/1","status":"backlog"}]'"#;
+        db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some(cmd)))
+            .unwrap();
+
+        // AlwaysFailRunner → detect_default_branch returns "main".
+        let (mut runner, _rx) = make_runner_with_runner(db.clone(), Arc::new(AlwaysFailRunner));
+        runner.tick().await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].base_branch, "main");
     }
 
     #[tokio::test]

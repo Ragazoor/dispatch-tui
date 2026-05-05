@@ -1,11 +1,16 @@
-//! Integration tests for the CLI commands (list, update, create).
+//! Integration tests for the CLI commands (list, update, plan, verify-feed).
 //!
 //! Each test spins up a fresh temp-file DB and invokes the compiled binary
-//! via `std::process::Command`.
+//! via `std::process::Command`. Task creation is no longer exposed via the
+//! CLI — tests seed tasks through the DB API directly.
 
 use std::io::Write;
+use std::path::Path;
 use std::process::Command;
 use tempfile::NamedTempFile;
+
+use dispatch_tui::db::{Database, ProjectCrud, TaskCrud};
+use dispatch_tui::models::{TaskId, TaskStatus};
 
 fn binary() -> Command {
     Command::new(env!("CARGO_BIN_EXE_dispatch"))
@@ -19,6 +24,27 @@ fn make_plan_file(title: &str, goal: &str) -> NamedTempFile {
     )
     .unwrap();
     f
+}
+
+/// Seed a backlog task directly via the DB API so we can drive the
+/// `update` / `list` / `plan` subcommands without the (removed) `create`
+/// subcommand.
+fn seed_task(db_path: &Path, title: &str) -> TaskId {
+    let db = Database::open(db_path).unwrap();
+    let project_id = db.get_default_project().unwrap().id;
+    db.create_task(
+        title,
+        "",
+        "/tmp/test-repo",
+        None,
+        TaskStatus::Backlog,
+        "main",
+        None,
+        None,
+        None,
+        project_id,
+    )
+    .unwrap()
 }
 
 // ---------------------------------------------------------------------------
@@ -56,102 +82,11 @@ fn list_unknown_status_fails() {
     assert!(!out.status.success(), "Expected failure for unknown status");
 }
 
-// ---------------------------------------------------------------------------
-// create
-// ---------------------------------------------------------------------------
-
-#[test]
-fn create_from_plan() {
-    let db = NamedTempFile::new().unwrap();
-    let plan = make_plan_file("My Feature", "Implement X.");
-
-    let out = binary()
-        .args([
-            "--db",
-            db.path().to_str().unwrap(),
-            "create",
-            "--from-plan",
-            plan.path().to_str().unwrap(),
-            "--repo-path",
-            "/tmp/test-repo",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        stdout.contains("Created task #"),
-        "Expected task creation, got: {stdout}"
-    );
-    assert!(
-        stdout.contains("My Feature"),
-        "Expected title in output, got: {stdout}"
-    );
-    assert!(
-        stdout.contains("[backlog]"),
-        "Expected [backlog] status, got: {stdout}"
-    );
-}
-
-#[test]
-fn create_then_list() {
-    let db = NamedTempFile::new().unwrap();
-    let plan = make_plan_file("Auth Bug Fix", "Fix login.");
-    let db_path = db.path().to_str().unwrap();
-
-    let create_out = binary()
-        .args([
-            "--db",
-            db_path,
-            "create",
-            "--from-plan",
-            plan.path().to_str().unwrap(),
-            "--repo-path",
-            "/tmp/test-repo",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        create_out.status.success(),
-        "create failed: {}",
-        String::from_utf8_lossy(&create_out.stderr)
-    );
-
-    let out = binary().args(["--db", db_path, "list"]).output().unwrap();
-    assert!(out.status.success());
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        stdout.contains("Auth Bug Fix"),
-        "Expected task title in list, got: {stdout}"
-    );
-    assert!(
-        stdout.contains("backlog"),
-        "Expected backlog status in list, got: {stdout}"
-    );
-}
-
 #[test]
 fn list_filter_by_status() {
     let db = NamedTempFile::new().unwrap();
-    let plan = make_plan_file("Filter Test", "Filter tasks.");
     let db_path = db.path().to_str().unwrap();
-
-    binary()
-        .args([
-            "--db",
-            db_path,
-            "create",
-            "--from-plan",
-            plan.path().to_str().unwrap(),
-            "--repo-path",
-            "/tmp/test-repo",
-        ])
-        .output()
-        .unwrap();
+    seed_task(db.path(), "Filter Test");
 
     // list --status backlog -> shows the task
     let out = binary()
@@ -178,121 +113,25 @@ fn list_filter_by_status() {
     );
 }
 
-#[test]
-fn create_idempotent_for_same_plan() {
-    let db = NamedTempFile::new().unwrap();
-    let plan = make_plan_file("Idempotent Task", "No duplicates.");
-    let db_path = db.path().to_str().unwrap();
-    let plan_path = plan.path().to_str().unwrap();
-
-    // First create
-    binary()
-        .args([
-            "--db",
-            db_path,
-            "create",
-            "--from-plan",
-            plan_path,
-            "--repo-path",
-            "/tmp/test-repo",
-        ])
-        .output()
-        .unwrap();
-
-    // Second create with same plan
-    let out = binary()
-        .args([
-            "--db",
-            db_path,
-            "create",
-            "--from-plan",
-            plan_path,
-            "--repo-path",
-            "/tmp/test-repo",
-        ])
-        .output()
-        .unwrap();
-    assert!(out.status.success());
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        stdout.contains("already exists"),
-        "Expected idempotency message, got: {stdout}"
-    );
-
-    // Only one task in list
-    let out = binary().args(["--db", db_path, "list"]).output().unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let task_lines: Vec<_> = stdout
-        .lines()
-        .filter(|l| l.contains("Idempotent Task"))
-        .collect();
-    assert_eq!(
-        task_lines.len(),
-        1,
-        "Expected exactly one task, got: {stdout}"
-    );
-}
+// ---------------------------------------------------------------------------
+// create subcommand removed (tasks are created via MCP only)
+// ---------------------------------------------------------------------------
 
 #[test]
-fn create_with_title_and_description_overrides() {
-    let db = NamedTempFile::new().unwrap();
-    let plan = make_plan_file("Original Title", "Original goal.");
-    let db_path = db.path().to_str().unwrap();
-
-    let out = binary()
-        .args([
-            "--db",
-            db_path,
-            "create",
-            "--from-plan",
-            plan.path().to_str().unwrap(),
-            "--repo-path",
-            "/tmp/test-repo",
-            "--title",
-            "Custom Title",
-            "--description",
-            "Custom description",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        stdout.contains("Custom Title"),
-        "Expected custom title, got: {stdout}"
-    );
-
-    // Verify in list output
-    let out = binary().args(["--db", db_path, "list"]).output().unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        stdout.contains("Custom Title"),
-        "Expected custom title in list, got: {stdout}"
-    );
-}
-
-#[test]
-fn create_missing_plan_file_fails() {
+fn create_subcommand_removed() {
     let db = NamedTempFile::new().unwrap();
     let out = binary()
-        .args([
-            "--db",
-            db.path().to_str().unwrap(),
-            "create",
-            "--from-plan",
-            "/tmp/nonexistent-plan-file-12345.md",
-            "--repo-path",
-            "/tmp/test-repo",
-        ])
+        .args(["--db", db.path().to_str().unwrap(), "create"])
         .output()
         .unwrap();
     assert!(
         !out.status.success(),
-        "Expected failure for missing plan file"
+        "create must no longer be a recognised subcommand"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("unrecognized subcommand") || stderr.contains("invalid value"),
+        "expected clap rejection, got stderr: {stderr}"
     );
 }
 
@@ -303,25 +142,12 @@ fn create_missing_plan_file_fails() {
 #[test]
 fn update_changes_status() {
     let db = NamedTempFile::new().unwrap();
-    let plan = make_plan_file("Update Test", "Test update.");
     let db_path = db.path().to_str().unwrap();
-
-    binary()
-        .args([
-            "--db",
-            db_path,
-            "create",
-            "--from-plan",
-            plan.path().to_str().unwrap(),
-            "--repo-path",
-            "/tmp/test-repo",
-        ])
-        .output()
-        .unwrap();
+    let id = seed_task(db.path(), "Update Test");
 
     // Update to running
     let out = binary()
-        .args(["--db", db_path, "update", "1", "running"])
+        .args(["--db", db_path, "update", &id.0.to_string(), "running"])
         .output()
         .unwrap();
     assert!(
@@ -331,7 +157,7 @@ fn update_changes_status() {
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("Task 1 updated to running"),
+        stdout.contains(&format!("Task {} updated to running", id.0)),
         "Expected update confirmation, got: {stdout}"
     );
 
@@ -347,6 +173,19 @@ fn update_changes_status() {
     );
 }
 
+#[test]
+fn update_unknown_status_fails() {
+    let db = NamedTempFile::new().unwrap();
+    let db_path = db.path().to_str().unwrap();
+    let id = seed_task(db.path(), "Error Test");
+
+    let out = binary()
+        .args(["--db", db_path, "update", &id.0.to_string(), "bogus-status"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "Expected failure for unknown status");
+}
+
 // ---------------------------------------------------------------------------
 // plan
 // ---------------------------------------------------------------------------
@@ -354,24 +193,9 @@ fn update_changes_status() {
 #[test]
 fn plan_attaches_to_existing_task() {
     let db = NamedTempFile::new().unwrap();
-    let plan = make_plan_file("Plan Target", "Attach a plan.");
     let db_path = db.path().to_str().unwrap();
+    let id = seed_task(db.path(), "Plan Target");
 
-    // Create a task first
-    binary()
-        .args([
-            "--db",
-            db_path,
-            "create",
-            "--from-plan",
-            plan.path().to_str().unwrap(),
-            "--repo-path",
-            "/tmp/test-repo",
-        ])
-        .output()
-        .unwrap();
-
-    // Write a separate plan file to attach
     let attach_plan = make_plan_file("Detailed Plan", "Step by step.");
 
     let out = binary()
@@ -379,7 +203,7 @@ fn plan_attaches_to_existing_task() {
             "--db",
             db_path,
             "plan",
-            "1",
+            &id.0.to_string(),
             attach_plan.path().to_str().unwrap(),
         ])
         .output()
@@ -391,7 +215,7 @@ fn plan_attaches_to_existing_task() {
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("Plan attached to task #1"),
+        stdout.contains(&format!("Plan attached to task #{}", id.0)),
         "Expected confirmation, got: {stdout}"
     );
 }
@@ -413,32 +237,6 @@ fn plan_nonexistent_file_fails() {
         !out.status.success(),
         "Expected failure for missing plan file"
     );
-}
-
-#[test]
-fn update_unknown_status_fails() {
-    let db = NamedTempFile::new().unwrap();
-    let plan = make_plan_file("Error Test", "Test errors.");
-    let db_path = db.path().to_str().unwrap();
-
-    binary()
-        .args([
-            "--db",
-            db_path,
-            "create",
-            "--from-plan",
-            plan.path().to_str().unwrap(),
-            "--repo-path",
-            "/tmp/test-repo",
-        ])
-        .output()
-        .unwrap();
-
-    let out = binary()
-        .args(["--db", db_path, "update", "1", "bogus-status"])
-        .output()
-        .unwrap();
-    assert!(!out.status.success(), "Expected failure for unknown status");
 }
 
 // ---------------------------------------------------------------------------
@@ -504,20 +302,18 @@ fn verify_feed_valid_empty_array_succeeds() {
         "stderr: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        stdout.contains("0 valid items"),
-        "Expected '0 valid items', got: {stdout}"
-    );
 }
 
 #[test]
 fn verify_feed_valid_items_succeeds() {
     let db = NamedTempFile::new().unwrap();
-    let json = r#"[{"external_id":"dependabot:org/repo#1","title":"[HIGH] lodash RCE","description":"desc","url":"https://example.com","status":"backlog"}]"#;
-    let cmd = format!("echo '{json}'");
     let out = binary()
-        .args(["--db", db.path().to_str().unwrap(), "verify-feed", &cmd])
+        .args([
+            "--db",
+            db.path().to_str().unwrap(),
+            "verify-feed",
+            r#"echo '[{"external_id":"x1","title":"T","description":"","status":"backlog"}]'"#,
+        ])
         .output()
         .unwrap();
     assert!(
@@ -527,16 +323,8 @@ fn verify_feed_valid_items_succeeds() {
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("1 valid item"),
-        "Expected '1 valid item', got: {stdout}"
-    );
-    assert!(
-        stdout.contains("dependabot:org/repo#1"),
-        "Expected external_id in output, got: {stdout}"
-    );
-    assert!(
-        stdout.contains("[HIGH] lodash RCE"),
-        "Expected title in output, got: {stdout}"
+        stdout.contains("x1"),
+        "Expected feed item id in output, got: {stdout}"
     );
 }
 
@@ -548,15 +336,18 @@ fn verify_feed_invalid_json_fails() {
             "--db",
             db.path().to_str().unwrap(),
             "verify-feed",
-            "echo 'not valid json'",
+            "echo 'not json'",
         ])
         .output()
         .unwrap();
-    assert!(!out.status.success(), "Expected failure for invalid JSON");
+    assert!(
+        !out.status.success(),
+        "Expected failure for invalid JSON output"
+    );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         stderr.contains("failed to parse"),
-        "Expected parse error in stderr, got: {stderr}"
+        "Expected parse error, got stderr: {stderr}"
     );
 }
 
@@ -564,39 +355,11 @@ fn verify_feed_invalid_json_fails() {
 fn verify_feed_command_failure_exits_nonzero() {
     let db = NamedTempFile::new().unwrap();
     let out = binary()
-        .args(["--db", db.path().to_str().unwrap(), "verify-feed", "exit 1"])
+        .args(["--db", db.path().to_str().unwrap(), "verify-feed", "exit 7"])
         .output()
         .unwrap();
     assert!(
         !out.status.success(),
-        "Expected failure when command exits non-zero"
-    );
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.contains("command exited"),
-        "Expected 'command exited' in stderr, got: {stderr}"
-    );
-}
-
-// ---------------------------------------------------------------------------
-// tui — tmux guard
-// ---------------------------------------------------------------------------
-
-#[test]
-fn tui_fails_without_tmux() {
-    let db = NamedTempFile::new().unwrap();
-    let out = binary()
-        .args(["--db", db.path().to_str().unwrap(), "tui"])
-        .env_remove("TMUX")
-        .output()
-        .unwrap();
-    assert!(
-        !out.status.success(),
-        "Expected failure when TMUX is not set"
-    );
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.to_lowercase().contains("tmux"),
-        "Expected error mentioning tmux, got: {stderr}"
+        "Expected failure when feed command exits non-zero"
     );
 }

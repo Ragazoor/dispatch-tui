@@ -116,11 +116,8 @@ Use the `dispatch` MCP server tool `create_task` with:
 - `description`: the refined description from Step 4
 - `repo_path`: the current working directory (resolve to the main repo root, not a worktree)
 
-**Fallback — CLI:**
-If MCP is unavailable, run:
-```bash
-dispatch create "<title>" "<description>" --repo-path <repo-root>
-```
+If MCP is unavailable, surface that to the user — task creation is
+exclusively via the MCP `create_task` tool; there is no CLI fallback.
 
 Report the created task IDs to the user.
 

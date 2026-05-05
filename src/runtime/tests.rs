@@ -71,7 +71,11 @@ fn make_runtime(
     TuiRuntime {
         task_svc: crate::service::TaskService::new(db.clone()),
         epic_svc: crate::service::EpicService::new(db.clone()),
-        feed_runner: Some(crate::feed::FeedRunner::new(db.clone(), feed_tx)),
+        feed_runner: Some(crate::feed::FeedRunner::new(
+            db.clone(),
+            feed_tx,
+            runner.clone(),
+        )),
         database: db,
         msg_tx: tx,
         runner,
@@ -829,7 +833,8 @@ async fn exec_quick_dispatch_creates_task_and_dispatches() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
-        // No detect_default_branch call — task.base_branch is used directly
+        // detect_default_branch (resolved to "main")
+        MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"),
         // provision_worktree: dir exists so git worktree add is skipped
         MockProcessRunner::ok(), // tmux new-window
         MockProcessRunner::ok(), // tmux set-option @dispatch_dir
@@ -879,6 +884,49 @@ async fn exec_quick_dispatch_creates_task_and_dispatches() {
 }
 
 #[tokio::test]
+async fn exec_quick_dispatch_sets_base_branch_to_repo_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().to_str().unwrap();
+    std::fs::create_dir_all(format!("{repo}/.worktrees/1-quick-task")).unwrap();
+
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let mock = Arc::new(MockProcessRunner::new(vec![
+        // detect_default_branch resolves to master
+        MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/master\n"),
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(), // tmux set-hook
+        MockProcessRunner::ok(), // tmux send-keys -l
+        MockProcessRunner::ok(), // tmux send-keys Enter
+    ]));
+    let rt = make_runtime(db.clone(), tx, mock);
+    let tasks = db.list_all().unwrap();
+    let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
+
+    rt.exec_quick_dispatch(
+        &mut app,
+        tui::TaskDraft {
+            title: "Quick task".into(),
+            description: String::new(),
+            repo_path: repo.to_string(),
+            tag: None,
+            // The draft default doesn't matter — quick-dispatch resolves
+            // base_branch from the repo's `origin/HEAD`.
+            base_branch: "main".into(),
+        },
+        None,
+    );
+
+    let stored = db.list_all().unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(
+        stored[0].base_branch, "master",
+        "quick-dispatch should resolve and persist the repo's default branch"
+    );
+}
+
+#[tokio::test]
 async fn exec_quick_dispatch_with_epic_dispatches_successfully() {
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path().to_str().unwrap();
@@ -890,7 +938,8 @@ async fn exec_quick_dispatch_with_epic_dispatches_successfully() {
         .unwrap();
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
-        // No detect_default_branch call — task.base_branch is used directly
+        // detect_default_branch (resolved to "main")
+        MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"),
         MockProcessRunner::ok(), // tmux new-window
         MockProcessRunner::ok(), // tmux set-option @dispatch_dir
         MockProcessRunner::ok(), // tmux set-hook

@@ -81,13 +81,19 @@ mod tests {
         let (tx, _rx) = mpsc::unbounded_channel();
         let (feed_tx, _) = mpsc::unbounded_channel();
         let db_arc: Arc<dyn crate::db::TaskStore> = db.clone();
+        let runner: Arc<dyn crate::process::ProcessRunner> =
+            Arc::new(crate::process::MockProcessRunner::new(vec![]));
         TuiRuntime {
             task_svc: crate::service::TaskService::new(db_arc.clone()),
             epic_svc: crate::service::EpicService::new(db_arc.clone()),
-            feed_runner: Some(crate::feed::FeedRunner::new(db_arc.clone(), feed_tx)),
+            feed_runner: Some(crate::feed::FeedRunner::new(
+                db_arc.clone(),
+                feed_tx,
+                runner.clone(),
+            )),
             database: db_arc,
             msg_tx: tx,
-            runner: Arc::new(crate::process::MockProcessRunner::new(vec![])),
+            runner,
             editor_session: Arc::new(std::sync::Mutex::new(None)),
         }
     }

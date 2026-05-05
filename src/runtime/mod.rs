@@ -195,6 +195,7 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
         feed_runner: Some(crate::feed::FeedRunner::new(
             database.clone(),
             feed_notify_tx,
+            runner.clone(),
         )),
         database,
         msg_tx,

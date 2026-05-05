@@ -5234,6 +5234,12 @@ fn make_feed_item(external_id: &str, title: &str) -> crate::models::FeedItem {
     }
 }
 
+/// Build a parallel vec of "main" base branches for tests that don't
+/// exercise the per-task base_branch path.
+fn main_branches(n: usize) -> Vec<String> {
+    vec!["main".to_string(); n]
+}
+
 #[test]
 fn upsert_feed_tasks_creates_tasks() {
     let db = in_memory_db();
@@ -5245,8 +5251,10 @@ fn upsert_feed_tasks_creates_tasks() {
         make_feed_item("ext-2", "Task Two"),
     ];
     let repo_paths = vec!["/repo".to_string(), "/repo".to_string()];
+    let branches = main_branches(items.len());
 
-    db.upsert_feed_tasks(epic.id, &items, &repo_paths).unwrap();
+    db.upsert_feed_tasks(epic.id, &items, &repo_paths, &branches)
+        .unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).unwrap();
     assert_eq!(tasks.len(), 2);
@@ -5268,9 +5276,12 @@ fn upsert_feed_tasks_idempotent() {
         .unwrap();
     let items = vec![make_feed_item("ext-1", "Task One")];
     let repo_paths = vec!["/repo".to_string()];
+    let branches = main_branches(items.len());
 
-    db.upsert_feed_tasks(epic.id, &items, &repo_paths).unwrap();
-    db.upsert_feed_tasks(epic.id, &items, &repo_paths).unwrap();
+    db.upsert_feed_tasks(epic.id, &items, &repo_paths, &branches)
+        .unwrap();
+    db.upsert_feed_tasks(epic.id, &items, &repo_paths, &branches)
+        .unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).unwrap();
     assert_eq!(tasks.len(), 1, "second call should not create duplicate");
@@ -5285,7 +5296,7 @@ fn upsert_feed_tasks_preserves_status() {
         .unwrap();
     let items = vec![make_feed_item("ext-1", "Original Title")];
 
-    db.upsert_feed_tasks(epic.id, &items, &["/repo".to_string()])
+    db.upsert_feed_tasks(epic.id, &items, &["/repo".to_string()], &main_branches(1))
         .unwrap();
 
     // Simulate user moving task to Running
@@ -5301,7 +5312,7 @@ fn upsert_feed_tasks_preserves_status() {
         url: String::new(),
         status: TaskStatus::Done, // feed says done; user status should be preserved
     }];
-    db.upsert_feed_tasks(epic.id, &updated, &["/repo".to_string()])
+    db.upsert_feed_tasks(epic.id, &updated, &["/repo".to_string()], &main_branches(1))
         .unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).unwrap();
@@ -5329,6 +5340,7 @@ fn upsert_feed_tasks_adds_new_items() {
         epic.id,
         &[make_feed_item("ext-1", "First")],
         &["/repo".to_string()],
+        &main_branches(1),
     )
     .unwrap();
 
@@ -5339,6 +5351,7 @@ fn upsert_feed_tasks_adds_new_items() {
             make_feed_item("ext-2", "Second"),
         ],
         &["/repo".to_string(), "/repo".to_string()],
+        &main_branches(2),
     )
     .unwrap();
 
@@ -5361,6 +5374,7 @@ fn upsert_feed_tasks_removes_stale_items() {
             make_feed_item("ext-2", "Second"),
         ],
         &["/repo".to_string(), "/repo".to_string()],
+        &main_branches(2),
     )
     .unwrap();
     assert_eq!(db.list_tasks_for_epic(epic.id).unwrap().len(), 2);
@@ -5370,6 +5384,7 @@ fn upsert_feed_tasks_removes_stale_items() {
         epic.id,
         &[make_feed_item("ext-1", "First")],
         &["/repo".to_string()],
+        &main_branches(1),
     )
     .unwrap();
 
@@ -5386,8 +5401,10 @@ fn upsert_feed_tasks_uses_resolved_repo_path() {
         .unwrap();
     let items = vec![make_feed_item("ext-1", "Task One")];
     let repo_paths = vec!["/resolved/local/repo".to_string()];
+    let branches = main_branches(items.len());
 
-    db.upsert_feed_tasks(epic.id, &items, &repo_paths).unwrap();
+    db.upsert_feed_tasks(epic.id, &items, &repo_paths, &branches)
+        .unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).unwrap();
     assert_eq!(tasks[0].repo_path, "/resolved/local/repo");
@@ -5401,8 +5418,10 @@ fn upsert_feed_tasks_stores_empty_sentinel_when_unresolved() {
         .unwrap();
     let items = vec![make_feed_item("ext-1", "Task One")];
     let repo_paths = vec!["".to_string()];
+    let branches = main_branches(items.len());
 
-    db.upsert_feed_tasks(epic.id, &items, &repo_paths).unwrap();
+    db.upsert_feed_tasks(epic.id, &items, &repo_paths, &branches)
+        .unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).unwrap();
     assert_eq!(tasks[0].repo_path, "");
@@ -5417,8 +5436,13 @@ fn upsert_feed_tasks_on_conflict_does_not_update_repo_path() {
     let items = vec![make_feed_item("ext-1", "Original")];
 
     // First upsert: resolved path stored
-    db.upsert_feed_tasks(epic.id, &items, &["/first/path".to_string()])
-        .unwrap();
+    db.upsert_feed_tasks(
+        epic.id,
+        &items,
+        &["/first/path".to_string()],
+        &main_branches(1),
+    )
+    .unwrap();
     let tasks = db.list_tasks_for_epic(epic.id).unwrap();
     assert_eq!(tasks[0].repo_path, "/first/path");
 
@@ -5430,8 +5454,13 @@ fn upsert_feed_tasks_on_conflict_does_not_update_repo_path() {
         url: String::new(),
         status: TaskStatus::Backlog,
     }];
-    db.upsert_feed_tasks(epic.id, &updated, &["/second/path".to_string()])
-        .unwrap();
+    db.upsert_feed_tasks(
+        epic.id,
+        &updated,
+        &["/second/path".to_string()],
+        &main_branches(1),
+    )
+    .unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).unwrap();
     assert_eq!(tasks[0].title, "Updated Title");
@@ -5452,8 +5481,10 @@ fn upsert_feed_tasks_mixed_batch_resolved_and_unresolved() {
         make_feed_item("ext-2", "Unresolved Task"),
     ];
     let repo_paths = vec!["/matched/local/path".to_string(), "".to_string()];
+    let branches = main_branches(items.len());
 
-    db.upsert_feed_tasks(epic.id, &items, &repo_paths).unwrap();
+    db.upsert_feed_tasks(epic.id, &items, &repo_paths, &branches)
+        .unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).unwrap();
     let resolved = tasks
@@ -5466,6 +5497,43 @@ fn upsert_feed_tasks_mixed_batch_resolved_and_unresolved() {
         .unwrap();
     assert_eq!(resolved.repo_path, "/matched/local/path");
     assert_eq!(unresolved.repo_path, "");
+}
+
+#[test]
+fn upsert_feed_tasks_stores_per_task_base_branch() {
+    let db = in_memory_db();
+    let epic = db
+        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .unwrap();
+    let items = vec![
+        make_feed_item("ext-1", "Master Task"),
+        make_feed_item("ext-2", "Develop Task"),
+        make_feed_item("ext-3", "Main Task"),
+    ];
+    let repo_paths = vec![
+        "/repo-a".to_string(),
+        "/repo-b".to_string(),
+        "/repo-c".to_string(),
+    ];
+    let base_branches = vec![
+        "master".to_string(),
+        "develop".to_string(),
+        "main".to_string(),
+    ];
+
+    db.upsert_feed_tasks(epic.id, &items, &repo_paths, &base_branches)
+        .unwrap();
+
+    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    let by_ext = |ext: &str| {
+        tasks
+            .iter()
+            .find(|t| t.external_id.as_deref() == Some(ext))
+            .unwrap()
+    };
+    assert_eq!(by_ext("ext-1").base_branch, "master");
+    assert_eq!(by_ext("ext-2").base_branch, "develop");
+    assert_eq!(by_ext("ext-3").base_branch, "main");
 }
 
 #[test]
@@ -5496,11 +5564,12 @@ fn upsert_feed_tasks_does_not_remove_manual_tasks() {
         epic.id,
         &[make_feed_item("ext-1", "Feed Task")],
         &["/repo".to_string()],
+        &main_branches(1),
     )
     .unwrap();
 
     // Feed fetch returns nothing — only manual task should survive
-    db.upsert_feed_tasks(epic.id, &[], &[]).unwrap();
+    db.upsert_feed_tasks(epic.id, &[], &[], &[]).unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).unwrap();
     assert_eq!(
