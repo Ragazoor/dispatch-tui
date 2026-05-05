@@ -110,6 +110,7 @@ pub(super) fn handle_record_learning(
                 Ok(entries) => entries
                     .into_iter()
                     .filter(|l| l.kind == parsed.kind && l.id != learning_id)
+                    .take(5)
                     .collect(),
                 Err(e) => {
                     tracing::warn!("record_learning: failed to query similar entries: {e}");
