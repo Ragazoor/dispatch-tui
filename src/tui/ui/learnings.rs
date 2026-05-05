@@ -47,9 +47,6 @@ fn scope_badge(scope: LearningScope, scope_ref: Option<&str>) -> String {
     }
 }
 
-fn scope_label(scope: LearningScope, scope_ref: Option<&str>) -> String {
-    scope_badge(scope, scope_ref)
-}
 
 pub fn render_learnings(frame: &mut Frame, app: &App, area: Rect) {
     let ViewMode::Learnings {
@@ -101,55 +98,56 @@ pub fn render_learnings(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     // ── Detail pane: pick the selected learning based on the active view ──────
-    let selected_learning = match view {
-        LearningsView::List => learnings.get(selected),
+    // For Tree view, both selected_learning and scope_node_count are derived from a single borrow.
+    let (selected_learning, scope_node_count): (Option<&Learning>, Option<usize>) = match view {
+        LearningsView::List => (learnings.get(selected), None),
         LearningsView::Tree => {
             let state = tree_state.borrow();
             let selected_path = state.selected();
-            selected_path
+
+            let learning = selected_path
                 .last()
                 .and_then(|id| id.strip_prefix("learning:"))
                 .and_then(|s| s.parse::<i64>().ok())
-                .and_then(|id| learnings.iter().find(|l| l.id.0 == id))
-        }
-    };
+                .and_then(|id| learnings.iter().find(|l| l.id.0 == id));
 
-    // Check whether a scope node (not a leaf) is selected in tree view
-    let scope_node_count: Option<usize> = if view == LearningsView::Tree {
-        let state = tree_state.borrow();
-        let selected_path = state.selected();
-        if let Some(last) = selected_path.last() {
-            if !last.starts_with("learning:") && !last.is_empty() {
-                // Count children of this scope node
-                let count = learnings
+            let count = selected_path.last().and_then(|last| {
+                if last.starts_with("learning:") || last.is_empty() {
+                    return None;
+                }
+                // Count learnings whose tree identifier matches this scope node.
+                // Repo nodes use the full path as identifier (e.g. "repo:/home/user/dispatch"),
+                // matching how build_learning_tree constructs node identifiers.
+                let n = learnings
                     .iter()
                     .filter(|l| {
-                        // Match learnings that belong to this scope node identifier
-                        let badge = match l.scope {
+                        let identifier = match l.scope {
                             LearningScope::User => "user".to_string(),
                             LearningScope::Task => "tasks".to_string(),
-                            LearningScope::Repo => {
-                                l.scope_ref.as_ref().map(|r| format!("repo:{r}")).unwrap_or_default()
-                            }
-                            LearningScope::Project => {
-                                l.scope_ref.as_ref().map(|r| format!("project:{r}")).unwrap_or_default()
-                            }
-                            LearningScope::Epic => {
-                                l.scope_ref.as_ref().map(|r| format!("epic:{r}")).unwrap_or_default()
-                            }
+                            LearningScope::Repo => l
+                                .scope_ref
+                                .as_ref()
+                                .map(|r| format!("repo:{r}"))
+                                .unwrap_or_default(),
+                            LearningScope::Project => l
+                                .scope_ref
+                                .as_ref()
+                                .map(|r| format!("project:{r}"))
+                                .unwrap_or_default(),
+                            LearningScope::Epic => l
+                                .scope_ref
+                                .as_ref()
+                                .map(|r| format!("epic:{r}"))
+                                .unwrap_or_default(),
                         };
-                        badge == *last
+                        identifier == *last
                     })
                     .count();
-                Some(count)
-            } else {
-                None
-            }
-        } else {
-            None
+                if n > 0 { Some(n) } else { None }
+            });
+
+            (learning, count)
         }
-    } else {
-        None
     };
 
     render_detail(frame, selected_learning, scope_node_count, bottom_area);
@@ -238,7 +236,7 @@ fn render_detail(
             lines.push(Line::raw(""));
             lines.push(Line::from(vec![
                 Span::styled(
-                    format!("scope:{}", scope_label(l.scope, l.scope_ref.as_deref())),
+                    format!("scope:{}", scope_badge(l.scope, l.scope_ref.as_deref())),
                     Style::default().fg(Color::DarkGray),
                 ),
                 Span::raw("  "),
@@ -264,6 +262,8 @@ pub fn build_learning_tree(
     learnings: &[Learning],
     app: &App,
 ) -> Vec<tui_tree_widget::TreeItem<'static, String>> {
+    use std::collections::HashMap;
+
     fn leaf(l: &Learning) -> tui_tree_widget::TreeItem<'static, String> {
         let text = format!(
             "{} {}  \u{2713}{}",
@@ -273,6 +273,23 @@ pub fn build_learning_tree(
         );
         tui_tree_widget::TreeItem::new_leaf(format!("learning:{}", l.id), text)
     }
+
+    // Build lookup maps once — O(N) instead of O(N²)
+    let epic_project: HashMap<i64, ProjectId> = app
+        .epics()
+        .iter()
+        .map(|e| (e.id.0, e.project_id))
+        .collect();
+    let epic_label_map: HashMap<i64, String> = app
+        .epics()
+        .iter()
+        .map(|e| (e.id.0, e.title.clone()))
+        .collect();
+    let proj_label_map: HashMap<ProjectId, String> = app
+        .projects()
+        .iter()
+        .map(|p| (p.id, p.name.clone()))
+        .collect();
 
     let mut roots: Vec<tui_tree_widget::TreeItem<'static, String>> = Vec::new();
 
@@ -289,6 +306,7 @@ pub fn build_learning_tree(
                 format!("Global ({})", user_leaves.len()),
                 user_leaves,
             )
+            // identifiers are unique: "user", "project:{id}", "epic:{id}", "repo:{path}", "tasks"
             .unwrap(),
         );
     }
@@ -308,9 +326,9 @@ pub fn build_learning_tree(
             LearningScope::Epic => {
                 if let Some(ref sr) = l.scope_ref {
                     if let Ok(eid) = sr.parse::<i64>() {
-                        if let Some(epic) = app.epics().iter().find(|e| e.id == EpicId(eid)) {
-                            if !project_ids.contains(&epic.project_id) {
-                                project_ids.push(epic.project_id);
+                        if let Some(&proj_id) = epic_project.get(&eid) {
+                            if !project_ids.contains(&proj_id) {
+                                project_ids.push(proj_id);
                             }
                         }
                     }
@@ -322,11 +340,9 @@ pub fn build_learning_tree(
     project_ids.sort_by_key(|p| p.0);
 
     for pid in project_ids {
-        let proj_label = app
-            .projects()
-            .iter()
-            .find(|p| p.id == pid)
-            .map(|p| p.name.clone())
+        let proj_label = proj_label_map
+            .get(&pid)
+            .cloned()
             .unwrap_or_else(|| format!("Project {}", pid.0));
         let mut children: Vec<tui_tree_widget::TreeItem<'static, String>> = Vec::new();
 
@@ -343,10 +359,8 @@ pub fn build_learning_tree(
         for l in learnings.iter().filter(|l| l.scope == LearningScope::Epic) {
             if let Some(ref sr) = l.scope_ref {
                 if let Ok(eid) = sr.parse::<i64>() {
-                    if let Some(epic) = app.epics().iter().find(|e| e.id == EpicId(eid)) {
-                        if epic.project_id == pid && !epic_ids.contains(&EpicId(eid)) {
-                            epic_ids.push(EpicId(eid));
-                        }
+                    if epic_project.get(&eid) == Some(&pid) && !epic_ids.contains(&EpicId(eid)) {
+                        epic_ids.push(EpicId(eid));
                     }
                 }
             }
@@ -354,11 +368,9 @@ pub fn build_learning_tree(
         epic_ids.sort_by_key(|e| e.0);
 
         for eid in epic_ids {
-            let epic_label = app
-                .epics()
-                .iter()
-                .find(|e| e.id == eid)
-                .map(|e| e.title.clone())
+            let epic_label = epic_label_map
+                .get(&eid.0)
+                .cloned()
                 .unwrap_or_else(|| format!("Epic {}", eid.0));
             let epic_leaves: Vec<_> = learnings
                 .iter()
@@ -375,6 +387,7 @@ pub fn build_learning_tree(
                         format!("Epic: {} ({})", epic_label, epic_leaves.len()),
                         epic_leaves,
                     )
+                    // identifiers are unique: "user", "project:{id}", "epic:{id}", "repo:{path}", "tasks"
                     .unwrap(),
                 );
             }
@@ -387,6 +400,7 @@ pub fn build_learning_tree(
                     format!("Project: {} ({})", proj_label, children.len()),
                     children,
                 )
+                // identifiers are unique: "user", "project:{id}", "epic:{id}", "repo:{path}", "tasks"
                 .unwrap(),
             );
         }
@@ -419,6 +433,7 @@ pub fn build_learning_tree(
                 format!("Repo: {} ({})", basename, leaves.len()),
                 leaves,
             )
+            // identifiers are unique: "user", "project:{id}", "epic:{id}", "repo:{path}", "tasks"
             .unwrap(),
         );
     }
@@ -436,6 +451,7 @@ pub fn build_learning_tree(
                 format!("Tasks ({})", task_leaves.len()),
                 task_leaves,
             )
+            // identifiers are unique: "user", "project:{id}", "epic:{id}", "repo:{path}", "tasks"
             .unwrap(),
         );
     }
