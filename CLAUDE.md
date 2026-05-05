@@ -53,7 +53,7 @@ cargo test
 
 # Module-level tests
 cargo test db::tests               # database CRUD and migrations
-cargo test service::tests          # domain service layer
+cargo test service::               # domain service layer (tasks, epics, learnings)
 cargo test tui::tests              # TUI input/message handling
 cargo test mcp::handlers::tests    # MCP JSON-RPC handlers
 
@@ -97,7 +97,7 @@ Keep snapshots at 120×40 so failure diffs remain readable.
 |---------------------|----------------------|
 | TUI key handling / message flow | `src/tui/tests/` |
 | DB schema, CRUD, migrations | `src/db/tests.rs` |
-| Business rules in the service layer | inline in `src/service.rs` |
+| Business rules in the service layer | inline in `src/service/tasks.rs`, `src/service/epics.rs`, or `src/service/learnings.rs` |
 | MCP JSON-RPC handler behaviour | `src/mcp/handlers/tests.rs` |
 | Full task/epic lifecycle (end-to-end) | `tests/` (integration tests) |
 | Domain-type invariants and roundtrips | inline in the owning module (`src/models.rs`, `src/db/mod.rs`) |
@@ -178,7 +178,7 @@ The agent calls `update_review_status` (MCP tool) to advance its own status. Whe
 The codebase uses three error types at different layers:
 
 - **`anyhow::Result`** — infrastructure and IO errors (file operations, shell commands, DB initialization). Used at the outer edges where errors propagate up to the caller.
-- **`ServiceError`** (`Validation` / `NotFound` / `Internal`) — business logic errors in `src/service.rs`. MCP handlers match on these to return appropriate JSON-RPC error codes.
+- **`ServiceError`** (`Validation` / `NotFound` / `Internal`) — business logic errors in `src/service/mod.rs`. MCP handlers match on these to return appropriate JSON-RPC error codes.
 - **Domain-specific errors** (`FinishError`, `PrError`) — operations with distinct failure modes that callers need to handle differently (e.g., rebase conflicts vs. push failures).
 
 Rule of thumb: use `ServiceError` for request validation and business rules, domain-specific errors when callers branch on the variant, and `anyhow` for everything else.
@@ -217,7 +217,10 @@ A task with a plan always dispatches directly regardless of tag. Tags are select
 | `src/tui/types.rs` | `Message`, `Command`, `ViewMode`, `InputMode`, `AgentTracking` enums and structs |
 | `src/tui/tests.rs` | TUI unit tests |
 | `src/models.rs` | Domain types (`Task`, `Epic`, `TaskStatus`, `SubStatus`, `TaskTag`), `DispatchMode::for_task()` tag routing |
-| `src/service.rs` | Domain service layer (`TaskService`, `EpicService`): business logic (validation, patch building, epic recalculation) decoupled from MCP/HTTP; also owns `FieldUpdate` and `UpdateTaskParams`/`UpdateEpicParams` |
+| `src/service/mod.rs` | Service module root: `ServiceError`, `FieldUpdate`, re-exports of all sub-module types |
+| `src/service/tasks.rs` | `TaskService`, `UpdateTaskParams`, `CreateTaskParams`, `ClaimTaskParams`, `ListTasksFilter` — task business logic |
+| `src/service/epics.rs` | `EpicService`, `UpdateEpicParams`, `CreateEpicParams` — epic business logic |
+| `src/service/learnings.rs` | `LearningService`, `CreateLearningParams`, `UpdateLearningParams` — learning business logic |
 | `src/db/mod.rs` | `Database` struct, constructor, `TaskStore` trait, `TaskPatch`/`EpicPatch` builders |
 | `src/db/migrations.rs` | Versioned schema migrations (`MIGRATIONS` array, `migrate_vN_*` functions) |
 | `src/db/queries.rs` | `impl TaskStore for Database` — all CRUD operations, row helpers |
@@ -339,7 +342,7 @@ Approved entries affect dispatch. Rejected and archived entries do not.
 ### Implementation references
 
 - `src/mcp/handlers/learnings.rs` — MCP tool handlers
-- `src/service.rs` — `LearningService` (approval, rejection, archive, edit)
+- `src/service/learnings.rs` — `LearningService` (approval, rejection, archive, edit)
 - `src/db/` — `LearningStore` trait, `LearningPatch`, `LearningFilter`
 - `src/dispatch.rs` — prompt augmentation in `dispatch_with_prompt()`
 - `docs/specs/learnings.allium` — full domain specification
@@ -365,7 +368,7 @@ Quick dispatch is the same code path as normal dispatch — the difference is th
 
 ### `FieldUpdate` — nullable string fields
 
-`FieldUpdate` (`src/service.rs`) replaces the `Option<String>` + empty-string sentinel anti-pattern for fields that need three states: "don't touch", "set to value", "clear to NULL":
+`FieldUpdate` (`src/service/mod.rs`) replaces the `Option<String>` + empty-string sentinel anti-pattern for fields that need three states: "don't touch", "set to value", "clear to NULL":
 
 ```rust
 pub enum FieldUpdate {
@@ -428,7 +431,7 @@ Avoid `#[allow(dead_code)]` — dead code should be removed, not suppressed. If 
 
 ### Sub-status validation TOCTOU
 
-`TaskService::update_task()` (`src/service.rs`) reads the existing task to validate the requested sub-status before applying the patch. This is a TOCTOU window: a concurrent MCP call could change the task status between the read and the write. This is intentional and accepted — simultaneous status changes from two agents on the same task are considered a user error, and the window is too small to be worth a transaction-level fix.
+`TaskService::update_task()` (`src/service/tasks.rs`) reads the existing task to validate the requested sub-status before applying the patch. This is a TOCTOU window: a concurrent MCP call could change the task status between the read and the write. This is intentional and accepted — simultaneous status changes from two agents on the same task are considered a user error, and the window is too small to be worth a transaction-level fix.
 
 ### Immutable `parent_epic_id`
 
@@ -468,13 +471,13 @@ Adding a fully integrated entity involves five layers. Work through them in orde
    - Define a `NewEntityPatch` builder struct with `Option<Option<T>>` for nullable fields; implement the `UPDATE` query.
    - Write a corresponding `NewEntityFilter` if list queries need filtering.
 
-4. **Service layer** (`src/service.rs`) — create `NewEntityService` holding `Arc<dyn NewEntityCrud>`. Add `create_`, `get_`, `list_`, `update_`, and any lifecycle methods. Use `ServiceError::Validation` for input errors, `ServiceError::NotFound` for missing rows, and `anyhow` for DB I/O errors. Accept `FieldUpdate` for nullable string fields, map to `Option<Option<T>>` before writing the patch.
+4. **Service layer** (`src/service/<entity>.rs`) — create `NewEntityService` holding `Arc<dyn NewEntityCrud>`. Add `create_`, `get_`, `list_`, `update_`, and any lifecycle methods. Use `ServiceError::Validation` for input errors, `ServiceError::NotFound` for missing rows, and `anyhow` for DB I/O errors. Accept `FieldUpdate` for nullable string fields, map to `Option<Option<T>>` before writing the patch. Declare the new module in `src/service/mod.rs` and add `pub use` re-exports so callers are unaffected.
 
 5. **MCP handler** (if agents need to interact) — follow [Adding a New MCP Tool](#adding-a-new-mcp-tool). For read-only tools, hold the narrowest sub-trait; for mutating tools, call `state.notify()` after the write.
 
 6. **Tests**:
    - DB-layer tests in `src/db/tests.rs` using `Database::open_in_memory()`.
-   - Service-layer tests inline in `src/service.rs` (or a `mod tests` block there).
+   - Service-layer tests inline in the corresponding `src/service/<entity>.rs` file.
    - MCP handler tests in `src/mcp/handlers/tests.rs` for any new tools.
 
 7. **Spec** (`docs/specs/`) — write or extend an Allium spec to document the entity's lifecycle, rules, and invariants. Use the `allium:tend` skill and run `allium check` to validate syntax.
