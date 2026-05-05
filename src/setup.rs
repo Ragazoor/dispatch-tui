@@ -356,8 +356,9 @@ pub fn install_example_script(data_dir: &Path) -> Result<PathBuf> {
             .with_context(|| format!("Failed to write {}", path.display()))?,
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
         Err(e) => {
-            return Err(anyhow::Error::new(e)
-                .context(format!("Failed to create {}", path.display())))
+            return Err(
+                anyhow::Error::new(e).context(format!("Failed to create {}", path.display()))
+            )
         }
     }
     Ok(path)
