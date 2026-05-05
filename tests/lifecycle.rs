@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use dispatch_tui::db::{self, Database, TaskCrud};
+use dispatch_tui::db::{self, CreateTaskRequest, Database, TaskCrud};
 use dispatch_tui::models::{DispatchMode, ProjectId, Task, TaskId, TaskStatus};
 use dispatch_tui::tui::{App, Command, Message, MoveDirection};
 
@@ -43,18 +43,18 @@ fn full_lifecycle() {
 
     // 1. Create task with a plan: simulate what exec_insert_task does (DB insert + TaskCreated message)
     let task_id = db
-        .create_task(
-            "Fix auth bug",
-            "Users can't log in",
-            "/repo",
-            Some("plan.md"),
-            TaskStatus::Backlog,
-            "main",
-            None,
-            None,
-            None,
-            ProjectId(1),
-        )
+        .create_task(CreateTaskRequest {
+            title: "Fix auth bug",
+            description: "Users can't log in",
+            repo_path: "/repo",
+            plan: Some("plan.md"),
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+        })
         .unwrap();
     let now = chrono::Utc::now();
     let cmds = app.update(Message::TaskCreated {

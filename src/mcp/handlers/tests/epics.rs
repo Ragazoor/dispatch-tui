@@ -125,33 +125,33 @@ async fn get_epic_shows_subtask_summary() {
         .unwrap();
     let t1 = state
         .db
-        .create_task(
-            "Sub 1",
-            "",
-            "/repo",
-            None,
-            TaskStatus::Done,
-            "main",
-            None,
-            None,
-            None,
-            ProjectId(1),
-        )
+        .create_task(CreateTaskRequest {
+            title: "Sub 1",
+            description: "",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Done,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+        })
         .unwrap();
     let t2 = state
         .db
-        .create_task(
-            "Sub 2",
-            "",
-            "/repo",
-            None,
-            TaskStatus::Backlog,
-            "main",
-            None,
-            None,
-            None,
-            ProjectId(1),
-        )
+        .create_task(CreateTaskRequest {
+            title: "Sub 2",
+            description: "",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+        })
         .unwrap();
     state.db.set_task_epic_id(t1, Some(epic.id)).unwrap();
     state.db.set_task_epic_id(t2, Some(epic.id)).unwrap();
@@ -243,33 +243,33 @@ async fn list_epics_shows_subtask_counts() {
         .unwrap();
     let t1 = state
         .db
-        .create_task(
-            "Done",
-            "",
-            "/repo",
-            None,
-            TaskStatus::Done,
-            "main",
-            None,
-            None,
-            None,
-            ProjectId(1),
-        )
+        .create_task(CreateTaskRequest {
+            title: "Done",
+            description: "",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Done,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+        })
         .unwrap();
     let t2 = state
         .db
-        .create_task(
-            "Pending",
-            "",
-            "/repo",
-            None,
-            TaskStatus::Backlog,
-            "main",
-            None,
-            None,
-            None,
-            ProjectId(1),
-        )
+        .create_task(CreateTaskRequest {
+            title: "Pending",
+            description: "",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+        })
         .unwrap();
     state.db.set_task_epic_id(t1, Some(epic.id)).unwrap();
     state.db.set_task_epic_id(t2, Some(epic.id)).unwrap();

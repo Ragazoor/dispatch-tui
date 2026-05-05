@@ -720,7 +720,7 @@ mod tests {
     // finalize-result dispatch. The watcher itself is covered by the pure
     // watch_editor tests above.
 
-    use crate::db::Database;
+    use crate::db::{CreateTaskRequest, Database};
     use crate::models::TaskStatus;
     use crate::process::MockProcessRunner;
     use crate::tui::{App, EditKind};
@@ -773,18 +773,18 @@ mod tests {
 
     fn seed_task(db: &dyn crate::db::TaskStore) -> models::Task {
         let id = db
-            .create_task(
-                "Original title",
-                "Original desc",
-                "/orig/repo",
-                Some("docs/plan.md"),
-                TaskStatus::Backlog,
-                "main",
-                None,
-                None,
-                None,
-                ProjectId(1),
-            )
+            .create_task(CreateTaskRequest {
+                title: "Original title",
+                description: "Original desc",
+                repo_path: "/orig/repo",
+                plan: Some("docs/plan.md"),
+                status: TaskStatus::Backlog,
+                base_branch: "main",
+                epic_id: None,
+                sort_order: None,
+                tag: None,
+                project_id: ProjectId(1),
+            })
             .unwrap();
         db.get_task(id).unwrap().unwrap()
     }

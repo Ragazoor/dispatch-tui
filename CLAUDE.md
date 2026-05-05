@@ -96,7 +96,7 @@ Keep snapshots at 120×40 so failure diffs remain readable.
 | What you're testing | Where to put the test |
 |---------------------|----------------------|
 | TUI key handling / message flow | `src/tui/tests/` |
-| DB schema, CRUD, migrations | `src/db/tests.rs` |
+| DB schema, CRUD, migrations | `src/db/tests/` (split by domain: tasks, epics, prs, alerts, projects, learnings, settings, migrations) |
 | Business rules in the service layer | inline in `src/service/tasks.rs`, `src/service/epics.rs`, or `src/service/learnings.rs` |
 | MCP JSON-RPC handler behaviour | `src/mcp/handlers/tests.rs` |
 | Full task/epic lifecycle (end-to-end) | `tests/` (integration tests) |

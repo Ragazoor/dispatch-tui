@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::db::{self, TaskPatch};
+use crate::db::{self, CreateTaskRequest, TaskPatch};
 use crate::models::{
     EpicId, ProjectId, SubStatus, Task, TaskId, TaskStatus, TaskTag, UsageReport,
     DEFAULT_BASE_BRANCH,
@@ -454,18 +454,18 @@ impl TaskService {
         let base_branch = params.base_branch.as_deref().unwrap_or(DEFAULT_BASE_BRANCH);
         let task_id = self
             .db
-            .create_task(
-                &params.title,
-                &params.description,
-                &repo_path,
-                plan.as_deref(),
-                TaskStatus::Backlog,
+            .create_task(CreateTaskRequest {
+                title: &params.title,
+                description: &params.description,
+                repo_path: &repo_path,
+                plan: plan.as_deref(),
+                status: TaskStatus::Backlog,
                 base_branch,
-                params.epic_id.map(EpicId),
-                params.sort_order,
-                params.tag,
-                params.project_id,
-            )
+                epic_id: params.epic_id.map(EpicId),
+                sort_order: params.sort_order,
+                tag: params.tag,
+                project_id: params.project_id,
+            })
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
 
         self.get_task(task_id.0)

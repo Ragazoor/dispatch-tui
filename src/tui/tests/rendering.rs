@@ -592,20 +592,20 @@ fn stress_rapid_status_transitions() {
 #[test]
 fn stress_db_with_many_tasks() {
     let db = crate::db::Database::open_in_memory().unwrap();
-    use crate::db::TaskCrud;
+    use crate::db::{CreateTaskRequest, TaskCrud};
     for i in 0..500 {
-        db.create_task(
-            &format!("Task {i}"),
-            "stress test",
-            "/repo",
-            None,
-            TaskStatus::Backlog,
-            "main",
-            None,
-            None,
-            None,
-            ProjectId(1),
-        )
+        db.create_task(CreateTaskRequest {
+            title: &format!("Task {i}"),
+            description: "stress test",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+        })
         .unwrap();
     }
     let tasks = db.list_all().unwrap();

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use axum::{extract::State, Json};
 use serde_json::{json, Value};
 
-use crate::db::{self, Database};
+use crate::db::{self, CreateTaskRequest, Database};
 use crate::mcp::McpState;
 use crate::models::{ProjectId, SubStatus, TaskStatus};
 use crate::process::{MockProcessRunner, ProcessRunner};
@@ -68,18 +68,18 @@ async fn call(state: &Arc<McpState>, method: &str, params: Option<Value>) -> Jso
 fn create_task_fixture(state: &Arc<McpState>) -> crate::models::TaskId {
     state
         .db
-        .create_task(
-            "Test Task",
-            "test description",
-            "/repo",
-            None,
-            TaskStatus::Backlog,
-            "main",
-            None,
-            None,
-            None,
-            ProjectId(1),
-        )
+        .create_task(CreateTaskRequest {
+            title: "Test Task",
+            description: "test description",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+        })
         .unwrap()
 }
 
@@ -87,18 +87,18 @@ fn create_task_fixture(state: &Arc<McpState>) -> crate::models::TaskId {
 fn create_running_task_with_window(state: &Arc<McpState>) -> crate::models::TaskId {
     let task_id = state
         .db
-        .create_task(
-            "Running Task",
-            "description",
-            "/repo",
-            None,
-            TaskStatus::Running,
-            "main",
-            None,
-            None,
-            None,
-            ProjectId(1),
-        )
+        .create_task(CreateTaskRequest {
+            title: "Running Task",
+            description: "description",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Running,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+        })
         .unwrap();
     let patch = crate::db::TaskPatch::new()
         .worktree(Some("/repo/.worktrees/task-123"))

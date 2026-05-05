@@ -12,18 +12,18 @@ fn create_task_in_repo(state: &Arc<McpState>, repo: &str) -> crate::models::Task
     let pid = default_project_id(state);
     state
         .db
-        .create_task(
-            "Test task",
-            "",
-            repo,
-            None,
-            crate::models::TaskStatus::Backlog,
-            "main",
-            None,
-            None,
-            None,
-            pid,
-        )
+        .create_task(CreateTaskRequest {
+            title: "Test task",
+            description: "",
+            repo_path: repo,
+            plan: None,
+            status: crate::models::TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: pid,
+        })
         .unwrap()
 }
 
@@ -134,18 +134,18 @@ async fn record_learning_derives_scope_ref_for_epic() {
     let epic = state.db.create_epic("E", "", "/r", None, pid).unwrap();
     let task_id = state
         .db
-        .create_task(
-            "T",
-            "",
-            "/r",
-            None,
-            crate::models::TaskStatus::Backlog,
-            "main",
-            Some(epic.id),
-            None,
-            None,
-            pid,
-        )
+        .create_task(CreateTaskRequest {
+            title: "T",
+            description: "",
+            repo_path: "/r",
+            plan: None,
+            status: crate::models::TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: Some(epic.id),
+            sort_order: None,
+            tag: None,
+            project_id: pid,
+        })
         .unwrap();
 
     let resp = call(

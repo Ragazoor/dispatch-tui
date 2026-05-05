@@ -1,4 +1,4 @@
-use dispatch_tui::db::{Database, EpicCrud, EpicPatch, LearningStore, TaskCrud, TaskPatch};
+use dispatch_tui::db::{CreateTaskRequest, Database, EpicCrud, EpicPatch, LearningStore, TaskCrud, TaskPatch};
 use dispatch_tui::models::*;
 
 #[test]
@@ -18,32 +18,32 @@ fn full_epic_lifecycle() {
 
     // 2. Create subtasks linked to epic
     let sub1 = db
-        .create_task(
-            "Extract middleware",
-            "desc",
-            "/repo",
-            None,
-            TaskStatus::Backlog,
-            "main",
-            None,
-            None,
-            None,
-            ProjectId(1),
-        )
+        .create_task(CreateTaskRequest {
+            title: "Extract middleware",
+            description: "desc",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+        })
         .unwrap();
     let sub2 = db
-        .create_task(
-            "Add JWT validation",
-            "desc",
-            "/repo",
-            None,
-            TaskStatus::Backlog,
-            "main",
-            None,
-            None,
-            None,
-            ProjectId(1),
-        )
+        .create_task(CreateTaskRequest {
+            title: "Add JWT validation",
+            description: "desc",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+        })
         .unwrap();
     db.set_task_epic_id(sub1, Some(epic.id)).unwrap();
     db.set_task_epic_id(sub2, Some(epic.id)).unwrap();
@@ -97,18 +97,18 @@ fn soft_archive_epic_does_not_violate_foreign_keys() {
         .unwrap();
 
     let task_id = db
-        .create_task(
-            "Subtask",
-            "desc",
-            "/repo",
-            None,
-            TaskStatus::Done,
-            "main",
-            None,
-            None,
-            None,
-            ProjectId(1),
-        )
+        .create_task(CreateTaskRequest {
+            title: "Subtask",
+            description: "desc",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Done,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+        })
         .unwrap();
     db.set_task_epic_id(task_id, Some(epic.id)).unwrap();
 

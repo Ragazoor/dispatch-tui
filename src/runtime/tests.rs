@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::db::Database;
+use crate::db::{CreateTaskRequest, Database};
 use crate::models::ProjectId;
 use crate::process::MockProcessRunner;
 
@@ -102,18 +102,18 @@ fn create_task_returning(
     plan: Option<&str>,
     status: models::TaskStatus,
 ) -> anyhow::Result<models::Task> {
-    let id = db.create_task(
+    let id = db.create_task(CreateTaskRequest {
         title,
         description,
         repo_path,
         plan,
         status,
-        "main",
-        None,
-        None,
-        None,
-        ProjectId(1),
-    )?;
+        base_branch: "main",
+        epic_id: None,
+        sort_order: None,
+        tag: None,
+        project_id: ProjectId(1),
+    })?;
     db.get_task(id)?
         .ok_or_else(|| anyhow::anyhow!("Task {id} vanished after insert"))
 }
@@ -242,18 +242,18 @@ fn exec_refresh_from_db_syncs_external_changes() {
     let (rt, mut app) = test_runtime();
     // Insert directly into DB, bypassing app
     rt.database
-        .create_task(
-            "External",
-            "Added via CLI",
-            "/repo",
-            None,
-            models::TaskStatus::Backlog,
-            "main",
-            None,
-            None,
-            None,
-            ProjectId(1),
-        )
+        .create_task(CreateTaskRequest {
+            title: "External",
+            description: "Added via CLI",
+            repo_path: "/repo",
+            plan: None,
+            status: models::TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+        })
         .unwrap();
     assert!(app.tasks().is_empty());
     rt.exec_refresh_from_db(&mut app);
@@ -266,18 +266,18 @@ fn exec_refresh_from_db_returns_commands_from_refresh() {
     let (rt, mut app) = test_runtime();
     // Insert a task directly into DB as Running
     rt.database
-        .create_task(
-            "Test",
-            "Desc",
-            "/repo",
-            None,
-            models::TaskStatus::Running,
-            "main",
-            None,
-            None,
-            None,
-            ProjectId(1),
-        )
+        .create_task(CreateTaskRequest {
+            title: "Test",
+            description: "Desc",
+            repo_path: "/repo",
+            plan: None,
+            status: models::TaskStatus::Running,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+        })
         .unwrap();
     // Load it into app
     let cmds = rt.exec_refresh_from_db(&mut app);

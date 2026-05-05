@@ -88,6 +88,25 @@ patch_struct! {
 }
 
 // ---------------------------------------------------------------------------
+// CreateTaskRequest — input struct for the create_task DB operation
+// ---------------------------------------------------------------------------
+
+/// All parameters needed to insert a new task row.
+#[derive(Debug)]
+pub struct CreateTaskRequest<'a> {
+    pub title: &'a str,
+    pub description: &'a str,
+    pub repo_path: &'a str,
+    pub plan: Option<&'a str>,
+    pub status: TaskStatus,
+    pub base_branch: &'a str,
+    pub epic_id: Option<EpicId>,
+    pub sort_order: Option<i64>,
+    pub tag: Option<TaskTag>,
+    pub project_id: ProjectId,
+}
+
+// ---------------------------------------------------------------------------
 // EpicPatch — builder for selective epic field updates
 // ---------------------------------------------------------------------------
 
@@ -142,20 +161,7 @@ impl PrKind {
 
 /// Task CRUD, list, patch, status updates.
 pub trait TaskCrud: Send + Sync {
-    #[allow(clippy::too_many_arguments)]
-    fn create_task(
-        &self,
-        title: &str,
-        description: &str,
-        repo_path: &str,
-        plan: Option<&str>,
-        status: TaskStatus,
-        base_branch: &str,
-        epic_id: Option<EpicId>,
-        sort_order: Option<i64>,
-        tag: Option<crate::models::TaskTag>,
-        project_id: ProjectId,
-    ) -> Result<TaskId>;
+    fn create_task(&self, req: CreateTaskRequest<'_>) -> Result<TaskId>;
     fn get_task(&self, id: TaskId) -> Result<Option<Task>>;
     fn list_all(&self) -> Result<Vec<Task>>;
     fn list_by_status(&self, status: TaskStatus) -> Result<Vec<Task>>;
