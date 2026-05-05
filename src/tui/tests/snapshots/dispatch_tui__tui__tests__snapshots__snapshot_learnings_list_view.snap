@@ -2,10 +2,10 @@
 source: src/tui/tests/snapshots.rs
 expression: rendered
 ---
-┌ Learnings (3) — sorted by use ───────────────────────────────────────────────────────────────────────────────────────┐
-│[h] Prefer concise responses over verbose ones  ✓0  global           ◦ review 0                     ◦ done 1          │
-│[!] tokio::spawn needs explicit error logging  ✓0  repo:repo────────────────────────────│─────────────────────────────│
-│[->] Use LearningService not raw db for learnings  ✓0  repo:repo                        │─────────────────────────────│
+┌ Learnings (2) — sorted by use ───────────────────────────────────────────────────────────────────────────────────────┐
+│[h] Prefer concise responses over verbose ones  ✓3  global           ◦ review 0                     ◦ done 1          │
+│[!] tokio::spawn needs explicit error logging  ✓1  repo:repo────────────────────────────│─────────────────────────────│
+│─────────────────────────────│  ── active                │                              │─────────────────────────────│
 │ ▌ #1 Task 1                 │───────────────────────────│                              │  ▎ #4 Task 4                │
 │  ◦ <1h                      │  ▎ #3 Task 3              │                              │   ✓ <1h                     │
 │─────────────────────────────│   ◉ running               │                              │─────────────────────────────│
@@ -33,10 +33,10 @@ expression: rendered
  Detail ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 [h] Prefer concise responses over verbose ones            │                              │
                               │                           │                              │
-scope:global  confirmed:0───────────────────────────────────────────────────────────────────────────────────────────────
+This helps agents stay focused.─────────────────────────────────────────────────────────────────────────────────────────
+
+scope:global  confirmed:3
 tags: style
-
-
 
 
 

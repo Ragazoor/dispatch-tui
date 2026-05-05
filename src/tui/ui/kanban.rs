@@ -1,4 +1,4 @@
-use super::learnings::render_proposed_learnings;
+use super::learnings::render_learnings;
 use super::palette::{
     ARCHIVE_COL_BG, ARCHIVE_STRIPE, BLUE, BORDER, CYAN, FG, FLASH_BG, GREEN, MUTED, MUTED_LIGHT,
     PROJECTS_COL_BG, PROJECTS_CURSOR_BG, PURPLE, YELLOW,
@@ -144,7 +144,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     render_repo_filter_overlay(frame, app, area);
     render_tips_overlay(frame, app, area);
     render_task_detail_overlay(frame, app, area);
-    render_proposed_learnings(frame, app, area);
+    render_learnings(frame, app, area);
 }
 
 /// Returns the layout constraints for the summary row based on which column is focused.
