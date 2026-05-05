@@ -91,7 +91,6 @@ patch_struct! {
 // CreateTaskRequest — input struct for the create_task DB operation
 // ---------------------------------------------------------------------------
 
-/// All parameters needed to insert a new task row.
 #[derive(Debug)]
 pub struct CreateTaskRequest<'a> {
     pub title: &'a str,

@@ -13,7 +13,6 @@ pub(super) fn in_memory_db() -> Database {
     Database::open_in_memory().unwrap()
 }
 
-/// Helper: create_task + get_task in one step (replaces removed trait method).
 pub(super) fn create_task_returning(
     db: &Database,
     title: &str,
