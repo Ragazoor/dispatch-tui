@@ -33,11 +33,10 @@ impl TuiRuntime {
     ) {
         use crate::service::CreateTaskParams;
         let repo_path = draft.repo_path.clone();
-        // Resolve the actual default branch of the target repo so dispatch
-        // doesn't fail on repos whose default isn't `main`. detect_default_branch
-        // falls back to "main" when origin/HEAD is unavailable.
-        let base_branch =
-            crate::git::detect_default_branch(&models::expand_tilde(&repo_path), &*self.runner);
+        let expanded = models::expand_tilde(&repo_path);
+        // detect_default_branch falls back to "main" when origin/HEAD is
+        // unavailable, so dispatch doesn't fail on repos whose default isn't main.
+        let base_branch = crate::git::detect_default_branch(&expanded, &*self.runner);
         let Some(task) = self.create_task(
             app,
             CreateTaskParams {
@@ -56,7 +55,6 @@ impl TuiRuntime {
         };
         app.update(Message::TaskCreated { task: task.clone() });
         app.update(Message::MarkDispatching(task.id));
-        let expanded = models::expand_tilde(&repo_path);
         let _ = self.database.save_repo_path(&expanded);
         let paths = self.database.list_repo_paths().unwrap_or_default();
         app.update(Message::RepoPathsUpdated(paths));

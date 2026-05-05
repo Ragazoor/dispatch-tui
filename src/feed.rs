@@ -26,15 +26,16 @@ pub(crate) fn resolve_base_branches(
     repo_paths
         .iter()
         .map(|path| {
-            if path.is_empty() {
-                return "main".to_string();
-            }
-            if let Some(branch) = cache.get(path.as_str()) {
-                return branch.clone();
-            }
-            let branch = detect_default_branch(path, runner);
-            cache.insert(path.as_str(), branch.clone());
-            branch
+            cache
+                .entry(path.as_str())
+                .or_insert_with(|| {
+                    if path.is_empty() {
+                        "main".to_string()
+                    } else {
+                        detect_default_branch(path, runner)
+                    }
+                })
+                .clone()
         })
         .collect()
 }

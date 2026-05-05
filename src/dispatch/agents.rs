@@ -324,26 +324,11 @@ fn provision_and_dispatch(
             }
         }
         WorktreeStrategy::NewBranch { branch_name } => {
-            let head_output = runner
-                .run(
-                    "git",
-                    &[
-                        "-C",
-                        &config.repo_path,
-                        "symbolic-ref",
-                        "refs/remotes/origin/HEAD",
-                    ],
-                )
-                .context("failed to detect default branch")?;
-            let head_stdout = String::from_utf8_lossy(&head_output.stdout);
-            let default_branch = head_stdout
-                .trim()
-                .strip_prefix("refs/remotes/origin/")
-                .unwrap_or("main");
+            let default_branch = detect_default_branch(&config.repo_path, runner);
 
             let _ = runner.run(
                 "git",
-                &["-C", &config.repo_path, "fetch", "origin", default_branch],
+                &["-C", &config.repo_path, "fetch", "origin", &default_branch],
             );
 
             if !std::path::Path::new(&worktree_path).exists() {
