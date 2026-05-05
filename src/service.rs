@@ -1044,19 +1044,6 @@ impl LearningService {
             .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
     }
 
-    pub fn approve_learning(&self, id: crate::models::LearningId) -> Result<(), ServiceError> {
-        let learning = self.get_learning(id)?;
-        if learning.status != crate::models::LearningStatus::Approved {
-            return Err(ServiceError::Validation(format!(
-                "learning is already in a terminal state (current status: {})",
-                learning.status
-            )));
-        }
-        // Learning is already approved; no-op (approve is idempotent post-removal of Proposed).
-        let _ = learning;
-        Ok(())
-    }
-
     pub fn reject_learning(&self, id: crate::models::LearningId) -> Result<(), ServiceError> {
         let learning = self.get_learning(id)?;
         if learning.status.is_terminal() {
@@ -1091,11 +1078,10 @@ impl LearningService {
 
     pub fn update_learning(&self, params: UpdateLearningParams) -> Result<(), ServiceError> {
         let learning = self.get_learning(params.id)?;
-        if learning.status != crate::models::LearningStatus::Approved {
-            return Err(ServiceError::Validation(format!(
-                "can only edit approved learnings (current status: {})",
-                learning.status
-            )));
+        if learning.status.is_terminal() {
+            return Err(ServiceError::Validation(
+                "cannot edit a rejected or archived learning".to_string(),
+            ));
         }
         if let Some(ref s) = params.summary {
             if s.trim().is_empty() {
@@ -3300,44 +3286,6 @@ mod learning_tests {
     }
 
     #[test]
-    fn approve_learning_from_proposed_succeeds() {
-        let svc = service();
-        let id = svc
-            .create_learning(CreateLearningParams {
-                kind: LearningKind::Convention,
-                summary: "A convention".to_string(),
-                detail: None,
-                scope: LearningScope::User,
-                scope_ref: None,
-                tags: vec![],
-                source_task_id: None,
-            })
-            .unwrap();
-        svc.approve_learning(id).unwrap();
-        let learning = svc.get_learning(id).unwrap();
-        assert_eq!(learning.status, LearningStatus::Approved);
-    }
-
-    #[test]
-    fn approve_learning_from_approved_fails() {
-        let svc = service();
-        let id = svc
-            .create_learning(CreateLearningParams {
-                kind: LearningKind::Convention,
-                summary: "A convention".to_string(),
-                detail: None,
-                scope: LearningScope::User,
-                scope_ref: None,
-                tags: vec![],
-                source_task_id: None,
-            })
-            .unwrap();
-        svc.approve_learning(id).unwrap();
-        let err = svc.approve_learning(id).unwrap_err();
-        assert!(matches!(err, ServiceError::Validation(_)));
-    }
-
-    #[test]
     fn reject_learning_from_proposed_succeeds() {
         let svc = service();
         let id = svc
@@ -3370,7 +3318,6 @@ mod learning_tests {
                 source_task_id: None,
             })
             .unwrap();
-        svc.approve_learning(id).unwrap();
         svc.archive_learning(id).unwrap();
         let err = svc.reject_learning(id).unwrap_err();
         assert!(matches!(err, ServiceError::Validation(_)));
@@ -3390,28 +3337,9 @@ mod learning_tests {
                 source_task_id: None,
             })
             .unwrap();
-        svc.approve_learning(id).unwrap();
         svc.archive_learning(id).unwrap();
         let learning = svc.get_learning(id).unwrap();
         assert_eq!(learning.status, LearningStatus::Archived);
-    }
-
-    #[test]
-    fn archive_learning_from_proposed_fails() {
-        let svc = service();
-        let id = svc
-            .create_learning(CreateLearningParams {
-                kind: LearningKind::Convention,
-                summary: "A convention".to_string(),
-                detail: None,
-                scope: LearningScope::User,
-                scope_ref: None,
-                tags: vec![],
-                source_task_id: None,
-            })
-            .unwrap();
-        let err = svc.archive_learning(id).unwrap_err();
-        assert!(matches!(err, ServiceError::Validation(_)));
     }
 
     #[test]
@@ -3468,24 +3396,6 @@ mod learning_tests {
     }
 
     #[test]
-    fn confirm_learning_on_proposed_fails() {
-        let svc = service();
-        let id = svc
-            .create_learning(CreateLearningParams {
-                kind: LearningKind::Convention,
-                summary: "A convention".to_string(),
-                detail: None,
-                scope: LearningScope::User,
-                scope_ref: None,
-                tags: vec![],
-                source_task_id: None,
-            })
-            .unwrap();
-        let err = svc.confirm_learning(id).unwrap_err();
-        assert!(matches!(err, ServiceError::Validation(_)));
-    }
-
-    #[test]
     fn confirm_learning_on_approved_succeeds() {
         let svc = service();
         let id = svc
@@ -3499,7 +3409,6 @@ mod learning_tests {
                 source_task_id: None,
             })
             .unwrap();
-        svc.approve_learning(id).unwrap();
         svc.confirm_learning(id).unwrap();
         let learning = svc.get_learning(id).unwrap();
         assert_eq!(learning.confirmed_count, 1);

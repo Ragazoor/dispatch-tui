@@ -36,7 +36,10 @@ impl TuiRuntime {
     }
 
     pub(super) fn exec_approve_learning(&self, app: &mut App, id: LearningId) {
-        self.exec_action_learning(app, id, "approve", |svc, id| svc.approve_learning(id));
+        // Learnings are created as Approved; "approving" from the review overlay is a no-op
+        // in the DB but still removes the entry from the overlay list.
+        app.update(Message::LearningActioned(id));
+        app.update(Message::StatusInfo(format!("Learning {id} approved")));
     }
 
     pub(super) fn exec_reject_learning(&self, app: &mut App, id: LearningId) {
