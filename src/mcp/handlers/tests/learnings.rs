@@ -381,9 +381,18 @@ async fn record_learning_still_creates_when_similar_exists() {
     .await;
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
 
-    let all = state.db.list_learnings(crate::db::LearningFilter::default()).unwrap();
-    assert_eq!(all.len(), 2, "expected pre-existing + newly created learning");
-    let new_one = all.iter().find(|l| l.summary == "New entry despite similar existing");
+    let all = state
+        .db
+        .list_learnings(crate::db::LearningFilter::default())
+        .unwrap();
+    assert_eq!(
+        all.len(),
+        2,
+        "expected pre-existing + newly created learning"
+    );
+    let new_one = all
+        .iter()
+        .find(|l| l.summary == "New entry despite similar existing");
     assert!(new_one.is_some(), "newly created learning must exist");
 }
 

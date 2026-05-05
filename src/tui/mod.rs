@@ -544,8 +544,7 @@ impl App {
                 self.board.epics.iter().map(|e| (e.id, e)).collect();
 
             // SubstatusLabel items only make sense in Running/Review columns.
-            let show_substatus_labels =
-                matches!(status, TaskStatus::Running | TaskStatus::Review);
+            let show_substatus_labels = matches!(status, TaskStatus::Running | TaskStatus::Review);
 
             // Sort: (substatus_priority, epic_sort_key, task_sort_key, task_id).
             // Orphan tasks (epic not in board) sort last within each substatus group.
@@ -804,10 +803,7 @@ impl App {
         let status = TaskStatus::from_column_index(col - 1)?;
         let items = self.column_items_for_status(status);
         let row = self.selection().row(col);
-        items
-            .into_iter()
-            .filter(|i| i.is_selectable())
-            .nth(row)
+        items.into_iter().filter(|i| i.is_selectable()).nth(row)
     }
 
     /// Look up the title of an epic by ID.

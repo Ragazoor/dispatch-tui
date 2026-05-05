@@ -572,8 +572,12 @@ mod tests {
     #[test]
     fn learning_instruction_query_comes_before_confirm() {
         let text = learning_tools_instruction();
-        let query_pos = text.find("query_learnings").expect("query_learnings must be present");
-        let confirm_pos = text.find("confirm_learning").expect("confirm_learning must be present");
+        let query_pos = text
+            .find("query_learnings")
+            .expect("query_learnings must be present");
+        let confirm_pos = text
+            .find("confirm_learning")
+            .expect("confirm_learning must be present");
         assert!(
             query_pos < confirm_pos,
             "query_learnings step should appear before confirm_learning step in the instruction"

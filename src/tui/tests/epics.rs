@@ -2449,12 +2449,30 @@ fn flat_view_review_substatus_label_precedes_epic_header() {
     let items = app.column_items_for_status(TaskStatus::Review);
     // Expected: SubstatusLabel, EpicHeader, Task(1), SubstatusLabel, EpicHeader, Task(2)
     assert_eq!(items.len(), 6, "expected 6 items, got {}", items.len());
-    assert!(matches!(items[0], ColumnItem::SubstatusLabel(_)), "items[0] must be SubstatusLabel");
-    assert!(matches!(items[1], ColumnItem::EpicHeader(_)),    "items[1] must be EpicHeader");
-    assert!(matches!(items[2], ColumnItem::Task(_)),          "items[2] must be Task");
-    assert!(matches!(items[3], ColumnItem::SubstatusLabel(_)), "items[3] must be SubstatusLabel");
-    assert!(matches!(items[4], ColumnItem::EpicHeader(_)),    "items[4] must be EpicHeader");
-    assert!(matches!(items[5], ColumnItem::Task(_)),          "items[5] must be Task");
+    assert!(
+        matches!(items[0], ColumnItem::SubstatusLabel(_)),
+        "items[0] must be SubstatusLabel"
+    );
+    assert!(
+        matches!(items[1], ColumnItem::EpicHeader(_)),
+        "items[1] must be EpicHeader"
+    );
+    assert!(
+        matches!(items[2], ColumnItem::Task(_)),
+        "items[2] must be Task"
+    );
+    assert!(
+        matches!(items[3], ColumnItem::SubstatusLabel(_)),
+        "items[3] must be SubstatusLabel"
+    );
+    assert!(
+        matches!(items[4], ColumnItem::EpicHeader(_)),
+        "items[4] must be EpicHeader"
+    );
+    assert!(
+        matches!(items[5], ColumnItem::Task(_)),
+        "items[5] must be Task"
+    );
 }
 
 #[test]
@@ -2482,7 +2500,10 @@ fn flat_view_epic_repeated_across_substatus_groups() {
         .iter()
         .filter(|i| matches!(i, ColumnItem::EpicHeader(_)))
         .count();
-    assert_eq!(epic_header_count, 2, "EpicHeader must appear once per substatus group; got {epic_header_count}");
+    assert_eq!(
+        epic_header_count, 2,
+        "EpicHeader must appear once per substatus group; got {epic_header_count}"
+    );
 }
 
 #[test]
@@ -2501,7 +2522,9 @@ fn flat_view_backlog_no_substatus_labels() {
 
     let items = app.column_items_for_status(TaskStatus::Backlog);
     assert!(
-        !items.iter().any(|i| matches!(i, ColumnItem::SubstatusLabel(_))),
+        !items
+            .iter()
+            .any(|i| matches!(i, ColumnItem::SubstatusLabel(_))),
         "Backlog column must not contain SubstatusLabel items"
     );
 }

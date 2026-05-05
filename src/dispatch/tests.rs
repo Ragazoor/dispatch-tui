@@ -2102,9 +2102,9 @@ fn fix_agent_returns_early_when_window_exists() {
     let repo_short = dir.path().file_name().unwrap().to_str().unwrap();
     let tmux_window = format!("fix-{repo_short}-1");
 
-    let mock = MockProcessRunner::new(vec![
-        MockProcessRunner::ok_with_stdout(tmux_window.as_bytes()),
-    ]);
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(
+        tmux_window.as_bytes(),
+    )]);
 
     let result = dispatch_fix_agent(fix_req(&repo_path, 1), &mock).unwrap();
 
@@ -2123,13 +2123,13 @@ fn fix_agent_calls_worktree_add_with_new_branch_when_dir_missing() {
     // Do NOT pre-create the worktree dir — git worktree add must be called.
 
     let mock = MockProcessRunner::new(vec![
-        MockProcessRunner::ok_with_stdout(b"\n"),                          // has_window: no match
-        MockProcessRunner::ok(),                                           // git worktree prune
+        MockProcessRunner::ok_with_stdout(b"\n"), // has_window: no match
+        MockProcessRunner::ok(),                  // git worktree prune
         MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // detect_default_branch
-        MockProcessRunner::ok(),                                           // git fetch origin main
-        MockProcessRunner::ok(),                                           // git worktree add -b
-        MockProcessRunner::ok(),                                           // tmux new-window
-        // fs::write will fail (mock worktree add doesn't create dir on disk)
+        MockProcessRunner::ok(),                  // git fetch origin main
+        MockProcessRunner::ok(),                  // git worktree add -b
+        MockProcessRunner::ok(),                  // tmux new-window
+                                                  // fs::write will fail (mock worktree add doesn't create dir on disk)
     ]);
 
     // The function errors at fs::write — we still verify the calls made before that.
@@ -2140,7 +2140,10 @@ fn fix_agent_calls_worktree_add_with_new_branch_when_dir_missing() {
     let wt_call = calls.iter().find(|(prog, args)| {
         prog == "git" && args.contains(&"add".to_string()) && args.contains(&"worktree".to_string())
     });
-    assert!(wt_call.is_some(), "git worktree add should be called when dir is missing");
+    assert!(
+        wt_call.is_some(),
+        "git worktree add should be called when dir is missing"
+    );
     let (_, args) = wt_call.unwrap();
     assert!(
         args.contains(&"-b".to_string()),
@@ -2157,13 +2160,13 @@ fn fix_agent_with_existing_dir_skips_worktree_add_and_uses_accept_edits() {
     let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("fix-vuln-1");
 
     let mock = MockProcessRunner::new(vec![
-        MockProcessRunner::ok_with_stdout(b"\n"),                          // has_window: no match
-        MockProcessRunner::ok(),                                           // git worktree prune
+        MockProcessRunner::ok_with_stdout(b"\n"), // has_window: no match
+        MockProcessRunner::ok(),                  // git worktree prune
         MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // detect_default_branch
-        MockProcessRunner::ok(),                                           // git fetch origin main
-        MockProcessRunner::ok(),                                           // tmux new-window
-        MockProcessRunner::ok(),                                           // tmux send-keys -l
-        MockProcessRunner::ok(),                                           // tmux send-keys Enter
+        MockProcessRunner::ok(),                  // git fetch origin main
+        MockProcessRunner::ok(),                  // tmux new-window
+        MockProcessRunner::ok(),                  // tmux send-keys -l
+        MockProcessRunner::ok(),                  // tmux send-keys Enter
     ]);
 
     dispatch_fix_agent(fix_req(&repo_path, 1), &mock).unwrap();
@@ -2198,7 +2201,10 @@ fn provision_and_dispatch_worktree_add_fails() {
 
     let result = dispatch_review_agent(&review_req(&repo_path, 5, "feature-x", false), &mock);
 
-    assert!(result.is_err(), "worktree add failure should propagate as error");
+    assert!(
+        result.is_err(),
+        "worktree add failure should propagate as error"
+    );
     let calls = mock.recorded_calls();
     assert!(
         calls
@@ -2214,9 +2220,7 @@ fn provision_and_dispatch_worktree_add_fails() {
 fn provision_worktree_git_add_fails_returns_error() {
     let (_dir, repo_path) = make_test_repo();
     // No base_branch → no fetch; first runner call is git worktree add.
-    let mock = MockProcessRunner::new(vec![MockProcessRunner::fail(
-        "fatal: not a git repository",
-    )]);
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("fatal: not a git repository")]);
 
     let task = make_task(&repo_path);
     let result = provision_worktree(&task, &mock, None);
