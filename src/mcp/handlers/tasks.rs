@@ -692,21 +692,6 @@ pub(super) async fn handle_wrap_up(
 
     match rebase_result {
         Ok(()) => {
-            let patch = db::TaskPatch::new().status(TaskStatus::Done);
-            if let Err(e) = db.patch_task(task_id, &patch) {
-                tracing::warn!(
-                    task_id = task_id.0,
-                    "MCP wrap_up: failed to set task to done: {e}"
-                );
-            }
-            if let Some(epic_id) = task.epic_id {
-                if let Err(err) = db.recalculate_epic_status(epic_id) {
-                    tracing::warn!(
-                        "failed to recalculate epic status for epic {}: {err}",
-                        epic_id.0
-                    );
-                }
-            }
             state.notify();
             JsonRpcResponse::ok(
                 id,
@@ -771,14 +756,25 @@ pub(super) fn handle_exit_session(
     };
 
     if is_second_call {
-        let patch = crate::db::TaskPatch::new().tmux_window(None);
+        let patch = crate::db::TaskPatch::new()
+            .status(TaskStatus::Done)
+            .sub_status(SubStatus::default_for(TaskStatus::Done))
+            .tmux_window(None);
         if let Err(e) = state.db.patch_task(task_id, &patch) {
             tracing::warn!(
                 task_id = task_id.0,
-                "exit_session: failed to clear tmux_window: {e}"
+                "exit_session: failed to apply closing patch: {e}"
             );
         }
-        state.notify(); // notify immediately after DB write
+        if let Some(epic_id) = task.epic_id {
+            if let Err(err) = state.db.recalculate_epic_status(epic_id) {
+                tracing::warn!(
+                    "failed to recalculate epic status for epic {}: {err}",
+                    epic_id.0
+                );
+            }
+        }
+        state.notify();
         let tmux_window = task.tmux_window;
         let runner = state.runner.clone();
         tokio::task::spawn_blocking(move || {

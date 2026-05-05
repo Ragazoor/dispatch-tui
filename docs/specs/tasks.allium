@@ -571,12 +571,17 @@ rule WrapUpRebase {
         if task.sub_status = conflict:
             task.sub_status = core/SubStatus.default_for(task.status)
     ensures: BranchRebased(branch: branch, onto: task.base_branch)
-    ensures: task.tmux_window = null
-    ensures: task.status = done
-    ensures: task.sub_status = core/SubStatus.default_for(done)
     ensures: task.updated_at = now
 
     @guidance
+        -- WrapUpRebase is the rebase mechanic only — it does NOT change
+        -- task.status or kill the tmux window. The Done transition for
+        -- the MCP path is owned by ExitSession (the agent must call
+        -- exit_session to close its session, which marks the task done
+        -- and kills tmux). The TUI path (W then r) emits FinishTask and
+        -- is governed by FinishTaskSuccess, which keeps its own Done
+        -- transition independent of this rule.
+        --
         -- Optimistically clears conflict sub_status before attempting the
         -- rebase, so the task is no longer visually flagged while the
         -- rebase runs in the background.
@@ -588,12 +593,11 @@ rule WrapUpRebase {
         --      On conflict: abort the rebase and emit RebaseConflict.
         --   4. `git merge --ff-only <branch>` in the repo root to
         --      fast-forward the base branch to the rebased branch.
-        --   5. Kill the tmux window (if it still exists).
         -- The worktree is preserved after a successful rebase (cleaned
-        -- up only on archive). Uses the same finish_task path as
-        -- FinishTaskSuccess. The operation runs in background via
-        -- spawn_blocking. Available from both the TUI (W then r) and
-        -- MCP (wrap_up tool with action "rebase").
+        -- up only on archive). The MCP wrap_up handler calls finish_task
+        -- with tmux_window=None so the agent's session stays alive until
+        -- it explicitly calls exit_session. Available from both the TUI
+        -- (W then r) and MCP (wrap_up tool with action "rebase").
 }
 
 rule WrapUpPr {
@@ -1554,13 +1558,24 @@ rule ExitSession {
         else:
             ExitSessionCompleted(task: task)
             TmuxWindowKilled(task: task)
+            task.status = done
+            task.sub_status = core/SubStatus.default_for(done)
+            task.tmux_window = null
+            task.updated_at = now
 
     @guidance
         -- Two-step call controlled by McpState.exit_session_pending (in-memory
         -- Mutex<HashSet<TaskId>>).
         -- First call: insert task_id into set, return reflection nudge asking the
         -- agent to call record_learning and query_learnings before finishing.
-        -- Second call: remove from set, kill tmux window, clear tmux_window in DB.
+        -- Second call: remove from set, mark the task done (status=done,
+        -- sub_status=default_for(done)), clear tmux_window in DB, and kill
+        -- the tmux window. Marking the task done is the canonical session-
+        -- close transition for the MCP flow — wrap_up performs only the
+        -- rebase mechanic and defers the Done transition to here.
+        -- If the task is part of an epic, epic status is recalculated after
+        -- the patch is committed.
+        -- Idempotent for tasks already in done.
         -- The pending set is cleared when the task is re-dispatched, so a
         -- resurrected agent always goes through the two-step again.
         -- Implemented in handle_exit_session() (src/mcp/handlers/tasks.rs).

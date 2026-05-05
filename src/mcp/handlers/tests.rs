@@ -4133,7 +4133,7 @@ async fn list_tasks_done_status_filter() {
 // =======================================================================
 
 #[tokio::test]
-async fn wrap_up_rebase_sets_task_to_done() {
+async fn wrap_up_rebase_does_not_change_status() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse --abbrev-ref HEAD
@@ -4183,13 +4183,13 @@ async fn wrap_up_rebase_sets_task_to_done() {
     let task = db.get_task(task_id).unwrap().unwrap();
     assert_eq!(
         task.status,
-        TaskStatus::Done,
-        "Task should be Done after successful rebase"
+        TaskStatus::Review,
+        "wrap_up must not change status — exit_session owns the Done transition"
     );
 }
 
 #[tokio::test]
-async fn wrap_up_rebase_recalculates_epic_status() {
+async fn wrap_up_rebase_does_not_recalculate_epic_status() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse --abbrev-ref HEAD
@@ -4227,8 +4227,8 @@ async fn wrap_up_rebase_recalculates_epic_status() {
         &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-only-task")),
     )
     .unwrap();
-    // Move epic to Running to simulate in-progress state
     db.recalculate_epic_status(epic.id).unwrap();
+    let epic_status_before = db.get_epic(epic.id).unwrap().unwrap().status;
 
     let resp = call(
         &state,
@@ -4241,11 +4241,10 @@ async fn wrap_up_rebase_recalculates_epic_status() {
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
 
-    let epic = db.get_epic(epic.id).unwrap().unwrap();
+    let epic_after = db.get_epic(epic.id).unwrap().unwrap();
     assert_eq!(
-        epic.status,
-        TaskStatus::Done,
-        "Epic should auto-advance to Done when all subtasks complete"
+        epic_after.status, epic_status_before,
+        "wrap_up must not recalculate epic status — that runs at exit_session"
     );
 }
 
@@ -5207,7 +5206,11 @@ async fn wrap_up_rebase_preserves_tmux_window() {
     );
 
     let task = db.get_task(task_id).unwrap().unwrap();
-    assert_eq!(task.status, TaskStatus::Done);
+    assert_eq!(
+        task.status,
+        TaskStatus::Review,
+        "wrap_up must not change status — exit_session owns the Done transition"
+    );
     assert!(
         task.tmux_window.is_some(),
         "tmux_window must NOT be cleared — exit_session owns the window kill"
@@ -8204,5 +8207,344 @@ async fn wrap_up_rebase_does_not_kill_window() {
     assert!(
         task.tmux_window.is_some(),
         "wrap_up(rebase) must not clear tmux_window — exit_session is responsible"
+    );
+}
+
+// -- exit_session: Done transition (added with the wrap_up/exit_session alignment) ---
+
+#[tokio::test]
+async fn exit_session_second_call_marks_task_done() {
+    // No-epic branch: the closing call must mark the task Done even when
+    // there is no epic to recalculate. Pins the `is_some()` guard around
+    // recalculate_epic_status.
+    let state = test_state();
+    let task_id = create_running_task_with_window(&state);
+
+    call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "exit_session",
+            "arguments": { "task_id": task_id.0 }
+        })),
+    )
+    .await;
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "exit_session",
+            "arguments": { "task_id": task_id.0 }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "{:?}", resp.error);
+
+    let task = state.db.get_task(task_id).unwrap().unwrap();
+    assert_eq!(task.status, TaskStatus::Done);
+    assert_eq!(task.sub_status, SubStatus::default_for(TaskStatus::Done));
+    assert!(task.tmux_window.is_none());
+    assert!(task.epic_id.is_none(), "fixture should have no epic");
+}
+
+#[tokio::test]
+async fn exit_session_first_call_does_not_change_status() {
+    let state = test_state();
+    let task_id = create_running_task_with_window(&state);
+
+    call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "exit_session",
+            "arguments": { "task_id": task_id.0 }
+        })),
+    )
+    .await;
+
+    let task = state.db.get_task(task_id).unwrap().unwrap();
+    assert_eq!(
+        task.status,
+        TaskStatus::Running,
+        "first exit_session call (reflection nudge) must not change status"
+    );
+    assert!(
+        task.tmux_window.is_some(),
+        "first call must not clear tmux_window"
+    );
+}
+
+#[tokio::test]
+async fn exit_session_already_done_task_stays_done() {
+    // Idempotency: a task that is somehow already Done before exit_session
+    // closes must remain Done after the closing call.
+    let state = test_state();
+    let task_id = create_running_task_with_window(&state);
+    state
+        .db
+        .patch_task(
+            task_id,
+            &crate::db::TaskPatch::new().status(TaskStatus::Done),
+        )
+        .unwrap();
+
+    call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "exit_session",
+            "arguments": { "task_id": task_id.0 }
+        })),
+    )
+    .await;
+    call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "exit_session",
+            "arguments": { "task_id": task_id.0 }
+        })),
+    )
+    .await;
+
+    let task = state.db.get_task(task_id).unwrap().unwrap();
+    assert_eq!(task.status, TaskStatus::Done);
+    assert!(task.tmux_window.is_none());
+}
+
+#[tokio::test]
+async fn exit_session_recalculates_epic_status() {
+    let state = test_state();
+    let epic = state
+        .db
+        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .unwrap();
+    let task_id = create_running_task_with_window(&state);
+    state.db.set_task_epic_id(task_id, Some(epic.id)).unwrap();
+    state.db.recalculate_epic_status(epic.id).unwrap();
+    let epic_before = state.db.get_epic(epic.id).unwrap().unwrap();
+    assert_ne!(
+        epic_before.status,
+        TaskStatus::Done,
+        "precondition: epic should be in-progress before exit_session"
+    );
+
+    call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "exit_session",
+            "arguments": { "task_id": task_id.0 }
+        })),
+    )
+    .await;
+    call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "exit_session",
+            "arguments": { "task_id": task_id.0 }
+        })),
+    )
+    .await;
+
+    let epic_after = state.db.get_epic(epic.id).unwrap().unwrap();
+    assert_eq!(
+        epic_after.status,
+        TaskStatus::Done,
+        "epic should auto-advance to Done once its only subtask is Done"
+    );
+}
+
+#[tokio::test]
+async fn exit_session_resets_sub_status_to_default_for_done() {
+    // A task that carries a non-default sub_status (e.g. Stale) into the
+    // closing call must have it reset to the Done default.
+    let state = test_state();
+    let task_id = create_running_task_with_window(&state);
+    state
+        .db
+        .patch_task(
+            task_id,
+            &crate::db::TaskPatch::new().sub_status(SubStatus::Stale),
+        )
+        .unwrap();
+
+    call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "exit_session",
+            "arguments": { "task_id": task_id.0 }
+        })),
+    )
+    .await;
+    call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "exit_session",
+            "arguments": { "task_id": task_id.0 }
+        })),
+    )
+    .await;
+
+    let task = state.db.get_task(task_id).unwrap().unwrap();
+    assert_eq!(task.status, TaskStatus::Done);
+    assert_eq!(
+        task.sub_status,
+        SubStatus::default_for(TaskStatus::Done),
+        "closing exit_session must reset sub_status to default_for(Done)"
+    );
+}
+
+#[tokio::test]
+async fn exit_session_emits_refresh_after_done_patch() {
+    // Pin the notify ordering: a Refresh event fires after the closing call
+    // commits the Done patch, so the TUI re-renders the task in Done.
+    let (state, mut rx) = test_state_with_notify();
+    let task_id = create_running_task_with_window(&state);
+
+    call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "exit_session",
+            "arguments": { "task_id": task_id.0 }
+        })),
+    )
+    .await;
+    while rx.try_recv().is_ok() {}
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "exit_session",
+            "arguments": { "task_id": task_id.0 }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "{:?}", resp.error);
+
+    // DB must already be Done by the time the Refresh fires.
+    let task = state.db.get_task(task_id).unwrap().unwrap();
+    assert_eq!(task.status, TaskStatus::Done);
+
+    let event = rx
+        .try_recv()
+        .expect("expected Refresh after closing exit_session");
+    assert!(matches!(event, crate::mcp::McpEvent::Refresh));
+}
+
+#[tokio::test]
+async fn wrap_up_then_exit_session_end_to_end() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse --abbrev-ref HEAD
+        MockProcessRunner::fail(""),                  // git remote get-url (no remote)
+        MockProcessRunner::ok(),                      // git rebase main
+        MockProcessRunner::ok(),                      // git merge --ff-only
+        // exit_session second call kills the tmux window:
+        MockProcessRunner::ok(), // tmux has-session
+        MockProcessRunner::ok(), // tmux kill-window
+    ]));
+    let state = Arc::new(McpState {
+        db: db.clone(),
+        notify_tx: None,
+        runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
+    });
+
+    let epic = db
+        .create_epic("E2E Epic", "", "/repo", None, ProjectId(1))
+        .unwrap();
+    let task_id = db
+        .create_task(
+            "E2E Task",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Running,
+            "main",
+            None,
+            None,
+            None,
+            ProjectId(1),
+        )
+        .unwrap();
+    db.set_task_epic_id(task_id, Some(epic.id)).unwrap();
+    db.patch_task(
+        task_id,
+        &crate::db::TaskPatch::new()
+            .worktree(Some("/repo/.worktrees/e2e"))
+            .tmux_window(Some("e2e-window")),
+    )
+    .unwrap();
+    db.recalculate_epic_status(epic.id).unwrap();
+    let epic_before = db.get_epic(epic.id).unwrap().unwrap();
+    assert_ne!(epic_before.status, TaskStatus::Done);
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "wrap_up",
+            "arguments": { "task_id": task_id.0, "action": "rebase" }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "{:?}", resp.error);
+
+    let after_wrap_up = db.get_task(task_id).unwrap().unwrap();
+    assert_eq!(
+        after_wrap_up.status,
+        TaskStatus::Running,
+        "after wrap_up: status must still be Running"
+    );
+    assert!(
+        after_wrap_up.tmux_window.is_some(),
+        "after wrap_up: tmux_window must be preserved"
+    );
+    let epic_after_wrap_up = db.get_epic(epic.id).unwrap().unwrap();
+    assert_eq!(
+        epic_after_wrap_up.status, epic_before.status,
+        "after wrap_up: epic status must not change"
+    );
+
+    call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "exit_session",
+            "arguments": { "task_id": task_id.0 }
+        })),
+    )
+    .await;
+    let close_resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "exit_session",
+            "arguments": { "task_id": task_id.0 }
+        })),
+    )
+    .await;
+    assert!(close_resp.error.is_none(), "{:?}", close_resp.error);
+
+    let final_task = db.get_task(task_id).unwrap().unwrap();
+    assert_eq!(final_task.status, TaskStatus::Done);
+    assert_eq!(
+        final_task.sub_status,
+        SubStatus::default_for(TaskStatus::Done)
+    );
+    assert!(final_task.tmux_window.is_none());
+
+    let final_epic = db.get_epic(epic.id).unwrap().unwrap();
+    assert_eq!(
+        final_epic.status,
+        TaskStatus::Done,
+        "epic auto-advances once its only subtask completes via exit_session"
     );
 }
