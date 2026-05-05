@@ -1,0 +1,719 @@
+use super::*;
+
+// =======================================================================
+// Epic tool tests
+// =======================================================================
+
+#[tokio::test]
+async fn create_epic_minimal() {
+    let state = test_state();
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "create_epic",
+            "arguments": { "title": "My Epic", "repo_path": "/repo" }
+        })),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert!(text.contains("Epic"));
+    assert!(text.contains("created"));
+
+    let epics = state.db.list_epics().unwrap();
+    assert_eq!(epics.len(), 1);
+    assert_eq!(epics[0].title, "My Epic");
+    assert_eq!(epics[0].repo_path, "/repo");
+}
+
+#[tokio::test]
+async fn create_epic_with_all_fields() {
+    let state = test_state();
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "create_epic",
+            "arguments": {
+                "title": "Full Epic",
+                "repo_path": "/repo",
+                "description": "Epic desc"
+            }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "{:?}", resp.error);
+
+    let epics = state.db.list_epics().unwrap();
+    assert_eq!(epics[0].description, "Epic desc");
+}
+
+#[tokio::test]
+async fn create_epic_missing_title() {
+    let state = test_state();
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "create_epic",
+            "arguments": { "repo_path": "/repo" }
+        })),
+    )
+    .await;
+    assert_error(&resp, "Invalid arguments");
+}
+
+#[tokio::test]
+async fn create_epic_missing_repo_path() {
+    let state = test_state();
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "create_epic",
+            "arguments": { "title": "No Repo" }
+        })),
+    )
+    .await;
+    assert_error(&resp, "Invalid arguments");
+}
+
+#[tokio::test]
+async fn get_epic_found() {
+    let state = test_state();
+    let epic = state
+        .db
+        .create_epic("Get Me", "desc", "/repo", None, ProjectId(1))
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "get_epic",
+            "arguments": { "epic_id": epic.id.0 }
+        })),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert!(text.contains("Get Me"));
+    assert!(text.contains("desc"));
+    assert!(text.contains("/repo"));
+}
+
+#[tokio::test]
+async fn get_epic_not_found() {
+    let state = test_state();
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "get_epic",
+            "arguments": { "epic_id": 9999 }
+        })),
+    )
+    .await;
+    assert_error(&resp, "not found");
+}
+
+#[tokio::test]
+async fn get_epic_shows_subtask_summary() {
+    let state = test_state();
+    let epic = state
+        .db
+        .create_epic("With Tasks", "", "/repo", None, ProjectId(1))
+        .unwrap();
+    let t1 = state
+        .db
+        .create_task(
+            "Sub 1",
+            "",
+            "/repo",
+            None,
+            TaskStatus::Done,
+            "main",
+            None,
+            None,
+            None,
+            ProjectId(1),
+        )
+        .unwrap();
+    let t2 = state
+        .db
+        .create_task(
+            "Sub 2",
+            "",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+            ProjectId(1),
+        )
+        .unwrap();
+    state.db.set_task_epic_id(t1, Some(epic.id)).unwrap();
+    state.db.set_task_epic_id(t2, Some(epic.id)).unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "get_epic",
+            "arguments": { "epic_id": epic.id.0 }
+        })),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert!(
+        text.contains("1/2 done"),
+        "expected subtask summary, got: {text}"
+    );
+}
+
+#[tokio::test]
+async fn get_epic_accepts_string_id() {
+    let state = test_state();
+    let epic = state
+        .db
+        .create_epic("String ID", "", "/repo", None, ProjectId(1))
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "get_epic",
+            "arguments": { "epic_id": epic.id.0.to_string() }
+        })),
+    )
+    .await;
+    assert!(
+        resp.error.is_none(),
+        "should accept string epic_id: {:?}",
+        resp.error
+    );
+    let text = extract_response_text(&resp);
+    assert!(text.contains("String ID"));
+}
+
+#[tokio::test]
+async fn list_epics_empty() {
+    let state = test_state();
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "list_epics", "arguments": {} })),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert!(text.contains("No epics found"));
+}
+
+#[tokio::test]
+async fn list_epics_with_items() {
+    let state = test_state();
+    state
+        .db
+        .create_epic("Epic A", "desc a", "/repo", None, ProjectId(1))
+        .unwrap();
+    state
+        .db
+        .create_epic("Epic B", "desc b", "/repo", None, ProjectId(1))
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "list_epics", "arguments": {} })),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert!(text.contains("Epic A"));
+    assert!(text.contains("Epic B"));
+}
+
+#[tokio::test]
+async fn list_epics_shows_subtask_counts() {
+    let state = test_state();
+    let epic = state
+        .db
+        .create_epic("Tracked", "", "/repo", None, ProjectId(1))
+        .unwrap();
+    let t1 = state
+        .db
+        .create_task(
+            "Done",
+            "",
+            "/repo",
+            None,
+            TaskStatus::Done,
+            "main",
+            None,
+            None,
+            None,
+            ProjectId(1),
+        )
+        .unwrap();
+    let t2 = state
+        .db
+        .create_task(
+            "Pending",
+            "",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+            ProjectId(1),
+        )
+        .unwrap();
+    state.db.set_task_epic_id(t1, Some(epic.id)).unwrap();
+    state.db.set_task_epic_id(t2, Some(epic.id)).unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "list_epics", "arguments": {} })),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert!(
+        text.contains("1/2 done"),
+        "expected subtask counts, got: {text}"
+    );
+}
+
+#[tokio::test]
+async fn list_epics_excludes_archived() {
+    let state = test_state();
+    state
+        .db
+        .create_epic("Active Epic", "desc", "/repo", None, ProjectId(1))
+        .unwrap();
+    let archived_epic = state
+        .db
+        .create_epic("Archived Epic", "desc", "/repo", None, ProjectId(1))
+        .unwrap();
+    state
+        .db
+        .patch_epic(
+            archived_epic.id,
+            &db::EpicPatch::new().status(TaskStatus::Archived),
+        )
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "list_epics", "arguments": {} })),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert!(text.contains("Active Epic"), "should show active epic");
+    assert!(
+        !text.contains("Archived Epic"),
+        "should not show archived epic: {text}"
+    );
+}
+
+#[tokio::test]
+async fn update_epic_title() {
+    let state = test_state();
+    let epic = state
+        .db
+        .create_epic("Old Title", "", "/repo", None, ProjectId(1))
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_epic",
+            "arguments": { "epic_id": epic.id.0, "title": "New Title" }
+        })),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert!(text.contains("updated"));
+    assert!(text.contains("title"));
+
+    let updated = state.db.get_epic(epic.id).unwrap().unwrap();
+    assert_eq!(updated.title, "New Title");
+}
+
+#[tokio::test]
+async fn update_epic_mark_done() {
+    let state = test_state();
+    let epic = state
+        .db
+        .create_epic("To Finish", "", "/repo", None, ProjectId(1))
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_epic",
+            "arguments": { "epic_id": epic.id.0, "status": "done" }
+        })),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert!(
+        text.contains("status"),
+        "response should mention status field: {text}"
+    );
+
+    let updated = state.db.get_epic(epic.id).unwrap().unwrap();
+    assert_eq!(updated.status, crate::models::TaskStatus::Done);
+}
+
+#[tokio::test]
+async fn update_epic_multiple_fields() {
+    let state = test_state();
+    let epic = state
+        .db
+        .create_epic("Old", "old desc", "/repo", None, ProjectId(1))
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_epic",
+            "arguments": {
+                "epic_id": epic.id.0,
+                "title": "New",
+                "description": "new desc"
+            }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none());
+
+    let updated = state.db.get_epic(epic.id).unwrap().unwrap();
+    assert_eq!(updated.title, "New");
+    assert_eq!(updated.description, "new desc");
+}
+
+#[tokio::test]
+async fn update_epic_accepts_string_id() {
+    let state = test_state();
+    let epic = state
+        .db
+        .create_epic("Str Epic", "", "/repo", None, ProjectId(1))
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_epic",
+            "arguments": { "epic_id": epic.id.0.to_string(), "title": "Updated" }
+        })),
+    )
+    .await;
+    assert!(
+        resp.error.is_none(),
+        "should accept string epic_id: {:?}",
+        resp.error
+    );
+}
+
+#[tokio::test]
+async fn update_epic_plan() {
+    let state = test_state();
+    let epic = state
+        .db
+        .create_epic("Planned Epic", "", "/repo", None, ProjectId(1))
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_epic",
+            "arguments": { "epic_id": epic.id.0, "plan_path": "docs/plans/epic-plan.md" }
+        })),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert!(
+        text.contains("plan"),
+        "response should mention plan: {text}"
+    );
+
+    let updated = state.db.get_epic(epic.id).unwrap().unwrap();
+    assert_eq!(
+        updated.plan_path.as_deref(),
+        Some("docs/plans/epic-plan.md")
+    );
+}
+
+#[tokio::test]
+async fn update_epic_no_fields_errors() {
+    let state = test_state();
+    let epic = state
+        .db
+        .create_epic("Test", "", "/repo", None, ProjectId(1))
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_epic",
+            "arguments": { "epic_id": epic.id.0 }
+        })),
+    )
+    .await;
+    assert_error(&resp, "At least one");
+}
+
+#[tokio::test]
+async fn update_epic_feed_command_set() {
+    let state = test_state();
+    let epic = state
+        .db
+        .create_epic("Feed Epic", "", "/repo", None, ProjectId(1))
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_epic",
+            "arguments": { "epic_id": epic.id.0, "feed_command": "echo []" }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "{:?}", resp.error);
+
+    let updated = state.db.get_epic(epic.id).unwrap().unwrap();
+    assert_eq!(updated.feed_command.as_deref(), Some("echo []"));
+}
+
+#[tokio::test]
+async fn update_epic_feed_command_clear() {
+    let state = test_state();
+    let epic = state
+        .db
+        .create_epic("Feed Epic", "", "/repo", None, ProjectId(1))
+        .unwrap();
+    state
+        .db
+        .patch_epic(
+            epic.id,
+            &crate::db::EpicPatch::default().feed_command(Some("old cmd")),
+        )
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_epic",
+            "arguments": { "epic_id": epic.id.0, "feed_command": null }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "{:?}", resp.error);
+
+    let updated = state.db.get_epic(epic.id).unwrap().unwrap();
+    assert!(
+        updated.feed_command.is_none(),
+        "feed_command should be cleared"
+    );
+}
+
+#[tokio::test]
+async fn update_epic_feed_command_absent_preserves_existing() {
+    let state = test_state();
+    let epic = state
+        .db
+        .create_epic("Feed Epic", "", "/repo", None, ProjectId(1))
+        .unwrap();
+    state
+        .db
+        .patch_epic(
+            epic.id,
+            &crate::db::EpicPatch::default().feed_command(Some("keep me")),
+        )
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_epic",
+            "arguments": { "epic_id": epic.id.0, "title": "Updated Title" }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "{:?}", resp.error);
+
+    let updated = state.db.get_epic(epic.id).unwrap().unwrap();
+    assert_eq!(updated.feed_command.as_deref(), Some("keep me"));
+}
+
+#[tokio::test]
+async fn update_epic_feed_interval_secs_set() {
+    let state = test_state();
+    let epic = state
+        .db
+        .create_epic("Feed Epic", "", "/repo", None, ProjectId(1))
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_epic",
+            "arguments": { "epic_id": epic.id.0, "feed_interval_secs": 60 }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "{:?}", resp.error);
+
+    let updated = state.db.get_epic(epic.id).unwrap().unwrap();
+    assert_eq!(updated.feed_interval_secs, Some(60));
+}
+
+#[tokio::test]
+async fn update_epic_feed_interval_secs_clear() {
+    let state = test_state();
+    let epic = state
+        .db
+        .create_epic("Feed Epic", "", "/repo", None, ProjectId(1))
+        .unwrap();
+    state
+        .db
+        .patch_epic(
+            epic.id,
+            &crate::db::EpicPatch::default().feed_interval_secs(Some(120)),
+        )
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_epic",
+            "arguments": { "epic_id": epic.id.0, "feed_interval_secs": null }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "{:?}", resp.error);
+
+    let updated = state.db.get_epic(epic.id).unwrap().unwrap();
+    assert!(
+        updated.feed_interval_secs.is_none(),
+        "feed_interval_secs should be cleared"
+    );
+}
+
+#[tokio::test]
+async fn get_epic_shows_feed_command() {
+    let state = test_state();
+    let epic = state
+        .db
+        .create_epic("Feed Epic", "", "/repo", None, ProjectId(1))
+        .unwrap();
+    state
+        .db
+        .patch_epic(
+            epic.id,
+            &crate::db::EpicPatch::default()
+                .feed_command(Some("./scripts/feed.sh"))
+                .feed_interval_secs(Some(300)),
+        )
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "get_epic",
+            "arguments": { "epic_id": epic.id.0 }
+        })),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert!(
+        text.contains("./scripts/feed.sh"),
+        "get_epic should show feed_command: {text}"
+    );
+    assert!(
+        text.contains("300"),
+        "get_epic should show feed_interval_secs: {text}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Step 6: MCP sub-epic creation
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn mcp_create_sub_epic() {
+    let state = test_state();
+
+    // Create parent epic first
+    let parent = state
+        .db
+        .create_epic("Parent Epic", "desc", "/tmp", None, ProjectId(1))
+        .unwrap();
+
+    // Create sub-epic via MCP with parent_epic_id
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "create_epic",
+            "arguments": {
+                "title": "Sub Epic",
+                "repo_path": "/tmp",
+                "description": "child",
+                "parent_epic_id": parent.id.0
+            }
+        })),
+    )
+    .await;
+
+    assert!(
+        resp.error.is_none(),
+        "expected success, got: {:?}",
+        resp.error
+    );
+
+    // Verify the sub-epic has the correct parent
+    let epics = state.db.list_epics().unwrap();
+    let sub = epics
+        .iter()
+        .find(|e| e.title == "Sub Epic")
+        .expect("sub epic should be created");
+    assert_eq!(
+        sub.parent_epic_id,
+        Some(parent.id),
+        "sub epic should have parent_epic_id set"
+    );
+}
+
+#[tokio::test]
+async fn create_epic_tool_schema_includes_parent_epic_id() {
+    let state = test_state();
+    let resp = call(&state, "tools/list", None).await;
+    let tools = resp.result.as_ref().unwrap()["tools"].as_array().unwrap();
+    let create_epic = tools
+        .iter()
+        .find(|t| t["name"] == "create_epic")
+        .expect("create_epic not in tool list");
+    let props = &create_epic["inputSchema"]["properties"];
+    assert!(
+        props.get("parent_epic_id").is_some(),
+        "create_epic schema is missing parent_epic_id property"
+    );
+}
