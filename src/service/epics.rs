@@ -255,3 +255,128 @@ impl EpicService {
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn update_epic_params_has_any_field_consistent_with_updated_field_names() {
+        // Same consistency guard for UpdateEpicParams.
+        let with_field = UpdateEpicParams {
+            epic_id: 1,
+            title: Some("x".to_string()),
+            description: None,
+            status: None,
+            plan_path: None,
+            sort_order: None,
+            repo_path: None,
+            auto_dispatch: None,
+            feed_command: None,
+            feed_interval_secs: None,
+            project_id: None,
+        };
+        assert!(
+            with_field.has_any_field(),
+            "has_any_field should be true when title is set"
+        );
+        assert!(
+            !with_field.updated_field_names().is_empty(),
+            "updated_field_names should be non-empty when title is set"
+        );
+
+        let empty = UpdateEpicParams {
+            epic_id: 1,
+            title: None,
+            description: None,
+            status: None,
+            plan_path: None,
+            sort_order: None,
+            repo_path: None,
+            auto_dispatch: None,
+            feed_command: None,
+            feed_interval_secs: None,
+            project_id: None,
+        };
+        assert!(
+            !empty.has_any_field(),
+            "has_any_field should be false when no fields are set"
+        );
+        assert!(
+            empty.updated_field_names().is_empty(),
+            "updated_field_names should be empty when no fields are set"
+        );
+    }
+
+    #[test]
+    fn update_epic_params_every_field_covered() {
+        // Each field set individually must trigger both has_any_field() and
+        // updated_field_names(). Add a case here whenever a new field is added
+        // to UpdateEpicParams so both methods stay in sync.
+        let base = || UpdateEpicParams {
+            epic_id: 1,
+            title: None,
+            description: None,
+            status: None,
+            plan_path: None,
+            sort_order: None,
+            repo_path: None,
+            auto_dispatch: None,
+            feed_command: None,
+            feed_interval_secs: None,
+            project_id: None,
+        };
+        let cases: Vec<UpdateEpicParams> = vec![
+            UpdateEpicParams {
+                title: Some("t".to_string()),
+                ..base()
+            },
+            UpdateEpicParams {
+                description: Some("d".to_string()),
+                ..base()
+            },
+            UpdateEpicParams {
+                status: Some(TaskStatus::Backlog),
+                ..base()
+            },
+            UpdateEpicParams {
+                plan_path: Some("p".to_string()),
+                ..base()
+            },
+            UpdateEpicParams {
+                sort_order: Some(0),
+                ..base()
+            },
+            UpdateEpicParams {
+                repo_path: Some("r".to_string()),
+                ..base()
+            },
+            UpdateEpicParams {
+                auto_dispatch: Some(true),
+                ..base()
+            },
+            UpdateEpicParams {
+                feed_command: Some(FieldUpdate::Set("cmd".to_string())),
+                ..base()
+            },
+            UpdateEpicParams {
+                feed_interval_secs: Some(Some(300)),
+                ..base()
+            },
+            UpdateEpicParams {
+                project_id: Some(ProjectId(1)),
+                ..base()
+            },
+        ];
+        for params in &cases {
+            assert!(
+                params.has_any_field(),
+                "has_any_field() should be true when a field is set"
+            );
+            assert!(
+                !params.updated_field_names().is_empty(),
+                "updated_field_names() should be non-empty when a field is set"
+            );
+        }
+    }
+}
