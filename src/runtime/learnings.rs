@@ -6,7 +6,7 @@ use crate::models::{LearningId, LearningScope, LearningStatus};
 use crate::service::LearningService;
 
 impl TuiRuntime {
-    pub(super) fn exec_load_proposed_learnings(&self, app: &mut App) {
+    pub(super) fn exec_load_learnings(&self, app: &mut App) {
         let db: Arc<dyn db::LearningStore> = self.database.clone();
         let filter = db::LearningFilter {
             status: Some(LearningStatus::Approved),
@@ -35,11 +35,8 @@ impl TuiRuntime {
         }
     }
 
-    pub(super) fn exec_approve_learning(&self, app: &mut App, id: LearningId) {
-        // Learnings are created as Approved; "approving" from the review overlay is a no-op
-        // in the DB but still removes the entry from the overlay list.
-        app.update(Message::LearningActioned(id));
-        app.update(Message::StatusInfo(format!("Learning {id} approved")));
+    pub(super) fn exec_archive_learning(&self, app: &mut App, id: LearningId) {
+        self.exec_action_learning(app, id, "archive", |svc, id| svc.archive_learning(id));
     }
 
     pub(super) fn exec_reject_learning(&self, app: &mut App, id: LearningId) {
@@ -133,25 +130,25 @@ mod tests {
     }
 
     #[test]
-    fn exec_approve_learning_updates_db_and_sends_actioned_message() {
+    fn exec_archive_learning_updates_db_and_sends_actioned_message() {
         let db = Arc::new(Database::open_in_memory().unwrap());
         let id = insert_proposed_learning(&db);
         let rt = make_runtime(db.clone());
         let mut app = App::new(vec![], ProjectId(1), APP_INACTIVITY_TIMEOUT);
-        // Put the app in ProposedLearnings view with the learning
+        // Put the app in Learnings view with the learning
         let learning = make_learning(id);
         app.update(Message::ShowLearnings(vec![learning]));
 
-        rt.exec_approve_learning(&mut app, id);
+        rt.exec_archive_learning(&mut app, id);
 
         // Learning should be removed from the overlay list
         assert!(matches!(
             app.view_mode(),
             ViewMode::Learnings { learnings, .. } if learnings.is_empty()
         ));
-        // DB should show approved
+        // DB should show archived
         let updated = db.get_learning(id).unwrap().unwrap();
-        assert_eq!(updated.status, LearningStatus::Approved);
+        assert_eq!(updated.status, LearningStatus::Archived);
     }
 
     #[test]
@@ -171,18 +168,6 @@ mod tests {
         ));
         let updated = db.get_learning(id).unwrap().unwrap();
         assert_eq!(updated.status, LearningStatus::Rejected);
-    }
-
-    #[test]
-    fn exec_approve_on_nonexistent_id_shows_status_info() {
-        let db = Arc::new(Database::open_in_memory().unwrap());
-        let rt = make_runtime(db);
-        let mut app = App::new(vec![], ProjectId(1), APP_INACTIVITY_TIMEOUT);
-
-        rt.exec_approve_learning(&mut app, LearningId(999));
-
-        // Should show a status message, not panic
-        assert!(app.status_message().is_some());
     }
 
     #[test]
@@ -218,7 +203,7 @@ mod tests {
         let rt = make_runtime(db.clone());
         let mut app = App::new(vec![], ProjectId(1), APP_INACTIVITY_TIMEOUT);
 
-        rt.exec_load_proposed_learnings(&mut app);
+        rt.exec_load_learnings(&mut app);
 
         // User scope (0) must come before Repo scope (2)
         if let ViewMode::Learnings { learnings, .. } = app.view_mode() {

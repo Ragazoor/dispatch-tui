@@ -6298,6 +6298,61 @@ fn list_learnings_filter_by_status() {
 }
 
 #[test]
+fn list_learnings_approved_filter_excludes_rejected_and_archived() {
+    use crate::db::{LearningFilter, LearningPatch};
+    use crate::models::{LearningKind, LearningScope, LearningStatus};
+    let db = in_memory_db();
+    let approved_id = db
+        .create_learning(
+            LearningKind::Pitfall,
+            "approved one",
+            None,
+            LearningScope::User,
+            None,
+            &[],
+            None,
+        )
+        .unwrap();
+    let rejected_id = db
+        .create_learning(
+            LearningKind::Convention,
+            "rejected one",
+            None,
+            LearningScope::User,
+            None,
+            &[],
+            None,
+        )
+        .unwrap();
+    let archived_id = db
+        .create_learning(
+            LearningKind::Preference,
+            "archived one",
+            None,
+            LearningScope::User,
+            None,
+            &[],
+            None,
+        )
+        .unwrap();
+    // Transition rejected and archived
+    db.patch_learning(rejected_id, &LearningPatch::new().status(LearningStatus::Rejected))
+        .unwrap();
+    db.patch_learning(archived_id, &LearningPatch::new().status(LearningStatus::Archived))
+        .unwrap();
+
+    let results = db
+        .list_learnings(LearningFilter {
+            status: Some(LearningStatus::Approved),
+            ..Default::default()
+        })
+        .unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].id, approved_id);
+}
+
+#[test]
 fn patch_learning_updates_summary_and_updated_at() {
     use crate::db::LearningPatch;
     use crate::models::{LearningKind, LearningScope};

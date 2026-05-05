@@ -242,11 +242,11 @@ pub(super) fn dispatch(
             vec![]
         }
         LoadLearnings => {
-            rt.exec_load_proposed_learnings(app);
+            rt.exec_load_learnings(app);
             vec![]
         }
         ArchiveLearning(id) => {
-            rt.exec_approve_learning(app, id);
+            rt.exec_archive_learning(app, id);
             vec![]
         }
         RejectLearning(id) => {
