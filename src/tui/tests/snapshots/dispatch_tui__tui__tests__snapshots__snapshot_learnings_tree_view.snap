@@ -1,0 +1,44 @@
+---
+source: src/tui/tests/snapshots.rs
+expression: rendered
+---
+┌ Learnings — hierarchy view (2) ──────────────────────────────────────────────────────────────────────────────────────┐
+│▼ Global (1)klog 2 [ ]                 ◦ running 1                   ◦ review 0                     ◦ done 1          │
+│    [h] Prefer concise responses over verbose ones  ✓3───│──────────────────────────────│─────────────────────────────│
+│▼ Repo: repo (1)─────────────│  ── active                │                              │─────────────────────────────│
+│    [!] tokio::spawn needs explicit error logging  ✓1────│                              │  ▎ #4 Task 4                │
+│  ◦ <1h                      │  ▎ #3 Task 3              │                              │   ✓ <1h                     │
+│─────────────────────────────│   ◉ running               │                              │─────────────────────────────│
+│ ▎ #2 Task 2                 │───────────────────────────│                              │                             │
+│  ◦ <1h                      │                           │                              │                             │
+│─────────────────────────────│                           │                              │                             │
+│                             │                           │                              │                             │
+│                             │                           │                              │                             │
+│                             │                           │                              │                             │
+│                             │                           │                              │                             │
+│                             │                           │                              │                             │
+│                             │                           │                              │                             │
+│                             │                           │                              │                             │
+│                             │                           │                              │                             │
+│                             │                           │                              │                             │
+│                             │                           │                              │                             │
+│                             │                           │                              │                             │
+│                             │                           │                              │                             │
+│                             │                           │                              │                             │
+│                             │                           │                              │                             │
+│                             │                           │                              │                             │
+│                             │                           │                              │                             │
+│                             │                           │                              │                             │
+ Tab:list  h/l:collapse/expand  j/k:nav  e:edit  x:reject  A:archive  q:close──────────────────────────────────────────┘
+ Detail ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[h] Prefer concise responses over verbose ones            │                              │
+                              │                           │                              │
+This helps agents stay focused.─────────────────────────────────────────────────────────────────────────────────────────
+
+scope:global  confirmed:3
+tags: style
+
+
+
+
+[d] brainstorm  [e]dit  [L] move  [x] archive  [h] projects  [Enter] detail  [c]opy  [a] select all  [n]ew  [E]pic  [D]

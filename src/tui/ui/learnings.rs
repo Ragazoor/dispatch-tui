@@ -6,7 +6,7 @@ use ratatui::Frame;
 
 use super::palette::{CYAN, GREEN, MUTED, PURPLE, RED, YELLOW};
 use super::shared::truncate;
-use crate::models::{Learning, LearningKind, LearningScope};
+use crate::models::{EpicId, Learning, LearningKind, LearningScope, ProjectId};
 use crate::tui::types::LearningsView;
 use crate::tui::{App, ViewMode};
 
@@ -172,22 +172,330 @@ fn render_detail(frame: &mut Frame, learning: Option<&Learning>, area: Rect) {
 }
 
 pub fn build_learning_tree(
-    _learnings: &[Learning],
-    _app: &App,
+    learnings: &[Learning],
+    app: &App,
 ) -> Vec<tui_tree_widget::TreeItem<'static, String>> {
-    vec![]
+    fn leaf(l: &Learning) -> tui_tree_widget::TreeItem<'static, String> {
+        let text = format!(
+            "{} {}  \u{2713}{}",
+            kind_icon(l.kind),
+            truncate(&l.summary, 55),
+            l.confirmed_count
+        );
+        tui_tree_widget::TreeItem::new_leaf(format!("learning:{}", l.id), text)
+    }
+
+    let mut roots: Vec<tui_tree_widget::TreeItem<'static, String>> = Vec::new();
+
+    // --- Global (user-scoped) ---
+    let user_leaves: Vec<_> = learnings
+        .iter()
+        .filter(|l| l.scope == LearningScope::User)
+        .map(leaf)
+        .collect();
+    if !user_leaves.is_empty() {
+        roots.push(
+            tui_tree_widget::TreeItem::new(
+                "user".to_string(),
+                format!("Global ({})", user_leaves.len()),
+                user_leaves,
+            )
+            .unwrap(),
+        );
+    }
+
+    // --- Per-project (project-scoped + epic-scoped nested under project) ---
+    let mut project_ids: Vec<ProjectId> = Vec::new();
+    for l in learnings {
+        match l.scope {
+            LearningScope::Project => {
+                if let Some(id) = l.scope_ref.as_ref().and_then(|s| s.parse::<i64>().ok()) {
+                    let pid = ProjectId(id);
+                    if !project_ids.contains(&pid) {
+                        project_ids.push(pid);
+                    }
+                }
+            }
+            LearningScope::Epic => {
+                if let Some(ref sr) = l.scope_ref {
+                    if let Ok(eid) = sr.parse::<i64>() {
+                        if let Some(epic) = app.epics().iter().find(|e| e.id == EpicId(eid)) {
+                            if !project_ids.contains(&epic.project_id) {
+                                project_ids.push(epic.project_id);
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    project_ids.sort_by_key(|p| p.0);
+
+    for pid in project_ids {
+        let proj_label = app
+            .projects()
+            .iter()
+            .find(|p| p.id == pid)
+            .map(|p| p.name.clone())
+            .unwrap_or_else(|| format!("Project {}", pid.0));
+        let mut children: Vec<tui_tree_widget::TreeItem<'static, String>> = Vec::new();
+
+        // Direct project-scoped leaves
+        for l in learnings.iter().filter(|l| {
+            l.scope == LearningScope::Project
+                && l.scope_ref.as_deref() == Some(&pid.0.to_string())
+        }) {
+            children.push(leaf(l));
+        }
+
+        // Epic sub-nodes under this project
+        let mut epic_ids: Vec<EpicId> = Vec::new();
+        for l in learnings.iter().filter(|l| l.scope == LearningScope::Epic) {
+            if let Some(ref sr) = l.scope_ref {
+                if let Ok(eid) = sr.parse::<i64>() {
+                    if let Some(epic) = app.epics().iter().find(|e| e.id == EpicId(eid)) {
+                        if epic.project_id == pid && !epic_ids.contains(&EpicId(eid)) {
+                            epic_ids.push(EpicId(eid));
+                        }
+                    }
+                }
+            }
+        }
+        epic_ids.sort_by_key(|e| e.0);
+
+        for eid in epic_ids {
+            let epic_label = app
+                .epics()
+                .iter()
+                .find(|e| e.id == eid)
+                .map(|e| e.title.clone())
+                .unwrap_or_else(|| format!("Epic {}", eid.0));
+            let epic_leaves: Vec<_> = learnings
+                .iter()
+                .filter(|l| {
+                    l.scope == LearningScope::Epic
+                        && l.scope_ref.as_deref() == Some(&eid.0.to_string())
+                })
+                .map(leaf)
+                .collect();
+            if !epic_leaves.is_empty() {
+                children.push(
+                    tui_tree_widget::TreeItem::new(
+                        format!("epic:{}", eid.0),
+                        format!("Epic: {} ({})", epic_label, epic_leaves.len()),
+                        epic_leaves,
+                    )
+                    .unwrap(),
+                );
+            }
+        }
+
+        if !children.is_empty() {
+            roots.push(
+                tui_tree_widget::TreeItem::new(
+                    format!("project:{}", pid.0),
+                    format!("Project: {} ({})", proj_label, children.len()),
+                    children,
+                )
+                .unwrap(),
+            );
+        }
+    }
+
+    // --- Repos (top-level, scope = repo) ---
+    let mut repo_paths: Vec<String> = learnings
+        .iter()
+        .filter(|l| l.scope == LearningScope::Repo)
+        .filter_map(|l| l.scope_ref.clone())
+        .collect();
+    repo_paths.sort();
+    repo_paths.dedup();
+
+    for repo_path in repo_paths {
+        let leaves: Vec<_> = learnings
+            .iter()
+            .filter(|l| {
+                l.scope == LearningScope::Repo && l.scope_ref.as_deref() == Some(&repo_path)
+            })
+            .map(leaf)
+            .collect();
+        let basename = std::path::Path::new(&repo_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(&repo_path);
+        roots.push(
+            tui_tree_widget::TreeItem::new(
+                format!("repo:{repo_path}"),
+                format!("Repo: {} ({})", basename, leaves.len()),
+                leaves,
+            )
+            .unwrap(),
+        );
+    }
+
+    // --- Tasks (rare, task-scoped) ---
+    let task_leaves: Vec<_> = learnings
+        .iter()
+        .filter(|l| l.scope == LearningScope::Task)
+        .map(leaf)
+        .collect();
+    if !task_leaves.is_empty() {
+        roots.push(
+            tui_tree_widget::TreeItem::new(
+                "tasks".to_string(),
+                format!("Tasks ({})", task_leaves.len()),
+                task_leaves,
+            )
+            .unwrap(),
+        );
+    }
+
+    roots
 }
 
 fn render_tree(
     frame: &mut Frame,
-    _app: &App,
-    _learnings: &[Learning],
-    _tree_state: &std::cell::RefCell<tui_tree_widget::TreeState<String>>,
+    app: &App,
+    learnings: &[Learning],
+    tree_state: &std::cell::RefCell<tui_tree_widget::TreeState<String>>,
     area: Rect,
 ) {
-    // Stub: will be implemented in Task 12
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" Learnings \u{2014} tree view (coming soon) ");
-    frame.render_widget(block, area);
+    let items = build_learning_tree(learnings, app);
+
+    // Open all root nodes on first render (if none are open)
+    {
+        let mut state = tree_state.borrow_mut();
+        if state.opened().is_empty() && !items.is_empty() {
+            for item in &items {
+                state.open(vec![item.identifier().clone()]);
+            }
+        }
+    }
+
+    let title = format!(" Learnings \u{2014} hierarchy view ({}) ", learnings.len());
+    let block = Block::default().borders(Borders::ALL).title(title);
+
+    let tree = tui_tree_widget::Tree::new(&items)
+        .expect("all learning tree items have unique identifiers")
+        .block(block)
+        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+
+    frame.render_stateful_widget(tree, area, &mut tree_state.borrow_mut());
+
+    // Footer hints
+    let footer_area = Rect {
+        y: area.y + area.height.saturating_sub(1),
+        height: 1,
+        ..area
+    };
+    let hints =
+        Paragraph::new(" Tab:list  h/l:collapse/expand  j/k:nav  e:edit  x:reject  A:archive  q:close")
+            .style(Style::default().fg(Color::DarkGray));
+    frame.render_widget(hints, footer_area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{LearningId, LearningStatus};
+    use crate::tui::App;
+    use chrono::Utc;
+    use std::time::Duration;
+
+    fn make_learning(id: i64, scope: LearningScope, scope_ref: Option<&str>) -> Learning {
+        Learning {
+            id: LearningId(id),
+            kind: LearningKind::Convention,
+            summary: format!("learning {id}"),
+            detail: None,
+            scope,
+            scope_ref: scope_ref.map(|s| s.to_string()),
+            tags: vec![],
+            status: LearningStatus::Approved,
+            source_task_id: None,
+            confirmed_count: 0,
+            last_confirmed_at: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    fn make_app() -> App {
+        App::new(vec![], ProjectId(1), Duration::from_secs(300))
+    }
+
+    #[test]
+    fn build_learning_tree_groups_user_under_global() {
+        let learnings = vec![make_learning(1, LearningScope::User, None)];
+        let app = make_app();
+        let tree = build_learning_tree(&learnings, &app);
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].identifier(), "user");
+    }
+
+    #[test]
+    fn build_learning_tree_two_user_learnings_under_one_global_node() {
+        let learnings = vec![
+            make_learning(1, LearningScope::User, None),
+            make_learning(2, LearningScope::User, None),
+        ];
+        let app = make_app();
+        let tree = build_learning_tree(&learnings, &app);
+        assert_eq!(tree.len(), 1, "both user learnings under one Global node");
+        assert_eq!(tree[0].children().len(), 2);
+    }
+
+    #[test]
+    fn build_learning_tree_repo_at_top_level() {
+        let learnings = vec![make_learning(
+            20,
+            LearningScope::Repo,
+            Some("/home/user/dispatch"),
+        )];
+        let app = make_app();
+        let tree = build_learning_tree(&learnings, &app);
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].identifier(), "repo:/home/user/dispatch");
+    }
+
+    #[test]
+    fn build_learning_tree_empty_returns_empty() {
+        let app = make_app();
+        let tree = build_learning_tree(&[], &app);
+        assert!(tree.is_empty());
+    }
+
+    #[test]
+    fn build_learning_tree_task_scoped_in_tasks_node() {
+        let learnings = vec![make_learning(5, LearningScope::Task, Some("42"))];
+        let app = make_app();
+        let tree = build_learning_tree(&learnings, &app);
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].identifier(), "tasks");
+        assert_eq!(tree[0].children().len(), 1);
+    }
+
+    #[test]
+    fn build_learning_tree_multiple_repos_separate_nodes() {
+        let learnings = vec![
+            make_learning(1, LearningScope::Repo, Some("/repo/a")),
+            make_learning(2, LearningScope::Repo, Some("/repo/b")),
+        ];
+        let app = make_app();
+        let tree = build_learning_tree(&learnings, &app);
+        assert_eq!(tree.len(), 2);
+        assert_eq!(tree[0].identifier(), "repo:/repo/a");
+        assert_eq!(tree[1].identifier(), "repo:/repo/b");
+    }
+
+    #[test]
+    fn build_learning_tree_project_scoped_without_matching_epic() {
+        let learnings = vec![make_learning(1, LearningScope::Project, Some("1"))];
+        let app = make_app();
+        let tree = build_learning_tree(&learnings, &app);
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].identifier(), "project:1");
+        assert_eq!(tree[0].children().len(), 1);
+    }
 }
