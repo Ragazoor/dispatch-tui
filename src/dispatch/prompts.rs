@@ -128,10 +128,10 @@ pub(super) fn mcp_tools_instruction() -> &'static str {
 
 /// Learning tools availability notice for implementation agents.
 pub(super) fn learning_tools_instruction() -> &'static str {
-    "Learning MCP tools are available — call `query_learnings` to \
-surface relevant past experience when needed, `record_learning` when you discover something \
-non-obvious worth capturing, and `confirm_learning` when a retrieved learning \
-proves useful."
+    "Learning MCP tools are available — use them in this order:\n\
+1. Call `query_learnings` at the start of your task to surface relevant past experience before starting work.\n\
+2. Call `confirm_learning` whenever a retrieved learning proves correct during your work.\n\
+3. Call `record_learning` when you discover something non-obvious worth capturing for future agents."
 }
 
 /// Instructions for writing a plan and attaching it to the task via MCP.
@@ -548,6 +548,35 @@ mod tests {
         assert!(
             text.contains("query_learnings"),
             "fix_task prompt should mention query_learnings"
+        );
+    }
+
+    #[test]
+    fn learning_instruction_mentions_query_at_start_of_task() {
+        let text = learning_tools_instruction();
+        assert!(
+            text.contains("first") || text.contains("start"),
+            "learning instruction should tell agents to query_learnings at the start of a task, got: {text}"
+        );
+    }
+
+    #[test]
+    fn learning_instruction_mentions_confirm_whenever_proven() {
+        let text = learning_tools_instruction();
+        assert!(
+            text.contains("whenever") || text.contains("each time"),
+            "learning instruction should tell agents to confirm_learning whenever a learning proves correct, got: {text}"
+        );
+    }
+
+    #[test]
+    fn learning_instruction_query_comes_before_confirm() {
+        let text = learning_tools_instruction();
+        let query_pos = text.find("query_learnings").expect("query_learnings must be present");
+        let confirm_pos = text.find("confirm_learning").expect("confirm_learning must be present");
+        assert!(
+            query_pos < confirm_pos,
+            "query_learnings step should appear before confirm_learning step in the instruction"
         );
     }
 }
