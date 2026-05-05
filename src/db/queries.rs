@@ -328,12 +328,13 @@ impl super::TaskCrud for Database {
             tx.execute(
                 "INSERT INTO tasks
                      (title, description, repo_path, status, sub_status, base_branch,
-                      epic_id, external_id, project_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                      epic_id, external_id, project_id, tag)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                  ON CONFLICT(epic_id, external_id) WHERE external_id IS NOT NULL
                  DO UPDATE SET
                      title       = excluded.title,
                      description = excluded.description,
+                     tag         = excluded.tag,
                      updated_at  = datetime('now')",
                 params![
                     item.title,
@@ -345,6 +346,7 @@ impl super::TaskCrud for Database {
                     epic_id.0,
                     item.external_id,
                     project_id.0,
+                    item.tag.as_str(),
                 ],
             )
             .with_context(|| format!("Failed to upsert feed task '{}'", item.external_id))?;

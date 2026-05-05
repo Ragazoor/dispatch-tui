@@ -312,7 +312,7 @@ fn verify_feed_valid_items_succeeds() {
             "--db",
             db.path().to_str().unwrap(),
             "verify-feed",
-            r#"echo '[{"external_id":"x1","title":"T","description":"","status":"backlog"}]'"#,
+            r#"echo '[{"external_id":"x1","title":"T","description":"","status":"backlog","tag":"pr-review"}]'"#,
         ])
         .output()
         .unwrap();
@@ -325,6 +325,60 @@ fn verify_feed_valid_items_succeeds() {
     assert!(
         stdout.contains("x1"),
         "Expected feed item id in output, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("TAG"),
+        "Expected TAG header in output, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("pr-review"),
+        "Expected tag value in output, got: {stdout}"
+    );
+}
+
+#[test]
+fn verify_feed_missing_tag_fails() {
+    let db = NamedTempFile::new().unwrap();
+    let out = binary()
+        .args([
+            "--db",
+            db.path().to_str().unwrap(),
+            "verify-feed",
+            r#"echo '[{"external_id":"x1","title":"T","description":"","status":"backlog"}]'"#,
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "Expected failure when feed item is missing tag"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("failed to parse") && stderr.contains("tag"),
+        "Expected parse error mentioning tag, got stderr: {stderr}"
+    );
+}
+
+#[test]
+fn verify_feed_invalid_tag_fails() {
+    let db = NamedTempFile::new().unwrap();
+    let out = binary()
+        .args([
+            "--db",
+            db.path().to_str().unwrap(),
+            "verify-feed",
+            r#"echo '[{"external_id":"x1","title":"T","description":"","status":"backlog","tag":"nonsense"}]'"#,
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "Expected failure when feed item has unknown tag value"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("failed to parse"),
+        "Expected parse error, got stderr: {stderr}"
     );
 }
 

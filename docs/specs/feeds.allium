@@ -37,6 +37,13 @@ concept FeedItem {
                               -- list, the runner uses it to resolve a repo_path
                               -- for the inserted Task. See UpsertFeedTasks.
     status: core/TaskStatus   -- desired column for newly-inserted tasks
+    tag: core/TaskTag         -- required: drives DispatchMode for the inserted
+                              -- Task. Feed scripts must set this so dispatch
+                              -- routes the task to the correct agent (e.g.
+                              -- pr_review for Dependabot PRs, fix for
+                              -- security alerts). Missing or unknown tag
+                              -- causes parse failure in verify-feed and the
+                              -- FeedRunner.
 }
 
 ------------------------------------------------------------
@@ -66,9 +73,9 @@ rule VerifyFeed {
 
     -- The verify-feed subcommand spawns <command> via `sh -c`, captures
     -- stdout, and validates that it parses as Vec<FeedItem>. On success
-    -- it prints a table of (external_id, title, status) and exits 0. On
-    -- failure (non-zero exit, parse failure) it prints the error to
-    -- stderr and exits 1.
+    -- it prints a table of (external_id, title, tag, status) and exits 0.
+    -- On failure (non-zero exit, parse failure including missing or
+    -- unknown tag) it prints the error to stderr and exits 1.
     --
     -- This is the supported way to debug a feed script before wiring it
     -- onto an epic's feed_command. It performs no DB writes.
@@ -195,7 +202,7 @@ rule UpsertFeedTasks {
     -- == Per-item upsert ==
     --
     --   - New (no match): a Task is inserted with the FeedItem's
-    --     title, description, repo_path = resolved_path[item] (which
+    --     title, description, tag, repo_path = resolved_path[item] (which
     --     may be ""), status = item.status, sub_status =
     --     SubStatus.default_for(item.status), external_id =
     --     item.external_id, base_branch = the resolved default branch
@@ -203,11 +210,12 @@ rule UpsertFeedTasks {
     --     back to "main" when resolved_path is empty or the ref is
     --     missing), epic = epic.
     --
-    --   - Match: title and description on the existing Task are updated
-    --     to the new values; status, sub_status, AND repo_path are NOT
-    --     touched. updated_at is bumped. This means a user who manually
-    --     fixes the repo_path on a feed task (via 'e') keeps that
-    --     correction across subsequent feed refreshes.
+    --   - Match: title, description, and tag on the existing Task are
+    --     updated to the new values; status, sub_status, AND repo_path
+    --     are NOT touched. updated_at is bumped. This means a user who
+    --     manually fixes the repo_path on a feed task (via 'e') keeps
+    --     that correction across subsequent feed refreshes, while the
+    --     feed-owned tag stays in sync with the script output.
     --
     -- Tasks present locally that are NOT in the latest emission are
     -- removed. The dispatch runtime treats the feed as the source of
@@ -229,6 +237,7 @@ rule UpsertFeedTasks {
                 Task.created(
                     title: item.title,
                     description: item.description,
+                    tag: item.tag,
                     repo_path: resolved,
                     status: item.status,
                     sub_status: core/SubStatus.default_for(item.status),
@@ -239,6 +248,7 @@ rule UpsertFeedTasks {
             else:
                 existing.title = item.title
                 existing.description = item.description
+                existing.tag = item.tag
                 -- existing.status, existing.sub_status, existing.repo_path preserved
 
         for task in Tasks where epic = epic and external_id != null:

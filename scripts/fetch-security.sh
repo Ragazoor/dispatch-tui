@@ -39,7 +39,8 @@ for repo in "${REPOS[@]}"; do
         title: ("[" + (.security_advisory.severity | ascii_upcase) + "] " + .security_advisory.summary),
         description: (.security_advisory.description // ""),
         url: .html_url,
-        status: "backlog"
+        status: "backlog",
+        tag: "fix"
       }]' \
     || echo '[]'
 done | jq -s '[.[][]]'

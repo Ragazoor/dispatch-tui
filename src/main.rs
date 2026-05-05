@@ -205,11 +205,17 @@ async fn main() -> Result<()> {
             match serde_json::from_str::<Vec<models::FeedItem>>(stdout.trim()) {
                 Ok(items) => {
                     if !items.is_empty() {
-                        println!("{:<52} {:<55} STATUS", "EXTERNAL_ID", "TITLE");
+                        println!("{:<52} {:<55} {:<10} STATUS", "EXTERNAL_ID", "TITLE", "TAG");
                         for item in &items {
                             let id = truncate(&item.external_id, 50);
                             let title = truncate(&item.title, 53);
-                            println!("{:<52} {:<55} {}", id, title, item.status.as_str());
+                            println!(
+                                "{:<52} {:<55} {:<10} {}",
+                                id,
+                                title,
+                                item.tag.as_str(),
+                                item.status.as_str()
+                            );
                         }
                         println!();
                     }

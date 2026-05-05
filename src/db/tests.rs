@@ -5293,6 +5293,7 @@ fn make_feed_item(external_id: &str, title: &str) -> crate::models::FeedItem {
         description: "desc".to_string(),
         url: String::new(),
         status: TaskStatus::Backlog,
+        tag: crate::models::TaskTag::Bug,
     }
 }
 
@@ -5373,6 +5374,7 @@ fn upsert_feed_tasks_preserves_status() {
         description: "new desc".to_string(),
         url: String::new(),
         status: TaskStatus::Done, // feed says done; user status should be preserved
+        tag: crate::models::TaskTag::Bug,
     }];
     db.upsert_feed_tasks(epic.id, &updated, &["/repo".to_string()], &main_branches(1))
         .unwrap();
@@ -5515,6 +5517,7 @@ fn upsert_feed_tasks_on_conflict_does_not_update_repo_path() {
         description: "new desc".to_string(),
         url: String::new(),
         status: TaskStatus::Backlog,
+        tag: crate::models::TaskTag::Bug,
     }];
     db.upsert_feed_tasks(
         epic.id,
@@ -5640,6 +5643,63 @@ fn upsert_feed_tasks_does_not_remove_manual_tasks() {
         "manual task should survive empty feed fetch"
     );
     assert_eq!(tasks[0].id, manual_task_id);
+}
+
+#[test]
+fn upsert_feed_tasks_persists_tag() {
+    let db = in_memory_db();
+    let epic = db
+        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .unwrap();
+    let items = vec![crate::models::FeedItem {
+        external_id: "ext-1".to_string(),
+        title: "Tagged".to_string(),
+        description: "".to_string(),
+        url: String::new(),
+        status: TaskStatus::Backlog,
+        tag: crate::models::TaskTag::PrReview,
+    }];
+
+    db.upsert_feed_tasks(epic.id, &items, &["/repo".to_string()], &main_branches(1))
+        .unwrap();
+
+    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].tag, Some(crate::models::TaskTag::PrReview));
+}
+
+#[test]
+fn upsert_feed_tasks_updates_tag_on_conflict() {
+    let db = in_memory_db();
+    let epic = db
+        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .unwrap();
+    let initial = vec![crate::models::FeedItem {
+        external_id: "ext-1".to_string(),
+        title: "T".to_string(),
+        description: "".to_string(),
+        url: String::new(),
+        status: TaskStatus::Backlog,
+        tag: crate::models::TaskTag::PrReview,
+    }];
+    db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
+        .unwrap();
+
+    // Re-emit the same item with a different tag — feed is the source of truth.
+    let updated = vec![crate::models::FeedItem {
+        external_id: "ext-1".to_string(),
+        title: "T".to_string(),
+        description: "".to_string(),
+        url: String::new(),
+        status: TaskStatus::Backlog,
+        tag: crate::models::TaskTag::Fix,
+    }];
+    db.upsert_feed_tasks(epic.id, &updated, &["/repo".to_string()], &main_branches(1))
+        .unwrap();
+
+    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].tag, Some(crate::models::TaskTag::Fix));
 }
 
 // ---------------------------------------------------------------------------

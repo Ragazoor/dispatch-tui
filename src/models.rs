@@ -1196,6 +1196,10 @@ pub struct FeedItem {
     #[serde(default)]
     pub url: String,
     pub status: TaskStatus,
+    /// Required: feed scripts must declare which TaskTag the inserted task
+    /// receives, so dispatch routes feed-derived tasks to the correct agent
+    /// (e.g. `pr-review` for Dependabot PRs, `fix` for security alerts).
+    pub tag: TaskTag,
 }
 
 // ---------------------------------------------------------------------------
@@ -1246,7 +1250,7 @@ impl DispatchMode {
 // TaskTag
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TaskTag {
     Bug,

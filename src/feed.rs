@@ -247,7 +247,7 @@ mod tests {
         db.patch_epic(
             epic.id,
             &EpicPatch::new().feed_command(Some(
-                r#"echo '[{"external_id":"bg1","title":"BG","description":"","status":"backlog"}]'"#,
+                r#"echo '[{"external_id":"bg1","title":"BG","description":"","status":"backlog","tag":"bug"}]'"#,
             )),
         )
         .unwrap();
@@ -274,7 +274,7 @@ mod tests {
         db.patch_epic(
             epic.id,
             &EpicPatch::new().feed_command(Some(
-                r#"echo '[{"external_id":"1","title":"T","description":"D","status":"backlog"}]'"#,
+                r#"echo '[{"external_id":"1","title":"T","description":"D","status":"backlog","tag":"bug"}]'"#,
             )),
         )
         .unwrap();
@@ -291,6 +291,62 @@ mod tests {
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].title, "T");
         assert_eq!(tasks[0].external_id.as_deref(), Some("1"));
+    }
+
+    #[tokio::test]
+    async fn tick_persists_feed_tag() {
+        use crate::models::TaskTag;
+        let db = Arc::new(Database::open_in_memory().unwrap());
+        let epic = db
+            .create_epic("Tagged Epic", "", "/repo", None, ProjectId(1))
+            .unwrap();
+        db.patch_epic(
+            epic.id,
+            &EpicPatch::new().feed_command(Some(
+                r#"echo '[{"external_id":"1","title":"T","description":"","status":"backlog","tag":"pr-review"}]'"#,
+            )),
+        )
+        .unwrap();
+
+        let (mut runner, mut rx) = make_runner(db.clone());
+        runner.tick().await;
+
+        tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("timed out waiting for McpEvent::Refresh")
+            .expect("channel closed");
+
+        let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].tag, Some(TaskTag::PrReview));
+    }
+
+    #[tokio::test]
+    async fn tick_missing_tag_rejects_item() {
+        let db = Arc::new(Database::open_in_memory().unwrap());
+        let epic = db
+            .create_epic("Untagged Epic", "", "/repo", None, ProjectId(1))
+            .unwrap();
+        db.patch_epic(
+            epic.id,
+            &EpicPatch::new().feed_command(Some(
+                r#"echo '[{"external_id":"1","title":"T","description":"","status":"backlog"}]'"#,
+            )),
+        )
+        .unwrap();
+
+        let (mut runner, mut rx) = make_runner(db.clone());
+        runner.tick().await;
+
+        // Parse must fail and no Refresh is sent.
+        let result = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
+        assert!(
+            result.is_err(),
+            "expected no notification when tag is missing"
+        );
+
+        let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+        assert!(tasks.is_empty(), "no task should be inserted on parse fail");
     }
 
     #[tokio::test]
@@ -345,7 +401,7 @@ mod tests {
         // Write a counter to a temp file so we can count how many times the command ran.
         let tmp = std::env::temp_dir().join(format!("feed_test_{}", epic.id.0));
         let cmd = format!(
-            r#"echo 0 >> {path}; echo '[{{"external_id":"1","title":"T","description":"","status":"backlog"}}]'"#,
+            r#"echo 0 >> {path}; echo '[{{"external_id":"1","title":"T","description":"","status":"backlog","tag":"bug"}}]'"#,
             path = tmp.display()
         );
         db.patch_epic(
@@ -435,7 +491,7 @@ mod tests {
         db.patch_epic(
             epic.id,
             &EpicPatch::new().feed_command(Some(
-                r#"echo '[{"external_id":"bg1","title":"BG Task","description":"","status":"backlog"}]'"#,
+                r#"echo '[{"external_id":"bg1","title":"BG Task","description":"","status":"backlog","tag":"bug"}]'"#,
             )),
         )
         .unwrap();
@@ -474,7 +530,7 @@ mod tests {
         let epic = db
             .create_epic("Feed Epic", "", "/fallback", None, ProjectId(1))
             .unwrap();
-        let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","url":"https://github.com/org/myrepo/pull/42","status":"backlog"}]'"#;
+        let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","url":"https://github.com/org/myrepo/pull/42","status":"backlog","tag":"bug"}]'"#;
         db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some(cmd)))
             .unwrap();
 
@@ -500,7 +556,7 @@ mod tests {
         let epic = db
             .create_epic("Feed Epic", "", "/fallback", None, ProjectId(1))
             .unwrap();
-        let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","url":"https://github.com/org/myrepo/pull/42","status":"backlog"}]'"#;
+        let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","url":"https://github.com/org/myrepo/pull/42","status":"backlog","tag":"bug"}]'"#;
         db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some(cmd)))
             .unwrap();
 
@@ -524,7 +580,7 @@ mod tests {
         let epic = db
             .create_epic("Feed Epic", "", "/fallback", None, ProjectId(1))
             .unwrap();
-        let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","status":"backlog"}]'"#;
+        let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","status":"backlog","tag":"bug"}]'"#;
         db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some(cmd)))
             .unwrap();
 
@@ -594,9 +650,9 @@ mod tests {
             .unwrap();
         // Three items: two for repo-a (master), one for repo-b (develop).
         let cmd = r#"echo '[
-            {"external_id":"1","title":"A1","description":"","url":"https://github.com/org/repo-a/pull/1","status":"backlog"},
-            {"external_id":"2","title":"A2","description":"","url":"https://github.com/org/repo-a/pull/2","status":"backlog"},
-            {"external_id":"3","title":"B1","description":"","url":"https://github.com/org/repo-b/pull/1","status":"backlog"}
+            {"external_id":"1","title":"A1","description":"","url":"https://github.com/org/repo-a/pull/1","status":"backlog","tag":"bug"},
+            {"external_id":"2","title":"A2","description":"","url":"https://github.com/org/repo-a/pull/2","status":"backlog","tag":"bug"},
+            {"external_id":"3","title":"B1","description":"","url":"https://github.com/org/repo-b/pull/1","status":"backlog","tag":"bug"}
         ]'"#;
         db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some(cmd)))
             .unwrap();
@@ -640,7 +696,7 @@ mod tests {
         let epic = db
             .create_epic("Feed Epic", "", "/fallback", None, ProjectId(1))
             .unwrap();
-        let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","url":"https://github.com/org/repo-a/pull/1","status":"backlog"}]'"#;
+        let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","url":"https://github.com/org/repo-a/pull/1","status":"backlog","tag":"bug"}]'"#;
         db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some(cmd)))
             .unwrap();
 
@@ -661,7 +717,7 @@ mod tests {
         let epic = db
             .create_epic("Feed Epic", "", "/fallback", None, ProjectId(1))
             .unwrap();
-        let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","url":"https://jira.company.com/PROJ-123","status":"backlog"}]'"#;
+        let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","url":"https://jira.company.com/PROJ-123","status":"backlog","tag":"bug"}]'"#;
         db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some(cmd)))
             .unwrap();
 

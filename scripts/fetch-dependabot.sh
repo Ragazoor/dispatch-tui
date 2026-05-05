@@ -10,7 +10,7 @@
 #      Example: /home/you/scripts/fetch-dependabot.sh
 #
 # Output format (FeedItem):
-#   [{"external_id":"dep:owner/repo#42","title":"#42 Bump foo","description":"...","url":"...","status":"backlog"}]
+#   [{"external_id":"dep:owner/repo#42","title":"#42 Bump foo","description":"...","url":"...","status":"backlog","tag":"pr-review"}]
 
 # ---------------------------------------------------------------------------
 # Configure your repositories here (space-separated "owner/repo" slugs).
@@ -39,7 +39,8 @@ for repo in $REPOS; do
       title: ("#" + (.number | tostring) + " " + .title),
       description: ((.body // "") | .[0:500]),
       url: .url,
-      status: "backlog"
+      status: "backlog",
+      tag: "pr-review"
     }]') || continue
 
   result=$(printf '%s\n%s' "$result" "$items" | jq -s 'add // []')

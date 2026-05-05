@@ -1849,7 +1849,7 @@ async fn exec_trigger_epic_feed_success() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let rt = make_runtime(db, tx, Arc::new(MockProcessRunner::new(vec![])));
 
-    let cmd = r#"echo '[{"external_id":"vuln:1","title":"CVE-1","description":"desc","status":"backlog"}]'"#;
+    let cmd = r#"echo '[{"external_id":"vuln:1","title":"CVE-1","description":"desc","status":"backlog","tag":"fix"}]'"#;
     rt.exec_trigger_epic_feed(
         epic.id,
         "Security Vulnerabilities".to_string(),
