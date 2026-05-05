@@ -1,18 +1,18 @@
 -- allium: 3
 -- learnings.allium
 --
--- Scope: The Learnings system — agents propose knowledge entries; humans approve
---        them; approved learnings are injected into future dispatch prompts for
---        the matching scope.
--- Includes: Scope model and priority ordering, approval lifecycle summary, MCP
+-- Scope: The Learnings system — agents record knowledge entries that land
+--        immediately as approved and are injected into future dispatch prompts
+--        for the matching scope. Humans curate entries after the fact.
+-- Includes: Scope model and priority ordering, lifecycle summary, MCP
 --           tool contracts, dispatch prompt augmentation, TUI review surface,
 --           invariants.
 -- Excludes: Core entity/enum definitions (see core.allium — Learning,
 --           LearningScope, LearningKind, LearningStatus); task-context rule
 --           implementations (see tasks.allium — RecordLearningViaMcp,
 --           QueryLearningsViaMcp, ConfirmLearningViaMcp, AugmentDispatchPromptWithLearnings,
---           WrapUpReflection, ApproveLearning, RejectLearning, ArchiveLearning,
---           EditLearning, ProposedLearningsReview surface).
+--           WrapUpReflection, RejectLearning, ArchiveLearning,
+--           EditLearning, LearningsOverlay surface).
 
 use "./core.allium" as core
 
@@ -21,7 +21,7 @@ use "./core.allium" as core
 --   core/LearningScope    — user | project | repo | epic | task
 --   core/LearningKind     — pitfall | convention | preference |
 --                           tool_recommendation | procedural | episodic
---   core/LearningStatus   — proposed | approved | rejected | archived
+--   core/LearningStatus   — approved | rejected | archived
 
 ------------------------------------------------------------
 -- Scope Model
@@ -74,19 +74,16 @@ use "./core.allium" as core
 -- Lifecycle
 ------------------------------------------------------------
 
--- Agents propose learnings via record_learning during task execution or at wrap-up.
--- Entries always land as proposed — they do not affect dispatch prompts until a
--- human approves them in the TUI ProposedLearningsReview surface.
+-- Learnings are created by agents via record_learning and land immediately as
+-- approved — no human gate. Humans curate after the fact in the LearningsOverlay.
 --
--- Human review transitions (implemented in tasks.allium):
+-- Human curation transitions:
 --
---   proposed  --[ApproveLearning]→  approved
---   proposed  --[RejectLearning]→   rejected   (terminal)
 --   approved  --[RejectLearning]→   rejected   (terminal)
 --   approved  --[ArchiveLearning]→  archived   (terminal)
 --
 -- Editing (EditLearning) updates summary/detail/kind/tags without changing status.
--- Editing is available for both proposed and approved entries.
+-- Editing is available for approved entries only.
 --
 -- confirmed_count is incremented by ConfirmLearning when an agent acts on a
 -- learning and it proves correct. No status change occurs on confirmation; the
@@ -102,7 +99,7 @@ use "./core.allium" as core
 -- here for discoverability.
 
 -- record_learning(task_id, kind, summary, scope, detail?, scope_ref?, tags?)
---   Creates a core/Learning with status = proposed and source_task = task.
+--   Creates a core/Learning with status = approved and source_task = task.
 --   scope_ref is auto-derived from task context when omitted (see Scope Model).
 --   summary must be non-empty.
 --   tags defaults to the empty set.
@@ -166,17 +163,17 @@ invariant ApprovedLearningsHaveScopeRef {
 -- Surfaces
 ------------------------------------------------------------
 
--- ProposedLearningsReview surface is declared in tasks.allium. It is reproduced
+-- LearningsOverlay surface is declared in tasks.allium. It is reproduced
 -- here in summary for discoverability:
 --
---   surface ProposedLearningsReview — TUI overlay (opened with 'L' from main board)
---     exposes: learnings where status = proposed, ordered by scope asc, created_at desc
---     provides: Navigate(delta), Approve(learning), Reject(learning), Edit(learning), Close
+--   surface LearningsOverlay — TUI overlay (opened with 'L' from main board)
+--     exposes: approved learnings, ordered by scope asc, created_at desc
+--     provides: Navigate(delta), Reject(learning), Archive(learning), Edit(learning), Close
 --
--- The surface also exposes approved learnings for Archive. Key binding summary:
---   L       — open ProposedLearningsReview
---   a       — approve selected learning
+-- Key binding summary:
+--   L       — open LearningsOverlay
 --   x       — reject selected learning
 --   A       — archive selected (approved) learning
 --   e       — edit selected learning (opens $EDITOR)
+--   Tab     — toggle list/tree view
 --   Esc/q   — close overlay
