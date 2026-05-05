@@ -1547,14 +1547,19 @@ rule WrapUpReflection {
 }
 
 rule ExitSession {
-    when: ExitSession(task)
+    when: ExitSession(task, has_learnings?)
 
-    let is_first_call = not ExitSessionPending(task)
+    let in_reflecting = ExitSessionReflecting(task)
+    let in_pending = ExitSessionPending(task)
+    let is_first_call = not in_pending and not in_reflecting
 
     ensures:
         if is_first_call:
             ExitSessionPendingSet(task: task)
-            ExitSessionReflectionNudged(task: task)
+            ExitSessionAskedAboutLearnings(task: task)
+        else if in_pending and has_learnings = true:
+            ExitSessionReflectingSet(task: task)
+            ExitSessionRecordPromptSent(task: task)
         else:
             ExitSessionCompleted(task: task)
             TmuxWindowKilled(task: task)
@@ -1564,20 +1569,33 @@ rule ExitSession {
             task.updated_at = now
 
     @guidance
-        -- Two-step call controlled by McpState.exit_session_pending (in-memory
-        -- Mutex<HashSet<TaskId>>).
-        -- First call: insert task_id into set, return reflection nudge asking the
-        -- agent to call record_learning and query_learnings before finishing.
-        -- Second call: remove from set, mark the task done (status=done,
-        -- sub_status=default_for(done)), clear tmux_window in DB, and kill
-        -- the tmux window. Marking the task done is the canonical session-
-        -- close transition for the MCP flow — wrap_up performs only the
-        -- rebase mechanic and defers the Done transition to here.
-        -- If the task is part of an epic, epic status is recalculated after
-        -- the patch is committed.
-        -- Idempotent for tasks already in done.
-        -- The pending set is cleared when the task is re-dispatched, so a
-        -- resurrected agent always goes through the two-step again.
+        -- Three-phase flow controlled by two in-memory sets on McpState:
+        --   exit_session_pending (Mutex<HashSet<TaskId>>)
+        --   exit_session_reflecting (Mutex<HashSet<TaskId>>)
+        --
+        -- Phase 1 (first call — neither set):
+        --   Inserts into pending. Returns structured question listing pitfall,
+        --   convention, tool tip categories and instructs the agent to answer
+        --   via exit_session(has_learnings=true|false).
+        --
+        -- Phase 2a (second call, has_learnings=true — task in pending):
+        --   Removes from pending, inserts into reflecting. Returns record_learning
+        --   prompt listing kind/summary/scope parameters. Session remains open;
+        --   agent calls record_learning one or more times, then calls exit_session.
+        --
+        -- Phase 2b (second call, has_learnings=false or omitted — task in pending):
+        --   Removes from pending. Closes session immediately.
+        --
+        -- Phase 3 (any call — task in reflecting):
+        --   Removes from reflecting. Closes session: status=done,
+        --   sub_status=default_for(done), tmux_window=null, kills tmux window.
+        --
+        -- Epic status is recalculated after the close patch when task.epic_id is set.
+        --
+        -- Both sets are cleared on re-dispatch (clear_exit_session_pending in
+        -- McpState, called from handle_dispatch_task and handle_dispatch_next),
+        -- so a resurrected agent always starts from Phase 1.
+        --
         -- Implemented in handle_exit_session() (src/mcp/handlers/tasks.rs).
 }
 
