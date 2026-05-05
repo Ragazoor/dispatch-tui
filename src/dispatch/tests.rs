@@ -7,10 +7,11 @@ use super::worktree::provision_worktree;
 use super::*;
 
 use crate::models::{
-    EpicId, Learning, LearningId, LearningKind, LearningScope, LearningStatus, ProjectId, Task,
-    TaskId, TaskStatus,
+    AlertKind, EpicId, Learning, LearningId, LearningKind, LearningScope, LearningStatus,
+    ProjectId, Task, TaskId, TaskStatus,
 };
 use crate::process::{exit_fail, MockProcessRunner};
+use crate::tui::FixAgentRequest;
 use chrono::Utc;
 use std::process::Output;
 
@@ -2075,5 +2076,265 @@ fn review_agent_includes_plugin_dir() {
     assert!(
         send_keys_arg.contains(".claude/plugins/local/dispatch"),
         "plugin-dir should point to local dispatch plugin, got: {send_keys_arg}"
+    );
+}
+
+// -----------------------------------------------------------------------
+// fix_req helper
+// -----------------------------------------------------------------------
+
+fn fix_req(repo_path: &str, number: i64) -> FixAgentRequest {
+    FixAgentRequest {
+        repo: repo_path.to_string(),
+        github_repo: "acme/app".to_string(),
+        number,
+        kind: AlertKind::Dependabot,
+        title: "CVE-2024-1234".to_string(),
+        description: "A known vulnerability".to_string(),
+        package: Some("some-crate".to_string()),
+        fixed_version: Some("1.2.3".to_string()),
+    }
+}
+
+// -----------------------------------------------------------------------
+// dispatch_fix_agent — NewBranch strategy (agents.rs)
+// -----------------------------------------------------------------------
+
+#[test]
+fn fix_agent_returns_early_when_window_exists() {
+    let (dir, repo_path) = make_test_repo();
+    let repo_short = dir.path().file_name().unwrap().to_str().unwrap();
+    let tmux_window = format!("fix-{repo_short}-1");
+
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(tmux_window.as_bytes()),
+    ]);
+
+    let result = dispatch_fix_agent(fix_req(&repo_path, 1), &mock).unwrap();
+
+    let calls = mock.recorded_calls();
+    assert_eq!(calls.len(), 1, "only list-windows should be called");
+    assert_eq!(calls[0].0, "tmux");
+    assert_eq!(calls[0].1[0], "list-windows");
+    assert_eq!(result.tmux_window, tmux_window);
+    let expected_worktree = format!("{repo_path}/.worktrees/fix-vuln-1");
+    assert_eq!(result.worktree_path, expected_worktree);
+}
+
+#[test]
+fn fix_agent_calls_worktree_add_with_new_branch_when_dir_missing() {
+    let (_dir, repo_path) = make_test_repo();
+    // Do NOT pre-create the worktree dir — git worktree add must be called.
+
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"\n"),                          // has_window: no match
+        MockProcessRunner::ok(),                                           // git worktree prune
+        MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // detect_default_branch
+        MockProcessRunner::ok(),                                           // git fetch origin main
+        MockProcessRunner::ok(),                                           // git worktree add -b
+        MockProcessRunner::ok(),                                           // tmux new-window
+        // fs::write will fail (mock worktree add doesn't create dir on disk)
+    ]);
+
+    // The function errors at fs::write — we still verify the calls made before that.
+    let result = dispatch_fix_agent(fix_req(&repo_path, 1), &mock);
+    assert!(result.is_err());
+
+    let calls = mock.recorded_calls();
+    let wt_call = calls.iter().find(|(prog, args)| {
+        prog == "git" && args.contains(&"add".to_string()) && args.contains(&"worktree".to_string())
+    });
+    assert!(wt_call.is_some(), "git worktree add should be called when dir is missing");
+    let (_, args) = wt_call.unwrap();
+    assert!(
+        args.contains(&"-b".to_string()),
+        "NewBranch strategy should pass -b flag, got: {args:?}"
+    );
+    assert!(
+        args.iter().any(|a| a.contains("fix/vuln")),
+        "branch name should contain fix/vuln, got: {args:?}"
+    );
+}
+
+#[test]
+fn fix_agent_skips_worktree_add_when_dir_exists() {
+    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("fix-vuln-1");
+
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"\n"), // has_window: no match
+        MockProcessRunner::ok(),                  // git worktree prune
+        MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // detect_default_branch
+        MockProcessRunner::ok(),                  // git fetch origin main
+        // git worktree add is skipped (dir exists)
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux send-keys -l
+        MockProcessRunner::ok(), // tmux send-keys Enter
+    ]);
+
+    dispatch_fix_agent(fix_req(&repo_path, 1), &mock).unwrap();
+
+    let calls = mock.recorded_calls();
+    assert!(
+        calls
+            .iter()
+            .all(|(prog, args)| !(prog == "git" && args.iter().any(|a| a == "add"))),
+        "git worktree add should be skipped when dir exists, got: {calls:?}"
+    );
+}
+
+#[test]
+fn fix_agent_uses_accept_edits_permission_mode() {
+    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("fix-vuln-1");
+
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"\n"), // has_window: no match
+        MockProcessRunner::ok(),                  // git worktree prune
+        MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // detect_default_branch
+        MockProcessRunner::ok(),                  // git fetch origin main
+        MockProcessRunner::ok(),                  // tmux new-window
+        MockProcessRunner::ok(),                  // tmux send-keys -l
+        MockProcessRunner::ok(),                  // tmux send-keys Enter
+    ]);
+
+    dispatch_fix_agent(fix_req(&repo_path, 1), &mock).unwrap();
+
+    let calls = mock.recorded_calls();
+    let send_keys_arg = find_call_arg(&calls, 5, "claude");
+    assert!(
+        send_keys_arg.contains("--permission-mode acceptEdits"),
+        "fix agent should use acceptEdits mode, got: {send_keys_arg}"
+    );
+}
+
+// -----------------------------------------------------------------------
+// provision_and_dispatch error paths (agents.rs)
+// -----------------------------------------------------------------------
+
+#[test]
+fn provision_and_dispatch_checkout_remote_fetch_fails() {
+    let (_dir, repo_path) = make_test_repo();
+
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"\n"), // has_window: no match
+        MockProcessRunner::ok(),                  // git worktree prune
+        MockProcessRunner::fail("fatal: unable to access 'origin'"), // git fetch — fails
+    ]);
+
+    let result = dispatch_review_agent(&review_req(&repo_path, 5, "feature-x", false), &mock);
+
+    assert!(result.is_err(), "fetch failure should propagate as error");
+    let calls = mock.recorded_calls();
+    assert!(
+        calls
+            .iter()
+            .all(|(prog, args)| !(prog == "tmux" && args.iter().any(|a| a == "new-window"))),
+        "tmux new-window should not be called when fetch fails, got: {calls:?}"
+    );
+}
+
+#[test]
+fn provision_and_dispatch_worktree_add_fails() {
+    let (_dir, repo_path) = make_test_repo();
+    // Do NOT pre-create worktree dir — git worktree add will be attempted.
+
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"\n"), // has_window: no match
+        MockProcessRunner::ok(),                  // git worktree prune
+        MockProcessRunner::ok(),                  // git fetch origin feature-x
+        MockProcessRunner::fail("fatal: '/path' already exists"), // git worktree add — fails
+    ]);
+
+    let result = dispatch_review_agent(&review_req(&repo_path, 5, "feature-x", false), &mock);
+
+    assert!(result.is_err(), "worktree add failure should propagate as error");
+    let calls = mock.recorded_calls();
+    assert!(
+        calls
+            .iter()
+            .all(|(prog, args)| !(prog == "tmux" && args.iter().any(|a| a == "new-window"))),
+        "tmux new-window should not be called when worktree add fails, got: {calls:?}"
+    );
+}
+
+// -----------------------------------------------------------------------
+// provision_worktree error path (worktree.rs)
+// -----------------------------------------------------------------------
+
+#[test]
+fn provision_worktree_git_add_fails_returns_error() {
+    let (_dir, repo_path) = make_test_repo();
+    // No base_branch → no fetch; first runner call is git worktree add.
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::fail(
+        "fatal: not a git repository",
+    )]);
+
+    let task = make_task(&repo_path);
+    let result = provision_worktree(&task, &mock, None);
+
+    assert!(result.is_err(), "git worktree add failure should propagate");
+}
+
+// -----------------------------------------------------------------------
+// cleanup_task edge case (worktree.rs)
+// -----------------------------------------------------------------------
+
+#[test]
+fn cleanup_skips_kill_when_window_not_found() {
+    // tmux_window is Some but has_window returns false (window already gone).
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"\n"), // has_window: empty → false
+        MockProcessRunner::ok(),                  // git worktree remove
+        MockProcessRunner::ok(),                  // git branch -D (best-effort)
+    ]);
+
+    cleanup_task(
+        "/repo",
+        "/repo/.worktrees/42-fix-bug",
+        Some("task-42"),
+        &mock,
+    )
+    .unwrap();
+
+    let calls = mock.recorded_calls();
+    assert!(
+        calls
+            .iter()
+            .all(|(prog, args)| !(prog == "tmux" && args.iter().any(|a| a == "kill-window"))),
+        "kill-window should not be called when window not found, got: {calls:?}"
+    );
+}
+
+// -----------------------------------------------------------------------
+// finish_task edge case (finish.rs)
+// -----------------------------------------------------------------------
+
+#[test]
+fn finish_task_skips_kill_when_tmux_window_not_found() {
+    // The tmux window has already disappeared before finish_task runs.
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"main\n"), // rev-parse HEAD
+        MockProcessRunner::fail(""),                  // remote get-url (no remote)
+        MockProcessRunner::ok(),                      // git rebase main (from worktree)
+        MockProcessRunner::ok(),                      // git merge --ff-only
+        MockProcessRunner::ok_with_stdout(b"\n"),     // tmux list-windows — no match
+        // no kill-window call expected
+    ]);
+
+    finish_task(
+        "/repo",
+        "/repo/.worktrees/42-fix-bug",
+        "42-fix-bug",
+        "main",
+        Some("task-42"),
+        &mock,
+    )
+    .unwrap();
+
+    let calls = mock.recorded_calls();
+    assert!(
+        calls
+            .iter()
+            .all(|(prog, args)| !(prog == "tmux" && args.iter().any(|a| a == "kill-window"))),
+        "kill-window should not be called when window not found, got: {calls:?}"
     );
 }
