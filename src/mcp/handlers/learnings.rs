@@ -1,8 +1,9 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use crate::db::LearningFilter;
 use crate::mcp::McpState;
-use crate::models::{LearningId, LearningKind, LearningScope};
+use crate::models::{LearningId, LearningKind, LearningScope, LearningStatus};
 use crate::service::LearningService;
 
 use super::types::{
@@ -88,6 +89,7 @@ pub(super) fn handle_record_learning(
         },
     };
 
+    let similar_scope_ref = scope_ref.clone();
     let svc = LearningService::new(state.db.clone());
     match svc.create_learning(crate::service::CreateLearningParams {
         kind: parsed.kind,
@@ -98,18 +100,50 @@ pub(super) fn handle_record_learning(
         tags: parsed.tags,
         source_task_id: Some(task_id),
     }) {
-        Ok(learning_id) => JsonRpcResponse::ok(
-            id,
-            json!({
-                "content": [{
-                    "type": "text",
-                    "text": format!(
-                        "Learning {learning_id} recorded and active. \
-                         It will be injected into future dispatch prompts for matching tasks."
-                    )
-                }]
-            }),
-        ),
+        Ok(learning_id) => {
+            let similar: Vec<_> = match state.db.list_learnings(LearningFilter {
+                status: Some(LearningStatus::Approved),
+                scope: Some(parsed.scope),
+                scope_ref: similar_scope_ref,
+                ..Default::default()
+            }) {
+                Ok(entries) => entries
+                    .into_iter()
+                    .filter(|l| l.kind == parsed.kind && l.id != learning_id)
+                    .collect(),
+                Err(e) => {
+                    tracing::warn!("record_learning: failed to query similar entries: {e}");
+                    vec![]
+                }
+            };
+
+            let mut text = format!(
+                "Learning {learning_id} recorded and active. \
+                 It will be injected into future dispatch prompts for matching tasks."
+            );
+
+            if !similar.is_empty() {
+                text.push_str(&format!(
+                    "\n\nSimilar approved learnings already exist for \
+                     (kind={kind}, scope={scope}):",
+                    kind = parsed.kind,
+                    scope = parsed.scope,
+                ));
+                for l in &similar {
+                    text.push_str(&format!(
+                        "\n  [{}] {} (confirmed {}x) \
+                         → confirm_learning(learning_id={}, task_id={})",
+                        l.id, l.summary, l.confirmed_count, l.id, task_id.0
+                    ));
+                }
+                text.push_str(
+                    "\n\nIf one of these already captures what you intended, \
+                     consider calling confirm_learning on it instead of keeping this new entry.",
+                );
+            }
+
+            JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
+        }
         Err(e) => service_err_to_response(id, e),
     }
 }

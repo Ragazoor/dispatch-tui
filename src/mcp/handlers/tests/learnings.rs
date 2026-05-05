@@ -271,6 +271,152 @@ async fn record_learning_unknown_task_fails() {
     assert_error(&resp, "9999");
 }
 
+// --- record_learning: similar-entries echo -----------------------------------
+
+#[tokio::test]
+async fn record_learning_echoes_similar_approved_entries() {
+    let state = test_state();
+    let task_id = create_task_in_repo(&state, "/repo/foo");
+
+    // Pre-seed an approved learning with same (kind=convention, scope=repo, scope_ref=/repo/foo)
+    let existing_id = create_approved_learning(
+        &state,
+        "Always use cargo fmt before committing",
+        crate::models::LearningScope::Repo,
+        Some("/repo/foo"),
+        &[],
+    );
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "record_learning",
+            "arguments": {
+                "task_id": task_id.0,
+                "kind": "convention",
+                "summary": "Prefer rustfmt over manual formatting",
+                "scope": "repo"
+            }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
+
+    let text = extract_response_text(&resp);
+    assert!(
+        text.contains(&existing_id.0.to_string()),
+        "expected existing learning id {} in response: {text}",
+        existing_id.0
+    );
+    assert!(
+        text.contains("confirm_learning"),
+        "expected confirm_learning suggestion in response: {text}"
+    );
+}
+
+#[tokio::test]
+async fn record_learning_no_echo_when_different_kind() {
+    let state = test_state();
+    let task_id = create_task_in_repo(&state, "/repo/foo");
+
+    // Pre-seed an approved convention learning; we will submit a pitfall learning.
+    create_approved_learning(
+        &state,
+        "Watch out for integer overflow",
+        crate::models::LearningScope::Repo,
+        Some("/repo/foo"),
+        &[],
+    );
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "record_learning",
+            "arguments": {
+                "task_id": task_id.0,
+                "kind": "pitfall",
+                "summary": "Use checked_add to avoid overflow",
+                "scope": "repo"
+            }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
+
+    let text = extract_response_text(&resp);
+    assert!(
+        !text.contains("confirm_learning"),
+        "should not suggest confirm_learning when existing entry has a different kind: {text}"
+    );
+}
+
+#[tokio::test]
+async fn record_learning_still_creates_when_similar_exists() {
+    let state = test_state();
+    let task_id = create_task_in_repo(&state, "/repo/foo");
+
+    create_approved_learning(
+        &state,
+        "Existing approved entry",
+        crate::models::LearningScope::Repo,
+        Some("/repo/foo"),
+        &[],
+    );
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "record_learning",
+            "arguments": {
+                "task_id": task_id.0,
+                "kind": "convention",
+                "summary": "New entry despite similar existing",
+                "scope": "repo"
+            }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
+
+    let all = state.db.list_learnings(crate::db::LearningFilter::default()).unwrap();
+    assert_eq!(all.len(), 2, "expected pre-existing + newly created learning");
+    let new_one = all.iter().find(|l| l.summary == "New entry despite similar existing");
+    assert!(new_one.is_some(), "newly created learning must exist");
+}
+
+#[tokio::test]
+async fn record_learning_does_not_echo_itself() {
+    // When no pre-existing similar entry exists, the newly created entry must
+    // not be echoed as a "similar" entry (it should exclude itself).
+    let state = test_state();
+    let task_id = create_task_in_repo(&state, "/repo/foo");
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "record_learning",
+            "arguments": {
+                "task_id": task_id.0,
+                "kind": "convention",
+                "summary": "A brand new learning with no prior similar entries",
+                "scope": "repo"
+            }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
+
+    let text = extract_response_text(&resp);
+    assert!(
+        !text.contains("confirm_learning"),
+        "should not suggest confirm_learning when no pre-existing similar entries: {text}"
+    );
+}
+
 // --- query_learnings ---------------------------------------------------------
 
 #[tokio::test]
