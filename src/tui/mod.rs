@@ -1175,16 +1175,14 @@ impl App {
             }
             Message::FeedFailed { epic_title, error } => self.handle_feed_failed(epic_title, error),
             Message::OpenLearnings => vec![Command::LoadLearnings],
-            Message::ShowLearnings(learnings) => {
-                self.handle_show_proposed_learnings(learnings)
+            Message::ShowLearnings(learnings) => self.handle_show_learnings(learnings),
+            Message::CloseLearnings => self.handle_close_learnings(),
+            Message::NavigateLearning(delta) => self.handle_navigate_learning(delta),
+            Message::ArchiveLearning(id) => self.handle_archive_learning(id),
+            Message::ToggleLearningsView => self.handle_toggle_learnings_view(),
+            Message::NavigateTreeLearning(nav) => {
+                self.handle_navigate_tree_learning(nav)
             }
-            Message::CloseLearnings => self.handle_close_proposed_learnings(),
-            Message::NavigateLearning(delta) => {
-                self.handle_navigate_proposed_learning(delta)
-            }
-            Message::ArchiveLearning(id) => self.handle_approve_learning(id),
-            Message::ToggleLearningsView => vec![],
-            Message::NavigateTreeLearning(_) => vec![],
             Message::RejectLearning(id) => self.handle_reject_learning(id),
             Message::EditLearning(id) => self.handle_edit_learning(id),
             Message::LearningActioned(id) => self.handle_learning_actioned(id),

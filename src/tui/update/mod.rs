@@ -12,7 +12,7 @@ mod forms;
 mod lifecycle;
 mod navigation;
 mod pr;
-mod proposed_learnings;
+mod learnings;
 mod repo_filter;
 mod retry;
 mod selection;
