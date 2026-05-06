@@ -432,3 +432,69 @@ pub fn is_wrappable(task: &Task) -> bool {
     task.worktree.is_some()
         && (task.status == TaskStatus::Review || task.status == TaskStatus::Running)
 }
+
+/// The fixed tmux window name used for the main claude session.
+pub const MAIN_SESSION_WINDOW: &str = "dispatch-main";
+
+/// Launch a plain interactive `claude` session in a new tmux window.
+///
+/// Unlike task agents, this session has no task context, no prompt file, and
+/// no `--permission-mode` flag — it opens as a plain interactive Claude Code
+/// session with dispatch plugins available.
+///
+/// Returns the name of the created tmux window.
+pub fn create_main_session(dir: &str, runner: &dyn ProcessRunner) -> Result<String> {
+    let window = MAIN_SESSION_WINDOW;
+
+    tmux::new_window(window, dir, runner).context("failed to create main session tmux window")?;
+
+    tmux::send_keys(window, &format!("claude {DISPATCH_PLUGIN_DIR}"), runner)
+        .context("failed to send keys to main session tmux window")?;
+
+    tracing::info!(%window, %dir, "main session created");
+
+    Ok(window.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::process::MockProcessRunner;
+
+    #[test]
+    fn create_main_session_creates_tmux_window_in_given_dir() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // new-window
+            MockProcessRunner::ok(), // send-keys -l
+            MockProcessRunner::ok(), // send-keys Enter
+        ]);
+        let result = create_main_session("/home/user", &mock);
+        assert!(result.is_ok());
+        let window = result.unwrap();
+        assert_eq!(window, MAIN_SESSION_WINDOW);
+
+        let calls = mock.recorded_calls();
+        // First call: tmux new-window
+        assert!(calls[0].1.contains(&"new-window".to_string()));
+        assert!(calls[0].1.iter().any(|a| a.contains("/home/user")));
+        assert!(calls[0].1.iter().any(|a| a == MAIN_SESSION_WINDOW));
+    }
+
+    #[test]
+    fn create_main_session_sends_claude_with_plugin_dir() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // new-window
+            MockProcessRunner::ok(), // send-keys -l
+            MockProcessRunner::ok(), // send-keys Enter
+        ]);
+        create_main_session("/home/user", &mock).unwrap();
+
+        let calls = mock.recorded_calls();
+        // send-keys call passes "claude <plugin_dir>" as the command
+        let all_args: Vec<String> = calls.iter().flat_map(|(_, args)| args.clone()).collect();
+        let has_plugin_dir = all_args
+            .iter()
+            .any(|a| a.contains("claude") && a.contains("--plugin-dir"));
+        assert!(has_plugin_dir, "expected claude with plugin dir in send-keys, got: {all_args:?}");
+    }
+}
