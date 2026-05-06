@@ -95,7 +95,6 @@ fn allium_instruction_mentions_spec_and_skills() {
     assert!(instr.contains("allium:weed"));
 }
 
-
 fn make_task(repo_path: &str) -> Task {
     Task {
         id: TaskId(42),
@@ -140,7 +139,6 @@ fn make_test_repo_with_worktree(slug: &str) -> (tempfile::TempDir, String, std::
     std::fs::create_dir_all(&worktree_dir).unwrap();
     (dir, repo_path, worktree_dir)
 }
-
 
 #[test]
 fn find_call_arg_returns_matching_arg() {

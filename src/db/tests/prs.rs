@@ -170,10 +170,7 @@ fn save_review_prs_replaces_all() {
         }],
     };
     db.save_prs(super::super::PrKind::Review, &[pr1]).unwrap();
-    assert_eq!(
-        db.load_prs(super::super::PrKind::Review).unwrap().len(),
-        1
-    );
+    assert_eq!(db.load_prs(super::super::PrKind::Review).unwrap().len(), 1);
 
     // Verify new fields round-trip on the first save
     let loaded_first = db.load_prs(super::super::PrKind::Review).unwrap();
@@ -290,9 +287,7 @@ fn save_review_prs_preserves_agent_fields() {
     assert_eq!(loaded[0].review_decision, ReviewDecision::Approved);
 
     // Agent status should still be present after refresh
-    let status = db
-        .pr_agent_status("review_prs", "acme/app", 42)
-        .unwrap();
+    let status = db.pr_agent_status("review_prs", "acme/app", 42).unwrap();
     assert!(status.is_some(), "agent status should be preserved");
 }
 
@@ -328,10 +323,7 @@ fn save_review_prs_removes_stale_prs() {
         &[make_pr(1, "acme/app"), make_pr(2, "acme/other")],
     )
     .unwrap();
-    assert_eq!(
-        db.load_prs(super::super::PrKind::Review).unwrap().len(),
-        2
-    );
+    assert_eq!(db.load_prs(super::super::PrKind::Review).unwrap().len(), 2);
 
     // Refresh with only one — the other should be removed
     db.save_prs(super::super::PrKind::Review, &[make_pr(1, "acme/app")])
@@ -622,19 +614,13 @@ fn my_prs_and_review_prs_are_independent() {
         .unwrap();
 
     assert_eq!(db.load_prs(super::super::PrKind::My).unwrap().len(), 1);
-    assert_eq!(
-        db.load_prs(super::super::PrKind::Review).unwrap().len(),
-        1
-    );
+    assert_eq!(db.load_prs(super::super::PrKind::Review).unwrap().len(), 1);
     assert_eq!(db.load_prs(super::super::PrKind::Bot).unwrap().len(), 1);
 
     // Saving empty to one table doesn't affect others
     db.save_prs(super::super::PrKind::My, &[]).unwrap();
     assert!(db.load_prs(super::super::PrKind::My).unwrap().is_empty());
-    assert_eq!(
-        db.load_prs(super::super::PrKind::Review).unwrap().len(),
-        1
-    );
+    assert_eq!(db.load_prs(super::super::PrKind::Review).unwrap().len(), 1);
     assert_eq!(db.load_prs(super::super::PrKind::Bot).unwrap().len(), 1);
 }
 

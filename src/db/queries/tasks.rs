@@ -2,7 +2,9 @@ use anyhow::{Context, Result};
 use chrono::NaiveDateTime;
 use rusqlite::{params, OptionalExtension};
 
-use crate::models::{EpicId, FeedItem, ProjectId, SubStatus, TaskId, TaskStatus, TaskUsage, UsageReport};
+use crate::models::{
+    EpicId, FeedItem, ProjectId, SubStatus, TaskId, TaskStatus, TaskUsage, UsageReport,
+};
 
 use super::super::{CreateTaskRequest, Database, TaskPatch};
 use super::{row_to_task, TASK_COLUMNS};

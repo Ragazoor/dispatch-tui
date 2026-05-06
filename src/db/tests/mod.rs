@@ -4,8 +4,8 @@ mod alerts;
 mod epics;
 mod learnings;
 mod migrations;
-mod prs;
 mod projects;
+mod prs;
 mod settings;
 mod tasks;
 

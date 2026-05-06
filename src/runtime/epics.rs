@@ -141,13 +141,8 @@ impl TuiRuntime {
                 epic_id = epic_id.0,
                 "dispatching epic planning agent"
             );
-            match dispatch::epic_planning_agent(
-                &task,
-                epic_id,
-                &epic_title,
-                &project_ctx,
-                &*runner,
-            ) {
+            match dispatch::epic_planning_agent(&task, epic_id, &epic_title, &project_ctx, &*runner)
+            {
                 Ok(result) => {
                     let _ = tx.send(Message::Dispatched {
                         id,

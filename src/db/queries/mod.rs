@@ -1,8 +1,8 @@
 mod alerts;
 mod epics;
 mod learnings;
-mod prs;
 mod projects;
+mod prs;
 mod settings;
 mod tasks;
 
