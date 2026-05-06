@@ -58,6 +58,10 @@ pub(super) fn dispatch(
             rt.exec_jump_to_tmux(app, window);
             vec![]
         }
+        OpenMainSession => {
+            rt.exec_open_main_session(app);
+            vec![]
+        }
         QuickDispatch { draft, epic_id } => {
             rt.exec_quick_dispatch(app, draft, epic_id);
             vec![]

@@ -66,6 +66,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (41, migrate_v41_drop_cost_usd),
     (42, migrate_v42_drop_epic_tag),
     (43, migrate_v43_proposed_to_approved),
+    (44, migrate_v44_episodic_to_convention),
 ];
 
 fn migrate_v1_add_plan_column(conn: &Connection) -> Result<()> {
@@ -979,4 +980,9 @@ fn migrate_v43_proposed_to_approved(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_learnings_status ON learnings(status);",
     )
     .context("Failed to migrate learnings to default 'approved' status (migration v43)")
+}
+
+pub(super) fn migrate_v44_episodic_to_convention(conn: &Connection) -> Result<()> {
+    conn.execute_batch("UPDATE learnings SET kind = 'convention' WHERE kind = 'episodic'")
+        .context("Failed to migrate episodic learnings to convention (migration v44)")
 }

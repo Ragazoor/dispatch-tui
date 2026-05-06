@@ -149,17 +149,10 @@ impl LearningService {
             .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
     }
 
-    pub fn confirm_learning(&self, id: LearningId) -> Result<(), ServiceError> {
-        let learning = self.get_learning(id)?;
-        if learning.status != LearningStatus::Approved {
-            return Err(ServiceError::Validation(format!(
-                "can only confirm an approved learning (current status: {})",
-                learning.status
-            )));
-        }
+    pub fn upvote_learning(&self, id: LearningId) -> Result<(), ServiceError> {
         self.db
-            .confirm_learning(id)
-            .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
+            .upvote_learning(id)
+            .map_err(|e| ServiceError::Validation(format!("cannot upvote: {e}")))
     }
 }
 
@@ -361,7 +354,7 @@ mod learning_tests {
     }
 
     #[test]
-    fn confirm_learning_on_approved_succeeds() {
+    fn upvote_learning_on_approved_succeeds() {
         let svc = service();
         let id = svc
             .create_learning(CreateLearningParams {
@@ -374,7 +367,7 @@ mod learning_tests {
                 source_task_id: None,
             })
             .unwrap();
-        svc.confirm_learning(id).unwrap();
+        svc.upvote_learning(id).unwrap();
         let learning = svc.get_learning(id).unwrap();
         assert_eq!(learning.confirmed_count, 1);
     }

@@ -6,10 +6,10 @@ expression: rendered
         ▸ backlog 2 [ ]                 ◦ running 1                   ◦ review 0                     ◦ done 1
 ──────────────────────────────│───────────────────────────│──────────────────────────────│──────────────────────────────
 ──────────────────────────────│  ── active                │                              │──────────────────────────────
-  ▌ #1 Task ╭ Learnings ───────────────────────────────────────────────────────────────────────────────────╮
-   ◦ <1h    │┌ Learnings (2) — sorted by use ─────────────────────────────────────────────────────────────┐│
-────────────││[h] Prefer concise responses over verbose ones  ✓3  global                                  ││────────────
-  ▎ #2 Task ││[!] tokio::spawn needs explicit error logging  ✓1  repo:repo                                ││
+  ▌ #1 Task ╭ Knowledge Base ──────────────────────────────────────────────────────────────────────────────╮
+   ◦ <1h    │┌ Knowledge Base (2) — sorted by upvotes ────────────────────────────────────────────────────┐│
+────────────││[h] Prefer concise responses over verbose ones  ↑3  global                                  ││────────────
+  ▎ #2 Task ││[!] tokio::spawn needs explicit error logging  ↑1  repo:repo                                ││
    ◦ <1h    ││                                                                                            ││
 ────────────││                                                                                            ││
             ││                                                                                            ││
@@ -33,7 +33,7 @@ expression: rendered
             │                                                                                              │
             │This helps agents stay focused.                                                               │
             │                                                                                              │
-────────────│scope:global  confirmed:3                                                                     │────────────
+────────────│scope:global  upvotes:3                                                                       │────────────
             │tags: style                                                                                   │
             │                                                                                              │
             │                                                                                              │

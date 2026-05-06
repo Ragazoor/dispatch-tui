@@ -1,6 +1,31 @@
 use super::*;
 
 #[test]
+fn landscape_kind_can_be_recorded() {
+    use crate::models::{LearningKind, LearningScope};
+    let db = in_memory_db();
+    let id = db
+        .create_learning(
+            LearningKind::Landscape,
+            "Service X owns auth, service Y owns billing",
+            None,
+            LearningScope::Repo,
+            Some("/home/user/repo"),
+            &[],
+            None,
+        )
+        .unwrap();
+    let l = db.get_learning(id).unwrap().unwrap();
+    assert_eq!(l.kind, LearningKind::Landscape);
+}
+
+#[test]
+fn episodic_kind_does_not_parse() {
+    use crate::models::LearningKind;
+    assert!(LearningKind::parse("episodic").is_none());
+}
+
+#[test]
 fn test_learning_status_no_proposed() {
     // Proposed must no longer be a valid parse target
     assert!(crate::models::LearningStatus::parse("proposed").is_err());
@@ -221,7 +246,7 @@ fn patch_learning_updates_summary_and_updated_at() {
 }
 
 #[test]
-fn confirm_learning_increments_count_and_timestamps() {
+fn upvote_learning_increments_count_and_timestamps() {
     use crate::db::LearningPatch;
     use crate::models::{LearningKind, LearningScope, LearningStatus};
     let db = in_memory_db();
@@ -243,13 +268,13 @@ fn confirm_learning_increments_count_and_timestamps() {
     assert_eq!(before.confirmed_count, 0);
     assert!(before.last_confirmed_at.is_none());
 
-    db.confirm_learning(id).unwrap();
+    db.upvote_learning(id).unwrap();
     let after = db.get_learning(id).unwrap().unwrap();
     assert_eq!(after.confirmed_count, 1);
     assert!(after.last_confirmed_at.is_some());
     assert!(after.updated_at >= before.updated_at);
 
-    db.confirm_learning(id).unwrap();
+    db.upvote_learning(id).unwrap();
     let after2 = db.get_learning(id).unwrap().unwrap();
     assert_eq!(after2.confirmed_count, 2);
 }
@@ -319,7 +344,7 @@ fn list_learnings_for_dispatch_unions_scopes() {
     // task-scoped: should NOT appear (task scope excluded from auto-dispatch)
     let _t = db
         .create_learning(
-            LearningKind::Episodic,
+            LearningKind::Convention,
             "Task outcome",
             None,
             LearningScope::Task,

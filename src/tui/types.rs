@@ -390,6 +390,9 @@ pub enum Message {
         epic_title: String,
         error: String,
     },
+    // Main session messages
+    SubmitMainSessionDir(String),
+    MainSessionCreated(String),
 }
 
 // ---------------------------------------------------------------------------
@@ -557,6 +560,7 @@ pub enum Command {
     LoadLearnings,
     ArchiveLearning(crate::models::LearningId),
     RejectLearning(crate::models::LearningId),
+    OpenMainSession,
 }
 
 // ---------------------------------------------------------------------------
@@ -608,6 +612,7 @@ pub enum InputMode {
         id: ProjectId,
         item_count: u64,
     },
+    MainSessionDir,
 }
 
 // ---------------------------------------------------------------------------

@@ -439,7 +439,7 @@ pub trait LearningStore: Send + Sync {
     fn delete_learning(&self, id: LearningId) -> Result<()>;
 
     /// Atomically increments `confirmed_count` and updates `last_confirmed_at` and `updated_at`.
-    fn confirm_learning(&self, id: LearningId) -> Result<()>;
+    fn upvote_learning(&self, id: LearningId) -> Result<()>;
 
     /// Returns approved learnings for the given task context, unioning user + project + repo + epic
     /// scopes. Task-scoped learnings are excluded (they surface via explicit query only).

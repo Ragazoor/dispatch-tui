@@ -199,17 +199,21 @@ impl super::super::LearningStore for Database {
         Ok(())
     }
 
-    fn confirm_learning(&self, id: LearningId) -> Result<()> {
+    fn upvote_learning(&self, id: LearningId) -> Result<()> {
         let conn = self.conn()?;
-        conn.execute(
-            "UPDATE learnings
-             SET confirmed_count = confirmed_count + 1,
-                 last_confirmed_at = datetime('now'),
-                 updated_at = datetime('now')
-             WHERE id = ?1",
-            params![id.0],
-        )
-        .context("Failed to confirm learning")?;
+        let changed = conn
+            .execute(
+                "UPDATE learnings
+                 SET confirmed_count = confirmed_count + 1,
+                     last_confirmed_at = datetime('now'),
+                     updated_at = datetime('now')
+                 WHERE id = ?1 AND status = 'approved'",
+                params![id.0],
+            )
+            .context("Failed to upvote learning")?;
+        if changed == 0 {
+            anyhow::bail!("learning {id:?} not found or not approved");
+        }
         Ok(())
     }
 

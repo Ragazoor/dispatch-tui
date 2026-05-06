@@ -11,6 +11,7 @@ mod feeds;
 mod forms;
 mod learnings;
 mod lifecycle;
+mod main_session;
 mod navigation;
 mod pr;
 mod repo_filter;

@@ -155,7 +155,7 @@ async fn record_learning_derives_scope_ref_for_epic() {
             "name": "record_learning",
             "arguments": {
                 "task_id": task_id.0,
-                "kind": "episodic",
+                "kind": "convention",
                 "summary": "Epic-level outcome",
                 "scope": "epic"
             }
@@ -188,7 +188,7 @@ async fn record_learning_epic_scope_no_epic_fails() {
             "name": "record_learning",
             "arguments": {
                 "task_id": task_id.0,
-                "kind": "episodic",
+                "kind": "convention",
                 "summary": "Epic outcome but no epic",
                 "scope": "epic"
             }
@@ -310,8 +310,8 @@ async fn record_learning_echoes_similar_approved_entries() {
         existing_id.0
     );
     assert!(
-        text.contains("confirm_learning"),
-        "expected confirm_learning suggestion in response: {text}"
+        text.contains("upvote_learning"),
+        "expected upvote_learning suggestion in response: {text}"
     );
 }
 
@@ -347,8 +347,8 @@ async fn record_learning_no_echo_when_different_kind() {
 
     let text = extract_response_text(&resp);
     assert!(
-        !text.contains("confirm_learning"),
-        "should not suggest confirm_learning when existing entry has a different kind: {text}"
+        !text.contains("upvote_learning"),
+        "should not suggest upvote_learning when existing entry has a different kind: {text}"
     );
 }
 
@@ -421,8 +421,8 @@ async fn record_learning_does_not_echo_itself() {
 
     let text = extract_response_text(&resp);
     assert!(
-        !text.contains("confirm_learning"),
-        "should not suggest confirm_learning when no pre-existing similar entries: {text}"
+        !text.contains("upvote_learning"),
+        "should not suggest upvote_learning when no pre-existing similar entries: {text}"
     );
 }
 
@@ -540,10 +540,10 @@ async fn query_learnings_unknown_task_fails() {
     assert_error(&resp, "9999");
 }
 
-// --- confirm_learning --------------------------------------------------------
+// --- upvote_learning --------------------------------------------------------
 
 #[tokio::test]
-async fn confirm_learning_increments_count() {
+async fn upvote_learning_increments_count() {
     let state = test_state();
     let task_id = create_task_in_repo(&state, "/repo");
     let learning_id = create_approved_learning(
@@ -558,7 +558,7 @@ async fn confirm_learning_increments_count() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "confirm_learning",
+            "name": "upvote_learning",
             "arguments": { "learning_id": learning_id, "task_id": task_id.0 }
         })),
     )
@@ -570,7 +570,7 @@ async fn confirm_learning_increments_count() {
 }
 
 #[tokio::test]
-async fn confirm_learning_unknown_learning_fails() {
+async fn upvote_learning_unknown_learning_fails() {
     let state = test_state();
     let task_id = create_task_in_repo(&state, "/repo");
 
@@ -578,7 +578,7 @@ async fn confirm_learning_unknown_learning_fails() {
         &state,
         "tools/call",
         Some(json!({
-            "name": "confirm_learning",
+            "name": "upvote_learning",
             "arguments": { "learning_id": 9999, "task_id": task_id.0 }
         })),
     )

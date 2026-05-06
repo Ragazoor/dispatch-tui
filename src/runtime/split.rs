@@ -7,6 +7,53 @@ impl TuiRuntime {
         }
     }
 
+    pub(super) fn exec_open_main_session(&self, app: &mut App) {
+        let dir = match app.main_session_dir() {
+            Some(d) => d.to_string(),
+            None => {
+                app.update(Message::Error(
+                    "Main session directory not configured".to_string(),
+                ));
+                return;
+            }
+        };
+
+        // Check if existing session is still alive.
+        if let Some(window) = app.main_session().map(str::to_string) {
+            match tmux::has_window(&window, &*self.runner) {
+                Ok(true) => {
+                    if let Err(e) = tmux::select_window(&window, &*self.runner) {
+                        app.update(Message::Error(format!(
+                            "Jump to main session failed: {e:#}"
+                        )));
+                    }
+                    return;
+                }
+                _ => {
+                    // Window is gone — clear stale reference and fall through to create.
+                    app.set_main_session(None);
+                    let _ = self.database.set_setting_string("main_session.window", "");
+                }
+            }
+        }
+
+        match dispatch::create_main_session(&dir, &*self.runner) {
+            Ok(window) => {
+                app.update(Message::MainSessionCreated(window.clone()));
+                if let Err(e) = tmux::select_window(&window, &*self.runner) {
+                    app.update(Message::Error(format!(
+                        "Main session created but jump failed: {e:#}"
+                    )));
+                }
+            }
+            Err(e) => {
+                app.update(Message::Error(format!(
+                    "Failed to create main session: {e:#}"
+                )));
+            }
+        }
+    }
+
     pub(super) fn exec_enter_split_mode(&self, app: &mut App) {
         let dispatch_pane = match tmux::current_pane_id(&*self.runner) {
             Ok(id) => id,

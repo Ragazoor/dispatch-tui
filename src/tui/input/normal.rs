@@ -154,6 +154,15 @@ impl App {
                 self.handle_key_move(MoveDirection::Backward)
             }
 
+            KeyCode::Char(':') => {
+                if self.main_session_dir.is_none() {
+                    self.input.mode = InputMode::MainSessionDir;
+                    vec![]
+                } else {
+                    vec![Command::OpenMainSession]
+                }
+            }
+
             KeyCode::Char('g') => {
                 if let Some(task) = self.selected_task() {
                     // If the task's window is pinned in the split pane, it no longer
