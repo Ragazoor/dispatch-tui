@@ -80,7 +80,7 @@ impl TaskStatus {
             TaskStatus::Running => 1,
             TaskStatus::Review => 2,
             TaskStatus::Done => 3,
-            TaskStatus::Archived => TaskStatus::COLUMN_COUNT, // Virtual archive column, rightmost
+            TaskStatus::Archived => TaskStatus::COLUMN_COUNT,
         }
     }
 
@@ -560,9 +560,9 @@ const WEEKS_THRESHOLD_DAYS: i64 = 14;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Staleness {
-    Fresh, // < 3 days
-    Aging, // 3-7 days
-    Stale, // > 7 days
+    Fresh,
+    Aging,
+    Stale,
 }
 
 impl Staleness {

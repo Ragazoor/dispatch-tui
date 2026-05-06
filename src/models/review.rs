@@ -942,7 +942,6 @@ mod security_tests {
             ReviewWorkflowState::COLUMN_COUNT,
             ReviewWorkflowState::ALL.len()
         );
-        // Verify that the 4 variants are in the ALL array
         let all_states = ReviewWorkflowState::ALL.to_vec();
         assert!(all_states.contains(&Backlog));
         assert!(all_states.contains(&Ongoing));
@@ -959,7 +958,6 @@ mod security_tests {
             SecurityWorkflowState::COLUMN_COUNT,
             SecurityWorkflowState::ALL.len()
         );
-        // Verify that the 4 variants are in the ALL array
         let all_states = SecurityWorkflowState::ALL.to_vec();
         assert!(all_states.contains(&Backlog));
         assert!(all_states.contains(&Ongoing));

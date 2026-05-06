@@ -64,13 +64,11 @@ impl EpicSubstatus {
     /// so that epics and tasks share the same section headers.
     pub fn column_priority(&self) -> u8 {
         match self {
-            Self::Blocked(_) => 3, // NeedsInput equivalent
-            Self::Active => 5,     // Active equivalent
-            Self::WrappingUp => 6, // Approved equivalent
-            Self::InReview => 5,   // AwaitingReview equivalent
-            Self::Unplanned => 5,
-            Self::Planned => 5,
-            Self::Done => 5,
+            Self::Blocked(_) => SubStatus::NeedsInput.column_priority(),
+            Self::Active => SubStatus::Active.column_priority(),
+            Self::WrappingUp => SubStatus::Approved.column_priority(),
+            Self::InReview => SubStatus::AwaitingReview.column_priority(),
+            Self::Unplanned | Self::Planned | Self::Done => SubStatus::None.column_priority(),
         }
     }
 
