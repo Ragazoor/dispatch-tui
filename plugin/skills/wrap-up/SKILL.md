@@ -52,17 +52,13 @@ git diff {base_branch}..HEAD --name-only
 git diff --name-only
 ```
 
-If the combined output includes any source code files (`.rs`, `.py`, `.ts`, `.js`, `.tsx`, `.jsx`, `.go`, `.java`, `.cpp`, `.c`, `.h`, `.swift`, `.kt`, `.rb`, `.cs`) — i.e., not only docs, configs, snapshots, or lock files — invoke the `code-simplifier:code-simplifier` agent using the Agent tool:
+If the combined output includes any source code files (`.rs`, `.py`, `.ts`, `.js`, `.tsx`, `.jsx`, `.go`, `.java`, `.cpp`, `.c`, `.h`, `.swift`, `.kt`, `.rb`, `.cs`) — i.e., not only docs, configs, snapshots, or lock files — invoke the simplify skill:
 
 ```
-Agent({
-  subagent_type: "code-simplifier:code-simplifier",
-  description: "Simplify code changes before wrap-up",
-  prompt: "Simplify recently modified code. Focus on changes in this worktree since {base_branch}."
-})
+Skill({ skill: "simplify" })
 ```
 
-Wait for the agent to complete before proceeding. If it makes additional changes, those will be picked up in Step 3.
+Wait for the skill to complete before proceeding. If it makes additional changes, those will be picked up in Step 3.
 
 If there are no code file changes, skip this step entirely.
 
