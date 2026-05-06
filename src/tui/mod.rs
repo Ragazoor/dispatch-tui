@@ -72,6 +72,8 @@ pub struct App {
     /// Advanced by `Tick` only while `dispatching` is non-empty.
     pub(in crate::tui) spinner_tick: u8,
     pub(in crate::tui) tips: Option<TipsOverlayState>,
+    pub(in crate::tui) main_session: Option<String>,
+    pub(in crate::tui) main_session_dir: Option<String>,
 }
 
 /// Format a title for display in confirmation prompts, truncating if longer than `max_len` chars.
@@ -143,6 +145,8 @@ impl App {
             dispatching: HashMap::new(),
             spinner_tick: 0,
             tips: None,
+            main_session: None,
+            main_session_dir: None,
         };
         app.update_anchor_from_current();
         app
@@ -296,6 +300,22 @@ impl App {
 
     pub fn set_notifications_enabled(&mut self, enabled: bool) {
         self.notifications_enabled = enabled;
+    }
+
+    pub fn main_session(&self) -> Option<&str> {
+        self.main_session.as_deref()
+    }
+
+    pub fn main_session_dir(&self) -> Option<&str> {
+        self.main_session_dir.as_deref()
+    }
+
+    pub fn set_main_session(&mut self, window: Option<String>) {
+        self.main_session = window;
+    }
+
+    pub fn set_main_session_dir(&mut self, dir: Option<String>) {
+        self.main_session_dir = dir;
     }
 
     pub fn set_repo_filter(&mut self, filter: HashSet<String>) {
@@ -1194,6 +1214,10 @@ impl App {
             Message::EditLearning(id) => self.handle_edit_learning(id),
             Message::LearningActioned(id) => self.handle_learning_actioned(id),
             Message::LearningEdited(updated) => self.handle_learning_edited(updated),
+
+            // ── Main session ──
+            Message::SubmitMainSessionDir(dir) => self.handle_submit_main_session_dir(dir),
+            Message::MainSessionCreated(window) => self.handle_main_session_created(window),
         }
     }
 

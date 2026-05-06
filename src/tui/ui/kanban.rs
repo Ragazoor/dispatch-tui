@@ -2009,6 +2009,14 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
+        InputMode::MainSessionDir => {
+            let text = format!(
+                "Main session directory:  {}  [Enter] open  [Esc] cancel",
+                app.input.buffer
+            );
+            let bar = Paragraph::new(text).style(Style::default().fg(Color::Cyan));
+            frame.render_widget(bar, area);
+        }
         InputMode::InputProjectName { editing_id } => {
             let action = if editing_id.is_some() {
                 "Rename project"

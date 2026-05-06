@@ -104,6 +104,7 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     }
 
     load_notifications_pref(&*database, &mut app);
+    load_main_session(&*database, &*runner, &mut app);
     load_per_project_repo_filters(&*database, &mut app);
     for msg in [
         load_filter_presets(&*database, &mut app),
@@ -410,6 +411,26 @@ async fn execute_commands(
 // ---------------------------------------------------------------------------
 // init load helpers — extracted from run_tui's startup block
 // ---------------------------------------------------------------------------
+
+fn load_main_session(
+    db: &dyn db::SettingsStore,
+    runner: &dyn crate::process::ProcessRunner,
+    app: &mut App,
+) {
+    if let Some(dir) = db.get_setting_string("main_session.dir").ok().flatten() {
+        if !dir.is_empty() {
+            app.set_main_session_dir(Some(dir));
+        }
+    }
+    if let Some(window) = db.get_setting_string("main_session.window").ok().flatten() {
+        if !window.is_empty() && tmux::has_window(&window, runner).unwrap_or(false) {
+            app.set_main_session(Some(window));
+        } else if !window.is_empty() {
+            // Window stored but no longer alive — clear stale entry.
+            let _ = db.set_setting_string("main_session.window", "");
+        }
+    }
+}
 
 fn load_notifications_pref(db: &dyn db::SettingsStore, app: &mut App) {
     let enabled = db

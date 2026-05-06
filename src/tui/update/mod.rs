@@ -19,4 +19,5 @@ mod selection;
 mod split_pane;
 mod system;
 mod tips_projects;
+mod main_session;
 mod wrap_up;

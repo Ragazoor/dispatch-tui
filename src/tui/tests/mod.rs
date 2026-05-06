@@ -2,6 +2,7 @@ pub mod scenarios;
 pub mod snapshots;
 
 mod archive;
+mod main_session;
 mod dispatch;
 mod epics;
 mod helpers;
