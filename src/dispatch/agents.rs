@@ -495,6 +495,9 @@ mod tests {
         let has_plugin_dir = all_args
             .iter()
             .any(|a| a.contains("claude") && a.contains("--plugin-dir"));
-        assert!(has_plugin_dir, "expected claude with plugin dir in send-keys, got: {all_args:?}");
+        assert!(
+            has_plugin_dir,
+            "expected claude with plugin dir in send-keys, got: {all_args:?}"
+        );
     }
 }

@@ -23,16 +23,16 @@ impl TuiRuntime {
             match tmux::has_window(&window, &*self.runner) {
                 Ok(true) => {
                     if let Err(e) = tmux::select_window(&window, &*self.runner) {
-                        app.update(Message::Error(format!("Jump to main session failed: {e:#}")));
+                        app.update(Message::Error(format!(
+                            "Jump to main session failed: {e:#}"
+                        )));
                     }
                     return;
                 }
                 _ => {
                     // Window is gone — clear stale reference and fall through to create.
                     app.set_main_session(None);
-                    let _ = self
-                        .database
-                        .set_setting_string("main_session.window", "");
+                    let _ = self.database.set_setting_string("main_session.window", "");
                 }
             }
         }
