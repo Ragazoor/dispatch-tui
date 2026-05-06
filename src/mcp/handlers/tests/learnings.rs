@@ -155,7 +155,7 @@ async fn record_learning_derives_scope_ref_for_epic() {
             "name": "record_learning",
             "arguments": {
                 "task_id": task_id.0,
-                "kind": "episodic",
+                "kind": "convention",
                 "summary": "Epic-level outcome",
                 "scope": "epic"
             }
@@ -188,7 +188,7 @@ async fn record_learning_epic_scope_no_epic_fails() {
             "name": "record_learning",
             "arguments": {
                 "task_id": task_id.0,
-                "kind": "episodic",
+                "kind": "convention",
                 "summary": "Epic outcome but no epic",
                 "scope": "epic"
             }

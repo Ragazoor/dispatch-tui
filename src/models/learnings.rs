@@ -13,7 +13,7 @@ pub enum LearningKind {
     Preference,
     ToolRecommendation,
     Procedural,
-    Episodic,
+    Landscape,
 }
 
 impl LearningKind {
@@ -24,7 +24,7 @@ impl LearningKind {
             LearningKind::Preference => "preference",
             LearningKind::ToolRecommendation => "tool_recommendation",
             LearningKind::Procedural => "procedural",
-            LearningKind::Episodic => "episodic",
+            LearningKind::Landscape => "landscape",
         }
     }
 
@@ -35,7 +35,7 @@ impl LearningKind {
             LearningKind::Preference => "Preference",
             LearningKind::ToolRecommendation => "Tool recommendation",
             LearningKind::Procedural => "Procedural",
-            LearningKind::Episodic => "Episodic",
+            LearningKind::Landscape => "Landscape",
         }
     }
 
@@ -46,7 +46,7 @@ impl LearningKind {
             "preference" => Some(LearningKind::Preference),
             "tool_recommendation" => Some(LearningKind::ToolRecommendation),
             "procedural" => Some(LearningKind::Procedural),
-            "episodic" => Some(LearningKind::Episodic),
+            "landscape" => Some(LearningKind::Landscape),
             _ => None,
         }
     }
