@@ -6,7 +6,7 @@ use ratatui::widgets::{
 };
 use ratatui::Frame;
 
-use super::palette::{CYAN, GREEN, MUTED, PURPLE, RED, YELLOW};
+use super::palette::{BLUE, CYAN, GREEN, PURPLE, RED, YELLOW};
 use super::shared::truncate;
 use crate::models::{EpicId, Learning, LearningKind, LearningScope, ProjectId};
 use crate::tui::types::LearningsView;
@@ -19,7 +19,7 @@ fn kind_icon(kind: LearningKind) -> &'static str {
         LearningKind::Preference => "[h]",
         LearningKind::ToolRecommendation => "[T]",
         LearningKind::Procedural => "[P]",
-        LearningKind::Episodic => "[E]",
+        LearningKind::Landscape => "[~]",
     }
 }
 
@@ -30,7 +30,7 @@ fn kind_color(kind: LearningKind) -> Style {
         LearningKind::Preference => Style::default().fg(PURPLE),
         LearningKind::ToolRecommendation => Style::default().fg(GREEN),
         LearningKind::Procedural => Style::default().fg(YELLOW),
-        LearningKind::Episodic => Style::default().fg(MUTED),
+        LearningKind::Landscape => Style::default().fg(BLUE),
     }
 }
 
@@ -71,7 +71,7 @@ pub fn render_learnings(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Clear, overlay_area);
 
     let outer_block = Block::default()
-        .title(" Learnings ")
+        .title(" Knowledge Base ")
         .title_style(Style::default().fg(CYAN).add_modifier(Modifier::BOLD))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
@@ -155,7 +155,10 @@ pub fn render_learnings(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_list(frame: &mut Frame, learnings: &[Learning], selected: usize, area: Rect) {
-    let title = format!(" Learnings ({}) \u{2014} sorted by use ", learnings.len());
+    let title = format!(
+        " Knowledge Base ({}) \u{2014} sorted by upvotes ",
+        learnings.len()
+    );
     let block = Block::default().borders(Borders::ALL).title(title);
 
     let items: Vec<ListItem> = learnings
@@ -169,7 +172,7 @@ fn render_list(frame: &mut Frame, learnings: &[Learning], selected: usize, area:
                 Span::raw(truncate(&l.summary, 55)),
                 Span::raw("  "),
                 Span::styled(
-                    format!("\u{2713}{}", l.confirmed_count),
+                    format!("\u{2191}{}", l.confirmed_count),
                     Style::default().fg(Color::Green),
                 ),
                 Span::raw("  "),
@@ -245,7 +248,7 @@ fn render_detail(
                 ),
                 Span::raw("  "),
                 Span::styled(
-                    format!("confirmed:{}", l.confirmed_count),
+                    format!("upvotes:{}", l.confirmed_count),
                     Style::default().fg(Color::Green),
                 ),
             ]));
@@ -478,7 +481,10 @@ fn render_tree(
         }
     }
 
-    let title = format!(" Learnings \u{2014} hierarchy view ({}) ", learnings.len());
+    let title = format!(
+        " Knowledge Base \u{2014} hierarchy view ({}) ",
+        learnings.len()
+    );
     let block = Block::default().borders(Borders::ALL).title(title);
 
     let tree = tui_tree_widget::Tree::new(&items)

@@ -187,9 +187,9 @@ mod tests {
             )
             .unwrap();
         // Bump id2's confirmed_count so it sorts first.
-        db.confirm_learning(id2).unwrap();
-        db.confirm_learning(id2).unwrap();
-        db.confirm_learning(id2).unwrap();
+        db.upvote_learning(id2).unwrap();
+        db.upvote_learning(id2).unwrap();
+        db.upvote_learning(id2).unwrap();
 
         let rt = make_runtime(db.clone());
         let mut app = App::new(vec![], ProjectId(1), APP_INACTIVITY_TIMEOUT);

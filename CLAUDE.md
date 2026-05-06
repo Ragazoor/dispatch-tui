@@ -280,16 +280,16 @@ Feed epics are epics whose tasks are populated externally by a shell command rat
 
 Feed tasks appear in their own column on the kanban board (`SubStatus::Feed`). The schema is backed by migration v38. See `docs/specs/feeds.allium` for the full specification.
 
-## Learnings Flow
+## Knowledge Base Flow
 
-The Learnings system lets dispatched agents propose knowledge entries that, once approved by a human, are automatically injected into future dispatch prompts.
+The Knowledge Base lets dispatched agents record knowledge entries that are automatically injected into future dispatch prompts.
 
 ### End-to-end lifecycle
 
-1. **Agent proposes** — calls `record_learning(task_id, kind, summary, scope, ...)` during a task or at wrap-up. The entry lands as `proposed` and has no effect on other agents yet.
-2. **Human reviews** — opens the Learnings overlay (`L` key from the main board) and approves, rejects, or edits entries. Only approved entries enter the active pool.
-3. **Future dispatches** — when an agent is launched, `dispatch_with_prompt()` queries approved learnings for the task's context and prepends them to the prompt (see `docs/specs/learnings.allium`).
-4. **Agent confirms** — calls `confirm_learning(learning_id, task_id)` when a retrieved learning proves correct. This increments `confirmed_count`, which raises the learning's priority in future results.
+1. **Agent records** — calls `record_learning(task_id, kind, summary, scope, ...)` during a task or at wrap-up. The entry is immediately active and will appear in future dispatch prompts for agents working in the matching scope.
+2. **Human manages** — opens the Knowledge Base overlay (`L` key from the main board) and can reject, archive, or edit entries. Only approved entries stay in the active pool.
+3. **Future dispatches** — when an agent is launched, `dispatch_with_prompt()` queries approved entries for the task's context and prepends them to the prompt (see `docs/specs/learnings.allium`).
+4. **Agent upvotes** — calls `upvote_learning(learning_id, task_id)` when a retrieved entry proves correct. This increments `confirmed_count`, which raises the entry's priority in future results.
 
 ### Scope model
 
@@ -303,7 +303,7 @@ Each learning has a `scope` that determines which tasks receive it:
 | `epic` | Task belongs to this epic | `str(epic_id)` |
 | `task` | Only via explicit `query_learnings` | `str(task_id)` |
 
-`scope_ref` is auto-derived from the task context when omitted. `task`-scoped learnings are excluded from auto-injection (they capture past-task outcomes and must be fetched on demand).
+`scope_ref` is auto-derived from the task context when omitted. `task`-scoped entries are excluded from auto-injection (they capture task-specific outcomes and must be fetched on demand).
 
 ### Prompt priority order
 
@@ -320,14 +320,13 @@ Within each level, entries are sorted by `confirmed_count DESC`.
 ### Status lifecycle
 
 ```
-proposed → approved → archived (terminal)
-        ↘ rejected (terminal)
-approved → rejected (terminal)
+approved → archived (terminal)
+         ↘ rejected (terminal)
 ```
 
 Approved entries affect dispatch. Rejected and archived entries do not.
 
-### Key bindings in the Learnings overlay
+### Key bindings in the Knowledge Base overlay
 
 | Key | Action |
 |-----|--------|
@@ -523,18 +522,18 @@ Projects group tasks and epics for board filtering. See `docs/specs/projects.all
 - `ProjectId = i64` (type alias, not newtype) — simpler rusqlite integration. No FK constraint in the schema; integrity is enforced at the service/runtime layer.
 - `exec_refresh_projects_from_db` follows the `exec_refresh_*_from_db` naming pattern (see `src/runtime/tasks.rs`).
 
-### Learning Store MCP Tools
+### Knowledge Base MCP Tools
 
-Three MCP tools manage the learning store from within an agent session:
+Three MCP tools manage the knowledge base from within an agent session:
 
-- **`record_learning`** — propose a new learning (lands as `proposed`; awaits human approval before affecting future dispatches)
-- **`query_learnings`** — retrieve approved learnings relevant to the current task's context; supports `tag_filter` and `limit`
-- **`confirm_learning`** — increment `confirmed_count` on a learning that proved useful
+- **`record_learning`** — record a new entry in the knowledge base (immediately active in future dispatch prompts)
+- **`query_learnings`** — retrieve approved entries relevant to the current task's context; supports `tag_filter` and `limit`
+- **`upvote_learning`** — increment `confirmed_count` on an entry that proved useful
 
 **When to call these tools:**
-- Call `query_learnings` at the start of a task to surface relevant conventions and past decisions.
-- Call `record_learning` when you discover a pattern worth capturing for future agents (pitfall, convention, preference, etc.).
-- Call `confirm_learning` when a retrieved learning turns out to be correct and useful.
+- Call `query_learnings` via the action-specific skills (`/codebase-knowledge`, `/code-conventions`, `/pr-workflow`, etc.) at the right moment — not just at task start.
+- Call `record_learning` when you discover a pattern worth capturing for future agents (pitfall, convention, landscape, etc.).
+- Call `upvote_learning` when a retrieved entry turns out to be correct and useful.
 
 **Scope auto-derivation:** omit `scope_ref` — the MCP handler derives it from the task's project, repo, or epic automatically. Pass `scope_ref` explicitly only to override.
 

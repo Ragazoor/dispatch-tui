@@ -517,7 +517,7 @@ mcp_tools! {
         { "type": "object", "properties": {} };
 
     sync "record_learning" => learnings::handle_record_learning,
-        "Records a learning from the current task. The entry is immediately active and will be injected into future dispatch prompts for agents working in the matching scope. Omit scope_ref to auto-derive it from the calling task (recommended in most cases).",
+        "Record a new entry in the shared knowledge base. The entry is immediately active and will be injected into future dispatch prompts for agents working in the matching scope. Omit scope_ref to auto-derive it from the calling task (recommended in most cases).",
         {
             "type": "object",
             "properties": {
@@ -527,8 +527,8 @@ mcp_tools! {
                 },
                 "kind": {
                     "type": "string",
-                    "description": "Category: pitfall, convention, preference, tool_recommendation, procedural, or episodic",
-                    "enum": ["pitfall", "convention", "preference", "tool_recommendation", "procedural", "episodic"]
+                    "description": "Category: pitfall, convention, preference, tool_recommendation, procedural, or landscape",
+                    "enum": ["pitfall", "convention", "preference", "tool_recommendation", "procedural", "landscape"]
                 },
                 "summary": {
                     "type": "string",
@@ -557,7 +557,7 @@ mcp_tools! {
         };
 
     sync "query_learnings" => learnings::handle_query_learnings,
-        "Retrieve approved learnings relevant to this task's context (user + project + repo + epic scopes). Ordered by scope priority then confirmation count. Excludes task-scoped learnings.",
+        "Query the knowledge base for entries relevant to the current task's context (user + project + repo + epic scopes). Ordered by scope priority then upvote count. Excludes task-scoped entries.",
         {
             "type": "object",
             "properties": {
@@ -577,18 +577,18 @@ mcp_tools! {
             "required": ["task_id"]
         };
 
-    sync "confirm_learning" => learnings::handle_confirm_learning,
-        "Signal that an approved learning proved useful during this task. Increments its confirmation count.",
+    sync "upvote_learning" => learnings::handle_upvote_learning,
+        "Signal that a knowledge base entry proved useful during this task. Increments its upvote count.",
         {
             "type": "object",
             "properties": {
                 "learning_id": {
                     "type": "integer",
-                    "description": "ID of the learning to confirm"
+                    "description": "ID of the knowledge base entry to upvote"
                 },
                 "task_id": {
                     "type": "integer",
-                    "description": "ID of the task that acted on this learning"
+                    "description": "ID of the task that acted on this entry"
                 }
             },
             "required": ["learning_id", "task_id"]

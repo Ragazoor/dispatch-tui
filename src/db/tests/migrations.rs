@@ -7,7 +7,7 @@ fn fresh_db_has_latest_schema_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 43);
+    assert_eq!(version, 44);
 }
 
 #[test]
@@ -209,7 +209,7 @@ fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 43);
+    assert_eq!(version, 44);
 }
 
 #[test]
@@ -298,7 +298,7 @@ fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 43);
+    assert_eq!(version, 44);
 }
 
 #[test]
@@ -409,7 +409,7 @@ fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 43);
+    assert_eq!(version, 44);
 }
 
 #[test]
@@ -490,7 +490,7 @@ fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 43);
+    assert_eq!(version, 44);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -611,7 +611,7 @@ fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 43);
+    assert_eq!(version, 44);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -1610,7 +1610,7 @@ fn migration_31_re_expands_tilde_paths() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 43);
+    assert_eq!(version, 44);
 }
 
 #[test]
@@ -1686,7 +1686,7 @@ fn migrate_v32_adds_base_branch_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 43);
+    assert_eq!(version, 44);
 }
 
 #[test]
@@ -1809,7 +1809,7 @@ fn migration_v38_feed_epic_columns() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 43);
+    assert_eq!(version, 44);
 }
 
 #[test]
@@ -1819,7 +1819,7 @@ fn fresh_db_schema_version_is_40() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 43);
+    assert_eq!(version, 44);
 }
 
 #[test]
@@ -1889,7 +1889,7 @@ fn migration_v40_creates_learnings_table() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 43);
+    assert_eq!(version, 44);
 }
 
 #[test]
@@ -1929,6 +1929,27 @@ fn migration_v41_drops_cost_usd_column() {
              cache_write_tokens INTEGER NOT NULL DEFAULT 0,
              updated_at TEXT NOT NULL DEFAULT ''
          );
+         CREATE TABLE learnings (
+             id                INTEGER PRIMARY KEY,
+             kind              TEXT    NOT NULL,
+             summary           TEXT    NOT NULL,
+             detail            TEXT,
+             scope             TEXT    NOT NULL,
+             scope_ref         TEXT,
+             tags              TEXT    NOT NULL DEFAULT '[]',
+             status            TEXT    NOT NULL DEFAULT 'approved',
+             source_task_id    INTEGER REFERENCES tasks(id),
+             confirmed_count   INTEGER NOT NULL DEFAULT 0,
+             last_confirmed_at TEXT,
+             created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+             updated_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+             CHECK (
+                 (scope = 'user' AND scope_ref IS NULL)
+                 OR (scope != 'user' AND scope_ref IS NOT NULL)
+             )
+         );
+         CREATE INDEX IF NOT EXISTS idx_learnings_scope ON learnings(scope, scope_ref);
+         CREATE INDEX IF NOT EXISTS idx_learnings_status ON learnings(status);
          INSERT INTO tasks (id, title, status) VALUES (999, 'test', 'backlog');
          INSERT INTO task_usage (task_id, cost_usd, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, updated_at)
              VALUES (999, 0.42, 100, 50, 10, 5, '');
@@ -1939,7 +1960,7 @@ fn migration_v41_drops_cost_usd_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 43);
+    assert_eq!(version, 44);
     // Original token data is preserved
     let row: (i64, i64, i64, i64, i64) = conn
         .query_row(
@@ -2047,9 +2068,58 @@ fn test_migrate_v43_proposed_to_approved() {
         .unwrap();
     assert_eq!(new_status, "approved");
 
-    // Assert: schema version bumped to 43
+    // Assert: schema version bumped to 44
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 43);
+    assert_eq!(version, 44);
+}
+
+#[test]
+fn migration_v44_converts_episodic_to_convention() {
+    use rusqlite::Connection as RawConn;
+    let conn = RawConn::open_in_memory().unwrap();
+    conn.execute_batch(
+        "PRAGMA foreign_keys=ON;
+         CREATE TABLE learnings (
+             id                INTEGER PRIMARY KEY,
+             kind              TEXT    NOT NULL,
+             summary           TEXT    NOT NULL,
+             detail            TEXT,
+             scope             TEXT    NOT NULL,
+             scope_ref         TEXT,
+             tags              TEXT    NOT NULL DEFAULT '[]',
+             status            TEXT    NOT NULL DEFAULT 'approved',
+             source_task_id    INTEGER,
+             confirmed_count   INTEGER NOT NULL DEFAULT 0,
+             last_confirmed_at TEXT,
+             created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+             updated_at        TEXT    NOT NULL DEFAULT (datetime('now'))
+         );
+         INSERT INTO learnings (kind, summary, scope, status)
+             VALUES ('episodic', 'how I solved task 42', 'user', 'approved');
+         INSERT INTO learnings (kind, summary, scope, status)
+             VALUES ('convention', 'use Arc for shared state', 'user', 'approved');
+         PRAGMA user_version = 43;",
+    )
+    .unwrap();
+
+    crate::db::migrations::migrate_v44_episodic_to_convention(&conn).unwrap();
+
+    let mut stmt = conn
+        .prepare("SELECT kind FROM learnings ORDER BY id")
+        .unwrap();
+    let kinds: Vec<String> = stmt
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect();
+    assert_eq!(
+        kinds[0], "convention",
+        "episodic entry should be converted to convention"
+    );
+    assert_eq!(
+        kinds[1], "convention",
+        "non-episodic entry should be unchanged"
+    );
 }

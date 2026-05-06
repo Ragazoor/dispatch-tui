@@ -415,7 +415,7 @@ fn tool_schemas_match_arg_structs() {
             json!({"task_id": 1}),
         ),
         (
-            "confirm_learning",
+            "upvote_learning",
             BTreeSet::from(["learning_id", "task_id"]),
             BTreeSet::from(["learning_id", "task_id"]),
             json!({"learning_id": 1, "task_id": 1}),
@@ -519,8 +519,8 @@ fn tool_schemas_match_arg_structs() {
                 serde_json::from_value::<super::learnings::QueryLearningsArgs>(payload.clone())
                     .unwrap();
             }
-            "confirm_learning" => {
-                serde_json::from_value::<super::learnings::ConfirmLearningArgs>(payload.clone())
+            "upvote_learning" => {
+                serde_json::from_value::<super::learnings::UpvoteLearningArgs>(payload.clone())
                     .unwrap();
             }
             "exit_session" => {
