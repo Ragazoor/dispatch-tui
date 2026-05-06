@@ -172,7 +172,7 @@ fn render_list(frame: &mut Frame, learnings: &[Learning], selected: usize, area:
                 Span::raw(truncate(&l.summary, 55)),
                 Span::raw("  "),
                 Span::styled(
-                    format!("\u{2713}{}", l.confirmed_count),
+                    format!("\u{2191}{}", l.confirmed_count),
                     Style::default().fg(Color::Green),
                 ),
                 Span::raw("  "),
@@ -248,7 +248,7 @@ fn render_detail(
                 ),
                 Span::raw("  "),
                 Span::styled(
-                    format!("confirmed:{}", l.confirmed_count),
+                    format!("upvotes:{}", l.confirmed_count),
                     Style::default().fg(Color::Green),
                 ),
             ]));
