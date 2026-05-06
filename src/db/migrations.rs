@@ -983,12 +983,6 @@ fn migrate_v43_proposed_to_approved(conn: &Connection) -> Result<()> {
 }
 
 pub(super) fn migrate_v44_episodic_to_convention(conn: &Connection) -> Result<()> {
-    let table_exists: bool = conn
-        .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='learnings'")?
-        .exists([])?;
-    if !table_exists {
-        return Ok(());
-    }
     conn.execute_batch("UPDATE learnings SET kind = 'convention' WHERE kind = 'episodic'")
         .context("Failed to migrate episodic learnings to convention (migration v44)")
 }

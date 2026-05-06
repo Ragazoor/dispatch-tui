@@ -1929,6 +1929,27 @@ fn migration_v41_drops_cost_usd_column() {
              cache_write_tokens INTEGER NOT NULL DEFAULT 0,
              updated_at TEXT NOT NULL DEFAULT ''
          );
+         CREATE TABLE learnings (
+             id                INTEGER PRIMARY KEY,
+             kind              TEXT    NOT NULL,
+             summary           TEXT    NOT NULL,
+             detail            TEXT,
+             scope             TEXT    NOT NULL,
+             scope_ref         TEXT,
+             tags              TEXT    NOT NULL DEFAULT '[]',
+             status            TEXT    NOT NULL DEFAULT 'approved',
+             source_task_id    INTEGER REFERENCES tasks(id),
+             confirmed_count   INTEGER NOT NULL DEFAULT 0,
+             last_confirmed_at TEXT,
+             created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+             updated_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+             CHECK (
+                 (scope = 'user' AND scope_ref IS NULL)
+                 OR (scope != 'user' AND scope_ref IS NOT NULL)
+             )
+         );
+         CREATE INDEX IF NOT EXISTS idx_learnings_scope ON learnings(scope, scope_ref);
+         CREATE INDEX IF NOT EXISTS idx_learnings_status ON learnings(status);
          INSERT INTO tasks (id, title, status) VALUES (999, 'test', 'backlog');
          INSERT INTO task_usage (task_id, cost_usd, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, updated_at)
              VALUES (999, 0.42, 100, 50, 10, 5, '');
