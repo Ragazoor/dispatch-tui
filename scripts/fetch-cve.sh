@@ -17,9 +17,12 @@
 set -euo pipefail
 
 REPOS=(
-  # Add "owner/repo" slugs here, one per line. Example:
-  #   "myorg/frontend"
-  #   "myorg/backend"
+    "annotell/scala-common"
+    "annotell/gha-scala"
+    "annotell/gha-database-bootstrapper"
+    "annotell/airflow-dags"
+    "annotell/annotell-data-warehouse"
+    "annotell/bigquery-export"
 )
 
 if [[ ${#REPOS[@]} -eq 0 ]]; then
