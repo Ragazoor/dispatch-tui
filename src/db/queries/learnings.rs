@@ -199,7 +199,7 @@ impl super::super::LearningStore for Database {
         Ok(())
     }
 
-    fn confirm_learning(&self, id: LearningId) -> Result<()> {
+    fn upvote_learning(&self, id: LearningId) -> Result<()> {
         let conn = self.conn()?;
         conn.execute(
             "UPDATE learnings

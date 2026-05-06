@@ -577,18 +577,18 @@ mcp_tools! {
             "required": ["task_id"]
         };
 
-    sync "confirm_learning" => learnings::handle_confirm_learning,
-        "Signal that an approved learning proved useful during this task. Increments its confirmation count.",
+    sync "upvote_learning" => learnings::handle_upvote_learning,
+        "Signal that a knowledge base entry proved useful during this task. Increments its upvote count.",
         {
             "type": "object",
             "properties": {
                 "learning_id": {
                     "type": "integer",
-                    "description": "ID of the learning to confirm"
+                    "description": "ID of the knowledge base entry to upvote"
                 },
                 "task_id": {
                     "type": "integer",
-                    "description": "ID of the task that acted on this learning"
+                    "description": "ID of the task that acted on this entry"
                 }
             },
             "required": ["learning_id", "task_id"]
