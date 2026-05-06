@@ -82,7 +82,7 @@ enum SubStatus {
 
 -- LearningScope identifies what context a learning applies to.
 -- Dispatch retrieval unions: user + project:<this_project> + repo:<this_repo> + epic:<this_epic> (if set).
--- task scope carries past-task episodic outcomes, retrieved on demand.
+-- task scope carries task-specific outcomes, retrieved on demand.
 enum LearningScope { user | project | repo | epic | task }
 
 -- LearningKind categorises what was learned.
@@ -94,12 +94,12 @@ enum LearningKind {
     preference           -- the user's explicit working preference
     tool_recommendation  -- recommended tool or library for a given problem
     procedural           -- injected verbatim into matching dispatch prompts once approved
-    episodic             -- outcome summary of a past task (what was tried, what worked)
+    landscape            -- codebase/system overview (service maps, module responsibilities)
 }
 
 -- LearningStatus controls whether an entry is active in retrieval.
--- Agents always propose; humans approve, reject, or archive via the TUI.
-enum LearningStatus { proposed | approved | rejected | archived }
+-- New entries land as approved; humans can reject or archive via the TUI.
+enum LearningStatus { approved | rejected | archived }
 
 ------------------------------------------------------------
 -- Entities and Variants
