@@ -71,7 +71,7 @@ pub fn render_learnings(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Clear, overlay_area);
 
     let outer_block = Block::default()
-        .title(" Learnings ")
+        .title(" Knowledge Base ")
         .title_style(Style::default().fg(CYAN).add_modifier(Modifier::BOLD))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
@@ -155,7 +155,7 @@ pub fn render_learnings(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_list(frame: &mut Frame, learnings: &[Learning], selected: usize, area: Rect) {
-    let title = format!(" Learnings ({}) \u{2014} sorted by use ", learnings.len());
+    let title = format!(" Knowledge Base ({}) \u{2014} sorted by upvotes ", learnings.len());
     let block = Block::default().borders(Borders::ALL).title(title);
 
     let items: Vec<ListItem> = learnings
@@ -478,7 +478,7 @@ fn render_tree(
         }
     }
 
-    let title = format!(" Learnings \u{2014} hierarchy view ({}) ", learnings.len());
+    let title = format!(" Knowledge Base \u{2014} hierarchy view ({}) ", learnings.len());
     let block = Block::default().borders(Borders::ALL).title(title);
 
     let tree = tui_tree_widget::Tree::new(&items)

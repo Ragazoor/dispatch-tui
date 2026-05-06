@@ -1,81 +1,77 @@
 ---
 name: learnings
-description: Use at task start to query existing learnings and understand when and how to record new ones. Guides agents through the full learning lifecycle — surfacing, confirming, and recording knowledge effectively.
+description: Manage the knowledge base lifecycle — query, upvote, and record entries. Use at wrap-up or whenever you want to contribute to the shared knowledge base.
 ---
 
-# Learnings
+# Knowledge Base
 
-Use this skill at the start of every task. It covers three moments: surfacing existing knowledge, confirming what proves useful, and deciding what to record.
+Use this skill to interact with the shared knowledge base — recording new entries and upvoting entries that proved useful.
 
-**Announce at start:** "I'm using the learnings skill to surface relevant past experience for this task."
+For action-specific knowledge base queries at the right moment, use the domain skills:
+`/codebase-knowledge`, `/code-conventions`, `/test-conventions`, `/pr-workflow`,
+`/dispatch-workflow`, `/troubleshoot`, `/improvement`.
 
-## Step 1: Query at task start
+**Announce at start:** "I'm using the learnings skill to interact with the knowledge base."
 
-Call the `query_learnings` MCP tool with your `task_id`.
+## Upvoting useful entries
 
-Read the results as context — they describe past conventions, pitfalls, and decisions that may be relevant to your work. Treat them as useful background, not hard rules.
+When a knowledge base entry proves useful during your work — you acted on it and it helped — call:
+```
+upvote_learning(learning_id=<id>, task_id=<your task id>)
+```
 
-If the results include similar-entry warnings (the system echoes existing entries when you later record), consider calling `confirm_learning` on an existing entry rather than adding a near-duplicate.
+Do this at the moment it helps, not deferred to wrap-up.
 
-If no learnings are returned, proceed normally.
+**Upvote when:** An entry saved you from a pitfall, matched a convention you applied, or guided a decision you made.
 
-## Step 2: Confirm when useful — during the task
+**Don't upvote:** Entries you read but didn't act on, or entries that turned out to be wrong.
 
-When a retrieved learning proves **useful** during your work — you acted on it and it helped — call `confirm_learning` with its `learning_id` and your `task_id`. Do this at the moment of confirmation, not deferred to wrap-up.
+## Recording new entries
 
-**Call `confirm_learning` when:** A learning saved you from a pitfall, matched a convention you applied, or guided a decision you made.
-
-**Don't call it for:** Learnings you read but didn't act on, or learnings that turned out to be wrong or outdated (flag those to the user instead).
-
-## Step 3: Record at wrap-up — decide what's worth keeping
-
-Before finishing, ask: *Did I discover anything non-obvious that a future agent would benefit from knowing?*
+Before finishing a task, ask: *Did I discover anything non-obvious that a future agent would benefit from knowing?*
 
 ### Record if:
 
-- You hit a **non-obvious pitfall** that isn't documented and would trap future agents
-- You found a **convention** that applies broadly but isn't visible from reading the code
 - The user expressed a **preference** explicitly that isn't already in CLAUDE.md
-- A specific **tool or approach** solved a problem in a way worth re-applying
+- You built a **landscape understanding** of a codebase area worth sharing
+- You found a **convention** that applies broadly but isn't visible from reading the code
+- A specific **workflow pattern** solved a cross-repo or cross-task problem elegantly
 - This epic or project has a **procedural step** every agent working here should follow
-- The task had a complex arc worth capturing as an **episodic note** (what was tried, what worked)
 
 ### Do NOT record:
 
-- Code patterns **readable from source code** — the code is self-documenting
-- Things already in **CLAUDE.md**, README, or existing docs
-- **Git history** — visible via `git log` / `git blame`
-- **Debugging solutions** where the fix is already in the commit — the commit message captures the context
-- **General language or framework best practices** — these belong in documentation, not learnings
-- Things **too specific to generalize** — if it won't apply to other tasks, skip it or use `scope=task`
-- **Duplicate entries** — if the system echoes a similar existing learning when you record, call `confirm_learning` on that entry instead
-
-### Picking a scope
-
-| Scope | Use when | `scope_ref` |
-|-------|----------|-------------|
-| `user` | Personal workflow preference, applies to all your work | omit |
-| `repo` | Codebase-wide convention or pitfall | omit (auto-derived) |
-| `project` | Applies to all tasks in this project | omit (auto-derived) |
-| `epic` | Shared design decision for this epic only | omit (auto-derived; task must belong to an epic) |
-| `task` | One-off note for this task; not auto-injected | omit (auto-derived) |
-
-**Default to `repo` for code conventions and `user` for workflow preferences.** Use `epic` for architectural decisions that every subtask in this epic should know. Use `task` for ephemeral notes you may query later — they won't appear in future agents' prompts automatically.
+- Code patterns readable from source code — the code is self-documenting
+- Things already in CLAUDE.md, README, or existing docs
+- Git history — visible via `git log` / `git blame`
+- Debugging solutions where the fix is in the commit
+- Things too specific to generalise — if it won't apply to other tasks, skip it
+- How you fixed a specific problem — that's in the code and commit message
 
 ### Picking a kind
 
 | Kind | Use for |
 |------|---------|
-| `pitfall` | Silent failures, API traps, behavior surprises — warn future agents away |
+| `pitfall` | Silent failures, API traps, behaviour surprises — warn future agents |
 | `convention` | Preferred patterns or style for this codebase |
 | `preference` | Explicit user preference expressed during the task |
 | `tool_recommendation` | Specific tool or library for a problem type |
-| `procedural` | Step-by-step instructions to prefix dispatch prompts (epic-level only) |
-| `episodic` | Outcome summary of this task — what was attempted, what worked (usually `scope=task`) |
+| `procedural` | Step-by-step instructions to prefix dispatch prompts (epic-level) |
+| `landscape` | Codebase/system overviews — service maps, module responsibilities |
+
+### Picking a scope
+
+| Scope | Use when | `scope_ref` |
+|-------|----------|-------------|
+| `user` | Personal workflow preference, applies to all work | omit |
+| `repo` | Codebase-wide convention or landscape entry | omit (auto-derived) |
+| `project` | Applies to all tasks in this project | omit (auto-derived) |
+| `epic` | Shared design decision for this epic only | omit (auto-derived) |
+| `task` | One-off note; not auto-injected into future prompts | omit (auto-derived) |
+
+**Default to `repo` for code conventions and `user` for workflow preferences.**
 
 ### Writing a good summary
 
-- **One sentence only.** If you need two, the learning is too broad — split it or drop it.
+- **One sentence only.** If you need two, the entry is too broad — split or drop it.
 - **Name the specific thing.** Not "be careful with DB queries" but "TaskPatch double-Option means `Some(None)` clears a field, `None` leaves it unchanged."
-- **Lead with the surprise.** "Despite what the API suggests, …" or "Unlike TaskService, EpicService does not …"
-- **Include a scope signal.** Mention the filename, function name, or context so the reader knows when it applies.
+- **Lead with the actionable insight.** What should a future agent do differently?
