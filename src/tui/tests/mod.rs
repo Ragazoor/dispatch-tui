@@ -2,12 +2,12 @@ pub mod scenarios;
 pub mod snapshots;
 
 mod archive;
-mod main_session;
 mod dispatch;
 mod epics;
 mod helpers;
 mod input_handlers;
 mod learning_review;
+mod main_session;
 mod navigation;
 mod projects;
 mod rendering;

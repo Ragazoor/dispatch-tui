@@ -51,9 +51,9 @@ fn enter_in_main_session_dir_mode_emits_submit_message() {
     app.input.mode = InputMode::MainSessionDir;
     app.input.buffer = "/home/user".to_string();
     let cmds = app.handle_key(make_key(KeyCode::Enter));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::PersistStringSetting { key, .. } if key == "main_session.dir")));
+    assert!(cmds.iter().any(
+        |c| matches!(c, Command::PersistStringSetting { key, .. } if key == "main_session.dir")
+    ));
     assert!(cmds.iter().any(|c| matches!(c, Command::OpenMainSession)));
 }
 
@@ -91,16 +91,19 @@ fn submit_main_session_dir_expands_tilde() {
     let mut app = make_app();
     app.update(Message::SubmitMainSessionDir("~/code".to_string()));
     let dir = app.main_session_dir().unwrap();
-    assert!(!dir.starts_with('~'), "tilde should be expanded, got: {dir}");
+    assert!(
+        !dir.starts_with('~'),
+        "tilde should be expanded, got: {dir}"
+    );
 }
 
 #[test]
 fn submit_main_session_dir_returns_persist_and_open_commands() {
     let mut app = make_app();
     let cmds = app.update(Message::SubmitMainSessionDir("/home/user".to_string()));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::PersistStringSetting { key, .. } if key == "main_session.dir")));
+    assert!(cmds.iter().any(
+        |c| matches!(c, Command::PersistStringSetting { key, .. } if key == "main_session.dir")
+    ));
     assert!(cmds.iter().any(|c| matches!(c, Command::OpenMainSession)));
 }
 
@@ -123,6 +126,8 @@ fn main_session_created_sets_window_on_app() {
 fn main_session_created_returns_persist_command() {
     let mut app = make_app();
     let cmds = app.update(Message::MainSessionCreated("dispatch-main".to_string()));
-    assert!(cmds.iter().any(|c| matches!(c, Command::PersistStringSetting { key, value }
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::PersistStringSetting { key, value }
         if key == "main_session.window" && value == "dispatch-main")));
 }

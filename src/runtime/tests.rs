@@ -2025,10 +2025,10 @@ fn exec_open_main_session_creates_window_when_no_session() {
     let (tx, _rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // has_window check (list-windows — window absent)
-        MockProcessRunner::ok(),               // new-window
-        MockProcessRunner::ok(),               // send-keys -l
-        MockProcessRunner::ok(),               // send-keys Enter
-        MockProcessRunner::ok(),               // select-window
+        MockProcessRunner::ok(), // new-window
+        MockProcessRunner::ok(), // send-keys -l
+        MockProcessRunner::ok(), // send-keys Enter
+        MockProcessRunner::ok(), // select-window
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone());
     let mut app = make_app();
@@ -2047,7 +2047,7 @@ fn exec_open_main_session_attaches_to_existing_alive_session() {
     let (tx, _rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"dispatch-main\n"), // has_window → true
-        MockProcessRunner::ok(),                              // select-window
+        MockProcessRunner::ok(),                               // select-window
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone());
     let mut app = make_app();
@@ -2058,7 +2058,9 @@ fn exec_open_main_session_attaches_to_existing_alive_session() {
 
     let calls = mock.recorded_calls();
     // Should NOT have called new-window — only list-windows + select-window.
-    assert!(!calls.iter().any(|(_, args)| args.contains(&"new-window".to_string())));
+    assert!(!calls
+        .iter()
+        .any(|(_, args)| args.contains(&"new-window".to_string())));
     assert!(app.error_popup().is_none());
 }
 
@@ -2071,10 +2073,10 @@ fn exec_open_main_session_creates_fresh_when_stored_window_is_dead() {
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // has_window → false (empty list)
         MockProcessRunner::ok(), // has_window check during create path
-        MockProcessRunner::ok(),               // new-window
-        MockProcessRunner::ok(),               // send-keys -l
-        MockProcessRunner::ok(),               // send-keys Enter
-        MockProcessRunner::ok(),               // select-window
+        MockProcessRunner::ok(), // new-window
+        MockProcessRunner::ok(), // send-keys -l
+        MockProcessRunner::ok(), // send-keys Enter
+        MockProcessRunner::ok(), // select-window
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone());
     let mut app = make_app();
