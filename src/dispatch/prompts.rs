@@ -126,10 +126,18 @@ pub(super) fn mcp_tools_instruction() -> &'static str {
     "The dispatch MCP tools are available — use them to query and update this task (get_task, update_task)."
 }
 
-/// Learning tools availability notice for implementation agents.
+/// Knowledge base skill checkpoints for dispatched agents.
 pub(super) fn learning_tools_instruction() -> &'static str {
-    "Learning tools: Use `/learnings` at task start to surface relevant past experience \
-and get guidance on recording new learnings."
+    "Knowledge base: Invoke domain-specific skills at action checkpoints — \
+not just at task start:\n\
+- Exploring unfamiliar code → `/codebase-knowledge`\n\
+- Before writing code → `/code-conventions`\n\
+- Before writing tests → `/test-conventions`\n\
+- Before creating/updating a PR → `/pr-workflow`\n\
+- When using dispatch MCP tools → `/dispatch-workflow`\n\
+- When hitting a build or test failure → `/troubleshoot`\n\
+- When noticing an improvement opportunity (and before wrapping up) → `/improvement`\n\
+Use `/learnings` to record new entries or upvote entries that proved useful."
 }
 
 /// Instructions for writing a plan and attaching it to the task via MCP.
@@ -411,11 +419,11 @@ mod tests {
     }
 
     #[test]
-    fn learning_instruction_mentions_task_start() {
+    fn learning_instruction_mentions_checkpoints() {
         let text = learning_tools_instruction();
         assert!(
-            text.contains("task start") || text.contains("start"),
-            "learning instruction should tell agents to use /learnings at task start, got: {text}"
+            text.contains("checkpoint") || text.contains("action"),
+            "learning instruction should describe action checkpoints, got: {text}"
         );
     }
 
@@ -450,6 +458,42 @@ mod tests {
         assert!(
             text.contains("/learnings"),
             "quick dispatch prompt should reference /learnings skill"
+        );
+    }
+
+    #[test]
+    fn knowledge_base_checkpoints_include_pr_workflow_skill() {
+        let text = trailing_block();
+        assert!(
+            text.contains("/pr-workflow"),
+            "trailing block should reference /pr-workflow skill checkpoint, got: {text}"
+        );
+    }
+
+    #[test]
+    fn knowledge_base_checkpoints_include_troubleshoot_skill() {
+        let text = trailing_block();
+        assert!(
+            text.contains("/troubleshoot"),
+            "trailing block should reference /troubleshoot skill checkpoint, got: {text}"
+        );
+    }
+
+    #[test]
+    fn knowledge_base_checkpoints_include_improvement_skill() {
+        let text = trailing_block();
+        assert!(
+            text.contains("/improvement"),
+            "trailing block should reference /improvement skill checkpoint"
+        );
+    }
+
+    #[test]
+    fn knowledge_base_checkpoints_include_codebase_knowledge_skill() {
+        let text = trailing_block();
+        assert!(
+            text.contains("/codebase-knowledge"),
+            "trailing block should reference /codebase-knowledge skill"
         );
     }
 
