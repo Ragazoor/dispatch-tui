@@ -150,16 +150,9 @@ impl LearningService {
     }
 
     pub fn upvote_learning(&self, id: LearningId) -> Result<(), ServiceError> {
-        let learning = self.get_learning(id)?;
-        if learning.status != LearningStatus::Approved {
-            return Err(ServiceError::Validation(format!(
-                "can only upvote an approved learning (current status: {})",
-                learning.status
-            )));
-        }
         self.db
             .upvote_learning(id)
-            .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
+            .map_err(|e| ServiceError::Validation(format!("cannot upvote: {e}")))
     }
 }
 
