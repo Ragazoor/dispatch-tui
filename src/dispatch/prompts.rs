@@ -463,37 +463,37 @@ mod tests {
 
     #[test]
     fn knowledge_base_checkpoints_include_pr_workflow_skill() {
-        let text = trailing_block();
+        let text = learning_tools_instruction();
         assert!(
             text.contains("/pr-workflow"),
-            "trailing block should reference /pr-workflow skill checkpoint, got: {text}"
+            "learning instruction should reference /pr-workflow skill checkpoint, got: {text}"
         );
     }
 
     #[test]
     fn knowledge_base_checkpoints_include_troubleshoot_skill() {
-        let text = trailing_block();
+        let text = learning_tools_instruction();
         assert!(
             text.contains("/troubleshoot"),
-            "trailing block should reference /troubleshoot skill checkpoint, got: {text}"
+            "learning instruction should reference /troubleshoot skill checkpoint, got: {text}"
         );
     }
 
     #[test]
     fn knowledge_base_checkpoints_include_improvement_skill() {
-        let text = trailing_block();
+        let text = learning_tools_instruction();
         assert!(
             text.contains("/improvement"),
-            "trailing block should reference /improvement skill checkpoint"
+            "learning instruction should reference /improvement skill checkpoint"
         );
     }
 
     #[test]
     fn knowledge_base_checkpoints_include_codebase_knowledge_skill() {
-        let text = trailing_block();
+        let text = learning_tools_instruction();
         assert!(
             text.contains("/codebase-knowledge"),
-            "trailing block should reference /codebase-knowledge skill"
+            "learning instruction should reference /codebase-knowledge skill"
         );
     }
 
