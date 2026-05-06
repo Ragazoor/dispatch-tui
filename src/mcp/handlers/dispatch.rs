@@ -527,8 +527,8 @@ mcp_tools! {
                 },
                 "kind": {
                     "type": "string",
-                    "description": "Category: pitfall, convention, preference, tool_recommendation, procedural, or episodic",
-                    "enum": ["pitfall", "convention", "preference", "tool_recommendation", "procedural", "episodic"]
+                    "description": "Category: pitfall, convention, preference, tool_recommendation, procedural, or landscape",
+                    "enum": ["pitfall", "convention", "preference", "tool_recommendation", "procedural", "landscape"]
                 },
                 "summary": {
                     "type": "string",

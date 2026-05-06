@@ -6,7 +6,7 @@ use ratatui::widgets::{
 };
 use ratatui::Frame;
 
-use super::palette::{CYAN, GREEN, MUTED, PURPLE, RED, YELLOW};
+use super::palette::{BLUE, CYAN, GREEN, PURPLE, RED, YELLOW};
 use super::shared::truncate;
 use crate::models::{EpicId, Learning, LearningKind, LearningScope, ProjectId};
 use crate::tui::types::LearningsView;
@@ -19,7 +19,7 @@ fn kind_icon(kind: LearningKind) -> &'static str {
         LearningKind::Preference => "[h]",
         LearningKind::ToolRecommendation => "[T]",
         LearningKind::Procedural => "[P]",
-        LearningKind::Episodic => "[E]",
+        LearningKind::Landscape => "[~]",
     }
 }
 
@@ -30,7 +30,7 @@ fn kind_color(kind: LearningKind) -> Style {
         LearningKind::Preference => Style::default().fg(PURPLE),
         LearningKind::ToolRecommendation => Style::default().fg(GREEN),
         LearningKind::Procedural => Style::default().fg(YELLOW),
-        LearningKind::Episodic => Style::default().fg(MUTED),
+        LearningKind::Landscape => Style::default().fg(BLUE),
     }
 }
 
