@@ -20,7 +20,7 @@ use "./core.allium" as core
 --   core/Learning         — persisted knowledge entry (full field set + transition graph)
 --   core/LearningScope    — user | project | repo | epic | task
 --   core/LearningKind     — pitfall | convention | preference |
---                           tool_recommendation | procedural | episodic
+--                           tool_recommendation | procedural | landscape
 --   core/LearningStatus   — approved | rejected | archived
 
 ------------------------------------------------------------
@@ -39,7 +39,7 @@ use "./core.allium" as core
 --   epic      str(task.epic_id)            task belongs to an epic
 --
 -- task-scoped learnings (scope = task) are excluded from auto-injection into
--- dispatch prompts. They capture past-task episodic outcomes and must be
+-- dispatch prompts. They capture task-specific outcomes and must be
 -- retrieved explicitly via query_learnings (QueryLearningsViaMcp in tasks.allium).
 --
 -- Scope resolution when scope_ref is omitted from record_learning:
@@ -112,7 +112,7 @@ use "./core.allium" as core
 --   Ordered by scope_priority(scope) then confirmed_count DESC.
 --   limit capped at 50 (default: 20).
 --
--- confirm_learning(learning_id, task_id)
+-- upvote_learning(learning_id, task_id)
 --   Requires: learning.status = approved
 --   Increments confirmed_count; updates last_confirmed_at and updated_at.
 --   No status change.

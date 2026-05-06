@@ -517,7 +517,7 @@ mcp_tools! {
         { "type": "object", "properties": {} };
 
     sync "record_learning" => learnings::handle_record_learning,
-        "Records a learning from the current task. The entry is immediately active and will be injected into future dispatch prompts for agents working in the matching scope. Omit scope_ref to auto-derive it from the calling task (recommended in most cases).",
+        "Record a new entry in the shared knowledge base. The entry is immediately active and will be injected into future dispatch prompts for agents working in the matching scope. Omit scope_ref to auto-derive it from the calling task (recommended in most cases).",
         {
             "type": "object",
             "properties": {
@@ -557,7 +557,7 @@ mcp_tools! {
         };
 
     sync "query_learnings" => learnings::handle_query_learnings,
-        "Retrieve approved learnings relevant to this task's context (user + project + repo + epic scopes). Ordered by scope priority then confirmation count. Excludes task-scoped learnings.",
+        "Query the knowledge base for entries relevant to the current task's context (user + project + repo + epic scopes). Ordered by scope priority then upvote count. Excludes task-scoped entries.",
         {
             "type": "object",
             "properties": {
