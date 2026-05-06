@@ -165,7 +165,7 @@ remaining changes and finalise the task."
 
 /// Allium spec instruction — shared across all agents that may touch domain behaviour.
 pub(super) fn allium_instruction() -> &'static str {
-    "The Allium specs in `docs/specs/` are the source of truth for domain logic \
+    "The Allium specs in `docs/specs/` are the source of truth for domain logic. \
 Consult them before changing core behaviour. If your implementation changes domain behaviour, \
 update the spec using the `allium:tend` skill and verify alignment with `allium:weed`."
 }
