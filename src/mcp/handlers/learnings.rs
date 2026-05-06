@@ -41,7 +41,7 @@ pub(super) struct QueryLearningsArgs {
 }
 
 #[derive(Deserialize)]
-pub(super) struct ConfirmLearningArgs {
+pub(super) struct UpvoteLearningArgs {
     #[serde(deserialize_with = "deserialize_flexible_i64")]
     pub(super) learning_id: i64,
     #[serde(deserialize_with = "deserialize_flexible_i64")]
@@ -133,13 +133,13 @@ pub(super) fn handle_record_learning(
                 for l in &similar {
                     text.push_str(&format!(
                         "\n  [{}] {} (confirmed {}x) \
-                         → confirm_learning(learning_id={}, task_id={})",
+                         → upvote_learning(learning_id={}, task_id={})",
                         l.id, l.summary, l.confirmed_count, l.id, task_id.0
                     ));
                 }
                 text.push_str(
                     "\n\nIf one of these already captures what you intended, \
-                     consider calling confirm_learning on it instead of keeping this new entry.",
+                     consider calling upvote_learning on it instead of keeping this new entry.",
                 );
             }
 
@@ -214,12 +214,12 @@ pub(super) fn handle_query_learnings(
     JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
 }
 
-pub(super) fn handle_confirm_learning(
+pub(super) fn handle_upvote_learning(
     state: &McpState,
     id: Option<Value>,
     args: Value,
 ) -> JsonRpcResponse {
-    let parsed = match parse_args::<ConfirmLearningArgs>(&id, args) {
+    let parsed = match parse_args::<UpvoteLearningArgs>(&id, args) {
         Ok(a) => a,
         Err(e) => return e,
     };
@@ -227,17 +227,17 @@ pub(super) fn handle_confirm_learning(
     tracing::info!(
         task_id = parsed.task_id,
         learning_id = parsed.learning_id,
-        "MCP confirm_learning"
+        "MCP upvote_learning"
     );
 
     let svc = LearningService::new(state.db.clone());
-    match svc.confirm_learning(LearningId(parsed.learning_id)) {
+    match svc.upvote_learning(LearningId(parsed.learning_id)) {
         Ok(()) => JsonRpcResponse::ok(
             id,
             json!({
                 "content": [{
                     "type": "text",
-                    "text": format!("Learning {} confirmed.", parsed.learning_id)
+                    "text": format!("Learning {} upvoted.", parsed.learning_id)
                 }]
             }),
         ),

@@ -221,7 +221,7 @@ fn patch_learning_updates_summary_and_updated_at() {
 }
 
 #[test]
-fn confirm_learning_increments_count_and_timestamps() {
+fn upvote_learning_increments_count_and_timestamps() {
     use crate::db::LearningPatch;
     use crate::models::{LearningKind, LearningScope, LearningStatus};
     let db = in_memory_db();
@@ -243,13 +243,13 @@ fn confirm_learning_increments_count_and_timestamps() {
     assert_eq!(before.confirmed_count, 0);
     assert!(before.last_confirmed_at.is_none());
 
-    db.confirm_learning(id).unwrap();
+    db.upvote_learning(id).unwrap();
     let after = db.get_learning(id).unwrap().unwrap();
     assert_eq!(after.confirmed_count, 1);
     assert!(after.last_confirmed_at.is_some());
     assert!(after.updated_at >= before.updated_at);
 
-    db.confirm_learning(id).unwrap();
+    db.upvote_learning(id).unwrap();
     let after2 = db.get_learning(id).unwrap().unwrap();
     assert_eq!(after2.confirmed_count, 2);
 }
