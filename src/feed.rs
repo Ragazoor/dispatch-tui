@@ -717,6 +717,72 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tick_twice_is_idempotent() {
+        let db = Arc::new(Database::open_in_memory().unwrap());
+        let epic = db
+            .create_epic("Idem Epic", "", "/repo", None, ProjectId(1))
+            .unwrap();
+        db.patch_epic(
+            epic.id,
+            &EpicPatch::new()
+                .feed_command(Some(
+                    r#"echo '[{"external_id":"1","title":"T","description":"","status":"backlog","tag":"bug"}]'"#,
+                ))
+                // 0-second interval so the second tick re-runs the command.
+                .feed_interval_secs(Some(0)),
+        )
+        .unwrap();
+
+        let (mut runner, mut rx) = make_runner(db.clone());
+
+        runner.tick().await;
+        tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("first tick: timed out waiting for refresh")
+            .expect("channel closed");
+
+        let first = db.list_tasks_for_epic(epic.id).unwrap();
+        assert_eq!(first.len(), 1);
+        let first_id = first[0].id;
+
+        runner.tick().await;
+        tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("second tick: timed out waiting for refresh")
+            .expect("channel closed");
+
+        let second = db.list_tasks_for_epic(epic.id).unwrap();
+        assert_eq!(
+            second.len(),
+            1,
+            "running the same feed twice must not duplicate tasks"
+        );
+        assert_eq!(
+            second[0].id, first_id,
+            "task id must be stable across upserts"
+        );
+        assert_eq!(second[0].external_id.as_deref(), Some("1"));
+    }
+
+    #[tokio::test]
+    async fn tick_empty_array_creates_no_tasks() {
+        let db = Arc::new(Database::open_in_memory().unwrap());
+        let epic = db
+            .create_epic("Empty Epic", "", "/repo", None, ProjectId(1))
+            .unwrap();
+        db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some("echo '[]'")))
+            .unwrap();
+
+        let (mut runner, mut rx) = make_runner(db.clone());
+        runner.tick().await;
+
+        let _ = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
+
+        let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+        assert!(tasks.is_empty(), "empty feed array must not create tasks");
+    }
+
+    #[tokio::test]
     async fn tick_non_github_url_stores_empty_sentinel() {
         let db = Arc::new(Database::open_in_memory().unwrap());
         db.save_repo_path("/home/user/code/myrepo").unwrap();
