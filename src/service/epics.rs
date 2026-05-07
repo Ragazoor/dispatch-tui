@@ -10,7 +10,7 @@ use super::{FieldUpdate, ServiceError};
 // ---------------------------------------------------------------------------
 
 pub struct UpdateEpicParams {
-    pub epic_id: i64,
+    pub epic_id: EpicId,
     pub title: Option<String>,
     pub description: Option<String>,
     pub status: Option<TaskStatus>,
@@ -125,18 +125,21 @@ impl EpicService {
         Ok(epic)
     }
 
-    pub fn get_epic(&self, epic_id: i64) -> Result<Epic, ServiceError> {
-        match self.db.get_epic(EpicId(epic_id)) {
+    pub fn get_epic(&self, epic_id: EpicId) -> Result<Epic, ServiceError> {
+        match self.db.get_epic(epic_id) {
             Ok(Some(epic)) => Ok(epic),
             Ok(None) => Err(ServiceError::NotFound(format!(
                 "Epic {} not found",
-                epic_id
+                epic_id.0
             ))),
             Err(e) => Err(ServiceError::Internal(format!("Database error: {e}"))),
         }
     }
 
-    pub fn get_epic_with_subtasks(&self, epic_id: i64) -> Result<(Epic, Vec<Task>), ServiceError> {
+    pub fn get_epic_with_subtasks(
+        &self,
+        epic_id: EpicId,
+    ) -> Result<(Epic, Vec<Task>), ServiceError> {
         let epic = self.get_epic(epic_id)?;
         let subtasks = self.db.list_tasks_for_epic(epic.id).unwrap_or_default();
         Ok((epic, subtasks))
@@ -238,7 +241,7 @@ impl EpicService {
             patch = patch.project_id(pid);
         }
 
-        let epic_id = EpicId(params.epic_id);
+        let epic_id = params.epic_id;
         self.db
             .patch_epic(epic_id, &patch)
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
@@ -246,12 +249,12 @@ impl EpicService {
         Ok(epic_id)
     }
 
-    pub fn delete_epic(&self, epic_id: i64) -> Result<(), ServiceError> {
+    pub fn delete_epic(&self, epic_id: EpicId) -> Result<(), ServiceError> {
         // Verify epic exists
         self.get_epic(epic_id)?;
 
         self.db
-            .delete_epic(EpicId(epic_id))
+            .delete_epic(epic_id)
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))
     }
 }
@@ -264,7 +267,7 @@ mod tests {
     fn update_epic_params_has_any_field_consistent_with_updated_field_names() {
         // Same consistency guard for UpdateEpicParams.
         let with_field = UpdateEpicParams {
-            epic_id: 1,
+            epic_id: EpicId(1),
             title: Some("x".to_string()),
             description: None,
             status: None,
@@ -286,7 +289,7 @@ mod tests {
         );
 
         let empty = UpdateEpicParams {
-            epic_id: 1,
+            epic_id: EpicId(1),
             title: None,
             description: None,
             status: None,
@@ -314,7 +317,7 @@ mod tests {
         // updated_field_names(). Add a case here whenever a new field is added
         // to UpdateEpicParams so both methods stay in sync.
         let base = || UpdateEpicParams {
-            epic_id: 1,
+            epic_id: EpicId(1),
             title: None,
             description: None,
             status: None,

@@ -109,7 +109,7 @@ pub(super) fn handle_get_epic(state: &McpState, id: Option<Value>, args: Value) 
     tracing::info!(epic_id = parsed.epic_id, "MCP get_epic");
 
     let svc = EpicService::new(state.db.clone());
-    match svc.get_epic_with_subtasks(parsed.epic_id) {
+    match svc.get_epic_with_subtasks(EpicId(parsed.epic_id)) {
         Ok((epic, subtasks)) => {
             let done_count = subtasks
                 .iter()
@@ -228,7 +228,7 @@ pub(super) fn handle_update_epic(
     }
 
     let params = UpdateEpicParams {
-        epic_id: parsed.epic_id,
+        epic_id: EpicId(parsed.epic_id),
         title: parsed.title,
         description: parsed.description,
         status: parsed.status,

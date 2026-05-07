@@ -14,7 +14,7 @@ impl TuiRuntime {
             description: draft.description,
             repo_path: draft.repo_path,
             plan_path: None,
-            epic_id: epic_id.map(|e| e.0),
+            epic_id,
             sort_order: None,
             tag: draft.tag,
             base_branch: Some(draft.base_branch),
@@ -44,7 +44,7 @@ impl TuiRuntime {
                 description: draft.description,
                 repo_path: draft.repo_path,
                 plan_path: None,
-                epic_id: epic_id.map(|e| e.0),
+                epic_id,
                 sort_order: None,
                 tag: None,
                 base_branch: Some(base_branch),
@@ -118,7 +118,7 @@ impl TuiRuntime {
     }
 
     pub(super) fn exec_delete_task(&self, app: &mut App, id: TaskId) {
-        if let Err(e) = self.task_svc.delete_task(id.0) {
+        if let Err(e) = self.task_svc.delete_task(id) {
             app.update(Message::Error(Self::db_error("deleting task", e)));
         }
     }

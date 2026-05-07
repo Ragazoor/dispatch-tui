@@ -29,7 +29,7 @@ impl TuiRuntime {
     }
 
     pub(super) fn exec_delete_epic(&self, app: &mut App, id: models::EpicId) {
-        if let Err(e) = self.epic_svc.delete_epic(id.0) {
+        if let Err(e) = self.epic_svc.delete_epic(id) {
             app.update(Message::Error(Self::db_error("deleting epic", e)));
         }
     }
@@ -46,7 +46,7 @@ impl TuiRuntime {
             return;
         }
         if let Err(e) = self.epic_svc.update_epic(crate::service::UpdateEpicParams {
-            epic_id: id.0,
+            epic_id: id,
             title: None,
             description: None,
             status,
@@ -69,7 +69,7 @@ impl TuiRuntime {
         auto_dispatch: bool,
     ) {
         if let Err(e) = self.epic_svc.update_epic(crate::service::UpdateEpicParams {
-            epic_id: id.0,
+            epic_id: id,
             title: None,
             description: None,
             status: None,
@@ -111,7 +111,7 @@ impl TuiRuntime {
                 description: description.clone(),
                 repo_path: epic.repo_path.clone(),
                 plan_path: None,
-                epic_id: Some(epic.id.0),
+                epic_id: Some(epic.id),
                 sort_order: None,
                 tag: None,
                 base_branch: None,

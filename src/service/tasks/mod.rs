@@ -18,7 +18,7 @@ mod tests {
         ClaimTaskParams, CreateTaskParams, ListTasksFilter, TaskService, UpdateTaskParams,
     };
     use crate::db::{self, Database, ProjectCrud, TaskCrud};
-    use crate::models::{ProjectId, SubStatus, TaskId, TaskStatus, TaskTag, UsageReport};
+    use crate::models::{EpicId, ProjectId, SubStatus, TaskId, TaskStatus, TaskTag, UsageReport};
     use crate::service::epics::{CreateEpicParams, EpicService, UpdateEpicParams};
     use crate::service::{FieldUpdate, ServiceError};
 
@@ -57,7 +57,7 @@ mod tests {
             })
             .unwrap();
 
-        let task = svc.get_task(id.0).unwrap();
+        let task = svc.get_task(id).unwrap();
         assert_eq!(task.title, "Test");
         assert_eq!(task.status, TaskStatus::Backlog);
     }
@@ -81,7 +81,7 @@ mod tests {
             })
             .unwrap();
 
-        let task = svc.get_task(id.0).unwrap();
+        let task = svc.get_task(id).unwrap();
         assert_eq!(task.tag, Some(TaskTag::Bug));
         assert_eq!(task.sort_order, Some(5));
     }
@@ -105,7 +105,7 @@ mod tests {
             })
             .unwrap();
 
-        let task = svc.get_task(id.0).unwrap();
+        let task = svc.get_task(id).unwrap();
         assert_eq!(task.sort_order, Some(42));
     }
 
@@ -131,7 +131,7 @@ mod tests {
         svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Running))
             .unwrap();
 
-        let task = svc.get_task(id.0).unwrap();
+        let task = svc.get_task(id).unwrap();
         assert_eq!(task.status, TaskStatus::Running);
     }
 
@@ -183,7 +183,7 @@ mod tests {
         svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Running))
             .unwrap();
 
-        let task = svc.get_task(id.0).unwrap();
+        let task = svc.get_task(id).unwrap();
         assert_eq!(task.status, TaskStatus::Running);
     }
 
@@ -234,7 +234,7 @@ mod tests {
 
         let task = svc
             .claim_task(ClaimTaskParams {
-                task_id: id.0,
+                task_id: id,
                 worktree: "/repo/.worktrees/feature".into(),
                 tmux_window: "win1".into(),
             })
@@ -242,7 +242,7 @@ mod tests {
         assert_eq!(task.title, "T");
 
         // Verify it was actually updated
-        let task = svc.get_task(id.0).unwrap();
+        let task = svc.get_task(id).unwrap();
         assert_eq!(task.status, TaskStatus::Running);
         assert_eq!(task.worktree.as_deref(), Some("/repo/.worktrees/feature"));
     }
@@ -268,7 +268,7 @@ mod tests {
 
         let err = svc
             .claim_task(ClaimTaskParams {
-                task_id: id.0,
+                task_id: id,
                 worktree: "/repo-b/.worktrees/feature".into(),
                 tmux_window: "win1".into(),
             })
@@ -301,7 +301,7 @@ mod tests {
 
         let err = svc
             .claim_task(ClaimTaskParams {
-                task_id: id.0,
+                task_id: id,
                 worktree: "/repo/.worktrees/feature".into(),
                 tmux_window: "win1".into(),
             })
@@ -348,7 +348,7 @@ mod tests {
     fn get_task_not_found() {
         let db = test_db();
         let svc = task_svc(&db);
-        let err = svc.get_task(999).unwrap_err();
+        let err = svc.get_task(TaskId(999)).unwrap_err();
         assert!(matches!(err, ServiceError::NotFound(_)));
     }
 
@@ -358,7 +358,7 @@ mod tests {
         let svc = task_svc(&db);
         let err = svc
             .report_usage(
-                999,
+                TaskId(999),
                 &UsageReport {
                     input_tokens: 100,
                     output_tokens: 50,
@@ -407,7 +407,7 @@ mod tests {
             .update_task(UpdateTaskParams::for_task(id).epic_id(epic.id))
             .unwrap();
 
-        let task = task_svc.get_task(id.0).unwrap();
+        let task = task_svc.get_task(id).unwrap();
         assert_eq!(task.epic_id, Some(epic.id));
     }
 
@@ -438,7 +438,7 @@ mod tests {
                 description: "".into(),
                 repo_path: "/repo".into(),
                 plan_path: None,
-                epic_id: Some(epic.id.0),
+                epic_id: Some(epic.id),
                 sort_order: None,
                 tag: None,
                 base_branch: None,
@@ -450,7 +450,7 @@ mod tests {
             .update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Running))
             .unwrap();
 
-        let refreshed = epic_svc.get_epic(epic.id.0).unwrap();
+        let refreshed = epic_svc.get_epic(epic.id).unwrap();
         assert_eq!(refreshed.status, TaskStatus::Running);
     }
 
@@ -494,7 +494,7 @@ mod tests {
                 description: "".into(),
                 repo_path: "/repo".into(),
                 plan_path: None,
-                epic_id: Some(epic_a.id.0),
+                epic_id: Some(epic_a.id),
                 sort_order: None,
                 tag: None,
                 base_branch: None,
@@ -507,7 +507,7 @@ mod tests {
 
         // Sanity: epic A is now Running.
         assert_eq!(
-            epic_svc.get_epic(epic_a.id.0).unwrap().status,
+            epic_svc.get_epic(epic_a.id).unwrap().status,
             TaskStatus::Running
         );
 
@@ -516,11 +516,11 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            epic_svc.get_epic(epic_a.id.0).unwrap().status,
+            epic_svc.get_epic(epic_a.id).unwrap().status,
             TaskStatus::Backlog
         );
         assert_eq!(
-            epic_svc.get_epic(epic_b.id.0).unwrap().status,
+            epic_svc.get_epic(epic_b.id).unwrap().status,
             TaskStatus::Running
         );
     }
@@ -545,7 +545,7 @@ mod tests {
             })
             .unwrap();
 
-        let fetched = svc.get_epic(epic.id.0).unwrap();
+        let fetched = svc.get_epic(epic.id).unwrap();
         assert_eq!(fetched.title, "Epic 1");
     }
 
@@ -553,7 +553,7 @@ mod tests {
     fn get_epic_not_found() {
         let db = test_db();
         let svc = epic_svc(&db);
-        let err = svc.get_epic(999).unwrap_err();
+        let err = svc.get_epic(EpicId(999)).unwrap_err();
         assert!(matches!(err, ServiceError::NotFound(_)));
     }
 
@@ -576,7 +576,7 @@ mod tests {
             .unwrap();
 
         svc.update_epic(UpdateEpicParams {
-            epic_id: epic.id.0,
+            epic_id: epic.id,
             title: None,
             description: None,
             status: Some(TaskStatus::Running),
@@ -590,7 +590,7 @@ mod tests {
         })
         .unwrap();
 
-        let updated = svc.get_epic(epic.id.0).unwrap();
+        let updated = svc.get_epic(epic.id).unwrap();
         assert_eq!(updated.status, TaskStatus::Running);
     }
 
@@ -614,7 +614,7 @@ mod tests {
 
         let err = svc
             .update_epic(UpdateEpicParams {
-                epic_id: epic.id.0,
+                epic_id: epic.id,
                 title: None,
                 description: None,
                 status: None,
@@ -651,7 +651,7 @@ mod tests {
         assert!(db.get_epic(epic.id).unwrap().unwrap().auto_dispatch);
 
         svc.update_epic(UpdateEpicParams {
-            epic_id: epic.id.0,
+            epic_id: epic.id,
             title: None,
             description: None,
             status: None,
@@ -693,7 +693,7 @@ mod tests {
                 description: "".into(),
                 repo_path: "/repo".into(),
                 plan_path: None,
-                epic_id: Some(epic.id.0),
+                epic_id: Some(epic.id),
                 sort_order: None,
                 tag: None,
                 base_branch: None,
@@ -746,7 +746,7 @@ mod tests {
                 description: "".into(),
                 repo_path: "/repo".into(),
                 plan_path: None,
-                epic_id: Some(e1.id.0),
+                epic_id: Some(e1.id),
                 sort_order: None,
                 tag: None,
                 base_branch: None,
@@ -759,7 +759,7 @@ mod tests {
                 description: "".into(),
                 repo_path: "/repo".into(),
                 plan_path: None,
-                epic_id: Some(e1.id.0),
+                epic_id: Some(e1.id),
                 sort_order: None,
                 tag: None,
                 base_branch: None,
@@ -773,7 +773,7 @@ mod tests {
                 description: "".into(),
                 repo_path: "/repo".into(),
                 plan_path: None,
-                epic_id: Some(e2.id.0),
+                epic_id: Some(e2.id),
                 sort_order: None,
                 tag: None,
                 base_branch: None,
@@ -821,7 +821,7 @@ mod tests {
                 description: "".into(),
                 repo_path: "/repo".into(),
                 plan_path: None,
-                epic_id: Some(epic.id.0),
+                epic_id: Some(epic.id),
                 sort_order: None,
                 tag: None,
                 base_branch: None,
@@ -833,7 +833,7 @@ mod tests {
             .update_task(UpdateTaskParams::for_task(task_id).status(TaskStatus::Done))
             .unwrap();
 
-        let updated_epic = epic_svc.get_epic(epic.id.0).unwrap();
+        let updated_epic = epic_svc.get_epic(epic.id).unwrap();
         assert_eq!(updated_epic.status, TaskStatus::Done);
     }
 
@@ -862,7 +862,7 @@ mod tests {
                 description: "".into(),
                 repo_path: "/repo".into(),
                 plan_path: None,
-                epic_id: Some(epic.id.0),
+                epic_id: Some(epic.id),
                 sort_order: None,
                 tag: None,
                 base_branch: None,
@@ -870,7 +870,7 @@ mod tests {
             })
             .unwrap();
 
-        let (e, subtasks) = epic_svc.get_epic_with_subtasks(epic.id.0).unwrap();
+        let (e, subtasks) = epic_svc.get_epic_with_subtasks(epic.id).unwrap();
         assert_eq!(e.title, "E");
         assert_eq!(subtasks.len(), 1);
     }
@@ -902,7 +902,7 @@ mod tests {
                 description: "".into(),
                 repo_path: "/repo".into(),
                 plan_path: None,
-                epic_id: Some(epic.id.0),
+                epic_id: Some(epic.id),
                 sort_order: Some(20),
                 tag: None,
                 base_branch: None,
@@ -916,7 +916,7 @@ mod tests {
                 description: "".into(),
                 repo_path: "/repo".into(),
                 plan_path: None,
-                epic_id: Some(epic.id.0),
+                epic_id: Some(epic.id),
                 sort_order: Some(10),
                 tag: None,
                 base_branch: None,
@@ -924,7 +924,7 @@ mod tests {
             })
             .unwrap();
 
-        let next = task_svc.next_backlog_task(epic.id.0).unwrap();
+        let next = task_svc.next_backlog_task(epic.id).unwrap();
         assert_eq!(next.unwrap().title, "First");
     }
 
@@ -953,7 +953,7 @@ mod tests {
                 description: "".into(),
                 repo_path: "/repo".into(),
                 plan_path: None,
-                epic_id: Some(epic.id.0),
+                epic_id: Some(epic.id),
                 sort_order: Some(1),
                 tag: None,
                 base_branch: None,
@@ -966,7 +966,7 @@ mod tests {
             .update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Running))
             .unwrap();
 
-        let next = task_svc.next_backlog_task(epic.id.0).unwrap();
+        let next = task_svc.next_backlog_task(epic.id).unwrap();
         assert!(next.is_none());
     }
 
@@ -974,7 +974,7 @@ mod tests {
     fn next_backlog_task_epic_not_found() {
         let db = test_db();
         let svc = task_svc(&db);
-        let err = svc.next_backlog_task(999).unwrap_err();
+        let err = svc.next_backlog_task(EpicId(999)).unwrap_err();
         assert!(matches!(err, ServiceError::NotFound(_)));
     }
 
@@ -1030,7 +1030,7 @@ mod tests {
                 description: "".into(),
                 repo_path: "/repo".into(),
                 plan_path: None,
-                epic_id: Some(epic.id.0),
+                epic_id: Some(epic.id),
                 sort_order: None,
                 tag: None,
                 base_branch: None,
@@ -1066,7 +1066,7 @@ mod tests {
                 description: "".into(),
                 repo_path: "/repo".into(),
                 plan_path: None,
-                epic_id: Some(epic.id.0),
+                epic_id: Some(epic.id),
                 sort_order: Some(3),
                 tag: Some(TaskTag::Feature),
                 base_branch: None,
@@ -1100,9 +1100,9 @@ mod tests {
             })
             .unwrap();
 
-        svc.delete_task(id.0).unwrap();
+        svc.delete_task(id).unwrap();
 
-        let err = svc.get_task(id.0).unwrap_err();
+        let err = svc.get_task(id).unwrap_err();
         assert!(matches!(err, ServiceError::NotFound(_)));
     }
 
@@ -1110,7 +1110,7 @@ mod tests {
     fn delete_task_not_found() {
         let db = test_db();
         let svc = task_svc(&db);
-        let err = svc.delete_task(999).unwrap_err();
+        let err = svc.delete_task(TaskId(999)).unwrap_err();
         assert!(matches!(err, ServiceError::NotFound(_)));
     }
 
@@ -1143,7 +1143,7 @@ mod tests {
         )
         .unwrap();
 
-        let task = svc.get_task(id.0).unwrap();
+        let task = svc.get_task(id).unwrap();
         assert_eq!(task.worktree.as_deref(), Some("/repo/.worktrees/feat"));
         assert_eq!(task.tmux_window.as_deref(), Some("task-1"));
     }
@@ -1185,7 +1185,7 @@ mod tests {
         )
         .unwrap();
 
-        let task = svc.get_task(id.0).unwrap();
+        let task = svc.get_task(id).unwrap();
         assert!(task.worktree.is_none());
         assert!(task.tmux_window.is_none());
     }
@@ -1214,7 +1214,7 @@ mod tests {
         svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Done))
             .unwrap();
 
-        let task = svc.get_task(id.0).unwrap();
+        let task = svc.get_task(id).unwrap();
         assert_eq!(task.status, TaskStatus::Done);
     }
 
@@ -1238,9 +1238,9 @@ mod tests {
             })
             .unwrap();
 
-        svc.delete_epic(epic.id.0).unwrap();
+        svc.delete_epic(epic.id).unwrap();
 
-        let err = svc.get_epic(epic.id.0).unwrap_err();
+        let err = svc.get_epic(epic.id).unwrap_err();
         assert!(matches!(err, ServiceError::NotFound(_)));
     }
 
@@ -1248,7 +1248,7 @@ mod tests {
     fn delete_epic_not_found() {
         let db = test_db();
         let svc = epic_svc(&db);
-        let err = svc.delete_epic(999).unwrap_err();
+        let err = svc.delete_epic(EpicId(999)).unwrap_err();
         assert!(matches!(err, ServiceError::NotFound(_)));
     }
 
@@ -1391,7 +1391,7 @@ mod tests {
                 description: "".into(),
                 repo_path: "/repo".into(),
                 plan_path: None,
-                epic_id: Some(epic.id.0),
+                epic_id: Some(epic.id),
                 sort_order: None,
                 tag: None,
                 base_branch: None,
@@ -1611,7 +1611,7 @@ mod tests {
             })
             .unwrap();
 
-        let err = svc.validate_send_message(from_id.0, to_id.0).unwrap_err();
+        let err = svc.validate_send_message(from_id, to_id).unwrap_err();
         assert!(matches!(err, ServiceError::Validation(_)));
         assert!(err.to_string().contains("no worktree"));
     }
@@ -1657,7 +1657,7 @@ mod tests {
         )
         .unwrap();
 
-        let err = svc.validate_send_message(from_id.0, to_id.0).unwrap_err();
+        let err = svc.validate_send_message(from_id, to_id).unwrap_err();
         assert!(matches!(err, ServiceError::Validation(_)));
         assert!(err.to_string().contains("no tmux window"));
     }
@@ -1681,7 +1681,7 @@ mod tests {
             })
             .unwrap();
 
-        let err = svc.validate_send_message(from_id.0, 999).unwrap_err();
+        let err = svc.validate_send_message(from_id, TaskId(999)).unwrap_err();
         assert!(matches!(err, ServiceError::NotFound(_)));
     }
 
@@ -1754,7 +1754,7 @@ mod tests {
 
         assert_eq!(child.parent_epic_id, Some(parent.id));
 
-        let fetched = svc.get_epic(child.id.0).unwrap();
+        let fetched = svc.get_epic(child.id).unwrap();
         assert_eq!(fetched.parent_epic_id, Some(parent.id));
     }
 
@@ -1881,7 +1881,7 @@ mod tests {
             .unwrap();
 
         svc.update_epic(UpdateEpicParams {
-            epic_id: epic.id.0,
+            epic_id: epic.id,
             title: None,
             description: None,
             status: None,

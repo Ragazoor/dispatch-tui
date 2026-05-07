@@ -342,7 +342,7 @@ impl TuiRuntime {
 
         let epic_id = epic.id;
         if let Err(e) = self.epic_svc.update_epic(UpdateEpicParams {
-            epic_id: epic_id.0,
+            epic_id,
             title: Some(applied.title.clone()),
             description: Some(applied.description.clone()),
             status: None,

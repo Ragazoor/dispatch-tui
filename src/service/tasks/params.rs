@@ -182,7 +182,7 @@ pub struct CreateTaskParams {
     pub description: String,
     pub repo_path: String,
     pub plan_path: Option<String>,
-    pub epic_id: Option<i64>,
+    pub epic_id: Option<EpicId>,
     pub sort_order: Option<i64>,
     pub tag: Option<TaskTag>,
     pub base_branch: Option<String>,
@@ -194,7 +194,7 @@ pub struct CreateTaskParams {
 // ---------------------------------------------------------------------------
 
 pub struct ClaimTaskParams {
-    pub task_id: i64,
+    pub task_id: TaskId,
     pub worktree: String,
     pub tmux_window: String,
 }

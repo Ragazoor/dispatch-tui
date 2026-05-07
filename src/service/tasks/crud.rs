@@ -198,31 +198,31 @@ impl TaskService {
                 plan: plan.as_deref(),
                 status: TaskStatus::Backlog,
                 base_branch,
-                epic_id: params.epic_id.map(EpicId),
+                epic_id: params.epic_id,
                 sort_order: params.sort_order,
                 tag: params.tag,
                 project_id: params.project_id,
             })
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
 
-        self.get_task(task_id.0)
+        self.get_task(task_id)
     }
 
-    pub fn delete_task(&self, task_id: i64) -> Result<(), ServiceError> {
+    pub fn delete_task(&self, task_id: TaskId) -> Result<(), ServiceError> {
         // Verify task exists
         self.get_task(task_id)?;
 
         self.db
-            .delete_task(TaskId(task_id))
+            .delete_task(task_id)
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))
     }
 
-    pub fn get_task(&self, task_id: i64) -> Result<Task, ServiceError> {
-        match self.db.get_task(TaskId(task_id)) {
+    pub fn get_task(&self, task_id: TaskId) -> Result<Task, ServiceError> {
+        match self.db.get_task(task_id) {
             Ok(Some(task)) => Ok(task),
             Ok(None) => Err(ServiceError::NotFound(format!(
                 "Task {} not found",
-                task_id
+                task_id.0
             ))),
             Err(e) => Err(ServiceError::Internal(format!("Database error: {e}"))),
         }
@@ -288,7 +288,7 @@ impl TaskService {
 
         self.db
             .patch_task(
-                TaskId(params.task_id),
+                params.task_id,
                 &TaskPatch::new()
                     .status(TaskStatus::Running)
                     .worktree(Some(&params.worktree))
@@ -299,39 +299,39 @@ impl TaskService {
         Ok(task)
     }
 
-    pub fn validate_wrap_up(&self, task_id: i64) -> Result<Task, ServiceError> {
+    pub fn validate_wrap_up(&self, task_id: TaskId) -> Result<Task, ServiceError> {
         let task = self.get_task(task_id)?;
 
         if !crate::dispatch::is_wrappable(&task) {
             return Err(ServiceError::Validation(format!(
                 "Task {} cannot be wrapped up. Requires Running or Review status with a worktree.",
-                task_id
+                task_id.0
             )));
         }
 
         Ok(task)
     }
 
-    pub fn report_usage(&self, task_id: i64, usage: &UsageReport) -> Result<(), ServiceError> {
+    pub fn report_usage(&self, task_id: TaskId, usage: &UsageReport) -> Result<(), ServiceError> {
         // Verify task exists
         self.get_task(task_id)?;
 
         self.db
-            .report_usage(TaskId(task_id), usage)
+            .report_usage(task_id, usage)
             .map_err(|e| ServiceError::Internal(format!("Failed to record usage: {e}")))
     }
 
     pub fn validate_send_message(
         &self,
-        from_task_id: i64,
-        to_task_id: i64,
+        from_task_id: TaskId,
+        to_task_id: TaskId,
     ) -> Result<(Task, Task), ServiceError> {
-        let from_task = match self.db.get_task(TaskId(from_task_id)) {
+        let from_task = match self.db.get_task(from_task_id) {
             Ok(Some(t)) => t,
             Ok(None) => {
                 return Err(ServiceError::NotFound(format!(
                     "sender task {} not found",
-                    from_task_id
+                    from_task_id.0
                 )));
             }
             Err(e) => {
@@ -341,12 +341,12 @@ impl TaskService {
             }
         };
 
-        let to_task = match self.db.get_task(TaskId(to_task_id)) {
+        let to_task = match self.db.get_task(to_task_id) {
             Ok(Some(t)) => t,
             Ok(None) => {
                 return Err(ServiceError::NotFound(format!(
                     "target task {} not found",
-                    to_task_id
+                    to_task_id.0
                 )));
             }
             Err(e) => {
@@ -359,14 +359,14 @@ impl TaskService {
         if to_task.worktree.is_none() {
             return Err(ServiceError::Validation(format!(
                 "target task {} has no worktree (not running)",
-                to_task_id
+                to_task_id.0
             )));
         }
 
         if to_task.tmux_window.is_none() {
             return Err(ServiceError::Validation(format!(
                 "target task {} has no tmux window (not running)",
-                to_task_id
+                to_task_id.0
             )));
         }
 
@@ -375,14 +375,14 @@ impl TaskService {
 
     /// Find the next backlog task for an epic, sorted by sort_order then id.
     /// Returns `Ok(None)` if no backlog tasks remain.
-    pub fn next_backlog_task(&self, epic_id: i64) -> Result<Option<Task>, ServiceError> {
+    pub fn next_backlog_task(&self, epic_id: EpicId) -> Result<Option<Task>, ServiceError> {
         // Verify the epic exists
-        match self.db.get_epic(EpicId(epic_id)) {
+        match self.db.get_epic(epic_id) {
             Ok(Some(_)) => {}
             Ok(None) => {
                 return Err(ServiceError::NotFound(format!(
                     "Epic {} not found",
-                    epic_id
+                    epic_id.0
                 )))
             }
             Err(e) => return Err(ServiceError::Internal(format!("database error: {e}"))),
@@ -390,7 +390,7 @@ impl TaskService {
 
         let tasks = self
             .db
-            .list_tasks_for_epic(EpicId(epic_id))
+            .list_tasks_for_epic(epic_id)
             .map_err(|e| ServiceError::Internal(format!("failed to list epic tasks: {e}")))?;
 
         let mut backlog: Vec<Task> = tasks

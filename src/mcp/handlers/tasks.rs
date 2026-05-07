@@ -414,7 +414,7 @@ pub(super) fn handle_create_task(
         description: parsed.description,
         repo_path: parsed.repo_path,
         plan_path: parsed.plan_path,
-        epic_id: parsed.epic_id,
+        epic_id: parsed.epic_id.map(EpicId),
         sort_order: parsed.sort_order,
         tag: parsed.tag,
         base_branch: parsed.base_branch,
@@ -439,7 +439,7 @@ pub(super) fn handle_get_task(state: &McpState, id: Option<Value>, args: Value) 
     tracing::info!(task_id = parsed.task_id, "MCP get_task");
 
     let svc = TaskService::new(state.db.clone());
-    match svc.get_task(parsed.task_id) {
+    match svc.get_task(TaskId(parsed.task_id)) {
         Ok(task) => {
             let epic_titles = build_epic_titles(state);
             let text = format_task_detail(&task, &epic_titles);
@@ -587,7 +587,7 @@ pub(super) fn handle_claim_task(
 
     let svc = TaskService::new(state.db.clone());
     match svc.claim_task(ClaimTaskParams {
-        task_id: parsed.task_id,
+        task_id: TaskId(parsed.task_id),
         worktree: parsed.worktree,
         tmux_window: parsed.tmux_window,
     }) {
@@ -627,7 +627,7 @@ pub(super) async fn handle_wrap_up(
     tracing::info!(task_id = parsed.task_id, action = ?parsed.action, "MCP wrap_up");
 
     let svc = TaskService::new(state.db.clone());
-    let task = match svc.validate_wrap_up(parsed.task_id) {
+    let task = match svc.validate_wrap_up(TaskId(parsed.task_id)) {
         Ok(t) => t,
         Err(e) => return service_err_to_response(id, e),
     };
@@ -892,7 +892,7 @@ pub(super) async fn handle_dispatch_next(
     }
 
     let svc = TaskService::new(state.db.clone());
-    let next_task = match svc.next_backlog_task(parsed.epic_id) {
+    let next_task = match svc.next_backlog_task(EpicId(parsed.epic_id)) {
         Ok(Some(task)) => task,
         Ok(None) => {
             return JsonRpcResponse::ok(
@@ -1042,7 +1042,7 @@ pub(super) fn handle_send_message(
 
     let svc = TaskService::new(state.db.clone());
     let (from_task, to_task) =
-        match svc.validate_send_message(parsed.from_task_id, parsed.to_task_id) {
+        match svc.validate_send_message(TaskId(parsed.from_task_id), TaskId(parsed.to_task_id)) {
             Ok(pair) => pair,
             Err(e) => return service_err_to_response(id, e),
         };
@@ -1182,7 +1182,7 @@ pub(super) fn handle_report_usage(
 
     let svc = TaskService::new(state.db.clone());
     match svc.report_usage(
-        parsed.task_id,
+        TaskId(parsed.task_id),
         &crate::models::UsageReport {
             input_tokens: parsed.input_tokens,
             output_tokens: parsed.output_tokens,
