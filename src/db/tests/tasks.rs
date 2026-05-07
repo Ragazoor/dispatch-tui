@@ -2076,5 +2076,132 @@ mod property_tests {
             let patch = epicpatch_from_bits(bits);
             prop_assert_eq!(patch.has_changes(), bits != 0);
         }
+
+        /// Applying a `TaskPatch` to a baseline task and re-reading should yield:
+        /// - `Some(_)` patch fields → applied to the row
+        /// - `None` patch fields   → preserved from baseline
+        ///
+        /// For nullable fields, `Some(Some(v))` writes `v` and `Some(None)` writes NULL.
+        ///
+        /// `status` and `sort_order` are exercised in dedicated property tests below
+        /// because they have additional invariants (sub_status coupling, signed integer).
+        #[test]
+        fn taskpatch_roundtrip(
+            title       in proptest::option::of("[a-zA-Z0-9 ]{1,32}"),
+            description in proptest::option::of("[a-zA-Z0-9 ]{0,32}"),
+            repo_path   in proptest::option::of("/[a-z]{1,16}"),
+            base_branch in proptest::option::of("[a-z]{1,16}"),
+            plan_path   in proptest::option::of(proptest::option::of("[a-z]{1,16}\\.md")),
+            worktree    in proptest::option::of(proptest::option::of("/[a-z]{1,16}")),
+            tmux_window in proptest::option::of(proptest::option::of("[a-z]{1,16}")),
+            pr_url      in proptest::option::of(proptest::option::of("https://x/[0-9]{1,4}")),
+            external_id in proptest::option::of(proptest::option::of("[a-z]{1,16}")),
+        ) {
+            let db = in_memory_db();
+            let id = db
+                .create_task(CreateTaskRequest {
+                    title: "Baseline",
+                    description: "baseline desc",
+                    repo_path: "/baseline",
+                    plan: None,
+                    status: TaskStatus::Backlog,
+                    base_branch: "main",
+                    epic_id: None,
+                    sort_order: None,
+                    tag: None,
+                    project_id: ProjectId(1),
+                })
+                .unwrap();
+            let baseline = db.get_task(id).unwrap().unwrap();
+
+            let mut p = TaskPatch::new();
+            if let Some(t)  = title.as_deref()       { p = p.title(t); }
+            if let Some(d)  = description.as_deref() { p = p.description(d); }
+            if let Some(r)  = repo_path.as_deref()   { p = p.repo_path(r); }
+            if let Some(bb) = base_branch.as_deref() { p = p.base_branch(bb); }
+            if let Some(ref pp) = plan_path   { p = p.plan_path(pp.as_deref()); }
+            if let Some(ref w)  = worktree    { p = p.worktree(w.as_deref()); }
+            if let Some(ref tw) = tmux_window { p = p.tmux_window(tw.as_deref()); }
+            if let Some(ref u)  = pr_url      { p = p.pr_url(u.as_deref()); }
+            if let Some(ref e)  = external_id { p = p.external_id(e.as_deref()); }
+
+            db.patch_task(id, &p).unwrap();
+            let after = db.get_task(id).unwrap().unwrap();
+
+            prop_assert_eq!(&after.title,       &title.unwrap_or(baseline.title));
+            prop_assert_eq!(&after.description, &description.unwrap_or(baseline.description));
+            prop_assert_eq!(&after.repo_path,   &repo_path.unwrap_or(baseline.repo_path));
+            prop_assert_eq!(&after.base_branch, &base_branch.unwrap_or(baseline.base_branch));
+            prop_assert_eq!(&after.plan_path,   &plan_path.unwrap_or(baseline.plan_path));
+            prop_assert_eq!(&after.worktree,    &worktree.unwrap_or(baseline.worktree));
+            prop_assert_eq!(&after.tmux_window, &tmux_window.unwrap_or(baseline.tmux_window));
+            prop_assert_eq!(&after.pr_url,      &pr_url.unwrap_or(baseline.pr_url));
+            prop_assert_eq!(&after.external_id, &external_id.unwrap_or(baseline.external_id));
+            prop_assert_eq!(after.status,     baseline.status);
+            prop_assert_eq!(after.sub_status, baseline.sub_status);
+        }
+
+        /// `sort_order` is `nullable i64` — round-trip both Some(v) and None separately.
+        #[test]
+        fn taskpatch_roundtrip_sort_order(
+            sort_order in proptest::option::of(proptest::option::of(any::<i64>())),
+        ) {
+            let db = in_memory_db();
+            let id = db
+                .create_task(CreateTaskRequest {
+                    title: "T", description: "d", repo_path: "/r",
+                    plan: None, status: TaskStatus::Backlog, base_branch: "main",
+                    epic_id: None, sort_order: Some(42), tag: None, project_id: ProjectId(1),
+                })
+                .unwrap();
+            let baseline = db.get_task(id).unwrap().unwrap();
+            let mut p = TaskPatch::new();
+            if let Some(so) = sort_order { p = p.sort_order(so); }
+            db.patch_task(id, &p).unwrap();
+            let after = db.get_task(id).unwrap().unwrap();
+            prop_assert_eq!(after.sort_order, sort_order.unwrap_or(baseline.sort_order));
+        }
+
+        /// Applying an `EpicPatch` to a baseline epic and re-reading should yield
+        /// the same Some(_) ↔ field, None ↔ baseline contract as `TaskPatch`.
+        #[test]
+        fn epicpatch_roundtrip(
+            title       in proptest::option::of("[a-zA-Z0-9 ]{1,32}"),
+            description in proptest::option::of("[a-zA-Z0-9 ]{0,32}"),
+            repo_path   in proptest::option::of("/[a-z]{1,16}"),
+            plan_path   in proptest::option::of(proptest::option::of("[a-z]{1,16}\\.md")),
+            sort_order  in proptest::option::of(proptest::option::of(any::<i64>())),
+            auto_dispatch in proptest::option::of(any::<bool>()),
+            feed_command  in proptest::option::of(proptest::option::of("[a-z]{1,16}")),
+            feed_interval in proptest::option::of(proptest::option::of(1i64..86_400)),
+        ) {
+            let db = in_memory_db();
+            let epic = db
+                .create_epic("Baseline epic", "baseline", "/baseline", None, ProjectId(1))
+                .unwrap();
+            let baseline = db.get_epic(epic.id).unwrap().unwrap();
+
+            let mut p = EpicPatch::new();
+            if let Some(t)  = title.as_deref()       { p = p.title(t); }
+            if let Some(d)  = description.as_deref() { p = p.description(d); }
+            if let Some(r)  = repo_path.as_deref()   { p = p.repo_path(r); }
+            if let Some(ref pp) = plan_path { p = p.plan_path(pp.as_deref()); }
+            if let Some(so) = sort_order    { p = p.sort_order(so); }
+            if let Some(ad) = auto_dispatch { p = p.auto_dispatch(ad); }
+            if let Some(ref fc) = feed_command  { p = p.feed_command(fc.as_deref()); }
+            if let Some(fi) = feed_interval     { p = p.feed_interval_secs(fi); }
+
+            db.patch_epic(epic.id, &p).unwrap();
+            let after = db.get_epic(epic.id).unwrap().unwrap();
+
+            prop_assert_eq!(&after.title,         &title.unwrap_or(baseline.title));
+            prop_assert_eq!(&after.description,   &description.unwrap_or(baseline.description));
+            prop_assert_eq!(&after.repo_path,     &repo_path.unwrap_or(baseline.repo_path));
+            prop_assert_eq!(&after.plan_path,     &plan_path.unwrap_or(baseline.plan_path));
+            prop_assert_eq!(after.sort_order,     sort_order.unwrap_or(baseline.sort_order));
+            prop_assert_eq!(after.auto_dispatch,  auto_dispatch.unwrap_or(baseline.auto_dispatch));
+            prop_assert_eq!(&after.feed_command,  &feed_command.unwrap_or(baseline.feed_command));
+            prop_assert_eq!(after.feed_interval_secs, feed_interval.unwrap_or(baseline.feed_interval_secs));
+        }
     }
 }

@@ -1900,4 +1900,80 @@ mod tests {
         let updated = epics.iter().find(|e| e.id == epic.id).unwrap();
         assert_eq!(updated.project_id, other.id);
     }
+
+    mod property_tests {
+        use super::*;
+        use proptest::prelude::*;
+
+        /// Mirror of the `FieldUpdate ↔ Option<Option<T>>` mapping documented in
+        /// CLAUDE.md and applied by `validators::build_task_patch`:
+        ///   `Some(Set(v))` → `Some(Some(v))`
+        ///   `Some(Clear)`  → `Some(None)`
+        ///   `None`         → `None`
+        fn map_field_update(fu: Option<FieldUpdate>) -> Option<Option<String>> {
+            match fu {
+                Some(FieldUpdate::Set(v)) => Some(Some(v)),
+                Some(FieldUpdate::Clear) => Some(None),
+                None => None,
+            }
+        }
+
+        fn field_update_strategy() -> impl Strategy<Value = Option<FieldUpdate>> {
+            prop_oneof![
+                Just(None),
+                Just(Some(FieldUpdate::Clear)),
+                "[a-zA-Z0-9/]{0,32}".prop_map(|s| Some(FieldUpdate::Set(s))),
+            ]
+        }
+
+        proptest! {
+            /// `FieldUpdate` round-trips through the canonical mapping cleanly.
+            #[test]
+            fn field_update_roundtrip(fu in field_update_strategy()) {
+                let mapped = map_field_update(fu.clone());
+                let back: Option<FieldUpdate> = match mapped {
+                    None              => None,
+                    Some(None)        => Some(FieldUpdate::Clear),
+                    Some(Some(v))     => Some(FieldUpdate::Set(v)),
+                };
+                prop_assert_eq!(back, fu);
+            }
+
+            /// `build_task_patch` applies the mapping to `pr_url`, `worktree`, and
+            /// `tmux_window`. For all input combinations, the resulting `TaskPatch`
+            /// must carry the canonical `Option<Option<&str>>` shape.
+            #[test]
+            fn build_task_patch_maps_field_updates(
+                pr_url in field_update_strategy(),
+                worktree in field_update_strategy(),
+                tmux_window in field_update_strategy(),
+            ) {
+                let mut params = UpdateTaskParams::for_task(TaskId(1));
+                if let Some(ref u) = pr_url      { params = params.pr_url(u.clone()); }
+                if let Some(ref w) = worktree    { params = params.worktree(w.clone()); }
+                if let Some(ref t) = tmux_window { params = params.tmux_window(t.clone()); }
+
+                let patch = super::super::validators::build_task_patch(&params, None, None);
+
+                let expect = |fu: &Option<FieldUpdate>| -> Option<Option<String>> {
+                    fu.as_ref().map(|x| match x {
+                        FieldUpdate::Set(v) => Some(v.clone()),
+                        FieldUpdate::Clear  => None,
+                    })
+                };
+                prop_assert_eq!(
+                    patch.pr_url.map(|o| o.map(|s| s.to_string())),
+                    expect(&pr_url)
+                );
+                prop_assert_eq!(
+                    patch.worktree.map(|o| o.map(|s| s.to_string())),
+                    expect(&worktree)
+                );
+                prop_assert_eq!(
+                    patch.tmux_window.map(|o| o.map(|s| s.to_string())),
+                    expect(&tmux_window)
+                );
+            }
+        }
+    }
 }
