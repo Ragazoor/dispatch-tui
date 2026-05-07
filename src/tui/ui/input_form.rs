@@ -230,17 +230,20 @@ pub(in crate::tui) fn input_base_branch_lines(
     ]
 }
 
-pub(in crate::tui) fn main_session_dir_lines<'a>(
+fn repo_picker_lines<'a>(
     app: &'a App,
     area: Rect,
+    header: &'a str,
+    prefix: &'a str,
+    hint_text: &'a str,
     active: Style,
     hint: Style,
 ) -> Vec<Line<'a>> {
     let mut lines = vec![
-        Line::from(Span::styled("  Main session — base repo:", active)),
+        Line::from(Span::styled(header, active)),
         Line::from(""),
         Line::from(Span::styled(
-            format!("  Path: {}_ ", app.input.buffer),
+            format!("  {prefix}: {}_ ", app.input.buffer),
             active,
         )),
     ];
@@ -256,11 +259,25 @@ pub(in crate::tui) fn main_session_dir_lines<'a>(
         );
     }
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "  Type to filter · [j/k] navigate · [Enter] select · [Esc] cancel",
-        hint,
-    )));
+    lines.push(Line::from(Span::styled(hint_text, hint)));
     lines
+}
+
+pub(in crate::tui) fn main_session_dir_lines<'a>(
+    app: &'a App,
+    area: Rect,
+    active: Style,
+    hint: Style,
+) -> Vec<Line<'a>> {
+    repo_picker_lines(
+        app,
+        area,
+        "  Main session — base repo:",
+        "Path",
+        "  Type to filter · [j/k] navigate · [Enter] select · [Esc] cancel",
+        active,
+        hint,
+    )
 }
 
 pub(in crate::tui) fn quick_dispatch_lines<'a>(
@@ -269,31 +286,15 @@ pub(in crate::tui) fn quick_dispatch_lines<'a>(
     active: Style,
     hint: Style,
 ) -> Vec<Line<'a>> {
-    let mut lines = vec![
-        Line::from(Span::styled("  Quick Dispatch — select repo:", active)),
-        Line::from(""),
-        Line::from(Span::styled(
-            format!("  Filter: {}_ ", app.input.buffer),
-            active,
-        )),
-    ];
-    let filtered = crate::tui::filtered_repos(&app.board.repo_paths, &app.input.buffer);
-    if !filtered.is_empty() {
-        append_repo_path_list(
-            &mut lines,
-            &filtered,
-            app.input.repo_cursor,
-            7,
-            area.height,
-            hint,
-        );
-    }
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
+    repo_picker_lines(
+        app,
+        area,
+        "  Quick Dispatch — select repo:",
+        "Filter",
         "  Type to filter · [j/k] navigate · [Enter] select · [1-9] shortcut · [Esc] cancel",
+        active,
         hint,
-    )));
-    lines
+    )
 }
 
 pub(in crate::tui) fn confirm_retry_lines(app: &App, id: TaskId) -> Vec<Line<'static>> {

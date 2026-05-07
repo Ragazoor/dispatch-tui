@@ -288,13 +288,7 @@ impl App {
                     }
                     InputMode::InputEpicRepoPath => self.update(Message::SubmitEpicRepoPath(value)),
                     InputMode::InputBaseBranch => self.update(Message::SubmitBaseBranch(value)),
-                    InputMode::MainSessionDir => {
-                        if value.is_empty() {
-                            self.update(Message::CancelInput)
-                        } else {
-                            self.update(Message::SubmitMainSessionDir(value))
-                        }
-                    }
+                    InputMode::MainSessionDir => self.update(Message::SubmitMainSessionDir(value)),
                     _ => vec![],
                 }
             }
