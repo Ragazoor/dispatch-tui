@@ -137,6 +137,7 @@ not just at task start:\n\
 - When using dispatch MCP tools → `/dispatch-workflow`\n\
 - When hitting a build or test failure → `/troubleshoot`\n\
 - When noticing an improvement opportunity (and before wrapping up) → `/improvement`\n\
+- Before wrapping up → `/lint`\n\
 Use `/learnings` to record new entries or upvote entries that proved useful."
 }
 

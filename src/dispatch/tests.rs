@@ -1,7 +1,8 @@
 use super::prompts::{
-    allium_instruction, build_epic_planning_prompt, build_prompt, build_quick_dispatch_prompt,
-    build_tmux_window_name, epic_preamble, mcp_tools_instruction, plan_and_attach_instruction,
-    rebase_preamble, task_block, tdd_instruction, wrap_up_instruction, EpicContext, ProjectContext,
+    allium_instruction, build_epic_planning_prompt, build_fix_task_prompt, build_prompt,
+    build_quick_dispatch_prompt, build_tmux_window_name, epic_preamble, learning_tools_instruction,
+    mcp_tools_instruction, plan_and_attach_instruction, rebase_preamble, task_block, tdd_instruction,
+    wrap_up_instruction, EpicContext, ProjectContext,
 };
 use super::worktree::provision_worktree;
 use super::*;
@@ -59,6 +60,24 @@ fn build_prompt_includes_project_context() {
     let prompt = build_prompt(TaskId(1), "Task", "Desc", None, None, Some(&ctx));
     assert!(prompt.contains("ProjectId: 7"));
     assert!(prompt.contains("Dispatch"));
+}
+
+#[test]
+fn learning_tools_instruction_includes_lint_checkpoint() {
+    let instr = learning_tools_instruction();
+    assert!(
+        instr.contains("/lint"),
+        "learning_tools_instruction must include the /lint checkpoint, got:\n{instr}"
+    );
+}
+
+#[test]
+fn fix_task_prompt_includes_lint_checkpoint() {
+    let prompt = build_fix_task_prompt(TaskId(5), "Fix CVE", "desc", None, None);
+    assert!(
+        prompt.contains("/lint"),
+        "build_fix_task_prompt must include /lint (via learning_tools_instruction), got:\n{prompt}"
+    );
 }
 
 #[test]
