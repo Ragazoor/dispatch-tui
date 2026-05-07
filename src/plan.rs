@@ -120,6 +120,24 @@ mod tests {
 
     #[test]
     #[allow(clippy::unwrap_used)]
+    fn parse_empty_input_is_error() {
+        let result = parse_plan("");
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("H1"), "Error should mention missing H1 heading");
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn parse_whitespace_only_input_is_error() {
+        let result = parse_plan("   \n\t\n   \n");
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("H1"), "Error should mention missing H1 heading");
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
     fn parse_missing_goal_gives_empty_description() {
         let content = "\
 # Feature Without Goal
