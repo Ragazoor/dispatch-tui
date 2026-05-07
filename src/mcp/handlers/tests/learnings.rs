@@ -526,6 +526,48 @@ async fn query_learnings_respects_limit() {
 }
 
 #[tokio::test]
+async fn query_learnings_records_a_retrieval_per_returned_id() {
+    let state = test_state();
+    let task_id = create_task_in_repo(&state, "/repo/retrievals");
+    create_approved_learning(
+        &state,
+        "First entry",
+        crate::models::LearningScope::Repo,
+        Some("/repo/retrievals"),
+        &[],
+    );
+    create_approved_learning(
+        &state,
+        "Second entry",
+        crate::models::LearningScope::Repo,
+        Some("/repo/retrievals"),
+        &[],
+    );
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "query_learnings",
+            "arguments": { "task_id": task_id.0 }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
+
+    let rows = state.db.list_retrievals_for_task(task_id).unwrap();
+    let query_rows: Vec<_> = rows
+        .iter()
+        .filter(|r| r.source == crate::models::RetrievalSource::QueryLearnings)
+        .collect();
+    assert_eq!(
+        query_rows.len(),
+        2,
+        "expected 2 query_learnings retrievals, got {rows:?}"
+    );
+}
+
+#[tokio::test]
 async fn query_learnings_unknown_task_fails() {
     let state = test_state();
 

@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 
 use crate::db::LearningFilter;
 use crate::mcp::McpState;
-use crate::models::{LearningId, LearningKind, LearningScope, LearningStatus};
+use crate::models::{LearningId, LearningKind, LearningScope, LearningStatus, RetrievalSource};
 use crate::service::LearningService;
 
 use super::types::{
@@ -182,6 +182,15 @@ pub(super) fn handle_query_learnings(
 
     let limit = parsed.limit.unwrap_or(20).min(50) as usize;
     learnings.truncate(limit);
+
+    // Best-effort: record a retrieval row per returned learning so the
+    // wrap-up verdict step can validate that the agent saw it. A failed
+    // insert must not fail the query response.
+    for l in &learnings {
+        let _ = state
+            .db
+            .record_retrieval(task_id, l.id, RetrievalSource::QueryLearnings);
+    }
 
     if learnings.is_empty() {
         return JsonRpcResponse::ok(
