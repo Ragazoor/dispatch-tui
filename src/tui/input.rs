@@ -28,8 +28,8 @@ impl App {
             | InputMode::InputEpicTitle
             | InputMode::InputEpicDescription
             | InputMode::InputEpicRepoPath
-            | InputMode::InputBaseBranch => self.handle_key_text_input(key),
-            InputMode::MainSessionDir => self.handle_key_main_session_dir(key),
+            | InputMode::InputBaseBranch
+            | InputMode::MainSessionDir => self.handle_key_text_input(key),
             InputMode::ConfirmDelete => self.handle_key_confirm_delete(key),
             InputMode::InputTag => self.handle_key_tag(key),
             InputMode::QuickDispatch => self.handle_key_quick_dispatch(key),
@@ -248,7 +248,7 @@ impl App {
         // In repo path modes, j/k navigate the filtered repo list
         let is_repo_mode = matches!(
             self.input.mode,
-            InputMode::InputRepoPath | InputMode::InputEpicRepoPath
+            InputMode::InputRepoPath | InputMode::InputEpicRepoPath | InputMode::MainSessionDir
         );
         if is_repo_mode {
             match key.code {
@@ -270,6 +270,7 @@ impl App {
                         let path = filtered[idx].clone();
                         let msg = match self.input.mode {
                             InputMode::InputEpicRepoPath => Message::SubmitEpicRepoPath(path),
+                            InputMode::MainSessionDir => Message::SubmitMainSessionDir(path),
                             _ => Message::SubmitRepoPath(path),
                         };
                         return self.update(msg);
@@ -287,24 +288,15 @@ impl App {
                     }
                     InputMode::InputEpicRepoPath => self.update(Message::SubmitEpicRepoPath(value)),
                     InputMode::InputBaseBranch => self.update(Message::SubmitBaseBranch(value)),
+                    InputMode::MainSessionDir => {
+                        if value.is_empty() {
+                            self.update(Message::CancelInput)
+                        } else {
+                            self.update(Message::SubmitMainSessionDir(value))
+                        }
+                    }
                     _ => vec![],
                 }
-            }
-            KeyCode::Backspace => self.update(Message::InputBackspace),
-            KeyCode::Char(c) => self.update(Message::InputChar(c)),
-            _ => vec![],
-        }
-    }
-
-    pub(in crate::tui) fn handle_key_main_session_dir(&mut self, key: KeyEvent) -> Vec<Command> {
-        match key.code {
-            KeyCode::Esc => self.update(Message::CancelInput),
-            KeyCode::Enter => {
-                let value = self.input.buffer.trim().to_string();
-                if value.is_empty() {
-                    return self.update(Message::CancelInput);
-                }
-                self.update(Message::SubmitMainSessionDir(value))
             }
             KeyCode::Backspace => self.update(Message::InputBackspace),
             KeyCode::Char(c) => self.update(Message::InputChar(c)),

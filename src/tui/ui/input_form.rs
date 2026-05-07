@@ -230,6 +230,39 @@ pub(in crate::tui) fn input_base_branch_lines(
     ]
 }
 
+pub(in crate::tui) fn main_session_dir_lines<'a>(
+    app: &'a App,
+    area: Rect,
+    active: Style,
+    hint: Style,
+) -> Vec<Line<'a>> {
+    let mut lines = vec![
+        Line::from(Span::styled("  Main session — base repo:", active)),
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("  Path: {}_ ", app.input.buffer),
+            active,
+        )),
+    ];
+    let filtered = crate::tui::filtered_repos(&app.board.repo_paths, &app.input.buffer);
+    if !filtered.is_empty() {
+        append_repo_path_list(
+            &mut lines,
+            &filtered,
+            app.input.repo_cursor,
+            7,
+            area.height,
+            hint,
+        );
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "  Type to filter · [j/k] navigate · [Enter] select · [Esc] cancel",
+        hint,
+    )));
+    lines
+}
+
 pub(in crate::tui) fn quick_dispatch_lines<'a>(
     app: &'a App,
     area: Rect,

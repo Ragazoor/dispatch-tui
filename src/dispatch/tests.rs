@@ -2,8 +2,8 @@
 use super::prompts::{
     allium_instruction, build_epic_planning_prompt, build_fix_task_prompt, build_prompt,
     build_quick_dispatch_prompt, build_tmux_window_name, epic_preamble, learning_tools_instruction,
-    mcp_tools_instruction, plan_and_attach_instruction, rebase_preamble, task_block, tdd_instruction,
-    wrap_up_instruction, EpicContext, ProjectContext,
+    mcp_tools_instruction, plan_and_attach_instruction, rebase_preamble, task_block,
+    tdd_instruction, wrap_up_instruction, EpicContext, ProjectContext,
 };
 use super::worktree::provision_worktree;
 use super::*;

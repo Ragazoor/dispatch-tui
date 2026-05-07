@@ -77,7 +77,7 @@ fn input_panel_height(app: &App, area_height: u16) -> u16 {
     let overhead: u16 = 9;
     let max_height = area_height.saturating_sub(overhead).max(8);
     match &app.input.mode {
-        InputMode::QuickDispatch => {
+        InputMode::QuickDispatch | InputMode::MainSessionDir => {
             // header(1) + blank(1) + filter(1) + repos(N) + blank(1) + hint(1) + borders(2) = N + 7
             let n = app
                 .board
@@ -1201,7 +1201,8 @@ fn wrapped_line_count(text: &str, width: usize) -> usize {
 use super::input_form::{
     confirm_retry_lines, input_base_branch_lines, input_description_lines,
     input_epic_description_lines, input_epic_repo_path_lines, input_epic_title_lines,
-    input_repo_path_lines, input_tag_lines, input_title_lines, quick_dispatch_lines,
+    input_repo_path_lines, input_tag_lines, input_title_lines, main_session_dir_lines,
+    quick_dispatch_lines,
 };
 
 fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
@@ -1218,6 +1219,7 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
         InputMode::InputRepoPath => input_repo_path_lines(app, area, completed, active, hint),
         InputMode::InputBaseBranch => input_base_branch_lines(app, completed, active, hint),
         InputMode::QuickDispatch => quick_dispatch_lines(app, area, active, hint),
+        InputMode::MainSessionDir => main_session_dir_lines(app, area, active, hint),
         InputMode::ConfirmRetry(id) => confirm_retry_lines(app, *id),
         InputMode::InputEpicTitle => input_epic_title_lines(app, active, hint),
         InputMode::InputEpicDescription => {
@@ -1236,6 +1238,7 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
 
     let block_title = match &app.input.mode {
         InputMode::QuickDispatch => " Quick Dispatch ",
+        InputMode::MainSessionDir => " Main Session ",
         InputMode::ConfirmRetry(_) => " Retry Agent ",
         _ if is_epic_input => " New Epic ",
         _ => " New Task ",

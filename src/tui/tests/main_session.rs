@@ -132,3 +132,62 @@ fn main_session_created_returns_persist_command() {
         .any(|c| matches!(c, Command::PersistStringSetting { key, value }
         if key == "main_session.window" && value == "dispatch-main")));
 }
+
+// ── fuzzy repo_path history selection (#612) ──
+
+fn make_app_with_repos(repos: &[&str]) -> App {
+    let mut app = make_app();
+    app.board.repo_paths = repos.iter().map(|s| s.to_string()).collect();
+    app
+}
+
+#[test]
+fn arrow_keys_navigate_filtered_repo_paths_in_main_session_dir() {
+    let mut app = make_app_with_repos(&["/a/foo", "/a/bar", "/b/foo"]);
+    app.input.mode = InputMode::MainSessionDir;
+    // Type "foo" — fuzzy matches "/a/foo" and "/b/foo" (length 2)
+    app.handle_key(make_key(KeyCode::Char('f')));
+    app.handle_key(make_key(KeyCode::Char('o')));
+    app.handle_key(make_key(KeyCode::Char('o')));
+    assert_eq!(app.input.repo_cursor, 0);
+
+    app.handle_key(make_key(KeyCode::Down));
+    assert_eq!(app.input.repo_cursor, 1);
+
+    // Wraps around to 0 (filtered length 2)
+    app.handle_key(make_key(KeyCode::Down));
+    assert_eq!(app.input.repo_cursor, 0);
+}
+
+#[test]
+fn enter_with_fuzzy_match_submits_filtered_selection_in_main_session_dir() {
+    let mut app = make_app_with_repos(&["/a/foo", "/a/bar", "/b/foo"]);
+    app.input.mode = InputMode::MainSessionDir;
+    app.handle_key(make_key(KeyCode::Char('b')));
+    app.handle_key(make_key(KeyCode::Char('a')));
+    app.handle_key(make_key(KeyCode::Char('r')));
+    let cmds = app.handle_key(make_key(KeyCode::Enter));
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, Command::PersistStringSetting { key, value }
+        if key == "main_session.dir" && value == "/a/bar")),
+        "expected persist of /a/bar from filtered match, got: {cmds:?}"
+    );
+    assert!(cmds.iter().any(|c| matches!(c, Command::OpenMainSession)));
+}
+
+#[test]
+fn enter_with_no_fuzzy_match_submits_literal_buffer_in_main_session_dir() {
+    let mut app = make_app_with_repos(&["/a/foo"]);
+    app.input.mode = InputMode::MainSessionDir;
+    for c in "/totally/new/path".chars() {
+        app.handle_key(make_key(KeyCode::Char(c)));
+    }
+    let cmds = app.handle_key(make_key(KeyCode::Enter));
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, Command::PersistStringSetting { key, value }
+        if key == "main_session.dir" && value == "/totally/new/path")),
+        "expected literal buffer to be submitted when no history match, got: {cmds:?}"
+    );
+}

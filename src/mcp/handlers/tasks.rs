@@ -1051,7 +1051,11 @@ pub(super) fn handle_send_message(
         return JsonRpcResponse::err(id, -32603, "target task has no worktree (internal error)");
     };
     let Some(tmux_window) = to_task.tmux_window.as_ref() else {
-        return JsonRpcResponse::err(id, -32603, "target task has no tmux window (internal error)");
+        return JsonRpcResponse::err(
+            id,
+            -32603,
+            "target task has no tmux window (internal error)",
+        );
     };
 
     // Write message to a uniquely-named file in target's worktree
