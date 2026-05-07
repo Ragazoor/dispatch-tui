@@ -25,21 +25,37 @@ fi
 result="[]"
 
 for repo in $REPOS; do
-  items=$(gh pr list \
+  # Probe repo existence/auth first — `gh pr list --author app/dependabot`
+  # silently returns [] on 404/SSO failures, so we'd never see auth issues.
+  probe=$(gh api "/repos/$repo" --jq '.full_name' 2>&1)
+  status=$?
+  if [ $status -ne 0 ]; then
+    echo "fetch-dependabot: $repo — repo unreachable (exit $status): $probe" >&2
+    continue
+  fi
+
+  raw=$(gh pr list \
     --repo "$repo" \
     --author app/dependabot \
     --state open \
-    --json number,title,body,url \
-    --jq \
-    --arg repo "$repo" \
-    '[.[] | {
+    --json number,title,body,url 2>&1)
+  status=$?
+  if [ $status -ne 0 ]; then
+    echo "fetch-dependabot: $repo — gh pr list failed (exit $status): $raw" >&2
+    continue
+  fi
+
+  items=$(printf '%s' "$raw" | jq --arg repo "$repo" '[.[] | {
       external_id: ("dep:" + $repo + "#" + (.number | tostring)),
       title: ("#" + (.number | tostring) + " " + .title),
       description: ((.body // "") | .[0:500]),
       url: .url,
       status: "backlog",
       tag: "pr-review"
-    }]') || continue
+    }]') || {
+    echo "fetch-dependabot: $repo — jq failed on output: $raw" >&2
+    continue
+  }
 
   result=$(printf '%s\n%s' "$result" "$items" | jq -s 'add // []')
 done
