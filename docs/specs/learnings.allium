@@ -21,7 +21,11 @@ use "./core.allium" as core
 --   core/LearningScope    — user | project | repo | epic | task
 --   core/LearningKind     — pitfall | convention | preference |
 --                           tool_recommendation | procedural | landscape
---   core/LearningStatus   — approved | rejected | archived
+--   core/LearningStatus   — approved | needs_review | rejected | archived
+--   core/VerdictKind      — helped | unused | wrong
+--   core/RetrievalSource  — prompt_injection | procedural | query_learnings
+--   core/Retrieval        — one row per surfacing event of a learning to a task
+--   core/Verdict          — one row per agent wrap-up verdict on a retrieved learning
 
 ------------------------------------------------------------
 -- Scope Model
@@ -79,15 +83,23 @@ use "./core.allium" as core
 --
 -- Human curation transitions:
 --
---   approved  --[RejectLearning]→   rejected   (terminal)
---   approved  --[ArchiveLearning]→  archived   (terminal)
+--   approved      --[RejectLearning]→         rejected      (terminal)
+--   approved      --[ArchiveLearning]→        archived      (terminal)
+--   needs_review  --[ApproveFromReview]→      approved
+--   needs_review  --[RejectLearning]→         rejected      (terminal)
+--   needs_review  --[ArchiveLearning]→        archived      (terminal)
+--
+-- System-driven transitions (no human in the loop):
+--
+--   approved      --[wrong verdict at wrap-up]→  needs_review
 --
 -- Editing (EditLearning) updates summary/detail/kind/tags without changing status.
--- Editing is available for approved entries only.
+-- Editing is available for approved and needs_review entries.
 --
 -- confirmed_count is incremented by ConfirmLearning when an agent acts on a
--- learning and it proves correct. No status change occurs on confirmation; the
--- count feeds the priority ordering within a scope level.
+-- learning and it proves correct. The same effect arises from a `helped`
+-- verdict at wrap-up. No status change occurs on confirmation; the count feeds
+-- the priority ordering within a scope level.
 --
 -- The transition graph is declared on core/Learning (see core.allium).
 
@@ -107,15 +119,24 @@ use "./core.allium" as core
 --
 -- query_learnings(task_id, tag_filter?, limit?)
 --   Returns approved learnings for the task's scope union.
+--   Entries with status in {needs_review, rejected, archived} are excluded.
 --   Excludes task-scoped entries from the auto-retrieved set.
 --   When tag_filter is provided, only entries whose tags set contains tag_filter.
 --   Ordered by scope_priority(scope) then confirmed_count DESC.
 --   limit capped at 50 (default: 20).
+--   For each returned learning, the runtime records a core/Retrieval with
+--   source = query_learnings (see Retrievals & Verdicts below).
 --
 -- upvote_learning(learning_id, task_id)
 --   Requires: learning.status = approved
 --   Increments confirmed_count; updates last_confirmed_at and updated_at.
 --   No status change.
+--
+-- wrap_up(task_id, learning_verdicts?)
+--   The wrap_up tool (defined in tasks.allium) optionally accepts a list of
+--   verdicts: [{learning_id, verdict}, ...]. Each verdict is recorded as a
+--   core/Verdict and applied as described in Retrievals & Verdicts below.
+--   Verdicts are optional — wrap_up succeeds without them.
 
 ------------------------------------------------------------
 -- Dispatch Prompt Augmentation
@@ -126,17 +147,62 @@ use "./core.allium" as core
 -- in tasks.allium):
 --
 --   1. Retrieve list_learnings_for_dispatch(task) — union of user + project +
---      repo + epic-scoped approved learnings.
+--      repo + epic-scoped learnings whose status = approved. Entries in
+--      needs_review, rejected, or archived are excluded.
 --   2. Partition by kind: procedural vs. all others.
 --   3. Prepend procedural entries as prompt-prefix instructions (verbatim text,
 --      in scope-priority then confirmed_count order).
 --   4. Append remaining entries under a "Relevant learnings" section.
 --   5. If the relevant set is empty, no augmentation occurs (no section appended).
+--   6. For every learning included in the prompt (procedural or otherwise),
+--      the runtime inserts a core/Retrieval row with the appropriate source
+--      (procedural | prompt_injection) — see Retrievals & Verdicts below.
 --
 -- Wrap-up nudge (WrapUpReflection in tasks.allium): when
 -- config.learning_reflection_enabled = true, the MCP wrap_up response appends
 -- a nudge asking the agent to call record_learning if it discovered anything
 -- non-obvious. The agent may proceed without proposing.
+
+------------------------------------------------------------
+-- Retrievals & Verdicts
+------------------------------------------------------------
+
+-- Every time the system surfaces a learning for a task, it records a
+-- core/Retrieval row with one of three sources:
+--
+--   prompt_injection — entry was included in the tiered "Validated knowledge"
+--                      block prepended to the dispatch prompt.
+--   procedural       — entry was prepended verbatim as a procedural-prefix
+--                      instruction.
+--   query_learnings  — entry was returned by an explicit query_learnings call.
+--
+-- Multiple retrievals of the same (task, learning) are kept as separate rows
+-- — re-retrieval in a long session contributes its own row each time.
+--
+-- At wrap-up, the agent may submit a list of verdicts. Each verdict records a
+-- core/Verdict row and applies the rules below in a single transaction.
+--
+-- Rule: a `helped` verdict on any learning increments confirmed_count and
+-- sets last_confirmed_at to now. Status is unchanged. This is the same
+-- effect as upvote_learning.
+--
+-- Rule: an `unused` verdict records the verdict only. The learning is not
+-- mutated. (Used to compute exposure-vs-usefulness telemetry.)
+--
+-- Rule: a `wrong` verdict on a learning whose status = approved transitions
+-- the learning to needs_review. last_confirmed_at is unchanged. A `wrong`
+-- verdict on a learning that is already in needs_review, rejected, or
+-- archived records the verdict but performs no transition (the entry is
+-- already out of the active retrieval pool).
+--
+-- Rule: a verdict is valid only if the same (task_id, learning_id) appears in
+-- at least one prior core/Retrieval row. Verdicts referencing learnings that
+-- were never retrieved for the task are rejected with a validation error.
+-- Unknown verdict strings are likewise rejected.
+--
+-- Rule: learnings with status in {needs_review, rejected, archived} are
+-- excluded from prompt injection (AugmentDispatchPromptWithLearnings) and from
+-- query_learnings results. Only approved learnings reach agents.
 
 ------------------------------------------------------------
 -- Invariants
@@ -167,8 +233,11 @@ invariant ApprovedLearningsHaveScopeRef {
 -- here in summary for discoverability:
 --
 --   surface LearningsOverlay — TUI overlay (opened with 'L' from main board)
---     exposes: approved learnings, ordered by scope asc, created_at desc
---     provides: Navigate(delta), Reject(learning), Archive(learning), Edit(learning), Close
+--     exposes: approved + needs_review learnings; needs_review entries
+--              surface at the top of the list as a curation queue,
+--              followed by approved entries ordered by scope asc, created_at desc
+--     provides: Navigate(delta), Approve(learning), Reject(learning),
+--               Archive(learning), Edit(learning), Close
 --
 -- Key binding summary:
 --   L       — open LearningsOverlay

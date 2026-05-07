@@ -99,7 +99,25 @@ enum LearningKind {
 
 -- LearningStatus controls whether an entry is active in retrieval.
 -- New entries land as approved; humans can reject or archive via the TUI.
-enum LearningStatus { approved | rejected | archived }
+-- needs_review is set automatically when an agent returns a `wrong` verdict
+-- for a previously approved entry; such entries surface in the human curation
+-- queue and are excluded from prompt injection and query_learnings results
+-- (treated like archived/rejected for retrieval purposes).
+enum LearningStatus { approved | needs_review | rejected | archived }
+
+-- VerdictKind captures an agent's evaluation of a retrieved learning at wrap-up.
+--   helped  — the learning applied and was useful (acts like an upvote)
+--   unused  — the learning was retrieved but did not apply to this task
+--   wrong   — the learning misled the agent or is no longer accurate;
+--             an approved learning routes to needs_review on receipt of `wrong`
+enum VerdictKind { helped | unused | wrong }
+
+-- RetrievalSource records how a learning was surfaced to a task's agent.
+--   prompt_injection — included in the tiered "Validated knowledge" block
+--                      prepended to the dispatch prompt
+--   procedural       — prepended verbatim as a procedural-prefix instruction
+--   query_learnings  — returned by an explicit query_learnings MCP call
+enum RetrievalSource { prompt_injection | procedural | query_learnings }
 
 ------------------------------------------------------------
 -- Entities and Variants
@@ -251,6 +269,11 @@ entity Learning {
         proposed -> rejected
         approved -> archived
         approved -> rejected
+        approved -> needs_review     -- system-driven: a `wrong` verdict on an
+                                     -- approved learning flags it for human curation
+        needs_review -> approved     -- human-driven: curator confirms the entry is fine
+        needs_review -> rejected     -- human-driven: curator removes the entry
+        needs_review -> archived     -- human-driven: curator archives the entry
         terminal: rejected, archived
     }
 
@@ -273,6 +296,30 @@ entity Learning {
         (scope = user implies scope_ref = null)
         and (scope != user implies scope_ref != null)
     }
+}
+
+-- Retrieval records a single occasion on which a Learning was surfaced for a
+-- task. One row is inserted per surfacing event, so repeated exposure
+-- accumulates as separate rows. Used to drive verdict validation at wrap-up
+-- (a verdict's learning_id must have a matching retrieval row for the same
+-- task) and to support telemetry on which entries actually fire.
+entity Retrieval {
+    task: Task
+    learning: Learning
+    source: RetrievalSource
+    retrieved_at: Timestamp
+}
+
+-- Verdict records an agent's wrap-up evaluation of a retrieved learning.
+-- See learnings.allium for the rules that consume verdicts.
+--   helped → increments learning.confirmed_count and updates last_confirmed_at
+--   unused → recorded only (no mutation of the learning)
+--   wrong  → if the learning is approved, transitions it to needs_review
+entity Verdict {
+    task: Task
+    learning: Learning
+    verdict: VerdictKind
+    recorded_at: Timestamp
 }
 
 -- SplitPane is a runtime-only UI concept (not persisted) that tracks
