@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use crate::db::{self, LearningFilter, LearningPatch};
-use crate::models::{Learning, LearningId, LearningKind, LearningScope, LearningStatus, TaskId};
+use crate::models::{
+    Learning, LearningId, LearningKind, LearningScope, LearningStatus, LearningVerdict,
+    RetrievalSource, TaskId,
+};
 
 use super::{FieldUpdate, ServiceError};
 
@@ -33,11 +36,11 @@ pub struct UpdateLearningParams {
 // ---------------------------------------------------------------------------
 
 pub struct LearningService {
-    pub db: Arc<dyn db::LearningStore>,
+    pub db: Arc<dyn db::TaskStore>,
 }
 
 impl LearningService {
-    pub fn new(db: Arc<dyn db::LearningStore>) -> Self {
+    pub fn new(db: Arc<dyn db::TaskStore>) -> Self {
         Self { db }
     }
 
@@ -154,6 +157,45 @@ impl LearningService {
             .upvote_learning(id)
             .map_err(|e| ServiceError::Validation(format!("cannot upvote: {e}")))
     }
+
+    pub fn record_retrieval(
+        &self,
+        task_id: TaskId,
+        learning_id: LearningId,
+        source: RetrievalSource,
+    ) -> Result<(), ServiceError> {
+        self.db
+            .record_retrieval(task_id, learning_id, source)
+            .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
+    }
+
+    pub fn apply_verdicts(
+        &self,
+        task_id: TaskId,
+        verdicts: Vec<(LearningId, LearningVerdict)>,
+    ) -> Result<(), ServiceError> {
+        if verdicts.is_empty() {
+            return Ok(());
+        }
+        let retrieved: Vec<LearningId> = self
+            .db
+            .list_retrievals_for_task(task_id)
+            .map_err(|e| ServiceError::Internal(format!("database error: {e}")))?
+            .into_iter()
+            .map(|r| r.learning_id)
+            .collect();
+        for (lid, _) in &verdicts {
+            if !retrieved.contains(lid) {
+                return Err(ServiceError::Validation(format!(
+                    "learning {} was not retrieved during task {}",
+                    lid, task_id
+                )));
+            }
+        }
+        self.db
+            .apply_verdicts_tx(task_id, &verdicts)
+            .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -166,13 +208,50 @@ mod learning_tests {
     use std::sync::Arc;
 
     use super::{CreateLearningParams, LearningService, UpdateLearningParams};
-    use crate::db::Database;
-    use crate::models::{LearningId, LearningKind, LearningScope, LearningStatus};
+    use crate::db::{CreateTaskRequest, Database, TaskStore};
+    use crate::models::{
+        LearningId, LearningKind, LearningScope, LearningStatus, LearningVerdict, ProjectId,
+        RetrievalSource, TaskId, TaskStatus,
+    };
     use crate::service::ServiceError;
 
     fn service() -> LearningService {
         let db = Arc::new(Database::open_in_memory().unwrap());
         LearningService::new(db)
+    }
+
+    fn service_with_db() -> (LearningService, Arc<dyn TaskStore>) {
+        let db: Arc<dyn TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        (LearningService::new(db.clone()), db)
+    }
+
+    fn seed_task(db: &Arc<dyn TaskStore>) -> TaskId {
+        db.create_task(CreateTaskRequest {
+            title: "test task",
+            description: "",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+        })
+        .unwrap()
+    }
+
+    fn seed_approved_learning(svc: &LearningService) -> LearningId {
+        svc.create_learning(CreateLearningParams {
+            kind: LearningKind::Convention,
+            summary: "A convention".to_string(),
+            detail: None,
+            scope: LearningScope::User,
+            scope_ref: None,
+            tags: vec![],
+            source_task_id: None,
+        })
+        .unwrap()
     }
 
     #[test]
@@ -378,5 +457,37 @@ mod learning_tests {
         let svc = service();
         let err = svc.get_learning(LearningId(99999)).unwrap_err();
         assert!(matches!(err, ServiceError::NotFound(_)));
+    }
+
+    #[test]
+    fn apply_verdicts_validation_rejects_unknown_retrieval() {
+        let (svc, db) = service_with_db();
+        let task_id = seed_task(&db);
+        let learning_id = seed_approved_learning(&svc);
+        // No retrieval recorded — apply should fail with Validation.
+        let err = svc
+            .apply_verdicts(task_id, vec![(learning_id, LearningVerdict::Helped)])
+            .unwrap_err();
+        assert!(matches!(err, ServiceError::Validation(_)));
+    }
+
+    #[test]
+    fn apply_verdicts_succeeds_when_retrieval_exists() {
+        let (svc, db) = service_with_db();
+        let task_id = seed_task(&db);
+        let learning_id = seed_approved_learning(&svc);
+        svc.record_retrieval(task_id, learning_id, RetrievalSource::PromptInjection)
+            .unwrap();
+        svc.apply_verdicts(task_id, vec![(learning_id, LearningVerdict::Helped)])
+            .unwrap();
+        let l = svc.get_learning(learning_id).unwrap();
+        assert_eq!(l.confirmed_count, 1);
+    }
+
+    #[test]
+    fn apply_verdicts_empty_is_ok() {
+        let (svc, db) = service_with_db();
+        let task_id = seed_task(&db);
+        svc.apply_verdicts(task_id, vec![]).unwrap();
     }
 }

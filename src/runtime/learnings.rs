@@ -7,7 +7,7 @@ use crate::service::LearningService;
 
 impl TuiRuntime {
     pub(super) fn exec_load_learnings(&self, app: &mut App) {
-        let db: Arc<dyn db::LearningStore> = self.database.clone();
+        let db: Arc<dyn db::TaskStore> = self.database.clone();
         let filter = db::LearningFilter {
             status: Some(LearningStatus::Approved),
             ..Default::default()
@@ -39,7 +39,7 @@ impl TuiRuntime {
         verb: &str,
         action: impl Fn(&LearningService, LearningId) -> Result<(), crate::service::ServiceError>,
     ) {
-        let db: Arc<dyn db::LearningStore> = self.database.clone();
+        let db: Arc<dyn db::TaskStore> = self.database.clone();
         let svc = LearningService::new(db);
         match action(&svc, id) {
             Ok(()) => {

@@ -276,7 +276,7 @@ impl TuiRuntime {
             detail: fields.detail,
         };
 
-        let db: Arc<dyn crate::db::LearningStore> = self.database.clone();
+        let db: Arc<dyn crate::db::TaskStore> = self.database.clone();
         let svc = crate::service::LearningService::new(db.clone());
         match svc.update_learning(params) {
             Ok(()) => {
@@ -577,7 +577,7 @@ mod learning_editor_tests {
             )
             .unwrap();
         // Reject it so it's in an un-editable state
-        crate::service::LearningService::new(db.clone() as Arc<dyn crate::db::LearningStore>)
+        crate::service::LearningService::new(db.clone() as Arc<dyn crate::db::TaskStore>)
             .reject_learning(id)
             .unwrap();
         let learning = make_learning(id);
