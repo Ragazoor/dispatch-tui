@@ -8,7 +8,32 @@ fn fresh_db_has_latest_schema_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 47);
+    assert_eq!(version, 48);
+}
+
+#[test]
+fn v48_creates_retrieval_and_verdict_tables() {
+    let db = in_memory_db();
+    let conn = db.conn().unwrap();
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('learning_retrievals','learning_verdicts')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 2);
+}
+
+#[test]
+fn v48_accepts_needs_review_status() {
+    let db = in_memory_db();
+    let conn = db.conn().unwrap();
+    conn.execute(
+        "INSERT INTO learnings (kind, summary, scope, status) VALUES ('pitfall','x','user','needs_review')",
+        [],
+    )
+    .unwrap();
 }
 
 #[test]
@@ -210,7 +235,7 @@ fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 47);
+    assert_eq!(version, 48);
 }
 
 #[test]
@@ -299,7 +324,7 @@ fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 47);
+    assert_eq!(version, 48);
 }
 
 #[test]
@@ -410,7 +435,7 @@ fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 47);
+    assert_eq!(version, 48);
 }
 
 #[test]
@@ -491,7 +516,7 @@ fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 47);
+    assert_eq!(version, 48);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -612,7 +637,7 @@ fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 47);
+    assert_eq!(version, 48);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -1611,7 +1636,7 @@ fn migration_31_re_expands_tilde_paths() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 47);
+    assert_eq!(version, 48);
 }
 
 #[test]
@@ -1687,7 +1712,7 @@ fn migrate_v32_adds_base_branch_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 47);
+    assert_eq!(version, 48);
 }
 
 #[test]
@@ -1810,7 +1835,7 @@ fn migration_v38_feed_epic_columns() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 47);
+    assert_eq!(version, 48);
 }
 
 #[test]
@@ -1820,7 +1845,7 @@ fn fresh_db_schema_version_is_40() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 47);
+    assert_eq!(version, 48);
 }
 
 #[test]
@@ -1890,7 +1915,7 @@ fn migration_v40_creates_learnings_table() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 47);
+    assert_eq!(version, 48);
 }
 
 #[test]
@@ -1961,7 +1986,7 @@ fn migration_v41_drops_cost_usd_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 47);
+    assert_eq!(version, 48);
     // Original token data is preserved
     let row: (i64, i64, i64, i64, i64) = conn
         .query_row(
@@ -2073,7 +2098,7 @@ fn test_migrate_v43_proposed_to_approved() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 47);
+    assert_eq!(version, 48);
 }
 
 #[test]

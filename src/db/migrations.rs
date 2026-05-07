@@ -70,6 +70,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (45, migrate_v45_add_task_labels),
     (46, migrate_v46_learning_source_task_set_null),
     (47, migrate_v47_task_usage_restore_cascade),
+    (48, migrate_v48_learning_validation),
 ];
 
 fn migrate_v1_add_plan_column(conn: &Connection) -> Result<()> {
@@ -1083,4 +1084,28 @@ pub(super) fn migrate_v47_task_usage_restore_cascade(conn: &Connection) -> Resul
         ALTER TABLE task_usage_new RENAME TO task_usage;",
     )
     .context("Failed to restore ON DELETE CASCADE on task_usage (migration v47)")
+}
+
+fn migrate_v48_learning_validation(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE learning_retrievals (
+            id           INTEGER PRIMARY KEY,
+            task_id      INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            learning_id  INTEGER NOT NULL REFERENCES learnings(id) ON DELETE CASCADE,
+            source       TEXT    NOT NULL,
+            retrieved_at TEXT    NOT NULL DEFAULT (datetime('now'))
+         );
+         CREATE INDEX idx_lr_task ON learning_retrievals(task_id);
+         CREATE INDEX idx_lr_learning ON learning_retrievals(learning_id);
+
+         CREATE TABLE learning_verdicts (
+            id           INTEGER PRIMARY KEY,
+            task_id      INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            learning_id  INTEGER NOT NULL REFERENCES learnings(id) ON DELETE CASCADE,
+            verdict      TEXT    NOT NULL,
+            recorded_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+         );
+         CREATE INDEX idx_lv_learning ON learning_verdicts(learning_id);",
+    )
+    .context("Failed to create learning validation tables (migration v48)")
 }
