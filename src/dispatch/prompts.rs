@@ -1,5 +1,5 @@
 use crate::db;
-use crate::models::{EpicId, ProjectId, Task, TaskId};
+use crate::models::{EpicId, Learning, LearningKind, LearningScope, ProjectId, Task, TaskId};
 
 /// Plugin dir flag added to all Claude agent invocations so dispatched agents
 /// discover the dispatch plugin's skills and commands (e.g. /wrap-up).
@@ -404,6 +404,143 @@ IMPORTANT: Do NOT start implementing. Your job ends after creating the work pack
 {trailing}",
         trailing = trailing_block(),
     )
+}
+
+// Tiered learning selection — wired into dispatch prompts in Task 7 of
+// docs/superpowers/plans/2026-05-07-knowledge-base-validation-loop.md.
+#[allow(dead_code)]
+const TIER_ORDER: [LearningScope; 4] = [
+    LearningScope::Epic,
+    LearningScope::Repo,
+    LearningScope::Project,
+    LearningScope::User,
+];
+#[allow(dead_code)]
+const PER_TIER: usize = 2;
+
+#[allow(dead_code)]
+pub(super) fn select_tiered_learnings(learnings: &[Learning], cap: usize) -> Vec<&Learning> {
+    use std::collections::HashSet;
+    let mut picked: Vec<&Learning> = Vec::new();
+    let mut seen: HashSet<i64> = HashSet::new();
+    for tier in TIER_ORDER {
+        let mut tier_items: Vec<&Learning> = learnings
+            .iter()
+            .filter(|l| l.scope == tier && l.kind != LearningKind::Procedural)
+            .collect();
+        tier_items.sort_by(|a, b| {
+            b.confirmed_count
+                .cmp(&a.confirmed_count)
+                .then(b.updated_at.cmp(&a.updated_at))
+        });
+        for l in tier_items.into_iter().take(PER_TIER) {
+            if picked.len() >= cap {
+                return picked;
+            }
+            if seen.insert(l.id.0) {
+                picked.push(l);
+            }
+        }
+    }
+    picked
+}
+
+#[cfg(test)]
+mod tiered_selection_tests {
+    use super::*;
+    use crate::models::{Learning, LearningId, LearningKind, LearningScope, LearningStatus};
+    use chrono::{TimeZone, Utc};
+
+    fn seed(id: i64, scope: LearningScope, count: i64) -> Learning {
+        Learning {
+            id: LearningId(id),
+            kind: LearningKind::Pitfall,
+            summary: format!("learning {id}"),
+            detail: None,
+            scope,
+            scope_ref: match scope {
+                LearningScope::User => None,
+                _ => Some("ref".into()),
+            },
+            tags: vec![],
+            status: LearningStatus::Approved,
+            source_task_id: None,
+            confirmed_count: count,
+            last_confirmed_at: None,
+            created_at: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            updated_at: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+        }
+    }
+
+    fn seed_kind(id: i64, scope: LearningScope, kind: LearningKind) -> Learning {
+        let mut l = seed(id, scope, 0);
+        l.kind = kind;
+        l
+    }
+
+    #[test]
+    fn picks_top_two_per_scope_in_tier_order() {
+        let learnings = vec![
+            seed(1, LearningScope::Epic, 5),
+            seed(2, LearningScope::Epic, 4),
+            seed(3, LearningScope::Epic, 3),
+            seed(4, LearningScope::Repo, 2),
+            seed(5, LearningScope::Repo, 1),
+            seed(6, LearningScope::Repo, 0),
+            seed(7, LearningScope::User, 0),
+        ];
+        let picked = select_tiered_learnings(&learnings, 8);
+        let ids: Vec<i64> = picked.iter().map(|l| l.id.0).collect();
+        assert_eq!(ids, vec![1, 2, 4, 5, 7]);
+    }
+
+    #[test]
+    fn caps_at_eight() {
+        let mut learnings = vec![];
+        let mut id = 1;
+        for s in [
+            LearningScope::Epic,
+            LearningScope::Repo,
+            LearningScope::Project,
+            LearningScope::User,
+        ] {
+            for i in 0..3 {
+                learnings.push(seed(id, s, i));
+                id += 1;
+            }
+        }
+        // 4 tiers * 3 entries = 12, take 2 each = 8, cap = 8.
+        assert_eq!(select_tiered_learnings(&learnings, 8).len(), 8);
+    }
+
+    #[test]
+    fn skips_procedural_entries() {
+        let learnings = vec![
+            seed_kind(1, LearningScope::Epic, LearningKind::Procedural),
+            seed(2, LearningScope::Epic, 0),
+        ];
+        let picked = select_tiered_learnings(&learnings, 8);
+        let ids: Vec<i64> = picked.iter().map(|l| l.id.0).collect();
+        assert_eq!(ids, vec![2]);
+    }
+
+    #[test]
+    fn dedups_by_id_across_tiers() {
+        // Same id appearing twice in input (shouldn't happen in practice,
+        // but if it did the function must not duplicate).
+        let learnings = vec![
+            seed(1, LearningScope::Epic, 5),
+            seed(1, LearningScope::Repo, 5),
+        ];
+        let picked = select_tiered_learnings(&learnings, 8);
+        let ids: Vec<i64> = picked.iter().map(|l| l.id.0).collect();
+        assert_eq!(ids, vec![1]);
+    }
+
+    #[test]
+    fn empty_input_returns_empty() {
+        assert!(select_tiered_learnings(&[], 8).is_empty());
+    }
 }
 
 #[cfg(test)]
