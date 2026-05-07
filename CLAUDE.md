@@ -436,6 +436,10 @@ Avoid `#[allow(dead_code)]` — dead code should be removed, not suppressed. If 
 
 `EpicPatch` intentionally omits `parent_epic_id`. Reparenting an epic is not supported: the parent is set at creation time and never changed. This keeps the parent chain immutable and prevents accidental cycle introduction. The database enforces `CHECK (parent_epic_id != id)` (migration v35) as a final guard. See the doc comment at `src/db/mod.rs` (`EpicPatch` definition) for the full rationale.
 
+### Clippy lint rules
+
+Custom lint rules are configured in `[lints.clippy]` in `Cargo.toml`. The pre-push hook enforces them via `cargo clippy --all-targets --fix -- -D warnings`. When you discover a pattern worth enforcing, add a new entry with a structured comment explaining why. Consult the `/lint` skill for the full workflow.
+
 ## How-To Guides
 
 ### Adding a New MCP Tool
