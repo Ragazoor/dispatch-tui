@@ -193,6 +193,50 @@ pub(super) fn trailing_block() -> String {
     )
 }
 
+/// Render procedural-kind learnings as verbatim prompt-prefix instructions.
+/// `procedurals` is expected to already be ordered by scope priority then
+/// `confirmed_count DESC`.
+pub(super) fn render_procedural_prefix(procedurals: &[&Learning]) -> String {
+    if procedurals.is_empty() {
+        return String::new();
+    }
+    let mut out = String::new();
+    for l in procedurals {
+        let body = l.detail.as_deref().unwrap_or(l.summary.as_str());
+        out.push_str(body);
+        if !body.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push('\n');
+    }
+    out
+}
+
+/// Render the tiered-knowledge block placed between the task block and the
+/// addendum in a dispatch prompt. Returns an empty string when `picked` is
+/// empty so existing prompts are byte-identical when no learnings are injected.
+pub(super) fn render_validated_knowledge_block(picked: &[&Learning]) -> String {
+    if picked.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from(
+        "## Validated knowledge for this task\n\n\
+The following knowledge has been validated by previous agents. Apply it where relevant; \
+return a verdict for each entry at wrap-up via the `learning_verdicts` argument of `wrap_up`.\n\n",
+    );
+    for l in picked {
+        out.push_str(&format!(
+            "- [#{} {}, \u{2191}{}] {}\n",
+            l.id.0,
+            l.scope.as_str(),
+            l.confirmed_count,
+            l.summary
+        ));
+    }
+    out.push('\n');
+    out
+}
+
 pub(super) fn build_prompt(
     task_id: TaskId,
     title: &str,
@@ -200,6 +244,7 @@ pub(super) fn build_prompt(
     plan: Option<&str>,
     epic: Option<&EpicContext>,
     project: Option<&ProjectContext>,
+    injections: &LearningInjections<'_>,
 ) -> String {
     let block = task_block(task_id, title, description, epic, project);
     let addendum = match plan {
@@ -213,12 +258,14 @@ then ask: 'Shall I proceed with implementation?' Wait for confirmation before \
 making any changes."
         ),
     };
+    let proc_prefix = render_procedural_prefix(&injections.procedural);
+    let knowledge = render_validated_knowledge_block(&injections.tiered);
 
     format!(
-        "Your task is:\n\
+        "{proc_prefix}Your task is:\n\
 {block}\n\
 \n\
-{addendum}\n\
+{knowledge}{addendum}\n\
 \n\
 {trailing}",
         trailing = trailing_block(),
@@ -231,6 +278,7 @@ pub(super) fn build_quick_dispatch_prompt(
     description: &str,
     epic: Option<&EpicContext>,
     project: Option<&ProjectContext>,
+    injections: &LearningInjections<'_>,
 ) -> String {
     let block = task_block(task_id, title, description, epic, project);
     let addendum = format!(
@@ -243,13 +291,15 @@ Then write a focused plan before making any changes:\n\
 {attach}",
         attach = plan_and_attach_instruction(),
     );
+    let proc_prefix = render_procedural_prefix(&injections.procedural);
+    let knowledge = render_validated_knowledge_block(&injections.tiered);
 
     format!(
-        "You are working interactively with the user.\n\
+        "{proc_prefix}You are working interactively with the user.\n\
 \n\
 {block}\n\
 \n\
-{addendum}\n\
+{knowledge}{addendum}\n\
 \n\
 {trailing}",
         trailing = trailing_block(),
@@ -408,18 +458,27 @@ IMPORTANT: Do NOT start implementing. Your job ends after creating the work pack
 
 // Tiered learning selection — wired into dispatch prompts in Task 7 of
 // docs/superpowers/plans/2026-05-07-knowledge-base-validation-loop.md.
-#[allow(dead_code)]
 const TIER_ORDER: [LearningScope; 4] = [
     LearningScope::Epic,
     LearningScope::Repo,
     LearningScope::Project,
     LearningScope::User,
 ];
-#[allow(dead_code)]
 const PER_TIER: usize = 2;
 
-#[allow(dead_code)]
-pub(super) fn select_tiered_learnings(learnings: &[Learning], cap: usize) -> Vec<&Learning> {
+/// Push-injection groups for a dispatch prompt. Both lists hold borrowed
+/// `Learning`s so the caller keeps ownership of the active list returned by
+/// `LearningStore::list_learnings_for_dispatch`.
+#[derive(Default)]
+pub struct LearningInjections<'a> {
+    /// Procedural-kind learnings, rendered verbatim near the top of the prompt.
+    /// Expected to be ordered by scope priority then `confirmed_count DESC`.
+    pub procedural: Vec<&'a Learning>,
+    /// Non-procedural learnings selected by `select_tiered_learnings`.
+    pub tiered: Vec<&'a Learning>,
+}
+
+pub(crate) fn select_tiered_learnings(learnings: &[Learning], cap: usize) -> Vec<&Learning> {
     use std::collections::HashSet;
     let mut picked: Vec<&Learning> = Vec::new();
     let mut seen: HashSet<i64> = HashSet::new();
@@ -574,6 +633,7 @@ mod tests {
             Some("/path/to/plan.md"),
             None,
             None,
+            &LearningInjections::default(),
         );
         assert!(
             text.contains("/learnings"),
@@ -583,7 +643,15 @@ mod tests {
 
     #[test]
     fn learning_instruction_in_task_prompts_no_plan() {
-        let text = build_prompt(TaskId(1), "title", "desc", None, None, None);
+        let text = build_prompt(
+            TaskId(1),
+            "title",
+            "desc",
+            None,
+            None,
+            None,
+            &LearningInjections::default(),
+        );
         assert!(
             text.contains("/learnings"),
             "build_prompt (no plan) should reference /learnings skill"
@@ -592,7 +660,14 @@ mod tests {
 
     #[test]
     fn learning_instruction_in_quick_dispatch_prompt() {
-        let text = build_quick_dispatch_prompt(TaskId(1), "title", "desc", None, None);
+        let text = build_quick_dispatch_prompt(
+            TaskId(1),
+            "title",
+            "desc",
+            None,
+            None,
+            &LearningInjections::default(),
+        );
         assert!(
             text.contains("/learnings"),
             "quick dispatch prompt should reference /learnings skill"
@@ -700,5 +775,105 @@ mod tests {
             text.contains("/learnings"),
             "fix_task prompt should reference /learnings skill"
         );
+    }
+
+    fn seed(id: i64, scope: LearningScope, count: i64) -> Learning {
+        use crate::models::{LearningId, LearningStatus};
+        use chrono::{TimeZone, Utc};
+        Learning {
+            id: LearningId(id),
+            kind: LearningKind::Pitfall,
+            summary: format!("learning {id}"),
+            detail: None,
+            scope,
+            scope_ref: match scope {
+                LearningScope::User => None,
+                _ => Some("ref".into()),
+            },
+            tags: vec![],
+            status: LearningStatus::Approved,
+            source_task_id: None,
+            confirmed_count: count,
+            last_confirmed_at: None,
+            created_at: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            updated_at: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+        }
+    }
+
+    #[test]
+    fn render_validated_knowledge_block_omits_when_empty() {
+        assert_eq!(render_validated_knowledge_block(&[]), String::new());
+    }
+
+    #[test]
+    fn render_validated_knowledge_block_formats_entries() {
+        let l = seed(7, LearningScope::Epic, 3);
+        let out = render_validated_knowledge_block(&[&l]);
+        assert!(out.contains("## Validated knowledge for this task"));
+        assert!(out.contains("[#7 epic, \u{2191}3]"));
+        assert!(out.contains("learning 7"));
+    }
+
+    #[test]
+    fn render_procedural_prefix_omits_when_empty() {
+        assert_eq!(render_procedural_prefix(&[]), String::new());
+    }
+
+    #[test]
+    fn render_procedural_prefix_emits_summary_when_no_detail() {
+        let l = seed(1, LearningScope::User, 0);
+        let out = render_procedural_prefix(&[&l]);
+        assert!(out.contains("learning 1"));
+        assert!(out.ends_with("\n\n"));
+    }
+
+    #[test]
+    fn build_prompt_default_injections_unchanged() {
+        // Regression: when no learnings are injected the prompt must not gain
+        // any leading whitespace or knowledge-block headers.
+        let text = build_prompt(
+            TaskId(1),
+            "title",
+            "desc",
+            None,
+            None,
+            None,
+            &LearningInjections::default(),
+        );
+        assert!(text.starts_with("Your task is:"));
+        assert!(!text.contains("Validated knowledge for this task"));
+    }
+
+    #[test]
+    fn build_prompt_with_injections_includes_knowledge_block() {
+        let proc_l = {
+            let mut l = seed(10, LearningScope::User, 0);
+            l.kind = LearningKind::Procedural;
+            l.detail = Some("Always run tests before committing.".into());
+            l
+        };
+        let tier_l = seed(11, LearningScope::Repo, 2);
+        let injections = LearningInjections {
+            procedural: vec![&proc_l],
+            tiered: vec![&tier_l],
+        };
+        let text = build_prompt(TaskId(1), "title", "desc", None, None, None, &injections);
+        assert!(text.starts_with("Always run tests before committing."));
+        assert!(text.contains("## Validated knowledge for this task"));
+        assert!(text.contains("[#11 repo, \u{2191}2]"));
+    }
+
+    #[test]
+    fn build_quick_dispatch_prompt_default_injections_unchanged() {
+        let text = build_quick_dispatch_prompt(
+            TaskId(1),
+            "title",
+            "desc",
+            None,
+            None,
+            &LearningInjections::default(),
+        );
+        assert!(text.starts_with("You are working interactively with the user."));
+        assert!(!text.contains("Validated knowledge for this task"));
     }
 }

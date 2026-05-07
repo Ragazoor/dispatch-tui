@@ -2150,3 +2150,63 @@ fn load_main_session_clears_stale_window() {
     let stored = db.get_setting_string("main_session.window").unwrap();
     assert!(stored.as_deref().unwrap_or("").is_empty());
 }
+
+#[test]
+fn build_learning_injections_partitions_and_records_retrievals() {
+    use crate::models::{LearningKind, LearningScope, RetrievalSource};
+
+    let (rt, _app) = test_runtime();
+    // Seed a task in the default project.
+    let task = create_task_returning(
+        &*rt.database,
+        "title",
+        "desc",
+        "/repo/a",
+        None,
+        models::TaskStatus::Backlog,
+    )
+    .unwrap();
+
+    // Seed two approved learnings: one repo-scoped non-procedural, one
+    // user-scoped procedural. Both should land in the dispatch list for
+    // a task in /repo/a.
+    let proc_id = rt
+        .database
+        .create_learning(
+            LearningKind::Procedural,
+            "Always run tests before committing.",
+            None,
+            LearningScope::User,
+            None,
+            &[],
+            None,
+        )
+        .unwrap();
+    let repo_id = rt
+        .database
+        .create_learning(
+            LearningKind::Convention,
+            "Use Arc for shared state.",
+            None,
+            LearningScope::Repo,
+            Some("/repo/a"),
+            &[],
+            None,
+        )
+        .unwrap();
+
+    let (procedural, tiered) = rt.build_learning_injections(&task);
+    assert_eq!(procedural.len(), 1);
+    assert_eq!(procedural[0].id, proc_id);
+    assert_eq!(tiered.len(), 1);
+    assert_eq!(tiered[0].id, repo_id);
+
+    rt.record_injection_retrievals(task.id, &procedural, &tiered);
+
+    let rows = rt.database.list_retrievals_for_task(task.id).unwrap();
+    assert_eq!(rows.len(), 2);
+    let proc_row = rows.iter().find(|r| r.learning_id == proc_id).unwrap();
+    assert!(matches!(proc_row.source, RetrievalSource::Procedural));
+    let tier_row = rows.iter().find(|r| r.learning_id == repo_id).unwrap();
+    assert!(matches!(tier_row.source, RetrievalSource::PromptInjection));
+}

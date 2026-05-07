@@ -841,12 +841,38 @@ fn do_dispatch(
     db: &dyn crate::db::TaskStore,
     runner: &dyn crate::process::ProcessRunner,
 ) -> anyhow::Result<crate::models::DispatchResult> {
+    use crate::models::{LearningKind, RetrievalSource};
     let epic_ctx = dispatch::EpicContext::from_db(task, db);
     let project_ctx = dispatch::ProjectContext::from_db(task, db);
+    let active = db
+        .list_learnings_for_dispatch(Some(task.project_id), &task.repo_path, task.epic_id)
+        .unwrap_or_default();
+    let (procedural, non_procedural): (Vec<_>, Vec<_>) = active
+        .into_iter()
+        .partition(|l| l.kind == LearningKind::Procedural);
+    let tiered: Vec<_> = dispatch::select_tiered_learnings(&non_procedural, 8)
+        .into_iter()
+        .cloned()
+        .collect();
+    // Best-effort recording of injection rows.
+    for l in &procedural {
+        let _ = db.record_retrieval(task.id, l.id, RetrievalSource::Procedural);
+    }
+    for l in &tiered {
+        let _ = db.record_retrieval(task.id, l.id, RetrievalSource::PromptInjection);
+    }
+    let injections = dispatch::LearningInjections {
+        procedural: procedural.iter().collect(),
+        tiered: tiered.iter().collect(),
+    };
     match DispatchMode::for_task(task) {
-        DispatchMode::Dispatch => {
-            dispatch::dispatch_agent(task, runner, epic_ctx.as_ref(), Some(&project_ctx))
-        }
+        DispatchMode::Dispatch => dispatch::dispatch_agent(
+            task,
+            runner,
+            epic_ctx.as_ref(),
+            Some(&project_ctx),
+            &injections,
+        ),
         DispatchMode::PrReview => {
             dispatch::pr_review_agent(task, runner, epic_ctx.as_ref(), Some(&project_ctx))
         }

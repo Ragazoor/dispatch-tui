@@ -12,7 +12,7 @@ use crate::tui::{FixAgentRequest, ReviewAgentRequest};
 use super::prompts::{
     build_epic_planning_prompt, build_fix_task_prompt, build_pr_review_prompt, build_prompt,
     build_quick_dispatch_prompt, build_research_prompt, build_tmux_window_name, rebase_preamble,
-    EpicContext, ProjectContext, DISPATCH_PLUGIN_DIR,
+    EpicContext, LearningInjections, ProjectContext, DISPATCH_PLUGIN_DIR,
 };
 use super::stderr_str;
 use super::worktree::provision_worktree;
@@ -79,6 +79,7 @@ pub fn dispatch_agent(
     runner: &dyn ProcessRunner,
     epic: Option<&EpicContext>,
     project: Option<&ProjectContext>,
+    injections: &LearningInjections<'_>,
 ) -> Result<DispatchResult> {
     let prompt = build_prompt(
         task.id,
@@ -87,6 +88,7 @@ pub fn dispatch_agent(
         task.plan_path.as_deref(),
         epic,
         project,
+        injections,
     );
     dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch))
 }
@@ -126,9 +128,16 @@ pub fn quick_dispatch_agent(
     runner: &dyn ProcessRunner,
     epic: Option<&EpicContext>,
     project: Option<&ProjectContext>,
+    injections: &LearningInjections<'_>,
 ) -> Result<DispatchResult> {
-    let prompt =
-        build_quick_dispatch_prompt(task.id, &task.title, &task.description, epic, project);
+    let prompt = build_quick_dispatch_prompt(
+        task.id,
+        &task.title,
+        &task.description,
+        epic,
+        project,
+        injections,
+    );
     dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch))
 }
 
