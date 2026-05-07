@@ -110,16 +110,16 @@ Keep snapshots at 120×40 so failure diffs remain readable.
 |---------------------|----------------------|
 | TUI key handling / message flow | `src/tui/tests/` |
 | DB schema, CRUD, migrations | `src/db/tests/` (split by domain: tasks, epics, prs, alerts, projects, learnings, settings, migrations) |
-| Business rules in the service layer | inline in `src/service/tasks.rs`, `src/service/epics.rs`, or `src/service/learnings.rs` |
-| MCP JSON-RPC handler behaviour | `src/mcp/handlers/tests.rs` |
+| Business rules in the service layer | inline in `src/service/tasks/` (mod/crud/params/validators), `src/service/epics.rs`, or `src/service/learnings.rs` |
+| MCP JSON-RPC handler behaviour | `src/mcp/handlers/tests/` (split per domain) |
 | Full task/epic lifecycle (end-to-end) | `tests/` (integration tests) |
-| Domain-type invariants and roundtrips | inline in the owning module (`src/models.rs`, `src/db/mod.rs`) |
+| Domain-type invariants and roundtrips | inline in the owning module (`src/models/`, `src/db/mod.rs`) |
 
 Property tests live alongside unit tests in the same module, in a nested `mod property_tests` block.
 
 ### Coverage
 
-`cargo-tarpaulin` is configured in CI (`.github/workflows/ci.yml`). Run locally with:
+`cargo-tarpaulin` is configured in CI in the `coverage` job of `.github/workflows/ci.yml` (installed via `cargo install cargo-tarpaulin`, no `Cargo.toml` config — runs `cargo tarpaulin --out xml`). Run locally with:
 
 ```bash
 cargo tarpaulin --out Html
@@ -142,7 +142,7 @@ Consult the relevant spec before changing core behavior. Use `allium:tend` and `
 
 ## Agent Working Directory
 
-Dispatched agents always work from their worktree folder. Every prompt includes an instruction to stay in the worktree and not `cd` to the parent repo. This is enforced in `dispatch_with_prompt()` in `src/dispatch.rs`.
+Dispatched agents always work from their worktree folder. Every prompt includes an instruction to stay in the worktree and not `cd` to the parent repo. This is enforced in `dispatch_with_prompt()` in `src/dispatch/agents.rs`.
 
 ## Architecture
 
@@ -167,7 +167,7 @@ Key patterns that aren't obvious from reading the code:
 
 ### Review/Security Agent State Machine
 
-Review agents (dispatched for PRs) and fix agents (dispatched for security alerts) track their lifecycle via `ReviewAgentStatus` (`src/models.rs`):
+Review agents (dispatched for PRs) and fix agents (dispatched for security alerts) track their lifecycle via `ReviewAgentStatus` (`src/models/review.rs`):
 
 | Status | DB value | Card badge | Meaning |
 |--------|----------|------------|---------|
@@ -206,59 +206,74 @@ Rule of thumb: use `ServiceError` for request validation and business rules, dom
 
 ## Tag System
 
-Tags (`bug`, `feature`, `chore`, `epic`) drive dispatch behavior via `DispatchMode::for_task()` in `models.rs`:
+Tags (`TaskTag` in `src/models/tasks.rs`: `Bug`, `Feature`, `Chore`, `PrReview`, `Research`, `Fix`) drive dispatch behavior via `DispatchMode::for_task()` (`src/models/tasks.rs`).
 
-| Tag | No plan | Has plan |
-|-----|---------|----------|
-| `epic` | Brainstorm (ideation, no edits) | Dispatch |
-| `feature` | Plan (write implementation plan) | Dispatch |
-| `bug`, `chore`, none | Dispatch | Dispatch |
+A task with a plan always routes to `DispatchMode::Dispatch` regardless of tag. Without a plan, the tag selects a dedicated agent: `PrReview` → `DispatchMode::PrReview`, `Research` → `Research`, `Fix` → `Fix`; everything else (including no tag, `Bug`, `Feature`, `Chore`) → `Dispatch`.
 
-A task with a plan always dispatches directly regardless of tag. Tags are selected during task creation: `b`=bug, `f`=feature, `c`=chore, `e`=epic, Enter=none.
+For the authoritative mapping, read `DispatchMode::for_task()` in `src/models/tasks.rs` — this table is intentionally a pointer rather than a duplicate so it cannot drift.
 
 ## Timing Constants
 
-- **Tick interval** (2s): `TICK_INTERVAL` in `runtime.rs` — captures tmux output, checks staleness.
-- **Status TTL** (5s): `STATUS_MESSAGE_TTL` in `tui/mod.rs` — transient status bar messages auto-clear.
-- **PR poll** (30s): `PR_POLL_INTERVAL` in `tui/mod.rs` — polls PR status for tasks in review.
+- **Tick interval** (2s): `TICK_INTERVAL` in `src/runtime/mod.rs` — captures tmux output, checks staleness.
+- **Status TTL** (5s): `STATUS_MESSAGE_TTL` in `src/tui/mod.rs` — transient status bar messages auto-clear.
+- **PR poll** (30s): `PR_POLL_INTERVAL` in `src/tui/mod.rs` — polls PR status for tasks in review.
 
 ## Module Map
 
 | File | Responsibility |
 |------|---------------|
-| `src/main.rs` | CLI entry point (clap), subcommand dispatch (`tui`, `update`, `add`) |
+| `src/main.rs` | CLI entry point (clap), subcommand dispatch (`tui`, `setup`, `verify-feed`, …) |
 | `src/lib.rs` | Crate root, public module re-exports |
-| `src/runtime.rs` | Async event loop (`tokio::select!`), bridges TUI ↔ MCP ↔ shell commands, executes `Command` side effects |
-| `src/tui/mod.rs` | `App` struct, `update()` message dispatcher, `column_items_for_status()` render helper |
-| `src/tui/input.rs` | Key event handlers, inline-mutation convention for UI-only state |
+| `src/runtime/mod.rs` | Async event loop (`tokio::select!`), bridges TUI ↔ MCP ↔ shell commands |
+| `src/runtime/commands.rs` | `Command` side-effect dispatcher (called by `execute_commands`) |
+| `src/runtime/tasks.rs` | Per-command runtime handlers for tasks (refresh, dispatch, finish, etc.) |
+| `src/runtime/{agents,epics,learnings,pr,settings,split,editor}.rs` | Domain-specific runtime helpers |
+| `src/tui/mod.rs` | `App` struct, lifecycle, `update()` entry point, `column_items_for_status()` render helper |
+| `src/tui/dispatcher.rs` | `dispatch(app, msg)` routing table — match arm per `Message` variant |
+| `src/tui/update/` | Per-message handlers (`agent.rs`, `epics.rs`, `feeds.rs`, `forms.rs`, `learnings.rs`, `lifecycle.rs`, `main_session.rs`, `navigation.rs`, `pr.rs`, `repo_filter.rs`, `retry.rs`, `selection.rs`, `split_pane.rs`, `system.rs`, `tips_projects.rs`, `wrap_up.rs`) |
+| `src/tui/input.rs` | Key event entry point, inline-mutation convention for UI-only state |
+| `src/tui/input/` | Per-mode key handlers: `normal.rs`, `confirm.rs`, `projects.rs`, `repo_filter.rs` |
 | `src/tui/ui/mod.rs` | Rendering entry point — re-exports `render()`, thin dispatcher |
 | `src/tui/ui/kanban.rs` | Kanban board rendering: task/epic cards, columns, overlays, action hints |
 | `src/tui/ui/shared.rs` | Cross-board helpers: `render_tab_bar`, `refresh_status`, `truncate`, `push_hint_spans` |
 | `src/tui/ui/palette.rs` | Tokyo Night color palette constants |
+| `src/tui/ui/{input_form,learnings}.rs` | Overlay renderers (input forms, knowledge base panel) |
 | `src/tui/types.rs` | `Message`, `Command`, `ViewMode`, `InputMode`, `AgentTracking` enums and structs |
-| `src/tui/tests.rs` | TUI unit tests |
-| `src/models.rs` | Domain types (`Task`, `Epic`, `TaskStatus`, `SubStatus`, `TaskTag`), `DispatchMode::for_task()` tag routing |
+| `src/tui/tests/` | TUI unit and scenario tests, snapshots, helpers |
+| `src/models/mod.rs` | Re-exports of domain types and shared model tests |
+| `src/models/tasks.rs` | `Task`, `TaskStatus`, `SubStatus`, `TaskTag`, `DispatchMode::for_task()` tag routing |
+| `src/models/{epics,learnings,projects,review}.rs` | Domain types per area |
 | `src/service/mod.rs` | Service module root: `ServiceError`, `FieldUpdate`, re-exports of all sub-module types |
-| `src/service/tasks.rs` | `TaskService`, `UpdateTaskParams`, `CreateTaskParams`, `ClaimTaskParams`, `ListTasksFilter` — task business logic |
+| `src/service/tasks/mod.rs` | `TaskService` — task business logic |
+| `src/service/tasks/{crud,params,validators}.rs` | Task CRUD methods, `*Params` request types, validation helpers |
 | `src/service/epics.rs` | `EpicService`, `UpdateEpicParams`, `CreateEpicParams` — epic business logic |
 | `src/service/learnings.rs` | `LearningService`, `CreateLearningParams`, `UpdateLearningParams` — learning business logic |
 | `src/db/mod.rs` | `Database` struct, constructor, `TaskStore` trait, `TaskPatch`/`EpicPatch` builders |
 | `src/db/migrations.rs` | Versioned schema migrations (`MIGRATIONS` array, `migrate_vN_*` functions) |
-| `src/db/queries.rs` | `impl TaskStore for Database` — all CRUD operations, row helpers |
-| `src/db/tests.rs` | Database unit tests |
-| `src/dispatch.rs` | Worktree creation, tmux session management, agent lifecycle (dispatch/brainstorm/plan/resume/review) |
+| `src/db/queries/mod.rs` | `impl TaskStore for Database` — fans out across the per-domain query files |
+| `src/db/queries/{tasks,epics,prs,alerts,projects,learnings,settings}.rs` | CRUD per domain |
+| `src/db/tests/mod.rs` | Database unit tests entry point |
+| `src/db/tests/{tasks,epics,prs,alerts,projects,learnings,settings,migrations}.rs` | Tests per domain |
+| `src/dispatch/mod.rs` | Worktree creation, tmux session management, agent lifecycle (dispatch/brainstorm/plan/resume/review) |
+| `src/dispatch/agents.rs` | Agent-specific dispatch helpers |
+| `src/dispatch/prompts.rs` | Prompt construction (with-plan, no-plan variants, learning injection) |
+| `src/dispatch/worktree.rs` | Worktree creation/teardown |
 | `src/dispatch/finish.rs` | Rebase + fast-forward branch onto base branch, kill tmux window (`finish_task`); defines `FinishError` |
 | `src/process.rs` | `ProcessRunner` trait + `RealProcessRunner` / `MockProcessRunner` for testable shell execution |
 | `src/tmux.rs` | Tmux API: create windows, send keys, capture pane output, kill windows |
 | `src/editor.rs` | External `$EDITOR` integration for editing task/epic fields |
 | `src/plan.rs` | Plan file parsing (extract title/description from markdown) |
-| `src/setup.rs` | First-run setup: MCP config merging, plugin installation (hooks, skills, commands) |
+| `src/setup/mod.rs` | First-run setup entry point |
+| `src/setup/{config,plugins,hooks}.rs` | MCP config merging, plugin installation, git hook installation |
 | `src/mcp/mod.rs` | MCP server bootstrap (Axum router), `McpState`, `McpEvent` notification enum |
 | `src/mcp/handlers/dispatch.rs` | JSON-RPC entry point (`handle_mcp`), tool definitions, method routing |
 | `src/mcp/handlers/tasks.rs` | Task tool handlers (thin wrappers): parse JSON-RPC args → call `TaskService` → format response |
 | `src/mcp/handlers/epics.rs` | Epic tool handlers (thin wrappers): parse JSON-RPC args → call `EpicService` → format response |
+| `src/mcp/handlers/learnings.rs` | Knowledge base tool handlers |
+| `src/mcp/handlers/review.rs` | Review/security agent status handlers |
 | `src/mcp/handlers/types.rs` | JSON-RPC request/response types, flexible integer deserializer |
-| `src/mcp/handlers/tests.rs` | MCP handler integration tests |
+| `src/mcp/handlers/tests/mod.rs` | MCP handler integration tests entry point |
+| `src/mcp/handlers/tests/{tasks,epics,learnings,projects,review}.rs` | MCP handler tests per domain |
 
 ## MCP Notification Flow
 
@@ -279,7 +294,7 @@ MCP handler (e.g. handle_update_task)
 Key types in the chain:
 - `McpEvent` (`src/mcp/mod.rs`) — enum with `Refresh` and `MessageSent` variants
 - `McpState::notify()` — fire-and-forget send on the channel
-- `TuiRuntime::exec_refresh_from_db()` (`src/runtime.rs`) — reloads tasks, epics, and usage from DB
+- `TuiRuntime::exec_refresh_from_db()` (`src/runtime/tasks.rs`) — reloads tasks, epics, and usage from DB
 - `Message::RefreshTasks` (`src/tui/types.rs`) — carries the fresh task list into the App
 
 The `MessageSent` variant additionally triggers `Message::MessageReceived(task_id)`, which flashes the target task's card in the TUI.
@@ -388,7 +403,7 @@ Approved entries affect dispatch. Rejected and archived entries do not.
 - `src/mcp/handlers/learnings.rs` — MCP tool handlers
 - `src/service/learnings.rs` — `LearningService` (approval, rejection, archive, edit)
 - `src/db/` — `LearningStore` trait, `LearningPatch`, `LearningFilter`
-- `src/dispatch.rs` — prompt augmentation in `dispatch_with_prompt()`
+- `src/dispatch/agents.rs` — prompt augmentation in `dispatch_with_prompt()`
 - `docs/specs/learnings.allium` — full domain specification
 
 ## Visibility Convention
@@ -400,8 +415,8 @@ Approved entries affect dispatch. Rejected and archived entries do not.
 `Shift+D` creates and immediately dispatches a task without going through the task creation dialog. The flow:
 
 1. Key handler emits `Command::QuickDispatch { draft: TaskDraft { title: DEFAULT_QUICK_TASK_TITLE, repo_path, .. }, epic_id }` (`src/tui/mod.rs`)
-2. Runtime handles it in `exec_quick_dispatch()` (`src/runtime.rs`) — calls `create_task()` then immediately dispatches
-3. The created task gets title `"Quick task"` (`DEFAULT_QUICK_TASK_TITLE` in `src/models.rs`), no tag, no plan
+2. Runtime handles it in `exec_quick_dispatch()` (`src/runtime/tasks.rs`) — calls `create_task()` then immediately dispatches
+3. The created task gets title `"Quick task"` (`DEFAULT_QUICK_TASK_TITLE` in `src/models/tasks.rs`), no tag, no plan
 4. If the board has multiple repo paths, `Shift+D` first enters `InputMode::QuickDispatchRepo` (repo picker), then emits `Message::SelectQuickDispatchRepo(idx)` to resolve the repo before dispatching
 
 Quick dispatch is the same code path as normal dispatch — the difference is the task is created with defaults and skips the creation dialog entirely.
@@ -477,7 +492,7 @@ Avoid `#[allow(dead_code)]` — dead code should be removed, not suppressed. If 
 
 ### Sub-status validation TOCTOU
 
-`TaskService::update_task()` (`src/service/tasks.rs`) reads the existing task to validate the requested sub-status before applying the patch. This is a TOCTOU window: a concurrent MCP call could change the task status between the read and the write. This is intentional and accepted — simultaneous status changes from two agents on the same task are considered a user error, and the window is too small to be worth a transaction-level fix.
+`TaskService::update_task()` (`src/service/tasks/crud.rs`) reads the existing task to validate the requested sub-status before applying the patch. This is a TOCTOU window: a concurrent MCP call could change the task status between the read and the write. This is intentional and accepted — simultaneous status changes from two agents on the same task are considered a user error, and the window is too small to be worth a transaction-level fix.
 
 ### Immutable `parent_epic_id`
 
@@ -495,7 +510,7 @@ Custom lint rules are configured in `[lints.clippy]` in `Cargo.toml`. The pre-pu
 2. **Add the tool schema** to `tool_definitions()` in `src/mcp/handlers/dispatch.rs` — add a new entry to the `tools` array with `name`, `description`, and `inputSchema`.
 3. **Wire the route** in `handle_mcp()` in `src/mcp/handlers/dispatch.rs` — add a match arm in the `tools/call` section mapping the tool name to your handler.
 4. **Add types** if needed in `src/mcp/handlers/types.rs` (argument structs with serde derives, use `#[serde(deserialize_with = "deserialize_flexible_i64")]` for integer fields since Claude Code may send them as strings).
-5. **Write tests** in `src/mcp/handlers/tests.rs` using `Database::open_in_memory()`.
+5. **Write tests** in `src/mcp/handlers/tests/` (the file matching the tool's domain) using `Database::open_in_memory()`.
 
 ### Adding a New TUI View/Mode
 
@@ -510,14 +525,14 @@ Custom lint rules are configured in `[lints.clippy]` in `Cargo.toml`. The pre-pu
 
 Adding a fully integrated entity involves five layers. Work through them in order:
 
-1. **Domain model** (`src/models.rs`) — define the struct and any enums. For nullable fields that agents or the TUI can set/clear, plan to use `FieldUpdate` (service layer) and `Option<Option<T>>` double-Option (DB layer); see the [FieldUpdate](#fieldupdate--nullable-string-fields) and [TaskPatch/EpicPatch](#taskpatch--epicpatch--double-option-in-the-db-layer) conventions.
+1. **Domain model** (`src/models/`) — define the struct and any enums in the appropriate domain file. For nullable fields that agents or the TUI can set/clear, plan to use `FieldUpdate` (service layer) and `Option<Option<T>>` double-Option (DB layer); see the [FieldUpdate](#fieldupdate--nullable-string-fields) and [TaskPatch/EpicPatch](#taskpatch--epicpatch--double-option-in-the-db-layer) conventions.
 
 2. **Database migration** (`src/db/migrations.rs`) — write `migrate_vN_description(conn)` and register it in `MIGRATIONS`. See [Adding a Database Migration](#adding-a-database-migration) for the full procedure.
 
-3. **DB trait and queries** (`src/db/mod.rs`, `src/db/queries.rs`):
+3. **DB trait and queries** (`src/db/mod.rs`, `src/db/queries/`):
    - Define a narrow sub-trait (e.g., `trait NewEntityCrud`) with CRUD methods. Follow the [trait-narrowing convention](#db-trait-narrowing--take-the-narrowest-sub-trait-you-need).
    - Add `NewEntityCrud` as a supertrait of `TaskStore` so existing holders (`McpState`, `TuiRuntime`) get it automatically.
-   - Implement `impl NewEntityCrud for Database` in `src/db/queries.rs` using `self.conn()?`.
+   - Implement `impl NewEntityCrud for Database` under `src/db/queries/` (a new file per domain, wired into `src/db/queries/mod.rs`) using `self.conn()?`.
    - Define a `NewEntityPatch` builder struct with `Option<Option<T>>` for nullable fields; implement the `UPDATE` query.
    - Write a corresponding `NewEntityFilter` if list queries need filtering.
 
@@ -526,9 +541,9 @@ Adding a fully integrated entity involves five layers. Work through them in orde
 5. **MCP handler** (if agents need to interact) — follow [Adding a New MCP Tool](#adding-a-new-mcp-tool). For read-only tools, hold the narrowest sub-trait; for mutating tools, call `state.notify()` after the write.
 
 6. **Tests**:
-   - DB-layer tests in `src/db/tests.rs` using `Database::open_in_memory()`.
+   - DB-layer tests in `src/db/tests/` (the file matching the entity's domain) using `Database::open_in_memory()`.
    - Service-layer tests inline in the corresponding `src/service/<entity>.rs` file.
-   - MCP handler tests in `src/mcp/handlers/tests.rs` for any new tools.
+   - MCP handler tests in `src/mcp/handlers/tests/` (the file matching the tool's domain) for any new tools.
 
 7. **Spec** (`docs/specs/`) — write or extend an Allium spec to document the entity's lifecycle, rules, and invariants. Use the `allium:tend` skill and run `allium check` to validate syntax.
 
@@ -538,8 +553,8 @@ Migrations live in `src/db/migrations.rs` as standalone functions. We do **not**
 
 1. **Write the migration function**: `fn migrate_vN_description(conn: &Connection) -> Result<()>` in `src/db/migrations.rs`. Use `ALTER TABLE` for additive changes; for destructive changes (column removal, constraint changes), create a new table, copy data, drop old, rename.
 2. **Register it** in the `MIGRATIONS` array in `src/db/migrations.rs`: add `(N, migrate_vN_description)`. The loop in `Database::init_schema()` applies any migration where `current_version < N` and bumps `PRAGMA user_version` after each.
-3. **Update the schema test**: `fresh_db_has_latest_schema_version` in `src/db/tests.rs` asserts the final version number — bump it to match your new N.
-4. **Write a migration test** in `src/db/tests.rs` that creates a DB at the pre-migration schema, inserts test data, runs the migration, and verifies the result.
+3. **Update the schema test**: `fresh_db_has_latest_schema_version` in `src/db/tests/migrations.rs` asserts the final version number — bump it to match your new N.
+4. **Write a migration test** in `src/db/tests/migrations.rs` that creates a DB at the pre-migration schema, inserts test data, runs the migration, and verifies the result.
 
 ### Projects Feature
 

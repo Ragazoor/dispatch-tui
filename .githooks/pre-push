@@ -6,3 +6,6 @@ cargo fmt
 
 echo "clippy..."
 cargo clippy --all-targets --fix -- -D warnings
+
+echo "doc-paths..."
+./scripts/check-doc-paths.sh
