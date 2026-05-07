@@ -37,11 +37,15 @@ feed. `verify-feed` runs the given shell command (via `sh -c`) and checks
 that stdout parses as a JSON array of `FeedItem` objects; use it when
 writing or debugging a custom `feed_command`.
 
-Pre-push hook runs `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test` automatically before each push. One-time setup:
+### First-time setup
+
+Point git at the repo's hooks directory so the pre-push hook runs:
 
 ```bash
 git config core.hooksPath .githooks
 ```
+
+The pre-push hook runs `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test` before each push. The first run is slow (cold cargo cache); subsequent runs are quick.
 
 ### Running Tests
 
@@ -78,14 +82,23 @@ Snapshot tests in `src/tui/tests/snapshots.rs` render the TUI to a 120×40 `Test
 
 **Updating snapshots intentionally** (e.g. after a deliberate UI change):
 
-```bash
-# Accept all pending new snapshots
-cargo insta review
+1. Run the tests and accept the new output, either interactively or in bulk:
 
-# Or auto-accept without interactive review
-INSTA_UPDATE=always cargo test tui::tests::snapshots
-rm src/tui/tests/snapshots/*.snap.new  # clean up leftover .snap.new files
-```
+   ```bash
+   # Accept all pending new snapshots interactively
+   cargo insta review
+
+   # Or auto-accept without interactive review
+   INSTA_UPDATE=always cargo test tui::tests::snapshots
+   ```
+
+2. **Clean up `.snap.new` files** — `INSTA_UPDATE=always` overwrites the `.snap` files but can leave behind `.snap.new` siblings that show up as untracked. Always run:
+
+   ```bash
+   rm src/tui/tests/snapshots/*.snap.new
+   ```
+
+3. Review the diff in the committed `.snap` files before pushing — `git diff src/tui/tests/snapshots/` should show only the changes you intended.
 
 Keep snapshots at 120×40 so failure diffs remain readable.
 
@@ -141,7 +154,15 @@ Key patterns that aren't obvious from reading the code:
 - **TaskPatch builder**: Selective field updates for the database. `None` = don't change, `Some(None)` = set field to NULL.
 - **MCP server**: Runs on port 3142 (configurable via `DISPATCH_PORT`). Agents call JSON-RPC methods in `src/mcp/handlers/` to update task status.
 - **Integration tests**: Use `Database::open_in_memory()` with a real SQLite instance — no mocking the database layer.
-- **Command queue draining**: `execute_commands` (`src/runtime.rs`) loads the initial `Vec<Command>` into a `VecDeque` and drains it iteratively. Any handler that produces additional commands (e.g. error-path `app.update()` calls that return extra commands) extends the queue with `queue.extend(extra)`, so a single message can cascade into multiple commands without recursive calls.
+- **Command queue draining**: `execute_commands` (`src/runtime/mod.rs`) loads the initial `Vec<Command>` into a `VecDeque` and drains it iteratively. Any handler that produces additional commands (e.g. error-path `app.update()` calls) extends the queue with `queue.extend(extra)`, so a single message can cascade into multiple commands without recursive calls:
+
+  ```rust
+  let mut queue = std::collections::VecDeque::from(cmds);
+  while let Some(command) = queue.pop_front() {
+      let extra = commands::dispatch(command, app, rt);
+      queue.extend(extra);
+  }
+  ```
 - **Editor session invariant**: `TuiRuntime` holds an `editor_session: Arc<Mutex<Option<EditorSession>>>` (`src/runtime/mod.rs`). At most one pop-out editor can be open at a time — the runtime refuses to start a new one while the slot is occupied. The slot is `None` when idle.
 
 ### Review/Security Agent State Machine
@@ -274,6 +295,30 @@ MCP handlers in `src/mcp/handlers/` return JSON-RPC error objects using two code
 
 Use `JsonRpcResponse::err(id, -32602, msg)` for anything the caller can fix; use `-32603` for anything they can't.
 
+### Debugging MCP handlers
+
+The MCP server listens on port 3142 by default (override with `DISPATCH_PORT`). When a handler misbehaves you can reproduce it without going through Claude Code:
+
+```bash
+# Tail server logs while the TUI runs (logs go to stderr; redirect when launching)
+RUST_LOG=dispatch=debug cargo run -- tui 2> /tmp/dispatch.log
+tail -f /tmp/dispatch.log
+
+# Send a manual JSON-RPC request to a tool (e.g. list_tasks)
+curl -s -X POST http://127.0.0.1:3142 \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_tasks","arguments":{}}}' \
+  | jq
+
+# Reproduce a failing update — substitute the offending arguments
+curl -s -X POST http://127.0.0.1:3142 \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"update_task","arguments":{"task_id":42,"status":"done"}}}' \
+  | jq
+```
+
+`tools/list` returns the tool schemas — useful when the argument shape isn't obvious.
+
 ## Feed Epics
 
 Feed epics are epics whose tasks are populated externally by a shell command rather than by a human. When an epic has a `feed_command` set, the runtime runs it periodically (`feed_interval_secs`) and calls `upsert_feed_tasks()` to sync the results. Each feed task has an `external_id` that is used as the upsert key — tasks are created on first appearance and updated (but not deleted) on subsequent runs.
@@ -377,6 +422,8 @@ pub enum FieldUpdate {
 ```
 
 Used in `UpdateTaskParams` for `pr_url`, `worktree`, and `tmux_window`. When adding a new nullable field to `UpdateTaskParams`, use `Option<FieldUpdate>` rather than `Option<Option<String>>`.
+
+**When to use:** if the caller can clear the field to NULL (nullable column, user-clearable), use `FieldUpdate`. If the field is non-nullable or the update path only ever sets a value, use a plain `String` (or `Option<String>` to mean "don't touch / set"). Reserve the three-state pattern for genuinely tri-valued updates.
 
 ### `TaskPatch` / `EpicPatch` — double-Option in the DB layer
 
