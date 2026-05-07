@@ -457,3 +457,140 @@ fn list_learnings_for_dispatch_excludes_non_approved() {
     assert!(!ids.contains(&rejected));
     assert!(ids.contains(&approved));
 }
+
+fn make_db_with_task_and_learning() -> (Database, crate::models::TaskId, LearningId) {
+    use crate::models::{LearningKind, LearningScope};
+    let db = in_memory_db();
+    let task = create_task_returning(
+        &db,
+        "t",
+        "d",
+        "/repo/a",
+        None,
+        crate::models::TaskStatus::Backlog,
+    )
+    .unwrap();
+    let learning = db
+        .create_learning(
+            LearningKind::Convention,
+            "Some convention",
+            None,
+            LearningScope::Repo,
+            Some("/repo/a"),
+            &[],
+            None,
+        )
+        .unwrap();
+    (db, task.id, learning)
+}
+
+#[test]
+fn record_and_list_retrievals() {
+    use crate::models::RetrievalSource;
+    let (db, task_id, learning_id) = make_db_with_task_and_learning();
+    db.record_retrieval(task_id, learning_id, RetrievalSource::PromptInjection)
+        .unwrap();
+    db.record_retrieval(task_id, learning_id, RetrievalSource::QueryLearnings)
+        .unwrap();
+    let rows = db.list_retrievals_for_task(task_id).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].source, RetrievalSource::PromptInjection);
+    assert_eq!(rows[0].task_id, task_id);
+    assert_eq!(rows[0].learning_id, learning_id);
+    assert_eq!(rows[1].source, RetrievalSource::QueryLearnings);
+}
+
+#[test]
+fn apply_verdicts_helped_increments_count() {
+    use crate::models::{LearningStatus, LearningVerdict, RetrievalSource};
+    let (db, task_id, learning_id) = make_db_with_task_and_learning();
+    db.record_retrieval(task_id, learning_id, RetrievalSource::PromptInjection)
+        .unwrap();
+    db.apply_verdicts_tx(task_id, &[(learning_id, LearningVerdict::Helped)])
+        .unwrap();
+    let l = db.get_learning(learning_id).unwrap().unwrap();
+    assert_eq!(l.confirmed_count, 1);
+    assert!(l.last_confirmed_at.is_some());
+    assert_eq!(l.status, LearningStatus::Approved);
+}
+
+#[test]
+fn apply_verdicts_wrong_sets_needs_review() {
+    use crate::models::{LearningStatus, LearningVerdict, RetrievalSource};
+    let (db, task_id, learning_id) = make_db_with_task_and_learning();
+    db.record_retrieval(task_id, learning_id, RetrievalSource::PromptInjection)
+        .unwrap();
+    db.apply_verdicts_tx(task_id, &[(learning_id, LearningVerdict::Wrong)])
+        .unwrap();
+    let l = db.get_learning(learning_id).unwrap().unwrap();
+    assert_eq!(l.status, LearningStatus::NeedsReview);
+    assert_eq!(l.confirmed_count, 0);
+}
+
+#[test]
+fn apply_verdicts_unused_records_only() {
+    use crate::models::{LearningStatus, LearningVerdict, RetrievalSource};
+    let (db, task_id, learning_id) = make_db_with_task_and_learning();
+    db.record_retrieval(task_id, learning_id, RetrievalSource::PromptInjection)
+        .unwrap();
+    db.apply_verdicts_tx(task_id, &[(learning_id, LearningVerdict::Unused)])
+        .unwrap();
+    let l = db.get_learning(learning_id).unwrap().unwrap();
+    assert_eq!(l.status, LearningStatus::Approved);
+    assert_eq!(l.confirmed_count, 0);
+    let conn = db.conn().unwrap();
+    let n: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM learning_verdicts WHERE learning_id = ?1",
+            rusqlite::params![learning_id.0],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 1);
+}
+
+#[test]
+fn count_needs_review() {
+    use crate::models::{LearningVerdict, RetrievalSource};
+    let (db, task_id, learning_id) = make_db_with_task_and_learning();
+    db.record_retrieval(task_id, learning_id, RetrievalSource::PromptInjection)
+        .unwrap();
+    db.apply_verdicts_tx(task_id, &[(learning_id, LearningVerdict::Wrong)])
+        .unwrap();
+    assert_eq!(db.count_learnings_needs_review().unwrap(), 1);
+}
+
+#[test]
+fn list_learnings_for_dispatch_excludes_needs_review() {
+    use crate::models::{LearningKind, LearningScope, LearningVerdict, RetrievalSource};
+    let (db, task_id, flagged) = make_db_with_task_and_learning();
+    let healthy = db
+        .create_learning(
+            LearningKind::Convention,
+            "Healthy convention",
+            None,
+            LearningScope::Repo,
+            Some("/repo/a"),
+            &[],
+            None,
+        )
+        .unwrap();
+
+    db.record_retrieval(task_id, flagged, RetrievalSource::PromptInjection)
+        .unwrap();
+    db.apply_verdicts_tx(task_id, &[(flagged, LearningVerdict::Wrong)])
+        .unwrap();
+
+    let results = db
+        .list_learnings_for_dispatch(None, "/repo/a", None)
+        .unwrap();
+    let ids: Vec<_> = results.iter().map(|l| l.id).collect();
+    assert!(
+        !ids.contains(&flagged),
+        "needs_review learning must be excluded from dispatch"
+    );
+    assert!(
+        ids.contains(&healthy),
+        "approved learning should still surface"
+    );
+}

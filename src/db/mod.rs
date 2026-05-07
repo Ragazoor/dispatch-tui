@@ -9,9 +9,9 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use crate::models::{
-    Epic, EpicId, FeedItem, Learning, LearningId, LearningKind, LearningScope, LearningStatus,
-    Project, ProjectId, SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage, TipsShowMode,
-    UsageReport,
+    Epic, EpicId, FeedItem, Learning, LearningId, LearningKind, LearningRetrieval, LearningScope,
+    LearningStatus, LearningVerdict, Project, ProjectId, RetrievalSource, SubStatus, Task, TaskId,
+    TaskStatus, TaskTag, TaskUsage, TipsShowMode, UsageReport,
 };
 
 // ---------------------------------------------------------------------------
@@ -454,6 +454,37 @@ pub trait LearningStore: Send + Sync {
 }
 
 // ---------------------------------------------------------------------------
+// LearningRetrievalStore — narrow sub-trait for retrievals + verdicts
+// ---------------------------------------------------------------------------
+
+pub trait LearningRetrievalStore: Send + Sync {
+    /// Insert a row into `learning_retrievals` recording that `learning_id` was
+    /// surfaced to `task_id` via the given source.
+    fn record_retrieval(
+        &self,
+        task_id: TaskId,
+        learning_id: LearningId,
+        source: RetrievalSource,
+    ) -> Result<()>;
+
+    /// Return all retrievals recorded for `task_id`, ordered by id ascending.
+    fn list_retrievals_for_task(&self, task_id: TaskId) -> Result<Vec<LearningRetrieval>>;
+
+    /// Apply a batch of verdicts atomically. Each verdict is recorded in
+    /// `learning_verdicts`; in addition, `Helped` bumps the learning's
+    /// `confirmed_count` and `Wrong` flips an approved learning to
+    /// `needs_review`. `Unused` only records a row.
+    fn apply_verdicts_tx(
+        &self,
+        task_id: TaskId,
+        verdicts: &[(LearningId, LearningVerdict)],
+    ) -> Result<()>;
+
+    /// Count of learnings currently in the `needs_review` state.
+    fn count_learnings_needs_review(&self) -> Result<i64>;
+}
+
+// ---------------------------------------------------------------------------
 // TaskStore — supertrait combining all sub-traits
 // ---------------------------------------------------------------------------
 
@@ -465,6 +496,7 @@ pub trait TaskStore:
     + PrWorkflowStore
     + ProjectCrud
     + LearningStore
+    + LearningRetrievalStore
 {
 }
 
@@ -475,7 +507,8 @@ impl<
             + SettingsStore
             + PrWorkflowStore
             + ProjectCrud
-            + LearningStore,
+            + LearningStore
+            + LearningRetrievalStore,
     > TaskStore for T
 {
 }

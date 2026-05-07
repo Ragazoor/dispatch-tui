@@ -5,7 +5,8 @@ use chrono::{NaiveDateTime, TimeZone, Utc};
 use rusqlite::{params, OptionalExtension};
 
 use crate::models::{
-    EpicId, Learning, LearningId, LearningKind, LearningScope, LearningStatus, ProjectId, TaskId,
+    EpicId, Learning, LearningId, LearningKind, LearningRetrieval, LearningScope, LearningStatus,
+    LearningVerdict, ProjectId, RetrievalSource, TaskId,
 };
 
 use super::super::{Database, LearningFilter, LearningPatch};
@@ -278,5 +279,127 @@ impl super::super::LearningStore for Database {
             .collect::<rusqlite::Result<Vec<_>>>()
             .context("Failed to collect learnings for dispatch")?;
         Ok(rows)
+    }
+}
+
+impl super::super::LearningRetrievalStore for Database {
+    fn record_retrieval(
+        &self,
+        task_id: TaskId,
+        learning_id: LearningId,
+        source: RetrievalSource,
+    ) -> Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "INSERT INTO learning_retrievals (task_id, learning_id, source)
+             VALUES (?1, ?2, ?3)",
+            params![task_id.0, learning_id.0, source.as_str()],
+        )
+        .context("Failed to insert learning retrieval")?;
+        Ok(())
+    }
+
+    fn list_retrievals_for_task(&self, task_id: TaskId) -> Result<Vec<LearningRetrieval>> {
+        let conn = self.conn()?;
+        let parse_dt = |s: &str| -> chrono::DateTime<Utc> {
+            NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
+                .map(|ndt| Utc.from_utc_datetime(&ndt))
+                .unwrap_or_else(|_| Utc::now())
+        };
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, task_id, learning_id, source, retrieved_at
+                 FROM learning_retrievals
+                 WHERE task_id = ?1
+                 ORDER BY id",
+            )
+            .context("Failed to prepare list_retrievals_for_task")?;
+        let rows = stmt
+            .query_map(params![task_id.0], |row| {
+                let source_str: String = row.get(3)?;
+                let source = RetrievalSource::parse(&source_str).map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        3,
+                        rusqlite::types::Type::Text,
+                        e.into(),
+                    )
+                })?;
+                let retrieved_str: String = row.get(4)?;
+                Ok(LearningRetrieval {
+                    id: row.get(0)?,
+                    task_id: TaskId(row.get(1)?),
+                    learning_id: LearningId(row.get(2)?),
+                    source,
+                    retrieved_at: parse_dt(&retrieved_str),
+                })
+            })
+            .context("Failed to query learning retrievals")?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .context("Failed to collect learning retrievals")?;
+        Ok(rows)
+    }
+
+    fn apply_verdicts_tx(
+        &self,
+        task_id: TaskId,
+        verdicts: &[(LearningId, LearningVerdict)],
+    ) -> Result<()> {
+        let conn = self.conn()?;
+        let tx = conn
+            .unchecked_transaction()
+            .context("Failed to begin verdict transaction")?;
+        for (lid, verdict) in verdicts {
+            tx.execute(
+                "INSERT INTO learning_verdicts (task_id, learning_id, verdict)
+                 VALUES (?1, ?2, ?3)",
+                params![task_id.0, lid.0, verdict.as_str()],
+            )
+            .context("Failed to insert learning verdict")?;
+            match verdict {
+                LearningVerdict::Helped => {
+                    tx.execute(
+                        "UPDATE learnings
+                         SET confirmed_count = confirmed_count + 1,
+                             last_confirmed_at = datetime('now'),
+                             updated_at = datetime('now')
+                         WHERE id = ?1",
+                        params![lid.0],
+                    )
+                    .context("Failed to bump confirmed_count for helped verdict")?;
+                }
+                LearningVerdict::Wrong => {
+                    // Only flip approved learnings to needs_review; a wrong
+                    // verdict on an already rejected/archived/needs_review
+                    // entry is a no-op for the learnings row (but the verdict
+                    // row was still recorded above for audit).
+                    tx.execute(
+                        "UPDATE learnings
+                         SET status = 'needs_review',
+                             updated_at = datetime('now')
+                         WHERE id = ?1 AND status = 'approved'",
+                        params![lid.0],
+                    )
+                    .context("Failed to flag learning as needs_review")?;
+                }
+                LearningVerdict::Unused => {
+                    // recorded only — no change to the learning row
+                }
+            }
+        }
+        tx.commit()
+            .context("Failed to commit verdict transaction")?;
+        Ok(())
+    }
+
+    fn count_learnings_needs_review(&self) -> Result<i64> {
+        let conn = self.conn()?;
+        let n: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM learnings WHERE status = 'needs_review'",
+                [],
+                |row| row.get(0),
+            )
+            .context("Failed to count needs_review learnings")?;
+        Ok(n)
     }
 }
