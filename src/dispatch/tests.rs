@@ -2114,3 +2114,362 @@ fn finish_task_skips_kill_when_tmux_window_not_found() {
         "kill-window should not be called when window not found, got: {calls:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// finish_task — additional branch coverage
+// ---------------------------------------------------------------------------
+
+#[test]
+fn finish_task_rebase_other_failure_aborts_and_returns_other() {
+    // Rebase fails with a non-conflict stderr → maps to FinishError::Other.
+    // `git rebase --abort` is still issued for cleanup.
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"main\n"), // rev-parse HEAD
+        MockProcessRunner::fail(""),                  // remote get-url (no remote)
+        MockProcessRunner::fail("fatal: unrelated histories"), // git rebase
+        MockProcessRunner::ok(),                      // git rebase --abort
+    ]);
+
+    let err = finish_task(
+        "/repo",
+        "/repo/.worktrees/42-fix-bug",
+        "42-fix-bug",
+        "main",
+        None,
+        &mock,
+    )
+    .unwrap_err();
+
+    assert!(
+        matches!(err, FinishError::Other(ref m) if m.contains("Rebase failed")),
+        "non-conflict rebase failure should be FinishError::Other, got: {err}"
+    );
+
+    let calls = mock.recorded_calls();
+    assert!(
+        calls.last().unwrap().1.contains(&"--abort".to_string()),
+        "rebase --abort must be invoked after a non-conflict rebase failure"
+    );
+}
+
+#[test]
+fn finish_task_ff_only_failure_returns_other() {
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"main\n"), // rev-parse HEAD
+        MockProcessRunner::fail(""),                  // remote get-url (no remote)
+        MockProcessRunner::ok(),                      // git rebase main
+        MockProcessRunner::fail("fatal: Not possible to fast-forward, aborting."),
+    ]);
+
+    let err = finish_task(
+        "/repo",
+        "/repo/.worktrees/42-fix-bug",
+        "42-fix-bug",
+        "main",
+        None,
+        &mock,
+    )
+    .unwrap_err();
+
+    assert!(
+        matches!(err, FinishError::Other(ref m) if m.contains("Fast-forward failed")),
+        "ff-only failure should map to FinishError::Other, got: {err}"
+    );
+}
+
+#[test]
+fn finish_task_rev_parse_runner_error_returns_other() {
+    // The runner itself errors (e.g. git binary missing) on rev-parse.
+    let mock = MockProcessRunner::new(vec![Err(anyhow::anyhow!("no such program"))]);
+
+    let err = finish_task(
+        "/repo",
+        "/repo/.worktrees/42-fix-bug",
+        "42-fix-bug",
+        "main",
+        None,
+        &mock,
+    )
+    .unwrap_err();
+
+    assert!(
+        matches!(err, FinishError::Other(ref m) if m.contains("Failed to check current branch")),
+        "rev-parse runner error should map to FinishError::Other, got: {err}"
+    );
+}
+
+#[test]
+fn finish_task_no_tmux_window_skips_tmux_entirely() {
+    // tmux_window=None → no list-windows or kill-window calls.
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"main\n"), // rev-parse HEAD
+        MockProcessRunner::fail(""),                  // remote get-url (no remote)
+        MockProcessRunner::ok(),                      // git rebase
+        MockProcessRunner::ok(),                      // git merge --ff-only
+    ]);
+
+    finish_task(
+        "/repo",
+        "/repo/.worktrees/42-fix-bug",
+        "42-fix-bug",
+        "main",
+        None,
+        &mock,
+    )
+    .unwrap();
+
+    let calls = mock.recorded_calls();
+    assert!(
+        !calls.iter().any(|c| c.0 == "tmux"),
+        "no tmux calls expected when tmux_window is None, got: {calls:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// cleanup_task — additional branch coverage
+// ---------------------------------------------------------------------------
+
+#[test]
+fn cleanup_task_no_tmux_window_arg_skips_tmux() {
+    // tmux_window=None → cleanup goes straight to worktree remove + branch -D.
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // git worktree remove
+        MockProcessRunner::ok(), // git branch -D (best-effort)
+    ]);
+
+    cleanup_task("/repo", "/repo/.worktrees/42-fix-bug", None, &mock).unwrap();
+
+    let calls = mock.recorded_calls();
+    assert!(
+        !calls.iter().any(|c| c.0 == "tmux"),
+        "no tmux calls expected when tmux_window is None, got: {calls:?}"
+    );
+    assert!(calls[0].1.contains(&"remove".to_string()));
+}
+
+#[test]
+fn cleanup_task_other_remove_failure_propagates() {
+    // git worktree remove fails with stderr that is NOT "is not a working tree"
+    // → cleanup_task surfaces an error to the caller.
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::fail(
+        "fatal: some unexpected git failure",
+    )]);
+
+    let err = cleanup_task("/repo", "/repo/.worktrees/42-fix-bug", None, &mock).unwrap_err();
+
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("git worktree remove failed"),
+        "expected 'git worktree remove failed' in error chain, got: {msg}"
+    );
+}
+
+#[test]
+fn cleanup_task_kill_window_failure_propagates() {
+    // tmux kill-window fails → cleanup_task returns an error and does NOT
+    // attempt the worktree remove.
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"task-42\n"), // has_window → true
+        MockProcessRunner::fail("can't find window"),    // kill-window fails
+    ]);
+
+    let err = cleanup_task(
+        "/repo",
+        "/repo/.worktrees/42-fix-bug",
+        Some("task-42"),
+        &mock,
+    )
+    .unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("failed to kill tmux window"),
+        "expected kill-window failure in error chain, got: {msg}"
+    );
+
+    let calls = mock.recorded_calls();
+    assert!(
+        !calls
+            .iter()
+            .any(|c| c.0 == "git" && c.1.contains(&"remove".to_string())),
+        "git worktree remove must not run after kill-window failure, got: {calls:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// branch_from_worktree — pure helper
+// ---------------------------------------------------------------------------
+
+#[test]
+fn branch_from_worktree_returns_last_path_component() {
+    assert_eq!(
+        branch_from_worktree("/repo/.worktrees/42-fix-bug"),
+        Some("42-fix-bug".to_string())
+    );
+}
+
+#[test]
+fn branch_from_worktree_strips_trailing_slash() {
+    assert_eq!(
+        branch_from_worktree("/repo/.worktrees/42-fix-bug/"),
+        Some("42-fix-bug".to_string())
+    );
+}
+
+#[test]
+fn branch_from_worktree_returns_none_for_empty() {
+    assert_eq!(branch_from_worktree(""), None);
+}
+
+#[test]
+fn branch_from_worktree_returns_none_for_root() {
+    assert_eq!(branch_from_worktree("/"), None);
+}
+
+// ---------------------------------------------------------------------------
+// build_fix_prompt — alert-kind specific prompt construction
+// ---------------------------------------------------------------------------
+
+fn dependabot_req(fixed_version: Option<&str>, package: Option<&str>) -> FixAgentRequest {
+    FixAgentRequest {
+        repo: "/local/path".to_string(),
+        github_repo: "acme/app".to_string(),
+        number: 7,
+        kind: AlertKind::Dependabot,
+        title: "CVE-2024-1234".to_string(),
+        description: "vuln details".to_string(),
+        package: package.map(|s| s.to_string()),
+        fixed_version: fixed_version.map(|s| s.to_string()),
+    }
+}
+
+#[test]
+fn build_fix_prompt_dependabot_with_fixed_version() {
+    let prompt = build_fix_prompt(&dependabot_req(Some("1.2.3"), Some("openssl")));
+    assert!(
+        prompt.contains("upgrade to version 1.2.3"),
+        "should mention fixed version, got: {prompt}"
+    );
+    assert!(prompt.contains("openssl"), "should mention package");
+    assert!(prompt.contains("acme/app"), "should mention repo");
+    assert!(prompt.contains("#7"), "should mention alert number");
+    assert!(
+        prompt.contains("CVE-2024-1234"),
+        "should mention alert title"
+    );
+    assert!(
+        prompt.contains("update_review_status"),
+        "should reference MCP tool"
+    );
+}
+
+#[test]
+fn build_fix_prompt_dependabot_without_fixed_version() {
+    let prompt = build_fix_prompt(&dependabot_req(None, Some("openssl")));
+    assert!(
+        prompt.contains("No fixed version is available yet"),
+        "should mention no fix, got: {prompt}"
+    );
+    assert!(
+        !prompt.contains("upgrade to version"),
+        "should not include upgrade-to wording when no fixed version"
+    );
+}
+
+#[test]
+fn build_fix_prompt_dependabot_without_package_uses_unknown_placeholder() {
+    let prompt = build_fix_prompt(&dependabot_req(Some("2.0.0"), None));
+    assert!(
+        prompt.contains("`unknown`"),
+        "missing package should fall back to 'unknown', got: {prompt}"
+    );
+}
+
+#[test]
+fn build_fix_prompt_code_scanning() {
+    let req = FixAgentRequest {
+        repo: "/local/path".to_string(),
+        github_repo: "acme/app".to_string(),
+        number: 11,
+        kind: AlertKind::CodeScanning,
+        title: "SQL injection in login".to_string(),
+        description: "src/auth.rs:42".to_string(),
+        package: None,
+        fixed_version: None,
+    };
+    let prompt = build_fix_prompt(&req);
+    assert!(
+        prompt.contains("code scanning alert"),
+        "should mention code scanning alert kind, got: {prompt}"
+    );
+    assert!(
+        prompt.contains("SQL injection in login"),
+        "should include alert title"
+    );
+    assert!(
+        prompt.contains("src/auth.rs:42"),
+        "should include alert location/description"
+    );
+    assert!(prompt.contains("#11"), "should mention alert number");
+    assert!(
+        !prompt.contains("Package:"),
+        "code scanning prompt should not include Dependabot Package field"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// dispatch_review_agent — Dependabot variant uses /review (built-in)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn review_agent_dependabot_uses_builtin_review_command() {
+    let (_dir, repo_path, worktree_dir) = make_test_repo_with_worktree("review-77");
+
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"\n"), // has_window: no match
+        MockProcessRunner::ok(),                  // git worktree prune
+        MockProcessRunner::ok(),                  // git fetch
+        MockProcessRunner::ok(),                  // tmux new-window
+        MockProcessRunner::ok(),                  // tmux send-keys -l
+        MockProcessRunner::ok(),                  // tmux send-keys Enter
+    ]);
+
+    dispatch_review_agent(
+        &review_req(&repo_path, 77, "dependabot/cargo/foo", true),
+        &mock,
+    )
+    .unwrap();
+
+    let prompt = std::fs::read_to_string(worktree_dir.join(".claude-prompt")).unwrap();
+    assert!(
+        prompt.contains("/review 77"),
+        "dependabot review prompt should use the built-in /review command, got: {prompt}"
+    );
+    assert!(
+        !prompt.contains("/anthropic-review-pr:review-pr"),
+        "dependabot review prompt must not invoke the anthropic skill, got: {prompt}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// resume_agent — failure path
+// ---------------------------------------------------------------------------
+
+#[test]
+fn resume_agent_propagates_new_window_failure() {
+    // First call (tmux new-window) fails — error should bubble up.
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::fail(
+        "no server running on /tmp/tmux-1000/default",
+    )]);
+
+    let result = resume_agent(TaskId(42), "/repo/.worktrees/42-fix-bug", &mock);
+
+    assert!(
+        result.is_err(),
+        "resume_agent should propagate new-window failure"
+    );
+    let msg = format!("{:#}", result.unwrap_err());
+    assert!(
+        msg.contains("failed to create tmux window for resume"),
+        "expected resume context in error chain, got: {msg}"
+    );
+}
