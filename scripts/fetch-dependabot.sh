@@ -14,9 +14,7 @@
 
 # ---------------------------------------------------------------------------
 # Configure your repositories here (space-separated "owner/repo" slugs).
-# Empty by default — fill in the repos you want surfaced as feed tasks.
-# Example: REPOS="myorg/frontend myorg/backend myorg/infra"
-REPOS=""
+REPOS="annotell/scala-common annotell/gha-scala annotell/gha-database-bootstrapper annotell/airflow-dags annotell/annotell-data-warehouse annotell/bigquery-export"
 # ---------------------------------------------------------------------------
 
 if [ -z "$REPOS" ]; then
