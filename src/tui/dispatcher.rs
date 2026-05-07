@@ -1,0 +1,203 @@
+//! Routing table for `App::update()`.
+//!
+//! Adding a new `Message` variant becomes a two-file edit: declare the variant
+//! in `types.rs` and add the match arm here. The `App` state container and
+//! lifecycle methods live in `mod.rs`; per-message handlers live in
+//! `update/*.rs`.
+
+use crate::tui::types::{Command, Message};
+use crate::tui::App;
+
+/// Process a message and return a list of side-effect commands.
+pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
+    match msg {
+        // ── Board navigation, view toggles, system events ──
+        Message::Tick => app.handle_tick(),
+        Message::TerminalResized => vec![],
+        Message::Quit => app.handle_quit(),
+        Message::NavigateColumn(delta) => app.handle_navigate_column(delta),
+        Message::NavigateRow(delta) => app.handle_navigate_row(delta),
+        Message::MoveTask { id, direction } => app.handle_move_task(id, direction),
+        Message::ReorderItem(dir) => app.handle_reorder_item(dir),
+        Message::OpenTaskDetail(task_id) => app.handle_open_task_detail(task_id),
+        Message::CloseTaskDetail => app.handle_close_task_detail(),
+        Message::ToggleFlattened => app.handle_toggle_flattened(),
+        Message::ToggleHelp => app.handle_toggle_help(),
+        Message::ToggleNotifications => app.handle_toggle_notifications(),
+        Message::ToggleSplitMode => app.handle_toggle_split_mode(),
+        Message::SwapSplitPane(task_id) => app.handle_swap_split_pane(task_id),
+        Message::SplitPaneOpened { pane_id, task_id } => {
+            app.handle_split_pane_opened(pane_id, task_id)
+        }
+        Message::SplitPaneClosed => app.handle_split_pane_closed(),
+        Message::FocusChanged(focused) => app.handle_focus_changed(focused),
+        Message::RefreshTasks(tasks) => app.handle_refresh_tasks(tasks),
+        Message::RefreshUsage(usage) => app.handle_refresh_usage(usage),
+        Message::Error(text) => app.handle_error(text),
+        Message::DismissError => app.handle_dismiss_error(),
+        Message::StatusInfo(text) => app.handle_status_info(text),
+        Message::RepoPathsUpdated(paths) => app.handle_repo_paths_updated(paths),
+        Message::MessageReceived(id) => app.handle_message_received(id),
+        Message::OpenInBrowser { url } => app.handle_open_in_browser(url),
+        Message::TmuxOutput {
+            id,
+            output,
+            activity_ts,
+        } => app.handle_tmux_output(id, output, activity_ts),
+        Message::WindowGone(id) => app.handle_window_gone(id),
+
+        // ── Task lifecycle, dispatch, selection, wrap-up ──
+        Message::DispatchTask(id, mode) => app.handle_dispatch_task(id, mode),
+        Message::Dispatched {
+            id,
+            worktree,
+            tmux_window,
+            switch_focus,
+        } => app.handle_dispatched(id, worktree, tmux_window, switch_focus),
+        Message::TaskCreated { task } => app.handle_task_created(task),
+        Message::DeleteTask(id) => app.handle_delete_task(id),
+        Message::ResumeTask(id) => app.handle_resume_task(id),
+        Message::Resumed { id, tmux_window } => app.handle_resumed(id, tmux_window),
+        Message::DispatchFailed(id) => app.handle_dispatch_failed(id),
+        Message::MarkDispatching(id) => app.handle_mark_dispatching(id),
+        Message::TaskEdited(edit) => app.handle_task_edited(edit),
+        Message::StaleAgent(id) => app.handle_stale_agent(id),
+        Message::AgentCrashed(id) => app.handle_agent_crashed(id),
+        Message::KillAndRetry(id) => app.handle_kill_and_retry(id),
+        Message::RetryResume(id) => app.handle_retry_resume(id),
+        Message::RetryFresh(id) => app.handle_retry_fresh(id),
+        Message::ArchiveTask(id) => app.handle_archive_task(id),
+        Message::QuickDispatch { repo_path, epic_id } => {
+            app.handle_quick_dispatch(repo_path, epic_id)
+        }
+        Message::StartQuickDispatchSelection => app.handle_start_quick_dispatch_selection(),
+        Message::SelectQuickDispatchRepo(idx) => app.handle_select_quick_dispatch_repo(idx),
+        Message::FinishComplete(id) => app.handle_finish_complete(id),
+        Message::FinishFailed {
+            id,
+            error,
+            is_conflict,
+        } => app.handle_finish_failed(id, error, is_conflict),
+        Message::ConfirmDone => app.handle_confirm_done(),
+        Message::CancelDone => app.handle_cancel_done(),
+        Message::StartWrapUp(id) => app.handle_start_wrap_up(id),
+        Message::WrapUpRebase => app.handle_wrap_up_rebase(),
+        Message::CancelWrapUp => app.handle_cancel_wrap_up(),
+        Message::DetachTmux(id) => app.handle_detach_tmux(vec![id]),
+        Message::BatchDetachTmux(ids) => app.handle_detach_tmux(ids),
+        Message::ConfirmDetachTmux => app.handle_confirm_detach_tmux(),
+        Message::ToggleSelect(id) => app.handle_toggle_select(id),
+        Message::ClearSelection => app.handle_clear_selection(),
+        Message::SelectAllColumn => app.handle_select_all_column(),
+        Message::BatchMoveTasks { ids, direction } => app.handle_batch_move_tasks(ids, direction),
+        Message::BatchArchiveTasks(ids) => app.handle_batch_archive_tasks(ids),
+
+        // ── Form input, text entry, creation flows ──
+        Message::StartNewTask => app.handle_start_new_task(),
+        Message::CopyTask => app.handle_copy_task(),
+        Message::CancelInput => app.handle_cancel_input(),
+        Message::ConfirmDeleteStart => app.handle_confirm_delete_start(),
+        Message::ConfirmDeleteYes => app.handle_confirm_delete_yes(),
+        Message::CancelDelete => app.handle_cancel_delete(),
+        Message::SubmitTitle(value) => app.handle_submit_title(value),
+        Message::SubmitDescription(value) => app.handle_submit_description(value),
+        Message::DescriptionEditorResult(value) => app.handle_description_editor_result(value),
+        Message::EditorResult { kind, outcome } => app.handle_editor_result(kind, outcome),
+        Message::SubmitRepoPath(value) => app.handle_submit_repo_path(value),
+        Message::SubmitTag(tag) => app.handle_submit_tag(tag),
+        Message::SubmitBaseBranch(value) => app.handle_submit_base_branch(value),
+        Message::InputChar(c) => app.handle_input_char(c),
+        Message::InputBackspace => app.handle_input_backspace(),
+        Message::CancelRetry => app.handle_cancel_retry(),
+
+        // ── Epic CRUD, lifecycle, wrap-up ──
+        Message::DispatchEpic(id) => app.handle_dispatch_epic(id),
+        Message::EnterEpic(epic_id) => app.handle_enter_epic(epic_id),
+        Message::ExitEpic => app.handle_exit_epic(),
+        Message::RefreshEpics(epics) => app.handle_refresh_epics(epics),
+        Message::EpicCreated(epic) => app.handle_epic_created(epic),
+        Message::EditEpic(id) => app.handle_edit_epic(id),
+        Message::EpicEdited(epic) => app.handle_epic_edited(epic),
+        Message::DeleteEpic(id) => app.handle_delete_epic(id),
+        Message::ConfirmDeleteEpic => app.handle_confirm_delete_epic(),
+        Message::MoveEpicStatus(id, dir) => app.handle_move_epic_status(id, dir),
+        Message::ArchiveEpic(id) => app.handle_archive_epic(id),
+        Message::ConfirmArchiveEpic => app.handle_confirm_archive_epic(),
+        Message::StartNewEpic => app.handle_start_new_epic(),
+        Message::SubmitEpicTitle(v) => app.handle_submit_epic_title(v),
+        Message::SubmitEpicDescription(v) => app.handle_submit_epic_description(v),
+        Message::SubmitEpicRepoPath(v) => app.handle_submit_epic_repo_path(v),
+        Message::StartEpicWrapUp(id) => app.handle_start_epic_wrap_up(id),
+        Message::EpicWrapUpRebase => app.handle_epic_wrap_up(),
+        Message::CancelEpicWrapUp => app.handle_cancel_epic_wrap_up(),
+        Message::CancelMergeQueue => app.handle_cancel_merge_queue(),
+        Message::ToggleSelectEpic(id) => app.handle_toggle_select_epic(id),
+        Message::BatchArchiveEpics(ids) => app.handle_batch_archive_epics(ids),
+        Message::ToggleEpicAutoDispatch(id) => app.handle_toggle_epic_auto_dispatch(id),
+
+        // ── PR flow: creation, merge, review state ──
+        Message::PrMerged(id) => app.handle_pr_merged(id),
+        Message::StartMergePr(id) => app.handle_start_merge_pr(id),
+        Message::ConfirmMergePr => app.handle_confirm_merge_pr(),
+        Message::CancelMergePr => app.handle_cancel_merge_pr(),
+        Message::MergePrFailed { id, error } => app.handle_merge_pr_failed(id, error),
+        Message::PrReviewState {
+            id,
+            review_decision,
+        } => app.handle_pr_review_state(id, review_decision),
+
+        // ── Task repo filters and filter presets ──
+        Message::StartRepoFilter => app.handle_start_repo_filter(),
+        Message::CloseRepoFilter => app.handle_close_repo_filter(),
+        Message::ToggleRepoFilter(path) => app.handle_toggle_repo_filter(path),
+        Message::ToggleAllRepoFilter => app.handle_toggle_all_repo_filter(),
+        Message::ToggleRepoFilterMode => app.handle_toggle_repo_filter_mode(),
+        Message::MoveRepoCursor(delta) => app.handle_move_repo_cursor(delta),
+        Message::StartSavePreset => app.handle_start_save_preset(),
+        Message::SaveFilterPreset(name) => app.handle_save_filter_preset(name),
+        Message::LoadFilterPreset(name) => app.handle_load_filter_preset(name),
+        Message::StartDeletePreset => app.handle_start_delete_preset(),
+        Message::DeleteFilterPreset(name) => app.handle_delete_filter_preset(name),
+        Message::StartDeleteRepoPath => app.handle_start_delete_repo_path(),
+        Message::DeleteRepoPath(path) => app.handle_delete_repo_path(path),
+        Message::CancelPresetInput => app.handle_cancel_preset_input(),
+        Message::FilterPresetsLoaded(presets) => app.handle_filter_presets_loaded(presets),
+
+        // ── Tips overlay ──
+        Message::ShowTips {
+            tips,
+            starting_index,
+            max_seen_id,
+            show_mode,
+        } => app.handle_show_tips(tips, starting_index, max_seen_id, show_mode),
+        Message::NextTip => app.handle_next_tip(),
+        Message::PrevTip => app.handle_prev_tip(),
+        Message::SetTipsMode(mode) => app.handle_set_tips_mode(mode),
+        Message::CloseTips => app.handle_close_tips(),
+
+        // ── Project messages ──
+        Message::ProjectsUpdated(projects) => app.handle_projects_updated(projects),
+        Message::SelectProject(project_id) => app.handle_select_project(project_id),
+        Message::FollowProject(project_id) => app.handle_follow_project(project_id),
+        Message::TriggerEpicFeed(id) => app.handle_trigger_epic_feed(id),
+        Message::FeedRefreshed { epic_title, count } => {
+            app.handle_feed_refreshed(epic_title, count)
+        }
+        Message::FeedFailed { epic_title, error } => app.handle_feed_failed(epic_title, error),
+        Message::OpenLearnings => vec![Command::LoadLearnings],
+        Message::ShowLearnings(learnings) => app.handle_show_learnings(learnings),
+        Message::CloseLearnings => app.handle_close_learnings(),
+        Message::NavigateLearning(delta) => app.handle_navigate_learning(delta),
+        Message::ArchiveLearning(id) => app.handle_archive_learning(id),
+        Message::ToggleLearningsView => app.handle_toggle_learnings_view(),
+        Message::NavigateTreeLearning(nav) => app.handle_navigate_tree_learning(nav),
+        Message::RejectLearning(id) => app.handle_reject_learning(id),
+        Message::EditLearning(id) => app.handle_edit_learning(id),
+        Message::LearningActioned(id) => app.handle_learning_actioned(id),
+        Message::LearningEdited(updated) => app.handle_learning_edited(updated),
+
+        // ── Main session ──
+        Message::SubmitMainSessionDir(dir) => app.handle_submit_main_session_dir(dir),
+        Message::MainSessionCreated(window) => app.handle_main_session_created(window),
+    }
+}

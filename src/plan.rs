@@ -124,7 +124,10 @@ mod tests {
         let result = parse_plan("");
         assert!(result.is_err());
         let msg = format!("{}", result.unwrap_err());
-        assert!(msg.contains("H1"), "Error should mention missing H1 heading");
+        assert!(
+            msg.contains("H1"),
+            "Error should mention missing H1 heading"
+        );
     }
 
     #[test]
@@ -133,7 +136,10 @@ mod tests {
         let result = parse_plan("   \n\t\n   \n");
         assert!(result.is_err());
         let msg = format!("{}", result.unwrap_err());
-        assert!(msg.contains("H1"), "Error should mention missing H1 heading");
+        assert!(
+            msg.contains("H1"),
+            "Error should mention missing H1 heading"
+        );
     }
 
     #[test]
