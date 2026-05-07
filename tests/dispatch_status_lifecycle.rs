@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 //! Integration test: visible dispatching status across the full
 //! mark → in-flight → resolved lifecycle. This test exercises the public
 //! `App` API (`status_message`, `is_dispatching`) so a regression that

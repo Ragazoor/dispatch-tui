@@ -1047,8 +1047,12 @@ pub(super) fn handle_send_message(
             Err(e) => return service_err_to_response(id, e),
         };
 
-    let worktree = to_task.worktree.as_ref().expect("validated by service");
-    let tmux_window = to_task.tmux_window.as_ref().expect("validated by service");
+    let Some(worktree) = to_task.worktree.as_ref() else {
+        return JsonRpcResponse::err(id, -32603, "target task has no worktree (internal error)");
+    };
+    let Some(tmux_window) = to_task.tmux_window.as_ref() else {
+        return JsonRpcResponse::err(id, -32603, "target task has no tmux window (internal error)");
+    };
 
     // Write message to a uniquely-named file in target's worktree
     let messages_dir = format!("{worktree}/.claude-messages");

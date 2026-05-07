@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
 use crate::models::{EpicId, ProjectId, SubStatus, TaskId, TaskStatus};
 use crossterm::event::KeyCode;

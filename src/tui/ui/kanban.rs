@@ -2208,6 +2208,7 @@ fn batch_action_hints(count: usize, key_color: Color, has_tasks: bool) -> Vec<Sp
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
     use crate::models::TaskTag;
     use crate::tui::types::TaskDraft;

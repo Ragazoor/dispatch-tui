@@ -43,6 +43,7 @@ impl MockProcessRunner {
         }
     }
 
+    #[allow(clippy::unwrap_used)] // test helper — panics on poisoned mutex (programming error)
     pub fn recorded_calls(&self) -> Vec<(String, Vec<String>)> {
         self.calls.lock().unwrap().clone()
     }
@@ -76,6 +77,7 @@ impl MockProcessRunner {
 }
 
 impl ProcessRunner for MockProcessRunner {
+    #[allow(clippy::unwrap_used)] // test helper — panics on poisoned mutex (programming error)
     fn run(&self, program: &str, args: &[&str]) -> Result<Output> {
         self.calls.lock().unwrap().push((
             program.to_string(),

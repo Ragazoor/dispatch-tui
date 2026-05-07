@@ -543,6 +543,7 @@ fn unbind_key_args(key: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
 
     #[test]

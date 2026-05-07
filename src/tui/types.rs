@@ -1213,6 +1213,7 @@ pub type EpicStatsMap = HashMap<EpicId, SubtaskStats>;
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
 
     // -- RepoFilterMode --

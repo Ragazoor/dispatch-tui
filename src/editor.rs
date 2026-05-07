@@ -264,6 +264,7 @@ pub fn parse_learning_editor_output(input: &str) -> LearningEditorFields {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
     use crate::models::{EpicId, TaskId, TaskStatus};
     use chrono::Utc;

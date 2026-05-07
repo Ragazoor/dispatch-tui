@@ -9,8 +9,10 @@ impl App {
     pub(in crate::tui) fn handle_toggle_split_mode(&mut self) -> Vec<Command> {
         if self.board.split.active {
             self.exit_split_if_active()
-        } else if let Some(window) = self.selected_task().and_then(|t| t.tmux_window.clone()) {
-            let task_id = self.selected_task().unwrap().id;
+        } else if let Some((task_id, window)) = self
+            .selected_task()
+            .and_then(|t| t.tmux_window.clone().map(|w| (t.id, w)))
+        {
             vec![Command::EnterSplitModeWithTask { task_id, window }]
         } else {
             vec![Command::EnterSplitMode]

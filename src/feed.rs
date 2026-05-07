@@ -188,6 +188,7 @@ impl FeedRunner {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
     use crate::db::{Database, EpicCrud, EpicPatch, SettingsStore};
     use std::sync::Arc;

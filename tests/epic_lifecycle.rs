@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 use dispatch_tui::db::{
     CreateTaskRequest, Database, EpicCrud, EpicPatch, LearningStore, TaskCrud, TaskPatch,
 };

@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 //! Integration test: full task lifecycle through App::update() with a real (in-memory) DB.
 
 use std::time::Duration;

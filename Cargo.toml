@@ -30,6 +30,12 @@ tui-tree-widget = "0.23"
 insta = "1"
 proptest = "1"
 
+[lints.clippy]
+# Added by task #602 (2026-05-07): surfaces accidental panics in production paths
+unwrap_used = "warn"
+# Added by task #602 (2026-05-07): surfaces accidental panics in production paths
+expect_used = "warn"
+
 [[bin]]
 name = "dispatch"
 path = "src/main.rs"

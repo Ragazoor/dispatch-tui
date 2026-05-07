@@ -54,6 +54,7 @@ mod tests {
         }
 
         #[test]
+        #[allow(clippy::unwrap_used)]
         fn roundtrip_title(title in "[a-zA-Z0-9 ]{1,80}") {
             let md = format!("# {title}\n\n**Goal:** Some goal.\n");
             let meta = parse_plan(&md).unwrap();
@@ -61,6 +62,7 @@ mod tests {
         }
 
         #[test]
+        #[allow(clippy::unwrap_used)]
         fn roundtrip_description(desc in "[a-zA-Z0-9 .!,]{1,100}") {
             let md = format!("# Title\n\n**Goal:** {desc}\n");
             let meta = parse_plan(&md).unwrap();
@@ -69,6 +71,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::unwrap_used)]
     fn parse_standard_plan() {
         let content = "\
 # Automatic Task Status Hooks — Implementation Plan
@@ -88,6 +91,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::unwrap_used)]
     fn parse_title_without_suffix() {
         let content = "\
 # Simple Feature
@@ -100,6 +104,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::unwrap_used)]
     fn parse_missing_h1_is_error() {
         let content = "\
 **Goal:** No heading here.
@@ -114,6 +119,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::unwrap_used)]
     fn parse_missing_goal_gives_empty_description() {
         let content = "\
 # Feature Without Goal
@@ -126,6 +132,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::unwrap_used)]
     fn parse_h1_with_extra_whitespace() {
         let content = "\
 #   Padded Title — Implementation Plan

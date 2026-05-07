@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 //! Integration tests for the CLI commands (list, update, plan, verify-feed).
 //!
 //! Each test spins up a fresh temp-file DB and invokes the compiled binary

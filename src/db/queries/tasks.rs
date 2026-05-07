@@ -335,7 +335,7 @@ impl super::super::TaskCrud for Database {
 
         let keep_ids =
             serde_json::to_string(&items.iter().map(|i| &i.external_id).collect::<Vec<_>>())
-                .expect("Vec<String> serialization is infallible");
+                .context("failed to serialize external_ids for feed task cleanup")?;
         tx.execute(
             "DELETE FROM tasks
              WHERE epic_id = ?1

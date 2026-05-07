@@ -265,6 +265,9 @@ fn render_detail(
     frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), inner);
 }
 
+// TreeItem::new returns Err only if two children share the same identifier.
+// All identifiers in this tree are distinct by construction (prefixed by scope type).
+#[allow(clippy::unwrap_used)]
 pub fn build_learning_tree(
     learnings: &[Learning],
     app: &App,
@@ -462,6 +465,9 @@ pub fn build_learning_tree(
     roots
 }
 
+// Tree::new returns Err only if top-level items share identifiers, which cannot happen
+// here because identifiers are unique across root nodes ("user", "project:{id}", etc.).
+#[allow(clippy::expect_used)]
 fn render_tree(
     frame: &mut Frame,
     app: &App,

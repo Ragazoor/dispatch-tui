@@ -57,6 +57,7 @@ impl TuiRuntime {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
     use crate::db::{Database, LearningStore};
     use crate::models::{Learning, LearningId, LearningKind, LearningScope, LearningStatus};

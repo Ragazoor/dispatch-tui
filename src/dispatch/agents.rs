@@ -458,6 +458,7 @@ pub fn create_main_session(dir: &str, runner: &dyn ProcessRunner) -> Result<Stri
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
     use crate::process::MockProcessRunner;
 

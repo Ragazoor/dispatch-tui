@@ -400,6 +400,7 @@ fn clear_session_slot(slot: &Arc<Mutex<Option<EditorSession>>>) {
 
 #[cfg(test)]
 mod learning_editor_tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
     use crate::db::{Database, LearningStore};
     use crate::models::{Learning, LearningId, LearningKind, LearningScope, LearningStatus};
@@ -606,6 +607,7 @@ mod learning_editor_tests {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
     use std::cell::Cell;
 

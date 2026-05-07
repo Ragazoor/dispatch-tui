@@ -592,6 +592,7 @@ pub fn tips_starting_index(
 
 /// Returns the project id to open at startup.
 /// Prefers the saved `last_project` setting; falls back to the default project.
+#[allow(clippy::expect_used)] // DB invariant: a default project must always exist (migration v39)
 fn resolve_initial_project(
     projects: &[crate::models::Project],
     saved: Option<String>,

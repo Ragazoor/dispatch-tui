@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
 use crate::models::{
     DispatchMode, EpicId, ProjectId, SubStatus, TaskId, TaskStatus, TaskTag,
