@@ -88,10 +88,7 @@ fn review_agent_full_state_machine() {
     let status = db.pr_agent_status("review_prs", repo, number).unwrap();
     assert_eq!(status, Some(ReviewAgentStatus::Idle));
 
-    // 4. Workflow row reflects the FindingsReady transition (verified earlier
-    //    via update_agent_status; re-check the row is still present and the
-    //    agent can be re-dispatched cleanly by overwriting set_pr_agent —
-    //    which resets agent_status back to "reviewing").
+    // 4. Re-dispatch from Idle resets agent_status back to Reviewing.
     let updated = db
         .set_pr_agent(
             PrKind::Review,
@@ -103,11 +100,7 @@ fn review_agent_full_state_machine() {
         .unwrap();
     assert!(updated);
     let status = db.pr_agent_status("review_prs", repo, number).unwrap();
-    assert_eq!(
-        status,
-        Some(ReviewAgentStatus::Reviewing),
-        "re-dispatch should reset agent_status to Reviewing"
-    );
+    assert_eq!(status, Some(ReviewAgentStatus::Reviewing));
 }
 
 #[test]
