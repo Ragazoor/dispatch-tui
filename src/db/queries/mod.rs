@@ -15,7 +15,7 @@ use crate::models::{Epic, EpicId, ProjectId, SubStatus, Task, TaskId, TaskStatus
 pub(super) const TASK_COLUMNS: &str =
     "id, title, description, repo_path, status, worktree, tmux_window, \
      plan_path, epic_id, sub_status, pr_url, tag, sort_order, base_branch, external_id, \
-     created_at, updated_at, project_id";
+     created_at, updated_at, project_id, labels";
 
 pub(super) fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     let status_str: String = row.get("status")?;
@@ -58,6 +58,7 @@ pub(super) fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
             .unwrap_or_else(|| "main".to_string()),
         external_id: row.get::<_, Option<String>>("external_id").unwrap_or(None),
         project_id: ProjectId(row.get::<_, i64>("project_id")?),
+        labels: read_json_string_vec(row, "labels"),
         created_at: parse_datetime(&created_str),
         updated_at: parse_datetime(&updated_str),
     })
@@ -89,6 +90,28 @@ pub(super) fn row_to_epic(row: &rusqlite::Row<'_>) -> rusqlite::Result<Epic> {
         created_at: parse_datetime(&created_str),
         updated_at: parse_datetime(&updated_str),
     })
+}
+
+/// Decode a JSON-encoded `Vec<String>` column. Tolerates NULL, missing
+/// columns, and malformed JSON by defaulting to an empty vector — a
+/// corrupt cell must never crash the TUI.
+pub(super) fn read_json_string_vec(row: &rusqlite::Row<'_>, column: &str) -> Vec<String> {
+    let raw: Option<String> = row.get::<_, Option<String>>(column).ok().flatten();
+    match raw {
+        Some(s) => match serde_json::from_str::<Vec<String>>(&s) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(column, raw = %s, error = %e, "malformed JSON list, defaulting to empty");
+                Vec::new()
+            }
+        },
+        None => Vec::new(),
+    }
+}
+
+/// Serialize a `Vec<String>` for storage in a JSON-encoded column.
+pub(super) fn write_json_string_vec(values: &[String]) -> Result<String> {
+    serde_json::to_string(values).context("Failed to serialize string list to JSON")
 }
 
 /// Parse SQLite `datetime('now')` output: "YYYY-MM-DD HH:MM:SS"

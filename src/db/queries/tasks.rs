@@ -7,7 +7,7 @@ use crate::models::{
 };
 
 use super::super::{CreateTaskRequest, Database, TaskPatch};
-use super::{row_to_task, TASK_COLUMNS};
+use super::{row_to_task, write_json_string_vec, TASK_COLUMNS};
 
 impl super::super::TaskCrud for Database {
     fn create_task(&self, req: CreateTaskRequest<'_>) -> Result<TaskId> {
@@ -190,6 +190,10 @@ impl super::super::TaskCrud for Database {
             sets.push("project_id = ?");
             values.push(Box::new(pid.0));
         }
+        if let Some(labels) = patch.labels {
+            sets.push("labels = ?");
+            values.push(Box::new(write_json_string_vec(labels)?));
+        }
 
         sets.push("updated_at = datetime('now')");
         values.push(Box::new(id.0));
@@ -306,16 +310,19 @@ impl super::super::TaskCrud for Database {
             .zip(base_branches.iter())
         {
             let sub_status = SubStatus::default_for(item.status).as_str().to_string();
+            let labels_json = write_json_string_vec(&item.labels)?;
             tx.execute(
                 "INSERT INTO tasks
                      (title, description, repo_path, status, sub_status, base_branch,
-                      epic_id, external_id, project_id, tag)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                      epic_id, external_id, project_id, tag, labels, sort_order)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
                  ON CONFLICT(epic_id, external_id) WHERE external_id IS NOT NULL
                  DO UPDATE SET
                      title       = excluded.title,
                      description = excluded.description,
                      tag         = excluded.tag,
+                     labels      = excluded.labels,
+                     sort_order  = excluded.sort_order,
                      updated_at  = datetime('now')",
                 params![
                     item.title,
@@ -328,6 +335,8 @@ impl super::super::TaskCrud for Database {
                     item.external_id,
                     project_id.0,
                     item.tag.as_str(),
+                    labels_json,
+                    item.sort_order,
                 ],
             )
             .with_context(|| format!("Failed to upsert feed task '{}'", item.external_id))?;

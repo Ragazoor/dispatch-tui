@@ -95,6 +95,106 @@ fn snapshot_confirm_retry_form() {
     insta::assert_snapshot!(rendered);
 }
 
+/// Baseline regression coverage for second-line card badges across the
+/// most common variants (tags, sub-statuses, PR labels). Locks the layout
+/// before introducing label rendering so any unintended shift in spacing
+/// or styling is caught by the snapshot diff.
+#[test]
+fn snapshot_card_badges_baseline() {
+    use super::super::App;
+    use crate::models::{SubStatus, TaskStatus, TaskTag};
+
+    let mut tasks = Vec::new();
+    let mk = |id: i64, status: TaskStatus, title: &str| {
+        let mut t = make_task(id, status);
+        t.title = title.to_string();
+        t
+    };
+
+    // Backlog: tag pills
+    let mut t = mk(1, TaskStatus::Backlog, "bug task");
+    t.tag = Some(TaskTag::Bug);
+    tasks.push(t);
+    let mut t = mk(2, TaskStatus::Backlog, "feature task");
+    t.tag = Some(TaskTag::Feature);
+    tasks.push(t);
+    let mut t = mk(3, TaskStatus::Backlog, "chore task");
+    t.tag = Some(TaskTag::Chore);
+    tasks.push(t);
+    let mut t = mk(4, TaskStatus::Backlog, "fix task");
+    t.tag = Some(TaskTag::Fix);
+    tasks.push(t);
+
+    // Running: sub-status badges
+    let mut t = mk(5, TaskStatus::Running, "active");
+    t.sub_status = SubStatus::Active;
+    t.worktree = Some("/wt".to_string());
+    t.tmux_window = Some("w".to_string());
+    tasks.push(t);
+    let mut t = mk(6, TaskStatus::Running, "stale");
+    t.sub_status = SubStatus::Stale;
+    t.worktree = Some("/wt".to_string());
+    t.tmux_window = Some("w".to_string());
+    tasks.push(t);
+    let mut t = mk(7, TaskStatus::Running, "needs input");
+    t.sub_status = SubStatus::NeedsInput;
+    t.worktree = Some("/wt".to_string());
+    t.tmux_window = Some("w".to_string());
+    tasks.push(t);
+    let mut t = mk(8, TaskStatus::Running, "crashed");
+    t.sub_status = SubStatus::Crashed;
+    t.worktree = Some("/wt".to_string());
+    tasks.push(t);
+
+    // Review: PR labels + sub-statuses
+    let mut t = mk(9, TaskStatus::Review, "awaiting review");
+    t.sub_status = SubStatus::AwaitingReview;
+    t.pr_url = Some("https://github.com/o/r/pull/42".to_string());
+    tasks.push(t);
+    let mut t = mk(10, TaskStatus::Review, "changes requested");
+    t.sub_status = SubStatus::ChangesRequested;
+    t.pr_url = Some("https://github.com/o/r/pull/43".to_string());
+    tasks.push(t);
+    let mut t = mk(11, TaskStatus::Review, "approved");
+    t.sub_status = SubStatus::Approved;
+    t.pr_url = Some("https://github.com/o/r/pull/44".to_string());
+    tasks.push(t);
+
+    // Done: merged PR
+    let mut t = mk(12, TaskStatus::Done, "merged");
+    t.pr_url = Some("https://github.com/o/r/pull/45".to_string());
+    tasks.push(t);
+
+    let mut app = App::new(tasks, ProjectId(1), TEST_TIMEOUT);
+    app.spinner_tick = 0;
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+/// Render a card with labels alongside an existing PR badge to verify labels
+/// compose with derived indicators on the second line without breaking
+/// layout. Two cards: one under the cursor (highlighted background) and one
+/// not, so the cursor-style interaction with label colours is also locked.
+#[test]
+fn snapshot_card_with_labels() {
+    use super::super::App;
+    use crate::models::TaskStatus;
+
+    let mut t1 = make_task(1, TaskStatus::Backlog);
+    t1.title = "CVE-2024-9999".to_string();
+    t1.labels = vec!["scala-common".to_string(), "security".to_string()];
+
+    let mut t2 = make_task(2, TaskStatus::Review);
+    t2.title = "PR review".to_string();
+    t2.labels = vec!["app-frontend".to_string()];
+    t2.pr_url = Some("https://github.com/o/r/pull/77".to_string());
+
+    let mut app = App::new(vec![t1, t2], ProjectId(1), TEST_TIMEOUT);
+    app.spinner_tick = 0;
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
 #[test]
 fn snapshot_card_dispatching_indicator() {
     use super::super::types::Message;

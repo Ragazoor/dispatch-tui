@@ -28,6 +28,7 @@ fn make_task(id: i64, title: &str) -> Task {
         sort_order: None,
         base_branch: "main".to_string(),
         external_id: None,
+        labels: Vec::new(),
         created_at: now,
         updated_at: now,
         project_id: ProjectId(1),

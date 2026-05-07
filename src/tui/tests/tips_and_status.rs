@@ -655,6 +655,7 @@ fn render_input_form_confirm_retry_shows_options() {
         sort_order: None,
         base_branch: "main".to_string(),
         external_id: None,
+        labels: Vec::new(),
         created_at: now,
         updated_at: now,
         project_id: ProjectId(1),

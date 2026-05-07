@@ -358,6 +358,7 @@ mod tests {
             sort_order: None,
             base_branch: "main".to_string(),
             external_id: None,
+            labels: Vec::new(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
             project_id: ProjectId(1),

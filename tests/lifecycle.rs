@@ -75,6 +75,7 @@ fn full_lifecycle() {
             sort_order: None,
             base_branch: "main".to_string(),
             external_id: None,
+            labels: Vec::new(),
             created_at: now,
             updated_at: now,
             project_id: dispatch_tui::models::ProjectId(1),

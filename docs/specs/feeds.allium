@@ -44,6 +44,19 @@ concept FeedItem {
                               -- security alerts). Missing or unknown tag
                               -- causes parse failure in verify-feed and the
                               -- FeedRunner.
+    labels: Set<String> = {}  -- optional free-form labels copied to Task.labels
+                              -- on insert and re-applied on every conflict update
+                              -- (feed-controlled, not user-editable). Defaults
+                              -- to empty set when the script omits the field,
+                              -- preserving wire compatibility with scripts
+                              -- written before this field existed.
+    sort_order: Integer?      -- optional ordering hint copied to Task.sort_order;
+                              -- the existing column ordering uses
+                              -- COALESCE(sort_order, id) ASC so lower values sort
+                              -- first. Used by the CVE feed to surface CRITICAL
+                              -- alerts above HIGH/MEDIUM/LOW (1=CRITICAL, 2=HIGH,
+                              -- 3=MEDIUM, 4=LOW). Optional; omission leaves
+                              -- Task.sort_order unchanged.
 }
 
 ------------------------------------------------------------
@@ -202,20 +215,23 @@ rule UpsertFeedTasks {
     -- == Per-item upsert ==
     --
     --   - New (no match): a Task is inserted with the FeedItem's
-    --     title, description, tag, repo_path = resolved_path[item] (which
-    --     may be ""), status = item.status, sub_status =
-    --     SubStatus.default_for(item.status), external_id =
+    --     title, description, tag, labels, sort_order, repo_path =
+    --     resolved_path[item] (which may be ""), status = item.status,
+    --     sub_status = SubStatus.default_for(item.status), external_id =
     --     item.external_id, base_branch = the resolved default branch
     --     of resolved_path[item] (read from `origin/HEAD`, falling
     --     back to "main" when resolved_path is empty or the ref is
     --     missing), epic = epic.
     --
-    --   - Match: title, description, and tag on the existing Task are
-    --     updated to the new values; status, sub_status, AND repo_path
-    --     are NOT touched. updated_at is bumped. This means a user who
+    --   - Match: title, description, tag, labels, and sort_order on the
+    --     existing Task are updated to the new values; status, sub_status,
+    --     AND repo_path are NOT touched. updated_at is bumped. labels and
+    --     sort_order are feed-controlled (never user-editable in this
+    --     iteration), so they are always replaced. This means a user who
     --     manually fixes the repo_path on a feed task (via 'e') keeps
     --     that correction across subsequent feed refreshes, while the
-    --     feed-owned tag stays in sync with the script output.
+    --     feed-owned tag, labels, and sort_order stay in sync with the
+    --     script output.
     --
     -- Tasks present locally that are NOT in the latest emission are
     -- removed. The dispatch runtime treats the feed as the source of
@@ -238,6 +254,8 @@ rule UpsertFeedTasks {
                     title: item.title,
                     description: item.description,
                     tag: item.tag,
+                    labels: item.labels,
+                    sort_order: item.sort_order,
                     repo_path: resolved,
                     status: item.status,
                     sub_status: core/SubStatus.default_for(item.status),
@@ -249,6 +267,8 @@ rule UpsertFeedTasks {
                 existing.title = item.title
                 existing.description = item.description
                 existing.tag = item.tag
+                existing.labels = item.labels
+                existing.sort_order = item.sort_order
                 -- existing.status, existing.sub_status, existing.repo_path preserved
 
         for task in Tasks where epic = epic and external_id != null:

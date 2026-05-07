@@ -455,7 +455,7 @@ const DISPATCHING_SPINNER: [&str; 10] = [
     "\u{2807}", "\u{280F}",
 ];
 
-fn render_card_indicator(indicator: CardIndicator) -> Line<'static> {
+fn render_card_indicator(indicator: CardIndicator, labels: &[String]) -> Line<'static> {
     let (label, color) = match indicator {
         CardIndicator::Dispatching { spinner_frame } => {
             let glyph = DISPATCHING_SPINNER
@@ -493,10 +493,18 @@ fn render_card_indicator(indicator: CardIndicator) -> Line<'static> {
             )
         }
     };
-    Line::from(vec![
+    let mut spans = vec![
         Span::raw("   "),
         Span::styled(label, Style::default().fg(color)),
-    ])
+    ];
+    for label in labels {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            format!("[{label}]"),
+            Style::default().fg(MUTED),
+        ));
+    }
+    Line::from(spans)
 }
 
 /// Returns a horizontal rule `Line` of box-drawing dashes spanning `width` columns.
@@ -571,7 +579,10 @@ fn build_task_list_item<'a>(
 
     let line1 = Line::from(line1_spans);
 
-    let line2 = render_card_indicator(classify_card_indicator(task, status, app, now));
+    let line2 = render_card_indicator(
+        classify_card_indicator(task, status, app, now),
+        &task.labels,
+    );
 
     let rule_color = if is_cursor || has_message_flash {
         col_color

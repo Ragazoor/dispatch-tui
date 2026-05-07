@@ -8,7 +8,7 @@ fn fresh_db_has_latest_schema_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 44);
+    assert_eq!(version, 47);
 }
 
 #[test]
@@ -210,7 +210,7 @@ fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 44);
+    assert_eq!(version, 47);
 }
 
 #[test]
@@ -299,7 +299,7 @@ fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 44);
+    assert_eq!(version, 47);
 }
 
 #[test]
@@ -410,7 +410,7 @@ fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 44);
+    assert_eq!(version, 47);
 }
 
 #[test]
@@ -491,7 +491,7 @@ fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 44);
+    assert_eq!(version, 47);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -612,7 +612,7 @@ fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 44);
+    assert_eq!(version, 47);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -1611,7 +1611,7 @@ fn migration_31_re_expands_tilde_paths() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 44);
+    assert_eq!(version, 47);
 }
 
 #[test]
@@ -1687,7 +1687,7 @@ fn migrate_v32_adds_base_branch_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 44);
+    assert_eq!(version, 47);
 }
 
 #[test]
@@ -1810,7 +1810,7 @@ fn migration_v38_feed_epic_columns() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 44);
+    assert_eq!(version, 47);
 }
 
 #[test]
@@ -1820,7 +1820,7 @@ fn fresh_db_schema_version_is_40() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 44);
+    assert_eq!(version, 47);
 }
 
 #[test]
@@ -1890,7 +1890,7 @@ fn migration_v40_creates_learnings_table() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 44);
+    assert_eq!(version, 47);
 }
 
 #[test]
@@ -1961,7 +1961,7 @@ fn migration_v41_drops_cost_usd_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 44);
+    assert_eq!(version, 47);
     // Original token data is preserved
     let row: (i64, i64, i64, i64, i64) = conn
         .query_row(
@@ -2073,7 +2073,7 @@ fn test_migrate_v43_proposed_to_approved() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 44);
+    assert_eq!(version, 47);
 }
 
 #[test]
@@ -2123,4 +2123,71 @@ fn migration_v44_converts_episodic_to_convention() {
         kinds[1], "convention",
         "non-episodic entry should be unchanged"
     );
+}
+
+#[test]
+fn migration_v45_adds_labels_column_with_default() {
+    use rusqlite::Connection as RawConn;
+    let conn = RawConn::open_in_memory().unwrap();
+    conn.execute_batch(
+        "PRAGMA foreign_keys=OFF;
+         CREATE TABLE tasks (
+             id INTEGER PRIMARY KEY,
+             title TEXT NOT NULL,
+             description TEXT NOT NULL DEFAULT '',
+             repo_path TEXT NOT NULL,
+             status TEXT NOT NULL DEFAULT 'backlog'
+         );
+         INSERT INTO tasks (title, repo_path, status)
+             VALUES ('legacy task', '/repo', 'backlog');
+         PRAGMA user_version = 44;",
+    )
+    .unwrap();
+
+    // Pre-migration: no labels column
+    assert!(
+        conn.prepare("SELECT labels FROM tasks LIMIT 1").is_err(),
+        "labels column should not exist before migration v45"
+    );
+
+    crate::db::migrations::migrate_v45_add_task_labels(&conn).unwrap();
+
+    let labels: String = conn
+        .query_row("SELECT labels FROM tasks WHERE id = 1", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(labels, "[]");
+
+    conn.execute(
+        "INSERT INTO tasks (title, repo_path, status) VALUES ('new task', '/repo', 'backlog')",
+        [],
+    )
+    .unwrap();
+    let new_labels: String = conn
+        .query_row(
+            "SELECT labels FROM tasks WHERE title = 'new task'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(new_labels, "[]");
+}
+
+#[test]
+fn migration_v45_is_idempotent() {
+    use rusqlite::Connection as RawConn;
+    let conn = RawConn::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE tasks (
+             id INTEGER PRIMARY KEY,
+             title TEXT NOT NULL,
+             description TEXT NOT NULL DEFAULT '',
+             repo_path TEXT NOT NULL,
+             status TEXT NOT NULL DEFAULT 'backlog',
+             labels TEXT NOT NULL DEFAULT '[]'
+         );",
+    )
+    .unwrap();
+
+    // Running the migration on a DB that already has the column must be a no-op.
+    crate::db::migrations::migrate_v45_add_task_labels(&conn).unwrap();
 }

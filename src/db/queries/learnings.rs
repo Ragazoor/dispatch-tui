@@ -9,6 +9,7 @@ use crate::models::{
 };
 
 use super::super::{Database, LearningFilter, LearningPatch};
+use super::{read_json_string_vec, write_json_string_vec};
 
 const LEARNING_COLUMNS: &str =
     "id, kind, summary, detail, scope, scope_ref, tags, status, source_task_id, \
@@ -18,12 +19,11 @@ fn row_to_learning(row: &rusqlite::Row<'_>) -> rusqlite::Result<Learning> {
     let kind_str: String = row.get(1)?;
     let scope_str: String = row.get(4)?;
     let status_str: String = row.get(7)?;
-    let tags_json: String = row.get(6)?;
     let last_confirmed_str: Option<String> = row.get(10)?;
     let created_str: String = row.get(11)?;
     let updated_str: String = row.get(12)?;
 
-    let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
+    let tags = read_json_string_vec(row, "tags");
 
     let parse_dt = |s: &str| -> chrono::DateTime<Utc> {
         NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
@@ -61,7 +61,7 @@ impl super::super::LearningStore for Database {
         source_task_id: Option<TaskId>,
     ) -> Result<LearningId> {
         let conn = self.conn()?;
-        let tags_json = serde_json::to_string(tags).context("Failed to serialize tags")?;
+        let tags_json = write_json_string_vec(tags)?;
         conn.execute(
             "INSERT INTO learnings (kind, summary, detail, scope, scope_ref, tags, status, source_task_id)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'approved', ?7)",
@@ -171,9 +171,8 @@ impl super::super::LearningStore for Database {
             bind.push(Box::new(kind.as_str().to_owned()));
         }
         if let Some(tags) = patch.tags {
-            let json = serde_json::to_string(tags).context("Failed to serialize tags")?;
             sets.push(format!("tags = ?{}", bind.len() + 1));
-            bind.push(Box::new(json));
+            bind.push(Box::new(write_json_string_vec(tags)?));
         }
 
         sets.push("updated_at = datetime('now')".to_string());

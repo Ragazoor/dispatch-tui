@@ -36,11 +36,17 @@ for repo in "${REPOS[@]}"; do
   gh api "/repos/$repo/dependabot/alerts?state=open&per_page=100" 2>/dev/null \
     | jq --arg repo "$repo" '[.[] | {
         external_id: ("dependabot:\($repo)#" + (.number | tostring)),
-        title: ("[" + (.security_advisory.severity | ascii_upcase) + "] " + .security_advisory.summary),
+        title: .security_advisory.summary,
         description: (.security_advisory.description // ""),
         url: .html_url,
         status: "backlog",
-        tag: "fix"
+        tag: "fix",
+        labels: [($repo | split("/") | last)],
+        sort_order: (
+          {critical: 1, high: 2, medium: 3, low: 4}[
+            .security_advisory.severity // "low"
+          ] // 4
+        )
       }]' \
     || echo '[]'
 done | jq -s '[.[][]]'

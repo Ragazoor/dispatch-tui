@@ -327,6 +327,146 @@ fn patch_task_none_fields_unchanged() {
 }
 
 #[test]
+fn create_task_defaults_labels_to_empty() {
+    let db = in_memory_db();
+    let id = db
+        .create_task(CreateTaskRequest {
+            title: "t",
+            description: "",
+            repo_path: "/r",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+        })
+        .unwrap();
+    let task = db.get_task(id).unwrap().unwrap();
+    assert_eq!(task.labels, Vec::<String>::new());
+}
+
+#[test]
+fn patch_task_sets_labels() {
+    let db = in_memory_db();
+    let id = db
+        .create_task(CreateTaskRequest {
+            title: "t",
+            description: "",
+            repo_path: "/r",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+        })
+        .unwrap();
+    let labels = vec!["scala-common".to_string(), "security".to_string()];
+    db.patch_task(id, &TaskPatch::new().labels(&labels))
+        .unwrap();
+    let task = db.get_task(id).unwrap().unwrap();
+    assert_eq!(task.labels, labels);
+}
+
+#[test]
+fn patch_task_clears_labels_to_empty() {
+    let db = in_memory_db();
+    let id = db
+        .create_task(CreateTaskRequest {
+            title: "t",
+            description: "",
+            repo_path: "/r",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+        })
+        .unwrap();
+    let initial = vec!["one".to_string()];
+    db.patch_task(id, &TaskPatch::new().labels(&initial))
+        .unwrap();
+    let empty: Vec<String> = Vec::new();
+    db.patch_task(id, &TaskPatch::new().labels(&empty)).unwrap();
+    let task = db.get_task(id).unwrap().unwrap();
+    assert!(task.labels.is_empty());
+
+    // Verify the column actually contains '[]', not NULL.
+    let conn = db.conn().unwrap();
+    let raw: String = conn
+        .query_row(
+            "SELECT labels FROM tasks WHERE id = ?1",
+            rusqlite::params![id.0],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(raw, "[]");
+}
+
+#[test]
+fn patch_task_none_preserves_labels() {
+    let db = in_memory_db();
+    let id = db
+        .create_task(CreateTaskRequest {
+            title: "t",
+            description: "",
+            repo_path: "/r",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+        })
+        .unwrap();
+    let labels = vec!["keep-me".to_string()];
+    db.patch_task(id, &TaskPatch::new().labels(&labels))
+        .unwrap();
+    // Patching unrelated field must not touch labels.
+    db.patch_task(id, &TaskPatch::new().title("new")).unwrap();
+    let task = db.get_task(id).unwrap().unwrap();
+    assert_eq!(task.labels, labels);
+}
+
+#[test]
+fn list_all_tolerates_corrupt_labels_json() {
+    let db = in_memory_db();
+    let id = db
+        .create_task(CreateTaskRequest {
+            title: "t",
+            description: "",
+            repo_path: "/r",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+        })
+        .unwrap();
+    // Inject malformed JSON directly via the connection.
+    {
+        let conn = db.conn().unwrap();
+        conn.execute(
+            "UPDATE tasks SET labels = ?1 WHERE id = ?2",
+            rusqlite::params!["{not json", id.0],
+        )
+        .unwrap();
+    }
+    // list_all must still succeed; the broken row falls back to empty labels.
+    let tasks = db.list_all().unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert!(tasks[0].labels.is_empty());
+}
+
+#[test]
 fn patch_task_sets_tag() {
     let db = in_memory_db();
     let id = db
@@ -1212,6 +1352,8 @@ fn make_feed_item(external_id: &str, title: &str) -> crate::models::FeedItem {
         url: String::new(),
         status: TaskStatus::Backlog,
         tag: crate::models::TaskTag::Bug,
+        labels: Vec::new(),
+        sort_order: None,
     }
 }
 
@@ -1293,6 +1435,8 @@ fn upsert_feed_tasks_preserves_status() {
         url: String::new(),
         status: TaskStatus::Done, // feed says done; user status should be preserved
         tag: crate::models::TaskTag::Bug,
+        labels: Vec::new(),
+        sort_order: None,
     }];
     db.upsert_feed_tasks(epic.id, &updated, &["/repo".to_string()], &main_branches(1))
         .unwrap();
@@ -1436,6 +1580,8 @@ fn upsert_feed_tasks_on_conflict_does_not_update_repo_path() {
         url: String::new(),
         status: TaskStatus::Backlog,
         tag: crate::models::TaskTag::Bug,
+        labels: Vec::new(),
+        sort_order: None,
     }];
     db.upsert_feed_tasks(
         epic.id,
@@ -1576,6 +1722,8 @@ fn upsert_feed_tasks_persists_tag() {
         url: String::new(),
         status: TaskStatus::Backlog,
         tag: crate::models::TaskTag::PrReview,
+        labels: Vec::new(),
+        sort_order: None,
     }];
 
     db.upsert_feed_tasks(epic.id, &items, &["/repo".to_string()], &main_branches(1))
@@ -1599,6 +1747,8 @@ fn upsert_feed_tasks_updates_tag_on_conflict() {
         url: String::new(),
         status: TaskStatus::Backlog,
         tag: crate::models::TaskTag::PrReview,
+        labels: Vec::new(),
+        sort_order: None,
     }];
     db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
         .unwrap();
@@ -1611,6 +1761,8 @@ fn upsert_feed_tasks_updates_tag_on_conflict() {
         url: String::new(),
         status: TaskStatus::Backlog,
         tag: crate::models::TaskTag::Fix,
+        labels: Vec::new(),
+        sort_order: None,
     }];
     db.upsert_feed_tasks(epic.id, &updated, &["/repo".to_string()], &main_branches(1))
         .unwrap();
@@ -1618,6 +1770,174 @@ fn upsert_feed_tasks_updates_tag_on_conflict() {
     let tasks = db.list_tasks_for_epic(epic.id).unwrap();
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].tag, Some(crate::models::TaskTag::Fix));
+}
+
+#[test]
+fn feed_item_legacy_json_deserializes_with_default_labels_and_sort_order() {
+    // Wire-compat: scripts written before labels/sort_order existed must still
+    // parse. Both fields are #[serde(default)].
+    let legacy_json = r#"{
+        "external_id": "ext-1",
+        "title": "Legacy",
+        "description": "",
+        "url": "",
+        "status": "backlog",
+        "tag": "bug"
+    }"#;
+    let item: crate::models::FeedItem = serde_json::from_str(legacy_json).unwrap();
+    assert!(item.labels.is_empty());
+    assert_eq!(item.sort_order, None);
+}
+
+#[test]
+fn upsert_feed_tasks_writes_labels_and_sort_order_on_insert() {
+    let db = in_memory_db();
+    let epic = db
+        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .unwrap();
+    let items = vec![crate::models::FeedItem {
+        external_id: "ext-1".to_string(),
+        title: "CRITICAL CVE-1234".to_string(),
+        description: "".to_string(),
+        url: String::new(),
+        status: TaskStatus::Backlog,
+        tag: crate::models::TaskTag::Fix,
+        labels: vec!["scala-common".to_string()],
+        sort_order: Some(1),
+    }];
+    db.upsert_feed_tasks(epic.id, &items, &["/repo".to_string()], &main_branches(1))
+        .unwrap();
+
+    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].labels, vec!["scala-common".to_string()]);
+    assert_eq!(tasks[0].sort_order, Some(1));
+}
+
+#[test]
+fn upsert_feed_tasks_replaces_labels_and_sort_order_on_conflict() {
+    let db = in_memory_db();
+    let epic = db
+        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .unwrap();
+    let initial = vec![crate::models::FeedItem {
+        external_id: "ext-1".to_string(),
+        title: "T".to_string(),
+        description: "".to_string(),
+        url: String::new(),
+        status: TaskStatus::Backlog,
+        tag: crate::models::TaskTag::Fix,
+        labels: vec!["repo-a".to_string()],
+        sort_order: Some(3),
+    }];
+    db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
+        .unwrap();
+    // Simulate user moving the task — status & repo_path must be preserved.
+    let task_id = db.list_tasks_for_epic(epic.id).unwrap()[0].id;
+    db.patch_task(
+        task_id,
+        &TaskPatch::new()
+            .status(TaskStatus::Running)
+            .repo_path("/manually-fixed"),
+    )
+    .unwrap();
+
+    let updated = vec![crate::models::FeedItem {
+        external_id: "ext-1".to_string(),
+        title: "T".to_string(),
+        description: "".to_string(),
+        url: String::new(),
+        status: TaskStatus::Backlog,
+        tag: crate::models::TaskTag::Fix,
+        labels: vec!["repo-a".to_string(), "security".to_string()],
+        sort_order: Some(1),
+    }];
+    db.upsert_feed_tasks(epic.id, &updated, &["/repo".to_string()], &main_branches(1))
+        .unwrap();
+
+    let task = db.get_task(task_id).unwrap().unwrap();
+    assert_eq!(
+        task.labels,
+        vec!["repo-a".to_string(), "security".to_string()],
+        "labels are feed-controlled and replaced on conflict"
+    );
+    assert_eq!(
+        task.sort_order,
+        Some(1),
+        "sort_order is replaced on conflict"
+    );
+    // User-owned fields preserved.
+    assert_eq!(task.status, TaskStatus::Running);
+    assert_eq!(task.repo_path, "/manually-fixed");
+}
+
+#[test]
+fn upsert_feed_tasks_can_purge_task_with_associated_learning() {
+    use crate::models::{LearningKind, LearningScope};
+
+    let db = in_memory_db();
+    let epic = db
+        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .unwrap();
+
+    // First feed run: creates a task.
+    let initial = vec![make_feed_item("ext-1", "first")];
+    db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
+        .unwrap();
+    let task_id = db.list_tasks_for_epic(epic.id).unwrap()[0].id;
+
+    // The dispatched agent records a learning referencing the task as its source.
+    db.create_learning(
+        LearningKind::Pitfall,
+        "watch out",
+        None,
+        LearningScope::User,
+        None,
+        &[],
+        Some(task_id),
+    )
+    .unwrap();
+
+    // Second feed run with a different external_id — the previous task should
+    // be purged. Without ON DELETE SET NULL on learnings.source_task_id, this
+    // fails with a FK violation.
+    let next = vec![make_feed_item("ext-2", "second")];
+    db.upsert_feed_tasks(epic.id, &next, &["/repo".to_string()], &main_branches(1))
+        .expect("stale feed task with associated learning should be purgeable");
+
+    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].external_id.as_deref(), Some("ext-2"));
+}
+
+#[test]
+fn upsert_feed_tasks_can_purge_task_with_reported_usage() {
+    use crate::models::UsageReport;
+
+    let db = in_memory_db();
+    let epic = db
+        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .unwrap();
+
+    let initial = vec![make_feed_item("ext-1", "first")];
+    db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
+        .unwrap();
+    let task_id = db.list_tasks_for_epic(epic.id).unwrap()[0].id;
+
+    db.report_usage(
+        task_id,
+        &UsageReport {
+            input_tokens: 1,
+            output_tokens: 1,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+        },
+    )
+    .unwrap();
+
+    let next = vec![make_feed_item("ext-2", "second")];
+    db.upsert_feed_tasks(epic.id, &next, &["/repo".to_string()], &main_branches(1))
+        .expect("stale feed task with reported usage should be purgeable");
 }
 
 // ---------------------------------------------------------------------------
@@ -1652,6 +1972,8 @@ fn task_patch_each_setter_marks_has_changes() {
     assert!(TaskPatch::new().external_id(Some("x")).has_changes());
     assert!(TaskPatch::new().external_id(None).has_changes());
     assert!(TaskPatch::new().project_id(ProjectId(1)).has_changes());
+    let labels: Vec<String> = vec!["x".into()];
+    assert!(TaskPatch::new().labels(&labels).has_changes());
 }
 
 // ---------------------------------------------------------------------------

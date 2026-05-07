@@ -84,6 +84,7 @@ patch_struct! {
         plain    base_branch:  &'a str,
         nullable external_id:  &'a str,
         plain    project_id:   ProjectId,
+        plain    labels:       &'a [String],
     }
 }
 

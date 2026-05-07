@@ -325,6 +325,10 @@ pub struct Task {
     pub base_branch: String,
     pub external_id: Option<String>,
     pub project_id: ProjectId,
+    /// Free-form badges rendered on the kanban card alongside derived
+    /// indicators. Order is preserved so feed scripts can control rendering
+    /// order.
+    pub labels: Vec<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -356,6 +360,15 @@ pub struct FeedItem {
     /// receives, so dispatch routes feed-derived tasks to the correct agent
     /// (e.g. `pr-review` for Dependabot PRs, `fix` for security alerts).
     pub tag: TaskTag,
+    /// Free-form labels copied to `Task.labels` on insert and on conflict.
+    /// `#[serde(default)]` keeps wire compatibility with scripts written
+    /// before this field existed.
+    #[serde(default)]
+    pub labels: Vec<String>,
+    /// Ordering hint copied to `Task.sort_order` (lower sorts first). Used
+    /// by the CVE feed to surface CRITICAL alerts above HIGH/MEDIUM/LOW.
+    #[serde(default)]
+    pub sort_order: Option<i64>,
 }
 
 // ---------------------------------------------------------------------------

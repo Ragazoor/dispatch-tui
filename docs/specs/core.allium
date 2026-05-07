@@ -117,7 +117,8 @@ entity Task {
     epic: Epic?
     pr_url: String?
     tag: TaskTag?
-    sort_order: Integer?
+    sort_order: Integer?  -- shared namespace for feed-driven and user-set ordering; lower sorts first via COALESCE(sort_order, id) ASC
+    labels: Set<String> = {}  -- free-form badges rendered on the card's second line; set by feed scripts via FeedItem.labels or by future TUI editors
     base_branch: String = "main" -- the branch this task rebases onto / targets for PRs
     external_id: String?  -- stable identifier for tasks sourced from a feed epic (see feeds.allium); null for hand-created tasks. Unique per (epic, external_id) when set.
     created_at: Timestamp

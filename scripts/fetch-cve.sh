@@ -64,7 +64,6 @@ for repo in "${REPOS[@]}"; do
   echo "$result" | jq --arg repo "$repo" '[.[] | {
       external_id: ("cve:\($repo)#" + (.number | tostring)),
       title: (
-        "[" + (.security_advisory.severity | ascii_upcase) + "] " +
         (if .security_advisory.cve_id != null
          then .security_advisory.cve_id + ": "
          else ""
@@ -74,6 +73,12 @@ for repo in "${REPOS[@]}"; do
       description: (.security_advisory.description // ""),
       url: .html_url,
       status: "backlog",
-      tag: "fix"
+      tag: "fix",
+      labels: [($repo | split("/") | last)],
+      sort_order: (
+        {critical: 1, high: 2, medium: 3, low: 4}[
+          .security_advisory.severity // "low"
+        ] // 4
+      )
     }]'
 done | jq -s '[.[][]]'

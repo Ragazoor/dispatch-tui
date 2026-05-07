@@ -67,6 +67,9 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (42, migrate_v42_drop_epic_tag),
     (43, migrate_v43_proposed_to_approved),
     (44, migrate_v44_episodic_to_convention),
+    (45, migrate_v45_add_task_labels),
+    (46, migrate_v46_learning_source_task_set_null),
+    (47, migrate_v47_task_usage_restore_cascade),
 ];
 
 fn migrate_v1_add_plan_column(conn: &Connection) -> Result<()> {
@@ -985,4 +988,99 @@ fn migrate_v43_proposed_to_approved(conn: &Connection) -> Result<()> {
 pub(super) fn migrate_v44_episodic_to_convention(conn: &Connection) -> Result<()> {
     conn.execute_batch("UPDATE learnings SET kind = 'convention' WHERE kind = 'episodic'")
         .context("Failed to migrate episodic learnings to convention (migration v44)")
+}
+
+pub(super) fn migrate_v45_add_task_labels(conn: &Connection) -> Result<()> {
+    if !column_exists(conn, "tasks", "labels") {
+        conn.execute_batch("ALTER TABLE tasks ADD COLUMN labels TEXT NOT NULL DEFAULT '[]'")
+            .context("Failed to add labels column to tasks (migration v45)")?;
+    }
+    Ok(())
+}
+
+pub(super) fn migrate_v46_learning_source_task_set_null(conn: &Connection) -> Result<()> {
+    // learnings.source_task_id originally referenced tasks(id) without an
+    // ON DELETE action. That blocked feed-task purges (UpsertFeedTasks)
+    // whenever a feed-derived task had been the source of any learning.
+    // Rebuild the table with ON DELETE SET NULL so a learning outlives its
+    // source task as orphaned provenance rather than blocking the delete.
+
+    let table_exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='learnings'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|n| n > 0)
+        .unwrap_or(false);
+    if !table_exists {
+        return Ok(());
+    }
+
+    conn.execute_batch(
+        "CREATE TABLE learnings_new (
+            id                INTEGER PRIMARY KEY,
+            kind              TEXT    NOT NULL,
+            summary           TEXT    NOT NULL,
+            detail            TEXT,
+            scope             TEXT    NOT NULL,
+            scope_ref         TEXT,
+            tags              TEXT    NOT NULL DEFAULT '[]',
+            status            TEXT    NOT NULL DEFAULT 'approved',
+            source_task_id    INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+            confirmed_count   INTEGER NOT NULL DEFAULT 0,
+            last_confirmed_at TEXT,
+            created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+            updated_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+            CHECK (
+                (scope = 'user' AND scope_ref IS NULL)
+                OR (scope != 'user' AND scope_ref IS NOT NULL)
+            )
+        );
+        INSERT INTO learnings_new
+            SELECT id, kind, summary, detail, scope, scope_ref, tags, status,
+                source_task_id, confirmed_count, last_confirmed_at, created_at, updated_at
+            FROM learnings;
+        DROP TABLE learnings;
+        ALTER TABLE learnings_new RENAME TO learnings;
+        CREATE INDEX IF NOT EXISTS idx_learnings_scope ON learnings(scope, scope_ref);
+        CREATE INDEX IF NOT EXISTS idx_learnings_status ON learnings(status);",
+    )
+    .context("Failed to rebuild learnings with ON DELETE SET NULL (migration v46)")
+}
+
+pub(super) fn migrate_v47_task_usage_restore_cascade(conn: &Connection) -> Result<()> {
+    // Migration v41 recreated task_usage to drop cost_usd but accidentally
+    // dropped the ON DELETE CASCADE clause that was on the original FK in
+    // v10. That broke feed-task purges (UpsertFeedTasks) for any task that
+    // had usage reported. Recreate the table with the cascade restored.
+
+    let table_exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='task_usage'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|n| n > 0)
+        .unwrap_or(false);
+    if !table_exists {
+        return Ok(());
+    }
+
+    conn.execute_batch(
+        "CREATE TABLE task_usage_new (
+            task_id            INTEGER NOT NULL PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+            input_tokens       INTEGER NOT NULL DEFAULT 0,
+            output_tokens      INTEGER NOT NULL DEFAULT 0,
+            cache_read_tokens  INTEGER NOT NULL DEFAULT 0,
+            cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+            updated_at         TEXT NOT NULL DEFAULT ''
+        );
+        INSERT INTO task_usage_new
+            SELECT task_id, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, updated_at
+            FROM task_usage;
+        DROP TABLE task_usage;
+        ALTER TABLE task_usage_new RENAME TO task_usage;",
+    )
+    .context("Failed to restore ON DELETE CASCADE on task_usage (migration v47)")
 }

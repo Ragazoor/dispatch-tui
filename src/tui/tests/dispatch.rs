@@ -1771,6 +1771,7 @@ fn quick_dispatch_status_uses_freshly_created_title() {
         sort_order: None,
         base_branch: "main".to_string(),
         external_id: None,
+        labels: Vec::new(),
         created_at: now,
         updated_at: now,
         project_id: ProjectId(1),
