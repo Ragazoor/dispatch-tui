@@ -117,6 +117,7 @@ pub enum LearningStatus {
     Approved,
     Rejected,
     Archived,
+    NeedsReview,
 }
 
 impl LearningStatus {
@@ -125,6 +126,7 @@ impl LearningStatus {
             LearningStatus::Approved => "approved",
             LearningStatus::Rejected => "rejected",
             LearningStatus::Archived => "archived",
+            LearningStatus::NeedsReview => "needs_review",
         }
     }
 
@@ -133,6 +135,7 @@ impl LearningStatus {
             "approved" => Ok(LearningStatus::Approved),
             "rejected" => Ok(LearningStatus::Rejected),
             "archived" => Ok(LearningStatus::Archived),
+            "needs_review" => Ok(LearningStatus::NeedsReview),
             other => Err(format!("unknown learning status: {other}")),
         }
     }
@@ -171,4 +174,147 @@ pub struct Learning {
     pub last_confirmed_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LearningVerdict {
+    Helped,
+    Unused,
+    Wrong,
+}
+
+impl LearningVerdict {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LearningVerdict::Helped => "helped",
+            LearningVerdict::Unused => "unused",
+            LearningVerdict::Wrong => "wrong",
+        }
+    }
+
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s {
+            "helped" => Ok(LearningVerdict::Helped),
+            "unused" => Ok(LearningVerdict::Unused),
+            "wrong" => Ok(LearningVerdict::Wrong),
+            other => Err(format!("unknown verdict: {other}")),
+        }
+    }
+}
+
+impl std::fmt::Display for LearningVerdict {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for LearningVerdict {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RetrievalSource {
+    PromptInjection,
+    Procedural,
+    QueryLearnings,
+}
+
+impl RetrievalSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RetrievalSource::PromptInjection => "prompt_injection",
+            RetrievalSource::Procedural => "procedural",
+            RetrievalSource::QueryLearnings => "query_learnings",
+        }
+    }
+
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s {
+            "prompt_injection" => Ok(RetrievalSource::PromptInjection),
+            "procedural" => Ok(RetrievalSource::Procedural),
+            "query_learnings" => Ok(RetrievalSource::QueryLearnings),
+            other => Err(format!("unknown retrieval source: {other}")),
+        }
+    }
+}
+
+impl std::fmt::Display for RetrievalSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for RetrievalSource {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct LearningRetrieval {
+    pub id: i64,
+    pub task_id: TaskId,
+    pub learning_id: LearningId,
+    pub source: RetrievalSource,
+    pub retrieved_at: DateTime<Utc>,
+}
+
+#[cfg(test)]
+mod validation_tests {
+    use super::*;
+
+    #[test]
+    fn needs_review_round_trips() {
+        assert_eq!(
+            LearningStatus::parse("needs_review").unwrap(),
+            LearningStatus::NeedsReview
+        );
+        assert_eq!(LearningStatus::NeedsReview.as_str(), "needs_review");
+        assert!(!LearningStatus::NeedsReview.is_terminal());
+    }
+
+    #[test]
+    fn verdict_round_trips() {
+        assert_eq!(
+            LearningVerdict::parse("helped").unwrap(),
+            LearningVerdict::Helped
+        );
+        assert_eq!(
+            LearningVerdict::parse("unused").unwrap(),
+            LearningVerdict::Unused
+        );
+        assert_eq!(
+            LearningVerdict::parse("wrong").unwrap(),
+            LearningVerdict::Wrong
+        );
+        assert!(LearningVerdict::parse("bogus").is_err());
+        assert_eq!(LearningVerdict::Helped.as_str(), "helped");
+    }
+
+    #[test]
+    fn retrieval_source_round_trips() {
+        assert_eq!(
+            RetrievalSource::parse("prompt_injection").unwrap(),
+            RetrievalSource::PromptInjection
+        );
+        assert_eq!(
+            RetrievalSource::parse("procedural").unwrap(),
+            RetrievalSource::Procedural
+        );
+        assert_eq!(
+            RetrievalSource::parse("query_learnings").unwrap(),
+            RetrievalSource::QueryLearnings
+        );
+        assert!(RetrievalSource::parse("nope").is_err());
+        assert_eq!(
+            RetrievalSource::PromptInjection.as_str(),
+            "prompt_injection"
+        );
+    }
 }
