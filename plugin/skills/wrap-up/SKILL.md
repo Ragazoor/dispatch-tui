@@ -98,13 +98,42 @@ The task is automatically moved to "done" (rebase) or "review" (PR) on success. 
 
 ### If rebase:
 
+Before calling `wrap_up`, decide on **learning verdicts** for any knowledge surfaced during this task — see *Validate retrieved knowledge* below.
+
 Call the `dispatch` MCP tool `wrap_up` with:
 - `task_id`: the integer from Step 1
 - `action`: `"rebase"`
+- `learning_verdicts` (optional): the list you assembled in *Validate retrieved knowledge*
 
 The tool blocks until the rebase completes. On success, the task is moved to "done" and the tmux window is killed, ending this session. Do not attempt any further actions after a successful rebase.
 
 If the tool returns an error (e.g. rebase conflict, repo not on `{base_branch}`), show the user the exact error message from the response and suggest resolution steps. The task remains in its current status.
+
+#### Validate retrieved knowledge
+
+When dispatch starts an agent, it injects relevant knowledge into the prompt under "## Validated knowledge for this task". Agents may also call `query_learnings` mid-task. Each surfacing is recorded as a retrieval; at wrap-up the knowledge base needs to know whether each entry was useful.
+
+For every learning that was injected into your prompt or returned by `query_learnings` during this task, decide one of:
+
+- `helped` — the entry was relevant and you applied it. Acts as an upvote.
+- `unused` — the entry appeared but did not apply to this task. Recorded for telemetry; honest "not applicable" — not a default.
+- `wrong` — the entry was misleading, outdated, or contradicts current code. Routes the entry to `needs_review` for human curation.
+
+Then pass the verdicts to `wrap_up`:
+
+```jsonc
+{
+  "task_id": 42,
+  "action": "rebase",
+  "learning_verdicts": [
+    {"learning_id": 7, "verdict": "helped"},
+    {"learning_id": 12, "verdict": "unused"},
+    {"learning_id": 19, "verdict": "wrong"}
+  ]
+}
+```
+
+Skipping verdicts is allowed (omit the field), but leaves the knowledge base unable to learn from this task. Provide verdicts whenever retrievals exist.
 
 ### If PR — author the PR yourself, then record the URL:
 
