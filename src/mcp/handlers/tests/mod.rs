@@ -317,9 +317,9 @@ fn tool_schemas_match_arg_structs() {
         ),
         (
             "wrap_up",
+            BTreeSet::from(["task_id", "action", "learning_verdicts"]),
             BTreeSet::from(["task_id", "action"]),
-            BTreeSet::from(["task_id", "action"]),
-            json!({"task_id": 1, "action": "rebase"}),
+            json!({"task_id": 1, "action": "rebase", "learning_verdicts": [{"learning_id": 1, "verdict": "helped"}]}),
         ),
         (
             "report_usage",

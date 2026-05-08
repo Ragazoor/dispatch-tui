@@ -7,10 +7,12 @@ use crate::db;
 use crate::dispatch;
 use crate::mcp::McpState;
 use crate::models::{
-    DispatchMode, EpicId, ProjectId, SubStatus, Task, TaskId, TaskStatus, TaskTag,
+    DispatchMode, EpicId, LearningId, LearningVerdict, ProjectId, SubStatus, Task, TaskId,
+    TaskStatus, TaskTag,
 };
 use crate::service::{
-    ClaimTaskParams, CreateTaskParams, ListTasksFilter, ServiceError, TaskService, UpdateTaskParams,
+    ClaimTaskParams, CreateTaskParams, LearningService, ListTasksFilter, ServiceError, TaskService,
+    UpdateTaskParams,
 };
 
 use super::types::{
@@ -117,11 +119,20 @@ pub(super) enum WrapUpAction {
     Rebase,
 }
 
+#[derive(Debug, Deserialize)]
+pub(super) struct VerdictArg {
+    #[serde(deserialize_with = "deserialize_flexible_i64")]
+    pub(super) learning_id: i64,
+    pub(super) verdict: String,
+}
+
 #[derive(Deserialize)]
 pub(super) struct WrapUpArgs {
     #[serde(deserialize_with = "deserialize_flexible_i64")]
     pub(super) task_id: i64,
     pub(super) action: WrapUpAction,
+    #[serde(default)]
+    pub(super) learning_verdicts: Option<Vec<VerdictArg>>,
 }
 
 #[derive(Deserialize)]
@@ -631,6 +642,25 @@ pub(super) async fn handle_wrap_up(
         Ok(t) => t,
         Err(e) => return service_err_to_response(id, e),
     };
+
+    // Apply learning verdicts BEFORE the rebase. The agent's evaluation of
+    // surfaced knowledge is independent of branch state — if the rebase fails,
+    // the verdicts have still been recorded against the retrieval rows that
+    // existed when the agent decided to wrap up.
+    if let Some(vs) = parsed.learning_verdicts {
+        let parsed_verdicts: Result<Vec<(LearningId, LearningVerdict)>, String> = vs
+            .into_iter()
+            .map(|v| LearningVerdict::parse(&v.verdict).map(|x| (LearningId(v.learning_id), x)))
+            .collect();
+        let parsed_verdicts = match parsed_verdicts {
+            Ok(p) => p,
+            Err(e) => return JsonRpcResponse::err(id, -32602, e),
+        };
+        let learning_svc = LearningService::new(state.db.clone());
+        if let Err(e) = learning_svc.apply_verdicts(task.id, parsed_verdicts) {
+            return service_err_to_response(id, e);
+        }
+    }
 
     // Defence in depth: `validate_wrap_up` (via `is_wrappable`) guarantees the
     // worktree is `Some` today, but a future change to the validator could

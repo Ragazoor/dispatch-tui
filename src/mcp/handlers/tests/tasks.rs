@@ -2405,6 +2405,188 @@ async fn wrap_up_rejects_pr_action() {
 }
 
 // ---------------------------------------------------------------------------
+// wrap_up + learning_verdicts tests
+// ---------------------------------------------------------------------------
+
+fn make_state_with_runner(
+    runner: Arc<dyn ProcessRunner>,
+) -> (Arc<McpState>, Arc<dyn db::TaskStore>) {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let state = Arc::new(McpState {
+        db: db.clone(),
+        notify_tx: None,
+        runner,
+        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
+        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
+    });
+    (state, db)
+}
+
+fn rebase_ok_runner() -> Arc<dyn ProcessRunner> {
+    Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"main\n"), // rev-parse HEAD
+        MockProcessRunner::fail(""),                  // remote get-url
+        MockProcessRunner::ok(),                      // git rebase
+        MockProcessRunner::ok(),                      // git merge --ff-only
+    ]))
+}
+
+fn create_wrappable_task(db: &Arc<dyn db::TaskStore>) -> crate::models::TaskId {
+    let task_id = db
+        .create_task(CreateTaskRequest {
+            title: "T",
+            description: "d",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Running,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+        })
+        .unwrap();
+    db.patch_task(
+        task_id,
+        &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
+    )
+    .unwrap();
+    task_id
+}
+
+fn create_approved_user_learning(
+    db: &Arc<dyn db::TaskStore>,
+    summary: &str,
+) -> crate::models::LearningId {
+    let id = db
+        .create_learning(
+            crate::models::LearningKind::Convention,
+            summary,
+            None,
+            crate::models::LearningScope::User,
+            None,
+            &[],
+            None,
+        )
+        .unwrap();
+    db.patch_learning(
+        id,
+        &crate::db::LearningPatch::new().status(crate::models::LearningStatus::Approved),
+    )
+    .unwrap();
+    id
+}
+
+fn setup_state_after_dispatch_with_two_retrieved_approved_learnings() -> (
+    Arc<McpState>,
+    Arc<dyn db::TaskStore>,
+    crate::models::TaskId,
+    crate::models::LearningId,
+    crate::models::LearningId,
+) {
+    let (state, db) = make_state_with_runner(rebase_ok_runner());
+    let task_id = create_wrappable_task(&db);
+    let l1 = create_approved_user_learning(&db, "first learning");
+    let l2 = create_approved_user_learning(&db, "second learning");
+    db.record_retrieval(task_id, l1, crate::models::RetrievalSource::PromptInjection)
+        .unwrap();
+    db.record_retrieval(task_id, l2, crate::models::RetrievalSource::PromptInjection)
+        .unwrap();
+    (state, db, task_id, l1, l2)
+}
+
+#[tokio::test]
+async fn wrap_up_with_verdicts_applies_them() {
+    let (state, db, task_id, l1_id, l2_id) =
+        setup_state_after_dispatch_with_two_retrieved_approved_learnings();
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "wrap_up",
+            "arguments": {
+                "task_id": task_id.0,
+                "action": "rebase",
+                "learning_verdicts": [
+                    {"learning_id": l1_id.0, "verdict": "helped"},
+                    {"learning_id": l2_id.0, "verdict": "wrong"}
+                ]
+            }
+        })),
+    )
+    .await;
+    // Verdicts are applied before the rebase, so they persist regardless of
+    // rebase outcome. Assert on DB state.
+    let l1 = db.get_learning(l1_id).unwrap().unwrap();
+    let l2 = db.get_learning(l2_id).unwrap().unwrap();
+    assert_eq!(l1.confirmed_count, 1);
+    assert_eq!(l2.status, crate::models::LearningStatus::NeedsReview);
+    let _ = resp;
+}
+
+#[tokio::test]
+async fn wrap_up_without_verdicts_still_succeeds() {
+    let (state, db) = make_state_with_runner(rebase_ok_runner());
+    let task_id = create_wrappable_task(&db);
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "wrap_up",
+            "arguments": { "task_id": task_id.0, "action": "rebase" }
+        })),
+    )
+    .await;
+    if let Some(err) = resp.error.as_ref() {
+        assert!(
+            !err.message.contains("verdict"),
+            "verdict path should not trigger when none provided: {}",
+            err.message
+        );
+    }
+}
+
+#[tokio::test]
+async fn wrap_up_rejects_verdict_for_unretrieved_learning() {
+    let (state, _db, task_id, _l1, _l2) =
+        setup_state_after_dispatch_with_two_retrieved_approved_learnings();
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "wrap_up",
+            "arguments": {
+                "task_id": task_id.0,
+                "action": "rebase",
+                "learning_verdicts": [{"learning_id": 9999, "verdict": "helped"}]
+            }
+        })),
+    )
+    .await;
+    assert_eq!(resp.error.expect("expected error").code, -32602);
+}
+
+#[tokio::test]
+async fn wrap_up_rejects_unknown_verdict_string() {
+    let (state, _db, task_id, l1_id, _l2) =
+        setup_state_after_dispatch_with_two_retrieved_approved_learnings();
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "wrap_up",
+            "arguments": {
+                "task_id": task_id.0,
+                "action": "rebase",
+                "learning_verdicts": [{"learning_id": l1_id.0, "verdict": "bogus"}]
+            }
+        })),
+    )
+    .await;
+    assert_eq!(resp.error.expect("expected error").code, -32602);
+}
+
+// ---------------------------------------------------------------------------
 // sub_status tests
 // ---------------------------------------------------------------------------
 

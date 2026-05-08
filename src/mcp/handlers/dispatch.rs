@@ -308,6 +308,18 @@ mcp_tools! {
                     "type": "string",
                     "enum": ["rebase"],
                     "description": "Only 'rebase' is supported. To create a PR, follow the /wrap-up skill (agent runs `gh pr create` with an authored title and body, then calls update_task to record pr_url + status='review')."
+                },
+                "learning_verdicts": {
+                    "type": "array",
+                    "description": "Optional per-learning verdicts for entries retrieved during this task. Submit at wrap-up to confirm or flag knowledge that was surfaced. helped → upvotes; unused → recorded only; wrong → routes the entry to needs_review.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "learning_id": { "type": "integer" },
+                            "verdict": { "type": "string", "enum": ["helped", "unused", "wrong"] }
+                        },
+                        "required": ["learning_id", "verdict"]
+                    }
                 }
             },
             "required": ["task_id", "action"]
