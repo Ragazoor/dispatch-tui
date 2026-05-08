@@ -445,35 +445,44 @@ fn parse_filter_setting(
     raw_mode: Option<String>,
     known: &HashSet<String>,
 ) -> (HashSet<String>, RepoFilterMode) {
-    let repos: HashSet<String> = match raw_repos.as_deref() {
-        Some(s) => match serde_json::from_str::<Vec<String>>(s) {
-            Ok(v) => v.into_iter().filter(|p| known.contains(p)).collect(),
-            Err(e) => {
-                tracing::warn!(
-                    raw = %s,
-                    error = %e,
-                    "failed to parse repo_filter setting as JSON, defaulting to empty"
-                );
-                HashSet::new()
-            }
-        },
-        None => HashSet::new(),
+    (
+        parse_repo_filter_repos(raw_repos.as_deref(), known),
+        parse_repo_filter_mode(raw_mode.as_deref()),
+    )
+}
+
+fn parse_repo_filter_repos(raw: Option<&str>, known: &HashSet<String>) -> HashSet<String> {
+    let Some(s) = raw else {
+        return HashSet::new();
     };
-    let mode = match raw_mode.as_deref() {
-        Some(s) => match s.parse::<RepoFilterMode>() {
-            Ok(m) => m,
-            Err(e) => {
-                tracing::warn!(
-                    raw = %s,
-                    error = %e,
-                    "failed to parse repo_filter_mode setting, defaulting"
-                );
-                RepoFilterMode::default()
-            }
-        },
-        None => RepoFilterMode::default(),
+    match serde_json::from_str::<Vec<String>>(s) {
+        Ok(v) => v.into_iter().filter(|p| known.contains(p)).collect(),
+        Err(e) => {
+            tracing::warn!(
+                raw = %s,
+                error = %e,
+                "failed to parse repo_filter setting as JSON, defaulting to empty"
+            );
+            HashSet::new()
+        }
+    }
+}
+
+fn parse_repo_filter_mode(raw: Option<&str>) -> RepoFilterMode {
+    let Some(s) = raw else {
+        return RepoFilterMode::default();
     };
-    (repos, mode)
+    match s.parse::<RepoFilterMode>() {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::warn!(
+                raw = %s,
+                error = %e,
+                "failed to parse repo_filter_mode setting, defaulting"
+            );
+            RepoFilterMode::default()
+        }
+    }
 }
 
 /// Load each known project's saved repo filter (settings keyed

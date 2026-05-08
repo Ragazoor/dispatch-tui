@@ -475,11 +475,9 @@ pub enum Command {
     /// the database via the appropriate service. Dispatches on the
     /// [`EditKind`] to reach the right code path.
     ///
-    /// **Note:** unlike most commands (which return `vec![]`), the handler
-    /// for this variant may return follow-on commands that the runtime queue
-    /// will execute. This is the only command that re-enters the queue. The
-    /// follow-on commands come from `app.update(...)` invocations triggered
-    /// by the editor result (e.g. status updates that need a DB write).
+    /// Unique among commands: the handler returns follow-on commands from
+    /// `app.update(...)` invocations made while applying the edit (e.g. DB
+    /// persistence, status messages), which the runtime queue then drains.
     FinalizeEditorResult {
         kind: EditKind,
         outcome: EditorOutcome,
