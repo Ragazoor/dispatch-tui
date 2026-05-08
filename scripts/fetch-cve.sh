@@ -21,6 +21,7 @@ REPOS=(
     "annotell/gha-scala"
     "annotell/gha-database-bootstrapper"
     "annotell/annotell-data-warehouse"
+    "annotell/airflow-dags"
     "annotell/bigquery-export"
 )
 
