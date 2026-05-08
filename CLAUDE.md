@@ -149,7 +149,7 @@ Dispatched agents always work from their worktree folder. Every prompt includes 
 Key patterns that aren't obvious from reading the code:
 
 - **Message → Command**: `App::update()` processes input messages and returns `Command`s (side effects). Keep rendering pure, effects in commands.
-- **Inline-mutation convention**: Input handlers in `input.rs` directly mutate `self.input.mode`, cursor positions, and other UI-only state, returning `vec![]` (no commands). This is intentional — not an Elm Architecture violation. The rule: if a state change has no side effects (no DB write, no process spawn, no network call), mutate inline and return empty. If it needs a side effect, return a `Command`.
+- **Inline-mutation convention**: Input handlers in `input.rs` directly mutate `self.input.mode`, cursor positions, and other UI-only state, returning `vec![]` (no commands). This is intentional — not an Elm Architecture violation. The rule: if a state change has no side effects (no DB write, no process spawn, no network call), mutate inline and return empty. If it needs a side effect, return a `Command`. If a UI handler in `src/tui/input.rs` returns `vec![]` after mutating `self.input.mode`, cursor positions, or selected indices, that is intentional — do not change it to a `Message`.
 - **ProcessRunner trait**: Abstraction over git/tmux shell commands. Tests use `MockProcessRunner` — never shell out in tests.
 - **TaskPatch builder**: Selective field updates for the database. `None` = don't change, `Some(None)` = set field to NULL.
 - **MCP server**: Runs on port 3142 (configurable via `DISPATCH_PORT`). Agents call JSON-RPC methods in `src/mcp/handlers/` to update task status.
@@ -164,6 +164,57 @@ Key patterns that aren't obvious from reading the code:
   }
   ```
 - **Editor session invariant**: `TuiRuntime` holds an `editor_session: Arc<Mutex<Option<EditorSession>>>` (`src/runtime/mod.rs`). At most one pop-out editor can be open at a time — the runtime refuses to start a new one while the slot is occupied. The slot is `None` when idle.
+
+### Rendering Purity
+
+Code under `src/tui/ui/` must be pure: it reads `App` and shared helpers, writes ratatui buffers, and does nothing else.
+
+**Allowed:**
+- Immutable reads of `App` fields and shared helpers from `src/tui/ui/shared.rs` and `src/tui/ui/palette.rs`
+- Writes to the ratatui `Buffer` / `Frame` passed in by the caller
+- Pure formatting (`format!`, `truncate`, span construction)
+
+**Forbidden:**
+- Database access (no `self.db`, no `Database::*`, no `rusqlite`)
+- File I/O (`std::fs`, `std::io`, `tokio::fs`)
+- Process spawning (`std::process::Command`, `tokio::process`)
+- Async runtime calls (`tokio::*`, `block_on`, channel sends/receives)
+- MCP calls or network I/O
+- `unwrap()` / `expect()` / `panic!` outside `#[cfg(test)]` — render must never crash the TUI
+
+If a render path needs data that isn't on `App`, compute it in the runtime/update layer and stash the result on `App` before rendering — do not reach for it from `src/tui/ui/`.
+
+### Soft-fail Decoding
+
+Schema enum values may be added in a migration before all rows are upgraded. Row decoders in `src/db/queries/` default unknown values and emit `tracing::warn!` rather than panicking — see `row_to_task` in `src/db/queries/mod.rs:20-25` for the canonical example.
+
+Never `panic!` (or `unwrap()`/`expect()`) on an unknown enum value read from the DB. Use `Enum::parse(&s).unwrap_or_else(|| { tracing::warn!(...); Enum::Default })`. This keeps an old DB readable after a partial migration and prevents a poisoned row from killing the TUI.
+
+### Border Parsing
+
+Untrusted inputs — MCP JSON-RPC arguments, editor output, feed-script JSON, plan files — must be parsed into typed domain enums **at the boundary**. Business logic should never see raw `serde_json::Value` or `String` for fields that have a typed shape.
+
+- MCP handlers in `src/mcp/handlers/` parse to typed `*Args` structs (with serde derives) before calling into the service layer.
+- Feed scripts produce `FeedItem` JSON which is parsed into the typed struct in `verify-feed` and at runtime ingest.
+- Plan files are parsed by `src/plan.rs` into a typed plan structure.
+
+Parse failures must surface to the caller as a `ServiceError::Validation` (or `-32602` at the MCP layer). Silent fallback to a default value is forbidden — if the input is invalid, the caller needs to know.
+
+### MCP State Machines
+
+Some MCP tools drive multi-call handshakes via in-memory state on `McpState`. The state is **not persisted** — a process restart loses it, and the agent will start the handshake from scratch on its next call.
+
+**`exit_session` 3-phase shutdown** (`src/mcp/handlers/tasks.rs:719-803`):
+
+| Phase | Trigger | Side effect | Response |
+|-------|---------|-------------|----------|
+| `AskQuestion` | First call, task not in either set | Insert `task_id` into `exit_session_pending` (`src/mcp/mod.rs:30`) | Prompts agent to reflect on learnings |
+| `RecordPrompt` | Second call with `has_learnings=true`, task in `pending` | Move `task_id` from `pending` to `exit_session_reflecting` (`src/mcp/mod.rs:34`) | Prompts agent to call `record_learning` then re-call `exit_session` |
+| `CloseSession` | Either: second call with `has_learnings=false`, OR third call (task in `reflecting`) | Remove from set; patch task to `Done` + clear `tmux_window`; spawn tmux window kill | Confirms close |
+
+Both sets are `Mutex<HashSet<TaskId>>`; entries are also cleared by `state.clear_exit_session_pending(task_id)` when a task is dispatched-next or finished through other paths. A crash mid-handshake leaves no stranded DB state — the task simply hasn't transitioned to `Done` yet, and the agent will re-invoke from `AskQuestion`.
+
+Do not add new ad-hoc state machines on `McpState` without documenting them here.
 
 ### Review/Security Agent State Machine
 
@@ -408,7 +459,17 @@ Approved entries affect dispatch. Rejected and archived entries do not.
 
 ## Visibility Convention
 
-`App` fields use `pub(in crate::tui)` to restrict mutation to the TUI module. External code (runtime, MCP handlers) can only change `App` state by sending a `Message` through `app.update()`, which returns `Command`s. This keeps state transitions auditable in one place and prevents scattered mutation from outside the TUI boundary.
+`App` fields use `pub(in crate::tui)` to restrict mutation to the TUI module. **After bootstrap**, external code (runtime, MCP handlers) can only change `App` state by sending a `Message` through `app.update()`, which returns `Command`s. This keeps state transitions auditable in one place and prevents scattered mutation from outside the TUI boundary.
+
+**Bootstrap-only setters** (called from `runtime::run_tui` and helpers in `src/runtime/mod.rs` while loading persisted settings, before the event loop starts):
+
+- `App::set_notifications_enabled` — invoked from `load_notifications_pref` (`src/runtime/mod.rs:440`)
+- `App::set_main_session` / `App::set_main_session_dir` — invoked from `load_main_session` (`src/runtime/mod.rs:422`, `src/runtime/mod.rs:427`)
+- `App::set_per_project_filter` — invoked from `load_per_project_repo_filters` (`src/runtime/mod.rs:487`, `src/runtime/mod.rs:514`)
+
+`App::set_main_session(None)` is also called mid-runtime from `src/runtime/split.rs:34` to clear a stale main-session reference when the tmux window has gone away — this is a deliberate carve-out because the runtime, not the TUI, owns the tmux lifecycle.
+
+Do not add new direct-mutation setters. Bootstrap loaders are the only legitimate users; everything else must go through a `Message`.
 
 ## Quick Dispatch
 
