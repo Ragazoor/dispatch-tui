@@ -182,7 +182,7 @@ fn shift_d_with_multiple_repos_enters_quick_dispatch_mode() {
 }
 
 #[test]
-fn quick_dispatch_mode_number_selects_repo() {
+fn quick_dispatch_mode_typed_digit_filters_not_selects() {
     let mut app = App::new(
         vec![make_task(1, TaskStatus::Backlog)],
         ProjectId(1),
@@ -191,11 +191,24 @@ fn quick_dispatch_mode_number_selects_repo() {
     app.board.repo_paths = vec!["/repo1".to_string(), "/repo2".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     let cmds = app.handle_key(make_key(KeyCode::Char('2')));
-    assert_eq!(cmds.len(), 1);
-    assert!(
-        matches!(&cmds[0], Command::QuickDispatch { ref draft, epic_id: None } if draft.repo_path == "/repo2")
+    assert!(cmds.is_empty(), "digit must not produce any command");
+    assert_eq!(app.input.mode, InputMode::QuickDispatch);
+    assert_eq!(app.input.buffer, "2");
+}
+
+#[test]
+fn quick_dispatch_mode_invalid_number_appends_to_buffer() {
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Backlog)],
+        ProjectId(1),
+        TEST_TIMEOUT,
     );
-    assert_eq!(app.input.mode, InputMode::Normal);
+    app.board.repo_paths = vec!["/repo1".to_string()];
+    app.input.mode = InputMode::QuickDispatch;
+    let cmds = app.handle_key(make_key(KeyCode::Char('3')));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::QuickDispatch);
+    assert_eq!(app.input.buffer, "3");
 }
 
 #[test]
@@ -210,20 +223,6 @@ fn quick_dispatch_mode_esc_cancels() {
     let cmds = app.handle_key(make_key(KeyCode::Esc));
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::Normal);
-}
-
-#[test]
-fn quick_dispatch_mode_invalid_number_is_noop() {
-    let mut app = App::new(
-        vec![make_task(1, TaskStatus::Backlog)],
-        ProjectId(1),
-        TEST_TIMEOUT,
-    );
-    app.board.repo_paths = vec!["/repo1".to_string()];
-    app.input.mode = InputMode::QuickDispatch;
-    let cmds = app.handle_key(make_key(KeyCode::Char('3')));
-    assert!(cmds.is_empty());
-    assert_eq!(app.input.mode, InputMode::QuickDispatch);
 }
 
 #[test]
@@ -289,8 +288,9 @@ fn shift_d_in_epic_view_repo_selection_dispatches_with_epic_id() {
     };
     // Enter selection mode
     app.handle_key(make_shift_key(KeyCode::Char('D')));
-    // Select second repo
-    let cmds = app.handle_key(make_key(KeyCode::Char('2')));
+    // Move cursor to second repo, then Enter to select.
+    app.handle_key(make_key(KeyCode::Down));
+    let cmds = app.handle_key(make_key(KeyCode::Enter));
     assert_eq!(cmds.len(), 1);
     assert!(matches!(&cmds[0],
         Command::QuickDispatch { ref draft, epic_id: Some(EpicId(10)) }
@@ -1297,13 +1297,24 @@ fn pr_review_state_preserves_conflict_substatus() {
 }
 
 #[test]
-fn quick_dispatch_j_moves_cursor_down() {
+fn quick_dispatch_down_arrow_moves_cursor_down() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.board.repo_paths = vec!["/a".to_string(), "/b".to_string(), "/c".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     app.input.repo_cursor = 0;
-    app.handle_key(make_key(KeyCode::Char('j')));
+    app.handle_key(make_key(KeyCode::Down));
     assert_eq!(app.input.repo_cursor, 1);
+}
+
+#[test]
+fn quick_dispatch_j_typed_into_filter_buffer() {
+    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    app.board.repo_paths = vec!["/jkl".to_string(), "/abc".to_string()];
+    app.input.mode = InputMode::QuickDispatch;
+    app.input.repo_cursor = 0;
+    app.handle_key(make_key(KeyCode::Char('j')));
+    assert_eq!(app.input.buffer, "j");
+    assert_eq!(app.input.repo_cursor, 0);
 }
 
 #[test]
@@ -1427,7 +1438,7 @@ fn quick_dispatch_enter_with_empty_filter_is_noop() {
 }
 
 #[test]
-fn quick_dispatch_number_shortcut_uses_filtered_list() {
+fn quick_dispatch_enter_uses_cursor_within_filtered_list() {
     let mut app = App::new(
         vec![make_task(1, TaskStatus::Backlog)],
         ProjectId(1),
@@ -1440,8 +1451,8 @@ fn quick_dispatch_number_shortcut_uses_filtered_list() {
     ];
     app.input.mode = InputMode::QuickDispatch;
     app.input.buffer = "api".to_string(); // filtered: ["/api-service", "/api-gateway"]
-                                          // Press '2' → second item in filtered list → "/api-gateway"
-    let cmds = app.handle_key(make_key(KeyCode::Char('2')));
+    app.input.repo_cursor = 1; // pick second filtered item → "/api-gateway"
+    let cmds = app.handle_key(make_key(KeyCode::Enter));
     assert_eq!(cmds.len(), 1);
     assert!(
         matches!(&cmds[0], Command::QuickDispatch { ref draft, .. } if draft.repo_path == "/api-gateway")

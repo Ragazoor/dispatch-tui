@@ -168,23 +168,9 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_input_char(&mut self, c: char) -> Vec<Command> {
-        let is_repo_mode = matches!(
-            self.input.mode,
-            InputMode::InputRepoPath | InputMode::InputEpicRepoPath
-        );
-        if is_repo_mode && c.is_ascii_digit() && c != '0' {
-            let idx = (c as usize) - ('1' as usize);
-            let filtered = filtered_repos(&self.board.repo_paths, &self.input.buffer);
-            if idx < filtered.len() {
-                let repo_path = filtered[idx].clone();
-                self.input.buffer.clear();
-                return match self.input.mode {
-                    InputMode::InputEpicRepoPath => self.finish_epic_creation(repo_path),
-                    _ => self.update(Message::SubmitRepoPath(repo_path)),
-                };
-            }
-        }
-        // Per spec: cursor resets to 0 whenever the query changes
+        // Per spec (RepoPathPicker.NoPrintableShortcut): every printable
+        // character filters; no digit/letter is a select shortcut.
+        // Cursor resets to 0 whenever the query changes.
         if matches!(
             self.input.mode,
             InputMode::InputRepoPath | InputMode::InputEpicRepoPath
@@ -211,9 +197,7 @@ impl App {
         self.input.mode = InputMode::QuickDispatch;
         self.input.repo_cursor = 0;
         self.input.buffer.clear();
-        self.set_status(
-            "Type to filter · j/k navigate · Enter select · 1-9 shortcut · Esc cancel".to_string(),
-        );
+        self.set_status("Type to filter · ↑/↓ navigate · Enter select · Esc cancel".to_string());
         vec![]
     }
 

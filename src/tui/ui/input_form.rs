@@ -170,7 +170,7 @@ pub(in crate::tui) fn input_repo_path_lines<'a>(
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "  Type to filter · [j/k] navigate · [Enter] select · [Esc] cancel",
+        "  Type to filter · [↑/↓] navigate · [Enter] select · [Esc] cancel",
         hint,
     )));
     lines
@@ -274,7 +274,7 @@ pub(in crate::tui) fn main_session_dir_lines<'a>(
         area,
         "  Main session — base repo:",
         "Path",
-        "  Type to filter · [j/k] navigate · [Enter] select · [Esc] cancel",
+        "  Type to filter · [↑/↓] navigate · [Enter] select · [Esc] cancel",
         active,
         hint,
     )
@@ -291,7 +291,7 @@ pub(in crate::tui) fn quick_dispatch_lines<'a>(
         area,
         "  Quick Dispatch — select repo:",
         "Filter",
-        "  Type to filter · [j/k] navigate · [Enter] select · [1-9] shortcut · [Esc] cancel",
+        "  Type to filter · [↑/↓] navigate · [Enter] select · [Esc] cancel",
         active,
         hint,
     )
@@ -410,7 +410,7 @@ pub(in crate::tui) fn input_epic_repo_path_lines<'a>(
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "  Type to filter · [j/k] navigate · [Enter] select · [Esc] cancel",
+        "  Type to filter · [↑/↓] navigate · [Enter] select · [Esc] cancel",
         hint,
     )));
     lines

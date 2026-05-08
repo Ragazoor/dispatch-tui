@@ -39,6 +39,6 @@ expression: rendered
 │  ► /repo/alpha                                                                                                       │
 │    /repo/beta                                                                                                        │
 │                                                                                                                      │
-│  Type to filter · [j/k] navigate · [Enter] select · [1-9] shortcut · [Esc] cancel                                    │
+│  Type to filter · [↑/↓] navigate · [Enter] select · [Esc] cancel                                                     │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 Quick dispatch: select repo path

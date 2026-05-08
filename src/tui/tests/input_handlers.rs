@@ -248,30 +248,6 @@ fn enter_in_description_advances_to_repo_path() {
 }
 
 #[test]
-fn number_key_in_repo_path_selects_saved_path() {
-    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
-    app.input.mode = InputMode::InputRepoPath;
-    app.input.task_draft = Some(TaskDraft {
-        title: "T".to_string(),
-        description: "d".to_string(),
-        ..Default::default()
-    });
-    app.input.buffer.clear();
-    // Use real directories so validate_repo_path passes
-    app.board.repo_paths = vec!["/tmp".to_string(), "/var".to_string()];
-    // Number key selects repo, advances to InputBaseBranch
-    let cmds = app.handle_key(make_key(KeyCode::Char('2')));
-    assert_eq!(app.input.mode, InputMode::InputBaseBranch);
-    assert_eq!(app.input.buffer, "main");
-    assert!(cmds.is_empty());
-    // Confirming base branch creates the task
-    let cmds2 = app.update(Message::SubmitBaseBranch("main".to_string()));
-    assert!(cmds2
-        .iter()
-        .any(|c| matches!(c, Command::InsertTask { ref draft, .. } if draft.repo_path == "/var")));
-}
-
-#[test]
 fn number_key_out_of_range_appends_to_buffer() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.input.mode = InputMode::InputRepoPath;
@@ -1149,20 +1125,6 @@ fn handle_key_confirm_retry_esc_cancels() {
 }
 
 #[test]
-fn handle_key_quick_dispatch_digit_selects() {
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
-    app.input.mode = InputMode::QuickDispatch;
-
-    let cmds = app.handle_key(make_key(KeyCode::Char('1')));
-    // Should produce a QuickDispatch command
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::QuickDispatch { .. })));
-    assert_eq!(*app.mode(), InputMode::Normal);
-}
-
-#[test]
 fn handle_key_quick_dispatch_esc_cancels() {
     let mut app = make_app();
     app.input.mode = InputMode::QuickDispatch;
@@ -1610,35 +1572,69 @@ fn handle_key_text_input_enter_submits_typed_text() {
         .any(|c| matches!(c, Command::InsertTask { .. })));
 }
 
-#[test]
-fn handle_key_quick_dispatch_j_moves_cursor_down() {
+// ── QuickDispatch picker: text-input contract (no j/k or digit hijacks) ──
+
+fn quick_dispatch_app(paths: &[&str]) -> App {
     let mut app = make_app();
-    app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
+    app.board.repo_paths = paths.iter().map(|s| s.to_string()).collect();
     app.input.mode = InputMode::QuickDispatch;
     app.input.repo_cursor = 0;
-
-    app.handle_key(make_key(KeyCode::Char('j')));
-    assert_eq!(app.input.repo_cursor, 1);
+    app.input.buffer.clear();
+    app
 }
 
 #[test]
-fn handle_key_quick_dispatch_k_moves_cursor_up() {
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
-    app.input.mode = InputMode::QuickDispatch;
-    app.input.repo_cursor = 1;
-
-    app.handle_key(make_key(KeyCode::Char('k')));
+fn handle_key_quick_dispatch_j_typed_into_buffer() {
+    let mut app = quick_dispatch_app(&["/jkl/repo", "/abc/repo"]);
+    app.handle_key(make_key(KeyCode::Char('j')));
+    assert_eq!(app.input.buffer, "j");
     assert_eq!(app.input.repo_cursor, 0);
 }
 
 #[test]
-fn handle_key_quick_dispatch_enter_selects_current() {
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
-    app.input.mode = InputMode::QuickDispatch;
-    app.input.repo_cursor = 0;
+fn handle_key_quick_dispatch_k_typed_into_buffer() {
+    let mut app = quick_dispatch_app(&["/kong/repo", "/abc/repo"]);
+    app.handle_key(make_key(KeyCode::Char('k')));
+    assert_eq!(app.input.buffer, "k");
+    assert_eq!(app.input.repo_cursor, 0);
+}
 
+#[test]
+fn handle_key_quick_dispatch_digits_typed_into_buffer() {
+    for c in '0'..='9' {
+        let mut app = quick_dispatch_app(&["/repo-1", "/repo-2", "/repo-3"]);
+        let cmds = app.handle_key(make_key(KeyCode::Char(c)));
+        assert!(
+            !cmds
+                .iter()
+                .any(|c| matches!(c, Command::QuickDispatch { .. })),
+            "digit '{c}' must not select"
+        );
+        assert_eq!(app.input.buffer, c.to_string(), "digit '{c}'");
+        assert_eq!(app.input.repo_cursor, 0, "digit '{c}'");
+    }
+}
+
+#[test]
+fn handle_key_quick_dispatch_down_arrow_navigates() {
+    let mut app = quick_dispatch_app(&["/a", "/b"]);
+    app.handle_key(make_key(KeyCode::Down));
+    assert_eq!(app.input.repo_cursor, 1);
+    assert!(app.input.buffer.is_empty());
+}
+
+#[test]
+fn handle_key_quick_dispatch_up_arrow_navigates() {
+    let mut app = quick_dispatch_app(&["/a", "/b"]);
+    app.input.repo_cursor = 1;
+    app.handle_key(make_key(KeyCode::Up));
+    assert_eq!(app.input.repo_cursor, 0);
+}
+
+#[test]
+fn handle_key_quick_dispatch_enter_selects_cursor_entry() {
+    let mut app = quick_dispatch_app(&["/a", "/b"]);
+    app.input.repo_cursor = 1;
     let cmds = app.handle_key(make_key(KeyCode::Enter));
     assert!(cmds
         .iter()
@@ -1646,22 +1642,100 @@ fn handle_key_quick_dispatch_enter_selects_current() {
 }
 
 #[test]
-fn handle_key_quick_dispatch_down_arrow() {
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
-    app.input.mode = InputMode::QuickDispatch;
-    app.input.repo_cursor = 0;
-
-    app.handle_key(make_key(KeyCode::Down));
-    assert_eq!(app.input.repo_cursor, 1);
+fn handle_key_quick_dispatch_backspace_pops_and_resets_cursor() {
+    let mut app = quick_dispatch_app(&["/repo"]);
+    app.input.buffer = "abc".to_string();
+    app.input.repo_cursor = 2;
+    app.handle_key(make_key(KeyCode::Backspace));
+    assert_eq!(app.input.buffer, "ab");
+    assert_eq!(app.input.repo_cursor, 0);
 }
 
 #[test]
-fn handle_key_quick_dispatch_unknown_key_is_noop() {
+fn handle_key_quick_dispatch_esc_cancels_and_clears_buffer() {
+    let mut app = quick_dispatch_app(&["/repo"]);
+    app.input.buffer = "abc".to_string();
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(app.input.buffer.is_empty());
+}
+
+#[test]
+fn handle_key_quick_dispatch_typing_digit_filters_by_digit() {
+    // Regression: with paths containing digits, typing a digit must
+    // filter (subsequence) rather than instant-select by index.
+    let mut app = quick_dispatch_app(&["/foo-1", "/bar-2"]);
+    let cmds = app.handle_key(make_key(KeyCode::Char('2')));
+    assert!(
+        !cmds
+            .iter()
+            .any(|c| matches!(c, Command::QuickDispatch { .. })),
+        "typing '2' must not select"
+    );
+    assert_eq!(app.input.buffer, "2");
+    let filtered = crate::tui::filtered_repos(&app.board.repo_paths, &app.input.buffer);
+    assert_eq!(filtered, vec!["/bar-2".to_string()]);
+}
+
+#[test]
+fn handle_key_quick_dispatch_typing_j_filters_by_j() {
+    // Regression: typing 'j' must filter, not navigate.
+    let mut app = quick_dispatch_app(&["/jkl/repo", "/abc/repo"]);
+    app.handle_key(make_key(KeyCode::Char('j')));
+    let filtered = crate::tui::filtered_repos(&app.board.repo_paths, &app.input.buffer);
+    assert_eq!(filtered, vec!["/jkl/repo".to_string()]);
+    assert_eq!(app.input.repo_cursor, 0);
+}
+
+// ── InputRepoPath / MainSessionDir digit-filtering regressions ──
+
+#[test]
+fn handle_key_input_repo_path_typing_digit_filters_not_selects() {
     let mut app = make_app();
-    app.input.mode = InputMode::QuickDispatch;
-    let cmds = app.handle_key(make_key(KeyCode::Char('z')));
-    assert!(cmds.is_empty());
+    app.board.repo_paths = vec!["/repo-1".to_string(), "/repo-2".to_string()];
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.task_draft = Some(TaskDraft {
+        title: "T".to_string(),
+        ..Default::default()
+    });
+    let cmds = app.handle_key(make_key(KeyCode::Char('2')));
+    assert!(
+        !cmds.iter().any(|c| matches!(c, Command::InsertTask { .. })),
+        "digit must not submit a repo path; cmds: {cmds:?}"
+    );
+    assert_eq!(app.input.buffer, "2");
+}
+
+#[test]
+fn handle_key_main_session_dir_typing_digit_filters_not_selects() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo-1".to_string(), "/repo-2".to_string()];
+    app.input.mode = InputMode::MainSessionDir;
+    let cmds = app.handle_key(make_key(KeyCode::Char('2')));
+    assert!(
+        !cmds.iter().any(
+            |c| matches!(c, Command::PersistStringSetting { key, .. } if key == "main_session.dir")
+        ),
+        "digit must not submit a main session dir; cmds: {cmds:?}"
+    );
+    assert_eq!(app.input.buffer, "2");
+}
+
+#[test]
+fn handle_key_input_epic_repo_path_typing_digit_filters_not_selects() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo-1".to_string(), "/repo-2".to_string()];
+    app.input.mode = InputMode::InputEpicRepoPath;
+    app.input.epic_draft = Some(crate::tui::types::EpicDraft {
+        title: "E".to_string(),
+        ..Default::default()
+    });
+    let cmds = app.handle_key(make_key(KeyCode::Char('2')));
+    assert!(
+        !cmds.iter().any(|c| matches!(c, Command::InsertEpic { .. })),
+        "digit must not submit an epic; cmds: {cmds:?}"
+    );
+    assert_eq!(app.input.buffer, "2");
 }
 
 #[test]
@@ -1876,35 +1950,6 @@ fn confirm_quit_without_split_emits_no_extra_commands() {
 
     assert!(app.should_quit);
     assert!(cmds.is_empty(), "no commands when split is not active");
-}
-
-#[test]
-fn number_key_selects_from_filtered_list() {
-    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
-    // Use two real existing dirs that both fuzzy-match "tmp" (both contain t, m, p)
-    // /tmp exists; /var/tmp also exists and contains t, m, p
-    app.board.repo_paths = vec![
-        "/tmp".to_string(),
-        "/var".to_string(),
-        "/var/tmp".to_string(),
-    ];
-    app.input.mode = InputMode::InputRepoPath;
-    app.input.task_draft = Some(TaskDraft {
-        title: "T".to_string(),
-        ..Default::default()
-    });
-    // Type "tmp" — filtered = ["/tmp", "/var/tmp"]
-    for c in "tmp".chars() {
-        app.handle_key(make_key(KeyCode::Char(c)));
-    }
-    // Press '2' — selects /var/tmp (2nd in filtered)
-    app.handle_key(make_key(KeyCode::Char('2')));
-    assert_eq!(app.input.mode, InputMode::InputBaseBranch);
-    let cmds = app.update(Message::SubmitBaseBranch("main".to_string()));
-    assert!(cmds.iter().any(|c| matches!(
-        c,
-        Command::InsertTask { ref draft, .. } if draft.repo_path == "/var/tmp"
-    )));
 }
 
 #[test]

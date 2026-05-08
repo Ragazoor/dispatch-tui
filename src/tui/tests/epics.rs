@@ -744,7 +744,8 @@ fn epic_text_input_unrecognized_key_is_noop() {
 }
 
 #[test]
-fn epic_repo_path_digit_quick_selects() {
+fn epic_repo_path_digit_filters_not_selects() {
+    // Per RepoPathPicker NoPrintableShortcut: digits filter, never select.
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.board.repo_paths = vec!["/first".to_string(), "/second".to_string()];
     app.input.mode = InputMode::InputEpicRepoPath;
@@ -755,10 +756,12 @@ fn epic_repo_path_digit_quick_selects() {
     });
     app.input.buffer.clear();
     let cmds = app.handle_key(make_key(KeyCode::Char('2')));
-    assert_eq!(app.input.mode, InputMode::Normal);
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::InsertEpic(ref d) if d.repo_path == "/second")));
+    assert_eq!(app.input.mode, InputMode::InputEpicRepoPath);
+    assert_eq!(app.input.buffer, "2");
+    assert!(
+        !cmds.iter().any(|c| matches!(c, Command::InsertEpic(_))),
+        "digit must not submit an epic"
+    );
 }
 
 #[test]

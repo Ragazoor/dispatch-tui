@@ -59,7 +59,10 @@ rule CreateQuickTask {
         -- Triggered by the Shift+D (capital D) TUI key. When no saved
         -- repo paths exist, the key is a no-op. When exactly one saved
         -- repo path exists, it is used directly. When multiple saved
-        -- paths exist, a picker (InputMode::QuickDispatch) is shown.
+        -- paths exist, a picker (InputMode::QuickDispatch) is shown,
+        -- which renders the shared RepoPathPicker surface (see below).
+        -- Per the picker's NoPrintableShortcut guarantee, j/k and
+        -- digits filter; they do not navigate or select.
         -- When invoked from the epic view, epic_id is set to the
         -- current epic, linking the quick task as a subtask.
         -- The task title defaults to "Quick task"; the agent is expected
@@ -1777,7 +1780,10 @@ surface RepoPathPicker {
             ensures: query = remove_last(query)
             ensures: cursor = 0
 
-        -- j/k move cursor within filtered list (wrapping)
+        -- Up/Down arrows move the cursor within the filtered list
+        -- (wrapping). No printable character is a navigation alias —
+        -- letters such as j/k are typed into query, not interpreted as
+        -- nav commands.
         CursorDown(user)
             when filtered.count > 0
             ensures: cursor = (cursor + 1) mod filtered.count
@@ -1787,23 +1793,15 @@ surface RepoPathPicker {
             ensures: cursor = (cursor - 1 + filtered.count) mod filtered.count
 
         -- Enter: select filtered[cursor] if filtered is non-empty,
-        -- otherwise use literal query as the path
+        -- otherwise use literal query as the path. (For pickers that do
+        -- not allow free-form paths, e.g. the QuickDispatch picker
+        -- variant, the empty-filtered branch is a no-op.)
         Confirm(user)
             ensures:
                 if filtered.count > 0:
                     SelectedPath(filtered[cursor].path)
                 else:
                     SelectedPath(query)
-
-        -- Digit 1-9: select filtered[digit-1] if that index exists,
-        -- otherwise append the digit to query
-        DigitSelect(user, digit: Integer)
-            requires: digit >= 1 and digit <= 9
-            ensures:
-                if digit - 1 < filtered.count:
-                    SelectedPath(filtered[digit - 1].path)
-                else:
-                    TypeChar(user, to_string(digit))
 
         -- Escape dismisses the picker without selecting
         Dismiss(user)
@@ -1812,14 +1810,25 @@ surface RepoPathPicker {
         -- cursor is always 0 when the picker is first displayed.
         -- This ensures the most-recently-used path is pre-selected.
 
+    @guarantee NoPrintableShortcut
+        -- No printable character (letter, digit, punctuation) is a
+        -- navigation or selection shortcut. Every printable character
+        -- is appended to query via TypeChar; navigation goes through
+        -- the arrow keys; selection goes through Enter. This contract
+        -- is shared by every InputMode that renders this picker —
+        -- in particular it forbids the historical j/k nav alias and
+        -- the historical 1-9 instant-select shortcut, both of which
+        -- broke fuzzy filtering on paths containing those characters.
+
     @guidance
         -- This surface appears during task creation (InputRepoPath),
-        -- epic creation (InputEpicRepoPath), and dispatch fallback
-        -- (InputDispatchRepoPath). It replaces a plain text input
-        -- with a fuzzy-filtered list of previously-used repo paths.
-        -- The filtered list is ordered by recency (most recent first).
-        -- When the user has not typed anything, all saved paths are
-        -- shown, letting them pick with a single keystroke.
+        -- epic creation (InputEpicRepoPath), main-session repo set
+        -- (MainSessionDir), and quick dispatch (QuickDispatch). It
+        -- replaces a plain text input with a fuzzy-filtered list of
+        -- previously-used repo paths. The filtered list is ordered by
+        -- recency (most recent first). When the user has not typed
+        -- anything, all saved paths are shown, letting them pick with
+        -- a single keystroke.
 }
 
 surface DispatchingFeedback {

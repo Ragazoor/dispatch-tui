@@ -164,6 +164,9 @@ impl App {
             KeyCode::Char(':') => {
                 if self.main_session_dir.is_none() {
                     self.input.mode = InputMode::MainSessionDir;
+                    self.set_status(
+                        "Type to filter · ↑/↓ navigate · Enter select · Esc cancel".to_string(),
+                    );
                     vec![]
                 } else {
                     vec![Command::OpenMainSession]

@@ -1398,7 +1398,7 @@ fn move_repo_cursor_down_wraps() {
     app.board.repo_paths = vec!["/a".to_string(), "/b".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     app.input.repo_cursor = 1; // last
-    app.handle_key(make_key(KeyCode::Char('j')));
+    app.handle_key(make_key(KeyCode::Down));
     assert_eq!(app.input.repo_cursor, 0, "should wrap to first");
 }
 
@@ -1408,7 +1408,7 @@ fn move_repo_cursor_up_wraps() {
     app.board.repo_paths = vec!["/a".to_string(), "/b".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     app.input.repo_cursor = 0; // first
-    app.handle_key(make_key(KeyCode::Char('k')));
+    app.handle_key(make_key(KeyCode::Up));
     assert_eq!(app.input.repo_cursor, 1, "should wrap to last");
 }
 

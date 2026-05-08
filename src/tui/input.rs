@@ -312,28 +312,26 @@ impl App {
         }
     }
 
-    /// Generic y/n confirm dialog: on y/Y resets mode, clears status, and runs `on_confirm`;
-    /// on any other key just resets mode and clears status.
+    /// Quick-dispatch repo picker. Mirrors the shared RepoPathPicker
+    /// surface contract (docs/specs/tasks.allium): every printable
+    /// character filters; arrows navigate; Enter selects the cursor
+    /// entry. No printable character is a navigation or select shortcut.
     pub(in crate::tui) fn handle_key_quick_dispatch(&mut self, key: KeyEvent) -> Vec<Command> {
         match key.code {
             KeyCode::Esc => self.update(Message::CancelInput),
-            KeyCode::Char('j') | KeyCode::Down => self.update(Message::MoveRepoCursor(1)),
-            KeyCode::Char('k') | KeyCode::Up => self.update(Message::MoveRepoCursor(-1)),
+            KeyCode::Down => self.update(Message::MoveRepoCursor(1)),
+            KeyCode::Up => self.update(Message::MoveRepoCursor(-1)),
             KeyCode::Enter => {
                 let idx = self.input.repo_cursor;
                 self.update(Message::SelectQuickDispatchRepo(idx))
             }
-            KeyCode::Char(c) if c.is_ascii_digit() && c != '0' => {
-                let idx = (c as usize) - ('1' as usize);
-                self.update(Message::SelectQuickDispatchRepo(idx))
-            }
-            KeyCode::Char(c) => {
-                self.input.buffer.push(c);
+            KeyCode::Backspace => {
+                self.input.buffer.pop();
                 self.input.repo_cursor = 0;
                 vec![]
             }
-            KeyCode::Backspace => {
-                self.input.buffer.pop();
+            KeyCode::Char(c) => {
+                self.input.buffer.push(c);
                 self.input.repo_cursor = 0;
                 vec![]
             }
