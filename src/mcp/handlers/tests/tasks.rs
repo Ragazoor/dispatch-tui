@@ -2410,8 +2410,6 @@ fn make_state_with_runner(
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
     (state, db)
 }
