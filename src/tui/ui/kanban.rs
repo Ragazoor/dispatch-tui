@@ -1866,6 +1866,16 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 prefix.append(&mut spans);
                 spans = prefix;
             }
+            if app.needs_review_count > 0 {
+                let mut prefix = vec![Span::styled(
+                    format!("[KB:{}] ", app.needs_review_count),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                )];
+                prefix.append(&mut spans);
+                spans = prefix;
+            }
             let bar = Paragraph::new(Line::from(spans));
             frame.render_widget(bar, area);
         }

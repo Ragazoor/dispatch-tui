@@ -194,6 +194,10 @@ pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
         Message::RejectLearning(id) => app.handle_reject_learning(id),
         Message::ApproveLearning(id) => app.handle_approve_learning(id),
         Message::EditLearning(id) => app.handle_edit_learning(id),
+        Message::NeedsReviewCountUpdated(n) => {
+            app.needs_review_count = n;
+            vec![]
+        }
         Message::LearningActioned(id) => app.handle_learning_actioned(id),
         Message::LearningEdited(updated) => app.handle_learning_edited(updated),
 

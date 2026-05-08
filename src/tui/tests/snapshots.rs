@@ -32,6 +32,14 @@ fn snapshot_empty_kanban_board() {
 }
 
 #[test]
+fn snapshot_status_bar_kb_badge() {
+    let mut app = make_app();
+    app.needs_review_count = 2;
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
 fn snapshot_kanban_with_tasks() {
     let mut app = make_app();
     let rendered = render_to_string(&mut app, 120, 40);

@@ -378,6 +378,9 @@ pub enum Message {
     LearningEdited(crate::models::Learning),
     ToggleLearningsView,
     NavigateTreeLearning(TreeNav),
+    /// Updates the count of `NeedsReview` learnings shown in the `[KB:N]`
+    /// status-bar badge.
+    NeedsReviewCountUpdated(i64),
     // Project messages
     ProjectsUpdated(Vec<Project>),
     SelectProject(ProjectId),

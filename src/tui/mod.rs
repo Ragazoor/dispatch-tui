@@ -75,6 +75,10 @@ pub struct App {
     pub(in crate::tui) tips: Option<TipsOverlayState>,
     pub(in crate::tui) main_session: Option<String>,
     pub(in crate::tui) main_session_dir: Option<String>,
+    /// Number of approved-pool learnings currently in `NeedsReview` status.
+    /// Drives the `[KB:N]` badge on the kanban status bar; refreshed alongside
+    /// epics/usage in `exec_refresh_from_db`.
+    pub(in crate::tui) needs_review_count: i64,
 }
 
 /// Format a title for display in confirmation prompts, truncating if longer than `max_len` chars.
@@ -148,6 +152,7 @@ impl App {
             tips: None,
             main_session: None,
             main_session_dir: None,
+            needs_review_count: 0,
         };
         app.update_anchor_from_current();
         app

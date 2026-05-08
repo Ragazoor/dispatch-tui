@@ -34,6 +34,21 @@ impl TuiRuntime {
         }
     }
 
+    /// Refresh the count of `NeedsReview` learnings and dispatch
+    /// [`Message::NeedsReviewCountUpdated`] so the `[KB:N]` status-bar badge
+    /// stays current. Best-effort — DB errors are logged but not surfaced to
+    /// the status bar (the badge simply won't update on this tick).
+    pub(super) fn exec_refresh_needs_review_count(&self, app: &mut App) {
+        match self.database.count_learnings_needs_review() {
+            Ok(n) => {
+                app.update(Message::NeedsReviewCountUpdated(n));
+            }
+            Err(e) => {
+                tracing::warn!(error = ?e, "failed to count needs_review learnings");
+            }
+        }
+    }
+
     pub(super) fn exec_archive_learning(&self, app: &mut App, id: LearningId) {
         self.exec_action_learning(app, id, "archive", |svc, id| svc.archive_learning(id));
     }
