@@ -467,6 +467,43 @@ fn list_all_tolerates_corrupt_labels_json() {
 }
 
 #[test]
+fn decode_fallback_counter_bumps_on_malformed_labels() {
+    let db = in_memory_db();
+    let id = db
+        .create_task(CreateTaskRequest {
+            title: "t",
+            description: "d",
+            repo_path: "/r",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+        })
+        .unwrap();
+    // Inject malformed JSON in labels — bypasses CHECK constraints on enum
+    // columns and exercises the soft-fail branch in `read_json_string_vec`.
+    {
+        let conn = db.conn().unwrap();
+        conn.execute(
+            "UPDATE tasks SET labels = ?1 WHERE id = ?2",
+            rusqlite::params!["{not json", id.0],
+        )
+        .unwrap();
+    }
+    let before = crate::db::decode_fallback_count();
+    let task = db.get_task(id).unwrap().expect("task exists");
+    assert!(task.labels.is_empty());
+    let after = crate::db::decode_fallback_count();
+    assert!(
+        after > before,
+        "decode_fallback_count should increment on malformed JSON (before={before}, after={after})"
+    );
+}
+
+#[test]
 fn patch_task_sets_tag() {
     let db = in_memory_db();
     let id = db

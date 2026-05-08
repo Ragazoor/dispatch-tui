@@ -304,6 +304,10 @@ impl App {
             .collect()
     }
 
+    /// Bootstrap-only carve-out: set during runtime startup from the saved
+    /// `notifications_enabled` setting before the message loop begins. After
+    /// bootstrap completes, this state is mutated only via Messages. See the
+    /// "Visibility Convention" section in CLAUDE.md.
     pub fn set_notifications_enabled(&mut self, enabled: bool) {
         self.notifications_enabled = enabled;
     }
@@ -316,10 +320,16 @@ impl App {
         self.main_session_dir.as_deref()
     }
 
+    /// Bootstrap-only carve-out: populated by the runtime loader from
+    /// `main_session.window` setting at startup. Also called from
+    /// `runtime::split` when the live tmux window disappears (clear path).
+    /// After bootstrap, set via Messages.
     pub fn set_main_session(&mut self, window: Option<String>) {
         self.main_session = window;
     }
 
+    /// Bootstrap-only carve-out: populated by the runtime loader from
+    /// `main_session.dir` setting at startup. After bootstrap, set via Messages.
     pub fn set_main_session_dir(&mut self, dir: Option<String>) {
         self.main_session_dir = dir;
     }
@@ -336,7 +346,8 @@ impl App {
 
     /// Insert a saved filter snapshot for `project_id` into the per-project
     /// map. Used by the runtime loader to restore per-project filters at
-    /// startup.
+    /// startup. Bootstrap-only carve-out from the Message-only convention;
+    /// after bootstrap, filters are mutated via Messages.
     pub(crate) fn set_per_project_filter(
         &mut self,
         project_id: ProjectId,

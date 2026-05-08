@@ -3,6 +3,8 @@ mod queries;
 #[cfg(test)]
 mod tests;
 
+pub use queries::decode_fallback_count;
+
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 use std::path::Path;

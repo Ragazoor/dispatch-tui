@@ -6,10 +6,27 @@ mod prs;
 mod settings;
 mod tasks;
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 
 use crate::models::{Epic, EpicId, ProjectId, SubStatus, Task, TaskId, TaskStatus, TaskTag};
+
+/// Process-wide counter incremented each time a row decode falls back to a
+/// default value (unknown enum string, malformed JSON list, etc.). Surfaces
+/// slow-bleeding migration/decoding bugs that the per-warn `tracing::warn!`
+/// lines alone are too easy to miss.
+static DECODE_FALLBACK_COUNT: AtomicU64 = AtomicU64::new(0);
+
+/// Returns the current value of the process-wide decode-fallback counter.
+pub fn decode_fallback_count() -> u64 {
+    DECODE_FALLBACK_COUNT.load(Ordering::Relaxed)
+}
+
+fn bump_decode_fallback() -> u64 {
+    DECODE_FALLBACK_COUNT.fetch_add(1, Ordering::Relaxed) + 1
+}
 
 /// Column list shared by all task SELECT queries. Pair with `row_to_task`.
 pub(super) const TASK_COLUMNS: &str =
@@ -20,7 +37,12 @@ pub(super) const TASK_COLUMNS: &str =
 pub(super) fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     let status_str: String = row.get("status")?;
     let status = TaskStatus::parse(&status_str).unwrap_or_else(|| {
-        tracing::warn!(raw = %status_str, "unrecognised task status, defaulting to Backlog");
+        let count = bump_decode_fallback();
+        tracing::warn!(
+            raw = %status_str,
+            count,
+            "unrecognised task status, defaulting to Backlog"
+        );
         TaskStatus::Backlog
     });
 
@@ -40,17 +62,9 @@ pub(super) fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
             .get::<_, Option<i64>>("epic_id")
             .unwrap_or(None)
             .map(EpicId),
-        sub_status: row
-            .get::<_, String>("sub_status")
-            .ok()
-            .and_then(|s| SubStatus::parse(&s))
-            .unwrap_or(SubStatus::None),
+        sub_status: parse_sub_status_or_warn(row.get::<_, String>("sub_status").ok()),
         pr_url: row.get::<_, Option<String>>("pr_url").unwrap_or(None),
-        tag: row
-            .get::<_, Option<String>>("tag")
-            .unwrap_or(None)
-            .as_deref()
-            .and_then(TaskTag::parse),
+        tag: parse_tag_or_warn(row.get::<_, Option<String>>("tag").unwrap_or(None)),
         sort_order: row.get::<_, Option<i64>>("sort_order").unwrap_or(None),
         base_branch: row
             .get::<_, Option<String>>("base_branch")
@@ -74,7 +88,15 @@ pub(super) fn row_to_epic(row: &rusqlite::Row<'_>) -> rusqlite::Result<Epic> {
         title: row.get("title")?,
         description: row.get("description")?,
         repo_path: row.get("repo_path")?,
-        status: TaskStatus::parse(&status_str).unwrap_or(TaskStatus::Backlog),
+        status: TaskStatus::parse(&status_str).unwrap_or_else(|| {
+            let count = bump_decode_fallback();
+            tracing::warn!(
+                raw = %status_str,
+                count,
+                "unrecognised epic status, defaulting to Backlog"
+            );
+            TaskStatus::Backlog
+        }),
         plan_path: row.get("plan_path")?,
         sort_order: row.get::<_, Option<i64>>("sort_order").unwrap_or(None),
         auto_dispatch: row.get::<_, bool>("auto_dispatch").unwrap_or(true),
@@ -101,11 +123,48 @@ pub(super) fn read_json_string_vec(row: &rusqlite::Row<'_>, column: &str) -> Vec
         Some(s) => match serde_json::from_str::<Vec<String>>(&s) {
             Ok(v) => v,
             Err(e) => {
-                tracing::warn!(column, raw = %s, error = %e, "malformed JSON list, defaulting to empty");
+                let count = bump_decode_fallback();
+                tracing::warn!(
+                    column,
+                    raw = %s,
+                    error = %e,
+                    count,
+                    "malformed JSON list, defaulting to empty"
+                );
                 Vec::new()
             }
         },
         None => Vec::new(),
+    }
+}
+
+fn parse_sub_status_or_warn(raw: Option<String>) -> SubStatus {
+    match raw {
+        Some(s) => match SubStatus::parse(&s) {
+            Some(v) => v,
+            None => {
+                let count = bump_decode_fallback();
+                tracing::warn!(
+                    raw = %s,
+                    count,
+                    "unrecognised sub_status, defaulting to None"
+                );
+                SubStatus::None
+            }
+        },
+        None => SubStatus::None,
+    }
+}
+
+fn parse_tag_or_warn(raw: Option<String>) -> Option<TaskTag> {
+    let s = raw?;
+    match TaskTag::parse(&s) {
+        Some(v) => Some(v),
+        None => {
+            let count = bump_decode_fallback();
+            tracing::warn!(raw = %s, count, "unrecognised task tag, dropping");
+            None
+        }
     }
 }
 

@@ -33,6 +33,10 @@ pub(super) fn dispatch(
             rt.exec_pop_out_editor(app, kind);
             vec![]
         }
+        // FinalizeEditorResult is the only command that re-enters the queue:
+        // post-edit `app.update(...)` calls inside `exec_finalize_editor_result`
+        // can produce follow-on commands (DB persistence, status messages),
+        // which we forward verbatim. See `Command::FinalizeEditorResult` doc.
         FinalizeEditorResult { kind, outcome } => {
             rt.exec_finalize_editor_result(app, kind, outcome)
         }

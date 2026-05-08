@@ -445,17 +445,34 @@ fn parse_filter_setting(
     raw_mode: Option<String>,
     known: &HashSet<String>,
 ) -> (HashSet<String>, RepoFilterMode) {
-    let repos = raw_repos
-        .as_deref()
-        .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok())
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|p| known.contains(p))
-        .collect();
-    let mode = raw_mode
-        .as_deref()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or_default();
+    let repos: HashSet<String> = match raw_repos.as_deref() {
+        Some(s) => match serde_json::from_str::<Vec<String>>(s) {
+            Ok(v) => v.into_iter().filter(|p| known.contains(p)).collect(),
+            Err(e) => {
+                tracing::warn!(
+                    raw = %s,
+                    error = %e,
+                    "failed to parse repo_filter setting as JSON, defaulting to empty"
+                );
+                HashSet::new()
+            }
+        },
+        None => HashSet::new(),
+    };
+    let mode = match raw_mode.as_deref() {
+        Some(s) => match s.parse::<RepoFilterMode>() {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!(
+                    raw = %s,
+                    error = %e,
+                    "failed to parse repo_filter_mode setting, defaulting"
+                );
+                RepoFilterMode::default()
+            }
+        },
+        None => RepoFilterMode::default(),
+    };
     (repos, mode)
 }
 

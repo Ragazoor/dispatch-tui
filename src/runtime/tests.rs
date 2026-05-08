@@ -2208,3 +2208,55 @@ fn build_learning_injections_partitions_and_records_retrievals() {
     let tier_row = rows.iter().find(|r| r.learning_id == repo_id).unwrap();
     assert!(matches!(tier_row.source, RetrievalSource::PromptInjection));
 }
+
+// ---------------------------------------------------------------------------
+// parse_filter_setting tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn parse_filter_setting_accepts_valid_json() {
+    let mut known = HashSet::new();
+    known.insert("/a".to_string());
+    known.insert("/b".to_string());
+    let raw = Some(r#"["/a","/b","/unknown"]"#.to_string());
+    let mode = Some("exclude".to_string());
+
+    let (repos, mode) = parse_filter_setting(raw, mode, &known);
+
+    assert!(repos.contains("/a"));
+    assert!(repos.contains("/b"));
+    assert!(
+        !repos.contains("/unknown"),
+        "unknown paths are filtered out"
+    );
+    assert_eq!(mode, RepoFilterMode::Exclude);
+}
+
+#[test]
+fn parse_filter_setting_returns_default_on_invalid_json() {
+    let known: HashSet<String> = HashSet::new();
+    let raw = Some("not json at all".to_string());
+
+    let (repos, mode) = parse_filter_setting(raw, None, &known);
+
+    assert!(repos.is_empty(), "bad JSON falls back to empty set");
+    assert_eq!(mode, RepoFilterMode::default());
+}
+
+#[test]
+fn parse_filter_setting_returns_default_on_invalid_mode() {
+    let known: HashSet<String> = HashSet::new();
+    let raw_mode = Some("not-a-mode".to_string());
+
+    let (_, mode) = parse_filter_setting(None, raw_mode, &known);
+
+    assert_eq!(mode, RepoFilterMode::default());
+}
+
+#[test]
+fn parse_filter_setting_empty_when_no_settings() {
+    let known: HashSet<String> = HashSet::new();
+    let (repos, mode) = parse_filter_setting(None, None, &known);
+    assert!(repos.is_empty());
+    assert_eq!(mode, RepoFilterMode::default());
+}

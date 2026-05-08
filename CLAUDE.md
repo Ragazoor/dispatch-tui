@@ -190,6 +190,8 @@ Schema enum values may be added in a migration before all rows are upgraded. Row
 
 Never `panic!` (or `unwrap()`/`expect()`) on an unknown enum value read from the DB. Use `Enum::parse(&s).unwrap_or_else(|| { tracing::warn!(...); Enum::Default })`. This keeps an old DB readable after a partial migration and prevents a poisoned row from killing the TUI.
 
+**Decode-fallback counter:** every soft-fail in `row_to_task`/`row_to_epic` and `read_json_string_vec` bumps a process-wide `AtomicU64` exposed as `crate::db::decode_fallback_count()`. The counter value is included in the `tracing::warn!` message (`count=N`) so the warns are greppable in aggregate, and the accessor lets tests and ad-hoc debugging detect slow-bleeding decode bugs without chasing log lines. When you add a new soft-fail branch, bump the counter from `db::queries::bump_decode_fallback()`.
+
 ### Border Parsing
 
 Untrusted inputs — MCP JSON-RPC arguments, editor output, feed-script JSON, plan files — must be parsed into typed domain enums **at the boundary**. Business logic should never see raw `serde_json::Value` or `String` for fields that have a typed shape.
