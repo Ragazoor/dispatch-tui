@@ -8,15 +8,25 @@ use crate::service::LearningService;
 impl TuiRuntime {
     pub(super) fn exec_load_learnings(&self, app: &mut App) {
         let db: Arc<dyn db::TaskStore> = self.database.clone();
-        let filter = db::LearningFilter {
+        // Load both `approved` and `needs_review` learnings. The overlay groups
+        // them with `needs_review` surfaced at the top so humans can curate
+        // entries demoted by a `wrong` verdict at wrap-up.
+        let approved = db.list_learnings(db::LearningFilter {
             status: Some(LearningStatus::Approved),
             ..Default::default()
-        };
-        match db.list_learnings(filter) {
-            Ok(learnings) => {
-                app.update(Message::ShowLearnings(learnings));
+        });
+        let needs_review = db.list_learnings(db::LearningFilter {
+            status: Some(LearningStatus::NeedsReview),
+            ..Default::default()
+        });
+        match (approved, needs_review) {
+            (Ok(mut a), Ok(mut nr)) => {
+                let mut all = Vec::with_capacity(a.len() + nr.len());
+                all.append(&mut nr);
+                all.append(&mut a);
+                app.update(Message::ShowLearnings(all));
             }
-            Err(e) => {
+            (Err(e), _) | (_, Err(e)) => {
                 app.update(Message::StatusInfo(format!(
                     "Failed to load learnings: {e}"
                 )));
@@ -30,6 +40,36 @@ impl TuiRuntime {
 
     pub(super) fn exec_reject_learning(&self, app: &mut App, id: LearningId) {
         self.exec_action_learning(app, id, "reject", |svc, id| svc.reject_learning(id));
+    }
+
+    /// Approve a learning. Unlike archive/reject, the entry stays visible in
+    /// the overlay (it transitions to `Approved`). After the patch we re-read
+    /// the learning and dispatch `LearningEdited` so the in-memory row picks
+    /// up the new status.
+    pub(super) fn exec_approve_learning(&self, app: &mut App, id: LearningId) {
+        let db: Arc<dyn db::TaskStore> = self.database.clone();
+        let svc = LearningService::new(db.clone());
+        match svc.approve_learning(id) {
+            Ok(()) => match db.get_learning(id) {
+                Ok(Some(updated)) => {
+                    app.update(Message::LearningEdited(updated));
+                    app.update(Message::StatusInfo(format!("Learning {id} approved")));
+                }
+                Ok(None) => {
+                    app.update(Message::StatusInfo(format!("Learning {id} not found")));
+                }
+                Err(e) => {
+                    app.update(Message::StatusInfo(format!(
+                        "Could not refresh learning: {e}"
+                    )));
+                }
+            },
+            Err(e) => {
+                app.update(Message::StatusInfo(format!(
+                    "Could not approve learning: {e}"
+                )));
+            }
+        }
     }
 
     fn exec_action_learning(

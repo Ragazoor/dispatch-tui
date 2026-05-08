@@ -192,6 +192,7 @@ pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
         Message::ToggleLearningsView => app.handle_toggle_learnings_view(),
         Message::NavigateTreeLearning(nav) => app.handle_navigate_tree_learning(nav),
         Message::RejectLearning(id) => app.handle_reject_learning(id),
+        Message::ApproveLearning(id) => app.handle_approve_learning(id),
         Message::EditLearning(id) => app.handle_edit_learning(id),
         Message::LearningActioned(id) => app.handle_learning_actioned(id),
         Message::LearningEdited(updated) => app.handle_learning_edited(updated),

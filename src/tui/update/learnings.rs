@@ -8,8 +8,16 @@ impl App {
         &mut self,
         mut learnings: Vec<crate::models::Learning>,
     ) -> Vec<Command> {
-        // Sort by confirmed_count DESC; stable sort preserves insertion order as a tiebreaker.
-        learnings.sort_by_key(|b| std::cmp::Reverse(b.confirmed_count));
+        // Group `needs_review` first (so they always surface at the top of the
+        // overlay regardless of upvote count), then sort each group by
+        // confirmed_count DESC. Stable sort preserves insertion order as a
+        // tiebreaker.
+        learnings.sort_by_key(|b| {
+            (
+                b.status != crate::models::LearningStatus::NeedsReview,
+                std::cmp::Reverse(b.confirmed_count),
+            )
+        });
         let previous = Box::new(std::mem::replace(
             &mut self.board.view_mode,
             ViewMode::Board(BoardSelection::default()),
@@ -65,6 +73,18 @@ impl App {
         if let ViewMode::Learnings { ref learnings, .. } = self.board.view_mode {
             if learnings.iter().any(|l| l.id == id) {
                 return vec![Command::ArchiveLearning(id)];
+            }
+        }
+        vec![]
+    }
+
+    pub(in crate::tui) fn handle_approve_learning(
+        &mut self,
+        id: crate::models::LearningId,
+    ) -> Vec<Command> {
+        if let ViewMode::Learnings { ref learnings, .. } = self.board.view_mode {
+            if learnings.iter().any(|l| l.id == id) {
+                return vec![Command::ApproveLearning(id)];
             }
         }
         vec![]

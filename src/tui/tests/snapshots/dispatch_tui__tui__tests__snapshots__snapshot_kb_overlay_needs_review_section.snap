@@ -8,10 +8,10 @@ expression: rendered
 ──────────────────────────────│  ── active                │                              │──────────────────────────────
   ▌ #1 Task ╭ Knowledge Base ──────────────────────────────────────────────────────────────────────────────╮
    ◦ <1h    │┌ Knowledge Base (2) — sorted by upvotes ────────────────────────────────────────────────────┐│
-────────────││── Approved (2) ──                                                                          ││────────────
-  ▎ #2 Task ││[h] Prefer concise responses over verbose ones  ↑3  global                                  ││
-   ◦ <1h    ││[!] tokio::spawn needs explicit error logging  ↑1  repo:repo                                ││
-────────────││                                                                                            ││
+────────────││── Needs review (1) ──                                                                      ││────────────
+  ▎ #2 Task ││[!] tokio::spawn needs explicit error logging  ↑0  repo:repo  [review]                      ││
+   ◦ <1h    ││── Approved (1) ──                                                                          ││
+────────────││[h] Prefer concise responses over verbose ones  ↑3  global                                  ││
             ││                                                                                            ││
             ││                                                                                            ││
             ││                                                                                            ││
@@ -29,12 +29,12 @@ expression: rendered
             ││                                                                                            ││
             │ Tab:tree  j/k:nav  a:approve  e:edit  x:reject  A:archive  q:close──────────────────────────┘│
             │ Detail ──────────────────────────────────────────────────────────────────────────────────────│
-            │[h] Prefer concise responses over verbose ones                                                │
+            │[!] tokio::spawn needs explicit error logging  [needs review]                                 │
             │                                                                                              │
-            │This helps agents stay focused.                                                               │
+            │Always wrap futures with logging.                                                             │
             │                                                                                              │
-────────────│status:approved  scope:global  upvotes:3                                                      │────────────
-            │tags: style                                                                                   │
+────────────│status:needs_review  scope:repo:repo  upvotes:0                                               │────────────
+            │tags: async                                                                                   │
             │                                                                                              │
             │                                                                                              │
             ╰──────────────────────────────────────────────────────────────────────────────────────────────╯

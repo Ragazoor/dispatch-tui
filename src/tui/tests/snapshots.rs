@@ -498,6 +498,54 @@ fn snapshot_learnings_tree_view() {
 }
 
 #[test]
+fn snapshot_kb_overlay_needs_review_section() {
+    use crate::models::{Learning, LearningId, LearningKind, LearningScope, LearningStatus};
+    use chrono::Utc;
+
+    let mut app = make_app();
+
+    let now = Utc::now();
+    // Order matches what `exec_load_learnings` produces: needs_review first,
+    // then approved.
+    let learnings = vec![
+        Learning {
+            id: LearningId(7),
+            kind: LearningKind::Pitfall,
+            summary: "tokio::spawn needs explicit error logging".to_string(),
+            detail: Some("Always wrap futures with logging.".to_string()),
+            scope: LearningScope::Repo,
+            scope_ref: Some("/repo".to_string()),
+            tags: vec!["async".to_string()],
+            status: LearningStatus::NeedsReview,
+            source_task_id: None,
+            confirmed_count: 0,
+            last_confirmed_at: None,
+            created_at: now,
+            updated_at: now,
+        },
+        Learning {
+            id: LearningId(1),
+            kind: LearningKind::Preference,
+            summary: "Prefer concise responses over verbose ones".to_string(),
+            detail: Some("This helps agents stay focused.".to_string()),
+            scope: LearningScope::User,
+            scope_ref: None,
+            tags: vec!["style".to_string()],
+            status: LearningStatus::Approved,
+            source_task_id: None,
+            confirmed_count: 3,
+            last_confirmed_at: None,
+            created_at: now,
+            updated_at: now,
+        },
+    ];
+    app.update(crate::tui::Message::ShowLearnings(learnings));
+
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
 fn flat_view_epic_headers() {
     use crate::models::EpicId;
     use crate::tui::tests::make_epic_with_title;

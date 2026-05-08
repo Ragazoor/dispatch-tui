@@ -257,5 +257,9 @@ pub(super) fn dispatch(
             rt.exec_reject_learning(app, id);
             vec![]
         }
+        ApproveLearning(id) => {
+            rt.exec_approve_learning(app, id);
+            vec![]
+        }
     }
 }

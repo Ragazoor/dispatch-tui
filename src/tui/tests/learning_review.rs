@@ -263,12 +263,14 @@ fn x_key_emits_reject_command() {
 }
 
 #[test]
-fn a_key_is_inert_in_overlay() {
-    // 'a' was removed from the learnings overlay key bindings; it must not
-    // trigger an archive command or close the overlay.
+fn a_key_emits_approve_learning() {
+    // 'a' approves the selected learning (used to demote `needs_review`
+    // back to `approved`; no-op for already-approved entries).
     let mut app = make_app_with_learnings();
     let cmds = app.handle_key(make_key(KeyCode::Char('a')));
-    assert!(cmds.is_empty());
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::ApproveLearning(id) if *id == LearningId(1))));
     assert!(matches!(app.board.view_mode, ViewMode::Learnings { .. }));
 }
 

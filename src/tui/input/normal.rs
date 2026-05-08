@@ -54,6 +54,13 @@ impl App {
                     vec![]
                 }
             }
+            KeyCode::Char('a') => {
+                if let Some(id) = selected_id {
+                    self.update(Message::ApproveLearning(id))
+                } else {
+                    vec![]
+                }
+            }
             KeyCode::Char('x') => {
                 if let Some(id) = selected_id {
                     self.update(Message::RejectLearning(id))

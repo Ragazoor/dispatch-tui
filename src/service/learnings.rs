@@ -93,6 +93,24 @@ impl LearningService {
             .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
     }
 
+    /// Approve a learning. Allowed from any non-terminal status, so this also
+    /// transitions a `needs_review` learning back to `approved`.
+    pub fn approve_learning(&self, id: LearningId) -> Result<(), ServiceError> {
+        let learning = self.get_learning(id)?;
+        if learning.status.is_terminal() {
+            return Err(ServiceError::Validation(format!(
+                "cannot approve a {} learning",
+                learning.status
+            )));
+        }
+        if learning.status == LearningStatus::Approved {
+            return Ok(());
+        }
+        self.db
+            .patch_learning(id, &LearningPatch::new().status(LearningStatus::Approved))
+            .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
+    }
+
     pub fn reject_learning(&self, id: LearningId) -> Result<(), ServiceError> {
         let learning = self.get_learning(id)?;
         if learning.status.is_terminal() {
@@ -108,9 +126,12 @@ impl LearningService {
 
     pub fn archive_learning(&self, id: LearningId) -> Result<(), ServiceError> {
         let learning = self.get_learning(id)?;
-        if learning.status != LearningStatus::Approved {
+        if !matches!(
+            learning.status,
+            LearningStatus::Approved | LearningStatus::NeedsReview
+        ) {
             return Err(ServiceError::Validation(format!(
-                "can only archive an approved learning (current status: {})",
+                "can only archive an approved or needs_review learning (current status: {})",
                 learning.status
             )));
         }
@@ -375,6 +396,46 @@ mod learning_tests {
                 source_task_id: None,
             })
             .unwrap();
+        svc.archive_learning(id).unwrap();
+        let learning = svc.get_learning(id).unwrap();
+        assert_eq!(learning.status, LearningStatus::Archived);
+    }
+
+    #[test]
+    fn approve_learning_from_needs_review_sets_status_to_approved() {
+        use crate::db::LearningPatch;
+        let (svc, db) = service_with_db();
+        let id = seed_approved_learning(&svc);
+        // Move to needs_review (simulating a `wrong` verdict).
+        db.patch_learning(
+            id,
+            &LearningPatch::new().status(LearningStatus::NeedsReview),
+        )
+        .unwrap();
+        svc.approve_learning(id).unwrap();
+        let learning = svc.get_learning(id).unwrap();
+        assert_eq!(learning.status, LearningStatus::Approved);
+    }
+
+    #[test]
+    fn approve_learning_from_terminal_status_fails() {
+        let svc = service();
+        let id = seed_approved_learning(&svc);
+        svc.reject_learning(id).unwrap();
+        let err = svc.approve_learning(id).unwrap_err();
+        assert!(matches!(err, ServiceError::Validation(_)));
+    }
+
+    #[test]
+    fn archive_learning_from_needs_review_succeeds() {
+        use crate::db::LearningPatch;
+        let (svc, db) = service_with_db();
+        let id = seed_approved_learning(&svc);
+        db.patch_learning(
+            id,
+            &LearningPatch::new().status(LearningStatus::NeedsReview),
+        )
+        .unwrap();
         svc.archive_learning(id).unwrap();
         let learning = svc.get_learning(id).unwrap();
         assert_eq!(learning.status, LearningStatus::Archived);

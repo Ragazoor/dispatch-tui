@@ -372,6 +372,7 @@ pub enum Message {
     NavigateLearning(isize),
     ArchiveLearning(crate::models::LearningId),
     RejectLearning(crate::models::LearningId),
+    ApproveLearning(crate::models::LearningId),
     EditLearning(crate::models::LearningId),
     LearningActioned(crate::models::LearningId),
     LearningEdited(crate::models::Learning),
@@ -561,6 +562,7 @@ pub enum Command {
     ArchiveLearning(crate::models::LearningId),
     RejectLearning(crate::models::LearningId),
     OpenMainSession,
+    ApproveLearning(crate::models::LearningId),
 }
 
 // ---------------------------------------------------------------------------

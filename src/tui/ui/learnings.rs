@@ -8,7 +8,7 @@ use ratatui::Frame;
 
 use super::palette::{BLUE, CYAN, GREEN, PURPLE, RED, YELLOW};
 use super::shared::truncate;
-use crate::models::{EpicId, Learning, LearningKind, LearningScope, ProjectId};
+use crate::models::{EpicId, Learning, LearningKind, LearningScope, LearningStatus, ProjectId};
 use crate::tui::types::LearningsView;
 use crate::tui::{App, ViewMode};
 
@@ -154,6 +154,38 @@ pub fn render_learnings(frame: &mut Frame, app: &App, area: Rect) {
     render_detail(frame, selected_learning, scope_node_count, bottom_area);
 }
 
+fn learning_row(l: &Learning) -> ListItem<'static> {
+    let icon = kind_icon(l.kind);
+    let badge = scope_badge(l.scope, l.scope_ref.as_deref());
+    let mut spans = vec![
+        Span::styled(icon, kind_color(l.kind)),
+        Span::raw(" "),
+        Span::raw(truncate(&l.summary, 55)),
+        Span::raw("  "),
+        Span::styled(
+            format!("\u{2191}{}", l.confirmed_count),
+            Style::default().fg(Color::Green),
+        ),
+        Span::raw("  "),
+        Span::styled(badge, Style::default().fg(Color::DarkGray)),
+    ];
+    if l.status == LearningStatus::NeedsReview {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            "[review]",
+            Style::default().fg(YELLOW).add_modifier(Modifier::BOLD),
+        ));
+    }
+    ListItem::new(Line::from(spans))
+}
+
+fn section_header(label: &str, count: usize, color: Color) -> ListItem<'static> {
+    ListItem::new(Line::from(Span::styled(
+        format!("── {label} ({count}) ──"),
+        Style::default().fg(color).add_modifier(Modifier::BOLD),
+    )))
+}
+
 fn render_list(frame: &mut Frame, learnings: &[Learning], selected: usize, area: Rect) {
     let title = format!(
         " Knowledge Base ({}) \u{2014} sorted by upvotes ",
@@ -161,29 +193,49 @@ fn render_list(frame: &mut Frame, learnings: &[Learning], selected: usize, area:
     );
     let block = Block::default().borders(Borders::ALL).title(title);
 
-    let items: Vec<ListItem> = learnings
+    // Partition while preserving relative order. `needs_review` learnings
+    // surface first so curators see them before the approved pool.
+    let needs_review: Vec<(usize, &Learning)> = learnings
         .iter()
-        .map(|l| {
-            let icon = kind_icon(l.kind);
-            let badge = scope_badge(l.scope, l.scope_ref.as_deref());
-            let line = Line::from(vec![
-                Span::styled(icon, kind_color(l.kind)),
-                Span::raw(" "),
-                Span::raw(truncate(&l.summary, 55)),
-                Span::raw("  "),
-                Span::styled(
-                    format!("\u{2191}{}", l.confirmed_count),
-                    Style::default().fg(Color::Green),
-                ),
-                Span::raw("  "),
-                Span::styled(badge, Style::default().fg(Color::DarkGray)),
-            ]);
-            ListItem::new(line)
-        })
+        .enumerate()
+        .filter(|(_, l)| l.status == LearningStatus::NeedsReview)
+        .collect();
+    let approved: Vec<(usize, &Learning)> = learnings
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.status != LearningStatus::NeedsReview)
         .collect();
 
+    // Build the visible list. Track which list-item index corresponds to which
+    // selectable learning index so navigation (which still indexes into the
+    // underlying `learnings` vec) maps to the right row.
+    let mut items: Vec<ListItem> = Vec::new();
+    // learning index -> list item row
+    let mut row_for_index: Vec<Option<usize>> = vec![None; learnings.len()];
+
+    if !needs_review.is_empty() {
+        items.push(section_header(
+            "Needs review",
+            needs_review.len(),
+            Color::Yellow,
+        ));
+        for (idx, l) in &needs_review {
+            row_for_index[*idx] = Some(items.len());
+            items.push(learning_row(l));
+        }
+    }
+    if !approved.is_empty() {
+        items.push(section_header("Approved", approved.len(), Color::DarkGray));
+        for (idx, l) in &approved {
+            row_for_index[*idx] = Some(items.len());
+            items.push(learning_row(l));
+        }
+    }
+
     let mut list_state = ListState::default();
-    list_state.select(Some(selected));
+    if let Some(row) = row_for_index.get(selected).copied().flatten() {
+        list_state.select(Some(row));
+    }
 
     let list = List::new(items)
         .block(block)
@@ -197,8 +249,9 @@ fn render_list(frame: &mut Frame, learnings: &[Learning], selected: usize, area:
         height: 1,
         ..area
     };
-    let hints = Paragraph::new(" Tab:tree  j/k:nav  e:edit  x:reject  A:archive  q:close")
-        .style(Style::default().fg(Color::DarkGray));
+    let hints =
+        Paragraph::new(" Tab:tree  j/k:nav  a:approve  e:edit  x:reject  A:archive  q:close")
+            .style(Style::default().fg(Color::DarkGray));
     frame.render_widget(hints, footer_area);
 }
 
@@ -228,20 +281,39 @@ fn render_detail(
     let text = match learning {
         None => Text::raw("No learning selected"),
         Some(l) => {
-            let mut lines = vec![Line::from(vec![
+            let mut header = vec![
                 Span::styled(kind_icon(l.kind), kind_color(l.kind)),
                 Span::raw(" "),
                 Span::styled(
                     l.summary.clone(),
                     Style::default().add_modifier(Modifier::BOLD),
                 ),
-            ])];
+            ];
+            if l.status == LearningStatus::NeedsReview {
+                header.push(Span::raw("  "));
+                header.push(Span::styled(
+                    "[needs review]",
+                    Style::default().fg(YELLOW).add_modifier(Modifier::BOLD),
+                ));
+            }
+            let mut lines = vec![Line::from(header)];
             if let Some(detail) = &l.detail {
                 lines.push(Line::raw(""));
                 lines.push(Line::raw(detail.clone()));
             }
             lines.push(Line::raw(""));
+            let status_color = match l.status {
+                LearningStatus::NeedsReview => YELLOW,
+                LearningStatus::Approved => GREEN,
+                LearningStatus::Rejected => RED,
+                LearningStatus::Archived => Color::DarkGray,
+            };
             lines.push(Line::from(vec![
+                Span::styled(
+                    format!("status:{}", l.status),
+                    Style::default().fg(status_color),
+                ),
+                Span::raw("  "),
                 Span::styled(
                     format!("scope:{}", scope_badge(l.scope, l.scope_ref.as_deref())),
                     Style::default().fg(Color::DarkGray),
