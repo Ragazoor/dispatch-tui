@@ -2195,13 +2195,11 @@ fn build_learning_injections_partitions_and_records_retrievals() {
         )
         .unwrap();
 
-    let (procedural, tiered) = rt.build_learning_injections(&task);
+    let (procedural, tiered) = crate::dispatch::build_and_record_injections(&*rt.database, &task);
     assert_eq!(procedural.len(), 1);
     assert_eq!(procedural[0].id, proc_id);
     assert_eq!(tiered.len(), 1);
     assert_eq!(tiered[0].id, repo_id);
-
-    rt.record_injection_retrievals(task.id, &procedural, &tiered);
 
     let rows = rt.database.list_retrievals_for_task(task.id).unwrap();
     assert_eq!(rows.len(), 2);

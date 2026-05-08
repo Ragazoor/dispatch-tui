@@ -60,10 +60,7 @@ impl TuiRuntime {
         app.update(Message::RepoPathsUpdated(paths));
         let epic_ctx = dispatch::EpicContext::from_db(&task, &*self.database);
         let project_ctx = dispatch::ProjectContext::from_db(&task, &*self.database);
-        let (procedural, tiered) = self.build_learning_injections(&task);
-        // Best-effort: record retrievals even if dispatch fails downstream so
-        // the verdict pipeline can still be exercised.
-        self.record_injection_retrievals(task.id, &procedural, &tiered);
+        let (procedural, tiered) = dispatch::build_and_record_injections(&*self.database, &task);
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
         tokio::task::spawn_blocking(move || {
@@ -135,10 +132,7 @@ impl TuiRuntime {
     pub(super) fn exec_dispatch_agent(&self, task: models::Task, mode: models::DispatchMode) {
         let epic_ctx = dispatch::EpicContext::from_db(&task, &*self.database);
         let project_ctx = dispatch::ProjectContext::from_db(&task, &*self.database);
-        let (procedural, tiered) = self.build_learning_injections(&task);
-        // Best-effort: record retrievals before spawning so the verdict
-        // pipeline knows what was surfaced even if the spawned dispatch fails.
-        self.record_injection_retrievals(task.id, &procedural, &tiered);
+        let (procedural, tiered) = dispatch::build_and_record_injections(&*self.database, &task);
         let label = mode.label();
         self.spawn_dispatch(
             task,
@@ -168,50 +162,6 @@ impl TuiRuntime {
             },
             label,
         );
-    }
-
-    /// Fetch the active learning list for a task and split it into
-    /// `(procedural, tiered)` owned vectors, ready for use as
-    /// `LearningInjections` and for retrieval recording.
-    pub(super) fn build_learning_injections(
-        &self,
-        task: &models::Task,
-    ) -> (Vec<models::Learning>, Vec<models::Learning>) {
-        let active = self
-            .database
-            .list_learnings_for_dispatch(Some(task.project_id), &task.repo_path, task.epic_id)
-            .unwrap_or_default();
-        let (procedural, non_procedural): (Vec<_>, Vec<_>) = active
-            .into_iter()
-            .partition(|l| l.kind == models::LearningKind::Procedural);
-        let tiered: Vec<models::Learning> =
-            crate::dispatch::select_tiered_learnings(&non_procedural, 8)
-                .into_iter()
-                .cloned()
-                .collect();
-        (procedural, tiered)
-    }
-
-    /// Record retrieval rows for each learning that will be injected.
-    /// Best-effort — failures are ignored and must not block dispatch.
-    pub(super) fn record_injection_retrievals(
-        &self,
-        task_id: TaskId,
-        procedural: &[models::Learning],
-        tiered: &[models::Learning],
-    ) {
-        for l in procedural {
-            let _ =
-                self.database
-                    .record_retrieval(task_id, l.id, models::RetrievalSource::Procedural);
-        }
-        for l in tiered {
-            let _ = self.database.record_retrieval(
-                task_id,
-                l.id,
-                models::RetrievalSource::PromptInjection,
-            );
-        }
     }
 
     pub(super) fn exec_capture_tmux(&self, id: TaskId, window: String) {

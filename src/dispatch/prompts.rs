@@ -456,8 +456,6 @@ IMPORTANT: Do NOT start implementing. Your job ends after creating the work pack
     )
 }
 
-// Tiered learning selection — wired into dispatch prompts in Task 7 of
-// docs/superpowers/plans/2026-05-07-knowledge-base-validation-loop.md.
 const TIER_ORDER: [LearningScope; 4] = [
     LearningScope::Epic,
     LearningScope::Repo,
@@ -465,6 +463,8 @@ const TIER_ORDER: [LearningScope; 4] = [
     LearningScope::User,
 ];
 const PER_TIER: usize = 2;
+/// Maximum total learnings injected into a dispatch prompt across all scope tiers.
+pub const INJECTION_CAP: usize = 8;
 
 /// Push-injection groups for a dispatch prompt. Both lists hold borrowed
 /// `Learning`s so the caller keeps ownership of the active list returned by
@@ -476,6 +476,42 @@ pub struct LearningInjections<'a> {
     pub procedural: Vec<&'a Learning>,
     /// Non-procedural learnings selected by `select_tiered_learnings`.
     pub tiered: Vec<&'a Learning>,
+}
+
+pub fn build_and_record_injections(
+    db: &dyn crate::db::TaskStore,
+    task: &crate::models::Task,
+) -> (Vec<Learning>, Vec<Learning>) {
+    use crate::models::RetrievalSource;
+    let active = db
+        .list_learnings_for_dispatch(Some(task.project_id), &task.repo_path, task.epic_id)
+        .unwrap_or_default();
+    let (procedural, non_procedural): (Vec<_>, Vec<_>) = active
+        .into_iter()
+        .partition(|l| l.kind == LearningKind::Procedural);
+    let tiered: Vec<Learning> = select_tiered_learnings(&non_procedural, INJECTION_CAP)
+        .into_iter()
+        .cloned()
+        .collect();
+    let pairs = procedural
+        .iter()
+        .map(|l| (l.id, RetrievalSource::Procedural))
+        .chain(
+            tiered
+                .iter()
+                .map(|l| (l.id, RetrievalSource::PromptInjection)),
+        );
+    for (lid, source) in pairs {
+        if let Err(e) = db.record_retrieval(task.id, lid, source) {
+            tracing::warn!(
+                task_id = task.id.0,
+                learning_id = lid.0,
+                error = ?e,
+                "failed to record learning retrieval"
+            );
+        }
+    }
+    (procedural, tiered)
 }
 
 pub(crate) fn select_tiered_learnings(learnings: &[Learning], cap: usize) -> Vec<&Learning> {

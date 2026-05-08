@@ -183,13 +183,18 @@ pub(super) fn handle_query_learnings(
     let limit = parsed.limit.unwrap_or(20).min(50) as usize;
     learnings.truncate(limit);
 
-    // Best-effort: record a retrieval row per returned learning so the
-    // wrap-up verdict step can validate that the agent saw it. A failed
-    // insert must not fail the query response.
     for l in &learnings {
-        let _ = state
+        if let Err(e) = state
             .db
-            .record_retrieval(task_id, l.id, RetrievalSource::QueryLearnings);
+            .record_retrieval(task_id, l.id, RetrievalSource::QueryLearnings)
+        {
+            tracing::warn!(
+                task_id = task_id.0,
+                learning_id = l.id.0,
+                error = ?e,
+                "failed to record learning retrieval"
+            );
+        }
     }
 
     if learnings.is_empty() {

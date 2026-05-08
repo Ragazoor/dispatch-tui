@@ -14,8 +14,7 @@ pub use agents::{
     quick_dispatch_agent, research_agent, resume_agent,
 };
 pub use finish::{finish_task, FinishError};
-pub(crate) use prompts::select_tiered_learnings;
-pub use prompts::{EpicContext, LearningInjections, ProjectContext};
+pub use prompts::{build_and_record_injections, EpicContext, LearningInjections, ProjectContext};
 pub use worktree::{branch_from_worktree, cleanup_task, validate_repo_path};
 
 /// Extract stderr from a process `Output` as a trimmed `String`.

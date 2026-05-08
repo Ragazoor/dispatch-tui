@@ -198,7 +198,7 @@ impl LearningService {
         if verdicts.is_empty() {
             return Ok(());
         }
-        let retrieved: Vec<LearningId> = self
+        let retrieved: std::collections::HashSet<LearningId> = self
             .db
             .list_retrievals_for_task(task_id)
             .map_err(|e| ServiceError::Internal(format!("database error: {e}")))?

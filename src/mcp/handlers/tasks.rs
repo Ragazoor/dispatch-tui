@@ -123,7 +123,7 @@ pub(super) enum WrapUpAction {
 pub(super) struct VerdictArg {
     #[serde(deserialize_with = "deserialize_flexible_i64")]
     pub(super) learning_id: i64,
-    pub(super) verdict: String,
+    pub(super) verdict: LearningVerdict,
 }
 
 #[derive(Deserialize)]
@@ -648,14 +648,10 @@ pub(super) async fn handle_wrap_up(
     // the verdicts have still been recorded against the retrieval rows that
     // existed when the agent decided to wrap up.
     if let Some(vs) = parsed.learning_verdicts {
-        let parsed_verdicts: Result<Vec<(LearningId, LearningVerdict)>, String> = vs
+        let parsed_verdicts: Vec<(LearningId, LearningVerdict)> = vs
             .into_iter()
-            .map(|v| LearningVerdict::parse(&v.verdict).map(|x| (LearningId(v.learning_id), x)))
+            .map(|v| (LearningId(v.learning_id), v.verdict))
             .collect();
-        let parsed_verdicts = match parsed_verdicts {
-            Ok(p) => p,
-            Err(e) => return JsonRpcResponse::err(id, -32602, e),
-        };
         let learning_svc = LearningService::new(state.db.clone());
         if let Err(e) = learning_svc.apply_verdicts(task.id, parsed_verdicts) {
             return service_err_to_response(id, e);
@@ -871,26 +867,9 @@ fn do_dispatch(
     db: &dyn crate::db::TaskStore,
     runner: &dyn crate::process::ProcessRunner,
 ) -> anyhow::Result<crate::models::DispatchResult> {
-    use crate::models::{LearningKind, RetrievalSource};
     let epic_ctx = dispatch::EpicContext::from_db(task, db);
     let project_ctx = dispatch::ProjectContext::from_db(task, db);
-    let active = db
-        .list_learnings_for_dispatch(Some(task.project_id), &task.repo_path, task.epic_id)
-        .unwrap_or_default();
-    let (procedural, non_procedural): (Vec<_>, Vec<_>) = active
-        .into_iter()
-        .partition(|l| l.kind == LearningKind::Procedural);
-    let tiered: Vec<_> = dispatch::select_tiered_learnings(&non_procedural, 8)
-        .into_iter()
-        .cloned()
-        .collect();
-    // Best-effort recording of injection rows.
-    for l in &procedural {
-        let _ = db.record_retrieval(task.id, l.id, RetrievalSource::Procedural);
-    }
-    for l in &tiered {
-        let _ = db.record_retrieval(task.id, l.id, RetrievalSource::PromptInjection);
-    }
+    let (procedural, tiered) = dispatch::build_and_record_injections(db, task);
     let injections = dispatch::LearningInjections {
         procedural: procedural.iter().collect(),
         tiered: tiered.iter().collect(),
