@@ -5,14 +5,39 @@ pub enum EditorSection {
     Plan,
 }
 
+/// A parse failure surfaced by [`parse_editor_content`] /
+/// [`parse_epic_editor_output`]. The runtime turns these into a status message
+/// so the user knows their input was rejected rather than silently dropped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditorParseError {
+    /// The section name as it appears in the editor file (e.g. `"STATUS"`).
+    pub field: &'static str,
+    /// The raw user-typed value that failed to parse.
+    pub raw: String,
+    /// Human-readable explanation suitable for a status bar message.
+    pub message: String,
+}
+
+impl std::fmt::Display for EditorParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.field, self.message)
+    }
+}
+
+#[derive(Default)]
 pub struct EditorFields {
     pub title: String,
     pub description: String,
     pub repo_path: String,
-    pub status: String,
+    /// Parsed task status, or `None` if the section was empty or its content
+    /// failed to parse. Parse failures are recorded in `errors`.
+    pub status: Option<crate::models::TaskStatus>,
     pub plan: String,
-    pub tag: String,
+    /// Parsed tag, or `None` if the section was empty or unparseable. Parse
+    /// failures are recorded in `errors`.
+    pub tag: Option<crate::models::TaskTag>,
     pub base_branch: String,
+    pub errors: Vec<EditorParseError>,
 }
 
 #[cfg(test)]
@@ -20,12 +45,16 @@ use crate::models::ProjectId;
 use crate::models::{Epic, Learning, LearningKind, Task};
 use crate::service::FieldUpdate;
 
+#[derive(Default)]
 pub struct EpicEditorFields {
     pub title: String,
     pub description: String,
     pub repo_path: String,
-    pub feed_command: String,       // "" → Clear, non-empty → Set
-    pub feed_interval_secs: String, // "" or non-integer → None (don't touch)
+    pub feed_command: String, // "" → Clear, non-empty → Set
+    /// Parsed seconds, or `None` if the section was empty or unparseable.
+    /// Parse failures are recorded in `errors`.
+    pub feed_interval_secs: Option<i64>,
+    pub errors: Vec<EditorParseError>,
 }
 
 /// Parse `--- SECTION ---` delimited text into a map of section name → content.
@@ -81,12 +110,30 @@ pub fn format_epic_for_editor(epic: &Epic) -> String {
 
 pub fn parse_epic_editor_output(input: &str) -> EpicEditorFields {
     let mut s = parse_sections(input);
+    let mut errors = Vec::new();
+    let raw_interval = s.remove("FEED_INTERVAL_SECS").unwrap_or_default();
+    let feed_interval_secs = if raw_interval.is_empty() {
+        None
+    } else {
+        match raw_interval.parse::<i64>() {
+            Ok(n) => Some(n),
+            Err(_) => {
+                errors.push(EditorParseError {
+                    field: "FEED_INTERVAL_SECS",
+                    raw: raw_interval.clone(),
+                    message: format!("not a valid integer: {raw_interval:?}"),
+                });
+                None
+            }
+        }
+    };
     EpicEditorFields {
         title: s.remove("TITLE").unwrap_or_default(),
         description: s.remove("DESCRIPTION").unwrap_or_default(),
         repo_path: s.remove("REPO_PATH").unwrap_or_default(),
         feed_command: s.remove("FEED_COMMAND").unwrap_or_default(),
-        feed_interval_secs: s.remove("FEED_INTERVAL_SECS").unwrap_or_default(),
+        feed_interval_secs,
+        errors,
     }
 }
 
@@ -132,17 +179,16 @@ pub fn apply_task_editor_fields(task: &Task, fields: EditorFields) -> TaskEditAp
     } else {
         fields.repo_path
     };
-    let status = crate::models::TaskStatus::parse(&fields.status).unwrap_or(task.status);
+    // None covers both empty-section and unparseable input — both fall back
+    // to the prior value. Unparseable input is also surfaced via
+    // `fields.errors` for the runtime to render as a status message.
+    let status = fields.status.unwrap_or(task.status);
     let plan_path = if fields.plan.is_empty() {
         None
     } else {
         Some(fields.plan)
     };
-    let tag = if fields.tag.is_empty() {
-        None
-    } else {
-        crate::models::TaskTag::parse(&fields.tag)
-    };
+    let tag = fields.tag;
     let base_branch = if fields.base_branch.is_empty() {
         None
     } else {
@@ -193,20 +239,57 @@ pub fn apply_epic_editor_fields(epic: &Epic, fields: EpicEditorFields) -> EpicEd
         } else {
             FieldUpdate::Set(fields.feed_command)
         },
-        feed_interval_secs: fields.feed_interval_secs.parse::<i64>().ok(),
+        feed_interval_secs: fields.feed_interval_secs,
     }
 }
 
 pub fn parse_editor_content(input: &str) -> EditorFields {
     let mut s = parse_sections(input);
+    let mut errors = Vec::new();
+
+    let raw_status = s.remove("STATUS").unwrap_or_default();
+    let status = if raw_status.is_empty() {
+        None
+    } else {
+        match crate::models::TaskStatus::parse(&raw_status) {
+            Some(st) => Some(st),
+            None => {
+                errors.push(EditorParseError {
+                    field: "STATUS",
+                    raw: raw_status.clone(),
+                    message: format!("unknown status: {raw_status:?}"),
+                });
+                None
+            }
+        }
+    };
+
+    let raw_tag = s.remove("TAG").unwrap_or_default();
+    let tag = if raw_tag.is_empty() {
+        None
+    } else {
+        match crate::models::TaskTag::parse(&raw_tag) {
+            Some(t) => Some(t),
+            None => {
+                errors.push(EditorParseError {
+                    field: "TAG",
+                    raw: raw_tag.clone(),
+                    message: format!("unknown tag: {raw_tag:?}"),
+                });
+                None
+            }
+        }
+    };
+
     EditorFields {
         title: s.remove("TITLE").unwrap_or_default(),
         description: s.remove("DESCRIPTION").unwrap_or_default(),
         repo_path: s.remove("REPO_PATH").unwrap_or_default(),
-        status: s.remove("STATUS").unwrap_or_default(),
+        status,
         plan: s.remove("PLAN").unwrap_or_default(),
-        tag: s.remove("TAG").unwrap_or_default(),
+        tag,
         base_branch: s.remove("BASE_BRANCH").unwrap_or_default(),
+        errors,
     }
 }
 
@@ -379,7 +462,7 @@ mod tests {
         assert_eq!(fields.title, "My Task");
         assert_eq!(fields.description, "A description");
         assert_eq!(fields.repo_path, "/repo");
-        assert_eq!(fields.status, "backlog");
+        assert_eq!(fields.status, Some(TaskStatus::Backlog));
         assert_eq!(fields.plan, "docs/plan.md");
     }
 
@@ -458,7 +541,7 @@ mod tests {
         let input = "--- TITLE ---\nHello\n--- UNKNOWN ---\nStuff\n--- STATUS ---\nbacklog\n";
         let fields = parse_editor_content(input);
         assert_eq!(fields.title, "Hello");
-        assert_eq!(fields.status, "backlog");
+        assert_eq!(fields.status, Some(TaskStatus::Backlog));
     }
 
     #[test]
@@ -527,13 +610,8 @@ mod tests {
     fn apply_task_empty_title_preserves_prior() {
         let task = sample_task();
         let fields = EditorFields {
-            title: String::new(),
             description: "New desc".into(),
-            repo_path: String::new(),
-            status: String::new(),
-            plan: String::new(),
-            tag: String::new(),
-            base_branch: String::new(),
+            ..Default::default()
         };
         let applied = apply_task_editor_fields(&task, fields);
         assert_eq!(applied.title, "Original title");
@@ -547,13 +625,8 @@ mod tests {
         let task = sample_task();
         assert!(task.plan_path.is_some());
         let fields = EditorFields {
-            title: String::new(),
-            description: String::new(),
-            repo_path: String::new(),
-            status: String::new(),
-            plan: String::new(),
-            tag: "bug".into(),
-            base_branch: String::new(),
+            tag: Some(crate::models::TaskTag::Bug),
+            ..Default::default()
         };
         let applied = apply_task_editor_fields(&task, fields);
         assert!(applied.plan_path.is_none(), "empty plan should clear plan");
@@ -562,64 +635,51 @@ mod tests {
     #[test]
     fn apply_task_empty_tag_clears_tag() {
         let task = sample_task();
-        let fields = EditorFields {
-            title: String::new(),
-            description: String::new(),
-            repo_path: String::new(),
-            status: String::new(),
-            plan: String::new(),
-            tag: String::new(),
-            base_branch: String::new(),
-        };
+        let fields = EditorFields::default();
         let applied = apply_task_editor_fields(&task, fields);
         assert!(applied.tag.is_none());
     }
 
     #[test]
-    fn apply_task_invalid_status_preserves_prior() {
+    fn parse_invalid_status_records_error_and_preserves_prior_on_apply() {
+        let input = "--- TITLE ---\nT\n--- STATUS ---\nnonsense\n";
+        let parsed = parse_editor_content(input);
+        assert!(parsed.status.is_none());
+        assert_eq!(parsed.errors.len(), 1);
+        assert_eq!(parsed.errors[0].field, "STATUS");
+        assert!(parsed.errors[0].message.contains("nonsense"));
+
         let task = sample_task();
-        let fields = EditorFields {
-            title: String::new(),
-            description: String::new(),
-            repo_path: String::new(),
-            status: "nonsense".into(),
-            plan: String::new(),
-            tag: String::new(),
-            base_branch: String::new(),
-        };
-        let applied = apply_task_editor_fields(&task, fields);
+        let applied = apply_task_editor_fields(&task, parsed);
         assert_eq!(applied.status, task.status);
     }
 
     #[test]
-    fn apply_task_invalid_tag_clears_tag() {
+    fn parse_invalid_tag_records_error_and_clears_on_apply() {
+        let input = "--- TITLE ---\nT\n--- TAG ---\nnot-a-real-tag\n";
+        let parsed = parse_editor_content(input);
+        assert!(parsed.tag.is_none());
+        assert_eq!(parsed.errors.len(), 1);
+        assert_eq!(parsed.errors[0].field, "TAG");
+
         let task = sample_task();
-        let fields = EditorFields {
-            title: String::new(),
-            description: String::new(),
-            repo_path: String::new(),
-            status: String::new(),
-            plan: String::new(),
-            tag: "not-a-real-tag".into(),
-            base_branch: String::new(),
-        };
-        let applied = apply_task_editor_fields(&task, fields);
-        // parse returns None → applied.tag = None. Documented behaviour.
+        let applied = apply_task_editor_fields(&task, parsed);
         assert!(applied.tag.is_none());
+    }
+
+    #[test]
+    fn parse_valid_input_has_no_errors() {
+        let task = sample_task();
+        let parsed = parse_editor_content(&format_editor_content(&task));
+        assert!(parsed.errors.is_empty(), "got: {:?}", parsed.errors);
+        assert_eq!(parsed.status, Some(task.status));
+        assert_eq!(parsed.tag, task.tag);
     }
 
     #[test]
     fn apply_task_empty_base_branch_preserves_prior() {
         let task = sample_task();
-        let fields = EditorFields {
-            title: String::new(),
-            description: String::new(),
-            repo_path: String::new(),
-            status: String::new(),
-            plan: String::new(),
-            tag: String::new(),
-            base_branch: String::new(),
-        };
+        let fields = EditorFields::default();
         let applied = apply_task_editor_fields(&task, fields);
         // When the field is "" we preserve by returning None so the DB
         // patch does not touch it. The runtime's merger then keeps the
@@ -662,11 +722,8 @@ mod tests {
     fn apply_epic_empty_fields_preserve_prior() {
         let epic = make_epic("E title", "E desc", "/repo");
         let fields = EpicEditorFields {
-            title: String::new(),
             description: "new desc".into(),
-            repo_path: String::new(),
-            feed_command: String::new(),
-            feed_interval_secs: String::new(),
+            ..Default::default()
         };
         let applied = apply_epic_editor_fields(&epic, fields);
         assert_eq!(applied.title, "E title");
@@ -717,7 +774,17 @@ mod tests {
         epic.feed_interval_secs = Some(FEED_INTERVAL_MED_SECS);
         let content = format_epic_for_editor(&epic);
         let fields = parse_epic_editor_output(&content);
-        assert_eq!(fields.feed_interval_secs, "120");
+        assert_eq!(fields.feed_interval_secs, Some(FEED_INTERVAL_MED_SECS));
+        assert!(fields.errors.is_empty());
+    }
+
+    #[test]
+    fn parse_epic_invalid_feed_interval_records_error() {
+        let input = "--- TITLE ---\nT\n--- FEED_INTERVAL_SECS ---\nnot-a-number\n";
+        let parsed = parse_epic_editor_output(input);
+        assert_eq!(parsed.feed_interval_secs, None);
+        assert_eq!(parsed.errors.len(), 1);
+        assert_eq!(parsed.errors[0].field, "FEED_INTERVAL_SECS");
     }
 
     #[test]
@@ -728,7 +795,8 @@ mod tests {
             description: "D".into(),
             repo_path: "/repo".into(),
             feed_command: "my-script.sh".into(),
-            feed_interval_secs: "".into(),
+            feed_interval_secs: None,
+            errors: Vec::new(),
         };
         let applied = apply_epic_editor_fields(&epic, fields);
         assert_eq!(
@@ -746,8 +814,9 @@ mod tests {
             title: "T".into(),
             description: "D".into(),
             repo_path: "/repo".into(),
-            feed_command: "".into(),
-            feed_interval_secs: "".into(),
+            feed_command: String::new(),
+            feed_interval_secs: None,
+            errors: Vec::new(),
         };
         let applied = apply_epic_editor_fields(&epic, fields);
         assert_eq!(applied.feed_command, crate::service::FieldUpdate::Clear);
@@ -760,25 +829,12 @@ mod tests {
             title: "T".into(),
             description: "D".into(),
             repo_path: "/repo".into(),
-            feed_command: "".into(),
-            feed_interval_secs: FEED_INTERVAL_SLOW_SECS.to_string(),
+            feed_command: String::new(),
+            feed_interval_secs: Some(FEED_INTERVAL_SLOW_SECS),
+            errors: Vec::new(),
         };
         let applied = apply_epic_editor_fields(&epic, fields);
         assert_eq!(applied.feed_interval_secs, Some(FEED_INTERVAL_SLOW_SECS));
-    }
-
-    #[test]
-    fn apply_epic_feed_interval_invalid_preserves_none() {
-        let epic = make_epic("T", "D", "/repo");
-        let fields = EpicEditorFields {
-            title: "T".into(),
-            description: "D".into(),
-            repo_path: "/repo".into(),
-            feed_command: "".into(),
-            feed_interval_secs: "not-a-number".into(),
-        };
-        let applied = apply_epic_editor_fields(&epic, fields);
-        assert_eq!(applied.feed_interval_secs, None);
     }
 
     #[test]

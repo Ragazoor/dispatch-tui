@@ -6,7 +6,7 @@ mod crud;
 mod params;
 mod validators;
 
-pub use crud::TaskService;
+pub use crud::{TaskService, UpdateTaskResult};
 pub use params::{ClaimTaskParams, CreateTaskParams, ListTasksFilter, UpdateTaskParams};
 
 #[cfg(test)]

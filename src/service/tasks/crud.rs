@@ -14,6 +14,18 @@ use crate::service::ServiceError;
 
 use super::params::{ClaimTaskParams, CreateTaskParams, ListTasksFilter, UpdateTaskParams};
 use super::validators::build_task_patch;
+use crate::service::FieldUpdate;
+
+/// Result of [`TaskService::update_task`]. Carries the updated task id plus
+/// presentation-relevant transition flags so MCP handlers can format their
+/// response without re-reading the DB.
+#[derive(Debug, Clone)]
+pub struct UpdateTaskResult {
+    pub task_id: TaskId,
+    /// `true` when the same call set a non-empty `pr_url` on a task that
+    /// previously had none AND moved its status to Review.
+    pub was_pr_finalisation: bool,
+}
 
 pub struct TaskService {
     pub db: Arc<dyn db::TaskAndEpicStore>,
@@ -35,7 +47,7 @@ impl TaskService {
     ///
     /// Use [`cli_update_task`](Self::cli_update_task) instead when writing CLI
     /// subcommands that need to complete or archive tasks.
-    pub fn update_task(&self, params: UpdateTaskParams) -> Result<TaskId, ServiceError> {
+    pub fn update_task(&self, params: UpdateTaskParams) -> Result<UpdateTaskResult, ServiceError> {
         if !params.has_any_field() {
             return Err(ServiceError::Validation(
                 "At least one field must be provided".into(),
@@ -47,17 +59,22 @@ impl TaskService {
         let validated_sub_status = self.validate_sub_status(task_id, &params)?;
         let patch = build_task_patch(&params, expanded_repo_path.as_deref(), validated_sub_status);
 
+        // Snapshot the task before the patch so we can detect the
+        // null-pr_url → set transition without an extra round-trip later.
+        let prior = self.db.get_task(task_id).ok().flatten();
+        let was_pr_finalisation = params.status == Some(TaskStatus::Review)
+            && matches!(
+                params.pr_url.as_ref(),
+                Some(FieldUpdate::Set(s)) if !s.is_empty()
+            )
+            && prior.as_ref().is_some_and(|t| t.pr_url.is_none());
+
         self.db
             .patch_task(task_id, &patch)
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
 
         if let Some(new_epic_id) = params.epic_id {
-            let old_epic_id = self
-                .db
-                .get_task(task_id)
-                .ok()
-                .flatten()
-                .and_then(|t| t.epic_id);
+            let old_epic_id = prior.as_ref().and_then(|t| t.epic_id);
             self.db
                 .set_task_epic_id(task_id, Some(new_epic_id))
                 .map_err(|e| ServiceError::Internal(format!("Failed to link task to epic: {e}")))?;
@@ -71,7 +88,10 @@ impl TaskService {
             self.recalculate_epic_for_task(task_id);
         }
 
-        Ok(task_id)
+        Ok(UpdateTaskResult {
+            task_id,
+            was_pr_finalisation,
+        })
     }
 
     /// Validate `params.sub_status` against the task's effective (current or

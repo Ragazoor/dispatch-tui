@@ -34,8 +34,6 @@ fn test_state() -> Arc<McpState> {
         db,
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     })
 }
 
@@ -46,8 +44,6 @@ fn test_state_with_db() -> (Arc<McpState>, Arc<dyn db::TaskStore>) {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
     (state, db)
 }

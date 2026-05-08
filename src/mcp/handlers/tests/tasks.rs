@@ -1643,7 +1643,7 @@ async fn list_tasks_invalid_status_in_array() {
         Some(json!({ "name": "list_tasks", "arguments": { "status": ["backlog", "bogus"] } })),
     )
     .await;
-    assert_error(&resp, "Invalid status in array");
+    assert_error(&resp, "Unknown status: bogus");
 }
 
 #[tokio::test]
@@ -1655,7 +1655,7 @@ async fn list_tasks_status_as_number_errors() {
         Some(json!({ "name": "list_tasks", "arguments": { "status": 42 } })),
     )
     .await;
-    assert_error(&resp, "string or array");
+    assert_error(&resp, "expected a status string");
 }
 
 #[tokio::test]
@@ -2139,8 +2139,6 @@ async fn wrap_up_accepts_running_blocked_task() {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let task_id = db
@@ -2196,8 +2194,6 @@ async fn wrap_up_accepts_running_active_task() {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let task_id = db
@@ -2319,8 +2315,6 @@ async fn wrap_up_rebase_returns_started() {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let task_id = db
@@ -2891,8 +2885,6 @@ async fn wrap_up_rebase_conflict_returns_error() {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let task_id = db
@@ -2945,8 +2937,6 @@ async fn wrap_up_rebase_not_on_main_returns_error() {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let task_id = db
@@ -3051,8 +3041,6 @@ async fn send_message_writes_file_and_sends_keys() {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     // Create sender and receiver tasks
@@ -3329,8 +3317,6 @@ fn test_state_with_notify() -> (
         db,
         notify_tx: Some(tx),
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
     (state, rx)
 }
@@ -3851,8 +3837,6 @@ async fn wrap_up_rebase_does_not_change_status() {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let task_id = db
@@ -3908,8 +3892,6 @@ async fn wrap_up_rebase_does_not_recalculate_epic_status() {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let epic = db
@@ -3969,8 +3951,6 @@ async fn wrap_up_accepts_string_task_id() {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let task_id = db
@@ -4389,8 +4369,6 @@ async fn dispatch_next_picks_first_backlog_subtask() {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let epic = db
@@ -4483,8 +4461,6 @@ async fn dispatch_next_respects_sort_order() {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let epic = db
@@ -4572,8 +4548,6 @@ async fn dispatch_next_respects_tag_routing() {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let epic = db
@@ -4876,8 +4850,6 @@ async fn wrap_up_rebase_preserves_tmux_window() {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let task_id = db
@@ -4943,8 +4915,6 @@ async fn wrap_up_rebase_conflict_sets_conflict_substatus() {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let task_id = db
@@ -5008,8 +4978,6 @@ async fn wrap_up_rebase_clears_conflict_substatus_on_non_conflict_error() {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let task_id = db
@@ -5825,8 +5793,6 @@ async fn dispatch_review_agent_success() {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     insert_review_pr_fixture(&state, 42, "acme/app");
@@ -5884,8 +5850,6 @@ async fn dispatch_fix_agent_success() {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let alert = SecurityAlert {
@@ -5961,8 +5925,6 @@ async fn dispatch_task_dispatches_backlog_task() {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let task_id = db
@@ -6084,8 +6046,6 @@ async fn dispatch_task_respects_tag_routing() {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     // Feature-tagged task with no plan → should route to Plan mode
@@ -6154,8 +6114,6 @@ async fn dispatch_task_returns_error_when_dispatch_fails() {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let task_id = db
@@ -6207,8 +6165,6 @@ async fn create_task_with_project_id_assigns_correctly() {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let resp = call(
@@ -6244,8 +6200,6 @@ async fn create_epic_without_project_id_assigns_to_default() {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let resp = call(
@@ -6277,8 +6231,6 @@ async fn create_epic_with_project_id_assigns_correctly() {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let resp = call(
@@ -6315,8 +6267,6 @@ async fn list_projects_returns_all_projects() {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let resp = call(
@@ -6352,8 +6302,6 @@ async fn update_task_project_id_moves_task() {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let task_id = create_task_fixture(&state);
@@ -6407,8 +6355,6 @@ async fn update_epic_project_id_moves_epic() {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let epic = db
@@ -6447,8 +6393,6 @@ async fn update_epic_invalid_project_id_returns_error() {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let epic = db
@@ -7353,8 +7297,6 @@ fn make_rebase_state() -> (Arc<dyn db::TaskStore>, Arc<McpState>) {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
     (db, state)
 }
@@ -7793,11 +7735,12 @@ async fn exit_session_has_learnings_false_closes_session() {
 }
 
 #[tokio::test]
-async fn exit_session_third_call_after_reflecting_closes_session() {
+async fn exit_session_after_record_prompt_closes_with_has_learnings_false() {
+    // Stateless flow: 1st call asks, 2nd with has_learnings=true returns the
+    // record_learning prompt, 3rd with has_learnings=false closes.
     let state = test_state();
     let task_id = create_running_task_with_window(&state);
 
-    // First call
     call(
         &state,
         "tools/call",
@@ -7805,7 +7748,6 @@ async fn exit_session_third_call_after_reflecting_closes_session() {
     )
     .await;
 
-    // Second call: has_learnings=true → enters reflecting state
     call(
         &state,
         "tools/call",
@@ -7816,42 +7758,35 @@ async fn exit_session_third_call_after_reflecting_closes_session() {
     )
     .await;
 
-    // Third call — should close session
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "exit_session", "arguments": { "task_id": task_id.0 } })),
+        Some(json!({
+            "name": "exit_session",
+            "arguments": { "task_id": task_id.0, "has_learnings": false }
+        })),
     )
     .await;
 
     let text = extract_response_text(&resp);
     assert_eq!(
         text, "Session closed.",
-        "third call should close session; got: {text}"
+        "has_learnings=false should close session; got: {text}"
     );
 
     let task = state.db.get_task(task_id).unwrap().unwrap();
-    assert!(
-        task.tmux_window.is_none(),
-        "tmux_window should be cleared after third call"
-    );
+    assert!(task.tmux_window.is_none());
     assert_eq!(task.status, TaskStatus::Done);
 }
 
 #[tokio::test]
-async fn exit_session_reflecting_cleared_on_redispatch() {
+async fn exit_session_bare_call_after_has_learnings_true_still_asks() {
+    // Regression guard for the stateless model: the server keeps no per-task
+    // state, so a bare exit_session call always returns the reflection
+    // question — even after a previous has_learnings=true.
     let state = test_state();
     let task_id = create_running_task_with_window(&state);
 
-    // First call → pending
-    call(
-        &state,
-        "tools/call",
-        Some(json!({ "name": "exit_session", "arguments": { "task_id": task_id.0 } })),
-    )
-    .await;
-
-    // Second call with has_learnings=true → reflecting
     call(
         &state,
         "tools/call",
@@ -7862,75 +7797,22 @@ async fn exit_session_reflecting_cleared_on_redispatch() {
     )
     .await;
 
-    // Verify it's in reflecting
-    {
-        let reflecting = state.exit_session_reflecting.lock().unwrap();
-        assert!(
-            reflecting.contains(&task_id),
-            "should be in reflecting state"
-        );
-    }
-
-    // Patch task back to backlog so dispatch_task accepts it
-    let patch = crate::db::TaskPatch::new().status(TaskStatus::Backlog);
-    state.db.patch_task(task_id, &patch).unwrap();
-
-    // Re-dispatch — should clear reflecting
-    call(
-        &state,
-        "tools/call",
-        Some(json!({ "name": "dispatch_task", "arguments": { "task_id": task_id.0 } })),
-    )
-    .await;
-
-    {
-        let reflecting = state.exit_session_reflecting.lock().unwrap();
-        assert!(
-            !reflecting.contains(&task_id),
-            "reflecting should be cleared after redispatch"
-        );
-    }
-}
-
-#[tokio::test]
-async fn exit_session_second_call_clears_window_and_returns_closed() {
-    let state = test_state();
-    let task_id = create_running_task_with_window(&state);
-
-    // First call
-    call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "exit_session",
-            "arguments": { "task_id": task_id.0 }
-        })),
-    )
-    .await;
-
-    // Second call
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({
-            "name": "exit_session",
-            "arguments": { "task_id": task_id.0 }
-        })),
+        Some(json!({ "name": "exit_session", "arguments": { "task_id": task_id.0 } })),
     )
     .await;
 
     let text = extract_response_text(&resp);
-    assert_eq!(
-        text, "Session closed.",
-        "expected 'Session closed.' message, got: {text}"
+    assert!(
+        text.contains("has_learnings"),
+        "bare call should always ask for has_learnings; got: {text}"
     );
 
-    // tmux_window must be cleared in DB
     let task = state.db.get_task(task_id).unwrap().unwrap();
-    assert!(
-        task.tmux_window.is_none(),
-        "tmux_window should be cleared after second call"
-    );
+    assert_eq!(task.status, TaskStatus::Running);
+    assert!(task.tmux_window.is_some());
 }
 
 #[tokio::test]
@@ -7966,52 +7848,6 @@ async fn exit_session_task_without_window_returns_error() {
     .await;
 
     assert_error(&resp, "no active session");
-}
-
-#[tokio::test]
-async fn exit_session_pending_cleared_on_redispatch() {
-    let state = test_state();
-    let task_id = create_running_task_with_window(&state);
-
-    // First exit_session call — inserts into pending set
-    call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "exit_session",
-            "arguments": { "task_id": task_id.0 }
-        })),
-    )
-    .await;
-
-    // Verify it's in the set right now
-    {
-        let pending = state.exit_session_pending.lock().unwrap();
-        assert!(pending.contains(&task_id), "should be pending before clear");
-    }
-
-    // Patch task back to backlog so dispatch_task accepts it
-    let patch = crate::db::TaskPatch::new().status(crate::models::TaskStatus::Backlog);
-    state.db.patch_task(task_id, &patch).unwrap();
-
-    // Call dispatch_task — this should clear the pending state
-    call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "dispatch_task",
-            "arguments": { "task_id": task_id.0 }
-        })),
-    )
-    .await;
-
-    {
-        let pending = state.exit_session_pending.lock().unwrap();
-        assert!(
-            !pending.contains(&task_id),
-            "pending should be cleared after dispatch"
-        );
-    }
 }
 
 #[tokio::test]
@@ -8071,22 +7907,12 @@ async fn exit_session_second_call_marks_task_done() {
     let state = test_state();
     let task_id = create_running_task_with_window(&state);
 
-    call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "exit_session",
-            "arguments": { "task_id": task_id.0 }
-        })),
-    )
-    .await;
-
     let resp = call(
         &state,
         "tools/call",
         Some(json!({
             "name": "exit_session",
-            "arguments": { "task_id": task_id.0 }
+            "arguments": { "task_id": task_id.0, "has_learnings": false }
         })),
     )
     .await;
@@ -8145,16 +7971,7 @@ async fn exit_session_already_done_task_stays_done() {
         "tools/call",
         Some(json!({
             "name": "exit_session",
-            "arguments": { "task_id": task_id.0 }
-        })),
-    )
-    .await;
-    call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "exit_session",
-            "arguments": { "task_id": task_id.0 }
+            "arguments": { "task_id": task_id.0, "has_learnings": false }
         })),
     )
     .await;
@@ -8186,16 +8003,7 @@ async fn exit_session_recalculates_epic_status() {
         "tools/call",
         Some(json!({
             "name": "exit_session",
-            "arguments": { "task_id": task_id.0 }
-        })),
-    )
-    .await;
-    call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "exit_session",
-            "arguments": { "task_id": task_id.0 }
+            "arguments": { "task_id": task_id.0, "has_learnings": false }
         })),
     )
     .await;
@@ -8227,16 +8035,7 @@ async fn exit_session_resets_sub_status_to_default_for_done() {
         "tools/call",
         Some(json!({
             "name": "exit_session",
-            "arguments": { "task_id": task_id.0 }
-        })),
-    )
-    .await;
-    call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "exit_session",
-            "arguments": { "task_id": task_id.0 }
+            "arguments": { "task_id": task_id.0, "has_learnings": false }
         })),
     )
     .await;
@@ -8273,7 +8072,7 @@ async fn exit_session_emits_refresh_after_done_patch() {
         "tools/call",
         Some(json!({
             "name": "exit_session",
-            "arguments": { "task_id": task_id.0 }
+            "arguments": { "task_id": task_id.0, "has_learnings": false }
         })),
     )
     .await;
@@ -8305,8 +8104,6 @@ async fn wrap_up_then_exit_session_end_to_end() {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let epic = db
@@ -8365,21 +8162,12 @@ async fn wrap_up_then_exit_session_end_to_end() {
         "after wrap_up: epic status must not change"
     );
 
-    call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "exit_session",
-            "arguments": { "task_id": task_id.0 }
-        })),
-    )
-    .await;
     let close_resp = call(
         &state,
         "tools/call",
         Some(json!({
             "name": "exit_session",
-            "arguments": { "task_id": task_id.0 }
+            "arguments": { "task_id": task_id.0, "has_learnings": false }
         })),
     )
     .await;

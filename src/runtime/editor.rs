@@ -299,8 +299,19 @@ impl TuiRuntime {
         let Some(text) = saved_text(outcome) else {
             return vec![];
         };
-        let fields = parse_editor_content(&text);
+        let mut fields = parse_editor_content(&text);
+        let parse_errors = std::mem::take(&mut fields.errors);
         let applied = apply_task_editor_fields(&task, fields);
+        if !parse_errors.is_empty() {
+            let summary = parse_errors
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join("; ");
+            app.update(Message::StatusInfo(format!(
+                "Edit accepted with parse errors — {summary}"
+            )));
+        }
 
         let task_id = task.id;
         let plan = applied.plan_path.clone();
@@ -337,8 +348,19 @@ impl TuiRuntime {
         let Some(text) = saved_text(outcome) else {
             return vec![];
         };
-        let fields = parse_epic_editor_output(&text);
+        let mut fields = parse_epic_editor_output(&text);
+        let parse_errors = std::mem::take(&mut fields.errors);
         let applied = apply_epic_editor_fields(&epic, fields);
+        if !parse_errors.is_empty() {
+            let summary = parse_errors
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join("; ");
+            app.update(Message::StatusInfo(format!(
+                "Edit accepted with parse errors — {summary}"
+            )));
+        }
 
         let epic_id = epic.id;
         if let Err(e) = self.epic_svc.update_epic(UpdateEpicParams {

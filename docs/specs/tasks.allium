@@ -1549,16 +1549,10 @@ rule WrapUpReflection {
 rule ExitSession {
     when: ExitSession(task, has_learnings?)
 
-    let in_reflecting = ExitSessionReflecting(task)
-    let in_pending = ExitSessionPending(task)
-    let is_first_call = not in_pending and not in_reflecting
-
     ensures:
-        if is_first_call:
-            ExitSessionPendingSet(task: task)
+        if has_learnings = null:
             ExitSessionAskedAboutLearnings(task: task)
-        else if in_pending and has_learnings = true:
-            ExitSessionReflectingSet(task: task)
+        else if has_learnings = true:
             ExitSessionRecordPromptSent(task: task)
         else:
             ExitSessionCompleted(task: task)
@@ -1569,32 +1563,28 @@ rule ExitSession {
             task.updated_at = now
 
     @guidance
-        -- Three-phase flow controlled by two in-memory sets on McpState:
-        --   exit_session_pending (Mutex<HashSet<TaskId>>)
-        --   exit_session_reflecting (Mutex<HashSet<TaskId>>)
+        -- Stateless three-way dispatch driven by `has_learnings`:
         --
-        -- Phase 1 (first call — neither set):
-        --   Inserts into pending. Returns structured question listing pitfall,
-        --   convention, tool tip categories and instructs the agent to answer
-        --   via exit_session(has_learnings=true|false).
+        -- has_learnings = null (omitted):
+        --   Returns the structured reflection question (pitfall / convention /
+        --   tool-tip categories) and instructs the agent to call again with
+        --   has_learnings=true or has_learnings=false.
         --
-        -- Phase 2a (second call, has_learnings=true — task in pending):
-        --   Removes from pending, inserts into reflecting. Returns record_learning
-        --   prompt listing kind/summary/scope parameters. Session remains open;
-        --   agent calls record_learning one or more times, then calls exit_session.
+        -- has_learnings = true:
+        --   Returns the record_learning prompt listing kind / summary / scope
+        --   parameters. The session remains open; the agent records each
+        --   finding via record_learning, then calls exit_session(has_learnings=false)
+        --   to close.
         --
-        -- Phase 2b (second call, has_learnings=false or omitted — task in pending):
-        --   Removes from pending. Closes session immediately.
-        --
-        -- Phase 3 (any call — task in reflecting):
-        --   Removes from reflecting. Closes session: status=done,
-        --   sub_status=default_for(done), tmux_window=null, kills tmux window.
+        -- has_learnings = false:
+        --   Closes the session: status=done, sub_status=default_for(done),
+        --   tmux_window=null, kills the tmux window.
         --
         -- Epic status is recalculated after the close patch when task.epic_id is set.
         --
-        -- Both sets are cleared on re-dispatch (clear_exit_session_pending in
-        -- McpState, called from handle_dispatch_task and handle_dispatch_next),
-        -- so a resurrected agent always starts from Phase 1.
+        -- No server-side state is kept between calls — every call's branch is
+        -- determined purely by the parameter. Re-dispatch needs no special
+        -- cleanup.
         --
         -- Implemented in handle_exit_session() (src/mcp/handlers/tasks.rs).
 }

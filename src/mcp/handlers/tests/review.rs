@@ -715,8 +715,6 @@ async fn dispatch_review_agent_success() {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     insert_review_pr_fixture(&state, 42, "acme/app");
@@ -844,8 +842,6 @@ async fn dispatch_fix_agent_success() {
         db: db.clone(),
         notify_tx: None,
         runner,
-        exit_session_pending: std::sync::Mutex::new(std::collections::HashSet::new()),
-        exit_session_reflecting: std::sync::Mutex::new(std::collections::HashSet::new()),
     });
 
     let alert = SecurityAlert {

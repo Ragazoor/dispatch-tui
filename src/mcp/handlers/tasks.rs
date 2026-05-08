@@ -11,13 +11,13 @@ use crate::models::{
     TaskStatus, TaskTag,
 };
 use crate::service::{
-    ClaimTaskParams, CreateTaskParams, LearningService, ListTasksFilter, ServiceError, TaskService,
-    UpdateTaskParams,
+    ClaimTaskParams, CreateTaskParams, FieldUpdate, LearningService, ListTasksFilter, ServiceError,
+    TaskService, UpdateTaskParams,
 };
 
 use super::types::{
     deserialize_flexible_i64, deserialize_optional_flexible_i64, parse_args,
-    service_err_to_response, JsonRpcResponse,
+    service_err_to_response, JsonRpcResponse, StatusFilter,
 };
 
 // ---------------------------------------------------------------------------
@@ -63,7 +63,7 @@ pub(super) struct GetTaskArgs {
 #[derive(Deserialize)]
 pub(super) struct ListTasksArgs {
     #[serde(default)]
-    pub(super) status: Option<Value>,
+    pub(super) status: Option<StatusFilter>,
     #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
     pub(super) epic_id: Option<i64>,
     #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
@@ -345,12 +345,7 @@ pub(super) fn handle_update_task(
     if let Some(sort_order) = parsed.sort_order {
         params = params.sort_order(sort_order);
     }
-    if let Some(pr_url_str) = parsed.pr_url {
-        let fu = if pr_url_str.is_empty() {
-            crate::service::FieldUpdate::Clear
-        } else {
-            crate::service::FieldUpdate::Set(pr_url_str)
-        };
+    if let Some(fu) = FieldUpdate::from_optional_string(parsed.pr_url) {
         params = params.pr_url(fu);
     }
     if let Some(sub_status) = parsed.sub_status {
@@ -367,32 +362,18 @@ pub(super) fn handle_update_task(
     }
     let fields_display = params.updated_field_names().join(", ");
 
-    // Detect the PR-finalisation transition (null pr_url -> set + status
-    // moves to Review) so we can append the reflection nudge that the
-    // rebase wrap_up emits. The DB read is gated by the cheap field
-    // checks first, so it only runs on actual finalisations.
-    let is_pr_finalisation = parsed.status == Some(TaskStatus::Review)
-        && matches!(
-            params.pr_url.as_ref(),
-            Some(crate::service::FieldUpdate::Set(s)) if !s.is_empty()
-        )
-        && matches!(
-            state.db.get_task(TaskId(parsed.task_id)),
-            Ok(Some(ref t)) if t.pr_url.is_none()
-        );
-
     let svc = TaskService::new(state.db.clone());
     match svc.update_task(params) {
-        Ok(task_id) => {
+        Ok(result) => {
             state.notify();
-            let nudge = if is_pr_finalisation {
+            let nudge = if result.was_pr_finalisation {
                 reflection_nudge(&*state.db)
             } else {
                 ""
             };
             JsonRpcResponse::ok(
                 id,
-                json!({"content": [{"type": "text", "text": format!("Task {} updated ({}){}", task_id, fields_display, nudge)}]}),
+                json!({"content": [{"type": "text", "text": format!("Task {} updated ({}){}", result.task_id, fields_display, nudge)}]}),
             )
         }
         Err(e) => service_err_to_response(id, e),
@@ -471,39 +452,7 @@ pub(super) fn handle_list_tasks(
     };
     tracing::info!(status = ?parsed.status, "MCP list_tasks");
 
-    // Parse status filter (supports string or array)
-    let status_filter: Option<Vec<TaskStatus>> = match parsed.status {
-        Some(Value::String(ref s)) => match TaskStatus::parse(s) {
-            Some(st) => Some(vec![st]),
-            None => {
-                return JsonRpcResponse::err(
-                    id,
-                    -32602,
-                    format!("Unknown status: {s}. Valid values: backlog, running, review, done"),
-                );
-            }
-        },
-        Some(Value::Array(ref arr)) => {
-            let mut statuses = Vec::new();
-            for v in arr {
-                match v.as_str().and_then(TaskStatus::parse) {
-                    Some(st) => statuses.push(st),
-                    None => {
-                        return JsonRpcResponse::err(
-                            id,
-                            -32602,
-                            format!("Invalid status in array: {v}"),
-                        );
-                    }
-                }
-            }
-            Some(statuses)
-        }
-        Some(_) => {
-            return JsonRpcResponse::err(id, -32602, "status must be a string or array of strings");
-        }
-        None => None,
-    };
+    let status_filter: Option<Vec<TaskStatus>> = parsed.status.map(StatusFilter::into_vec);
 
     let (derived_epic_id, derived_project_id, exclude_task_id) = if let Some(caller_id) =
         parsed.caller_task_id
@@ -769,42 +718,12 @@ pub(super) fn handle_exit_session(
         );
     }
 
-    enum Phase {
-        AskQuestion,
-        RecordPrompt,
-        CloseSession,
-    }
-
-    let phase = {
-        let mut reflecting = state
-            .exit_session_reflecting
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        if reflecting.contains(&task_id) {
-            reflecting.remove(&task_id);
-            Phase::CloseSession
-        } else {
-            let mut pending = state
-                .exit_session_pending
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            if pending.contains(&task_id) {
-                pending.remove(&task_id);
-                if parsed.has_learnings == Some(true) {
-                    reflecting.insert(task_id);
-                    Phase::RecordPrompt
-                } else {
-                    Phase::CloseSession
-                }
-            } else {
-                pending.insert(task_id);
-                Phase::AskQuestion
-            }
-        }
-    };
-
-    match phase {
-        Phase::AskQuestion => JsonRpcResponse::ok(
+    // Stateless three-way dispatch driven by `has_learnings`:
+    //   None       → ask the agent to reflect (call again with true/false)
+    //   Some(true) → instruct agent to record_learning, then call again
+    //   Some(false)→ close the session
+    match parsed.has_learnings {
+        None => JsonRpcResponse::ok(
             id,
             json!({"content": [{"type": "text", "text": "\
 Before closing, reflect on this session.\n\
@@ -816,7 +735,7 @@ Did you encounter any of the following?\n\
 \n\
 Call exit_session(has_learnings=true) if yes, or exit_session(has_learnings=false) to close now."}]}),
         ),
-        Phase::RecordPrompt => JsonRpcResponse::ok(
+        Some(true) => JsonRpcResponse::ok(
             id,
             json!({"content": [{"type": "text", "text": "\
 Record each finding with record_learning before closing:\n\
@@ -825,9 +744,9 @@ Record each finding with record_learning before closing:\n\
   \u{2022} scope: repo | project | user | epic | task\n\
 \n\
 Check query_learnings first to avoid duplicates.\n\
-Call exit_session again when done."}]}),
+Call exit_session(has_learnings=false) when done to close the session."}]}),
         ),
-        Phase::CloseSession => {
+        Some(false) => {
             let patch = crate::db::TaskPatch::new()
                 .status(TaskStatus::Done)
                 .sub_status(SubStatus::default_for(TaskStatus::Done))
@@ -942,11 +861,6 @@ pub(super) async fn handle_dispatch_next(
     };
 
     let next_id = next_task.id;
-
-    // Clear any pending exit_session state — if this task is being re-dispatched
-    // after a partial exit, the new agent must go through the two-step again.
-    state.clear_exit_session_pending(next_id);
-
     let next_title = next_task.title.clone();
     let db = state.db.clone();
     let runner = state.runner.clone();
@@ -1005,10 +919,6 @@ pub(super) async fn handle_dispatch_task(
         Err(resp) => return resp,
     };
     let task_id = crate::models::TaskId(parsed.task_id);
-
-    // Clear any pending exit_session state — if this task is being re-dispatched
-    // after a partial exit, the new agent must go through the two-step again.
-    state.clear_exit_session_pending(task_id);
 
     let task = match state.db.get_task(task_id) {
         Ok(Some(t)) => t,

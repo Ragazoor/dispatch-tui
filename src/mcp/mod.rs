@@ -1,7 +1,6 @@
 pub mod handlers;
 
-use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use axum::{routing::post, Router};
 use tokio::sync::mpsc;
@@ -25,13 +24,6 @@ pub struct McpState {
     pub notify_tx: Option<mpsc::UnboundedSender<McpEvent>>,
     /// Process runner shared with TuiRuntime for executing git/tmux operations.
     pub runner: Arc<dyn ProcessRunner>,
-    /// Tracks which task IDs have made their first call to exit_session.
-    /// Second call kills the window; cleared on re-dispatch.
-    pub exit_session_pending: Mutex<HashSet<TaskId>>,
-    /// Tracks which task IDs answered has_learnings=true on the second call.
-    /// Set on second call with has_learnings=true; cleared when the final call
-    /// closes the session or on re-dispatch.
-    pub exit_session_reflecting: Mutex<HashSet<TaskId>>,
 }
 
 impl McpState {
@@ -46,25 +38,6 @@ impl McpState {
             let _ = tx.send(McpEvent::MessageSent { to_task_id });
         }
     }
-
-    /// Removes task_id from both exit_session sets.
-    /// Called on re-dispatch so the new agent always starts from Phase 1.
-    pub fn clear_exit_session_pending(&self, task_id: TaskId) {
-        {
-            let mut pending = self
-                .exit_session_pending
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            pending.remove(&task_id);
-        }
-        {
-            let mut reflecting = self
-                .exit_session_reflecting
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            reflecting.remove(&task_id);
-        }
-    }
 }
 
 pub fn router(
@@ -76,8 +49,6 @@ pub fn router(
         db,
         notify_tx,
         runner,
-        exit_session_pending: Mutex::new(HashSet::new()),
-        exit_session_reflecting: Mutex::new(HashSet::new()),
     });
     Router::new()
         .route("/mcp", post(handlers::handle_mcp))

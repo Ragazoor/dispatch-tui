@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::models::TaskStatus;
+
 // ---------------------------------------------------------------------------
 // JSON-RPC request / response types
 // ---------------------------------------------------------------------------
@@ -182,6 +184,70 @@ where
 }
 
 // ---------------------------------------------------------------------------
+// StatusFilter — accepts a single string or array of strings at the JSON-RPC
+// boundary and parses each into a TaskStatus.
+// ---------------------------------------------------------------------------
+
+/// Filter for `list_tasks.status`. Deserialises from either a JSON string
+/// (`"backlog"`) or a JSON array of strings (`["backlog", "ready"]`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusFilter(pub Vec<TaskStatus>);
+
+impl StatusFilter {
+    pub fn into_vec(self) -> Vec<TaskStatus> {
+        self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for StatusFilter {
+    fn deserialize<D>(deserializer: D) -> Result<StatusFilter, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de;
+
+        struct StatusFilterVisitor;
+
+        fn parse_one<E: de::Error>(s: &str) -> Result<TaskStatus, E> {
+            TaskStatus::parse(s).ok_or_else(|| {
+                E::custom(format!(
+                    "Unknown status: {s}. Valid values: backlog, running, review, done"
+                ))
+            })
+        }
+
+        impl<'de> de::Visitor<'de> for StatusFilterVisitor {
+            type Value = StatusFilter;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a status string or an array of status strings")
+            }
+
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<StatusFilter, E> {
+                Ok(StatusFilter(vec![parse_one(v)?]))
+            }
+
+            fn visit_string<E: de::Error>(self, v: String) -> Result<StatusFilter, E> {
+                self.visit_str(&v)
+            }
+
+            fn visit_seq<A: de::SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> Result<StatusFilter, A::Error> {
+                let mut out = Vec::new();
+                while let Some(s) = seq.next_element::<String>()? {
+                    out.push(parse_one::<A::Error>(&s)?);
+                }
+                Ok(StatusFilter(out))
+            }
+        }
+
+        deserializer.deserialize_any(StatusFilterVisitor)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Argument parsing helper
 // ---------------------------------------------------------------------------
 
@@ -229,5 +295,58 @@ pub(super) fn service_err_to_response(
         ServiceError::Validation(msg) => JsonRpcResponse::err(id, -32602, msg),
         ServiceError::NotFound(msg) => JsonRpcResponse::err(id, -32602, msg),
         ServiceError::Internal(msg) => JsonRpcResponse::err(id, -32603, msg),
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod status_filter_tests {
+    use super::StatusFilter;
+    use crate::models::TaskStatus;
+    use serde_json::json;
+
+    #[test]
+    fn parses_single_string() {
+        let f: StatusFilter = serde_json::from_value(json!("backlog")).unwrap();
+        assert_eq!(f.into_vec(), vec![TaskStatus::Backlog]);
+    }
+
+    #[test]
+    fn parses_array_of_strings() {
+        let f: StatusFilter = serde_json::from_value(json!(["backlog", "running"])).unwrap();
+        assert_eq!(f.into_vec(), vec![TaskStatus::Backlog, TaskStatus::Running]);
+    }
+
+    #[test]
+    fn parses_ready_alias() {
+        let f: StatusFilter = serde_json::from_value(json!("ready")).unwrap();
+        assert_eq!(f.into_vec(), vec![TaskStatus::Backlog]);
+    }
+
+    #[test]
+    fn empty_array_yields_empty_vec() {
+        let f: StatusFilter = serde_json::from_value(json!([])).unwrap();
+        assert!(f.into_vec().is_empty());
+    }
+
+    #[test]
+    fn invalid_string_errors() {
+        let err = serde_json::from_value::<StatusFilter>(json!("bogus")).unwrap_err();
+        assert!(err.to_string().contains("Unknown status"));
+    }
+
+    #[test]
+    fn invalid_status_in_array_errors() {
+        let err = serde_json::from_value::<StatusFilter>(json!(["backlog", "bogus"])).unwrap_err();
+        assert!(err.to_string().contains("Unknown status"));
+    }
+
+    #[test]
+    fn number_errors() {
+        let err = serde_json::from_value::<StatusFilter>(json!(42)).unwrap_err();
+        assert!(
+            err.to_string().contains("status string") || err.to_string().contains("invalid type"),
+            "got: {err}"
+        );
     }
 }
