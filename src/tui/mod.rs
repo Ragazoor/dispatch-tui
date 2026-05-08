@@ -426,6 +426,10 @@ impl App {
     /// Mark a task as mid-dispatch and update the sticky status text.
     /// This is the single side-effect path for adding to `dispatching`.
     /// No-op if the task ID is not present in the task list.
+    ///
+    /// UI-only state update — does not perform dispatch. The caller (a
+    /// `Command` handler) has already executed the side effect; this
+    /// method only records the in-flight UI marker.
     pub(in crate::tui) fn mark_dispatching(&mut self, id: TaskId) {
         if self.find_task(id).is_none() {
             return;

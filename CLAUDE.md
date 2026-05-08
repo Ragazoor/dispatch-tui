@@ -287,7 +287,12 @@ For the authoritative mapping, read `DispatchMode::for_task()` in `src/models/ta
 | `src/tui/input.rs` | Key event entry point, inline-mutation convention for UI-only state |
 | `src/tui/input/` | Per-mode key handlers: `normal.rs`, `confirm.rs`, `projects.rs`, `repo_filter.rs` |
 | `src/tui/ui/mod.rs` | Rendering entry point — re-exports `render()`, thin dispatcher |
-| `src/tui/ui/kanban.rs` | Kanban board rendering: task/epic cards, columns, overlays, action hints |
+| `src/tui/ui/kanban/mod.rs` | Kanban board: `render()` entry, summary/status bar, action hints, color helpers |
+| `src/tui/ui/kanban/cards.rs` | Task and epic card rendering (indicator classification, card list items) |
+| `src/tui/ui/kanban/columns.rs` | Column layout — `render_columns`, per-column rendering, archive column |
+| `src/tui/ui/kanban/popups.rs` | Overlay rendering (error, tips, help, repo filter, task detail) |
+| `src/tui/ui/kanban/projects_panel.rs` | Left-side project filter panel |
+| `src/tui/ui/kanban/tests.rs` | Kanban rendering unit tests |
 | `src/tui/ui/shared.rs` | Cross-board helpers: `render_tab_bar`, `refresh_status`, `truncate`, `push_hint_spans` |
 | `src/tui/ui/palette.rs` | Tokyo Night color palette constants |
 | `src/tui/ui/{input_form,learnings}.rs` | Overlay renderers (input forms, knowledge base panel) |
