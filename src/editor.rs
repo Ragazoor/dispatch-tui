@@ -108,25 +108,44 @@ pub fn format_epic_for_editor(epic: &Epic) -> String {
     )
 }
 
+/// Parse a section's raw value with `parser`. Empty input is treated as
+/// "section absent" and returns `None` without an error. A non-empty value
+/// that fails to parse pushes an [`EditorParseError`] onto `errors` and
+/// returns `None`.
+fn parse_section<T>(
+    raw: String,
+    field: &'static str,
+    parser: impl FnOnce(&str) -> Option<T>,
+    on_fail_message: impl FnOnce(&str) -> String,
+    errors: &mut Vec<EditorParseError>,
+) -> Option<T> {
+    if raw.is_empty() {
+        return None;
+    }
+    match parser(&raw) {
+        Some(v) => Some(v),
+        None => {
+            let message = on_fail_message(&raw);
+            errors.push(EditorParseError {
+                field,
+                raw,
+                message,
+            });
+            None
+        }
+    }
+}
+
 pub fn parse_epic_editor_output(input: &str) -> EpicEditorFields {
     let mut s = parse_sections(input);
     let mut errors = Vec::new();
-    let raw_interval = s.remove("FEED_INTERVAL_SECS").unwrap_or_default();
-    let feed_interval_secs = if raw_interval.is_empty() {
-        None
-    } else {
-        match raw_interval.parse::<i64>() {
-            Ok(n) => Some(n),
-            Err(_) => {
-                errors.push(EditorParseError {
-                    field: "FEED_INTERVAL_SECS",
-                    raw: raw_interval.clone(),
-                    message: format!("not a valid integer: {raw_interval:?}"),
-                });
-                None
-            }
-        }
-    };
+    let feed_interval_secs = parse_section(
+        s.remove("FEED_INTERVAL_SECS").unwrap_or_default(),
+        "FEED_INTERVAL_SECS",
+        |raw| raw.parse::<i64>().ok(),
+        |raw| format!("not a valid integer: {raw:?}"),
+        &mut errors,
+    );
     EpicEditorFields {
         title: s.remove("TITLE").unwrap_or_default(),
         description: s.remove("DESCRIPTION").unwrap_or_default(),
@@ -247,39 +266,21 @@ pub fn parse_editor_content(input: &str) -> EditorFields {
     let mut s = parse_sections(input);
     let mut errors = Vec::new();
 
-    let raw_status = s.remove("STATUS").unwrap_or_default();
-    let status = if raw_status.is_empty() {
-        None
-    } else {
-        match crate::models::TaskStatus::parse(&raw_status) {
-            Some(st) => Some(st),
-            None => {
-                errors.push(EditorParseError {
-                    field: "STATUS",
-                    raw: raw_status.clone(),
-                    message: format!("unknown status: {raw_status:?}"),
-                });
-                None
-            }
-        }
-    };
+    let status = parse_section(
+        s.remove("STATUS").unwrap_or_default(),
+        "STATUS",
+        crate::models::TaskStatus::parse,
+        |raw| format!("unknown status: {raw:?}"),
+        &mut errors,
+    );
 
-    let raw_tag = s.remove("TAG").unwrap_or_default();
-    let tag = if raw_tag.is_empty() {
-        None
-    } else {
-        match crate::models::TaskTag::parse(&raw_tag) {
-            Some(t) => Some(t),
-            None => {
-                errors.push(EditorParseError {
-                    field: "TAG",
-                    raw: raw_tag.clone(),
-                    message: format!("unknown tag: {raw_tag:?}"),
-                });
-                None
-            }
-        }
-    };
+    let tag = parse_section(
+        s.remove("TAG").unwrap_or_default(),
+        "TAG",
+        crate::models::TaskTag::parse,
+        |raw| format!("unknown tag: {raw:?}"),
+        &mut errors,
+    );
 
     EditorFields {
         title: s.remove("TITLE").unwrap_or_default(),

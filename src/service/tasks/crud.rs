@@ -61,7 +61,20 @@ impl TaskService {
 
         // Snapshot the task before the patch so we can detect the
         // null-pr_url → set transition without an extra round-trip later.
-        let prior = self.db.get_task(task_id).ok().flatten();
+        // Skip the read entirely unless this update both moves to Review
+        // and sets pr_url — the only shape that can be a finalisation —
+        // or relinks the task to a different epic (also wants the prior).
+        let needs_prior = params.epic_id.is_some()
+            || (params.status == Some(TaskStatus::Review)
+                && matches!(
+                    params.pr_url.as_ref(),
+                    Some(FieldUpdate::Set(s)) if !s.is_empty()
+                ));
+        let prior = if needs_prior {
+            self.db.get_task(task_id).ok().flatten()
+        } else {
+            None
+        };
         let was_pr_finalisation = params.status == Some(TaskStatus::Review)
             && matches!(
                 params.pr_url.as_ref(),

@@ -302,16 +302,7 @@ impl TuiRuntime {
         let mut fields = parse_editor_content(&text);
         let parse_errors = std::mem::take(&mut fields.errors);
         let applied = apply_task_editor_fields(&task, fields);
-        if !parse_errors.is_empty() {
-            let summary = parse_errors
-                .iter()
-                .map(|e| e.to_string())
-                .collect::<Vec<_>>()
-                .join("; ");
-            app.update(Message::StatusInfo(format!(
-                "Edit accepted with parse errors — {summary}"
-            )));
-        }
+        emit_parse_errors(app, &parse_errors);
 
         let task_id = task.id;
         let plan = applied.plan_path.clone();
@@ -351,16 +342,7 @@ impl TuiRuntime {
         let mut fields = parse_epic_editor_output(&text);
         let parse_errors = std::mem::take(&mut fields.errors);
         let applied = apply_epic_editor_fields(&epic, fields);
-        if !parse_errors.is_empty() {
-            let summary = parse_errors
-                .iter()
-                .map(|e| e.to_string())
-                .collect::<Vec<_>>()
-                .join("; ");
-            app.update(Message::StatusInfo(format!(
-                "Edit accepted with parse errors — {summary}"
-            )));
-        }
+        emit_parse_errors(app, &parse_errors);
 
         let epic_id = epic.id;
         if let Err(e) = self.epic_svc.update_epic(UpdateEpicParams {
@@ -390,6 +372,22 @@ impl TuiRuntime {
         updated.feed_interval_secs = applied.feed_interval_secs;
         app.update(Message::EpicEdited(updated))
     }
+}
+
+/// Surface accumulated editor parse errors as a status message. No-op when
+/// the slice is empty so callers don't need to guard the call themselves.
+fn emit_parse_errors(app: &mut App, errors: &[crate::editor::EditorParseError]) {
+    if errors.is_empty() {
+        return;
+    }
+    let summary = errors
+        .iter()
+        .map(|e| e.to_string())
+        .collect::<Vec<_>>()
+        .join("; ");
+    app.update(Message::StatusInfo(format!(
+        "Edit accepted with parse errors — {summary}"
+    )));
 }
 
 /// Extract the saved text from an [`EditorOutcome`], returning `None` if
