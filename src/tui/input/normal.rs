@@ -357,7 +357,7 @@ impl App {
                     let ids: Vec<_> = self.select.tasks.iter().copied().collect();
                     self.update(Message::BatchDetachTmux(ids))
                 } else if let Some(task) = self.selected_task() {
-                    if task.status == TaskStatus::Review && task.tmux_window.is_some() {
+                    if task.tmux_window.is_some() {
                         let id = task.id;
                         self.update(Message::DetachTmux(id))
                     } else {

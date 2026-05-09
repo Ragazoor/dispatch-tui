@@ -217,10 +217,8 @@ pub(super) fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
         Line::from(vec![
             Span::styled("  [d]", key),
             Span::styled(" dispatch*  ", desc),
-            Span::styled("[m]", key),
-            Span::styled(" move fwd   ", desc),
-            Span::styled("[M]", key),
-            Span::styled(" move back", desc),
+            Span::styled("[H/L]", key),
+            Span::styled(" move task/epic backward/forward", desc),
         ]),
         Line::from(vec![
             Span::styled("  [x]", key),
@@ -240,8 +238,6 @@ pub(super) fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled(" Projects  ", desc),
             Span::styled("[l/\u{2192}]", key),
             Span::styled(" Archive   ", desc),
-            Span::styled("[V]", key),
-            Span::styled(" epic done  ", desc),
             Span::styled("[a]", key),
             Span::styled(" select all", desc),
         ]),
@@ -257,7 +253,7 @@ pub(super) fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
         Line::from(vec![
             Span::styled("  [T]", key),
             Span::styled(" detach tmux panel  ", desc),
-            Span::styled("(Review tasks, supports batch)", note),
+            Span::styled("(any task with a tmux window, supports batch)", note),
         ]),
         Line::from(vec![
             Span::styled("  [S]", key),

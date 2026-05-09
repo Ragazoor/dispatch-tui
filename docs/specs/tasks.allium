@@ -413,24 +413,24 @@ rule ReorderItem {
 rule DetachTmux {
     when: ConfirmDetachTmux(task)
 
-    requires: task.status = review
     requires: task.tmux_window != null
 
     ensures: task.tmux_window = null
     ensures:
         if task.sub_status in {stale, crashed}:
-            task.sub_status = core/SubStatus.default_for(review)
+            task.sub_status = core/SubStatus.default_for(task.status)
 
     @guidance
-        -- Kills the tmux window for a review task while preserving
-        -- the worktree. The agent is gone but the branch remains for
+        -- Kills the tmux window for a task while preserving the
+        -- worktree. The agent is gone but the branch remains for
         -- PR review or later resume. Clears agent health tracking
         -- (staleness timer, crash detection). Only Stale/Crashed
-        -- sub_statuses are reset to the review default (awaiting_review);
-        -- other sub_statuses (awaiting_review, changes_requested,
-        -- approved, conflict) are preserved.
-        -- Triggered via the TUI (T key, uppercase) on review tasks.
-        -- The T key always shows a confirmation prompt
+        -- sub_statuses are reset to the default for the task's
+        -- current status; all other sub_statuses are preserved.
+        -- Allowed for any task with a tmux window: Running tasks
+        -- have their live agent terminated; Review tasks lose their
+        -- post-completion session. Triggered via the TUI (T key,
+        -- uppercase). Always shows a confirmation prompt
         -- ("Detach tmux panel? [y/n]") before detaching, whether the
         -- target is a single task or a batch of multi-selected tasks.
 }
@@ -438,8 +438,8 @@ rule DetachTmux {
 rule BatchDetachTmux {
     when: BatchDetachTmux(tasks)
 
-    -- Filters to review tasks with a tmux window, then detaches all.
-    let detachable = tasks where status = review and tmux_window != null
+    -- Filters to tasks that have a tmux window, then detaches all.
+    let detachable = tasks where tmux_window != null
 
     requires: detachable.count > 0
 
@@ -451,7 +451,7 @@ rule BatchDetachTmux {
         -- Triggered via the TUI (T key, uppercase) when tasks are
         -- multi-selected. Shows a confirmation prompt with the count
         -- of detachable tasks ("Detach N tmux panels? [y/n]"). Tasks
-        -- that are not in review or lack a tmux window are silently
+        -- that lack a tmux window are silently
         -- filtered out before the prompt.
 }
 

@@ -1455,6 +1455,22 @@ fn handle_key_normal_detach_tmux_no_window_is_noop() {
 }
 
 #[test]
+fn handle_key_normal_detach_tmux_running_task_with_window_prompts() {
+    // Running tasks with a tmux window should also be detachable via T.
+    let mut task = make_task(20, TaskStatus::Running);
+    task.tmux_window = Some("main:20-running".to_string());
+    let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
+    app.selection_mut().set_column(2); // Running column
+    app.selection_mut().set_row(2, 0);
+    app.handle_key(make_key(KeyCode::Char('T')));
+    assert!(
+        matches!(app.mode(), InputMode::ConfirmDetachTmux(ids) if ids == &[TaskId(20)]),
+        "Expected ConfirmDetachTmux([20]), got {:?}",
+        app.mode()
+    );
+}
+
+#[test]
 fn handle_key_normal_unknown_key_is_noop() {
     let mut app = make_app();
     let cmds = app.handle_key(make_key(KeyCode::Char('z')));

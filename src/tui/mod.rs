@@ -1061,10 +1061,7 @@ impl App {
     pub(in crate::tui) fn handle_detach_tmux(&mut self, ids: Vec<TaskId>) -> Vec<Command> {
         let detachable: Vec<TaskId> = ids
             .iter()
-            .filter(|&&id| {
-                self.find_task(id)
-                    .is_some_and(|t| t.status == TaskStatus::Review && t.tmux_window.is_some())
-            })
+            .filter(|&&id| self.find_task(id).is_some_and(|t| t.tmux_window.is_some()))
             .copied()
             .collect();
 

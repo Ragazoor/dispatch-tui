@@ -1340,6 +1340,25 @@ fn detach_tmux_single_sets_confirm_mode() {
 }
 
 #[test]
+fn detach_tmux_running_task_with_window_is_detachable() {
+    // Running tasks with a tmux window should pass the detach filter.
+    let mut app = App::new(
+        vec![make_task(1, TaskStatus::Running)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
+    app.board.tasks[0].tmux_window = Some("task-1".to_string());
+
+    app.update(Message::DetachTmux(TaskId(1)));
+
+    assert!(
+        matches!(&app.input.mode, InputMode::ConfirmDetachTmux(ids) if ids == &[TaskId(1)]),
+        "Running task with window should set ConfirmDetachTmux, got {:?}",
+        app.input.mode
+    );
+}
+
+#[test]
 fn detach_tmux_noop_on_task_without_window() {
     let mut app = App::new(
         vec![make_task(1, TaskStatus::Review)],

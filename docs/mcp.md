@@ -88,7 +88,7 @@ The Knowledge Base lets dispatched agents record knowledge entries that are auto
 ### End-to-end lifecycle
 
 1. **Agent records** — calls `record_learning(task_id, kind, summary, scope, ...)` during a task or at wrap-up. The entry is immediately active and will appear in future dispatch prompts for agents working in the matching scope.
-2. **Human manages** — opens the Knowledge Base overlay (`L` key from the main board) and can reject, archive, or edit entries. Only approved entries stay in the active pool.
+2. **Human manages** — opens the Knowledge Base overlay (`I` key from the main board) and can reject, archive, or edit entries. Only approved entries stay in the active pool.
 3. **Future dispatches** — when an agent is launched, `dispatch_with_prompt()` queries approved entries for the task's context and prepends them to the prompt (see `docs/specs/learnings.allium`).
 4. **Agent upvotes** — calls `upvote_learning(learning_id, task_id)` when a retrieved entry proves correct. This increments `confirmed_count`, which raises the entry's priority in future results.
 
@@ -131,7 +131,7 @@ Approved entries affect dispatch. Rejected and archived entries do not.
 
 | Key | Action |
 |-----|--------|
-| `L` | Open overlay |
+| `I` | Open overlay |
 | `j` / `k` | Navigate list |
 | `a` | Approve selected |
 | `x` | Reject selected |
