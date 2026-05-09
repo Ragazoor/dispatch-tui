@@ -25,7 +25,9 @@ fn task_updated_replaces_existing_row() {
     updated.sub_status = SubStatus::default_for(TaskStatus::Running);
     let other_count_before = app.board.tasks.len();
 
-    app.update(Message::Task(crate::tui::messages::TaskMessage::Updated(updated)));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Updated(
+        updated,
+    )));
 
     let now = app
         .board
@@ -47,7 +49,9 @@ fn task_updated_appends_new_task() {
     let before = app.board.tasks.len();
     let new_task = make_task(99, TaskStatus::Backlog);
 
-    app.update(Message::Task(crate::tui::messages::TaskMessage::Updated(new_task)));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Updated(
+        new_task,
+    )));
 
     assert_eq!(app.board.tasks.len(), before + 1);
     assert!(app.board.tasks.iter().any(|t| t.id == TaskId(99)));
@@ -63,7 +67,9 @@ fn epic_updated_replaces_existing_row() {
     renamed.title = "renamed".to_string();
     let count_before = app.board.epics.len();
 
-    app.update(Message::Epic(crate::tui::messages::EpicMessage::Updated(renamed)));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Updated(
+        renamed,
+    )));
 
     let now = app
         .board
@@ -80,7 +86,9 @@ fn epic_updated_appends_new_epic() {
     let mut app = make_app();
     let before = app.board.epics.len();
 
-    app.update(Message::Epic(crate::tui::messages::EpicMessage::Updated(make_epic(42))));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Updated(
+        make_epic(42),
+    )));
 
     assert_eq!(app.board.epics.len(), before + 1);
     assert!(app.board.epics.iter().any(|e| e.id == EpicId(42)));
@@ -100,16 +108,17 @@ fn task_updated_fires_review_notification_on_transition() {
     updated.status = TaskStatus::Review;
     updated.sub_status = SubStatus::default_for(TaskStatus::Review);
 
-    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Updated(updated)));
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Updated(
+        updated,
+    )));
 
     assert!(
-        cmds.iter()
-            .any(|c| matches!(
-                c,
-                crate::tui::Command::System(
-                    crate::tui::commands::SystemCommand::SendNotification { .. }
-                )
-            )),
+        cmds.iter().any(|c| matches!(
+            c,
+            crate::tui::Command::System(
+                crate::tui::commands::SystemCommand::SendNotification { .. }
+            )
+        )),
         "expected a SendNotification command on review transition"
     );
 }

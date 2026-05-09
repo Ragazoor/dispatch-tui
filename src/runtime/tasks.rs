@@ -242,7 +242,9 @@ impl TuiRuntime {
     /// keeps draining notifications.
     pub(super) fn exec_refresh_task(&self, app: &mut App, task_id: TaskId) -> Vec<Command> {
         match self.database.get_task(task_id) {
-            Ok(Some(task)) => app.update(Message::Task(crate::tui::messages::TaskMessage::Updated(task))),
+            Ok(Some(task)) => app.update(Message::Task(
+                crate::tui::messages::TaskMessage::Updated(task),
+            )),
             Ok(None) => self.exec_refresh_from_db(app),
             Err(e) => {
                 app.update(Message::System(crate::tui::messages::SystemMessage::Error(
@@ -268,13 +270,17 @@ impl TuiRuntime {
                 return vec![];
             }
         };
-        let mut cmds = app.update(Message::Epic(crate::tui::messages::EpicMessage::Updated(epic)));
+        let mut cmds = app.update(Message::Epic(crate::tui::messages::EpicMessage::Updated(
+            epic,
+        )));
         // Feed-sync upserts whole batches under the epic — reload the
         // epic's tasks so card lists reflect the new rows in one shot.
         match self.database.list_tasks_for_epic(epic_id) {
             Ok(tasks) => {
                 for task in tasks {
-                    cmds.extend(app.update(Message::Task(crate::tui::messages::TaskMessage::Updated(task))));
+                    cmds.extend(app.update(Message::Task(
+                        crate::tui::messages::TaskMessage::Updated(task),
+                    )));
                 }
             }
             Err(e) => {
