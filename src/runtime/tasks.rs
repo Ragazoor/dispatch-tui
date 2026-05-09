@@ -210,6 +210,50 @@ impl TuiRuntime {
         }
     }
 
+    /// Reload a single task from the DB and splice it into the app state.
+    /// Falls back to a full refresh if the task is gone (e.g. deleted while
+    /// the event was in flight); returns silently on DB errors so the runtime
+    /// keeps draining notifications.
+    pub(super) fn exec_refresh_task(&self, app: &mut App, task_id: TaskId) -> Vec<Command> {
+        match self.database.get_task(task_id) {
+            Ok(Some(task)) => app.update(Message::TaskUpdated(task)),
+            Ok(None) => self.exec_refresh_from_db(app),
+            Err(e) => {
+                app.update(Message::Error(Self::db_error("refreshing task", e)));
+                vec![]
+            }
+        }
+    }
+
+    /// Reload a single epic plus its tasks (feed-sync changes appear here as
+    /// a batch update) and splice both into the app state. Falls back to a
+    /// full refresh if the epic is gone.
+    pub(super) fn exec_refresh_epic(&self, app: &mut App, epic_id: models::EpicId) -> Vec<Command> {
+        let epic_result = self.database.get_epic(epic_id);
+        let epic = match epic_result {
+            Ok(Some(e)) => e,
+            Ok(None) => return self.exec_refresh_from_db(app),
+            Err(e) => {
+                app.update(Message::Error(Self::db_error("refreshing epic", e)));
+                return vec![];
+            }
+        };
+        let mut cmds = app.update(Message::EpicUpdated(epic));
+        // Feed-sync upserts whole batches under the epic — reload the
+        // epic's tasks so card lists reflect the new rows in one shot.
+        match self.database.list_tasks_for_epic(epic_id) {
+            Ok(tasks) => {
+                for task in tasks {
+                    cmds.extend(app.update(Message::TaskUpdated(task)));
+                }
+            }
+            Err(e) => {
+                app.update(Message::Error(Self::db_error("listing epic tasks", e)));
+            }
+        }
+        cmds
+    }
+
     pub(super) fn exec_refresh_from_db(&self, app: &mut App) -> Vec<Command> {
         let mut cmds = Vec::new();
         match self.database.list_all() {

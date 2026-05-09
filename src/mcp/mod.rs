@@ -6,14 +6,20 @@ use axum::{routing::post, Router};
 use tokio::sync::mpsc;
 
 use crate::db;
-use crate::models::TaskId;
+use crate::models::{EpicId, TaskId};
 use crate::process::ProcessRunner;
 
 /// Events sent from the MCP server to the TUI runtime.
 #[derive(Debug)]
 pub enum McpEvent {
-    /// A mutation occurred — trigger a database refresh.
+    /// Catch-all "I don't know what changed" — full reload of tasks, epics, and usage.
+    /// Prefer the targeted variants below when the changed entity is known.
     Refresh,
+    /// A single task changed — reload just that row.
+    TaskChanged(TaskId),
+    /// A single epic changed — reload just that row (and the epic's task list,
+    /// since feed-sync changes appear here as a batch update for the epic).
+    EpicChanged(EpicId),
     /// A message was sent to an agent — flash the target task's card.
     MessageSent { to_task_id: TaskId },
 }
@@ -36,6 +42,23 @@ impl McpState {
     pub fn notify_message_sent(&self, to_task_id: TaskId) {
         if let Some(tx) = &self.notify_tx {
             let _ = tx.send(McpEvent::MessageSent { to_task_id });
+        }
+    }
+
+    /// Notify the runtime that a single task changed. Prefer this over
+    /// `notify()` whenever the affected `task_id` is known: it lets the
+    /// runtime reload one row instead of all tasks.
+    pub fn notify_task_changed(&self, task_id: TaskId) {
+        if let Some(tx) = &self.notify_tx {
+            let _ = tx.send(McpEvent::TaskChanged(task_id));
+        }
+    }
+
+    /// Notify the runtime that a single epic changed. Use this for epic
+    /// updates and for feed-sync batches (one event per sync, not per task).
+    pub fn notify_epic_changed(&self, epic_id: EpicId) {
+        if let Some(tx) = &self.notify_tx {
+            let _ = tx.send(McpEvent::EpicChanged(epic_id));
         }
     }
 }

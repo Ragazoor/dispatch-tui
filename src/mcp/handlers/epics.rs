@@ -91,7 +91,7 @@ pub(super) fn handle_create_epic(
         project_id,
     }) {
         Ok(epic) => {
-            state.notify();
+            state.notify_epic_changed(epic.id);
             JsonRpcResponse::ok(
                 id,
                 json!({"content": [{"type": "text", "text": format!("Epic {} created: {}", epic.id, epic.title)}]}),
@@ -252,7 +252,7 @@ pub(super) fn handle_update_epic(
     let svc = EpicService::new(state.db.clone());
     match svc.update_epic(params) {
         Ok(epic_id) => {
-            state.notify();
+            state.notify_epic_changed(epic_id);
             JsonRpcResponse::ok(
                 id,
                 json!({"content": [{"type": "text", "text": format!("Epic {} updated ({})", epic_id, field_names.join(", "))}]}),

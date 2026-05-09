@@ -225,6 +225,17 @@ impl App {
         vec![]
     }
 
+    /// Splice a single fresh epic into the in-memory list, replacing the row
+    /// with a matching id or appending if it's newly-created.
+    pub(in crate::tui) fn handle_epic_updated(&mut self, epic: Epic) -> Vec<Command> {
+        if let Some(slot) = self.board.epics.iter_mut().find(|e| e.id == epic.id) {
+            *slot = epic;
+        } else {
+            self.board.epics.push(epic);
+        }
+        vec![]
+    }
+
     pub(in crate::tui) fn handle_refresh_usage(&mut self, usage: Vec<TaskUsage>) -> Vec<Command> {
         self.board.usage = usage.into_iter().map(|u| (u.task_id, u)).collect();
         vec![]

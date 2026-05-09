@@ -396,6 +396,6 @@ rule ManualFeedTrigger {
 ------------------------------------------------------------
 
 -- After a successful upsert (regardless of whether any tasks actually
--- changed), the runner sends McpEvent::Refresh on the notification
--- channel so the TUI reloads the affected epic. Failed runs do NOT send
--- a refresh.
+-- changed), the runner sends one McpEvent::EpicChanged(epic_id) on the
+-- notification channel so the TUI reloads only the affected epic and
+-- its tasks — not the whole board. Failed runs do NOT send a refresh.

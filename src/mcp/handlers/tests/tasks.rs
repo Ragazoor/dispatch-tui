@@ -3335,11 +3335,14 @@ async fn update_task_sends_refresh_notification() {
     .await;
     assert!(resp.error.is_none());
 
-    // Should have received a Refresh event
+    // Should have received a targeted TaskChanged(task_id) event
     let event = rx
         .try_recv()
         .expect("expected notification after update_task");
-    assert!(matches!(event, crate::mcp::McpEvent::Refresh));
+    assert!(
+        matches!(event, crate::mcp::McpEvent::TaskChanged(t) if t == task_id),
+        "expected TaskChanged({task_id:?}), got {event:?}"
+    );
 }
 
 #[tokio::test]
@@ -3361,7 +3364,10 @@ async fn create_task_sends_refresh_notification() {
     let event = rx
         .try_recv()
         .expect("expected notification after create_task");
-    assert!(matches!(event, crate::mcp::McpEvent::Refresh));
+    assert!(
+        matches!(event, crate::mcp::McpEvent::TaskChanged(_)),
+        "expected TaskChanged, got {event:?}"
+    );
 }
 
 #[tokio::test]
@@ -3387,7 +3393,10 @@ async fn claim_task_sends_refresh_notification() {
     let event = rx
         .try_recv()
         .expect("expected notification after claim_task");
-    assert!(matches!(event, crate::mcp::McpEvent::Refresh));
+    assert!(
+        matches!(event, crate::mcp::McpEvent::TaskChanged(t) if t == task_id),
+        "expected TaskChanged({task_id:?}), got {event:?}"
+    );
 }
 
 #[tokio::test]
@@ -8082,8 +8091,11 @@ async fn exit_session_emits_refresh_after_done_patch() {
 
     let event = rx
         .try_recv()
-        .expect("expected Refresh after closing exit_session");
-    assert!(matches!(event, crate::mcp::McpEvent::Refresh));
+        .expect("expected TaskChanged after closing exit_session");
+    assert!(
+        matches!(event, crate::mcp::McpEvent::TaskChanged(t) if t == task_id),
+        "expected TaskChanged({task_id:?}), got {event:?}"
+    );
 }
 
 #[tokio::test]

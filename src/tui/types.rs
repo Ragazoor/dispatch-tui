@@ -209,6 +209,13 @@ pub enum Message {
     },
     WindowGone(TaskId),
     RefreshTasks(Vec<Task>),
+    /// Splice a single fresh task into `app.board.tasks` (replace if id
+    /// matches, otherwise append). Targeted counterpart to `RefreshTasks`
+    /// emitted from `McpEvent::TaskChanged`.
+    TaskUpdated(Task),
+    /// Splice a single fresh epic into `app.board.epics` (replace if id
+    /// matches, otherwise append). Targeted counterpart to `RefreshEpics`.
+    EpicUpdated(Epic),
     ResumeTask(TaskId),
     Resumed {
         id: TaskId,

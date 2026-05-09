@@ -179,7 +179,9 @@ impl FeedRunner {
                         "FeedRunner: upsert_feed_tasks failed: {err:#}"
                     );
                 } else {
-                    let _ = notify.send(McpEvent::Refresh);
+                    // One targeted event per sync batch — the runtime reloads
+                    // the epic and its tasks in a single splice.
+                    let _ = notify.send(McpEvent::EpicChanged(epic_id));
                 }
             });
         }

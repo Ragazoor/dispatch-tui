@@ -67,62 +67,8 @@ impl App {
 
     pub(in crate::tui) fn handle_refresh_tasks(&mut self, new_tasks: Vec<Task>) -> Vec<Command> {
         let mut cmds = Vec::new();
-
         for new_task in &new_tasks {
-            // Extract old state before any mutable borrows
-            let old_task = self.find_task(new_task.id);
-            let was_needs_input = old_task.is_some_and(|t| t.sub_status == SubStatus::NeedsInput);
-            let was_review = old_task.is_some_and(|t| t.status == TaskStatus::Review);
-
-            // Reset stale timer when a task recovers from Stale/Crashed via DB refresh
-            let was_stale_or_crashed = old_task
-                .is_some_and(|t| matches!(t.sub_status, SubStatus::Stale | SubStatus::Crashed));
-            let is_recovered = !matches!(
-                new_task.sub_status,
-                SubStatus::Stale | SubStatus::Crashed | SubStatus::Conflict
-            );
-            if was_stale_or_crashed && is_recovered {
-                self.agents.mark_active(new_task.id);
-            }
-
-            if self.notifications_enabled {
-                // Detect NeedsInput transition (running tasks only)
-                if new_task.sub_status == SubStatus::NeedsInput
-                    && !was_needs_input
-                    && new_task.status == TaskStatus::Running
-                    && !self.agents.notified_needs_input.contains(&new_task.id)
-                {
-                    self.agents.notified_needs_input.insert(new_task.id);
-                    cmds.push(Command::SendNotification {
-                        title: format!("Task #{}: {}", new_task.id.0, new_task.title),
-                        body: "Agent needs your input".to_string(),
-                        urgent: true,
-                    });
-                }
-
-                // Detect review transition (notification)
-                if new_task.status == TaskStatus::Review
-                    && !was_review
-                    && !self.agents.notified_review.contains(&new_task.id)
-                {
-                    self.agents.notified_review.insert(new_task.id);
-                    cmds.push(Command::SendNotification {
-                        title: format!("Task #{}: {}", new_task.id.0, new_task.title),
-                        body: "Ready for review".to_string(),
-                        urgent: false,
-                    });
-                }
-            }
-
-            // Always clear notified state when task leaves the triggering state,
-            // even when notifications are disabled. This prevents stale entries from
-            // suppressing notifications after re-enabling.
-            if new_task.status != TaskStatus::Review {
-                self.agents.notified_review.remove(&new_task.id);
-            }
-            if new_task.sub_status != SubStatus::NeedsInput {
-                self.agents.notified_needs_input.remove(&new_task.id);
-            }
+            cmds.extend(self.detect_task_transition_notifications(new_task));
         }
 
         // Merge DB state into in-memory state, preserving tmux_outputs
@@ -131,6 +77,75 @@ impl App {
         self.select.tasks.retain(|id| valid_ids.contains(id));
         self.board.tasks = new_tasks;
         self.sync_board_selection();
+        cmds
+    }
+
+    /// Splice a single fresh task into the in-memory list, replacing the row
+    /// with a matching id or appending if it's a newly-created task.
+    pub(in crate::tui) fn handle_task_updated(&mut self, new_task: Task) -> Vec<Command> {
+        let cmds = self.detect_task_transition_notifications(&new_task);
+        if let Some(slot) = self.board.tasks.iter_mut().find(|t| t.id == new_task.id) {
+            *slot = new_task;
+        } else {
+            self.board.tasks.push(new_task);
+        }
+        self.sync_board_selection();
+        cmds
+    }
+
+    /// Per-task transition logic shared between full and targeted refresh:
+    /// fires notifications on NeedsInput / Review entry, resets stale timers
+    /// on recovery, and clears notified state when the task leaves the
+    /// triggering state.
+    fn detect_task_transition_notifications(&mut self, new_task: &Task) -> Vec<Command> {
+        let mut cmds = Vec::new();
+        let old_task = self.find_task(new_task.id);
+        let was_needs_input = old_task.is_some_and(|t| t.sub_status == SubStatus::NeedsInput);
+        let was_review = old_task.is_some_and(|t| t.status == TaskStatus::Review);
+
+        let was_stale_or_crashed =
+            old_task.is_some_and(|t| matches!(t.sub_status, SubStatus::Stale | SubStatus::Crashed));
+        let is_recovered = !matches!(
+            new_task.sub_status,
+            SubStatus::Stale | SubStatus::Crashed | SubStatus::Conflict
+        );
+        if was_stale_or_crashed && is_recovered {
+            self.agents.mark_active(new_task.id);
+        }
+
+        if self.notifications_enabled {
+            if new_task.sub_status == SubStatus::NeedsInput
+                && !was_needs_input
+                && new_task.status == TaskStatus::Running
+                && !self.agents.notified_needs_input.contains(&new_task.id)
+            {
+                self.agents.notified_needs_input.insert(new_task.id);
+                cmds.push(Command::SendNotification {
+                    title: format!("Task #{}: {}", new_task.id.0, new_task.title),
+                    body: "Agent needs your input".to_string(),
+                    urgent: true,
+                });
+            }
+
+            if new_task.status == TaskStatus::Review
+                && !was_review
+                && !self.agents.notified_review.contains(&new_task.id)
+            {
+                self.agents.notified_review.insert(new_task.id);
+                cmds.push(Command::SendNotification {
+                    title: format!("Task #{}: {}", new_task.id.0, new_task.title),
+                    body: "Ready for review".to_string(),
+                    urgent: false,
+                });
+            }
+        }
+
+        if new_task.status != TaskStatus::Review {
+            self.agents.notified_review.remove(&new_task.id);
+        }
+        if new_task.sub_status != SubStatus::NeedsInput {
+            self.agents.notified_needs_input.remove(&new_task.id);
+        }
         cmds
     }
 

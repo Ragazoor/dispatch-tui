@@ -365,7 +365,7 @@ pub(super) fn handle_update_task(
     let svc = TaskService::new(state.db.clone());
     match svc.update_task(params) {
         Ok(result) => {
-            state.notify();
+            state.notify_task_changed(TaskId(parsed.task_id));
             let nudge = if result.was_pr_finalisation {
                 reflection_nudge(&*state.db)
             } else {
@@ -413,7 +413,7 @@ pub(super) fn handle_create_task(
         project_id: ProjectId(parsed.project_id),
     }) {
         Ok(task_id) => {
-            state.notify();
+            state.notify_task_changed(task_id);
             JsonRpcResponse::ok(
                 id,
                 json!({"content": [{"type": "text", "text": format!("Task {task_id} created")}]}),
@@ -552,7 +552,7 @@ pub(super) fn handle_claim_task(
         tmux_window: parsed.tmux_window,
     }) {
         Ok(task) => {
-            state.notify();
+            state.notify_task_changed(task.id);
             JsonRpcResponse::ok(
                 id,
                 json!({"content": [{"type": "text", "text": format!("Task {} claimed: {}", parsed.task_id, task.title)}]}),
@@ -669,7 +669,7 @@ pub(super) async fn handle_wrap_up(
 
     match rebase_result {
         Ok(()) => {
-            state.notify();
+            state.notify_task_changed(task_id);
             JsonRpcResponse::ok(
                 id,
                 json!({"content": [{"type": "text", "text": format!(
@@ -684,7 +684,7 @@ pub(super) async fn handle_wrap_up(
                 let _ = db.patch_task(task_id, &patch);
             }
             if let Some(tx) = notify_tx {
-                let _ = tx.send(crate::mcp::McpEvent::Refresh);
+                let _ = tx.send(crate::mcp::McpEvent::TaskChanged(task_id));
             }
             JsonRpcResponse::err(id, -32603, format!("wrap_up failed: {e}"))
         }
@@ -765,7 +765,10 @@ Call exit_session(has_learnings=false) when done to close the session."}]}),
                     );
                 }
             }
-            state.notify();
+            state.notify_task_changed(task_id);
+            if let Some(epic_id) = task.epic_id {
+                state.notify_epic_changed(epic_id);
+            }
             let tmux_window = task.tmux_window;
             let runner = state.runner.clone();
             tokio::task::spawn_blocking(move || {
@@ -862,6 +865,7 @@ pub(super) async fn handle_dispatch_next(
 
     let next_id = next_task.id;
     let next_title = next_task.title.clone();
+    let next_epic_id = next_task.epic_id;
     let db = state.db.clone();
     let runner = state.runner.clone();
     let notify_tx = state.notify_tx.clone();
@@ -881,7 +885,7 @@ pub(super) async fn handle_dispatch_next(
                         "dispatch_next: failed to update task: {e}"
                     );
                 }
-                if let Some(epic_id) = next_task.epic_id {
+                if let Some(epic_id) = next_epic_id {
                     if let Err(err) = db.recalculate_epic_status(epic_id) {
                         tracing::warn!(
                             "failed to recalculate epic status for epic {}: {err}",
@@ -896,7 +900,10 @@ pub(super) async fn handle_dispatch_next(
         }
 
         if let Some(tx) = notify_tx {
-            let _ = tx.send(crate::mcp::McpEvent::Refresh);
+            let _ = tx.send(crate::mcp::McpEvent::TaskChanged(next_id));
+            if let Some(epic_id) = next_epic_id {
+                let _ = tx.send(crate::mcp::McpEvent::EpicChanged(epic_id));
+            }
         }
     });
 
@@ -960,7 +967,10 @@ pub(super) async fn handle_dispatch_task(
                 let _ = state.db.recalculate_epic_status(eid);
             }
             if let Some(tx) = notify_tx {
-                let _ = tx.send(crate::mcp::McpEvent::Refresh);
+                let _ = tx.send(crate::mcp::McpEvent::TaskChanged(task_id));
+                if let Some(eid) = epic_id {
+                    let _ = tx.send(crate::mcp::McpEvent::EpicChanged(eid));
+                }
             }
             JsonRpcResponse::ok(
                 id,
