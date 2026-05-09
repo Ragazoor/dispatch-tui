@@ -21,14 +21,17 @@ use super::worktree::provision_worktree;
 /// The prompt file is deleted after Claude reads it.
 /// Shared by all dispatch variants.
 ///
-/// Uses `--permission-mode plan`: the agent may read files and run commands
-/// but must ask before writing. Review and fix agents use `acceptEdits`
-/// instead because they make direct code changes without interactive approval.
+/// `permission_mode` controls Claude's `--permission-mode` flag:
+/// `None` launches in Claude's default (auto) mode, used by every task
+/// agent except research. `Some("plan")` is used by the research agent so
+/// investigation stays read-only. Review and fix agents use a separate
+/// path (`provision_and_dispatch`) and pass `acceptEdits`.
 fn dispatch_with_prompt(
     task: &Task,
     prompt: &str,
     runner: &dyn ProcessRunner,
     base_branch: Option<&str>,
+    permission_mode: Option<&str>,
 ) -> Result<DispatchResult> {
     if task.repo_path.is_empty() {
         anyhow::bail!(
@@ -59,9 +62,13 @@ fn dispatch_with_prompt(
     let prompt_file = format!("{}/.claude-prompt", provision.worktree_path);
     fs::write(&prompt_file, &full_prompt)
         .with_context(|| format!("failed to write {prompt_file}"))?;
+    let permission_flag = match permission_mode {
+        Some(mode) => format!(" --permission-mode {mode}"),
+        None => String::new(),
+    };
     let claude_cmd = format!(
         "bash -c 'prompt=$(cat .claude-prompt) && rm -f .claude-prompt \
-         && claude {DISPATCH_PLUGIN_DIR} --permission-mode plan \"$prompt\"'"
+         && claude {DISPATCH_PLUGIN_DIR}{permission_flag} \"$prompt\"'"
     );
     tmux::send_keys(&provision.tmux_window, &claude_cmd, runner)
         .context("failed to send keys to tmux window")?;
@@ -90,7 +97,7 @@ pub fn dispatch_agent(
         project,
         injections,
     );
-    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch))
+    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch), None)
 }
 
 pub fn pr_review_agent(
@@ -100,7 +107,7 @@ pub fn pr_review_agent(
     project: Option<&ProjectContext>,
 ) -> Result<DispatchResult> {
     let prompt = build_pr_review_prompt(task.id, &task.title, &task.description, epic, project);
-    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch))
+    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch), None)
 }
 
 pub fn research_agent(
@@ -110,7 +117,7 @@ pub fn research_agent(
     project: Option<&ProjectContext>,
 ) -> Result<DispatchResult> {
     let prompt = build_research_prompt(task.id, &task.title, &task.description, epic, project);
-    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch))
+    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch), Some("plan"))
 }
 
 pub fn fix_task_agent(
@@ -120,7 +127,7 @@ pub fn fix_task_agent(
     project: Option<&ProjectContext>,
 ) -> Result<DispatchResult> {
     let prompt = build_fix_task_prompt(task.id, &task.title, &task.description, epic, project);
-    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch))
+    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch), None)
 }
 
 pub fn quick_dispatch_agent(
@@ -138,7 +145,7 @@ pub fn quick_dispatch_agent(
         project,
         injections,
     );
-    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch))
+    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch), None)
 }
 
 pub fn epic_planning_agent(
@@ -154,7 +161,7 @@ pub fn epic_planning_agent(
     };
     let prompt =
         build_epic_planning_prompt(task.id, &task.title, &task.description, &epic, project);
-    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch))
+    dispatch_with_prompt(task, &prompt, runner, Some(&task.base_branch), None)
 }
 
 /// Re-open a tmux window for an existing worktree and resume the most recent

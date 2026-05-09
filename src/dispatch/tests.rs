@@ -936,16 +936,13 @@ fn dispatch_sends_claude_command() {
         "send-keys should include claude"
     );
     assert!(
-        calls[3]
-            .1
-            .iter()
-            .any(|a| a.contains("--permission-mode plan")),
-        "dispatch_agent send-keys should use plan mode"
+        !calls[3].1.iter().any(|a| a.contains("--permission-mode")),
+        "dispatch_agent send-keys should omit --permission-mode (auto/default)"
     );
 }
 
 #[test]
-fn dispatch_agent_uses_plan_mode() {
+fn dispatch_agent_uses_default_permission_mode() {
     let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
 
     let mock = MockProcessRunner::new(vec![
@@ -963,8 +960,127 @@ fn dispatch_agent_uses_plan_mode() {
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, 3, "claude");
     assert!(
+        !send_keys_arg.contains("--permission-mode"),
+        "dispatch_agent should use default (auto) mode — no --permission-mode flag, got: {send_keys_arg}"
+    );
+}
+
+#[test]
+fn pr_review_agent_uses_default_permission_mode() {
+    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(), // tmux set-hook
+        MockProcessRunner::ok(), // tmux send-keys -l
+        MockProcessRunner::ok(), // tmux send-keys Enter
+    ]);
+
+    let task = make_task(&repo_path);
+    pr_review_agent(&task, &mock, None, None).unwrap();
+
+    let calls = mock.recorded_calls();
+    let send_keys_arg = find_call_arg(&calls, 3, "claude");
+    assert!(
+        !send_keys_arg.contains("--permission-mode"),
+        "pr_review_agent should use default (auto) mode — no --permission-mode flag, got: {send_keys_arg}"
+    );
+}
+
+#[test]
+fn research_agent_uses_plan_permission_mode() {
+    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(), // tmux set-hook
+        MockProcessRunner::ok(), // tmux send-keys -l
+        MockProcessRunner::ok(), // tmux send-keys Enter
+    ]);
+
+    let task = make_task(&repo_path);
+    research_agent(&task, &mock, None, None).unwrap();
+
+    let calls = mock.recorded_calls();
+    let send_keys_arg = find_call_arg(&calls, 3, "claude");
+    assert!(
         send_keys_arg.contains("--permission-mode plan"),
-        "dispatch_agent should use plan mode, got: {send_keys_arg}"
+        "research_agent should use --permission-mode plan to keep investigation read-only, got: {send_keys_arg}"
+    );
+}
+
+#[test]
+fn fix_task_agent_uses_default_permission_mode() {
+    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(), // tmux set-hook
+        MockProcessRunner::ok(), // tmux send-keys -l
+        MockProcessRunner::ok(), // tmux send-keys Enter
+    ]);
+
+    let task = make_task(&repo_path);
+    fix_task_agent(&task, &mock, None, None).unwrap();
+
+    let calls = mock.recorded_calls();
+    let send_keys_arg = find_call_arg(&calls, 3, "claude");
+    assert!(
+        !send_keys_arg.contains("--permission-mode"),
+        "fix_task_agent should use default (auto) mode — no --permission-mode flag, got: {send_keys_arg}"
+    );
+}
+
+#[test]
+fn quick_dispatch_agent_uses_default_permission_mode() {
+    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(), // tmux set-hook
+        MockProcessRunner::ok(), // tmux send-keys -l
+        MockProcessRunner::ok(), // tmux send-keys Enter
+    ]);
+
+    let task = make_task(&repo_path);
+    quick_dispatch_agent(&task, &mock, None, None, &LearningInjections::default()).unwrap();
+
+    let calls = mock.recorded_calls();
+    let send_keys_arg = find_call_arg(&calls, 3, "claude");
+    assert!(
+        !send_keys_arg.contains("--permission-mode"),
+        "quick_dispatch_agent should use default (auto) mode — no --permission-mode flag, got: {send_keys_arg}"
+    );
+}
+
+#[test]
+fn epic_planning_agent_uses_default_permission_mode() {
+    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(), // tmux set-hook
+        MockProcessRunner::ok(), // tmux send-keys -l
+        MockProcessRunner::ok(), // tmux send-keys Enter
+    ]);
+
+    let task = make_task(&repo_path);
+    let project = ProjectContext {
+        project_id: ProjectId(1),
+        project_name: "Dispatch".to_string(),
+    };
+    epic_planning_agent(&task, EpicId(7), "Big Epic", &project, &mock).unwrap();
+
+    let calls = mock.recorded_calls();
+    let send_keys_arg = find_call_arg(&calls, 3, "claude");
+    assert!(
+        !send_keys_arg.contains("--permission-mode"),
+        "epic_planning_agent should use default (auto) mode — no --permission-mode flag, got: {send_keys_arg}"
     );
 }
 
