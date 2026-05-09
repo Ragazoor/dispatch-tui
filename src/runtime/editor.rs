@@ -17,6 +17,7 @@ use crate::editor::{
 use crate::models::ProjectId;
 use crate::process::ProcessRunner;
 use crate::service::{UpdateEpicParams, UpdateTaskParams};
+use crate::tui::messages::LearningMessage;
 use crate::tui::{App, Command, EditKind, EditorOutcome, Message};
 use crate::{models, tmux};
 
@@ -281,7 +282,7 @@ impl TuiRuntime {
         match svc.update_learning(params) {
             Ok(()) => {
                 if let Ok(Some(updated)) = db.get_learning(learning.id) {
-                    app.update(Message::LearningEdited(updated));
+                    app.update(Message::Learning(LearningMessage::Edited(updated)));
                 }
             }
             Err(e) => {
@@ -495,7 +496,9 @@ mod learning_editor_tests {
         let rt = make_runtime(db.clone());
         // Put app into Learnings view
         let mut app = App::new(vec![], ProjectId(1), EDITOR_TEST_INACTIVITY_TIMEOUT);
-        app.update(Message::ShowLearnings(vec![learning.clone()]));
+        app.update(Message::Learning(LearningMessage::Show(vec![
+            learning.clone()
+        ])));
 
         let updated_content = "--- SUMMARY ---\nnew summary\n--- KIND ---\npitfall\n--- TAGS ---\nrust\n--- DETAIL ---\nsome detail\n".to_string();
         rt.exec_finalize_editor_result(
@@ -535,7 +538,9 @@ mod learning_editor_tests {
         let learning = make_learning(id);
         let rt = make_runtime(db.clone());
         let mut app = App::new(vec![], ProjectId(1), EDITOR_TEST_INACTIVITY_TIMEOUT);
-        app.update(Message::ShowLearnings(vec![learning.clone()]));
+        app.update(Message::Learning(LearningMessage::Show(vec![
+            learning.clone()
+        ])));
 
         let content_empty_summary =
             "--- SUMMARY ---\n\n--- KIND ---\npitfall\n--- TAGS ---\n\n--- DETAIL ---\n\n"

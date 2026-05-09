@@ -442,7 +442,9 @@ fn snapshot_learnings_list_view() {
             updated_at: now,
         },
     ];
-    app.update(crate::tui::Message::ShowLearnings(learnings));
+    app.update(crate::tui::Message::Learning(
+        crate::tui::messages::LearningMessage::Show(learnings),
+    ));
 
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);
@@ -489,9 +491,13 @@ fn snapshot_learnings_tree_view() {
             updated_at: now,
         },
     ];
-    app.update(crate::tui::Message::ShowLearnings(learnings));
+    app.update(crate::tui::Message::Learning(
+        crate::tui::messages::LearningMessage::Show(learnings),
+    ));
     // Switch to tree view
-    app.update(crate::tui::Message::ToggleLearningsView);
+    app.update(crate::tui::Message::Learning(
+        crate::tui::messages::LearningMessage::ToggleView,
+    ));
     // Verify we're in tree view
     assert!(matches!(
         &app.board.view_mode,
@@ -547,7 +553,9 @@ fn snapshot_kb_overlay_needs_review_section() {
             updated_at: now,
         },
     ];
-    app.update(crate::tui::Message::ShowLearnings(learnings));
+    app.update(crate::tui::Message::Learning(
+        crate::tui::messages::LearningMessage::Show(learnings),
+    ));
 
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);

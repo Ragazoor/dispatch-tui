@@ -31,6 +31,7 @@ use crate::db::{PrWorkflowStore, ProjectCrud, SettingsStore, TaskCrud};
 use crate::models::TaskId;
 use crate::process::{ProcessRunner, RealProcessRunner};
 use crate::service::FieldUpdate;
+use crate::tui::messages::LearningMessage;
 use crate::tui::{self, App, Command, Message, RepoFilterMode};
 use crate::{db, dispatch, mcp, models, tmux};
 

@@ -4,6 +4,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::models::{LearningId, SubStatus, TaskStatus};
 
+use super::super::messages::LearningMessage;
 use super::super::types::*;
 use super::super::App;
 
@@ -45,56 +46,58 @@ impl App {
         };
 
         match key.code {
-            KeyCode::Tab => self.update(Message::ToggleLearningsView),
-            KeyCode::Char('q') | KeyCode::Esc => self.update(Message::CloseLearnings),
+            KeyCode::Tab => self.update(Message::Learning(LearningMessage::ToggleView)),
+            KeyCode::Char('q') | KeyCode::Esc => {
+                self.update(Message::Learning(LearningMessage::Close))
+            }
             KeyCode::Char('e') => {
                 if let Some(id) = selected_id {
-                    self.update(Message::EditLearning(id))
+                    self.update(Message::Learning(LearningMessage::Edit(id)))
                 } else {
                     vec![]
                 }
             }
             KeyCode::Char('a') => {
                 if let Some(id) = selected_id {
-                    self.update(Message::ApproveLearning(id))
+                    self.update(Message::Learning(LearningMessage::Approve(id)))
                 } else {
                     vec![]
                 }
             }
             KeyCode::Char('x') => {
                 if let Some(id) = selected_id {
-                    self.update(Message::RejectLearning(id))
+                    self.update(Message::Learning(LearningMessage::Reject(id)))
                 } else {
                     vec![]
                 }
             }
             KeyCode::Char('A') => {
                 if let Some(id) = selected_id {
-                    self.update(Message::ArchiveLearning(id))
+                    self.update(Message::Learning(LearningMessage::Archive(id)))
                 } else {
                     vec![]
                 }
             }
             // List-view navigation
             KeyCode::Char('j') | KeyCode::Down if matches!(current_view, LearningsView::List) => {
-                self.update(Message::NavigateLearning(1))
+                self.update(Message::Learning(LearningMessage::Navigate(1)))
             }
             KeyCode::Char('k') | KeyCode::Up if matches!(current_view, LearningsView::List) => {
-                self.update(Message::NavigateLearning(-1))
+                self.update(Message::Learning(LearningMessage::Navigate(-1)))
             }
             // Tree-view navigation (j/k/Up/Down fall through here when in Tree view)
-            KeyCode::Char('j') | KeyCode::Down => {
-                self.update(Message::NavigateTreeLearning(TreeNav::Down))
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                self.update(Message::NavigateTreeLearning(TreeNav::Up))
-            }
-            KeyCode::Char('l') | KeyCode::Right => {
-                self.update(Message::NavigateTreeLearning(TreeNav::Right))
-            }
-            KeyCode::Char('h') | KeyCode::Left => {
-                self.update(Message::NavigateTreeLearning(TreeNav::Left))
-            }
+            KeyCode::Char('j') | KeyCode::Down => self.update(Message::Learning(
+                LearningMessage::NavigateTree(TreeNav::Down),
+            )),
+            KeyCode::Char('k') | KeyCode::Up => self.update(Message::Learning(
+                LearningMessage::NavigateTree(TreeNav::Up),
+            )),
+            KeyCode::Char('l') | KeyCode::Right => self.update(Message::Learning(
+                LearningMessage::NavigateTree(TreeNav::Right),
+            )),
+            KeyCode::Char('h') | KeyCode::Left => self.update(Message::Learning(
+                LearningMessage::NavigateTree(TreeNav::Left),
+            )),
             _ => vec![],
         }
     }
@@ -346,7 +349,7 @@ impl App {
 
             KeyCode::Char('F') => self.update(Message::ToggleFlattened),
 
-            KeyCode::Char('I') => self.update(Message::OpenLearnings),
+            KeyCode::Char('I') => self.update(Message::Learning(LearningMessage::Open)),
 
             KeyCode::Char('?') => self.update(Message::ToggleHelp),
 

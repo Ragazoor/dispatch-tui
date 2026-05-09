@@ -366,21 +366,8 @@ pub enum Message {
     PrevTip,
     SetTipsMode(TipsShowMode),
     CloseTips,
-    OpenLearnings,
-    ShowLearnings(Vec<crate::models::Learning>),
-    CloseLearnings,
-    NavigateLearning(isize),
-    ArchiveLearning(crate::models::LearningId),
-    RejectLearning(crate::models::LearningId),
-    ApproveLearning(crate::models::LearningId),
-    EditLearning(crate::models::LearningId),
-    LearningActioned(crate::models::LearningId),
-    LearningEdited(crate::models::Learning),
-    ToggleLearningsView,
-    NavigateTreeLearning(TreeNav),
-    /// Updates the count of `NeedsReview` learnings shown in the `[KB:N]`
-    /// status-bar badge.
-    NeedsReviewCountUpdated(i64),
+    /// Knowledge-base overlay messages — see [`crate::tui::messages::LearningMessage`].
+    Learning(crate::tui::messages::LearningMessage),
     // Project messages
     ProjectsUpdated(Vec<Project>),
     SelectProject(ProjectId),
@@ -565,11 +552,10 @@ pub enum Command {
         id: ProjectId,
         delta: i8,
     },
-    LoadLearnings,
-    ArchiveLearning(crate::models::LearningId),
-    RejectLearning(crate::models::LearningId),
     OpenMainSession,
-    ApproveLearning(crate::models::LearningId),
+    /// Knowledge-base overlay side-effect commands — see
+    /// [`crate::tui::commands::LearningCommand`].
+    Learning(crate::tui::commands::LearningCommand),
 }
 
 // ---------------------------------------------------------------------------

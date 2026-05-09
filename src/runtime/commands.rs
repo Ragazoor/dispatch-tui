@@ -249,21 +249,23 @@ pub(super) fn dispatch(
             rt.exec_reorder_project(app, id, delta);
             vec![]
         }
-        LoadLearnings => {
-            rt.exec_load_learnings(app);
+        Learning(cmd) => {
+            dispatch_learning(rt, app, cmd);
             vec![]
         }
-        ArchiveLearning(id) => {
-            rt.exec_archive_learning(app, id);
-            vec![]
-        }
-        RejectLearning(id) => {
-            rt.exec_reject_learning(app, id);
-            vec![]
-        }
-        ApproveLearning(id) => {
-            rt.exec_approve_learning(app, id);
-            vec![]
-        }
+    }
+}
+
+fn dispatch_learning(
+    rt: &super::TuiRuntime,
+    app: &mut super::App,
+    cmd: crate::tui::commands::LearningCommand,
+) {
+    use crate::tui::commands::LearningCommand::*;
+    match cmd {
+        Load => rt.exec_load_learnings(app),
+        Archive(id) => rt.exec_archive_learning(app, id),
+        Reject(id) => rt.exec_reject_learning(app, id),
+        Approve(id) => rt.exec_approve_learning(app, id),
     }
 }

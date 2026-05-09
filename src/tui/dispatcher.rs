@@ -5,8 +5,32 @@
 //! lifecycle methods live in `mod.rs`; per-message handlers live in
 //! `update/*.rs`.
 
+use crate::tui::messages::LearningMessage;
 use crate::tui::types::{Command, Message};
 use crate::tui::App;
+
+/// Per-domain dispatcher for [`LearningMessage`] variants.
+fn dispatch_learning(app: &mut App, msg: LearningMessage) -> Vec<Command> {
+    use crate::tui::commands::LearningCommand;
+    match msg {
+        LearningMessage::Open => vec![Command::Learning(LearningCommand::Load)],
+        LearningMessage::Show(learnings) => app.handle_show_learnings(learnings),
+        LearningMessage::Close => app.handle_close_learnings(),
+        LearningMessage::Navigate(delta) => app.handle_navigate_learning(delta),
+        LearningMessage::Archive(id) => app.handle_archive_learning(id),
+        LearningMessage::Reject(id) => app.handle_reject_learning(id),
+        LearningMessage::Approve(id) => app.handle_approve_learning(id),
+        LearningMessage::Edit(id) => app.handle_edit_learning(id),
+        LearningMessage::Actioned(id) => app.handle_learning_actioned(id),
+        LearningMessage::Edited(updated) => app.handle_learning_edited(updated),
+        LearningMessage::ToggleView => app.handle_toggle_learnings_view(),
+        LearningMessage::NavigateTree(nav) => app.handle_navigate_tree_learning(nav),
+        LearningMessage::NeedsReviewCountUpdated(n) => {
+            app.needs_review_count = n;
+            vec![]
+        }
+    }
+}
 
 /// Process a message and return a list of side-effect commands.
 pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
@@ -184,22 +208,7 @@ pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
             app.handle_feed_refreshed(epic_title, count)
         }
         Message::FeedFailed { epic_title, error } => app.handle_feed_failed(epic_title, error),
-        Message::OpenLearnings => vec![Command::LoadLearnings],
-        Message::ShowLearnings(learnings) => app.handle_show_learnings(learnings),
-        Message::CloseLearnings => app.handle_close_learnings(),
-        Message::NavigateLearning(delta) => app.handle_navigate_learning(delta),
-        Message::ArchiveLearning(id) => app.handle_archive_learning(id),
-        Message::ToggleLearningsView => app.handle_toggle_learnings_view(),
-        Message::NavigateTreeLearning(nav) => app.handle_navigate_tree_learning(nav),
-        Message::RejectLearning(id) => app.handle_reject_learning(id),
-        Message::ApproveLearning(id) => app.handle_approve_learning(id),
-        Message::EditLearning(id) => app.handle_edit_learning(id),
-        Message::NeedsReviewCountUpdated(n) => {
-            app.needs_review_count = n;
-            vec![]
-        }
-        Message::LearningActioned(id) => app.handle_learning_actioned(id),
-        Message::LearningEdited(updated) => app.handle_learning_edited(updated),
+        Message::Learning(lm) => dispatch_learning(app, lm),
 
         // ── Main session ──
         Message::SubmitMainSessionDir(dir) => app.handle_submit_main_session_dir(dir),

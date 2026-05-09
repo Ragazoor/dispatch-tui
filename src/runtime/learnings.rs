@@ -24,7 +24,7 @@ impl TuiRuntime {
                 let mut all = Vec::with_capacity(a.len() + nr.len());
                 all.append(&mut nr);
                 all.append(&mut a);
-                app.update(Message::ShowLearnings(all));
+                app.update(Message::Learning(LearningMessage::Show(all)));
             }
             (Err(e), _) | (_, Err(e)) => {
                 app.update(Message::StatusInfo(format!(
@@ -35,13 +35,15 @@ impl TuiRuntime {
     }
 
     /// Refresh the count of `NeedsReview` learnings and dispatch
-    /// [`Message::NeedsReviewCountUpdated`] so the `[KB:N]` status-bar badge
+    /// [`LearningMessage::NeedsReviewCountUpdated`] so the `[KB:N]` status-bar badge
     /// stays current. Best-effort — DB errors are logged but not surfaced to
     /// the status bar (the badge simply won't update on this tick).
     pub(super) fn exec_refresh_needs_review_count(&self, app: &mut App) {
         match self.database.count_learnings_needs_review() {
             Ok(n) => {
-                app.update(Message::NeedsReviewCountUpdated(n));
+                app.update(Message::Learning(LearningMessage::NeedsReviewCountUpdated(
+                    n,
+                )));
             }
             Err(e) => {
                 tracing::warn!(error = ?e, "failed to count needs_review learnings");
@@ -67,7 +69,7 @@ impl TuiRuntime {
         match svc.approve_learning(id) {
             Ok(()) => match db.get_learning(id) {
                 Ok(Some(updated)) => {
-                    app.update(Message::LearningEdited(updated));
+                    app.update(Message::Learning(LearningMessage::Edited(updated)));
                     app.update(Message::StatusInfo(format!("Learning {id} approved")));
                 }
                 Ok(None) => {
@@ -98,7 +100,7 @@ impl TuiRuntime {
         let svc = LearningService::new(db);
         match action(&svc, id) {
             Ok(()) => {
-                app.update(Message::LearningActioned(id));
+                app.update(Message::Learning(LearningMessage::Actioned(id)));
                 app.update(Message::StatusInfo(format!("Learning {id} {verb}ed")));
             }
             Err(e) => {
@@ -182,7 +184,7 @@ mod tests {
         let mut app = App::new(vec![], ProjectId(1), APP_INACTIVITY_TIMEOUT);
         // Put the app in Learnings view with the learning
         let learning = make_learning(id);
-        app.update(Message::ShowLearnings(vec![learning]));
+        app.update(Message::Learning(LearningMessage::Show(vec![learning])));
 
         rt.exec_archive_learning(&mut app, id);
 
@@ -203,7 +205,7 @@ mod tests {
         let rt = make_runtime(db.clone());
         let mut app = App::new(vec![], ProjectId(1), APP_INACTIVITY_TIMEOUT);
         let learning = make_learning(id);
-        app.update(Message::ShowLearnings(vec![learning]));
+        app.update(Message::Learning(LearningMessage::Show(vec![learning])));
 
         rt.exec_reject_learning(&mut app, id);
 

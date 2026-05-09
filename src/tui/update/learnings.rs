@@ -1,5 +1,6 @@
 //! Learnings overlay handlers.
 
+use super::super::commands::LearningCommand;
 use super::super::types::*;
 use super::super::App;
 
@@ -60,7 +61,7 @@ impl App {
     ) -> Vec<Command> {
         if let ViewMode::Learnings { ref learnings, .. } = self.board.view_mode {
             if learnings.iter().any(|l| l.id == id) {
-                return vec![Command::RejectLearning(id)];
+                return vec![Command::Learning(LearningCommand::Reject(id))];
             }
         }
         vec![]
@@ -72,7 +73,7 @@ impl App {
     ) -> Vec<Command> {
         if let ViewMode::Learnings { ref learnings, .. } = self.board.view_mode {
             if learnings.iter().any(|l| l.id == id) {
-                return vec![Command::ArchiveLearning(id)];
+                return vec![Command::Learning(LearningCommand::Archive(id))];
             }
         }
         vec![]
@@ -84,7 +85,7 @@ impl App {
     ) -> Vec<Command> {
         if let ViewMode::Learnings { ref learnings, .. } = self.board.view_mode {
             if learnings.iter().any(|l| l.id == id) {
-                return vec![Command::ApproveLearning(id)];
+                return vec![Command::Learning(LearningCommand::Approve(id))];
             }
         }
         vec![]
@@ -268,9 +269,9 @@ mod tests {
     fn archive_learning_returns_command() {
         let mut app = make_app_with_learnings();
         let cmds = app.handle_archive_learning(LearningId(1));
-        assert!(cmds
-            .iter()
-            .any(|c| matches!(c, Command::ArchiveLearning(id) if *id == LearningId(1))));
+        assert!(cmds.iter().any(
+            |c| matches!(c, Command::Learning(LearningCommand::Archive(id)) if *id == LearningId(1))
+        ));
     }
 
     #[test]

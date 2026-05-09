@@ -1,5 +1,7 @@
+pub mod commands;
 mod dispatcher;
 pub mod input;
+pub mod messages;
 pub mod types;
 pub mod ui;
 pub mod update;
