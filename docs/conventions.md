@@ -76,9 +76,14 @@ The service layer bridges the two patterns before writing a patch: `FieldUpdate:
 
 `Arc<dyn TaskStore>` coerces to any narrower trait object at call sites via Rust's trait-object upcasting (stabilised in 1.86). If you need to split a wide `Arc<dyn TaskStore>` into a narrower one, use a typed `let` binding: `let d: Arc<dyn EpicCrud> = task_store_arc.clone();`.
 
-## `conn()` — safe database access
+## DB access — `conn()?` and `db_call`
 
-Always acquire the SQLite connection via `self.conn()?` (`src/db/mod.rs`). This method locks the mutex and propagates a `Result` error if the lock is poisoned, rather than panicking. Never call `self.conn.lock().unwrap()` directly — that pattern was eliminated and any new code that reintroduces it will panic on a poisoned lock.
+`Database` (`src/db/mod.rs`) currently holds **two** connection handles to the same SQLite database:
+
+- `self.conn()?` returns a guarded `MutexGuard<Connection>` — the legacy sync path. Used by every `*Store` impl that has not yet been migrated to async, by `init_schema`, and by sync-only helpers. Locks the mutex and propagates a `Result` error if the lock is poisoned, rather than panicking. Never call `self.conn.lock().unwrap()` directly.
+- `self.db_call(|conn| { … }).await` runs a synchronous closure on a dedicated `tokio_rusqlite::Connection`, lazily opened against the same SQLite database via a shared-cache URI. New async trait impls (WP-2..WP-6 of the DB-async migration; see issue #681) move onto this helper so async MCP/runtime callers stop blocking the Tokio worker thread. The closure must be `Send + 'static` — clone any borrowed `&str`/slice arguments to owned values before moving them in.
+
+Once all `*Store` impls are async (end of WP-6), the sync `Mutex<Connection>` field and `conn()?` helper will be removed.
 
 ## Inline-mutation boundary
 

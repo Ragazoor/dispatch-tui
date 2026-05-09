@@ -6,9 +6,11 @@ mod tests;
 pub use queries::decode_fallback_count;
 
 use anyhow::{Context, Result};
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use tokio::sync::OnceCell;
 
 use crate::models::{
     Epic, EpicId, FeedItem, Learning, LearningId, LearningKind, LearningRetrieval, LearningScope,
@@ -523,8 +525,55 @@ impl<
 // Database
 // ---------------------------------------------------------------------------
 
+/// Newtype that adapts `anyhow::Error` (which itself does not implement
+/// [`std::error::Error`]) into the boxed-error slot that
+/// [`tokio_rusqlite::Error::Other`] expects. Round-trips through `Box<dyn
+/// StdError>` so [`Database::db_call`] can recover the original error.
+#[derive(Debug)]
+struct AnyhowErr(anyhow::Error);
+
+impl std::fmt::Display for AnyhowErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.0, f)
+    }
+}
+
+impl std::error::Error for AnyhowErr {}
+
+/// Process-wide counter for unique in-memory shared-cache URIs.
+///
+/// Each `open_in_memory()` call mints a fresh URI like
+/// `file:dispatch_inmem_<n>?mode=memory&cache=shared`, so that the sync
+/// `rusqlite::Connection` and the lazily-opened `tokio_rusqlite::Connection`
+/// can both reach the same in-memory database without collisions across tests.
+static IN_MEMORY_DB_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Storage backing for the [`Database`].
+///
+/// Two connection handles share the same underlying SQLite database:
+///
+/// - `conn` — a sync [`rusqlite::Connection`] guarded by a [`Mutex`]. Used by
+///   every store impl that has not yet been migrated to async, by
+///   [`Database::init_schema`], and for opaque sync helpers like
+///   `get_tips_state`.
+/// - `async_conn` — a [`tokio_rusqlite::Connection`] lazily opened on first
+///   call to [`Database::db_call`]. Future work-package migrations move trait
+///   impls onto this handle so that async MCP/runtime callers no longer block
+///   the Tokio worker thread.
+///
+/// Both handles connect to the same SQLite database via `db_uri`. For file
+/// paths this is just the path; for in-memory tests we use a shared-cache URI
+/// so the two connections share state.
 pub struct Database {
+    /// Sync connection used by un-migrated stores and by schema init/migrations.
     conn: Mutex<Connection>,
+    /// Lazily-opened async handle. `None` until the first `db_call`.
+    async_conn: OnceCell<tokio_rusqlite::Connection>,
+    /// SQLite open string (file path or `file:…?mode=memory&cache=shared` URI).
+    db_uri: String,
+    /// Whether `db_uri` is a URI (must be opened with `SQLITE_OPEN_URI`) rather
+    /// than a plain file path.
+    db_uri_is_uri: bool,
 }
 
 impl Database {
@@ -542,15 +591,82 @@ impl Database {
 
         Ok(Database {
             conn: Mutex::new(conn),
+            async_conn: OnceCell::new(),
+            db_uri: path.to_string_lossy().into_owned(),
+            db_uri_is_uri: false,
         })
     }
 
     pub fn open_in_memory() -> Result<Self> {
-        let conn = Connection::open_in_memory().context("Failed to open in-memory database")?;
+        // Use a unique shared-cache URI per instance so a later async-conn open
+        // can attach to the same in-memory database. Without `cache=shared`
+        // each connection would see its own empty database.
+        let id = IN_MEMORY_DB_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let uri = format!("file:dispatch_inmem_{id}?mode=memory&cache=shared");
+        let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
+            | OpenFlags::SQLITE_OPEN_CREATE
+            | OpenFlags::SQLITE_OPEN_URI;
+        let conn = Connection::open_with_flags(&uri, flags)
+            .context("Failed to open in-memory database")?;
         Self::init_schema(&conn)?;
         Ok(Database {
             conn: Mutex::new(conn),
+            async_conn: OnceCell::new(),
+            db_uri: uri,
+            db_uri_is_uri: true,
         })
+    }
+
+    /// Run a synchronous closure against the underlying SQLite database from an
+    /// async context, returning its result without blocking the Tokio worker.
+    ///
+    /// The closure receives a `&mut rusqlite::Connection` (the dedicated thread
+    /// owned by [`tokio_rusqlite::Connection`]). It must be `Send + 'static`,
+    /// so any borrowed parameters need to be cloned to owned values before
+    /// being moved in.
+    ///
+    /// Errors returned from the closure are wrapped in
+    /// [`tokio_rusqlite::Error::Other`] and surfaced as `anyhow::Error`.
+    ///
+    /// # Note
+    ///
+    /// This helper is intended for trait impls that are migrating from sync to
+    /// async (see WP-2..WP-6 in the DB async migration). Sync impls continue
+    /// to use [`Database::conn`].
+    pub async fn db_call<R, F>(&self, f: F) -> Result<R>
+    where
+        F: FnOnce(&mut Connection) -> Result<R> + Send + 'static,
+        R: Send + 'static,
+    {
+        let conn = self.async_conn().await?;
+        match conn
+            .call(move |c| f(c).map_err(|e| tokio_rusqlite::Error::Other(Box::new(AnyhowErr(e)))))
+            .await
+        {
+            Ok(value) => Ok(value),
+            Err(tokio_rusqlite::Error::Other(other)) => match other.downcast::<AnyhowErr>() {
+                Ok(boxed) => Err(boxed.0),
+                Err(other) => Err(anyhow::anyhow!(other.to_string())),
+            },
+            Err(e) => Err(anyhow::Error::from(e)),
+        }
+    }
+
+    /// Lazily open (or return) the dedicated async connection.
+    async fn async_conn(&self) -> Result<&tokio_rusqlite::Connection> {
+        self.async_conn
+            .get_or_try_init(|| async {
+                let mut flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
+                    | rusqlite::OpenFlags::SQLITE_OPEN_CREATE;
+                if self.db_uri_is_uri {
+                    flags |= rusqlite::OpenFlags::SQLITE_OPEN_URI;
+                }
+                let uri = self.db_uri.clone();
+                tokio_rusqlite::Connection::open_with_flags(uri, flags)
+                    .await
+                    .context("Failed to open async database connection")
+            })
+            .await
     }
 
     fn init_schema(conn: &Connection) -> Result<()> {
