@@ -210,7 +210,6 @@ pub(super) fn render_column_separator(frame: &mut Frame, area: Rect) {
     }
 }
 
-/// Per-column summary segment shown in the row above the kanban board.
 struct SummarySegment {
     label: String,
     color: Color,
@@ -218,7 +217,6 @@ struct SummarySegment {
     checkbox: CheckboxInfo,
 }
 
-/// Optional checkbox state for the focused task column.
 enum CheckboxInfo {
     Task {
         all_selected: bool,
@@ -249,11 +247,9 @@ fn render_summary(frame: &mut Frame, app: &App, epic_stats: &EpicStatsMap, area:
     }
 }
 
-/// Build the ordered list of segments to render in the summary row.
 fn build_summary_segments(app: &App, layout: &ColumnLayout, sel: usize) -> Vec<SummarySegment> {
     let mut segments: Vec<SummarySegment> = Vec::new();
 
-    // Edge column: Projects (only shown when col 0 is focused)
     if sel == 0 {
         let count = app.projects().len();
         segments.push(SummarySegment {
@@ -264,9 +260,9 @@ fn build_summary_segments(app: &App, layout: &ColumnLayout, sel: usize) -> Vec<S
         });
     }
 
-    // Task columns 1–4
     for (idx, &status) in TaskStatus::ALL.iter().enumerate() {
-        segments.push(task_column_segment(app, layout, status, idx, sel));
+        let is_focused = sel == idx + 1;
+        segments.push(task_column_segment(app, layout, status, is_focused));
     }
 
     if sel == TaskStatus::COLUMN_COUNT + 1 {
@@ -282,18 +278,14 @@ fn build_summary_segments(app: &App, layout: &ColumnLayout, sel: usize) -> Vec<S
     segments
 }
 
-/// Build the summary segment for one task column (Backlog/Running/Review/Done).
 fn task_column_segment(
     app: &App,
     layout: &ColumnLayout,
     status: TaskStatus,
-    idx: usize,
-    sel: usize,
+    is_focused: bool,
 ) -> SummarySegment {
-    let nav_col = idx + 1;
     let items = layout.get(status);
     let count = items.iter().filter(|i| i.is_selectable()).count();
-    let is_focused = sel == nav_col;
     let color = column_color(status);
     let prefix = if is_focused { "\u{25b8} " } else { "\u{25e6} " };
     let label = format!("{}{} {}", prefix, status.as_str(), count);
@@ -325,7 +317,6 @@ fn task_column_segment(
     }
 }
 
-/// Render a single summary segment into its allocated rectangle.
 fn render_summary_segment(frame: &mut Frame, seg: &SummarySegment, area: Rect) {
     let label_style = if seg.is_focused {
         Style::default()
