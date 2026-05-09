@@ -235,7 +235,7 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
 struct TuiRuntime {
     // Holds the widest TaskStore supertrait because execute_commands dispatches
     // to helpers spanning all four sub-traits (TaskAndEpicStore, PrStore,
-    // AlertStore, SettingsStore). See CLAUDE.md §DB trait narrowing for the
+    // AlertStore, SettingsStore). See docs/conventions.md §"DB trait narrowing" for the
     // narrowing discipline applied in TaskService and EpicService.
     database: Arc<dyn db::TaskStore>,
     task_svc: crate::service::TaskService,

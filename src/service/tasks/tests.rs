@@ -1891,7 +1891,7 @@ mod property_tests {
     use proptest::prelude::*;
 
     /// Mirror of the `FieldUpdate ↔ Option<Option<T>>` mapping documented in
-    /// CLAUDE.md and applied by `validators::build_task_patch`:
+    /// docs/conventions.md and applied by `validators::build_task_patch`:
     ///   `Some(Set(v))` → `Some(Some(v))`
     ///   `Some(Clear)`  → `Some(None)`
     ///   `None`         → `None`
