@@ -5,7 +5,7 @@
 //! lifecycle methods live in `mod.rs`; per-message handlers live in
 //! `update/*.rs`.
 
-use crate::tui::messages::{EditorMessage, LearningMessage, WrapUpMessage};
+use crate::tui::messages::{EditorMessage, FeedMessage, LearningMessage, WrapUpMessage};
 use crate::tui::types::{Command, Message};
 use crate::tui::App;
 
@@ -14,6 +14,17 @@ fn dispatch_editor(app: &mut App, msg: EditorMessage) -> Vec<Command> {
     match msg {
         EditorMessage::DescriptionResult(value) => app.handle_description_editor_result(value),
         EditorMessage::Result { kind, outcome } => app.handle_editor_result(kind, outcome),
+    }
+}
+
+/// Per-domain dispatcher for [`FeedMessage`] variants.
+fn dispatch_feed(app: &mut App, msg: FeedMessage) -> Vec<Command> {
+    match msg {
+        FeedMessage::TriggerEpic(id) => app.handle_trigger_epic_feed(id),
+        FeedMessage::Refreshed { epic_title, count } => {
+            app.handle_feed_refreshed(epic_title, count)
+        }
+        FeedMessage::Failed { epic_title, error } => app.handle_feed_failed(epic_title, error),
     }
 }
 
@@ -219,11 +230,7 @@ pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
         Message::ProjectsUpdated(projects) => app.handle_projects_updated(projects),
         Message::SelectProject(project_id) => app.handle_select_project(project_id),
         Message::FollowProject(project_id) => app.handle_follow_project(project_id),
-        Message::TriggerEpicFeed(id) => app.handle_trigger_epic_feed(id),
-        Message::FeedRefreshed { epic_title, count } => {
-            app.handle_feed_refreshed(epic_title, count)
-        }
-        Message::FeedFailed { epic_title, error } => app.handle_feed_failed(epic_title, error),
+        Message::Feed(fm) => dispatch_feed(app, fm),
         Message::Learning(lm) => dispatch_learning(app, lm),
 
         // ── Main session ──

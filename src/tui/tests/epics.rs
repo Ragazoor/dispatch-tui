@@ -2124,7 +2124,9 @@ fn trigger_epic_feed_sets_status_and_returns_command() {
     epic.feed_command = Some("echo '[]'".to_string());
     app.board.epics = vec![epic];
 
-    let cmds = app.update(Message::TriggerEpicFeed(EpicId(10)));
+    let cmds = app.update(Message::Feed(
+        crate::tui::messages::FeedMessage::TriggerEpic(EpicId(10)),
+    ));
 
     assert!(
         app.status_message()
@@ -2135,10 +2137,10 @@ fn trigger_epic_feed_sets_status_and_returns_command() {
     assert!(
         cmds.iter().any(|c| matches!(
             c,
-            Command::TriggerEpicFeed {
+            Command::Feed(crate::tui::commands::FeedCommand::TriggerEpic {
                 epic_id,
                 ..
-            } if *epic_id == EpicId(10)
+            }) if *epic_id == EpicId(10)
         )),
         "should return TriggerEpicFeed command"
     );
@@ -2149,16 +2151,19 @@ fn trigger_epic_feed_no_feed_command_sets_status_no_command() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)]; // no feed_command
 
-    let cmds = app.update(Message::TriggerEpicFeed(EpicId(10)));
+    let cmds = app.update(Message::Feed(
+        crate::tui::messages::FeedMessage::TriggerEpic(EpicId(10)),
+    ));
 
     assert!(
         app.status_message().is_some(),
         "should show a status message"
     );
     assert!(
-        !cmds
-            .iter()
-            .any(|c| matches!(c, Command::TriggerEpicFeed { .. })),
+        !cmds.iter().any(|c| matches!(
+            c,
+            Command::Feed(crate::tui::commands::FeedCommand::TriggerEpic { .. })
+        )),
         "should not return TriggerEpicFeed command when no feed_command"
     );
 }
@@ -2167,10 +2172,12 @@ fn trigger_epic_feed_no_feed_command_sets_status_no_command() {
 fn feed_refreshed_sets_status_and_returns_refresh_from_db() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
 
-    let cmds = app.update(Message::FeedRefreshed {
-        epic_title: "My Feed Epic".to_string(),
-        count: 5,
-    });
+    let cmds = app.update(Message::Feed(
+        crate::tui::messages::FeedMessage::Refreshed {
+            epic_title: "My Feed Epic".to_string(),
+            count: 5,
+        },
+    ));
 
     let status = app.status_message().unwrap_or("");
     assert!(
@@ -2191,10 +2198,12 @@ fn feed_refreshed_sets_status_and_returns_refresh_from_db() {
 fn feed_refreshed_zero_items_still_succeeds() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
 
-    let cmds = app.update(Message::FeedRefreshed {
-        epic_title: "Empty Feed".to_string(),
-        count: 0,
-    });
+    let cmds = app.update(Message::Feed(
+        crate::tui::messages::FeedMessage::Refreshed {
+            epic_title: "Empty Feed".to_string(),
+            count: 0,
+        },
+    ));
 
     assert!(
         cmds.iter().any(|c| matches!(c, Command::RefreshFromDb)),
@@ -2206,10 +2215,10 @@ fn feed_refreshed_zero_items_still_succeeds() {
 fn feed_failed_sets_status_no_refresh() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
 
-    let cmds = app.update(Message::FeedFailed {
+    let cmds = app.update(Message::Feed(crate::tui::messages::FeedMessage::Failed {
         epic_title: "Bad Feed".to_string(),
         error: "exit code 1".to_string(),
-    });
+    }));
 
     let status = app.status_message().unwrap_or("");
     assert!(

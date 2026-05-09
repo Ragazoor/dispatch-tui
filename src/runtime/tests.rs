@@ -1943,7 +1943,10 @@ async fn exec_trigger_epic_feed_success() {
         .expect("timed out waiting for FeedRefreshed")
         .expect("channel closed");
     assert!(
-        matches!(msg, Message::FeedRefreshed { count: 1, .. }),
+        matches!(
+            msg,
+            Message::Feed(crate::tui::messages::FeedMessage::Refreshed { count: 1, .. })
+        ),
         "expected FeedRefreshed with count=1, got: {msg:?}"
     );
 }
@@ -1965,7 +1968,10 @@ async fn exec_trigger_epic_feed_zero_items() {
         .expect("timed out")
         .expect("channel closed");
     assert!(
-        matches!(msg, Message::FeedRefreshed { count: 0, .. }),
+        matches!(
+            msg,
+            Message::Feed(crate::tui::messages::FeedMessage::Refreshed { count: 0, .. })
+        ),
         "empty feed should still succeed with count=0, got: {msg:?}"
     );
 }
@@ -1987,7 +1993,10 @@ async fn exec_trigger_epic_feed_command_fails() {
         .expect("timed out")
         .expect("channel closed");
     assert!(
-        matches!(msg, Message::FeedFailed { .. }),
+        matches!(
+            msg,
+            Message::Feed(crate::tui::messages::FeedMessage::Failed { .. })
+        ),
         "non-zero exit should produce FeedFailed, got: {msg:?}"
     );
 }
@@ -2013,7 +2022,10 @@ async fn exec_trigger_epic_feed_malformed_json() {
         .expect("timed out")
         .expect("channel closed");
     assert!(
-        matches!(msg, Message::FeedFailed { .. }),
+        matches!(
+            msg,
+            Message::Feed(crate::tui::messages::FeedMessage::Failed { .. })
+        ),
         "malformed JSON should produce FeedFailed, got: {msg:?}"
     );
 }

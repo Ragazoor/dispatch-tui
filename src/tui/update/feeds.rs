@@ -15,11 +15,13 @@ impl App {
         match result {
             Some((title, feed_command)) => {
                 self.set_status(format!("Fetching feed for '{title}'…"));
-                vec![Command::TriggerEpicFeed {
-                    epic_id: id,
-                    epic_title: title,
-                    feed_command,
-                }]
+                vec![Command::Feed(
+                    crate::tui::commands::FeedCommand::TriggerEpic {
+                        epic_id: id,
+                        epic_title: title,
+                        feed_command,
+                    },
+                )]
             }
             None => {
                 self.set_status("No feed command configured".to_string());

@@ -172,10 +172,10 @@ impl TuiRuntime {
 
         tokio::spawn(async move {
             let fail = |error: String| {
-                let _ = tx.send(Message::FeedFailed {
+                let _ = tx.send(Message::Feed(crate::tui::messages::FeedMessage::Failed {
                     epic_title: epic_title.clone(),
                     error,
-                });
+                }));
             };
 
             let output = match tokio::process::Command::new("sh")
@@ -202,7 +202,9 @@ impl TuiRuntime {
             let base_branches = crate::feed::resolve_base_branches(&repo_paths, &*runner);
             match db.upsert_feed_tasks(epic_id, &items, &repo_paths, &base_branches) {
                 Ok(()) => {
-                    let _ = tx.send(Message::FeedRefreshed { epic_title, count });
+                    let _ = tx.send(Message::Feed(
+                        crate::tui::messages::FeedMessage::Refreshed { epic_title, count },
+                    ));
                 }
                 Err(e) => fail(e.to_string()),
             }

@@ -5,7 +5,9 @@
 //! side-effect commands.
 
 pub mod editor;
+pub mod feed;
 pub mod learnings;
 
 pub use editor::EditorCommand;
+pub use feed::FeedCommand;
 pub use learnings::LearningCommand;

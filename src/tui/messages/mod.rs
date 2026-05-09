@@ -5,9 +5,11 @@
 //! the TUI grows. Each module here owns one domain's messages.
 
 pub mod editor;
+pub mod feed;
 pub mod learnings;
 pub mod wrap_up;
 
 pub use editor::EditorMessage;
+pub use feed::FeedMessage;
 pub use learnings::LearningMessage;
 pub use wrap_up::WrapUpMessage;

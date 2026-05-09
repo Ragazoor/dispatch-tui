@@ -395,7 +395,9 @@ impl App {
                     }
                 });
                 if let Some(id) = feed_epic_id {
-                    self.update(Message::TriggerEpicFeed(id))
+                    self.update(Message::Feed(
+                        crate::tui::messages::FeedMessage::TriggerEpic(id),
+                    ))
                 } else {
                     vec![]
                 }

@@ -30,6 +30,10 @@ pub(super) async fn dispatch(
             vec![]
         }
         Editor(cmd) => dispatch_editor(rt, app, cmd),
+        Feed(cmd) => {
+            dispatch_feed(rt, cmd);
+            vec![]
+        }
         SaveRepoPath(path) => {
             rt.exec_save_repo_path(app, path);
             vec![]
@@ -100,14 +104,6 @@ pub(super) async fn dispatch(
         }
         RefreshEpicsFromDb => {
             rt.exec_refresh_epics_from_db(app);
-            vec![]
-        }
-        TriggerEpicFeed {
-            epic_id,
-            epic_title,
-            feed_command,
-        } => {
-            rt.exec_trigger_epic_feed(epic_id, epic_title, feed_command);
             vec![]
         }
         DispatchEpic { epic } => {
@@ -257,6 +253,18 @@ fn dispatch_learning(
         Archive(id) => rt.exec_archive_learning(app, id),
         Reject(id) => rt.exec_reject_learning(app, id),
         Approve(id) => rt.exec_approve_learning(app, id),
+    }
+}
+
+/// Per-domain dispatcher for [`crate::tui::commands::FeedCommand`] variants.
+fn dispatch_feed(rt: &super::TuiRuntime, cmd: crate::tui::commands::FeedCommand) {
+    use crate::tui::commands::FeedCommand::*;
+    match cmd {
+        TriggerEpic {
+            epic_id,
+            epic_title,
+            feed_command,
+        } => rt.exec_trigger_epic_feed(epic_id, epic_title, feed_command),
     }
 }
 

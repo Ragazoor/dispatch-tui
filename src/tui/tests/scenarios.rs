@@ -238,9 +238,10 @@ fn r_on_feed_epic_card_emits_trigger_command() {
     let mut s = Scenario::with_app(make_app_with_feed_epic_selected());
     s.key(KeyCode::Char('r'));
     assert!(
-        s.commands
-            .iter()
-            .any(|c| matches!(c, Command::TriggerEpicFeed { .. })),
+        s.commands.iter().any(|c| matches!(
+            c,
+            Command::Feed(crate::tui::commands::FeedCommand::TriggerEpic { .. })
+        )),
         "pressing r on a feed epic card should emit TriggerEpicFeed command"
     );
 }
@@ -250,9 +251,10 @@ fn r_on_non_feed_epic_card_does_nothing() {
     let mut s = Scenario::with_app(make_app_with_non_feed_epic_selected());
     s.key(KeyCode::Char('r'));
     assert!(
-        !s.commands
-            .iter()
-            .any(|c| matches!(c, Command::TriggerEpicFeed { .. })),
+        !s.commands.iter().any(|c| matches!(
+            c,
+            Command::Feed(crate::tui::commands::FeedCommand::TriggerEpic { .. })
+        )),
         "pressing r on a non-feed epic should NOT emit TriggerEpicFeed"
     );
 }
@@ -273,9 +275,10 @@ fn r_in_epic_view_of_feed_epic_emits_trigger_command() {
     let mut s = Scenario::with_app(app);
     s.key(KeyCode::Char('r'));
     assert!(
-        s.commands
-            .iter()
-            .any(|c| matches!(c, Command::TriggerEpicFeed { .. })),
+        s.commands.iter().any(|c| matches!(
+            c,
+            Command::Feed(crate::tui::commands::FeedCommand::TriggerEpic { .. })
+        )),
         "pressing r inside Epic view of a feed epic should emit TriggerEpicFeed"
     );
 }
@@ -296,9 +299,10 @@ fn r_in_epic_view_of_non_feed_epic_does_nothing() {
     let mut s = Scenario::with_app(app);
     s.key(KeyCode::Char('r'));
     assert!(
-        !s.commands
-            .iter()
-            .any(|c| matches!(c, Command::TriggerEpicFeed { .. })),
+        !s.commands.iter().any(|c| matches!(
+            c,
+            Command::Feed(crate::tui::commands::FeedCommand::TriggerEpic { .. })
+        )),
         "pressing r inside Epic view of a non-feed epic should NOT emit TriggerEpicFeed"
     );
 }
