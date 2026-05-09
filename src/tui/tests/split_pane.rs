@@ -453,7 +453,9 @@ fn confirm_done_respawns_split_pane() {
     app.board.split.pinned_task_id = Some(TaskId(1));
     app.input.mode = InputMode::ConfirmDone(TaskId(1));
 
-    let cmds = app.update(Message::ConfirmDone);
+    let cmds = app.update(Message::Input(
+        crate::tui::messages::InputMessage::ConfirmDone,
+    ));
 
     assert!(
         cmds.iter()

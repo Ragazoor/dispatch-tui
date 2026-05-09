@@ -137,7 +137,9 @@ fn full_lifecycle() {
     );
 
     // Confirm the Done transition
-    let cmds = app.update(Message::ConfirmDone);
+    let cmds = app.update(Message::Input(
+        dispatch_tui::tui::messages::InputMessage::ConfirmDone,
+    ));
     execute(&db, &cmds);
     assert_eq!(app.tasks()[0].status, TaskStatus::Done);
 

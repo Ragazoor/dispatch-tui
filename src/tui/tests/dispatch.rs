@@ -1361,7 +1361,9 @@ fn quick_dispatch_clears_buffer_on_entry() {
     );
     app.board.repo_paths = vec!["/repo1".to_string(), "/repo2".to_string()];
     app.input.buffer = "leftover".to_string();
-    app.update(Message::StartQuickDispatchSelection);
+    app.update(Message::Input(
+        crate::tui::messages::InputMessage::StartQuickDispatchSelection,
+    ));
     assert_eq!(app.input.buffer, "");
     assert_eq!(app.input.mode, InputMode::QuickDispatch);
 }

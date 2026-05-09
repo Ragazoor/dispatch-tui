@@ -7,7 +7,9 @@ impl App {
     pub(in crate::tui) fn handle_submit_main_session_dir(&mut self, dir: String) -> Vec<Command> {
         let trimmed = dir.trim();
         if trimmed.is_empty() {
-            return self.update(Message::CancelInput);
+            return self.update(Message::Input(
+                crate::tui::messages::InputMessage::CancelInput,
+            ));
         }
         let expanded = expand_tilde(trimmed);
         self.main_session_dir = Some(expanded.clone());

@@ -67,7 +67,9 @@ impl App {
         match key.code {
             KeyCode::Char('r') => self.update(Message::RetryResume(id)),
             KeyCode::Char('f') => self.update(Message::RetryFresh(id)),
-            KeyCode::Esc => self.update(Message::CancelRetry),
+            KeyCode::Esc => self.update(Message::Input(
+                crate::tui::messages::InputMessage::CancelRetry,
+            )),
             _ => vec![],
         }
     }
@@ -99,8 +101,12 @@ impl App {
 
     pub(in crate::tui) fn handle_key_confirm_done(&mut self, key: KeyEvent) -> Vec<Command> {
         match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => self.update(Message::ConfirmDone),
-            _ => self.update(Message::CancelDone),
+            KeyCode::Char('y') | KeyCode::Char('Y') => self.update(Message::Input(
+                crate::tui::messages::InputMessage::ConfirmDone,
+            )),
+            _ => self.update(Message::Input(
+                crate::tui::messages::InputMessage::CancelDone,
+            )),
         }
     }
 

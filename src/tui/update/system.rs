@@ -145,9 +145,9 @@ impl App {
                 let text = crate::editor::parse_description_editor_output(text);
                 self.update(Message::Editor(EditorMessage::DescriptionResult(text)))
             }
-            (EditKind::Description { .. }, EditorOutcome::Cancelled) => {
-                self.update(Message::CancelInput)
-            }
+            (EditKind::Description { .. }, EditorOutcome::Cancelled) => self.update(
+                Message::Input(crate::tui::messages::InputMessage::CancelInput),
+            ),
             _ => vec![Command::Editor(EditorCommand::FinalizeResult {
                 kind,
                 outcome,

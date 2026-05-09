@@ -56,8 +56,12 @@ impl App {
                 self.update(Message::SaveFilterPreset(name))
             }
             KeyCode::Esc => self.update(Message::CancelPresetInput),
-            KeyCode::Backspace => self.update(Message::InputBackspace),
-            KeyCode::Char(c) => self.update(Message::InputChar(c)),
+            KeyCode::Backspace => self.update(Message::Input(
+                crate::tui::messages::InputMessage::InputBackspace,
+            )),
+            KeyCode::Char(c) => self.update(Message::Input(
+                crate::tui::messages::InputMessage::InputChar(c),
+            )),
             _ => vec![],
         }
     }

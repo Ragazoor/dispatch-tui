@@ -130,7 +130,9 @@ fn confirm_done_kills_tmux_but_preserves_worktree() {
     });
     assert!(matches!(app.input.mode, InputMode::ConfirmDone(TaskId(1))));
 
-    let cmds = app.update(Message::ConfirmDone);
+    let cmds = app.update(Message::Input(
+        crate::tui::messages::InputMessage::ConfirmDone,
+    ));
     // No Cleanup command — worktree stays for archive to clean up later
     assert!(!cmds.iter().any(|c| matches!(c, Command::Cleanup { .. })));
     // Tmux window should be killed
@@ -184,7 +186,9 @@ fn batch_confirm_done_moves_all_review_tasks() {
         direction: MoveDirection::Forward,
     });
     // Confirm
-    let cmds = app.update(Message::ConfirmDone);
+    let cmds = app.update(Message::Input(
+        crate::tui::messages::InputMessage::ConfirmDone,
+    ));
     assert_eq!(app.input.mode, InputMode::Normal);
     for id in [TaskId(1), TaskId(2)] {
         let task = app.board.tasks.iter().find(|t| t.id == id).unwrap();

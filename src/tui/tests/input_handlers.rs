@@ -54,7 +54,9 @@ fn repo_path_empty_uses_saved_path() {
     assert_eq!(app.input.buffer, "main");
     assert!(cmds.is_empty());
     // Submitting base branch completes creation
-    let cmds2 = app.update(Message::SubmitBaseBranch("main".to_string()));
+    let cmds2 = app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitBaseBranch("main".to_string()),
+    ));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(cmds2.iter().any(|c| matches!(
         c,
@@ -93,7 +95,9 @@ fn repo_path_nonexistent_shows_error() {
         description: "D".to_string(),
         ..Default::default()
     });
-    let cmds = app.update(Message::SubmitRepoPath("/nonexistent/path".to_string()));
+    let cmds = app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitRepoPath("/nonexistent/path".to_string()),
+    ));
     assert!(cmds.is_empty());
     assert!(app.status.message.is_some());
     let msg = app.status.message.as_ref().unwrap().as_str();
@@ -119,7 +123,9 @@ fn repo_path_nonempty_used_as_is() {
     assert_eq!(app.input.buffer, "main");
     assert!(cmds.is_empty());
     // Submitting base branch completes creation
-    let cmds2 = app.update(Message::SubmitBaseBranch("main".to_string()));
+    let cmds2 = app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitBaseBranch("main".to_string()),
+    ));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(cmds2
         .iter()
@@ -518,7 +524,9 @@ fn confirm_retry_esc_returns_to_normal() {
 #[test]
 fn start_new_task_enters_title_mode() {
     let mut app = make_app();
-    app.update(Message::StartNewTask);
+    app.update(Message::Input(
+        crate::tui::messages::InputMessage::StartNewTask,
+    ));
     assert_eq!(app.input.mode, InputMode::InputTitle);
     assert!(app.input.buffer.is_empty());
     assert!(app.input.task_draft.is_none());
@@ -532,7 +540,9 @@ fn cancel_input_returns_to_normal() {
     app.input.buffer = "partial".to_string();
     app.input.task_draft = Some(TaskDraft::default());
     app.status.message = Some("Enter title: ".to_string());
-    app.update(Message::CancelInput);
+    app.update(Message::Input(
+        crate::tui::messages::InputMessage::CancelInput,
+    ));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(app.input.buffer.is_empty());
     assert!(app.input.task_draft.is_none());
@@ -543,7 +553,9 @@ fn cancel_input_returns_to_normal() {
 fn submit_title_with_text_advances_to_tag() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.input.mode = InputMode::InputTitle;
-    app.update(Message::SubmitTitle("My Task".to_string()));
+    app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitTitle("My Task".to_string()),
+    ));
     assert_eq!(app.input.mode, InputMode::InputTag);
     assert_eq!(app.input.task_draft.as_ref().unwrap().title, "My Task");
     assert_eq!(
@@ -556,7 +568,9 @@ fn submit_title_with_text_advances_to_tag() {
 fn submit_empty_title_cancels() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.input.mode = InputMode::InputTitle;
-    app.update(Message::SubmitTitle(String::new()));
+    app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitTitle(String::new()),
+    ));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(app.input.task_draft.is_none());
 }
@@ -569,7 +583,9 @@ fn submit_tag_advances_to_description() {
         title: "T".to_string(),
         ..Default::default()
     });
-    let cmds = app.update(Message::SubmitTag(Some(TaskTag::Bug)));
+    let cmds = app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitTag(Some(TaskTag::Bug)),
+    ));
     assert_eq!(cmds.len(), 1);
     assert!(matches!(
         &cmds[0],
@@ -596,7 +612,9 @@ fn submit_description_advances_to_repo_path() {
         title: "T".to_string(),
         ..Default::default()
     });
-    app.update(Message::SubmitDescription("my desc".to_string()));
+    app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitDescription("my desc".to_string()),
+    ));
     assert_eq!(app.input.mode, InputMode::InputRepoPath);
     assert_eq!(
         app.input.task_draft.as_ref().unwrap().description,
@@ -738,7 +756,9 @@ fn submit_repo_path_advances_to_base_branch() {
         tag: Some(TaskTag::Bug),
         ..Default::default()
     });
-    let cmds = app.update(Message::SubmitRepoPath("/tmp".to_string()));
+    let cmds = app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitRepoPath("/tmp".to_string()),
+    ));
     assert_eq!(app.input.mode, InputMode::InputBaseBranch);
     assert_eq!(app.input.buffer, "main");
     assert!(cmds.is_empty());
@@ -756,7 +776,9 @@ fn submit_base_branch_creates_task_with_branch() {
         base_branch: "main".to_string(),
     });
     app.input.buffer = "develop".to_string();
-    let cmds = app.update(Message::SubmitBaseBranch("develop".to_string()));
+    let cmds = app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitBaseBranch("develop".to_string()),
+    ));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(cmds.iter().any(|c| matches!(
         c,
@@ -779,7 +801,9 @@ fn submit_base_branch_empty_uses_draft_default() {
         ..Default::default()
     });
     app.input.buffer = String::new();
-    let cmds = app.update(Message::SubmitBaseBranch(String::new()));
+    let cmds = app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitBaseBranch(String::new()),
+    ));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(cmds.iter().any(|c| matches!(
         c,
@@ -790,7 +814,9 @@ fn submit_base_branch_empty_uses_draft_default() {
 #[test]
 fn confirm_delete_start_enters_mode() {
     let mut app = make_app();
-    app.update(Message::ConfirmDeleteStart);
+    app.update(Message::Input(
+        crate::tui::messages::InputMessage::ConfirmDeleteStart,
+    ));
     assert_eq!(app.input.mode, InputMode::ConfirmDelete);
     // make_app() selects column 0, row 0 = Task 1 (Backlog)
     assert_eq!(
@@ -804,7 +830,9 @@ fn cancel_delete_returns_to_normal() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.input.mode = InputMode::ConfirmDelete;
     app.status.message = Some("Delete \"Task 1\" [backlog]? [y/n]".to_string());
-    app.update(Message::CancelDelete);
+    app.update(Message::Input(
+        crate::tui::messages::InputMessage::CancelDelete,
+    ));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(app.status.message.is_none());
 }
@@ -814,7 +842,9 @@ fn cancel_retry_returns_to_normal() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.input.mode = InputMode::ConfirmRetry(TaskId(4));
     app.status.message = Some("Agent stale".to_string());
-    app.update(Message::CancelRetry);
+    app.update(Message::Input(
+        crate::tui::messages::InputMessage::CancelRetry,
+    ));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(app.status.message.is_none());
 }
@@ -921,7 +951,9 @@ fn confirm_delete_start_running_with_worktree_shows_warning() {
     let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
     // Task is in Running column (column 2), navigate there
     app.selection_mut().set_column(2);
-    app.update(Message::ConfirmDeleteStart);
+    app.update(Message::Input(
+        crate::tui::messages::InputMessage::ConfirmDeleteStart,
+    ));
     assert_eq!(app.input.mode, InputMode::ConfirmDelete);
     assert_eq!(
         app.status.message.as_deref(),
@@ -1324,7 +1356,9 @@ fn confirm_detach_tmux_clears_window() {
         .insert(TaskId(1), "some output".to_string());
 
     app.update(Message::DetachTmux(TaskId(1)));
-    let cmds = app.update(Message::ConfirmDetachTmux);
+    let cmds = app.update(Message::Input(
+        crate::tui::messages::InputMessage::ConfirmDetachTmux,
+    ));
 
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(
@@ -1580,7 +1614,9 @@ fn handle_key_text_input_repo_enter_selects_cursor_repo() {
     // Now advances to InputBaseBranch; task not created until base branch submitted
     assert_eq!(app.input.mode, InputMode::InputBaseBranch);
     assert!(cmds.is_empty());
-    let cmds2 = app.update(Message::SubmitBaseBranch("main".to_string()));
+    let cmds2 = app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitBaseBranch("main".to_string()),
+    ));
     assert!(cmds2
         .iter()
         .any(|c| matches!(c, Command::InsertTask { .. })));
@@ -1601,7 +1637,9 @@ fn handle_key_text_input_enter_submits_typed_text() {
     // Now advances to InputBaseBranch; task not created until base branch submitted
     assert_eq!(app.input.mode, InputMode::InputBaseBranch);
     assert!(cmds.is_empty());
-    let cmds2 = app.update(Message::SubmitBaseBranch("main".to_string()));
+    let cmds2 = app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitBaseBranch("main".to_string()),
+    ));
     assert!(cmds2
         .iter()
         .any(|c| matches!(c, Command::InsertTask { .. })));

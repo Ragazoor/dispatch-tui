@@ -6,7 +6,8 @@
 //! `update/*.rs`.
 
 use crate::tui::messages::{
-    EditorMessage, FeedMessage, LearningMessage, PrMessage, SystemMessage, WrapUpMessage,
+    EditorMessage, FeedMessage, InputMessage, LearningMessage, PrMessage, SystemMessage,
+    WrapUpMessage,
 };
 use crate::tui::types::{Command, Message};
 use crate::tui::App;
@@ -16,6 +17,31 @@ fn dispatch_editor(app: &mut App, msg: EditorMessage) -> Vec<Command> {
     match msg {
         EditorMessage::DescriptionResult(value) => app.handle_description_editor_result(value),
         EditorMessage::Result { kind, outcome } => app.handle_editor_result(kind, outcome),
+    }
+}
+
+/// Per-domain dispatcher for [`InputMessage`] variants.
+fn dispatch_input(app: &mut App, msg: InputMessage) -> Vec<Command> {
+    match msg {
+        InputMessage::StartNewTask => app.handle_start_new_task(),
+        InputMessage::CopyTask => app.handle_copy_task(),
+        InputMessage::CancelInput => app.handle_cancel_input(),
+        InputMessage::ConfirmDeleteStart => app.handle_confirm_delete_start(),
+        InputMessage::ConfirmDeleteYes => app.handle_confirm_delete_yes(),
+        InputMessage::CancelDelete => app.handle_cancel_delete(),
+        InputMessage::SubmitTitle(value) => app.handle_submit_title(value),
+        InputMessage::SubmitDescription(value) => app.handle_submit_description(value),
+        InputMessage::SubmitRepoPath(value) => app.handle_submit_repo_path(value),
+        InputMessage::SubmitTag(tag) => app.handle_submit_tag(tag),
+        InputMessage::SubmitBaseBranch(value) => app.handle_submit_base_branch(value),
+        InputMessage::InputChar(c) => app.handle_input_char(c),
+        InputMessage::InputBackspace => app.handle_input_backspace(),
+        InputMessage::StartQuickDispatchSelection => app.handle_start_quick_dispatch_selection(),
+        InputMessage::SelectQuickDispatchRepo(idx) => app.handle_select_quick_dispatch_repo(idx),
+        InputMessage::CancelRetry => app.handle_cancel_retry(),
+        InputMessage::ConfirmDone => app.handle_confirm_done(),
+        InputMessage::CancelDone => app.handle_cancel_done(),
+        InputMessage::ConfirmDetachTmux => app.handle_confirm_detach_tmux(),
     }
 }
 
@@ -151,20 +177,15 @@ pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
         Message::QuickDispatch { repo_path, epic_id } => {
             app.handle_quick_dispatch(repo_path, epic_id)
         }
-        Message::StartQuickDispatchSelection => app.handle_start_quick_dispatch_selection(),
-        Message::SelectQuickDispatchRepo(idx) => app.handle_select_quick_dispatch_repo(idx),
         Message::FinishComplete(id) => app.handle_finish_complete(id),
         Message::FinishFailed {
             id,
             error,
             is_conflict,
         } => app.handle_finish_failed(id, error, is_conflict),
-        Message::ConfirmDone => app.handle_confirm_done(),
-        Message::CancelDone => app.handle_cancel_done(),
         Message::WrapUp(wm) => dispatch_wrap_up(app, wm),
         Message::DetachTmux(id) => app.handle_detach_tmux(vec![id]),
         Message::BatchDetachTmux(ids) => app.handle_detach_tmux(ids),
-        Message::ConfirmDetachTmux => app.handle_confirm_detach_tmux(),
         Message::ToggleSelect(id) => app.handle_toggle_select(id),
         Message::ClearSelection => app.handle_clear_selection(),
         Message::SelectAllColumn => app.handle_select_all_column(),
@@ -172,21 +193,8 @@ pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
         Message::BatchArchiveTasks(ids) => app.handle_batch_archive_tasks(ids),
 
         // ── Form input, text entry, creation flows ──
-        Message::StartNewTask => app.handle_start_new_task(),
-        Message::CopyTask => app.handle_copy_task(),
-        Message::CancelInput => app.handle_cancel_input(),
-        Message::ConfirmDeleteStart => app.handle_confirm_delete_start(),
-        Message::ConfirmDeleteYes => app.handle_confirm_delete_yes(),
-        Message::CancelDelete => app.handle_cancel_delete(),
-        Message::SubmitTitle(value) => app.handle_submit_title(value),
-        Message::SubmitDescription(value) => app.handle_submit_description(value),
+        Message::Input(im) => dispatch_input(app, im),
         Message::Editor(em) => dispatch_editor(app, em),
-        Message::SubmitRepoPath(value) => app.handle_submit_repo_path(value),
-        Message::SubmitTag(tag) => app.handle_submit_tag(tag),
-        Message::SubmitBaseBranch(value) => app.handle_submit_base_branch(value),
-        Message::InputChar(c) => app.handle_input_char(c),
-        Message::InputBackspace => app.handle_input_backspace(),
-        Message::CancelRetry => app.handle_cancel_retry(),
 
         // ── Epic CRUD, lifecycle, wrap-up ──
         Message::DispatchEpic(id) => app.handle_dispatch_epic(id),

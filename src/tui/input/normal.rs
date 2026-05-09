@@ -141,8 +141,12 @@ impl App {
             KeyCode::Char('J') => self.update(Message::ReorderItem(1)),
             KeyCode::Char('K') => self.update(Message::ReorderItem(-1)),
 
-            KeyCode::Char('n') => self.update(Message::StartNewTask),
-            KeyCode::Char('c') => self.update(Message::CopyTask),
+            KeyCode::Char('n') => self.update(Message::Input(
+                crate::tui::messages::InputMessage::StartNewTask,
+            )),
+            KeyCode::Char('c') => {
+                self.update(Message::Input(crate::tui::messages::InputMessage::CopyTask))
+            }
             KeyCode::Char('N') => self.update(Message::System(
                 crate::tui::messages::SystemMessage::ToggleNotifications,
             )),
@@ -360,7 +364,9 @@ impl App {
                         let repo_path = self.board.repo_paths[0].clone();
                         self.update(Message::QuickDispatch { repo_path, epic_id })
                     }
-                    _ => self.update(Message::StartQuickDispatchSelection),
+                    _ => self.update(Message::Input(
+                        crate::tui::messages::InputMessage::StartQuickDispatchSelection,
+                    )),
                 }
             }
 

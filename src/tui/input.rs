@@ -274,7 +274,9 @@ impl App {
             }
         }
         match key.code {
-            KeyCode::Esc => self.update(Message::CancelInput),
+            KeyCode::Esc => self.update(Message::Input(
+                crate::tui::messages::InputMessage::CancelInput,
+            )),
             KeyCode::Enter => {
                 // In repo path modes, Enter selects from the filtered list if there are matches,
                 // otherwise falls through to submit the literal buffer value as a new path.
@@ -287,7 +289,9 @@ impl App {
                         let msg = match self.input.mode {
                             InputMode::InputEpicRepoPath => Message::SubmitEpicRepoPath(path),
                             InputMode::MainSessionDir => Message::SubmitMainSessionDir(path),
-                            _ => Message::SubmitRepoPath(path),
+                            _ => Message::Input(
+                                crate::tui::messages::InputMessage::SubmitRepoPath(path),
+                            ),
                         };
                         return self.update(msg);
                     }
@@ -295,35 +299,63 @@ impl App {
                 }
                 let value = self.input.buffer.trim().to_string();
                 match self.input.mode.clone() {
-                    InputMode::InputTitle => self.update(Message::SubmitTitle(value)),
-                    InputMode::InputDescription => self.update(Message::SubmitDescription(value)),
-                    InputMode::InputRepoPath => self.update(Message::SubmitRepoPath(value)),
+                    InputMode::InputTitle => self.update(Message::Input(
+                        crate::tui::messages::InputMessage::SubmitTitle(value),
+                    )),
+                    InputMode::InputDescription => self.update(Message::Input(
+                        crate::tui::messages::InputMessage::SubmitDescription(value),
+                    )),
+                    InputMode::InputRepoPath => self.update(Message::Input(
+                        crate::tui::messages::InputMessage::SubmitRepoPath(value),
+                    )),
                     InputMode::InputEpicTitle => self.update(Message::SubmitEpicTitle(value)),
                     InputMode::InputEpicDescription => {
                         self.update(Message::SubmitEpicDescription(value))
                     }
                     InputMode::InputEpicRepoPath => self.update(Message::SubmitEpicRepoPath(value)),
-                    InputMode::InputBaseBranch => self.update(Message::SubmitBaseBranch(value)),
+                    InputMode::InputBaseBranch => self.update(Message::Input(
+                        crate::tui::messages::InputMessage::SubmitBaseBranch(value),
+                    )),
                     InputMode::MainSessionDir => self.update(Message::SubmitMainSessionDir(value)),
                     _ => vec![],
                 }
             }
-            KeyCode::Backspace => self.update(Message::InputBackspace),
-            KeyCode::Char(c) => self.update(Message::InputChar(c)),
+            KeyCode::Backspace => self.update(Message::Input(
+                crate::tui::messages::InputMessage::InputBackspace,
+            )),
+            KeyCode::Char(c) => self.update(Message::Input(
+                crate::tui::messages::InputMessage::InputChar(c),
+            )),
             _ => vec![],
         }
     }
 
     pub(in crate::tui) fn handle_key_tag(&mut self, key: KeyEvent) -> Vec<Command> {
         match key.code {
-            KeyCode::Char('b') => self.update(Message::SubmitTag(Some(TaskTag::Bug))),
-            KeyCode::Char('f') => self.update(Message::SubmitTag(Some(TaskTag::Feature))),
-            KeyCode::Char('c') => self.update(Message::SubmitTag(Some(TaskTag::Chore))),
-            KeyCode::Char('p') => self.update(Message::SubmitTag(Some(TaskTag::PrReview))),
-            KeyCode::Char('r') => self.update(Message::SubmitTag(Some(TaskTag::Research))),
-            KeyCode::Char('x') => self.update(Message::SubmitTag(Some(TaskTag::Fix))),
-            KeyCode::Enter => self.update(Message::SubmitTag(None)),
-            KeyCode::Esc => self.update(Message::CancelInput),
+            KeyCode::Char('b') => self.update(Message::Input(
+                crate::tui::messages::InputMessage::SubmitTag(Some(TaskTag::Bug)),
+            )),
+            KeyCode::Char('f') => self.update(Message::Input(
+                crate::tui::messages::InputMessage::SubmitTag(Some(TaskTag::Feature)),
+            )),
+            KeyCode::Char('c') => self.update(Message::Input(
+                crate::tui::messages::InputMessage::SubmitTag(Some(TaskTag::Chore)),
+            )),
+            KeyCode::Char('p') => self.update(Message::Input(
+                crate::tui::messages::InputMessage::SubmitTag(Some(TaskTag::PrReview)),
+            )),
+            KeyCode::Char('r') => self.update(Message::Input(
+                crate::tui::messages::InputMessage::SubmitTag(Some(TaskTag::Research)),
+            )),
+            KeyCode::Char('x') => self.update(Message::Input(
+                crate::tui::messages::InputMessage::SubmitTag(Some(TaskTag::Fix)),
+            )),
+            KeyCode::Enter => self.update(Message::Input(
+                crate::tui::messages::InputMessage::SubmitTag(None),
+            )),
+            KeyCode::Esc => self.update(Message::Input(
+                crate::tui::messages::InputMessage::CancelInput,
+            )),
             _ => vec![],
         }
     }
@@ -334,12 +366,16 @@ impl App {
     /// entry. No printable character is a navigation or select shortcut.
     pub(in crate::tui) fn handle_key_quick_dispatch(&mut self, key: KeyEvent) -> Vec<Command> {
         match key.code {
-            KeyCode::Esc => self.update(Message::CancelInput),
+            KeyCode::Esc => self.update(Message::Input(
+                crate::tui::messages::InputMessage::CancelInput,
+            )),
             KeyCode::Down => self.update(Message::MoveRepoCursor(1)),
             KeyCode::Up => self.update(Message::MoveRepoCursor(-1)),
             KeyCode::Enter => {
                 let idx = self.input.repo_cursor;
-                self.update(Message::SelectQuickDispatchRepo(idx))
+                self.update(Message::Input(
+                    crate::tui::messages::InputMessage::SelectQuickDispatchRepo(idx),
+                ))
             }
             KeyCode::Backspace => {
                 self.input.buffer.pop();

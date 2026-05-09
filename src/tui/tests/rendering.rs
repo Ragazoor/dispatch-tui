@@ -287,7 +287,9 @@ fn render_does_not_panic_on_small_terminal() {
 #[test]
 fn render_input_mode_shows_prompt() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
-    app.update(Message::StartNewTask);
+    app.update(Message::Input(
+        crate::tui::messages::InputMessage::StartNewTask,
+    ));
     let buf = render_to_buffer(&mut app, 100, 20);
     assert!(buffer_contains(&buf, "Title"));
 }
@@ -581,7 +583,9 @@ fn stress_rapid_status_transitions() {
     assert!(matches!(app.input.mode, InputMode::ConfirmDone(TaskId(1))));
 
     // Confirm the Done transition
-    app.update(Message::ConfirmDone);
+    app.update(Message::Input(
+        crate::tui::messages::InputMessage::ConfirmDone,
+    ));
     assert_eq!(app.board.tasks[0].status, TaskStatus::Done);
 
     for _ in 0..100 {

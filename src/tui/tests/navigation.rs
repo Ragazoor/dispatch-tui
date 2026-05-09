@@ -397,8 +397,12 @@ fn dismiss_error_clears_popup() {
 fn input_char_appends_to_buffer() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.input.mode = InputMode::InputTitle;
-    app.update(Message::InputChar('H'));
-    app.update(Message::InputChar('i'));
+    app.update(Message::Input(
+        crate::tui::messages::InputMessage::InputChar('H'),
+    ));
+    app.update(Message::Input(
+        crate::tui::messages::InputMessage::InputChar('i'),
+    ));
     assert_eq!(app.input.buffer, "Hi");
 }
 
@@ -406,7 +410,9 @@ fn input_char_appends_to_buffer() {
 fn input_backspace_removes_last_char() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.input.buffer = "abc".to_string();
-    app.update(Message::InputBackspace);
+    app.update(Message::Input(
+        crate::tui::messages::InputMessage::InputBackspace,
+    ));
     assert_eq!(app.input.buffer, "ab");
 }
 
@@ -422,7 +428,9 @@ fn status_info_sets_message() {
 #[test]
 fn start_quick_dispatch_selection_enters_mode() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
-    app.update(Message::StartQuickDispatchSelection);
+    app.update(Message::Input(
+        crate::tui::messages::InputMessage::StartQuickDispatchSelection,
+    ));
     assert_eq!(app.input.mode, InputMode::QuickDispatch);
     assert!(app.status.message.is_some());
 }
@@ -431,7 +439,9 @@ fn start_quick_dispatch_selection_enters_mode() {
 fn select_quick_dispatch_repo_dispatches() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.board.repo_paths = vec!["/repo1".to_string(), "/repo2".to_string()];
-    let cmds = app.update(Message::SelectQuickDispatchRepo(1));
+    let cmds = app.update(Message::Input(
+        crate::tui::messages::InputMessage::SelectQuickDispatchRepo(1),
+    ));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(cmds.iter().any(
         |c| matches!(c, Command::QuickDispatch { ref draft, .. } if draft.repo_path == "/repo2")
@@ -443,7 +453,9 @@ fn select_quick_dispatch_repo_out_of_range_is_noop() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.board.repo_paths = vec!["/repo1".to_string()];
     app.input.mode = InputMode::QuickDispatch;
-    let cmds = app.update(Message::SelectQuickDispatchRepo(5));
+    let cmds = app.update(Message::Input(
+        crate::tui::messages::InputMessage::SelectQuickDispatchRepo(5),
+    ));
     assert!(cmds.is_empty());
     // Mode is not changed by the handler (stays as-is)
 }
@@ -1456,7 +1468,9 @@ fn batch_detach_tmux() {
     app.board.tasks[1].tmux_window = Some("task-2".to_string());
 
     app.update(Message::BatchDetachTmux(vec![TaskId(1), TaskId(2)]));
-    let cmds = app.update(Message::ConfirmDetachTmux);
+    let cmds = app.update(Message::Input(
+        crate::tui::messages::InputMessage::ConfirmDetachTmux,
+    ));
 
     assert!(
         app.board.tasks[0].tmux_window.is_none(),
@@ -1509,7 +1523,9 @@ fn repo_cursor_resets_on_quick_dispatch_entry() {
     );
     app.board.repo_paths = vec!["/a".to_string(), "/b".to_string()];
     app.input.repo_cursor = 1;
-    app.update(Message::StartQuickDispatchSelection);
+    app.update(Message::Input(
+        crate::tui::messages::InputMessage::StartQuickDispatchSelection,
+    ));
     assert_eq!(
         app.input.repo_cursor, 0,
         "cursor should reset to 0 on mode entry"

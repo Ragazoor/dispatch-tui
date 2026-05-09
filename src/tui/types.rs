@@ -243,26 +243,11 @@ pub enum Message {
     },
     BatchArchiveTasks(Vec<TaskId>),
     BatchArchiveEpics(Vec<EpicId>),
-    // Input routing messages
-    StartNewTask,
-    CopyTask,
-    CancelInput,
-    ConfirmDeleteStart,
-    ConfirmDeleteYes,
-    CancelDelete,
-    SubmitTitle(String),
-    SubmitDescription(String),
+    /// Form-input flow messages — see [`crate::tui::messages::InputMessage`].
+    Input(crate::tui::messages::InputMessage),
     /// Pop-out `$EDITOR` flow messages — see
     /// [`crate::tui::messages::EditorMessage`].
     Editor(crate::tui::messages::EditorMessage),
-    SubmitRepoPath(String),
-    SubmitTag(Option<TaskTag>),
-    SubmitBaseBranch(String),
-    InputChar(char),
-    InputBackspace,
-    StartQuickDispatchSelection,
-    SelectQuickDispatchRepo(usize),
-    CancelRetry,
     // Split mode messages
     ToggleSplitMode,
     SwapSplitPane(TaskId),
@@ -299,9 +284,6 @@ pub enum Message {
     },
     /// PR flow messages — see [`crate::tui::messages::PrMessage`].
     Pr(crate::tui::messages::PrMessage),
-    // Done confirmation (no cleanup, just status change)
-    ConfirmDone,
-    CancelDone,
     // Repo filter
     StartRepoFilter,
     CloseRepoFilter,
@@ -325,7 +307,6 @@ pub enum Message {
     // Detach tmux panel (Review tasks only)
     DetachTmux(TaskId),
     BatchDetachTmux(Vec<TaskId>),
-    ConfirmDetachTmux,
     // Tips overlay
     ShowTips {
         tips: Vec<crate::tips::Tip>,
