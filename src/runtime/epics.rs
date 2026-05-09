@@ -23,14 +23,18 @@ impl TuiRuntime {
                 app.update(Message::EpicCreated(epic));
             }
             Err(e) => {
-                app.update(Message::Error(Self::db_error("creating epic", e)));
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    Self::db_error("creating epic", e),
+                )));
             }
         }
     }
 
     pub(super) fn exec_delete_epic(&self, app: &mut App, id: models::EpicId) {
         if let Err(e) = self.epic_svc.delete_epic(id) {
-            app.update(Message::Error(Self::db_error("deleting epic", e)));
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                Self::db_error("deleting epic", e),
+            )));
         }
     }
 
@@ -58,7 +62,9 @@ impl TuiRuntime {
             feed_interval_secs: None,
             project_id: None,
         }) {
-            app.update(Message::Error(Self::db_error("updating epic", e)));
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                Self::db_error("updating epic", e),
+            )));
         }
     }
 
@@ -81,7 +87,9 @@ impl TuiRuntime {
             feed_interval_secs: None,
             project_id: None,
         }) {
-            app.update(Message::Error(Self::db_error("toggling auto dispatch", e)));
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                Self::db_error("toggling auto dispatch", e),
+            )));
         }
     }
 
@@ -91,7 +99,9 @@ impl TuiRuntime {
                 app.update(Message::RefreshEpics(epics));
             }
             Err(e) => {
-                app.update(Message::Error(Self::db_error("refreshing epics", e)));
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    Self::db_error("refreshing epics", e),
+                )));
             }
         }
     }
@@ -119,7 +129,9 @@ impl TuiRuntime {
             }) {
             Ok(task) => task,
             Err(e) => {
-                app.update(Message::Error(Self::db_error("creating planning task", e)));
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    Self::db_error("creating planning task", e),
+                )));
                 return;
             }
         };
@@ -152,8 +164,8 @@ impl TuiRuntime {
                     });
                 }
                 Err(e) => {
-                    let _ = tx.send(Message::Error(format!(
-                        "Epic planning dispatch failed: {e:#}"
+                    let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
+                        format!("Epic planning dispatch failed: {e:#}"),
                     )));
                 }
             }

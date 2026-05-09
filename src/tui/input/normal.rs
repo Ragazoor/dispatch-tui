@@ -143,7 +143,9 @@ impl App {
 
             KeyCode::Char('n') => self.update(Message::StartNewTask),
             KeyCode::Char('c') => self.update(Message::CopyTask),
-            KeyCode::Char('N') => self.update(Message::ToggleNotifications),
+            KeyCode::Char('N') => self.update(Message::System(
+                crate::tui::messages::SystemMessage::ToggleNotifications,
+            )),
             KeyCode::Char('E') => self.update(Message::StartNewEpic),
             KeyCode::Char('d') => self.handle_key_dispatch(),
             KeyCode::Char('f') => self.update(Message::StartRepoFilter),
@@ -198,7 +200,11 @@ impl App {
                             window: window.clone(),
                         }]
                     } else {
-                        self.update(Message::StatusInfo("No active session".to_string()))
+                        self.update(Message::System(
+                            crate::tui::messages::SystemMessage::StatusInfo(
+                                "No active session".to_string(),
+                            ),
+                        ))
                     }
                 } else if let Some(id) = self.selected_epic_id() {
                     self.update(Message::EnterEpic(id))
@@ -244,7 +250,11 @@ impl App {
                     if let Some(window) = window {
                         vec![Command::JumpToTmux { window }]
                     } else {
-                        self.update(Message::StatusInfo("No active subtask session".to_string()))
+                        self.update(Message::System(
+                            crate::tui::messages::SystemMessage::StatusInfo(
+                                "No active subtask session".to_string(),
+                            ),
+                        ))
                     }
                 } else {
                     vec![]
@@ -254,9 +264,15 @@ impl App {
             KeyCode::Char('p') => {
                 if let Some(task) = self.selected_task() {
                     if let Some(url) = &task.pr_url {
-                        vec![Command::OpenInBrowser { url: url.clone() }]
+                        vec![Command::System(
+                            crate::tui::commands::SystemCommand::OpenInBrowser { url: url.clone() },
+                        )]
                     } else {
-                        self.update(Message::StatusInfo("No PR URL".to_string()))
+                        self.update(Message::System(
+                            crate::tui::messages::SystemMessage::StatusInfo(
+                                "No PR URL".to_string(),
+                            ),
+                        ))
                     }
                 } else {
                     vec![]
@@ -335,8 +351,10 @@ impl App {
                 };
                 self.input.pending_epic_id = epic_id;
                 match self.board.repo_paths.len() {
-                    0 => self.update(Message::StatusInfo(
-                        "No saved repo paths — create a task first".to_string(),
+                    0 => self.update(Message::System(
+                        crate::tui::messages::SystemMessage::StatusInfo(
+                            "No saved repo paths — create a task first".to_string(),
+                        ),
                     )),
                     1 => {
                         let repo_path = self.board.repo_paths[0].clone();
@@ -359,7 +377,9 @@ impl App {
 
             KeyCode::Char('I') => self.update(Message::Learning(LearningMessage::Open)),
 
-            KeyCode::Char('?') => self.update(Message::ToggleHelp),
+            KeyCode::Char('?') => self.update(Message::System(
+                crate::tui::messages::SystemMessage::ToggleHelp,
+            )),
 
             KeyCode::Char('S') => self.update(Message::ToggleSplitMode),
 

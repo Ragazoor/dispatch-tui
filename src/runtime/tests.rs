@@ -296,9 +296,10 @@ fn exec_refresh_from_db_returns_commands_from_refresh() {
     app.set_notifications_enabled(true);
     // Refresh should detect the transition and return a SendNotification
     let cmds = rt.exec_refresh_from_db(&mut app);
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::SendNotification { .. })));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::System(crate::tui::commands::SystemCommand::SendNotification { .. })
+    )));
 }
 
 #[test]
@@ -405,7 +406,10 @@ async fn exec_dispatch_sends_error_on_failure() {
         .unwrap()
         .unwrap();
     assert!(
-        matches!(msg2, Message::Error(_)),
+        matches!(
+            msg2,
+            Message::System(crate::tui::messages::SystemMessage::Error(_))
+        ),
         "Expected Error, got: {msg2:?}"
     );
 }
@@ -1015,7 +1019,11 @@ async fn exec_quick_dispatch_sends_error_on_failure() {
         .unwrap()
         .unwrap();
     assert!(
-        matches!(msg, Message::DispatchFailed(_) | Message::Error(_)),
+        matches!(
+            msg,
+            Message::DispatchFailed(_)
+                | Message::System(crate::tui::messages::SystemMessage::Error(_))
+        ),
         "Expected DispatchFailed or Error, got: {msg:?}"
     );
 }
@@ -1060,7 +1068,10 @@ async fn exec_quick_dispatch_failure_sends_dispatch_failed_and_error() {
         .unwrap()
         .unwrap();
     assert!(
-        matches!(msg2, Message::Error(_)),
+        matches!(
+            msg2,
+            Message::System(crate::tui::messages::SystemMessage::Error(_))
+        ),
         "Expected Error, got: {msg2:?}"
     );
 }
@@ -1132,7 +1143,10 @@ async fn exec_resume_sends_error_on_failure() {
         .unwrap()
         .unwrap();
     assert!(
-        matches!(msg, Message::Error(_)),
+        matches!(
+            msg,
+            Message::System(crate::tui::messages::SystemMessage::Error(_))
+        ),
         "Expected Error, got: {msg:?}"
     );
 }
@@ -1864,7 +1878,12 @@ fn apply_tmux_focus_warning_returns_none_when_enabled() {
 fn apply_tmux_focus_warning_returns_status_info_when_disabled() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"off\n")]);
     let result = apply_tmux_focus_warning(&mock);
-    assert!(matches!(result, Some(Message::StatusInfo(_))));
+    assert!(matches!(
+        result,
+        Some(Message::System(
+            crate::tui::messages::SystemMessage::StatusInfo(_)
+        ))
+    ));
 }
 
 mod resolve_initial_project_tests {

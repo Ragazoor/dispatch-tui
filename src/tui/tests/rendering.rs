@@ -198,7 +198,9 @@ fn render_shows_task_titles_in_columns() {
 #[test]
 fn render_error_popup_shows_message() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
-    app.update(Message::Error("Something went wrong".to_string()));
+    app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+        "Something went wrong".to_string(),
+    )));
     let buf = render_to_buffer(&mut app, 100, 20);
     assert!(buffer_contains(&buf, "Something went wrong"));
 }
@@ -491,7 +493,9 @@ fn render_columns_fill_terminal_width() {
 #[test]
 fn render_help_overlay_shows_keybindings_help() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
-    app.update(Message::ToggleHelp);
+    app.update(Message::System(
+        crate::tui::messages::SystemMessage::ToggleHelp,
+    ));
     let buf = render_to_buffer(&mut app, 100, 30);
     assert!(
         buffer_contains(&buf, "Navigation"),
@@ -632,11 +636,15 @@ fn focus_changed_updates_split_focused_when_split_active() {
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("pane1".to_string());
 
-    let cmds = app.update(Message::FocusChanged(false));
+    let cmds = app.update(Message::System(
+        crate::tui::messages::SystemMessage::FocusChanged(false),
+    ));
     assert!(cmds.is_empty());
     assert!(!app.split_focused());
 
-    let cmds = app.update(Message::FocusChanged(true));
+    let cmds = app.update(Message::System(
+        crate::tui::messages::SystemMessage::FocusChanged(true),
+    ));
     assert!(cmds.is_empty());
     assert!(app.split_focused());
 }

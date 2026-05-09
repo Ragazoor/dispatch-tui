@@ -1278,7 +1278,7 @@ fn handle_key_normal_open_pr_url() {
     let cmds = app.handle_key(make_key(KeyCode::Char('p')));
     assert!(cmds.iter().any(|c| matches!(
         c,
-        Command::OpenInBrowser { url } if url == "https://github.com/example/repo/pull/42"
+        Command::System(crate::tui::commands::SystemCommand::OpenInBrowser { url }) if url == "https://github.com/example/repo/pull/42"
     )));
 }
 

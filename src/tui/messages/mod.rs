@@ -8,10 +8,12 @@ pub mod editor;
 pub mod feed;
 pub mod learnings;
 pub mod pr;
+pub mod system;
 pub mod wrap_up;
 
 pub use editor::EditorMessage;
 pub use feed::FeedMessage;
 pub use learnings::LearningMessage;
 pub use pr::PrMessage;
+pub use system::SystemMessage;
 pub use wrap_up::WrapUpMessage;

@@ -27,9 +27,11 @@ impl TuiRuntime {
                 app.update(Message::Learning(LearningMessage::Show(all)));
             }
             (Err(e), _) | (_, Err(e)) => {
-                app.update(Message::StatusInfo(format!(
-                    "Failed to load learnings: {e}"
-                )));
+                app.update(Message::System(
+                    crate::tui::messages::SystemMessage::StatusInfo(format!(
+                        "Failed to load learnings: {e}"
+                    )),
+                ));
             }
         }
     }
@@ -70,21 +72,33 @@ impl TuiRuntime {
             Ok(()) => match db.get_learning(id) {
                 Ok(Some(updated)) => {
                     app.update(Message::Learning(LearningMessage::Edited(updated)));
-                    app.update(Message::StatusInfo(format!("Learning {id} approved")));
+                    app.update(Message::System(
+                        crate::tui::messages::SystemMessage::StatusInfo(format!(
+                            "Learning {id} approved"
+                        )),
+                    ));
                 }
                 Ok(None) => {
-                    app.update(Message::StatusInfo(format!("Learning {id} not found")));
+                    app.update(Message::System(
+                        crate::tui::messages::SystemMessage::StatusInfo(format!(
+                            "Learning {id} not found"
+                        )),
+                    ));
                 }
                 Err(e) => {
-                    app.update(Message::StatusInfo(format!(
-                        "Could not refresh learning: {e}"
-                    )));
+                    app.update(Message::System(
+                        crate::tui::messages::SystemMessage::StatusInfo(format!(
+                            "Could not refresh learning: {e}"
+                        )),
+                    ));
                 }
             },
             Err(e) => {
-                app.update(Message::StatusInfo(format!(
-                    "Could not approve learning: {e}"
-                )));
+                app.update(Message::System(
+                    crate::tui::messages::SystemMessage::StatusInfo(format!(
+                        "Could not approve learning: {e}"
+                    )),
+                ));
             }
         }
     }
@@ -101,12 +115,18 @@ impl TuiRuntime {
         match action(&svc, id) {
             Ok(()) => {
                 app.update(Message::Learning(LearningMessage::Actioned(id)));
-                app.update(Message::StatusInfo(format!("Learning {id} {verb}ed")));
+                app.update(Message::System(
+                    crate::tui::messages::SystemMessage::StatusInfo(format!(
+                        "Learning {id} {verb}ed"
+                    )),
+                ));
             }
             Err(e) => {
-                app.update(Message::StatusInfo(format!(
-                    "Could not {verb} learning: {e}"
-                )));
+                app.update(Message::System(
+                    crate::tui::messages::SystemMessage::StatusInfo(format!(
+                        "Could not {verb} learning: {e}"
+                    )),
+                ));
             }
         }
     }

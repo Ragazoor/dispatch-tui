@@ -134,7 +134,11 @@ impl TuiRuntime {
             Err(poisoned) => poisoned.into_inner(),
         };
         if guard.is_some() {
-            app.update(Message::StatusInfo(EDITOR_ALREADY_OPEN_MSG.to_string()));
+            app.update(Message::System(
+                crate::tui::messages::SystemMessage::StatusInfo(
+                    EDITOR_ALREADY_OPEN_MSG.to_string(),
+                ),
+            ));
             return;
         }
 
@@ -148,24 +152,24 @@ impl TuiRuntime {
         {
             Ok(f) => f,
             Err(e) => {
-                app.update(Message::Error(Self::db_error(
-                    "creating editor tempfile",
-                    e,
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    Self::db_error("creating editor tempfile", e),
                 )));
                 return;
             }
         };
         if let Err(e) = std::io::Write::write_all(tmp.as_file_mut(), content.as_bytes()) {
-            app.update(Message::Error(Self::db_error("writing editor tempfile", e)));
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                Self::db_error("writing editor tempfile", e),
+            )));
             return;
         }
 
         let (_file, temp_path) = match tmp.keep() {
             Ok(p) => p,
             Err(e) => {
-                app.update(Message::Error(Self::db_error(
-                    "persisting editor tempfile",
-                    e.error,
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    Self::db_error("persisting editor tempfile", e.error),
                 )));
                 return;
             }
@@ -184,7 +188,9 @@ impl TuiRuntime {
             &*self.runner,
         ) {
             let _ = std::fs::remove_file(&temp_path);
-            app.update(Message::Error(format!("Failed to open editor window: {e}")));
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                format!("Failed to open editor window: {e}"),
+            )));
             return;
         }
 
@@ -288,7 +294,9 @@ impl TuiRuntime {
                 }
             }
             Err(e) => {
-                app.update(Message::StatusInfo(format!("Edit failed: {e}")));
+                app.update(Message::System(
+                    crate::tui::messages::SystemMessage::StatusInfo(format!("Edit failed: {e}")),
+                ));
             }
         }
     }
@@ -319,7 +327,9 @@ impl TuiRuntime {
             .base_branch(applied.base_branch.clone());
 
         if let Err(e) = self.task_svc.update_task(params) {
-            app.update(Message::Error(Self::db_error("updating task", e)));
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                Self::db_error("updating task", e),
+            )));
         }
         app.update(Message::TaskEdited(crate::tui::TaskEdit {
             id: task_id,
@@ -361,7 +371,9 @@ impl TuiRuntime {
             feed_interval_secs: Some(applied.feed_interval_secs),
             project_id: None,
         }) {
-            app.update(Message::Error(Self::db_error("updating epic", e)));
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                Self::db_error("updating epic", e),
+            )));
         }
         let mut updated = epic;
         updated.title = applied.title;
@@ -388,9 +400,11 @@ fn emit_parse_errors(app: &mut App, errors: &[crate::editor::EditorParseError]) 
         .map(|e| e.to_string())
         .collect::<Vec<_>>()
         .join("; ");
-    app.update(Message::StatusInfo(format!(
-        "Edit accepted with parse errors — {summary}"
-    )));
+    app.update(Message::System(
+        crate::tui::messages::SystemMessage::StatusInfo(format!(
+            "Edit accepted with parse errors — {summary}"
+        )),
+    ));
 }
 
 /// Extract the saved text from an [`EditorOutcome`], returning `None` if

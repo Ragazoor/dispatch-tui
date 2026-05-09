@@ -5,7 +5,9 @@
 //! lifecycle methods live in `mod.rs`; per-message handlers live in
 //! `update/*.rs`.
 
-use crate::tui::messages::{EditorMessage, FeedMessage, LearningMessage, PrMessage, WrapUpMessage};
+use crate::tui::messages::{
+    EditorMessage, FeedMessage, LearningMessage, PrMessage, SystemMessage, WrapUpMessage,
+};
 use crate::tui::types::{Command, Message};
 use crate::tui::App;
 
@@ -14,6 +16,23 @@ fn dispatch_editor(app: &mut App, msg: EditorMessage) -> Vec<Command> {
     match msg {
         EditorMessage::DescriptionResult(value) => app.handle_description_editor_result(value),
         EditorMessage::Result { kind, outcome } => app.handle_editor_result(kind, outcome),
+    }
+}
+
+/// Per-domain dispatcher for [`SystemMessage`] variants.
+fn dispatch_system(app: &mut App, msg: SystemMessage) -> Vec<Command> {
+    match msg {
+        SystemMessage::Tick => app.handle_tick(),
+        SystemMessage::TerminalResized => vec![],
+        SystemMessage::FocusChanged(focused) => app.handle_focus_changed(focused),
+        SystemMessage::Quit => app.handle_quit(),
+        SystemMessage::Error(text) => app.handle_error(text),
+        SystemMessage::DismissError => app.handle_dismiss_error(),
+        SystemMessage::StatusInfo(text) => app.handle_status_info(text),
+        SystemMessage::ToggleHelp => app.handle_toggle_help(),
+        SystemMessage::ToggleNotifications => app.handle_toggle_notifications(),
+        SystemMessage::OpenInBrowser { url } => app.handle_open_in_browser(url),
+        SystemMessage::MessageReceived(id) => app.handle_message_received(id),
     }
 }
 
@@ -83,9 +102,7 @@ fn dispatch_learning(app: &mut App, msg: LearningMessage) -> Vec<Command> {
 pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
     match msg {
         // ── Board navigation, view toggles, system events ──
-        Message::Tick => app.handle_tick(),
-        Message::TerminalResized => vec![],
-        Message::Quit => app.handle_quit(),
+        Message::System(sm) => dispatch_system(app, sm),
         Message::NavigateColumn(delta) => app.handle_navigate_column(delta),
         Message::NavigateRow(delta) => app.handle_navigate_row(delta),
         Message::MoveTask { id, direction } => app.handle_move_task(id, direction),
@@ -93,24 +110,16 @@ pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
         Message::OpenTaskDetail(task_id) => app.handle_open_task_detail(task_id),
         Message::CloseTaskDetail => app.handle_close_task_detail(),
         Message::ToggleFlattened => app.handle_toggle_flattened(),
-        Message::ToggleHelp => app.handle_toggle_help(),
-        Message::ToggleNotifications => app.handle_toggle_notifications(),
         Message::ToggleSplitMode => app.handle_toggle_split_mode(),
         Message::SwapSplitPane(task_id) => app.handle_swap_split_pane(task_id),
         Message::SplitPaneOpened { pane_id, task_id } => {
             app.handle_split_pane_opened(pane_id, task_id)
         }
         Message::SplitPaneClosed => app.handle_split_pane_closed(),
-        Message::FocusChanged(focused) => app.handle_focus_changed(focused),
         Message::RefreshTasks(tasks) => app.handle_refresh_tasks(tasks),
         Message::TaskUpdated(task) => app.handle_task_updated(task),
         Message::RefreshUsage(usage) => app.handle_refresh_usage(usage),
-        Message::Error(text) => app.handle_error(text),
-        Message::DismissError => app.handle_dismiss_error(),
-        Message::StatusInfo(text) => app.handle_status_info(text),
         Message::RepoPathsUpdated(paths) => app.handle_repo_paths_updated(paths),
-        Message::MessageReceived(id) => app.handle_message_received(id),
-        Message::OpenInBrowser { url } => app.handle_open_in_browser(url),
         Message::TmuxOutput {
             id,
             output,

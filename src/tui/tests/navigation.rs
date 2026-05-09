@@ -66,7 +66,7 @@ fn move_task_backward_at_start_is_noop() {
 fn quit_enters_confirm_mode() {
     let mut app = make_app();
     assert!(!app.should_quit);
-    app.update(Message::Quit);
+    app.update(Message::System(crate::tui::messages::SystemMessage::Quit));
     assert!(!app.should_quit);
     assert_eq!(app.input.mode, InputMode::ConfirmQuit);
 }
@@ -151,7 +151,9 @@ fn delete_task_without_worktree_no_cleanup() {
 #[test]
 fn error_sets_error_popup() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
-    app.update(Message::Error("Something went wrong".to_string()));
+    app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+        "Something went wrong".to_string(),
+    )));
     assert_eq!(
         app.status.error_popup.as_deref(),
         Some("Something went wrong")
@@ -385,7 +387,9 @@ fn shift_h_key_on_empty_column_is_noop() {
 fn dismiss_error_clears_popup() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.status.error_popup = Some("boom".to_string());
-    app.update(Message::DismissError);
+    app.update(Message::System(
+        crate::tui::messages::SystemMessage::DismissError,
+    ));
     assert!(app.status.error_popup.is_none());
 }
 
@@ -409,7 +413,9 @@ fn input_backspace_removes_last_char() {
 #[test]
 fn status_info_sets_message() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
-    app.update(Message::StatusInfo("hello".to_string()));
+    app.update(Message::System(
+        crate::tui::messages::SystemMessage::StatusInfo("hello".to_string()),
+    ));
     assert_eq!(app.status.message.as_deref(), Some("hello"));
 }
 
@@ -590,7 +596,9 @@ fn focus_changed_ignored_when_split_inactive() {
     let mut app = make_app();
     assert!(!app.split_active());
 
-    let cmds = app.update(Message::FocusChanged(false));
+    let cmds = app.update(Message::System(
+        crate::tui::messages::SystemMessage::FocusChanged(false),
+    ));
     assert!(cmds.is_empty());
     assert!(app.split_focused()); // still true — ignored
 }
@@ -783,9 +791,13 @@ fn column_scrolls_back_up_when_cursor_moves_up() {
 fn toggle_notifications_flips_state() {
     let mut app = make_app();
     assert!(!app.notifications_enabled()); // default: false
-    app.update(Message::ToggleNotifications);
+    app.update(Message::System(
+        crate::tui::messages::SystemMessage::ToggleNotifications,
+    ));
     assert!(app.notifications_enabled());
-    app.update(Message::ToggleNotifications);
+    app.update(Message::System(
+        crate::tui::messages::SystemMessage::ToggleNotifications,
+    ));
     assert!(!app.notifications_enabled());
 }
 
@@ -803,11 +815,20 @@ fn refresh_tasks_emits_notification_on_review_transition() {
 
     let notif_cmds: Vec<_> = cmds
         .iter()
-        .filter(|c| matches!(c, Command::SendNotification { .. }))
+        .filter(|c| {
+            matches!(
+                c,
+                Command::System(crate::tui::commands::SystemCommand::SendNotification { .. })
+            )
+        })
         .collect();
     assert_eq!(notif_cmds.len(), 1);
     match &notif_cmds[0] {
-        Command::SendNotification { title, urgent, .. } => {
+        Command::System(crate::tui::commands::SystemCommand::SendNotification {
+            title,
+            urgent,
+            ..
+        }) => {
             assert!(title.contains("Task 3"));
             assert!(!urgent);
         }
@@ -826,11 +847,18 @@ fn refresh_tasks_emits_urgent_notification_on_needs_input() {
 
     let notif_cmds: Vec<_> = cmds
         .iter()
-        .filter(|c| matches!(c, Command::SendNotification { .. }))
+        .filter(|c| {
+            matches!(
+                c,
+                Command::System(crate::tui::commands::SystemCommand::SendNotification { .. })
+            )
+        })
         .collect();
     assert_eq!(notif_cmds.len(), 1);
     match &notif_cmds[0] {
-        Command::SendNotification { urgent, .. } => {
+        Command::System(crate::tui::commands::SystemCommand::SendNotification {
+            urgent, ..
+        }) => {
             assert!(urgent);
         }
         _ => unreachable!(),
@@ -848,7 +876,12 @@ fn refresh_tasks_does_not_duplicate_notifications() {
     let cmds = app.update(Message::RefreshTasks(updated));
     let notif_cmds: Vec<_> = cmds
         .iter()
-        .filter(|c| matches!(c, Command::SendNotification { .. }))
+        .filter(|c| {
+            matches!(
+                c,
+                Command::System(crate::tui::commands::SystemCommand::SendNotification { .. })
+            )
+        })
         .collect();
     assert_eq!(notif_cmds.len(), 0);
 }
@@ -864,7 +897,12 @@ fn refresh_tasks_does_not_duplicate_needs_input_notifications() {
     let cmds = app.update(Message::RefreshTasks(updated));
     let notif_cmds: Vec<_> = cmds
         .iter()
-        .filter(|c| matches!(c, Command::SendNotification { .. }))
+        .filter(|c| {
+            matches!(
+                c,
+                Command::System(crate::tui::commands::SystemCommand::SendNotification { .. })
+            )
+        })
         .collect();
     assert_eq!(notif_cmds.len(), 0);
 }
@@ -880,7 +918,10 @@ fn refresh_tasks_renotifies_needs_input_after_clearing() {
     let cmds = app.update(Message::RefreshTasks(updated.clone()));
     assert_eq!(
         cmds.iter()
-            .filter(|c| matches!(c, Command::SendNotification { .. }))
+            .filter(|c| matches!(
+                c,
+                Command::System(crate::tui::commands::SystemCommand::SendNotification { .. })
+            ))
             .count(),
         1
     );
@@ -894,7 +935,10 @@ fn refresh_tasks_renotifies_needs_input_after_clearing() {
     let cmds = app.update(Message::RefreshTasks(updated));
     assert_eq!(
         cmds.iter()
-            .filter(|c| matches!(c, Command::SendNotification { .. }))
+            .filter(|c| matches!(
+                c,
+                Command::System(crate::tui::commands::SystemCommand::SendNotification { .. })
+            ))
             .count(),
         1
     );
@@ -911,7 +955,12 @@ fn refresh_tasks_skips_notification_when_disabled() {
 
     let notif_cmds: Vec<_> = cmds
         .iter()
-        .filter(|c| matches!(c, Command::SendNotification { .. }))
+        .filter(|c| {
+            matches!(
+                c,
+                Command::System(crate::tui::commands::SystemCommand::SendNotification { .. })
+            )
+        })
         .collect();
     assert_eq!(notif_cmds.len(), 0);
 }
@@ -951,7 +1000,12 @@ fn refresh_tasks_clears_notified_when_task_leaves_review() {
     let cmds = app.update(Message::RefreshTasks(updated3));
     let notif_cmds: Vec<_> = cmds
         .iter()
-        .filter(|c| matches!(c, Command::SendNotification { .. }))
+        .filter(|c| {
+            matches!(
+                c,
+                Command::System(crate::tui::commands::SystemCommand::SendNotification { .. })
+            )
+        })
         .collect();
     assert_eq!(notif_cmds.len(), 1);
 }
@@ -967,13 +1021,18 @@ fn refresh_tasks_clears_notified_state_even_when_disabled() {
     let cmds = app.update(Message::RefreshTasks(updated));
     assert_eq!(
         cmds.iter()
-            .filter(|c| matches!(c, Command::SendNotification { .. }))
+            .filter(|c| matches!(
+                c,
+                Command::System(crate::tui::commands::SystemCommand::SendNotification { .. })
+            ))
             .count(),
         1
     );
 
     // Disable notifications
-    app.update(Message::ToggleNotifications);
+    app.update(Message::System(
+        crate::tui::messages::SystemMessage::ToggleNotifications,
+    ));
 
     // Task leaves review while disabled
     let mut updated2 = app.board.tasks.to_vec();
@@ -981,7 +1040,9 @@ fn refresh_tasks_clears_notified_state_even_when_disabled() {
     app.update(Message::RefreshTasks(updated2));
 
     // Re-enable notifications
-    app.update(Message::ToggleNotifications);
+    app.update(Message::System(
+        crate::tui::messages::SystemMessage::ToggleNotifications,
+    ));
 
     // Task returns to review — should re-notify because notified state was cleared
     let mut updated3 = app.board.tasks.to_vec();
@@ -989,7 +1050,12 @@ fn refresh_tasks_clears_notified_state_even_when_disabled() {
     let cmds = app.update(Message::RefreshTasks(updated3));
     let notif_cmds: Vec<_> = cmds
         .iter()
-        .filter(|c| matches!(c, Command::SendNotification { .. }))
+        .filter(|c| {
+            matches!(
+                c,
+                Command::System(crate::tui::commands::SystemCommand::SendNotification { .. })
+            )
+        })
         .collect();
     assert_eq!(
         notif_cmds.len(),
@@ -1165,7 +1231,7 @@ fn tick_skips_already_stale_tasks() {
         .last_active_at
         .insert(TaskId(3), Instant::now() - Duration::from_secs(301));
 
-    let cmds = app.update(Message::Tick);
+    let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
     // Tick should NOT re-emit PersistTask for already-stale tasks
     // (only CaptureTmux and RefreshFromDb expected)
     assert!(!cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
@@ -1184,7 +1250,7 @@ fn tick_skips_already_crashed_tasks() {
         .last_active_at
         .insert(TaskId(3), Instant::now() - Duration::from_secs(301));
 
-    let cmds = app.update(Message::Tick);
+    let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
     assert!(!cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
 }
 
@@ -1201,7 +1267,7 @@ fn tick_skips_conflict_tasks_for_stale_detection() {
         .last_active_at
         .insert(TaskId(3), Instant::now() - Duration::from_secs(301));
 
-    let cmds = app.update(Message::Tick);
+    let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
     assert!(!cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
     assert_eq!(app.board.tasks[0].sub_status, SubStatus::Conflict);
 }
@@ -1551,7 +1617,7 @@ fn tick_with_active_split_checks_pane() {
     let mut app = make_app();
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%42".to_string());
-    let cmds = app.update(Message::Tick);
+    let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
     assert!(cmds.iter().any(|c| matches!(
         c,
         Command::CheckSplitPaneExists { pane_id } if pane_id == "%42"
@@ -1561,7 +1627,7 @@ fn tick_with_active_split_checks_pane() {
 #[test]
 fn tick_without_split_does_not_check_pane() {
     let mut app = make_app();
-    let cmds = app.update(Message::Tick);
+    let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
     assert!(!cmds
         .iter()
         .any(|c| matches!(c, Command::CheckSplitPaneExists { .. })));
@@ -1578,7 +1644,7 @@ fn tick_skips_capture_for_split_pinned_task() {
     app.board.split.right_pane_id = Some("%42".to_string());
     app.board.split.pinned_task_id = Some(TaskId(4));
 
-    let cmds = app.update(Message::Tick);
+    let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
 
     // Should NOT emit CaptureTmux for the pinned task (its window is a pane now)
     assert!(

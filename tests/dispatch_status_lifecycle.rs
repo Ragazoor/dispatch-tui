@@ -57,7 +57,9 @@ fn dispatching_status_visible_across_lifecycle_success() {
     assert!(msg.contains("Dispatching"), "got: {msg}");
 
     // 3. Tick mid-flight: status persists (sticky).
-    app.update(Message::Tick);
+    app.update(Message::System(
+        dispatch_tui::tui::messages::SystemMessage::Tick,
+    ));
     let msg = app
         .status_message()
         .expect("sticky status survives Tick during dispatch");

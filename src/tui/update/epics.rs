@@ -22,8 +22,10 @@ impl App {
             .count();
 
         if review_count == 0 {
-            return self.update(Message::StatusInfo(
-                "No review tasks to wrap up".to_string(),
+            return self.update(Message::System(
+                crate::tui::messages::SystemMessage::StatusInfo(
+                    "No review tasks to wrap up".to_string(),
+                ),
             ));
         }
 

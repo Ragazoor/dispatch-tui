@@ -60,8 +60,10 @@ impl App {
                     if !project.is_default {
                         self.input.mode = InputMode::ConfirmDeleteProject1 { id: project.id };
                     } else {
-                        return self.update(Message::StatusInfo(
-                            "Cannot delete the default project".to_string(),
+                        return self.update(Message::System(
+                            crate::tui::messages::SystemMessage::StatusInfo(
+                                "Cannot delete the default project".to_string(),
+                            ),
                         ));
                     }
                 }
@@ -79,7 +81,9 @@ impl App {
                 }
                 vec![]
             }
-            KeyCode::Char('q') => self.update(Message::Quit),
+            KeyCode::Char('q') => {
+                self.update(Message::System(crate::tui::messages::SystemMessage::Quit))
+            }
             _ => vec![],
         }
     }

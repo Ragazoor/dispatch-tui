@@ -3,7 +3,9 @@ use super::*;
 impl TuiRuntime {
     pub(super) fn exec_jump_to_tmux(&self, app: &mut App, window: String) {
         if let Err(e) = tmux::select_window(&window, &*self.runner) {
-            app.update(Message::Error(format!("Jump failed: {e:#}")));
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                format!("Jump failed: {e:#}"),
+            )));
         }
     }
 
@@ -11,9 +13,9 @@ impl TuiRuntime {
         let dir = match app.main_session_dir() {
             Some(d) => d.to_string(),
             None => {
-                app.update(Message::Error(
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
                     "Main session directory not configured".to_string(),
-                ));
+                )));
                 return;
             }
         };
@@ -23,8 +25,8 @@ impl TuiRuntime {
             match tmux::has_window(&window, &*self.runner) {
                 Ok(true) => {
                     if let Err(e) = tmux::select_window(&window, &*self.runner) {
-                        app.update(Message::Error(format!(
-                            "Jump to main session failed: {e:#}"
+                        app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                            format!("Jump to main session failed: {e:#}"),
                         )));
                     }
                     return;
@@ -41,14 +43,14 @@ impl TuiRuntime {
             Ok(window) => {
                 app.update(Message::MainSessionCreated(window.clone()));
                 if let Err(e) = tmux::select_window(&window, &*self.runner) {
-                    app.update(Message::Error(format!(
-                        "Main session created but jump failed: {e:#}"
+                    app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                        format!("Main session created but jump failed: {e:#}"),
                     )));
                 }
             }
             Err(e) => {
-                app.update(Message::Error(format!(
-                    "Failed to create main session: {e:#}"
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    format!("Failed to create main session: {e:#}"),
                 )));
             }
         }
@@ -58,7 +60,11 @@ impl TuiRuntime {
         let dispatch_pane = match tmux::current_pane_id(&*self.runner) {
             Ok(id) => id,
             Err(_) => {
-                app.update(Message::StatusInfo("Split mode requires tmux".to_string()));
+                app.update(Message::System(
+                    crate::tui::messages::SystemMessage::StatusInfo(
+                        "Split mode requires tmux".to_string(),
+                    ),
+                ));
                 return;
             }
         };
@@ -70,7 +76,9 @@ impl TuiRuntime {
                 });
             }
             Err(e) => {
-                app.update(Message::Error(format!("Split failed: {e:#}")));
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    format!("Split failed: {e:#}"),
+                )));
             }
         }
     }
@@ -84,7 +92,11 @@ impl TuiRuntime {
         let dispatch_pane = match tmux::current_pane_id(&*self.runner) {
             Ok(id) => id,
             Err(_) => {
-                app.update(Message::StatusInfo("Split mode requires tmux".to_string()));
+                app.update(Message::System(
+                    crate::tui::messages::SystemMessage::StatusInfo(
+                        "Split mode requires tmux".to_string(),
+                    ),
+                ));
                 return;
             }
         };
@@ -96,7 +108,9 @@ impl TuiRuntime {
                 });
             }
             Err(e) => {
-                app.update(Message::Error(format!("Split with task failed: {e:#}")));
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    format!("Split with task failed: {e:#}"),
+                )));
             }
         }
     }
@@ -109,11 +123,15 @@ impl TuiRuntime {
     ) {
         if let Some(window_name) = restore_window {
             if let Err(e) = tmux::break_pane_to_window(pane_id, window_name, &*self.runner) {
-                app.update(Message::Error(format!("Break pane failed: {e:#}")));
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    format!("Break pane failed: {e:#}"),
+                )));
                 return;
             }
         } else if let Err(e) = tmux::kill_pane(pane_id, &*self.runner) {
-            app.update(Message::Error(format!("Kill pane failed: {e:#}")));
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                format!("Kill pane failed: {e:#}"),
+            )));
             return;
         }
         app.update(Message::SplitPaneClosed);
@@ -136,7 +154,9 @@ impl TuiRuntime {
         let new_pane_id = match tmux::pane_id_for_window(new_window, &*self.runner) {
             Ok(id) => id,
             Err(e) => {
-                app.update(Message::Error(format!("Cannot get pane ID: {e:#}")));
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    format!("Cannot get pane ID: {e:#}"),
+                )));
                 return;
             }
         };
@@ -144,7 +164,9 @@ impl TuiRuntime {
         // 2. Atomically swap pane contents — no layout change, no resize, no flicker
         let source = format!("{new_window}.0");
         if let Err(e) = tmux::swap_pane(&source, right_pane, &*self.runner) {
-            app.update(Message::Error(format!("Swap pane failed: {e:#}")));
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                format!("Swap pane failed: {e:#}"),
+            )));
             return;
         }
 
@@ -153,13 +175,17 @@ impl TuiRuntime {
         if let Some(old_name) = old_window {
             // The window kept its name (new_window). Rename it to the old task's name.
             if let Err(e) = tmux::rename_window(new_window, old_name, &*self.runner) {
-                app.update(Message::Error(format!("Rename window failed: {e:#}")));
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    format!("Rename window failed: {e:#}"),
+                )));
                 return;
             }
         } else {
             // Old pane was empty (no task) — kill the standalone window holding it
             if let Err(e) = tmux::kill_window(new_window, &*self.runner) {
-                app.update(Message::Error(format!("Kill window failed: {e:#}")));
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    format!("Kill window failed: {e:#}"),
+                )));
                 return;
             }
         }

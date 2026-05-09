@@ -79,7 +79,7 @@ fn status_message_clears_after_timeout_on_tick() {
     app.status.message_set_at = Some(Instant::now() - Duration::from_secs(6));
 
     // Tick should clear it since it's past the 5-second timeout
-    app.update(Message::Tick);
+    app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
     assert!(
         app.status.message.is_none(),
         "status_message should auto-clear after timeout"
@@ -94,7 +94,7 @@ fn status_message_persists_before_timeout() {
     app.status.message_set_at = Some(Instant::now());
 
     // Tick should NOT clear it since timeout hasn't elapsed
-    app.update(Message::Tick);
+    app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
     assert_eq!(app.status.message.as_deref(), Some("Task 1 finished"));
 }
 
@@ -106,7 +106,7 @@ fn status_message_does_not_clear_during_interactive_mode() {
     app.status.message_set_at = Some(Instant::now() - Duration::from_secs(10));
 
     // Tick should NOT clear it during an interactive mode
-    app.update(Message::Tick);
+    app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
     assert!(
         app.status.message.is_some(),
         "should not clear during interactive mode"
@@ -783,7 +783,9 @@ fn handle_key_confirm_delete_preset_routes_correctly() {
 #[test]
 fn terminal_resized_returns_no_commands() {
     let mut app = make_app();
-    let cmds = app.update(Message::TerminalResized);
+    let cmds = app.update(Message::System(
+        crate::tui::messages::SystemMessage::TerminalResized,
+    ));
     assert!(
         cmds.is_empty(),
         "resize should produce no commands, just trigger a re-draw"
@@ -1133,7 +1135,7 @@ fn dispatching_status_does_not_expire_on_tick() {
     // Backdate so a non-sticky message would auto-clear
     app.status.message_set_at = Some(Instant::now() - Duration::from_secs(10));
 
-    app.update(Message::Tick);
+    app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
     assert!(
         app.status.message.is_some(),
         "sticky dispatching status should survive Tick"
@@ -1220,7 +1222,7 @@ fn dispatching_status_skips_deleted_task() {
     // Task is deleted while dispatching is in flight.
     app.board.tasks.retain(|t| t.id != TaskId(1));
 
-    app.update(Message::Tick);
+    app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
 
     assert!(
         !app.dispatching.contains_key(&TaskId(1)),

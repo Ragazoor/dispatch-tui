@@ -120,11 +120,13 @@ impl App {
                 && !self.agents.notified_needs_input.contains(&new_task.id)
             {
                 self.agents.notified_needs_input.insert(new_task.id);
-                cmds.push(Command::SendNotification {
-                    title: format!("Task #{}: {}", new_task.id.0, new_task.title),
-                    body: "Agent needs your input".to_string(),
-                    urgent: true,
-                });
+                cmds.push(Command::System(
+                    crate::tui::commands::SystemCommand::SendNotification {
+                        title: format!("Task #{}: {}", new_task.id.0, new_task.title),
+                        body: "Agent needs your input".to_string(),
+                        urgent: true,
+                    },
+                ));
             }
 
             if new_task.status == TaskStatus::Review
@@ -132,11 +134,13 @@ impl App {
                 && !self.agents.notified_review.contains(&new_task.id)
             {
                 self.agents.notified_review.insert(new_task.id);
-                cmds.push(Command::SendNotification {
-                    title: format!("Task #{}: {}", new_task.id.0, new_task.title),
-                    body: "Ready for review".to_string(),
-                    urgent: false,
-                });
+                cmds.push(Command::System(
+                    crate::tui::commands::SystemCommand::SendNotification {
+                        title: format!("Task #{}: {}", new_task.id.0, new_task.title),
+                        body: "Ready for review".to_string(),
+                        urgent: false,
+                    },
+                ));
             }
         }
 
@@ -313,11 +317,13 @@ impl App {
 
         if self.notifications_enabled {
             if let Some(task) = self.find_task(id) {
-                cmds.push(Command::SendNotification {
-                    title: format!("Task #{}: {}", task.id.0, task.title),
-                    body: format!("Agent inactive for {elapsed}m"),
-                    urgent: false,
-                });
+                cmds.push(Command::System(
+                    crate::tui::commands::SystemCommand::SendNotification {
+                        title: format!("Task #{}: {}", task.id.0, task.title),
+                        body: format!("Agent inactive for {elapsed}m"),
+                        urgent: false,
+                    },
+                ));
             }
         }
         cmds
@@ -352,11 +358,13 @@ impl App {
 
         if self.notifications_enabled {
             if let Some(task) = self.find_task(id) {
-                cmds.push(Command::SendNotification {
-                    title: format!("Task #{}: {}", task.id.0, task.title),
-                    body: "Agent crashed".to_string(),
-                    urgent: true,
-                });
+                cmds.push(Command::System(
+                    crate::tui::commands::SystemCommand::SendNotification {
+                        title: format!("Task #{}: {}", task.id.0, task.title),
+                        body: "Agent crashed".to_string(),
+                        urgent: true,
+                    },
+                ));
             }
         }
         cmds

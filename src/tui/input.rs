@@ -12,7 +12,9 @@ impl App {
     /// Translate a terminal key event into zero or more commands, depending on current mode.
     pub fn handle_key(&mut self, key: KeyEvent) -> Vec<Command> {
         if self.status.error_popup.is_some() {
-            return self.update(Message::DismissError);
+            return self.update(Message::System(
+                crate::tui::messages::SystemMessage::DismissError,
+            ));
         }
 
         // Tips overlay captures all input when visible
@@ -80,14 +82,18 @@ impl App {
                     }
                 };
                 let mut cmds = self.update(Message::SetTipsMode(new_mode));
-                cmds.extend(self.update(Message::StatusInfo(label.to_string())));
+                cmds.extend(self.update(Message::System(
+                    crate::tui::messages::SystemMessage::StatusInfo(label.to_string()),
+                )));
                 cmds
             }
             KeyCode::Char('x') => {
                 let mut cmds = self.update(Message::SetTipsMode(TipsShowMode::Never));
-                cmds.extend(
-                    self.update(Message::StatusInfo("Tips: disabled on startup".to_string())),
-                );
+                cmds.extend(self.update(Message::System(
+                    crate::tui::messages::SystemMessage::StatusInfo(
+                        "Tips: disabled on startup".to_string(),
+                    ),
+                )));
                 cmds
             }
             KeyCode::Char('q') | KeyCode::Esc => self.update(Message::CloseTips),
@@ -164,7 +170,9 @@ impl App {
                 }
                 vec![]
             }
-            KeyCode::Char('q') => self.update(Message::Quit),
+            KeyCode::Char('q') => {
+                self.update(Message::System(crate::tui::messages::SystemMessage::Quit))
+            }
             _ => vec![],
         }
     }
@@ -194,24 +202,30 @@ impl App {
                         if is_problematic {
                             self.update(Message::KillAndRetry(id))
                         } else if has_window {
-                            self.update(Message::StatusInfo(
-                                "Agent already running, press g to jump".to_string(),
+                            self.update(Message::System(
+                                crate::tui::messages::SystemMessage::StatusInfo(
+                                    "Agent already running, press g to jump".to_string(),
+                                ),
                             ))
                         } else if has_worktree {
                             self.update(Message::ResumeTask(id))
                         } else {
-                            self.update(Message::StatusInfo(
-                                "No worktree to resume, move to Backlog and re-dispatch"
-                                    .to_string(),
+                            self.update(Message::System(
+                                crate::tui::messages::SystemMessage::StatusInfo(
+                                    "No worktree to resume, move to Backlog and re-dispatch"
+                                        .to_string(),
+                                ),
                             ))
                         }
                     }
-                    TaskStatus::Done => {
-                        self.update(Message::StatusInfo("Task is done".to_string()))
-                    }
-                    TaskStatus::Archived => {
-                        self.update(Message::StatusInfo("Task is archived".to_string()))
-                    }
+                    TaskStatus::Done => self.update(Message::System(
+                        crate::tui::messages::SystemMessage::StatusInfo("Task is done".to_string()),
+                    )),
+                    TaskStatus::Archived => self.update(Message::System(
+                        crate::tui::messages::SystemMessage::StatusInfo(
+                            "Task is archived".to_string(),
+                        ),
+                    )),
                 }
             }
             Some(ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_)) => vec![],
@@ -230,8 +244,10 @@ impl App {
         if self.has_selection() {
             if self.select.tasks.is_empty() {
                 // Only epics selected — can't move since status is derived
-                return self.update(Message::StatusInfo(
-                    "Epic status is derived from subtasks".to_string(),
+                return self.update(Message::System(
+                    crate::tui::messages::SystemMessage::StatusInfo(
+                        "Epic status is derived from subtasks".to_string(),
+                    ),
                 ));
             }
             let ids: Vec<_> = self.select.tasks.iter().copied().collect();
@@ -341,7 +357,9 @@ impl App {
 
     pub(in crate::tui) fn handle_key_help(&mut self, key: KeyEvent) -> Vec<Command> {
         match key.code {
-            KeyCode::Char('?') | KeyCode::Esc => self.update(Message::ToggleHelp),
+            KeyCode::Char('?') | KeyCode::Esc => self.update(Message::System(
+                crate::tui::messages::SystemMessage::ToggleHelp,
+            )),
             _ => vec![],
         }
     }

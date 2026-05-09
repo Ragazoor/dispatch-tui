@@ -38,11 +38,13 @@ impl App {
             cmds.push(Command::PersistTask(task_clone));
 
             if self.notifications_enabled {
-                cmds.push(Command::SendNotification {
-                    title: "PR merged".to_string(),
-                    body: format!("{pr_label} merged: {title}"),
-                    urgent: false,
-                });
+                cmds.push(Command::System(
+                    crate::tui::commands::SystemCommand::SendNotification {
+                        title: "PR merged".to_string(),
+                        body: format!("{pr_label} merged: {title}"),
+                        urgent: false,
+                    },
+                ));
             }
         }
 
@@ -58,10 +60,16 @@ impl App {
         };
 
         if task.status != TaskStatus::Review {
-            return self.update(Message::StatusInfo("Task is not in review".to_string()));
+            return self.update(Message::System(
+                crate::tui::messages::SystemMessage::StatusInfo(
+                    "Task is not in review".to_string(),
+                ),
+            ));
         }
         if task.pr_url.is_none() {
-            return self.update(Message::StatusInfo("Task has no PR".to_string()));
+            return self.update(Message::System(
+                crate::tui::messages::SystemMessage::StatusInfo("Task has no PR".to_string()),
+            ));
         }
         if task.sub_status != SubStatus::Approved {
             let label = match task.sub_status {
@@ -69,7 +77,11 @@ impl App {
                 SubStatus::ChangesRequested => "changes requested",
                 _ => "not approved",
             };
-            return self.update(Message::StatusInfo(format!("Cannot merge: PR is {label}")));
+            return self.update(Message::System(
+                crate::tui::messages::SystemMessage::StatusInfo(format!(
+                    "Cannot merge: PR is {label}"
+                )),
+            ));
         }
 
         let pr_label = task

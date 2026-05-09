@@ -114,13 +114,8 @@ pub(super) async fn dispatch(
             rt.exec_toggle_epic_auto_dispatch(app, id, auto_dispatch);
             vec![]
         }
-        // Notification
-        SendNotification {
-            title,
-            body,
-            urgent,
-        } => {
-            rt.exec_send_notification(&title, &body, urgent);
+        System(cmd) => {
+            dispatch_system(rt, cmd);
             vec![]
         }
         // Settings
@@ -151,11 +146,6 @@ pub(super) async fn dispatch(
         // PR commands (creation is agent-driven via the /wrap-up skill)
         Pr(cmd) => {
             dispatch_pr(rt, cmd);
-            vec![]
-        }
-        // Browser
-        OpenInBrowser { url } => {
-            rt.exec_open_in_browser(url);
             vec![]
         }
         // Patch sub-status
@@ -249,6 +239,19 @@ fn dispatch_learning(
         Archive(id) => rt.exec_archive_learning(app, id),
         Reject(id) => rt.exec_reject_learning(app, id),
         Approve(id) => rt.exec_approve_learning(app, id),
+    }
+}
+
+/// Per-domain dispatcher for [`crate::tui::commands::SystemCommand`] variants.
+fn dispatch_system(rt: &super::TuiRuntime, cmd: crate::tui::commands::SystemCommand) {
+    use crate::tui::commands::SystemCommand::*;
+    match cmd {
+        SendNotification {
+            title,
+            body,
+            urgent,
+        } => rt.exec_send_notification(&title, &body, urgent),
+        OpenInBrowser { url } => rt.exec_open_in_browser(url),
     }
 }
 

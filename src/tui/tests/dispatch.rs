@@ -30,7 +30,7 @@ fn tick_captures_review_task_with_live_window() {
     task.tmux_window = Some("task-5".to_string());
     let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
 
-    let cmds = app.update(Message::Tick);
+    let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
 
     assert!(cmds
         .iter()
@@ -310,7 +310,7 @@ fn stale_agent_detected_after_timeout() {
         .last_active_at
         .insert(TaskId(4), Instant::now() - Duration::from_secs(301));
 
-    let cmds = app.update(Message::Tick);
+    let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
     assert!(app.is_stale(TaskId(4)));
     assert!(cmds
         .iter()
@@ -935,9 +935,10 @@ fn pr_merged_moves_to_done_and_detaches() {
     assert!(task.worktree.is_some(), "worktree should be preserved");
     assert!(task.pr_url.is_some(), "pr_url should be preserved");
     assert!(cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::SendNotification { .. })));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::System(crate::tui::commands::SystemCommand::SendNotification { .. })
+    )));
 }
 
 #[test]
@@ -961,7 +962,7 @@ fn pr_polling_skips_done_tasks() {
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
     let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
 
-    let cmds = app.update(Message::Tick);
+    let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
     // Should NOT contain any CheckPrStatus command
     assert!(!cmds.iter().any(|c| matches!(
         c,
@@ -975,7 +976,7 @@ fn pr_polling_emits_check_for_review_tasks() {
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
     let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
 
-    let cmds = app.update(Message::Tick);
+    let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
     assert!(cmds.iter().any(|c| matches!(c, Command::Pr(crate::tui::commands::PrCommand::CheckStatus { ref pr_url, .. }) if pr_url == "https://github.com/org/repo/pull/42")));
 }
 
@@ -1176,9 +1177,13 @@ fn stale_notification_sent_when_enabled() {
     app.set_notifications_enabled(true);
 
     let cmds = app.update(Message::StaleAgent(TaskId(3)));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::SendNotification { urgent: false, .. })));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::System(crate::tui::commands::SystemCommand::SendNotification {
+            urgent: false,
+            ..
+        })
+    )));
 }
 
 #[test]
@@ -1192,9 +1197,10 @@ fn stale_notification_not_sent_when_disabled() {
     app.set_notifications_enabled(false);
 
     let cmds = app.update(Message::StaleAgent(TaskId(3)));
-    assert!(!cmds
-        .iter()
-        .any(|c| matches!(c, Command::SendNotification { .. })));
+    assert!(!cmds.iter().any(|c| matches!(
+        c,
+        Command::System(crate::tui::commands::SystemCommand::SendNotification { .. })
+    )));
 }
 
 #[test]
@@ -1208,9 +1214,10 @@ fn crashed_notification_sent_urgent_when_enabled() {
     app.set_notifications_enabled(true);
 
     let cmds = app.update(Message::AgentCrashed(TaskId(3)));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::SendNotification { urgent: true, .. })));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::System(crate::tui::commands::SystemCommand::SendNotification { urgent: true, .. })
+    )));
 }
 
 #[test]
@@ -1224,9 +1231,10 @@ fn crashed_notification_not_sent_when_disabled() {
     app.set_notifications_enabled(false);
 
     let cmds = app.update(Message::AgentCrashed(TaskId(3)));
-    assert!(!cmds
-        .iter()
-        .any(|c| matches!(c, Command::SendNotification { .. })));
+    assert!(!cmds.iter().any(|c| matches!(
+        c,
+        Command::System(crate::tui::commands::SystemCommand::SendNotification { .. })
+    )));
 }
 
 #[test]
@@ -1663,7 +1671,7 @@ fn dispatching_timeout_clears_stuck_task() {
     app.dispatching
         .insert(TaskId(1), Instant::now() - Duration::from_secs(90));
 
-    app.update(Message::Tick);
+    app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
 
     assert!(
         !app.is_dispatching(TaskId(1)),
@@ -1727,7 +1735,7 @@ fn spinner_tick_advances_only_on_tick_when_dispatching_nonempty() {
     app.update(Message::MarkDispatching(TaskId(1)));
     let before = app.spinner_tick;
 
-    app.update(Message::Tick);
+    app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
 
     assert_ne!(
         app.spinner_tick, before,
@@ -1740,7 +1748,7 @@ fn spinner_tick_does_not_advance_when_dispatching_empty() {
     let mut app = make_app();
     let before = app.spinner_tick;
 
-    app.update(Message::Tick);
+    app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
 
     assert_eq!(
         app.spinner_tick, before,
@@ -1756,7 +1764,7 @@ fn spinner_tick_wraps_modulo_ten() {
     // 10 ticks should bring us back to the starting frame.
     let start = app.spinner_tick;
     for _ in 0..10 {
-        app.update(Message::Tick);
+        app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
     }
     assert_eq!(
         app.spinner_tick, start,

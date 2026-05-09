@@ -241,7 +241,7 @@ fn tick_captures_non_pinned_tasks_in_split_mode() {
     app.board.split.right_pane_id = Some("%42".to_string());
     app.board.split.pinned_task_id = Some(TaskId(4));
 
-    let cmds = app.update(Message::Tick);
+    let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
 
     // Task 3 (not pinned) should still get captured
     assert!(cmds

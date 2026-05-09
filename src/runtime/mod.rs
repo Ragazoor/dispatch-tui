@@ -99,9 +99,11 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
 
     // Seed default GitHub query strings (no-op if already set)
     if let Err(e) = database.seed_github_query_defaults() {
-        app.update(Message::StatusInfo(format!(
-            "Failed to seed GitHub query defaults: {e}"
-        )));
+        app.update(Message::System(
+            crate::tui::messages::SystemMessage::StatusInfo(format!(
+                "Failed to seed GitHub query defaults: {e}"
+            )),
+        ));
     }
 
     load_notifications_pref(&*database, &mut app);
@@ -171,13 +173,19 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
                 Ok(Event::Key(key)) if key_tx.send(key).is_err() => break,
                 Ok(Event::Key(_)) => {}
                 Ok(Event::Resize(..)) => {
-                    let _ = resize_tx.send(Message::TerminalResized);
+                    let _ = resize_tx.send(Message::System(
+                        crate::tui::messages::SystemMessage::TerminalResized,
+                    ));
                 }
                 Ok(Event::FocusGained) => {
-                    let _ = resize_tx.send(Message::FocusChanged(true));
+                    let _ = resize_tx.send(Message::System(
+                        crate::tui::messages::SystemMessage::FocusChanged(true),
+                    ));
                 }
                 Ok(Event::FocusLost) => {
-                    let _ = resize_tx.send(Message::FocusChanged(false));
+                    let _ = resize_tx.send(Message::System(
+                        crate::tui::messages::SystemMessage::FocusChanged(false),
+                    ));
                 }
                 _ => {}
             }
@@ -275,7 +283,9 @@ impl TuiRuntime {
         match self.task_svc.create_task_returning(params) {
             Ok(task) => Some(task),
             Err(e) => {
-                app.update(Message::Error(Self::db_error("creating task", e)));
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    Self::db_error("creating task", e),
+                )));
                 None
             }
         }
@@ -312,7 +322,9 @@ impl TuiRuntime {
                 }
                 Ok(Err(e)) => {
                     let _ = tx.send(Message::DispatchFailed(id));
-                    let _ = tx.send(Message::Error(format!("{label} failed: {e:#}")));
+                    let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
+                        format!("{label} failed: {e:#}"),
+                    )));
                 }
                 Err(panic) => {
                     let detail = panic
@@ -322,7 +334,9 @@ impl TuiRuntime {
                         .unwrap_or_else(|| "unknown".to_string());
                     tracing::error!(task_id = id.0, label, "dispatch panicked: {detail}");
                     let _ = tx.send(Message::DispatchFailed(id));
-                    let _ = tx.send(Message::Error(format!("{label} panicked: {detail}")));
+                    let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
+                        format!("{label} panicked: {detail}"),
+                    )));
                 }
             }
         });
@@ -374,7 +388,9 @@ async fn run_loop(
                     mcp::McpEvent::TaskChanged(task_id) => rt.exec_refresh_task(app, task_id),
                     mcp::McpEvent::EpicChanged(epic_id) => rt.exec_refresh_epic(app, epic_id),
                     mcp::McpEvent::MessageSent { to_task_id } => {
-                        app.update(Message::MessageReceived(to_task_id));
+                        app.update(Message::System(
+                            crate::tui::messages::SystemMessage::MessageReceived(to_task_id),
+                        ));
                         rt.exec_refresh_task(app, to_task_id)
                     }
                 }
@@ -382,7 +398,7 @@ async fn run_loop(
 
             // Periodic tick for tmux capture and feed polling
             _ = tick_interval.tick() => {
-                app.update(Message::Tick)
+                app.update(Message::System(crate::tui::messages::SystemMessage::Tick))
             }
         };
 
@@ -549,17 +565,19 @@ fn load_filter_presets(db: &dyn db::SettingsStore, app: &mut App) -> Option<Mess
             let _ = app.update(Message::FilterPresetsLoaded(parse_raw_presets(raw, None)));
             None
         }
-        Err(e) => Some(Message::StatusInfo(format!(
-            "Failed to load filter presets: {e}"
-        ))),
+        Err(e) => Some(Message::System(
+            crate::tui::messages::SystemMessage::StatusInfo(format!(
+                "Failed to load filter presets: {e}"
+            )),
+        )),
     }
 }
 
 fn apply_tmux_focus_warning(runner: &dyn ProcessRunner) -> Option<Message> {
     if !crate::tmux::focus_events_enabled(runner) {
-        Some(Message::StatusInfo(
+        Some(Message::System(crate::tui::messages::SystemMessage::StatusInfo(
             "tmux focus-events is off \u{2014} split-view focus indicator won't work. Run: tmux set -g focus-events on".to_string(),
-        ))
+        )))
     } else {
         None
     }

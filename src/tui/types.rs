@@ -177,10 +177,8 @@ pub enum TreeNav {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    Tick,
-    TerminalResized,
-    FocusChanged(bool),
-    Quit,
+    /// System-level messages — see [`crate::tui::messages::SystemMessage`].
+    System(crate::tui::messages::SystemMessage),
     NavigateColumn(isize),
     NavigateRow(isize),
     MoveTask {
@@ -221,7 +219,6 @@ pub enum Message {
         id: TaskId,
         tmux_window: String,
     },
-    Error(String),
     DispatchFailed(TaskId),
     MarkDispatching(TaskId),
     TaskEdited(TaskEdit),
@@ -247,7 +244,6 @@ pub enum Message {
     BatchArchiveTasks(Vec<TaskId>),
     BatchArchiveEpics(Vec<EpicId>),
     // Input routing messages
-    DismissError,
     StartNewTask,
     CopyTask,
     CancelInput,
@@ -267,8 +263,6 @@ pub enum Message {
     StartQuickDispatchSelection,
     SelectQuickDispatchRepo(usize),
     CancelRetry,
-    StatusInfo(String),
-    ToggleHelp,
     // Split mode messages
     ToggleSplitMode,
     SwapSplitPane(TaskId),
@@ -308,10 +302,6 @@ pub enum Message {
     // Done confirmation (no cleanup, just status change)
     ConfirmDone,
     CancelDone,
-    ToggleNotifications,
-    OpenInBrowser {
-        url: String,
-    },
     // Repo filter
     StartRepoFilter,
     CloseRepoFilter,
@@ -336,8 +326,6 @@ pub enum Message {
     DetachTmux(TaskId),
     BatchDetachTmux(Vec<TaskId>),
     ConfirmDetachTmux,
-    // Inter-agent messaging
-    MessageReceived(TaskId),
     // Tips overlay
     ShowTips {
         tips: Vec<crate::tips::Tip>,
@@ -458,11 +446,9 @@ pub enum Command {
     /// Feed-epic refresh side-effect commands — see
     /// [`crate::tui::commands::FeedCommand`].
     Feed(crate::tui::commands::FeedCommand),
-    SendNotification {
-        title: String,
-        body: String,
-        urgent: bool,
-    },
+    /// System-level side-effect commands — see
+    /// [`crate::tui::commands::SystemCommand`].
+    System(crate::tui::commands::SystemCommand),
     PersistSetting {
         key: String,
         value: bool,
@@ -480,9 +466,6 @@ pub enum Command {
     DeleteRepoPath(String),
     /// PR flow side-effect commands — see [`crate::tui::commands::PrCommand`].
     Pr(crate::tui::commands::PrCommand),
-    OpenInBrowser {
-        url: String,
-    },
     PatchSubStatus {
         id: TaskId,
         sub_status: SubStatus,

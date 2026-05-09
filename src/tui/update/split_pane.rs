@@ -32,8 +32,10 @@ impl App {
         let new_window = match &task.tmux_window {
             Some(w) => w.clone(),
             None => {
-                return self.update(Message::StatusInfo(
-                    "No agent session for this task".to_string(),
+                return self.update(Message::System(
+                    crate::tui::messages::SystemMessage::StatusInfo(
+                        "No agent session for this task".to_string(),
+                    ),
                 ))
             }
         };

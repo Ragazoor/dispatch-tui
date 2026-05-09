@@ -13,13 +13,17 @@ impl TuiRuntime {
 
     pub(super) fn exec_persist_setting(&self, app: &mut App, key: &str, value: bool) {
         if let Err(e) = self.database.set_setting_bool(key, value) {
-            app.update(Message::Error(Self::db_error("persisting setting", e)));
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                Self::db_error("persisting setting", e),
+            )));
         }
     }
 
     pub(super) fn exec_persist_string_setting(&self, app: &mut App, key: &str, value: &str) {
         if let Err(e) = self.database.set_setting_string(key, value) {
-            app.update(Message::Error(Self::db_error("persisting setting", e)));
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                Self::db_error("persisting setting", e),
+            )));
         }
     }
 
@@ -31,13 +35,17 @@ impl TuiRuntime {
         mode: &str,
     ) {
         if let Err(e) = self.database.save_filter_preset(name, repo_paths, mode) {
-            app.update(Message::Error(Self::db_error("saving filter preset", e)));
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                Self::db_error("saving filter preset", e),
+            )));
         }
     }
 
     pub(super) fn exec_delete_filter_preset(&self, app: &mut App, name: &str) {
         if let Err(e) = self.database.delete_filter_preset(name) {
-            app.update(Message::Error(Self::db_error("deleting filter preset", e)));
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                Self::db_error("deleting filter preset", e),
+            )));
         }
     }
 
@@ -47,7 +55,9 @@ impl TuiRuntime {
                 app.update(Message::RefreshUsage(usage));
             }
             Err(e) => {
-                app.update(Message::Error(Self::db_error("refreshing usage", e)));
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    Self::db_error("refreshing usage", e),
+                )));
             }
         }
     }

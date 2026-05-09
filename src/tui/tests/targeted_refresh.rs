@@ -104,7 +104,12 @@ fn task_updated_fires_review_notification_on_transition() {
 
     assert!(
         cmds.iter()
-            .any(|c| matches!(c, crate::tui::Command::SendNotification { .. })),
+            .any(|c| matches!(
+                c,
+                crate::tui::Command::System(
+                    crate::tui::commands::SystemCommand::SendNotification { .. }
+                )
+            )),
         "expected a SendNotification command on review transition"
     );
 }

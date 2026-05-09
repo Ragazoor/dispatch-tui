@@ -86,7 +86,9 @@ impl TuiRuntime {
                 }
                 Err(e) => {
                     let _ = tx.send(Message::DispatchFailed(id));
-                    let _ = tx.send(Message::Error(format!("Quick dispatch failed: {e:#}")));
+                    let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
+                        format!("Quick dispatch failed: {e:#}"),
+                    )));
                 }
             }
         });
@@ -104,7 +106,9 @@ impl TuiRuntime {
             p = p.sort_order(so);
         }
         if let Err(e) = self.task_svc.update_task(p) {
-            app.update(Message::Error(Self::db_error("persisting task", e)));
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                Self::db_error("persisting task", e),
+            )));
         }
     }
 
@@ -119,13 +123,17 @@ impl TuiRuntime {
             .task_svc
             .update_task(UpdateTaskParams::for_task(id).sub_status(sub_status))
         {
-            app.update(Message::Error(Self::db_error("patching sub_status", e)));
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                Self::db_error("patching sub_status", e),
+            )));
         }
     }
 
     pub(super) fn exec_delete_task(&self, app: &mut App, id: TaskId) {
         if let Err(e) = self.task_svc.delete_task(id) {
-            app.update(Message::Error(Self::db_error("deleting task", e)));
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                Self::db_error("deleting task", e),
+            )));
         }
     }
 
@@ -187,8 +195,8 @@ impl TuiRuntime {
                     });
                 }
                 Err(e) => {
-                    let _ = tx.send(Message::Error(format!(
-                        "tmux capture failed for window {window}: {e}"
+                    let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
+                        format!("tmux capture failed for window {window}: {e}"),
                     )));
                 }
             }
@@ -198,14 +206,18 @@ impl TuiRuntime {
     pub(super) fn exec_save_repo_path(&self, app: &mut App, path: String) {
         let path = models::expand_tilde(&path);
         if let Err(e) = self.database.save_repo_path(&path) {
-            app.update(Message::Error(Self::db_error("saving repo path", e)));
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                Self::db_error("saving repo path", e),
+            )));
         }
         match self.database.list_repo_paths() {
             Ok(paths) => {
                 app.update(Message::RepoPathsUpdated(paths));
             }
             Err(e) => {
-                app.update(Message::Error(Self::db_error("listing repo paths", e)));
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    Self::db_error("listing repo paths", e),
+                )));
             }
         }
     }
@@ -219,7 +231,9 @@ impl TuiRuntime {
             Ok(Some(task)) => app.update(Message::TaskUpdated(task)),
             Ok(None) => self.exec_refresh_from_db(app),
             Err(e) => {
-                app.update(Message::Error(Self::db_error("refreshing task", e)));
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    Self::db_error("refreshing task", e),
+                )));
                 vec![]
             }
         }
@@ -234,7 +248,9 @@ impl TuiRuntime {
             Ok(Some(e)) => e,
             Ok(None) => return self.exec_refresh_from_db(app),
             Err(e) => {
-                app.update(Message::Error(Self::db_error("refreshing epic", e)));
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    Self::db_error("refreshing epic", e),
+                )));
                 return vec![];
             }
         };
@@ -248,7 +264,9 @@ impl TuiRuntime {
                 }
             }
             Err(e) => {
-                app.update(Message::Error(Self::db_error("listing epic tasks", e)));
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    Self::db_error("listing epic tasks", e),
+                )));
             }
         }
         cmds
@@ -261,7 +279,9 @@ impl TuiRuntime {
                 cmds = app.update(Message::RefreshTasks(tasks));
             }
             Err(e) => {
-                app.update(Message::Error(Self::db_error("refreshing tasks", e)));
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    Self::db_error("refreshing tasks", e),
+                )));
             }
         }
         self.exec_refresh_epics_from_db(app);
@@ -272,7 +292,9 @@ impl TuiRuntime {
 
     pub(super) fn exec_delete_repo_path(&self, app: &mut App, path: &str) {
         if let Err(e) = self.database.delete_repo_path(path) {
-            app.update(Message::Error(Self::db_error("deleting repo path", e)));
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                Self::db_error("deleting repo path", e),
+            )));
             return;
         }
         match self.database.list_repo_paths() {
@@ -280,7 +302,9 @@ impl TuiRuntime {
                 app.update(Message::RepoPathsUpdated(paths));
             }
             Err(e) => {
-                app.update(Message::Error(Self::db_error("listing repo paths", e)));
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    Self::db_error("listing repo paths", e),
+                )));
             }
         }
         // Refresh presets since delete_repo_path cleans them
@@ -311,9 +335,11 @@ impl TuiRuntime {
                     .worktree(FieldUpdate::Clear)
                     .tmux_window(FieldUpdate::Clear),
             ) {
-                let _ = self
-                    .msg_tx
-                    .send(Message::Error(format!("Detach failed: {e:#}")));
+                let _ =
+                    self.msg_tx
+                        .send(Message::System(crate::tui::messages::SystemMessage::Error(
+                            format!("Detach failed: {e:#}"),
+                        )));
             }
             return;
         }
@@ -326,7 +352,9 @@ impl TuiRuntime {
             if let Err(e) =
                 dispatch::cleanup_task(&repo_path, &worktree, tmux_window.as_deref(), &*runner)
             {
-                let _ = tx.send(Message::Error(format!("Cleanup failed: {e:#}")));
+                let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
+                    format!("Cleanup failed: {e:#}"),
+                )));
             }
         });
     }
@@ -355,9 +383,11 @@ impl TuiRuntime {
                     .worktree(FieldUpdate::Clear)
                     .tmux_window(FieldUpdate::Clear),
             ) {
-                let _ = self
-                    .msg_tx
-                    .send(Message::Error(format!("Detach failed: {e:#}")));
+                let _ =
+                    self.msg_tx
+                        .send(Message::System(crate::tui::messages::SystemMessage::Error(
+                            format!("Detach failed: {e:#}"),
+                        )));
             }
             let _ = self.msg_tx.send(Message::FinishComplete(id));
             return;
@@ -396,7 +426,9 @@ impl TuiRuntime {
                 app.update(Message::ProjectsUpdated(projects));
             }
             Err(e) => {
-                app.update(Message::Error(Self::db_error("refreshing projects", e)));
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    Self::db_error("refreshing projects", e),
+                )));
             }
         }
     }
@@ -410,14 +442,18 @@ impl TuiRuntime {
             .unwrap_or(0);
         match self.database.create_project(&name, max_order + 1).await {
             Ok(project) => {
-                app.update(Message::StatusInfo(format!(
-                    "Created project \"{}\"",
-                    project.name
-                )));
+                app.update(Message::System(
+                    crate::tui::messages::SystemMessage::StatusInfo(format!(
+                        "Created project \"{}\"",
+                        project.name
+                    )),
+                ));
                 self.exec_refresh_projects_from_db(app).await;
             }
             Err(e) => {
-                app.update(Message::Error(Self::db_error("creating project", e)));
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    Self::db_error("creating project", e),
+                )));
             }
         }
     }
@@ -426,14 +462,18 @@ impl TuiRuntime {
         match self.database.rename_project(id, &name).await {
             Ok(()) => self.exec_refresh_projects_from_db(app).await,
             Err(e) => {
-                app.update(Message::Error(Self::db_error("renaming project", e)));
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    Self::db_error("renaming project", e),
+                )));
             }
         }
     }
 
     pub(super) async fn exec_delete_project(&self, app: &mut App, id: ProjectId) {
         let Some(default_id) = app.projects().iter().find(|p| p.is_default).map(|p| p.id) else {
-            app.update(Message::Error("No default project found".to_string()));
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                "No default project found".to_string(),
+            )));
             return;
         };
         if let Err(e) = self
@@ -441,7 +481,9 @@ impl TuiRuntime {
             .delete_project_and_move_items(id, default_id)
             .await
         {
-            app.update(Message::Error(Self::db_error("deleting project", e)));
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                Self::db_error("deleting project", e),
+            )));
             return;
         }
         if app.active_project() == id {
@@ -495,7 +537,9 @@ impl TuiRuntime {
                     });
                 }
                 Err(e) => {
-                    let _ = tx.send(Message::Error(format!("Resume failed: {e:#}")));
+                    let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
+                        format!("Resume failed: {e:#}"),
+                    )));
                 }
             }
         });
