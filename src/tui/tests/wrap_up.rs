@@ -733,7 +733,7 @@ fn confirm_merge_pr_emits_merge_command() {
     assert_eq!(cmds.len(), 1);
     assert!(matches!(
         &cmds[0],
-        Command::MergePr { id: TaskId(1), pr_url } if pr_url == "https://github.com/owner/repo/pull/1"
+        Command::Pr(crate::tui::commands::PrCommand::Merge { id: TaskId(1), pr_url }) if pr_url == "https://github.com/owner/repo/pull/1"
     ));
     assert_eq!(app.input.mode, InputMode::Normal);
 }
@@ -760,10 +760,10 @@ fn merge_pr_failed_sets_status_message() {
         TEST_TIMEOUT,
     );
 
-    let cmds = app.update(Message::MergePrFailed {
+    let cmds = app.update(Message::Pr(crate::tui::messages::PrMessage::MergeFailed {
         id: TaskId(1),
         error: "CI checks failing".to_string(),
-    });
+    }));
     assert!(cmds.is_empty());
     assert!(app
         .status
@@ -875,7 +875,7 @@ fn handle_key_confirm_merge_pr_y_merges() {
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::MergePr { id, .. } if *id == TaskId(10))));
+        .any(|c| matches!(c, Command::Pr(crate::tui::commands::PrCommand::Merge { id, .. }) if *id == TaskId(10))));
 }
 
 #[test]

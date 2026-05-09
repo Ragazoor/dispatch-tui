@@ -5,7 +5,7 @@
 //! lifecycle methods live in `mod.rs`; per-message handlers live in
 //! `update/*.rs`.
 
-use crate::tui::messages::{EditorMessage, FeedMessage, LearningMessage, WrapUpMessage};
+use crate::tui::messages::{EditorMessage, FeedMessage, LearningMessage, PrMessage, WrapUpMessage};
 use crate::tui::types::{Command, Message};
 use crate::tui::App;
 
@@ -14,6 +14,21 @@ fn dispatch_editor(app: &mut App, msg: EditorMessage) -> Vec<Command> {
     match msg {
         EditorMessage::DescriptionResult(value) => app.handle_description_editor_result(value),
         EditorMessage::Result { kind, outcome } => app.handle_editor_result(kind, outcome),
+    }
+}
+
+/// Per-domain dispatcher for [`PrMessage`] variants.
+fn dispatch_pr(app: &mut App, msg: PrMessage) -> Vec<Command> {
+    match msg {
+        PrMessage::Merged(id) => app.handle_pr_merged(id),
+        PrMessage::StartMerge(id) => app.handle_start_merge_pr(id),
+        PrMessage::ConfirmMerge => app.handle_confirm_merge_pr(),
+        PrMessage::CancelMerge => app.handle_cancel_merge_pr(),
+        PrMessage::MergeFailed { id, error } => app.handle_merge_pr_failed(id, error),
+        PrMessage::ReviewState {
+            id,
+            review_decision,
+        } => app.handle_pr_review_state(id, review_decision),
     }
 }
 
@@ -187,15 +202,7 @@ pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
         Message::ToggleEpicAutoDispatch(id) => app.handle_toggle_epic_auto_dispatch(id),
 
         // ── PR flow: creation, merge, review state ──
-        Message::PrMerged(id) => app.handle_pr_merged(id),
-        Message::StartMergePr(id) => app.handle_start_merge_pr(id),
-        Message::ConfirmMergePr => app.handle_confirm_merge_pr(),
-        Message::CancelMergePr => app.handle_cancel_merge_pr(),
-        Message::MergePrFailed { id, error } => app.handle_merge_pr_failed(id, error),
-        Message::PrReviewState {
-            id,
-            review_decision,
-        } => app.handle_pr_review_state(id, review_decision),
+        Message::Pr(pm) => dispatch_pr(app, pm),
 
         // ── Task repo filters and filter presets ──
         Message::StartRepoFilter => app.handle_start_repo_filter(),

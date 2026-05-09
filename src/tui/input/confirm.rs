@@ -106,8 +106,10 @@ impl App {
 
     pub(in crate::tui) fn handle_key_confirm_merge_pr(&mut self, key: KeyEvent) -> Vec<Command> {
         match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => self.update(Message::ConfirmMergePr),
-            _ => self.update(Message::CancelMergePr),
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                self.update(Message::Pr(crate::tui::messages::PrMessage::ConfirmMerge))
+            }
+            _ => self.update(Message::Pr(crate::tui::messages::PrMessage::CancelMerge)),
         }
     }
 

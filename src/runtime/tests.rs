@@ -786,7 +786,10 @@ async fn exec_check_pr_status_sends_merged() {
         .await
         .unwrap()
         .unwrap();
-    assert!(matches!(msg, Message::PrMerged(TaskId(1))));
+    assert!(matches!(
+        msg,
+        Message::Pr(crate::tui::messages::PrMessage::Merged(TaskId(1)))
+    ));
 }
 
 #[tokio::test]
@@ -805,10 +808,10 @@ async fn exec_check_pr_status_open_sends_review_state() {
         .unwrap()
         .unwrap();
     match msg {
-        Message::PrReviewState {
+        Message::Pr(crate::tui::messages::PrMessage::ReviewState {
             id,
             review_decision,
-        } => {
+        }) => {
             assert_eq!(id, TaskId(1));
             assert_eq!(review_decision, Some(models::ReviewDecision::Approved));
         }
@@ -1584,7 +1587,10 @@ async fn exec_merge_pr_happy_path() {
         .unwrap()
         .unwrap();
     assert!(
-        matches!(msg, Message::PrMerged(TaskId(1))),
+        matches!(
+            msg,
+            Message::Pr(crate::tui::messages::PrMessage::Merged(TaskId(1)))
+        ),
         "Expected PrMerged, got: {msg:?}"
     );
 }
@@ -1605,7 +1611,10 @@ async fn exec_merge_pr_failure() {
         .unwrap()
         .unwrap();
     assert!(
-        matches!(msg, Message::MergePrFailed { id: TaskId(1), .. }),
+        matches!(
+            msg,
+            Message::Pr(crate::tui::messages::PrMessage::MergeFailed { id: TaskId(1), .. })
+        ),
         "Expected MergePrFailed, got: {msg:?}"
     );
 }

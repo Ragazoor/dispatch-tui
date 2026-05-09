@@ -7,7 +7,9 @@
 pub mod editor;
 pub mod feed;
 pub mod learnings;
+pub mod pr;
 
 pub use editor::EditorCommand;
 pub use feed::FeedCommand;
 pub use learnings::LearningCommand;
+pub use pr::PrCommand;

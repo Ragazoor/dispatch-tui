@@ -925,7 +925,9 @@ fn pr_merged_moves_to_done_and_detaches() {
     let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
     app.set_notifications_enabled(true);
 
-    let cmds = app.update(Message::PrMerged(TaskId(1)));
+    let cmds = app.update(Message::Pr(crate::tui::messages::PrMessage::Merged(
+        TaskId(1),
+    )));
 
     let task = app.find_task(TaskId(1)).unwrap();
     assert_eq!(task.status, TaskStatus::Done);
@@ -945,7 +947,9 @@ fn pr_merged_preserves_worktree() {
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
     let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
 
-    let cmds = app.update(Message::PrMerged(TaskId(1)));
+    let cmds = app.update(Message::Pr(crate::tui::messages::PrMessage::Merged(
+        TaskId(1),
+    )));
 
     // Should NOT emit a Cleanup command
     assert!(!cmds.iter().any(|c| matches!(c, Command::Cleanup { .. })));
@@ -959,9 +963,10 @@ fn pr_polling_skips_done_tasks() {
 
     let cmds = app.update(Message::Tick);
     // Should NOT contain any CheckPrStatus command
-    assert!(!cmds
-        .iter()
-        .any(|c| matches!(c, Command::CheckPrStatus { .. })));
+    assert!(!cmds.iter().any(|c| matches!(
+        c,
+        Command::Pr(crate::tui::commands::PrCommand::CheckStatus { .. })
+    )));
 }
 
 #[test]
@@ -971,7 +976,7 @@ fn pr_polling_emits_check_for_review_tasks() {
     let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
 
     let cmds = app.update(Message::Tick);
-    assert!(cmds.iter().any(|c| matches!(c, Command::CheckPrStatus { ref pr_url, .. } if pr_url == "https://github.com/org/repo/pull/42")));
+    assert!(cmds.iter().any(|c| matches!(c, Command::Pr(crate::tui::commands::PrCommand::CheckStatus { ref pr_url, .. }) if pr_url == "https://github.com/org/repo/pull/42")));
 }
 
 #[test]
@@ -1230,10 +1235,10 @@ fn pr_review_state_updates_substatus() {
     let id = TaskId(3);
     app.find_task_mut(id).unwrap().status = TaskStatus::Review;
     app.find_task_mut(id).unwrap().sub_status = SubStatus::AwaitingReview;
-    let cmds = app.update(Message::PrReviewState {
+    let cmds = app.update(Message::Pr(crate::tui::messages::PrMessage::ReviewState {
         id,
         review_decision: Some(ReviewDecision::Approved),
-    });
+    }));
     let task = app.find_task(id).unwrap();
     assert_eq!(task.sub_status, SubStatus::Approved);
     assert!(cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
@@ -1245,10 +1250,10 @@ fn pr_review_state_noop_when_unchanged() {
     let id = TaskId(3);
     app.find_task_mut(id).unwrap().status = TaskStatus::Review;
     app.find_task_mut(id).unwrap().sub_status = SubStatus::AwaitingReview;
-    let cmds = app.update(Message::PrReviewState {
+    let cmds = app.update(Message::Pr(crate::tui::messages::PrMessage::ReviewState {
         id,
         review_decision: None, // maps to AwaitingReview
-    });
+    }));
     assert!(cmds.is_empty()); // no change, no persist
 }
 
@@ -1258,10 +1263,10 @@ fn pr_review_state_changes_requested() {
     let id = TaskId(3);
     app.find_task_mut(id).unwrap().status = TaskStatus::Review;
     app.find_task_mut(id).unwrap().sub_status = SubStatus::AwaitingReview;
-    let cmds = app.update(Message::PrReviewState {
+    let cmds = app.update(Message::Pr(crate::tui::messages::PrMessage::ReviewState {
         id,
         review_decision: Some(ReviewDecision::ChangesRequested),
-    });
+    }));
     let task = app.find_task(id).unwrap();
     assert_eq!(task.sub_status, SubStatus::ChangesRequested);
     assert!(cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
@@ -1273,10 +1278,10 @@ fn pr_review_state_ignores_non_review_task() {
     let id = TaskId(3);
     // Task 3 is Running by default in make_app
     assert_eq!(app.find_task(id).unwrap().status, TaskStatus::Running);
-    let cmds = app.update(Message::PrReviewState {
+    let cmds = app.update(Message::Pr(crate::tui::messages::PrMessage::ReviewState {
         id,
         review_decision: Some(ReviewDecision::Approved),
-    });
+    }));
     assert!(cmds.is_empty());
     // sub_status should not have changed
     assert_ne!(app.find_task(id).unwrap().sub_status, SubStatus::Approved);
@@ -1288,10 +1293,10 @@ fn pr_review_state_preserves_conflict_substatus() {
     let id = TaskId(3);
     app.find_task_mut(id).unwrap().status = TaskStatus::Review;
     app.find_task_mut(id).unwrap().sub_status = SubStatus::Conflict;
-    let cmds = app.update(Message::PrReviewState {
+    let cmds = app.update(Message::Pr(crate::tui::messages::PrMessage::ReviewState {
         id,
         review_decision: Some(ReviewDecision::Approved),
-    });
+    }));
     assert!(cmds.is_empty());
     assert_eq!(app.find_task(id).unwrap().sub_status, SubStatus::Conflict);
 }

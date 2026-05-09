@@ -262,9 +262,9 @@ impl App {
                     vec![]
                 }
             }
-            KeyCode::Char('P') => {
-                self.with_selected_task(|s, id| s.update(Message::StartMergePr(id)))
-            }
+            KeyCode::Char('P') => self.with_selected_task(|s, id| {
+                s.update(Message::Pr(crate::tui::messages::PrMessage::StartMerge(id)))
+            }),
 
             KeyCode::Char('a') => self.update(Message::SelectAllColumn),
 

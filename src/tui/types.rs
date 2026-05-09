@@ -303,21 +303,8 @@ pub enum Message {
         error: String,
         is_conflict: bool,
     },
-    // PR flow (creation is now agent-driven via the /wrap-up skill;
-    // see plugin/skills/wrap-up/SKILL.md). PrMerged/MergePrFailed are
-    // still needed for status polling and the [P] merge action.
-    PrMerged(TaskId),
-    StartMergePr(TaskId),
-    ConfirmMergePr,
-    CancelMergePr,
-    MergePrFailed {
-        id: TaskId,
-        error: String,
-    },
-    PrReviewState {
-        id: TaskId,
-        review_decision: Option<crate::models::ReviewDecision>,
-    },
+    /// PR flow messages — see [`crate::tui::messages::PrMessage`].
+    Pr(crate::tui::messages::PrMessage),
     // Done confirmation (no cleanup, just status change)
     ConfirmDone,
     CancelDone,
@@ -491,14 +478,8 @@ pub enum Command {
     },
     DeleteFilterPreset(String),
     DeleteRepoPath(String),
-    CheckPrStatus {
-        id: TaskId,
-        pr_url: String,
-    },
-    MergePr {
-        id: TaskId,
-        pr_url: String,
-    },
+    /// PR flow side-effect commands — see [`crate::tui::commands::PrCommand`].
+    Pr(crate::tui::commands::PrCommand),
     OpenInBrowser {
         url: String,
     },

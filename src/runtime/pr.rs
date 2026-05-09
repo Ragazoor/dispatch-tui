@@ -9,12 +9,13 @@ impl TuiRuntime {
             match dispatch::check_pr_status(&pr_url, &*runner) {
                 Ok(status) => {
                     if status.state == dispatch::PrState::Merged {
-                        let _ = tx.send(Message::PrMerged(id));
+                        let _ = tx.send(Message::Pr(crate::tui::messages::PrMessage::Merged(id)));
                     } else if status.state == dispatch::PrState::Open {
-                        let _ = tx.send(Message::PrReviewState {
-                            id,
-                            review_decision: status.review_decision,
-                        });
+                        let _ =
+                            tx.send(Message::Pr(crate::tui::messages::PrMessage::ReviewState {
+                                id,
+                                review_decision: status.review_decision,
+                            }));
                     }
                     // Closed PRs: no message
                 }
@@ -31,13 +32,13 @@ impl TuiRuntime {
 
         tokio::task::spawn_blocking(move || match dispatch::merge_pr(&pr_url, &*runner) {
             Ok(()) => {
-                let _ = tx.send(Message::PrMerged(id));
+                let _ = tx.send(Message::Pr(crate::tui::messages::PrMessage::Merged(id)));
             }
             Err(e) => {
-                let _ = tx.send(Message::MergePrFailed {
+                let _ = tx.send(Message::Pr(crate::tui::messages::PrMessage::MergeFailed {
                     id,
                     error: e.to_string(),
-                });
+                }));
             }
         });
     }

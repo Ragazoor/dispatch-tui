@@ -102,7 +102,10 @@ impl App {
         let pr_label = crate::models::pr_number_from_url(&pr_url)
             .map_or("PR".to_string(), |n| format!("PR #{n}"));
         self.set_status(format!("Merging {pr_label}..."));
-        vec![Command::MergePr { id, pr_url }]
+        vec![Command::Pr(crate::tui::commands::PrCommand::Merge {
+            id,
+            pr_url,
+        })]
     }
 
     pub(in crate::tui) fn handle_cancel_merge_pr(&mut self) -> Vec<Command> {

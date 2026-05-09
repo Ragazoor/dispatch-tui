@@ -262,7 +262,10 @@ impl App {
 
         for (id, pr_url) in pr_tasks {
             self.agents.last_pr_poll.insert(id, Instant::now());
-            cmds.push(Command::CheckPrStatus { id, pr_url });
+            cmds.push(Command::Pr(crate::tui::commands::PrCommand::CheckStatus {
+                id,
+                pr_url,
+            }));
         }
 
         // Check if split mode right pane still exists

@@ -149,12 +149,8 @@ pub(super) async fn dispatch(
             vec![]
         }
         // PR commands (creation is agent-driven via the /wrap-up skill)
-        CheckPrStatus { id, pr_url } => {
-            rt.exec_check_pr_status(id, pr_url);
-            vec![]
-        }
-        MergePr { id, pr_url } => {
-            rt.exec_merge_pr(id, pr_url);
+        Pr(cmd) => {
+            dispatch_pr(rt, cmd);
             vec![]
         }
         // Browser
@@ -253,6 +249,15 @@ fn dispatch_learning(
         Archive(id) => rt.exec_archive_learning(app, id),
         Reject(id) => rt.exec_reject_learning(app, id),
         Approve(id) => rt.exec_approve_learning(app, id),
+    }
+}
+
+/// Per-domain dispatcher for [`crate::tui::commands::PrCommand`] variants.
+fn dispatch_pr(rt: &super::TuiRuntime, cmd: crate::tui::commands::PrCommand) {
+    use crate::tui::commands::PrCommand::*;
+    match cmd {
+        CheckStatus { id, pr_url } => rt.exec_check_pr_status(id, pr_url),
+        Merge { id, pr_url } => rt.exec_merge_pr(id, pr_url),
     }
 }
 
