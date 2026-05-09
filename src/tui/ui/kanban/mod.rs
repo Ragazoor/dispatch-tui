@@ -210,6 +210,24 @@ pub(super) fn render_column_separator(frame: &mut Frame, area: Rect) {
     }
 }
 
+/// Per-column summary segment shown in the row above the kanban board.
+struct SummarySegment {
+    label: String,
+    color: Color,
+    is_focused: bool,
+    checkbox: CheckboxInfo,
+}
+
+/// Optional checkbox state for the focused task column.
+enum CheckboxInfo {
+    Task {
+        all_selected: bool,
+        on_select_all: bool,
+        status: TaskStatus,
+    },
+    None,
+}
+
 fn render_summary(frame: &mut Frame, app: &App, epic_stats: &EpicStatsMap, area: Rect) {
     let sel = app.selected_column();
     let constraints = column_layout_constraints(sel);
@@ -219,31 +237,26 @@ fn render_summary(frame: &mut Frame, app: &App, epic_stats: &EpicStatsMap, area:
         .split(area);
 
     let layout = ColumnLayout::build(app, epic_stats);
+    let segments = build_summary_segments(app, &layout, sel);
 
-    // Build segments: (label, color, is_focused, checkbox_info)
-    // checkbox_info is Some((all_selected, on_select_all, status)) for focused task columns.
-    enum CheckboxInfo {
-        Task {
-            all_selected: bool,
-            on_select_all: bool,
-            status: TaskStatus,
-        },
-        None,
+    debug_assert_eq!(
+        segments.len(),
+        col_segments.len(),
+        "summary segment count must match layout constraint count"
+    );
+    for (i, seg) in segments.iter().enumerate() {
+        render_summary_segment(frame, seg, col_segments[i]);
     }
+}
 
-    struct Segment {
-        label: String,
-        color: Color,
-        is_focused: bool,
-        checkbox: CheckboxInfo,
-    }
-
-    let mut segments: Vec<Segment> = Vec::new();
+/// Build the ordered list of segments to render in the summary row.
+fn build_summary_segments(app: &App, layout: &ColumnLayout, sel: usize) -> Vec<SummarySegment> {
+    let mut segments: Vec<SummarySegment> = Vec::new();
 
     // Edge column: Projects (only shown when col 0 is focused)
     if sel == 0 {
         let count = app.projects().len();
-        segments.push(Segment {
+        segments.push(SummarySegment {
             label: format!("\u{25b8} Projects {}", count),
             color: PURPLE,
             is_focused: true,
@@ -253,44 +266,12 @@ fn render_summary(frame: &mut Frame, app: &App, epic_stats: &EpicStatsMap, area:
 
     // Task columns 1–4
     for (idx, &status) in TaskStatus::ALL.iter().enumerate() {
-        let nav_col = idx + 1;
-        let items = layout.get(status);
-        let count = items.iter().filter(|i| i.is_selectable()).count();
-        let is_focused = sel == nav_col;
-        let color = column_color(status);
-        let prefix = if is_focused { "\u{25b8} " } else { "\u{25e6} " };
-        let label = format!("{}{} {}", prefix, status.as_str(), count);
-
-        let checkbox = if is_focused {
-            let selectable = items.iter().filter(|i| i.is_selectable());
-            let (n, all_selected) = selectable.fold((0usize, true), |(n, all), item| {
-                let selected = match item {
-                    ColumnItem::Task(t) => app.selected_tasks().contains(&t.id),
-                    ColumnItem::Epic(e) => app.selected_epics().contains(&e.id),
-                    ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) => unreachable!(),
-                };
-                (n + 1, all && selected)
-            });
-            CheckboxInfo::Task {
-                all_selected: n > 0 && all_selected,
-                on_select_all: app.on_select_all(),
-                status,
-            }
-        } else {
-            CheckboxInfo::None
-        };
-
-        segments.push(Segment {
-            label,
-            color,
-            is_focused,
-            checkbox,
-        });
+        segments.push(task_column_segment(app, layout, status, idx, sel));
     }
 
     if sel == TaskStatus::COLUMN_COUNT + 1 {
         let count = app.archived_tasks().len();
-        segments.push(Segment {
+        segments.push(SummarySegment {
             label: format!("\u{25b8} Archive {}", count),
             color: ARCHIVE_STRIPE,
             is_focused: true,
@@ -298,49 +279,90 @@ fn render_summary(frame: &mut Frame, app: &App, epic_stats: &EpicStatsMap, area:
         });
     }
 
-    debug_assert_eq!(
-        segments.len(),
-        col_segments.len(),
-        "summary segment count must match layout constraint count"
-    );
-    for (i, seg) in segments.iter().enumerate() {
-        let label_style = if seg.is_focused {
-            Style::default()
-                .fg(seg.color)
-                .add_modifier(Modifier::BOLD)
-                .add_modifier(Modifier::UNDERLINED)
-        } else {
-            Style::default().fg(MUTED)
-        };
+    segments
+}
 
-        let spans = match &seg.checkbox {
-            CheckboxInfo::Task {
-                all_selected,
-                on_select_all,
-                status,
-            } => {
-                let checkbox = if *all_selected { " [x]" } else { " [ ]" };
-                let checkbox_style = if *on_select_all {
-                    Style::default()
-                        .bg(cursor_bg_color(*status))
-                        .fg(FG)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(MUTED)
-                };
-                vec![
-                    Span::styled(seg.label.clone(), label_style),
-                    Span::styled(checkbox, checkbox_style),
-                ]
-            }
-            CheckboxInfo::None => {
-                vec![Span::styled(seg.label.clone(), label_style)]
-            }
-        };
+/// Build the summary segment for one task column (Backlog/Running/Review/Done).
+fn task_column_segment(
+    app: &App,
+    layout: &ColumnLayout,
+    status: TaskStatus,
+    idx: usize,
+    sel: usize,
+) -> SummarySegment {
+    let nav_col = idx + 1;
+    let items = layout.get(status);
+    let count = items.iter().filter(|i| i.is_selectable()).count();
+    let is_focused = sel == nav_col;
+    let color = column_color(status);
+    let prefix = if is_focused { "\u{25b8} " } else { "\u{25e6} " };
+    let label = format!("{}{} {}", prefix, status.as_str(), count);
 
-        let paragraph = Paragraph::new(Line::from(spans)).alignment(Alignment::Center);
-        frame.render_widget(paragraph, col_segments[i]);
+    let checkbox = if is_focused {
+        let selectable = items.iter().filter(|i| i.is_selectable());
+        let (n, all_selected) = selectable.fold((0usize, true), |(n, all), item| {
+            let selected = match item {
+                ColumnItem::Task(t) => app.selected_tasks().contains(&t.id),
+                ColumnItem::Epic(e) => app.selected_epics().contains(&e.id),
+                ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) => unreachable!(),
+            };
+            (n + 1, all && selected)
+        });
+        CheckboxInfo::Task {
+            all_selected: n > 0 && all_selected,
+            on_select_all: app.on_select_all(),
+            status,
+        }
+    } else {
+        CheckboxInfo::None
+    };
+
+    SummarySegment {
+        label,
+        color,
+        is_focused,
+        checkbox,
     }
+}
+
+/// Render a single summary segment into its allocated rectangle.
+fn render_summary_segment(frame: &mut Frame, seg: &SummarySegment, area: Rect) {
+    let label_style = if seg.is_focused {
+        Style::default()
+            .fg(seg.color)
+            .add_modifier(Modifier::BOLD)
+            .add_modifier(Modifier::UNDERLINED)
+    } else {
+        Style::default().fg(MUTED)
+    };
+
+    let spans = match &seg.checkbox {
+        CheckboxInfo::Task {
+            all_selected,
+            on_select_all,
+            status,
+        } => {
+            let checkbox = if *all_selected { " [x]" } else { " [ ]" };
+            let checkbox_style = if *on_select_all {
+                Style::default()
+                    .bg(cursor_bg_color(*status))
+                    .fg(FG)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(MUTED)
+            };
+            vec![
+                Span::styled(seg.label.clone(), label_style),
+                Span::styled(checkbox, checkbox_style),
+            ]
+        }
+        CheckboxInfo::None => {
+            vec![Span::styled(seg.label.clone(), label_style)]
+        }
+    };
+
+    let paragraph = Paragraph::new(Line::from(spans)).alignment(Alignment::Center);
+    frame.render_widget(paragraph, area);
 }
 
 fn render_input_form_panel(frame: &mut Frame, app: &App, area: Rect) {
@@ -425,7 +447,6 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
     frame.render_widget(paragraph, area);
     true
 }
-
 
 /// Build context-sensitive keybinding hint spans for the status bar.
 /// Returns styled spans showing available actions for the selected task.
@@ -561,4 +582,3 @@ pub(in crate::tui) fn epic_action_hints(epic: &Epic, key_color: Color) -> Vec<Sp
 
     spans
 }
-
