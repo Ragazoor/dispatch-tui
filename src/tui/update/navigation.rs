@@ -150,7 +150,9 @@ impl App {
         if let Some(tid) = a_task_id {
             if let Some(t) = self.find_task_mut(tid) {
                 t.sort_order = Some(new_a);
-                cmds.push(Command::PersistTask(t.clone()));
+                cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
+                    t.clone(),
+                )));
             }
         }
         if let Some(eid) = a_epic_id {
@@ -166,7 +168,9 @@ impl App {
         if let Some(tid) = b_task_id {
             if let Some(t) = self.find_task_mut(tid) {
                 t.sort_order = Some(new_b);
-                cmds.push(Command::PersistTask(t.clone()));
+                cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
+                    t.clone(),
+                )));
             }
         }
         if let Some(eid) = b_epic_id {

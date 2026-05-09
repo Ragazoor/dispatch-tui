@@ -142,7 +142,7 @@ fn g_in_split_mode_emits_jump_command() {
     assert_eq!(cmds.len(), 1);
     assert!(matches!(
         &cmds[0],
-        Command::JumpToTmux { window } if window == "task-4"
+        Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "task-4"
     ));
 }
 
@@ -155,7 +155,7 @@ fn g_without_split_mode_emits_jump_command() {
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert!(matches!(
         &cmds[0],
-        Command::JumpToTmux { window } if window == "task-4"
+        Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "task-4"
     ));
 }
 
@@ -197,7 +197,7 @@ fn g_on_non_pinned_task_in_split_mode_still_jumps_to_window() {
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert_eq!(cmds.len(), 1);
     assert!(
-        matches!(&cmds[0], Command::JumpToTmux { window } if window == "task-4"),
+        matches!(&cmds[0], Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "task-4"),
         "expected JumpToTmux for non-pinned task, got {:?}",
         cmds
     );
@@ -244,13 +244,15 @@ fn tick_captures_non_pinned_tasks_in_split_mode() {
     let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
 
     // Task 3 (not pinned) should still get captured
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::CaptureTmux { id: TaskId(3), .. })));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::CaptureTmux { id: TaskId(3), .. })
+    )));
     // Task 4 (pinned in split) should NOT
-    assert!(!cmds
-        .iter()
-        .any(|c| matches!(c, Command::CaptureTmux { id: TaskId(4), .. })));
+    assert!(!cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::CaptureTmux { id: TaskId(4), .. })
+    )));
 }
 
 #[test]
@@ -338,7 +340,9 @@ fn finish_complete_respawns_split_pane_for_pinned_task() {
     app.board.split.right_pane_id = Some("%5".to_string());
     app.board.split.pinned_task_id = Some(TaskId(1));
 
-    let cmds = app.update(Message::FinishComplete(TaskId(1)));
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::FinishComplete(TaskId(1)),
+    ));
 
     assert!(
         cmds.iter()
@@ -380,7 +384,9 @@ fn finish_complete_no_respawn_for_non_pinned_task() {
     app.board.split.right_pane_id = Some("%5".to_string());
     app.board.split.pinned_task_id = Some(TaskId(2));
 
-    let cmds = app.update(Message::FinishComplete(TaskId(1)));
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::FinishComplete(TaskId(1)),
+    ));
 
     assert!(
         !cmds
@@ -409,7 +415,9 @@ fn finish_complete_no_respawn_without_split() {
     );
     // split is NOT active (default)
 
-    let cmds = app.update(Message::FinishComplete(TaskId(1)));
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::FinishComplete(TaskId(1)),
+    ));
 
     assert!(
         !cmds
@@ -475,7 +483,9 @@ fn archive_respawns_split_pane() {
     app.board.split.right_pane_id = Some("%5".to_string());
     app.board.split.pinned_task_id = Some(TaskId(1));
 
-    let cmds = app.update(Message::ArchiveTask(TaskId(1)));
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Archive(
+        TaskId(1),
+    )));
 
     assert!(
         cmds.iter()
@@ -498,7 +508,9 @@ fn retry_resume_respawns_split_pane() {
     app.board.split.pinned_task_id = Some(TaskId(1));
     app.input.mode = InputMode::ConfirmRetry(TaskId(1));
 
-    let cmds = app.update(Message::RetryResume(TaskId(1)));
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::RetryResume(TaskId(1)),
+    ));
 
     assert!(
         cmds.iter()
@@ -551,7 +563,9 @@ fn epic_wrap_up_respawns_split_pane_only_once() {
     ));
 
     // First task completes — this is the pinned one
-    let cmds1 = app.update(Message::FinishComplete(TaskId(2)));
+    let cmds1 = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::FinishComplete(TaskId(2)),
+    ));
     let respawn_count_1 = cmds1
         .iter()
         .filter(|c| matches!(c, Command::RespawnSplitPane { .. }))
@@ -560,7 +574,9 @@ fn epic_wrap_up_respawns_split_pane_only_once() {
     assert_eq!(app.board.split.pinned_task_id, None);
 
     // Second task completes — no longer pinned
-    let cmds2 = app.update(Message::FinishComplete(TaskId(1)));
+    let cmds2 = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::FinishComplete(TaskId(1)),
+    ));
     let respawn_count_2 = cmds2
         .iter()
         .filter(|c| matches!(c, Command::RespawnSplitPane { .. }))

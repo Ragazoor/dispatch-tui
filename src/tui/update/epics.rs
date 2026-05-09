@@ -120,14 +120,14 @@ impl App {
                 next_id
             ));
 
-            return vec![Command::Finish {
+            return vec![Command::Task(crate::tui::commands::TaskCommand::Finish {
                 id: next_id,
                 repo_path,
                 branch,
                 base_branch,
                 worktree,
                 tmux_window,
-            }];
+            })];
         }
     }
 
@@ -180,7 +180,9 @@ impl App {
             match next {
                 Some((task_id, mode, task)) => {
                     self.mark_dispatching(task_id);
-                    vec![Command::DispatchAgent { task, mode }]
+                    vec![Command::Task(
+                        crate::tui::commands::TaskCommand::DispatchAgent { task, mode },
+                    )]
                 }
                 None => {
                     self.set_status("No backlog subtasks in epic".to_string());
@@ -343,8 +345,12 @@ impl App {
             for task_id in subtask_ids {
                 if let Some(task) = self.find_task_mut(task_id) {
                     if let Some(window) = task.tmux_window.take() {
-                        cmds.push(Command::KillTmuxWindow { window });
-                        cmds.push(Command::PersistTask(task.clone()));
+                        cmds.push(Command::Task(
+                            crate::tui::commands::TaskCommand::KillTmuxWindow { window },
+                        ));
+                        cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
+                            task.clone(),
+                        )));
                     }
                 }
             }

@@ -21,7 +21,9 @@ impl TuiRuntime {
             project_id: app.active_project(),
         };
         if let Some(task) = self.create_task(app, params) {
-            app.update(Message::TaskCreated { task });
+            app.update(Message::Task(crate::tui::messages::TaskMessage::Created {
+                task,
+            }));
         }
     }
 
@@ -53,8 +55,12 @@ impl TuiRuntime {
         ) else {
             return;
         };
-        app.update(Message::TaskCreated { task: task.clone() });
-        app.update(Message::MarkDispatching(task.id));
+        app.update(Message::Task(crate::tui::messages::TaskMessage::Created {
+            task: task.clone(),
+        }));
+        app.update(Message::Task(
+            crate::tui::messages::TaskMessage::MarkDispatching(task.id),
+        ));
         let _ = self.database.save_repo_path(&expanded);
         let paths = self.database.list_repo_paths().unwrap_or_default();
         app.update(Message::RepoPathsUpdated(paths));
@@ -77,15 +83,19 @@ impl TuiRuntime {
                 &injections,
             ) {
                 Ok(result) => {
-                    let _ = tx.send(Message::Dispatched {
-                        id,
-                        worktree: result.worktree_path,
-                        tmux_window: result.tmux_window,
-                        switch_focus: true,
-                    });
+                    let _ = tx.send(Message::Task(
+                        crate::tui::messages::TaskMessage::Dispatched {
+                            id,
+                            worktree: result.worktree_path,
+                            tmux_window: result.tmux_window,
+                            switch_focus: true,
+                        },
+                    ));
                 }
                 Err(e) => {
-                    let _ = tx.send(Message::DispatchFailed(id));
+                    let _ = tx.send(Message::Task(
+                        crate::tui::messages::TaskMessage::DispatchFailed(id),
+                    ));
                     let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
                         format!("Quick dispatch failed: {e:#}"),
                     )));
@@ -178,7 +188,9 @@ impl TuiRuntime {
 
         tokio::task::spawn_blocking(move || {
             if let Ok(false) = tmux::has_window(&window, &*runner) {
-                let _ = tx.send(Message::WindowGone(id));
+                let _ = tx.send(Message::Task(
+                    crate::tui::messages::TaskMessage::WindowGone(id),
+                ));
                 return;
             }
 
@@ -188,11 +200,13 @@ impl TuiRuntime {
 
             match tmux::capture_pane(&window, 5, &*runner) {
                 Ok(output) => {
-                    let _ = tx.send(Message::TmuxOutput {
-                        id,
-                        output,
-                        activity_ts,
-                    });
+                    let _ = tx.send(Message::Task(
+                        crate::tui::messages::TaskMessage::TmuxOutput {
+                            id,
+                            output,
+                            activity_ts,
+                        },
+                    ));
                 }
                 Err(e) => {
                     let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
@@ -228,7 +242,7 @@ impl TuiRuntime {
     /// keeps draining notifications.
     pub(super) fn exec_refresh_task(&self, app: &mut App, task_id: TaskId) -> Vec<Command> {
         match self.database.get_task(task_id) {
-            Ok(Some(task)) => app.update(Message::TaskUpdated(task)),
+            Ok(Some(task)) => app.update(Message::Task(crate::tui::messages::TaskMessage::Updated(task))),
             Ok(None) => self.exec_refresh_from_db(app),
             Err(e) => {
                 app.update(Message::System(crate::tui::messages::SystemMessage::Error(
@@ -260,7 +274,7 @@ impl TuiRuntime {
         match self.database.list_tasks_for_epic(epic_id) {
             Ok(tasks) => {
                 for task in tasks {
-                    cmds.extend(app.update(Message::TaskUpdated(task)));
+                    cmds.extend(app.update(Message::Task(crate::tui::messages::TaskMessage::Updated(task))));
                 }
             }
             Err(e) => {
@@ -276,7 +290,9 @@ impl TuiRuntime {
         let mut cmds = Vec::new();
         match self.database.list_all() {
             Ok(tasks) => {
-                cmds = app.update(Message::RefreshTasks(tasks));
+                cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+                    tasks,
+                )));
             }
             Err(e) => {
                 app.update(Message::System(crate::tui::messages::SystemMessage::Error(
@@ -389,7 +405,9 @@ impl TuiRuntime {
                             format!("Detach failed: {e:#}"),
                         )));
             }
-            let _ = self.msg_tx.send(Message::FinishComplete(id));
+            let _ = self.msg_tx.send(Message::Task(
+                crate::tui::messages::TaskMessage::FinishComplete(id),
+            ));
             return;
         }
 
@@ -406,15 +424,19 @@ impl TuiRuntime {
                 &*runner,
             ) {
                 Ok(()) => {
-                    let _ = tx.send(Message::FinishComplete(id));
+                    let _ = tx.send(Message::Task(
+                        crate::tui::messages::TaskMessage::FinishComplete(id),
+                    ));
                 }
                 Err(e) => {
                     let is_conflict = matches!(e, dispatch::FinishError::RebaseConflict(_));
-                    let _ = tx.send(Message::FinishFailed {
-                        id,
-                        error: e.to_string(),
-                        is_conflict,
-                    });
+                    let _ = tx.send(Message::Task(
+                        crate::tui::messages::TaskMessage::FinishFailed {
+                            id,
+                            error: e.to_string(),
+                            is_conflict,
+                        },
+                    ));
                 }
             }
         });
@@ -531,10 +553,10 @@ impl TuiRuntime {
             tracing::info!(task_id = id.0, "resuming task");
             match dispatch::resume_agent(id, &worktree_path, &*runner) {
                 Ok(result) => {
-                    let _ = tx.send(Message::Resumed {
+                    let _ = tx.send(Message::Task(crate::tui::messages::TaskMessage::Resumed {
                         id,
                         tmux_window: result.tmux_window,
-                    });
+                    }));
                 }
                 Err(e) => {
                     let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(

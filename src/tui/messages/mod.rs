@@ -11,6 +11,7 @@ pub mod input;
 pub mod learnings;
 pub mod pr;
 pub mod system;
+pub mod task;
 pub mod wrap_up;
 
 pub use editor::EditorMessage;
@@ -20,4 +21,5 @@ pub use input::InputMessage;
 pub use learnings::LearningMessage;
 pub use pr::PrMessage;
 pub use system::SystemMessage;
+pub use task::TaskMessage;
 pub use wrap_up::WrapUpMessage;

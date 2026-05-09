@@ -7,7 +7,7 @@
 
 use crate::tui::messages::{
     EditorMessage, EpicMessage, FeedMessage, InputMessage, LearningMessage, PrMessage,
-    SystemMessage, WrapUpMessage,
+    SystemMessage, TaskMessage, WrapUpMessage,
 };
 use crate::tui::types::{Command, Message};
 use crate::tui::App;
@@ -17,6 +17,59 @@ fn dispatch_editor(app: &mut App, msg: EditorMessage) -> Vec<Command> {
     match msg {
         EditorMessage::DescriptionResult(value) => app.handle_description_editor_result(value),
         EditorMessage::Result { kind, outcome } => app.handle_editor_result(kind, outcome),
+    }
+}
+
+/// Per-domain dispatcher for [`TaskMessage`] variants.
+fn dispatch_task(app: &mut App, msg: TaskMessage) -> Vec<Command> {
+    match msg {
+        TaskMessage::Move { id, direction } => app.handle_move_task(id, direction),
+        TaskMessage::ReorderItem(dir) => app.handle_reorder_item(dir),
+        TaskMessage::Dispatch(id, mode) => app.handle_dispatch_task(id, mode),
+        TaskMessage::Dispatched {
+            id,
+            worktree,
+            tmux_window,
+            switch_focus,
+        } => app.handle_dispatched(id, worktree, tmux_window, switch_focus),
+        TaskMessage::Created { task } => app.handle_task_created(task),
+        TaskMessage::Delete(id) => app.handle_delete_task(id),
+        TaskMessage::OpenDetail(task_id) => app.handle_open_task_detail(task_id),
+        TaskMessage::CloseDetail => app.handle_close_task_detail(),
+        TaskMessage::ToggleFlattened => app.handle_toggle_flattened(),
+        TaskMessage::TmuxOutput {
+            id,
+            output,
+            activity_ts,
+        } => app.handle_tmux_output(id, output, activity_ts),
+        TaskMessage::WindowGone(id) => app.handle_window_gone(id),
+        TaskMessage::Refresh(tasks) => app.handle_refresh_tasks(tasks),
+        TaskMessage::Updated(task) => app.handle_task_updated(task),
+        TaskMessage::Resume(id) => app.handle_resume_task(id),
+        TaskMessage::Resumed { id, tmux_window } => app.handle_resumed(id, tmux_window),
+        TaskMessage::DispatchFailed(id) => app.handle_dispatch_failed(id),
+        TaskMessage::MarkDispatching(id) => app.handle_mark_dispatching(id),
+        TaskMessage::Edited(edit) => app.handle_task_edited(edit),
+        TaskMessage::QuickDispatch { repo_path, epic_id } => {
+            app.handle_quick_dispatch(repo_path, epic_id)
+        }
+        TaskMessage::StaleAgent(id) => app.handle_stale_agent(id),
+        TaskMessage::AgentCrashed(id) => app.handle_agent_crashed(id),
+        TaskMessage::KillAndRetry(id) => app.handle_kill_and_retry(id),
+        TaskMessage::RetryResume(id) => app.handle_retry_resume(id),
+        TaskMessage::RetryFresh(id) => app.handle_retry_fresh(id),
+        TaskMessage::Archive(id) => app.handle_archive_task(id),
+        TaskMessage::ToggleSelect(id) => app.handle_toggle_select(id),
+        TaskMessage::BatchMove { ids, direction } => app.handle_batch_move_tasks(ids, direction),
+        TaskMessage::BatchArchive(ids) => app.handle_batch_archive_tasks(ids),
+        TaskMessage::FinishComplete(id) => app.handle_finish_complete(id),
+        TaskMessage::FinishFailed {
+            id,
+            error,
+            is_conflict,
+        } => app.handle_finish_failed(id, error, is_conflict),
+        TaskMessage::DetachTmux(id) => app.handle_detach_tmux(vec![id]),
+        TaskMessage::BatchDetachTmux(ids) => app.handle_detach_tmux(ids),
     }
 }
 
@@ -155,68 +208,22 @@ pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
     match msg {
         // ── Board navigation, view toggles, system events ──
         Message::System(sm) => dispatch_system(app, sm),
+        Message::Task(tm) => dispatch_task(app, tm),
         Message::NavigateColumn(delta) => app.handle_navigate_column(delta),
         Message::NavigateRow(delta) => app.handle_navigate_row(delta),
-        Message::MoveTask { id, direction } => app.handle_move_task(id, direction),
-        Message::ReorderItem(dir) => app.handle_reorder_item(dir),
-        Message::OpenTaskDetail(task_id) => app.handle_open_task_detail(task_id),
-        Message::CloseTaskDetail => app.handle_close_task_detail(),
-        Message::ToggleFlattened => app.handle_toggle_flattened(),
         Message::ToggleSplitMode => app.handle_toggle_split_mode(),
         Message::SwapSplitPane(task_id) => app.handle_swap_split_pane(task_id),
         Message::SplitPaneOpened { pane_id, task_id } => {
             app.handle_split_pane_opened(pane_id, task_id)
         }
         Message::SplitPaneClosed => app.handle_split_pane_closed(),
-        Message::RefreshTasks(tasks) => app.handle_refresh_tasks(tasks),
-        Message::TaskUpdated(task) => app.handle_task_updated(task),
         Message::RefreshUsage(usage) => app.handle_refresh_usage(usage),
         Message::RepoPathsUpdated(paths) => app.handle_repo_paths_updated(paths),
-        Message::TmuxOutput {
-            id,
-            output,
-            activity_ts,
-        } => app.handle_tmux_output(id, output, activity_ts),
-        Message::WindowGone(id) => app.handle_window_gone(id),
 
-        // ── Task lifecycle, dispatch, selection, wrap-up ──
-        Message::DispatchTask(id, mode) => app.handle_dispatch_task(id, mode),
-        Message::Dispatched {
-            id,
-            worktree,
-            tmux_window,
-            switch_focus,
-        } => app.handle_dispatched(id, worktree, tmux_window, switch_focus),
-        Message::TaskCreated { task } => app.handle_task_created(task),
-        Message::DeleteTask(id) => app.handle_delete_task(id),
-        Message::ResumeTask(id) => app.handle_resume_task(id),
-        Message::Resumed { id, tmux_window } => app.handle_resumed(id, tmux_window),
-        Message::DispatchFailed(id) => app.handle_dispatch_failed(id),
-        Message::MarkDispatching(id) => app.handle_mark_dispatching(id),
-        Message::TaskEdited(edit) => app.handle_task_edited(edit),
-        Message::StaleAgent(id) => app.handle_stale_agent(id),
-        Message::AgentCrashed(id) => app.handle_agent_crashed(id),
-        Message::KillAndRetry(id) => app.handle_kill_and_retry(id),
-        Message::RetryResume(id) => app.handle_retry_resume(id),
-        Message::RetryFresh(id) => app.handle_retry_fresh(id),
-        Message::ArchiveTask(id) => app.handle_archive_task(id),
-        Message::QuickDispatch { repo_path, epic_id } => {
-            app.handle_quick_dispatch(repo_path, epic_id)
-        }
-        Message::FinishComplete(id) => app.handle_finish_complete(id),
-        Message::FinishFailed {
-            id,
-            error,
-            is_conflict,
-        } => app.handle_finish_failed(id, error, is_conflict),
+        // ── Task wrap-up ──
         Message::WrapUp(wm) => dispatch_wrap_up(app, wm),
-        Message::DetachTmux(id) => app.handle_detach_tmux(vec![id]),
-        Message::BatchDetachTmux(ids) => app.handle_detach_tmux(ids),
-        Message::ToggleSelect(id) => app.handle_toggle_select(id),
         Message::ClearSelection => app.handle_clear_selection(),
         Message::SelectAllColumn => app.handle_select_all_column(),
-        Message::BatchMoveTasks { ids, direction } => app.handle_batch_move_tasks(ids, direction),
-        Message::BatchArchiveTasks(ids) => app.handle_batch_archive_tasks(ids),
 
         // ── Form input, text entry, creation flows ──
         Message::Input(im) => dispatch_input(app, im),

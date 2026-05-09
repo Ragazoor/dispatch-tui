@@ -175,7 +175,9 @@ fn refresh_tasks_does_not_update_learnings_snapshot() {
         panic!("expected Learnings view mode")
     };
     // Simulate a RefreshTasks (MCP tick fires while overlay is open)
-    app.update(Message::RefreshTasks(app.board.tasks.clone()));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        app.board.tasks.clone(),
+    )));
     assert!(matches!(
         &app.board.view_mode,
         ViewMode::Learnings { learnings, .. } if learnings.len() == original_len

@@ -313,15 +313,19 @@ impl TuiRuntime {
             match result {
                 Ok(Ok(result)) => {
                     // receiver dropped = app shutting down; nothing to log
-                    let _ = tx.send(Message::Dispatched {
-                        id,
-                        worktree: result.worktree_path,
-                        tmux_window: result.tmux_window,
-                        switch_focus: false,
-                    });
+                    let _ = tx.send(Message::Task(
+                        crate::tui::messages::TaskMessage::Dispatched {
+                            id,
+                            worktree: result.worktree_path,
+                            tmux_window: result.tmux_window,
+                            switch_focus: false,
+                        },
+                    ));
                 }
                 Ok(Err(e)) => {
-                    let _ = tx.send(Message::DispatchFailed(id));
+                    let _ = tx.send(Message::Task(
+                        crate::tui::messages::TaskMessage::DispatchFailed(id),
+                    ));
                     let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
                         format!("{label} failed: {e:#}"),
                     )));
@@ -333,7 +337,9 @@ impl TuiRuntime {
                         .or_else(|| panic.downcast_ref::<String>().cloned())
                         .unwrap_or_else(|| "unknown".to_string());
                     tracing::error!(task_id = id.0, label, "dispatch panicked: {detail}");
-                    let _ = tx.send(Message::DispatchFailed(id));
+                    let _ = tx.send(Message::Task(
+                        crate::tui::messages::TaskMessage::DispatchFailed(id),
+                    ));
                     let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
                         format!("{label} panicked: {detail}"),
                     )));

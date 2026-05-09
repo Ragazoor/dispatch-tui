@@ -34,7 +34,9 @@ impl App {
                     task.sub_status = SubStatus::Active;
                 }
                 if let Some(task) = self.find_task(id) {
-                    cmds.push(Command::PersistTask(task.clone()));
+                    cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
+                        task.clone(),
+                    )));
                 }
             }
             self.agents.prev_tmux_activity.insert(id, activity_ts);
@@ -59,7 +61,9 @@ impl App {
         if let Some(task) = self.find_task_mut(id) {
             task.tmux_window = None;
             let task_clone = task.clone();
-            vec![Command::PersistTask(task_clone)]
+            vec![Command::Task(crate::tui::commands::TaskCommand::Persist(
+                task_clone,
+            ))]
         } else {
             vec![]
         }
@@ -217,9 +221,12 @@ impl App {
             .filter(|t| t.tmux_window.is_some())
             .filter(|t| Some(t.id) != split_pinned)
             .filter_map(|t| {
-                t.tmux_window
-                    .clone()
-                    .map(|window| Command::CaptureTmux { id: t.id, window })
+                t.tmux_window.clone().map(|window| {
+                    Command::Task(crate::tui::commands::TaskCommand::CaptureTmux {
+                        id: t.id,
+                        window,
+                    })
+                })
             })
             .collect();
 
@@ -281,7 +288,9 @@ impl App {
             }
         }
 
-        cmds.push(Command::RefreshFromDb);
+        cmds.push(Command::Task(
+            crate::tui::commands::TaskCommand::RefreshFromDb,
+        ));
         cmds
     }
 
@@ -309,7 +318,9 @@ impl App {
             .map(|d| d.as_secs() / 60)
             .unwrap_or(0);
         if let Some(task) = self.find_task(id) {
-            cmds.push(Command::PersistTask(task.clone()));
+            cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
+                task.clone(),
+            )));
         }
         self.set_status(format!(
             "Task {id} inactive for {elapsed}m - press d to retry",
@@ -352,7 +363,9 @@ impl App {
             task.tmux_window = None;
         }
         if let Some(task) = self.find_task(id) {
-            cmds.push(Command::PersistTask(task.clone()));
+            cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
+                task.clone(),
+            )));
         }
         self.set_status(format!("Task {id} agent crashed - press d to retry",));
 
@@ -376,7 +389,9 @@ impl App {
                 return vec![];
             }
             if task.worktree.is_some() && task.tmux_window.is_none() {
-                vec![Command::Resume { task: task.clone() }]
+                vec![Command::Task(crate::tui::commands::TaskCommand::Resume {
+                    task: task.clone(),
+                })]
             } else {
                 vec![]
             }
@@ -399,7 +414,9 @@ impl App {
             self.agents.last_error.remove(&id);
             self.sync_board_selection();
             self.set_status(format!("Task {id} resumed"));
-            vec![Command::PersistTask(task_clone)]
+            vec![Command::Task(crate::tui::commands::TaskCommand::Persist(
+                task_clone,
+            ))]
         } else {
             vec![]
         }

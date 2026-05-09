@@ -140,7 +140,9 @@ impl TuiRuntime {
             }
         };
 
-        app.update(Message::TaskCreated { task: task.clone() });
+        app.update(Message::Task(crate::tui::messages::TaskMessage::Created {
+            task: task.clone(),
+        }));
 
         let project_ctx = dispatch::ProjectContext::from_db(&task, &*self.database).await;
 
@@ -160,12 +162,14 @@ impl TuiRuntime {
             match dispatch::epic_planning_agent(&task, epic_id, &epic_title, &project_ctx, &*runner)
             {
                 Ok(result) => {
-                    let _ = tx.send(Message::Dispatched {
-                        id,
-                        worktree: result.worktree_path,
-                        tmux_window: result.tmux_window,
-                        switch_focus: true,
-                    });
+                    let _ = tx.send(Message::Task(
+                        crate::tui::messages::TaskMessage::Dispatched {
+                            id,
+                            worktree: result.worktree_path,
+                            tmux_window: result.tmux_window,
+                            switch_focus: true,
+                        },
+                    ));
                 }
                 Err(e) => {
                     let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(

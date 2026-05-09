@@ -9,26 +9,7 @@ pub(super) async fn dispatch(
 ) -> Vec<super::Command> {
     use super::Command::*;
     match command {
-        PersistTask(task) => {
-            rt.exec_persist_task(app, task);
-            vec![]
-        }
-        InsertTask { draft, epic_id } => {
-            rt.exec_insert_task(app, draft, epic_id);
-            vec![]
-        }
-        DeleteTask(id) => {
-            rt.exec_delete_task(app, id);
-            vec![]
-        }
-        DispatchAgent { task, mode } => {
-            rt.exec_dispatch_agent(task, mode).await;
-            vec![]
-        }
-        CaptureTmux { id, window } => {
-            rt.exec_capture_tmux(id, window);
-            vec![]
-        }
+        Task(cmd) => dispatch_task(rt, app, cmd).await,
         Editor(cmd) => dispatch_editor(rt, app, cmd),
         Feed(cmd) => {
             dispatch_feed(rt, cmd);
@@ -38,45 +19,8 @@ pub(super) async fn dispatch(
             rt.exec_save_repo_path(app, path);
             vec![]
         }
-        RefreshFromDb => rt.exec_refresh_from_db(app),
-        Cleanup {
-            id,
-            repo_path,
-            worktree,
-            tmux_window,
-        } => {
-            rt.exec_cleanup(id, repo_path, worktree, tmux_window);
-            vec![]
-        }
-        Resume { task } => {
-            rt.exec_resume(task);
-            vec![]
-        }
-        JumpToTmux { window } => {
-            rt.exec_jump_to_tmux(app, window);
-            vec![]
-        }
         OpenMainSession => {
             rt.exec_open_main_session(app);
-            vec![]
-        }
-        QuickDispatch { draft, epic_id } => {
-            rt.exec_quick_dispatch(app, draft, epic_id).await;
-            vec![]
-        }
-        KillTmuxWindow { window } => {
-            rt.exec_kill_tmux_window(window);
-            vec![]
-        }
-        Finish {
-            id,
-            repo_path,
-            branch,
-            base_branch,
-            worktree,
-            tmux_window,
-        } => {
-            rt.exec_finish(id, repo_path, branch, base_branch, worktree, tmux_window);
             vec![]
         }
         // Epic commands
@@ -116,11 +60,6 @@ pub(super) async fn dispatch(
         // PR commands (creation is agent-driven via the /wrap-up skill)
         Pr(cmd) => {
             dispatch_pr(rt, cmd);
-            vec![]
-        }
-        // Patch sub-status
-        PatchSubStatus { id, sub_status } => {
-            rt.exec_patch_sub_status(app, id, sub_status);
             vec![]
         }
         // Split mode
@@ -209,6 +148,78 @@ fn dispatch_learning(
         Archive(id) => rt.exec_archive_learning(app, id),
         Reject(id) => rt.exec_reject_learning(app, id),
         Approve(id) => rt.exec_approve_learning(app, id),
+    }
+}
+
+/// Per-domain dispatcher for [`crate::tui::commands::TaskCommand`] variants.
+async fn dispatch_task(
+    rt: &super::TuiRuntime,
+    app: &mut super::App,
+    cmd: crate::tui::commands::TaskCommand,
+) -> Vec<super::Command> {
+    use crate::tui::commands::TaskCommand::*;
+    match cmd {
+        Persist(task) => {
+            rt.exec_persist_task(app, task);
+            vec![]
+        }
+        Insert { draft, epic_id } => {
+            rt.exec_insert_task(app, draft, epic_id);
+            vec![]
+        }
+        Delete(id) => {
+            rt.exec_delete_task(app, id);
+            vec![]
+        }
+        DispatchAgent { task, mode } => {
+            rt.exec_dispatch_agent(task, mode).await;
+            vec![]
+        }
+        Cleanup {
+            id,
+            repo_path,
+            worktree,
+            tmux_window,
+        } => {
+            rt.exec_cleanup(id, repo_path, worktree, tmux_window);
+            vec![]
+        }
+        Finish {
+            id,
+            repo_path,
+            branch,
+            base_branch,
+            worktree,
+            tmux_window,
+        } => {
+            rt.exec_finish(id, repo_path, branch, base_branch, worktree, tmux_window);
+            vec![]
+        }
+        CaptureTmux { id, window } => {
+            rt.exec_capture_tmux(id, window);
+            vec![]
+        }
+        Resume { task } => {
+            rt.exec_resume(task);
+            vec![]
+        }
+        JumpToTmux { window } => {
+            rt.exec_jump_to_tmux(app, window);
+            vec![]
+        }
+        QuickDispatch { draft, epic_id } => {
+            rt.exec_quick_dispatch(app, draft, epic_id).await;
+            vec![]
+        }
+        KillTmuxWindow { window } => {
+            rt.exec_kill_tmux_window(window);
+            vec![]
+        }
+        PatchSubStatus { id, sub_status } => {
+            rt.exec_patch_sub_status(app, id, sub_status);
+            vec![]
+        }
+        RefreshFromDb => rt.exec_refresh_from_db(app),
     }
 }
 

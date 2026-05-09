@@ -10,6 +10,7 @@ pub mod feed;
 pub mod learnings;
 pub mod pr;
 pub mod system;
+pub mod task;
 
 pub use editor::EditorCommand;
 pub use epic::EpicCommand;
@@ -17,3 +18,4 @@ pub use feed::FeedCommand;
 pub use learnings::LearningCommand;
 pub use pr::PrCommand;
 pub use system::SystemCommand;
+pub use task::TaskCommand;

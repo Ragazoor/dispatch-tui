@@ -656,7 +656,9 @@ fn refresh_preserves_projects_panel() {
     );
 
     let tasks = app.board.tasks.clone();
-    app.update(Message::RefreshTasks(tasks));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        tasks,
+    )));
 
     assert!(
         app.projects_panel_visible(),
@@ -691,7 +693,9 @@ fn refresh_preserves_archive_column() {
     assert!(app.show_archived(), "precondition: archive column open");
 
     let tasks = app.board.tasks.clone();
-    app.update(Message::RefreshTasks(tasks));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        tasks,
+    )));
 
     assert!(
         app.show_archived(),

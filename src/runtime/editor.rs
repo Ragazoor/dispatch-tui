@@ -331,16 +331,18 @@ impl TuiRuntime {
                 Self::db_error("updating task", e),
             )));
         }
-        app.update(Message::TaskEdited(crate::tui::TaskEdit {
-            id: task_id,
-            title: applied.title,
-            description: applied.description,
-            repo_path: applied.repo_path,
-            status: applied.status,
-            plan_path: plan,
-            tag: applied.tag,
-            base_branch: applied.base_branch,
-        }))
+        app.update(Message::Task(crate::tui::messages::TaskMessage::Edited(
+            crate::tui::TaskEdit {
+                id: task_id,
+                title: applied.title,
+                description: applied.description,
+                repo_path: applied.repo_path,
+                status: applied.status,
+                plan_path: plan,
+                tag: applied.tag,
+                base_branch: applied.base_branch,
+            },
+        )))
     }
 
     fn finalize_epic_edit(

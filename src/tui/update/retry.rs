@@ -42,9 +42,13 @@ impl App {
 
             let mut cmds = Vec::new();
             if let Some(window) = old_window {
-                cmds.push(Command::KillTmuxWindow { window });
+                cmds.push(Command::Task(
+                    crate::tui::commands::TaskCommand::KillTmuxWindow { window },
+                ));
             }
-            cmds.push(Command::Resume { task: task_clone });
+            cmds.push(Command::Task(crate::tui::commands::TaskCommand::Resume {
+                task: task_clone,
+            }));
             cmds.extend(self.maybe_respawn_split_pane(id));
             cmds
         } else {
@@ -70,12 +74,16 @@ impl App {
             if let Some(c) = cleanup {
                 cmds.push(c);
             }
-            cmds.push(Command::PersistTask(task_clone.clone()));
+            cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
+                task_clone.clone(),
+            )));
             self.mark_dispatching(id);
-            cmds.push(Command::DispatchAgent {
-                task: task_clone,
-                mode: DispatchMode::Dispatch,
-            });
+            cmds.push(Command::Task(
+                crate::tui::commands::TaskCommand::DispatchAgent {
+                    task: task_clone,
+                    mode: DispatchMode::Dispatch,
+                },
+            ));
             cmds
         } else {
             vec![]
@@ -98,7 +106,9 @@ impl App {
             if let Some(c) = cleanup {
                 cmds.push(c);
             }
-            cmds.push(Command::PersistTask(task_clone));
+            cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
+                task_clone,
+            )));
             cmds.extend(self.maybe_respawn_split_pane(id));
             cmds
         } else {

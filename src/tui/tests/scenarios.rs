@@ -102,9 +102,10 @@ fn scenario_quick_dispatch_with_repo_path_emits_command() {
     s.key(KeyCode::Char('D'));
 
     assert!(
-        s.commands
-            .iter()
-            .any(|c| matches!(c, Command::QuickDispatch { .. })),
+        s.commands.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::QuickDispatch { .. })
+        )),
         "expected QuickDispatch command, got {:?}",
         s.commands
     );
@@ -116,9 +117,10 @@ fn scenario_quick_dispatch_without_repo_path_shows_no_dispatch_command() {
     s.key(KeyCode::Char('D'));
 
     assert!(
-        !s.commands
-            .iter()
-            .any(|c| matches!(c, Command::QuickDispatch { .. })),
+        !s.commands.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::QuickDispatch { .. })
+        )),
         "should not emit QuickDispatch without a repo path"
     );
 }
@@ -165,9 +167,10 @@ fn scenario_move_key_advances_selected_task_to_next_column() {
         "task 1 should be moved to Running after Shift+L"
     );
     assert!(
-        s.commands
-            .iter()
-            .any(|c| matches!(c, Command::PersistTask(_))),
+        s.commands.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+        )),
         "move should emit PersistTask command"
     );
 }
@@ -190,9 +193,10 @@ fn scenario_lowercase_m_is_no_longer_bound_to_move() {
         "lowercase 'm' must not move tasks; it is unbound"
     );
     assert!(
-        !s.commands
-            .iter()
-            .any(|c| matches!(c, Command::PersistTask(_))),
+        !s.commands.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+        )),
         "lowercase 'm' must not emit PersistTask"
     );
 }

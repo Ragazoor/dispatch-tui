@@ -209,7 +209,9 @@ fn snapshot_card_dispatching_indicator() {
     use crate::models::TaskId;
 
     let mut app = make_app();
-    app.update(Message::MarkDispatching(TaskId(1)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::MarkDispatching(TaskId(1)),
+    ));
     // Pin the spinner frame so the rendered glyph is deterministic.
     app.spinner_tick = 0;
 
@@ -326,7 +328,9 @@ fn snapshot_task_detail_overlay_peek() {
     task.repo_path = "/repo/my-project".to_string();
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
     app.board.tasks.push(task);
-    app.update(Message::OpenTaskDetail(1));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::OpenDetail(1),
+    ));
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);
 }
@@ -339,7 +343,9 @@ fn snapshot_task_detail_overlay_zoomed() {
     task.description = "First line of description.\nSecond line.\nThird line.".to_string();
     task.repo_path = "/repo/my-project".to_string();
     app.board.tasks.push(task);
-    app.update(Message::OpenTaskDetail(1));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::OpenDetail(1),
+    ));
     if let ViewMode::TaskDetail { ref mut zoomed, .. } = app.board.view_mode {
         *zoomed = true;
     }
@@ -356,7 +362,9 @@ fn snapshot_task_detail_overlay_empty_optional_fields() {
     task.repo_path = "/repo/path".to_string();
     // pr_url, plan_path, epic_id all None (default from make_task)
     app.board.tasks.push(task);
-    app.update(Message::OpenTaskDetail(1));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::OpenDetail(1),
+    ));
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);
 }

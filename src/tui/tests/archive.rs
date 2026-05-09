@@ -68,7 +68,9 @@ fn archive_targets_task_at_x_press_not_at_y_press() {
         t2_archived,
         make_task(3, TaskStatus::Done),
     ];
-    app.update(Message::RefreshTasks(refreshed));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        refreshed,
+    )));
     // After the refresh the Done column is [task 1, task 3]; the cursor clamped
     // to row 1 (task 3, the last visible item).
     assert_eq!(
@@ -96,10 +98,15 @@ fn archive_task_sets_status_and_emits_persist() {
         ProjectId(1),
         TEST_TIMEOUT,
     );
-    let cmds = app.update(Message::ArchiveTask(TaskId(1)));
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Archive(
+        TaskId(1),
+    )));
     let task = app.board.tasks.iter().find(|t| t.id == TaskId(1)).unwrap();
     assert_eq!(task.status, TaskStatus::Archived);
-    assert!(cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+    )));
 }
 
 #[test]
@@ -109,10 +116,18 @@ fn archive_task_with_worktree_emits_cleanup() {
     task.tmux_window = Some("dev:1-test".to_string());
     let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
 
-    let cmds = app.update(Message::ArchiveTask(TaskId(1)));
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Archive(
+        TaskId(1),
+    )));
 
-    assert!(cmds.iter().any(|c| matches!(c, Command::Cleanup { .. })));
-    assert!(cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Cleanup { .. })
+    )));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+    )));
     let task = app.board.tasks.iter().find(|t| t.id == TaskId(1)).unwrap();
     assert_eq!(task.status, TaskStatus::Archived);
     assert!(task.worktree.is_none());
@@ -126,9 +141,17 @@ fn archive_task_without_worktree_no_cleanup() {
         ProjectId(1),
         TEST_TIMEOUT,
     );
-    let cmds = app.update(Message::ArchiveTask(TaskId(1)));
-    assert!(!cmds.iter().any(|c| matches!(c, Command::Cleanup { .. })));
-    assert!(cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Archive(
+        TaskId(1),
+    )));
+    assert!(!cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Cleanup { .. })
+    )));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+    )));
 }
 
 #[test]
@@ -142,7 +165,9 @@ fn archive_clears_agent_tracking() {
         .insert(TaskId(1), "output".to_string());
     app.agents.prev_tmux_activity.insert(TaskId(1), 1000);
 
-    app.update(Message::ArchiveTask(TaskId(1)));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Archive(
+        TaskId(1),
+    )));
 
     // stale/crashed state is now on the task's sub_status field
     assert!(!app.agents.tmux_outputs.contains_key(&TaskId(1)));
@@ -206,9 +231,10 @@ fn archive_panel_confirm_delete_removes_task() {
     app.handle_key(make_key(KeyCode::Char('x')));
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert!(app.board.tasks.is_empty());
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::DeleteTask(TaskId(1)))));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Delete(TaskId(1)))
+    )));
 }
 
 #[test]
@@ -266,7 +292,10 @@ fn full_archive_flow() {
     let task = app.board.tasks.iter().find(|t| t.id == TaskId(1)).unwrap();
     assert_eq!(task.status, TaskStatus::Archived);
     assert!(task.worktree.is_none());
-    assert!(cmds.iter().any(|c| matches!(c, Command::Cleanup { .. })));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Cleanup { .. })
+    )));
 
     // Navigate to archive column (directly set to col 5 — the archive nav column)
     app.selection_mut().set_column(5);
@@ -280,9 +309,10 @@ fn full_archive_flow() {
     assert_eq!(app.input.mode, InputMode::ConfirmDelete);
 
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::DeleteTask(TaskId(1)))));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Delete(TaskId(1)))
+    )));
     assert!(app.archived_tasks().is_empty());
 }
 
@@ -298,10 +328,16 @@ fn batch_archive_archives_all_and_clears_selection() {
         TEST_TIMEOUT,
     );
 
-    app.update(Message::ToggleSelect(TaskId(1)));
-    app.update(Message::ToggleSelect(TaskId(2)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(1)),
+    ));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(2)),
+    ));
 
-    let cmds = app.update(Message::BatchArchiveTasks(vec![TaskId(1), TaskId(2)]));
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::BatchArchive(vec![TaskId(1), TaskId(2)]),
+    ));
 
     assert_eq!(
         app.find_task(TaskId(1)).unwrap().status,
@@ -320,7 +356,12 @@ fn batch_archive_archives_all_and_clears_selection() {
     // Should have PersistTask commands
     let persist_count = cmds
         .iter()
-        .filter(|c| matches!(c, Command::PersistTask(_)))
+        .filter(|c| {
+            matches!(
+                c,
+                Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+            )
+        })
         .count();
     assert_eq!(persist_count, 2);
 }
@@ -336,8 +377,12 @@ fn confirm_archive_with_selection_dispatches_batch() {
         TEST_TIMEOUT,
     );
 
-    app.update(Message::ToggleSelect(TaskId(1)));
-    app.update(Message::ToggleSelect(TaskId(2)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(1)),
+    ));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(2)),
+    ));
     app.input.mode = InputMode::ConfirmArchive(None);
 
     app.handle_key(make_key(KeyCode::Char('y')));
@@ -592,7 +637,7 @@ fn archive_epic_archives_subtasks_and_persists_each() {
     let persist_task_ids: Vec<_> = cmds
         .iter()
         .filter_map(|c| match c {
-            Command::PersistTask(t) => Some(t.id),
+            Command::Task(crate::tui::commands::TaskCommand::Persist(t)) => Some(t.id),
             _ => None,
         })
         .collect();
@@ -889,7 +934,7 @@ fn handle_key_confirm_archive_yes() {
     assert_eq!(*app.mode(), InputMode::Normal);
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::PersistTask(t) if t.status == TaskStatus::Archived)));
+        .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::Persist(t)) if t.status == TaskStatus::Archived)));
 }
 
 #[test]
@@ -945,7 +990,9 @@ fn batch_archive_mixed_tasks_and_epics() {
         TEST_TIMEOUT,
     );
     app.board.epics = vec![make_epic(10)];
-    app.update(Message::ToggleSelect(TaskId(1)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(1)),
+    ));
     app.update(Message::Epic(
         crate::tui::messages::EpicMessage::ToggleSelect(EpicId(10)),
     ));
@@ -1013,7 +1060,9 @@ fn render_status_bar_confirm_archive_epic() {
 fn archive_esc_closes_overlay() {
     let mut app = make_app();
     // Archive a task first
-    app.update(Message::ArchiveTask(TaskId(1)));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Archive(
+        TaskId(1),
+    )));
     app.selection_mut().set_column(5);
     app.handle_key(make_key(KeyCode::Esc));
     assert!(!app.show_archived());
@@ -1022,7 +1071,9 @@ fn archive_esc_closes_overlay() {
 #[test]
 fn archive_e_enters_edit_confirm() {
     let mut app = make_app();
-    app.update(Message::ArchiveTask(TaskId(1)));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Archive(
+        TaskId(1),
+    )));
     app.selection_mut().set_column(5);
     app.selection_mut().set_row(TaskStatus::COLUMN_COUNT + 1, 0);
     app.handle_key(make_key(KeyCode::Char('e')));
@@ -1032,7 +1083,9 @@ fn archive_e_enters_edit_confirm() {
 #[test]
 fn archive_q_quits() {
     let mut app = make_app();
-    app.update(Message::ArchiveTask(TaskId(1)));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Archive(
+        TaskId(1),
+    )));
     app.selection_mut().set_column(5);
     app.handle_key(make_key(KeyCode::Char('q')));
     assert_eq!(app.input.mode, InputMode::ConfirmQuit);

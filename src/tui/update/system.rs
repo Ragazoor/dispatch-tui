@@ -43,16 +43,18 @@ impl App {
         repo_path: String,
         epic_id: Option<EpicId>,
     ) -> Vec<Command> {
-        vec![Command::QuickDispatch {
-            draft: TaskDraft {
-                title: DEFAULT_QUICK_TASK_TITLE.to_string(),
-                description: String::new(),
-                repo_path,
-                tag: None,
-                base_branch: DEFAULT_BASE_BRANCH.to_string(),
+        vec![Command::Task(
+            crate::tui::commands::TaskCommand::QuickDispatch {
+                draft: TaskDraft {
+                    title: DEFAULT_QUICK_TASK_TITLE.to_string(),
+                    description: String::new(),
+                    repo_path,
+                    tag: None,
+                    base_branch: DEFAULT_BASE_BRANCH.to_string(),
+                },
+                epic_id,
             },
-            epic_id,
-        }]
+        )]
     }
 
     pub(in crate::tui) fn handle_dismiss_error(&mut self) -> Vec<Command> {
@@ -103,7 +105,7 @@ impl App {
             _ => None,
         };
         vec![
-            Command::InsertTask { draft, epic_id },
+            Command::Task(crate::tui::commands::TaskCommand::Insert { draft, epic_id }),
             Command::SaveRepoPath(repo_path),
         ]
     }

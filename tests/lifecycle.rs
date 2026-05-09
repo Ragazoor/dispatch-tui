@@ -21,7 +21,7 @@ fn make_app() -> (App, Database) {
 fn execute(db: &Database, cmds: &[Command]) {
     for cmd in cmds {
         match cmd {
-            Command::PersistTask(task) => {
+            Command::Task(dispatch_tui::tui::commands::TaskCommand::Persist(task)) => {
                 let _ = db.patch_task(
                     task.id,
                     &db::TaskPatch::new()
@@ -30,7 +30,7 @@ fn execute(db: &Database, cmds: &[Command]) {
                         .tmux_window(task.tmux_window.as_deref()),
                 );
             }
-            Command::DeleteTask(id) => {
+            Command::Task(dispatch_tui::tui::commands::TaskCommand::Delete(id)) => {
                 let _ = db.delete_task(*id);
             }
             _ => {}
@@ -58,29 +58,31 @@ fn full_lifecycle() {
         })
         .unwrap();
     let now = chrono::Utc::now();
-    let cmds = app.update(Message::TaskCreated {
-        task: Task {
-            id: task_id,
-            title: "Fix auth bug".to_string(),
-            description: "Users can't log in".to_string(),
-            repo_path: "/repo".to_string(),
-            status: TaskStatus::Backlog,
-            worktree: None,
-            tmux_window: None,
-            plan_path: Some("plan.md".into()),
-            epic_id: None,
-            sub_status: dispatch_tui::models::SubStatus::None,
-            pr_url: None,
-            tag: None,
-            sort_order: None,
-            base_branch: "main".to_string(),
-            external_id: None,
-            labels: Vec::new(),
-            created_at: now,
-            updated_at: now,
-            project_id: dispatch_tui::models::ProjectId(1),
+    let cmds = app.update(Message::Task(
+        dispatch_tui::tui::messages::TaskMessage::Created {
+            task: Task {
+                id: task_id,
+                title: "Fix auth bug".to_string(),
+                description: "Users can't log in".to_string(),
+                repo_path: "/repo".to_string(),
+                status: TaskStatus::Backlog,
+                worktree: None,
+                tmux_window: None,
+                plan_path: Some("plan.md".into()),
+                epic_id: None,
+                sub_status: dispatch_tui::models::SubStatus::None,
+                pr_url: None,
+                tag: None,
+                sort_order: None,
+                base_branch: "main".to_string(),
+                external_id: None,
+                labels: Vec::new(),
+                created_at: now,
+                updated_at: now,
+                project_id: dispatch_tui::models::ProjectId(1),
+            },
         },
-    });
+    ));
     assert!(cmds.is_empty());
     assert_eq!(app.tasks().len(), 1);
     assert_eq!(app.tasks()[0].status, TaskStatus::Backlog);
@@ -91,22 +93,31 @@ fn full_lifecycle() {
     assert_eq!(db_task.title, "Fix auth bug");
 
     // 2. Dispatch directly from Backlog (task has a plan) → Dispatch command issued
-    let cmds = app.update(Message::DispatchTask(task_id, DispatchMode::Dispatch));
-    assert!(matches!(cmds[0], Command::DispatchAgent { .. }));
+    let cmds = app.update(Message::Task(
+        dispatch_tui::tui::messages::TaskMessage::Dispatch(task_id, DispatchMode::Dispatch),
+    ));
+    assert!(matches!(
+        cmds[0],
+        Command::Task(dispatch_tui::tui::commands::TaskCommand::DispatchAgent { .. })
+    ));
 
     // Simulate dispatch result → moves to Running
-    let cmds = app.update(Message::Dispatched {
-        id: task_id,
-        worktree: "/repo/.worktrees/1-fix-auth-bug".to_string(),
-        tmux_window: "task-1".to_string(),
-        switch_focus: false,
-    });
+    let cmds = app.update(Message::Task(
+        dispatch_tui::tui::messages::TaskMessage::Dispatched {
+            id: task_id,
+            worktree: "/repo/.worktrees/1-fix-auth-bug".to_string(),
+            tmux_window: "task-1".to_string(),
+            switch_focus: false,
+        },
+    ));
     execute(&db, &cmds);
     assert_eq!(app.tasks()[0].status, TaskStatus::Running);
     assert_eq!(app.tasks()[0].tmux_window.as_deref(), Some("task-1"));
 
     // 4. WindowGone on a Running task → marks as crashed (tmux_window cleared, window is gone)
-    let cmds = app.update(Message::WindowGone(task_id));
+    let cmds = app.update(Message::Task(
+        dispatch_tui::tui::messages::TaskMessage::WindowGone(task_id),
+    ));
     execute(&db, &cmds);
     assert_eq!(app.tasks()[0].status, TaskStatus::Running);
     // tmux_window is cleared — the window is gone by definition
@@ -114,18 +125,22 @@ fn full_lifecycle() {
     assert!(app.is_crashed(task_id));
 
     // 4b. Agent advances task to Review via MCP (simulated as MoveTask)
-    let cmds = app.update(Message::MoveTask {
-        id: task_id,
-        direction: MoveDirection::Forward,
-    });
+    let cmds = app.update(Message::Task(
+        dispatch_tui::tui::messages::TaskMessage::Move {
+            id: task_id,
+            direction: MoveDirection::Forward,
+        },
+    ));
     execute(&db, &cmds);
     assert_eq!(app.tasks()[0].status, TaskStatus::Review);
 
     // 5. Move to Done → requires confirmation
-    let cmds = app.update(Message::MoveTask {
-        id: task_id,
-        direction: MoveDirection::Forward,
-    });
+    let cmds = app.update(Message::Task(
+        dispatch_tui::tui::messages::TaskMessage::Move {
+            id: task_id,
+            direction: MoveDirection::Forward,
+        },
+    ));
     assert!(
         cmds.is_empty(),
         "MoveTask should not produce commands when entering ConfirmDone"
@@ -147,7 +162,9 @@ fn full_lifecycle() {
     assert_eq!(db_task.status, TaskStatus::Done);
 
     // 6. Delete → removed from state and DB
-    let cmds = app.update(Message::DeleteTask(task_id));
+    let cmds = app.update(Message::Task(
+        dispatch_tui::tui::messages::TaskMessage::Delete(task_id),
+    ));
     execute(&db, &cmds);
     assert!(app.tasks().is_empty());
 

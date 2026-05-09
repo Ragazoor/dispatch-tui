@@ -12,15 +12,27 @@ fn dispatch_only_backlog_tasks() {
     let mut app = make_app();
 
     // Task 1 is Backlog — should dispatch
-    let cmds = app.update(Message::DispatchTask(TaskId(1), DispatchMode::Dispatch));
-    assert!(matches!(cmds[0], Command::DispatchAgent { .. }));
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Dispatch(
+        TaskId(1),
+        DispatchMode::Dispatch,
+    )));
+    assert!(matches!(
+        cmds[0],
+        Command::Task(crate::tui::commands::TaskCommand::DispatchAgent { .. })
+    ));
 
     // Task 3 is Running — should not dispatch
-    let cmds = app.update(Message::DispatchTask(TaskId(3), DispatchMode::Dispatch));
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Dispatch(
+        TaskId(3),
+        DispatchMode::Dispatch,
+    )));
     assert!(cmds.is_empty());
 
     // Task 4 is Done — should not dispatch
-    let cmds = app.update(Message::DispatchTask(TaskId(4), DispatchMode::Dispatch));
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Dispatch(
+        TaskId(4),
+        DispatchMode::Dispatch,
+    )));
     assert!(cmds.is_empty());
 }
 
@@ -32,9 +44,10 @@ fn tick_captures_review_task_with_live_window() {
 
     let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
 
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::CaptureTmux { id: TaskId(5), .. })));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::CaptureTmux { id: TaskId(5), .. })
+    )));
 }
 
 #[test]
@@ -43,7 +56,10 @@ fn dispatch_from_running_is_noop() {
     task.worktree = Some("/repo/.worktrees/4-task-4".to_string());
     task.tmux_window = Some("task-4".to_string());
     let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
-    let cmds = app.update(Message::DispatchTask(TaskId(4), DispatchMode::Dispatch));
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Dispatch(
+        TaskId(4),
+        DispatchMode::Dispatch,
+    )));
     assert!(cmds.is_empty());
 }
 
@@ -53,7 +69,10 @@ fn dispatch_from_review_is_noop() {
     task.worktree = Some("/repo/.worktrees/5-task-5".to_string());
     task.tmux_window = Some("task-5".to_string());
     let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
-    let cmds = app.update(Message::DispatchTask(TaskId(5), DispatchMode::Dispatch));
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Dispatch(
+        TaskId(5),
+        DispatchMode::Dispatch,
+    )));
     assert!(cmds.is_empty());
 }
 
@@ -64,7 +83,10 @@ fn d_key_on_backlog_with_plan_dispatches() {
     let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
     app.selection_mut().set_column(1); // Backlog column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
-    assert!(matches!(&cmds[0], Command::DispatchAgent { .. }));
+    assert!(matches!(
+        &cmds[0],
+        Command::Task(crate::tui::commands::TaskCommand::DispatchAgent { .. })
+    ));
 }
 
 #[test]
@@ -92,7 +114,10 @@ fn d_key_on_running_no_window_resumes() {
     let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
     app.selection_mut().set_column(2); // Running column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
-    assert!(matches!(&cmds[0], Command::Resume { .. }));
+    assert!(matches!(
+        &cmds[0],
+        Command::Task(crate::tui::commands::TaskCommand::Resume { .. })
+    ));
 }
 
 #[test]
@@ -104,7 +129,7 @@ fn d_key_on_backlog_dispatches() {
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert_eq!(cmds.len(), 1);
     assert!(
-        matches!(&cmds[0], Command::DispatchAgent { task, mode: DispatchMode::Dispatch } if task.id == TaskId(1))
+        matches!(&cmds[0], Command::Task(crate::tui::commands::TaskCommand::DispatchAgent { task, mode: DispatchMode::Dispatch }) if task.id == TaskId(1))
     );
 }
 
@@ -149,7 +174,7 @@ fn shift_d_with_one_repo_emits_quick_dispatch() {
     let cmds = app.handle_key(make_shift_key(KeyCode::Char('D')));
     assert_eq!(cmds.len(), 1);
     assert!(
-        matches!(&cmds[0], Command::QuickDispatch { ref draft, epic_id: None } if draft.repo_path == "/repo")
+        matches!(&cmds[0], Command::Task(crate::tui::commands::TaskCommand::QuickDispatch { ref draft, epic_id: None }) if draft.repo_path == "/repo")
     );
     assert_eq!(app.input.mode, InputMode::Normal);
 }
@@ -228,13 +253,15 @@ fn quick_dispatch_mode_esc_cancels() {
 #[test]
 fn quick_dispatch_message_emits_command() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
-    let cmds = app.update(Message::QuickDispatch {
-        repo_path: "/my/repo".to_string(),
-        epic_id: None,
-    });
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::QuickDispatch {
+            repo_path: "/my/repo".to_string(),
+            epic_id: None,
+        },
+    ));
     assert_eq!(cmds.len(), 1);
     assert!(
-        matches!(&cmds[0], Command::QuickDispatch { ref draft, epic_id: None }
+        matches!(&cmds[0], Command::Task(crate::tui::commands::TaskCommand::QuickDispatch { ref draft, epic_id: None })
         if draft.title == DEFAULT_QUICK_TASK_TITLE && draft.repo_path == "/my/repo")
     );
 }
@@ -253,7 +280,7 @@ fn shift_d_in_epic_view_quick_dispatches_subtask_single_repo() {
     let cmds = app.handle_key(make_shift_key(KeyCode::Char('D')));
     assert_eq!(cmds.len(), 1);
     assert!(matches!(&cmds[0],
-        Command::QuickDispatch { ref draft, epic_id: Some(EpicId(10)) }
+        Command::Task(crate::tui::commands::TaskCommand::QuickDispatch { ref draft, epic_id: Some(EpicId(10)) })
         if draft.repo_path == "/my/repo"
     ));
 }
@@ -293,7 +320,7 @@ fn shift_d_in_epic_view_repo_selection_dispatches_with_epic_id() {
     let cmds = app.handle_key(make_key(KeyCode::Enter));
     assert_eq!(cmds.len(), 1);
     assert!(matches!(&cmds[0],
-        Command::QuickDispatch { ref draft, epic_id: Some(EpicId(10)) }
+        Command::Task(crate::tui::commands::TaskCommand::QuickDispatch { ref draft, epic_id: Some(EpicId(10)) })
         if draft.repo_path == "/repo/b"
     ));
 }
@@ -312,12 +339,13 @@ fn stale_agent_detected_after_timeout() {
 
     let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
     assert!(app.is_stale(TaskId(4)));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::CaptureTmux { id: TaskId(4), .. })
+    )));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::CaptureTmux { id: TaskId(4), .. })));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::PersistTask(t) if t.id == TaskId(4))));
+        .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::Persist(t)) if t.id == TaskId(4))));
 }
 
 #[test]
@@ -329,13 +357,15 @@ fn window_gone_on_running_task_marks_crashed() {
     );
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
 
-    let cmds = app.update(Message::WindowGone(TaskId(4)));
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::WindowGone(TaskId(4)),
+    ));
     assert!(app.is_crashed(TaskId(4)));
     // tmux_window should be cleared — the window is gone by definition
     assert!(app.board.tasks[0].tmux_window.is_none());
     // Should emit PersistTask with cleared tmux_window
     assert!(cmds.iter().any(
-        |c| matches!(c, Command::PersistTask(t) if t.id == TaskId(4) && t.tmux_window.is_none())
+        |c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::Persist(t)) if t.id == TaskId(4) && t.tmux_window.is_none())
     ));
 }
 
@@ -348,10 +378,15 @@ fn window_gone_on_review_task_clears_window() {
     );
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
 
-    let cmds = app.update(Message::WindowGone(TaskId(4)));
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::WindowGone(TaskId(4)),
+    ));
     assert!(!app.is_crashed(TaskId(4)));
     assert!(app.board.tasks[0].tmux_window.is_none());
-    assert!(matches!(&cmds[0], Command::PersistTask(_)));
+    assert!(matches!(
+        &cmds[0],
+        Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+    ));
 }
 
 #[test]
@@ -367,11 +402,13 @@ fn tmux_output_change_resets_staleness_timer() {
         .insert(TaskId(4), Instant::now() - Duration::from_secs(301));
     app.agents.prev_tmux_activity.insert(TaskId(4), 1000);
 
-    app.update(Message::TmuxOutput {
-        id: TaskId(4),
-        output: "output".to_string(),
-        activity_ts: 1001,
-    });
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::TmuxOutput {
+            id: TaskId(4),
+            output: "output".to_string(),
+            activity_ts: 1001,
+        },
+    ));
     let elapsed = app.agents.last_active_at[&TaskId(4)].elapsed();
     assert!(elapsed < Duration::from_secs(1));
 }
@@ -388,11 +425,13 @@ fn tmux_output_same_activity_does_not_reset_timer() {
     app.agents.last_active_at.insert(TaskId(4), old_instant);
     app.agents.prev_tmux_activity.insert(TaskId(4), 1000);
 
-    app.update(Message::TmuxOutput {
-        id: TaskId(4),
-        output: "output".to_string(),
-        activity_ts: 1000,
-    });
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::TmuxOutput {
+            id: TaskId(4),
+            output: "output".to_string(),
+            activity_ts: 1000,
+        },
+    ));
     let elapsed = app.agents.last_active_at[&TaskId(4)].elapsed();
     assert!(elapsed >= Duration::from_secs(199));
 }
@@ -414,11 +453,13 @@ fn activity_ts_change_with_same_output_resets_timer() {
         .insert(TaskId(4), "same output".to_string());
 
     // Same display text, but tmux reports new activity
-    app.update(Message::TmuxOutput {
-        id: TaskId(4),
-        output: "same output".to_string(),
-        activity_ts: 1001,
-    });
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::TmuxOutput {
+            id: TaskId(4),
+            output: "same output".to_string(),
+            activity_ts: 1001,
+        },
+    ));
     let elapsed = app.agents.last_active_at[&TaskId(4)].elapsed();
     assert!(elapsed < Duration::from_secs(1));
 }
@@ -439,11 +480,13 @@ fn activity_ts_same_with_different_output_no_reset() {
         .insert(TaskId(4), "old text".to_string());
 
     // Different display text, but same activity timestamp
-    app.update(Message::TmuxOutput {
-        id: TaskId(4),
-        output: "new text".to_string(),
-        activity_ts: 1000,
-    });
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::TmuxOutput {
+            id: TaskId(4),
+            output: "new text".to_string(),
+            activity_ts: 1000,
+        },
+    ));
     let elapsed = app.agents.last_active_at[&TaskId(4)].elapsed();
     assert!(elapsed >= Duration::from_secs(199));
     // Display output is still updated for rendering
@@ -455,18 +498,23 @@ fn dispatched_sets_fields_and_transitions_to_running() {
     let mut task = make_task(3, TaskStatus::Backlog);
     task.plan_path = Some("plan.md".into());
     let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
-    let cmds = app.update(Message::Dispatched {
-        id: TaskId(3),
-        worktree: "/wt".to_string(),
-        tmux_window: "win".to_string(),
-        switch_focus: false,
-    });
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::Dispatched {
+            id: TaskId(3),
+            worktree: "/wt".to_string(),
+            tmux_window: "win".to_string(),
+            switch_focus: false,
+        },
+    ));
     let task = app.board.tasks.iter().find(|t| t.id == TaskId(3)).unwrap();
     assert_eq!(task.status, TaskStatus::Running);
     assert_eq!(task.worktree.as_deref(), Some("/wt"));
     assert_eq!(task.tmux_window.as_deref(), Some("win"));
     assert_eq!(cmds.len(), 1);
-    assert!(matches!(&cmds[0], Command::PersistTask(_)));
+    assert!(matches!(
+        &cmds[0],
+        Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+    ));
 }
 
 #[test]
@@ -474,15 +522,22 @@ fn dispatched_with_switch_focus_emits_jump() {
     let mut task = make_task(3, TaskStatus::Backlog);
     task.plan_path = Some("plan.md".into());
     let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
-    let cmds = app.update(Message::Dispatched {
-        id: TaskId(3),
-        worktree: "/wt".to_string(),
-        tmux_window: "win".to_string(),
-        switch_focus: true,
-    });
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::Dispatched {
+            id: TaskId(3),
+            worktree: "/wt".to_string(),
+            tmux_window: "win".to_string(),
+            switch_focus: true,
+        },
+    ));
     assert_eq!(cmds.len(), 2);
-    assert!(matches!(&cmds[0], Command::PersistTask(_)));
-    assert!(matches!(&cmds[1], Command::JumpToTmux { window } if window == "win"));
+    assert!(matches!(
+        &cmds[0],
+        Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+    ));
+    assert!(
+        matches!(&cmds[1], Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "win")
+    );
 }
 
 #[test]
@@ -492,12 +547,14 @@ fn dispatched_unknown_id_is_noop() {
         ProjectId(1),
         TEST_TIMEOUT,
     );
-    let cmds = app.update(Message::Dispatched {
-        id: TaskId(999),
-        worktree: "/wt".to_string(),
-        tmux_window: "win".to_string(),
-        switch_focus: false,
-    });
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::Dispatched {
+            id: TaskId(999),
+            worktree: "/wt".to_string(),
+            tmux_window: "win".to_string(),
+            switch_focus: false,
+        },
+    ));
     assert!(cmds.is_empty());
     assert_eq!(app.board.tasks[0].status, TaskStatus::Backlog);
 }
@@ -509,11 +566,13 @@ fn tmux_output_stores_in_map() {
         ProjectId(1),
         TEST_TIMEOUT,
     );
-    let cmds = app.update(Message::TmuxOutput {
-        id: TaskId(1),
-        output: "hello".to_string(),
-        activity_ts: 1000,
-    });
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::TmuxOutput {
+            id: TaskId(1),
+            output: "hello".to_string(),
+            activity_ts: 1000,
+        },
+    ));
     assert_eq!(app.agents.tmux_outputs.get(&TaskId(1)).unwrap(), "hello");
     assert!(cmds.is_empty());
 }
@@ -525,16 +584,20 @@ fn tmux_output_overwrites_previous() {
         ProjectId(1),
         TEST_TIMEOUT,
     );
-    app.update(Message::TmuxOutput {
-        id: TaskId(1),
-        output: "first".to_string(),
-        activity_ts: 1000,
-    });
-    app.update(Message::TmuxOutput {
-        id: TaskId(1),
-        output: "second".to_string(),
-        activity_ts: 1001,
-    });
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::TmuxOutput {
+            id: TaskId(1),
+            output: "first".to_string(),
+            activity_ts: 1000,
+        },
+    ));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::TmuxOutput {
+            id: TaskId(1),
+            output: "second".to_string(),
+            activity_ts: 1001,
+        },
+    ));
     assert_eq!(app.agents.tmux_outputs.get(&TaskId(1)).unwrap(), "second");
 }
 
@@ -563,7 +626,10 @@ fn d_key_on_review_no_window_with_worktree_resumes() {
     let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
     app.selection_mut().set_column(3); // Review column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
-    assert!(matches!(&cmds[0], Command::Resume { .. }));
+    assert!(matches!(
+        &cmds[0],
+        Command::Task(crate::tui::commands::TaskCommand::Resume { .. })
+    ));
 }
 
 #[test]
@@ -608,7 +674,9 @@ fn kill_and_retry_enters_confirm_mode() {
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
     app.board.tasks[0].sub_status = SubStatus::Stale;
 
-    app.update(Message::KillAndRetry(TaskId(4)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::KillAndRetry(TaskId(4)),
+    ));
     assert!(matches!(app.input.mode, InputMode::ConfirmRetry(TaskId(4))));
 }
 
@@ -624,16 +692,22 @@ fn retry_resume_emits_kill_and_resume() {
     app.board.tasks[0].sub_status = SubStatus::Stale;
     app.input.mode = InputMode::ConfirmRetry(TaskId(4));
 
-    let cmds = app.update(Message::RetryResume(TaskId(4)));
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::RetryResume(TaskId(4)),
+    ));
 
     // After retry resume, sub_status is no longer stale/crashed
     assert!(!app.is_stale(TaskId(4)));
     assert!(!app.is_crashed(TaskId(4)));
     assert_eq!(app.input.mode, InputMode::Normal);
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::KillTmuxWindow { .. })));
-    assert!(cmds.iter().any(|c| matches!(c, Command::Resume { .. })));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::KillTmuxWindow { .. })
+    )));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Resume { .. })
+    )));
 }
 
 #[test]
@@ -648,15 +722,21 @@ fn retry_fresh_emits_cleanup_and_dispatch() {
     app.board.tasks[0].sub_status = SubStatus::Stale;
     app.input.mode = InputMode::ConfirmRetry(TaskId(4));
 
-    let cmds = app.update(Message::RetryFresh(TaskId(4)));
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::RetryFresh(TaskId(4)),
+    ));
 
     assert!(!app.is_stale(TaskId(4)));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert_eq!(app.board.tasks[0].status, TaskStatus::Backlog);
-    assert!(cmds.iter().any(|c| matches!(c, Command::Cleanup { .. })));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::DispatchAgent { .. })));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Cleanup { .. })
+    )));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::DispatchAgent { .. })
+    )));
 }
 
 #[test]
@@ -799,7 +879,9 @@ fn dispatch_epic_with_plan_dispatches_next_backlog_subtask() {
     )));
     // Should dispatch task1 (first backlog subtask, has plan)
     assert_eq!(cmds.len(), 1);
-    assert!(matches!(cmds[0], Command::DispatchAgent { ref task, .. } if task.id == TaskId(1)));
+    assert!(
+        matches!(cmds[0], Command::Task(crate::tui::commands::TaskCommand::DispatchAgent { ref task, .. }) if task.id == TaskId(1))
+    );
 }
 
 #[test]
@@ -821,7 +903,7 @@ fn dispatch_epic_with_plan_dispatches_subtask_without_plan() {
     )));
     assert_eq!(cmds.len(), 1);
     assert!(
-        matches!(cmds[0], Command::DispatchAgent { ref task, mode: DispatchMode::Dispatch } if task.id == TaskId(1))
+        matches!(cmds[0], Command::Task(crate::tui::commands::TaskCommand::DispatchAgent { ref task, mode: DispatchMode::Dispatch }) if task.id == TaskId(1))
     );
 }
 
@@ -879,19 +961,21 @@ fn conflict_flag_clears_on_dispatch() {
         TEST_TIMEOUT,
     );
 
-    app.update(Message::FinishFailed {
-        id: TaskId(1),
-        error: "conflict".to_string(),
-        is_conflict: true,
-    });
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::FinishFailed {
+            id: TaskId(1),
+            error: "conflict".to_string(),
+            is_conflict: true,
+        },
+    ));
     assert!(app
         .find_task(TaskId(1))
         .is_some_and(|t| t.sub_status == SubStatus::Conflict));
 
-    app.update(Message::Resumed {
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Resumed {
         id: TaskId(1),
         tmux_window: "task-1".to_string(),
-    });
+    }));
     assert!(!app
         .find_task(TaskId(1))
         .is_some_and(|t| t.sub_status == SubStatus::Conflict));
@@ -909,16 +993,18 @@ fn conflict_flag_clears_on_move_backward() {
         TEST_TIMEOUT,
     );
 
-    app.update(Message::FinishFailed {
-        id: TaskId(1),
-        error: "conflict".to_string(),
-        is_conflict: true,
-    });
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::FinishFailed {
+            id: TaskId(1),
+            error: "conflict".to_string(),
+            is_conflict: true,
+        },
+    ));
 
-    app.update(Message::MoveTask {
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Move {
         id: TaskId(1),
         direction: MoveDirection::Backward,
-    });
+    }));
     assert!(!app
         .find_task(TaskId(1))
         .is_some_and(|t| t.sub_status == SubStatus::Conflict));
@@ -950,7 +1036,10 @@ fn pr_merged_moves_to_done_and_detaches() {
     assert!(task.tmux_window.is_none(), "tmux window should be cleared");
     assert!(task.worktree.is_some(), "worktree should be preserved");
     assert!(task.pr_url.is_some(), "pr_url should be preserved");
-    assert!(cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+    )));
     assert!(cmds.iter().any(|c| matches!(
         c,
         Command::System(crate::tui::commands::SystemCommand::SendNotification { .. })
@@ -969,7 +1058,10 @@ fn pr_merged_preserves_worktree() {
     )));
 
     // Should NOT emit a Cleanup command
-    assert!(!cmds.iter().any(|c| matches!(c, Command::Cleanup { .. })));
+    assert!(!cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Cleanup { .. })
+    )));
 }
 
 #[test]
@@ -1025,7 +1117,7 @@ fn dispatch_epic_with_backlog_subtasks_dispatches_first_by_sort_order() {
     // Should dispatch the task with lower sort_order (task 11, sort_order=100)
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::DispatchAgent { task, .. } if task.id == TaskId(11))));
+        .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::DispatchAgent { task, .. }) if task.id == TaskId(11))));
 }
 
 #[test]
@@ -1124,12 +1216,14 @@ fn stale_detection_sets_substatus_and_persists() {
     );
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
 
-    let cmds = app.update(Message::StaleAgent(TaskId(3)));
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::StaleAgent(TaskId(3)),
+    ));
     let task = app.find_task(TaskId(3)).unwrap();
     assert_eq!(task.sub_status, SubStatus::Stale);
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::PersistTask(t) if t.id == TaskId(3))));
+        .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::Persist(t)) if t.id == TaskId(3))));
 }
 
 #[test]
@@ -1141,12 +1235,14 @@ fn crashed_detection_sets_substatus_and_persists() {
     );
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
 
-    let cmds = app.update(Message::AgentCrashed(TaskId(3)));
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::AgentCrashed(TaskId(3)),
+    ));
     let task = app.find_task(TaskId(3)).unwrap();
     assert_eq!(task.sub_status, SubStatus::Crashed);
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::PersistTask(t) if t.id == TaskId(3))));
+        .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::Persist(t)) if t.id == TaskId(3))));
 }
 
 #[test]
@@ -1159,7 +1255,9 @@ fn stale_does_not_overwrite_crashed() {
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
     app.board.tasks[0].sub_status = SubStatus::Crashed;
 
-    let cmds = app.update(Message::StaleAgent(TaskId(3)));
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::StaleAgent(TaskId(3)),
+    ));
     let task = app.find_task(TaskId(3)).unwrap();
     assert_eq!(task.sub_status, SubStatus::Crashed); // unchanged
     assert!(cmds.is_empty()); // no persist needed
@@ -1173,7 +1271,9 @@ fn stale_skips_non_running_task() {
         TEST_TIMEOUT,
     );
 
-    let cmds = app.update(Message::StaleAgent(TaskId(3)));
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::StaleAgent(TaskId(3)),
+    ));
     let task = app.find_task(TaskId(3)).unwrap();
     assert_eq!(task.sub_status, SubStatus::None); // unchanged
     assert!(cmds.is_empty());
@@ -1187,7 +1287,9 @@ fn crashed_skips_non_running_task() {
         TEST_TIMEOUT,
     );
 
-    let cmds = app.update(Message::AgentCrashed(TaskId(3)));
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::AgentCrashed(TaskId(3)),
+    ));
     let task = app.find_task(TaskId(3)).unwrap();
     assert_eq!(task.sub_status, SubStatus::AwaitingReview); // unchanged
     assert!(cmds.is_empty());
@@ -1203,7 +1305,9 @@ fn stale_notification_sent_when_enabled() {
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
     app.set_notifications_enabled(true);
 
-    let cmds = app.update(Message::StaleAgent(TaskId(3)));
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::StaleAgent(TaskId(3)),
+    ));
     assert!(cmds.iter().any(|c| matches!(
         c,
         Command::System(crate::tui::commands::SystemCommand::SendNotification {
@@ -1223,7 +1327,9 @@ fn stale_notification_not_sent_when_disabled() {
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
     app.set_notifications_enabled(false);
 
-    let cmds = app.update(Message::StaleAgent(TaskId(3)));
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::StaleAgent(TaskId(3)),
+    ));
     assert!(!cmds.iter().any(|c| matches!(
         c,
         Command::System(crate::tui::commands::SystemCommand::SendNotification { .. })
@@ -1240,7 +1346,9 @@ fn crashed_notification_sent_urgent_when_enabled() {
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
     app.set_notifications_enabled(true);
 
-    let cmds = app.update(Message::AgentCrashed(TaskId(3)));
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::AgentCrashed(TaskId(3)),
+    ));
     assert!(cmds.iter().any(|c| matches!(
         c,
         Command::System(crate::tui::commands::SystemCommand::SendNotification { urgent: true, .. })
@@ -1257,7 +1365,9 @@ fn crashed_notification_not_sent_when_disabled() {
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
     app.set_notifications_enabled(false);
 
-    let cmds = app.update(Message::AgentCrashed(TaskId(3)));
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::AgentCrashed(TaskId(3)),
+    ));
     assert!(!cmds.iter().any(|c| matches!(
         c,
         Command::System(crate::tui::commands::SystemCommand::SendNotification { .. })
@@ -1276,7 +1386,10 @@ fn pr_review_state_updates_substatus() {
     }));
     let task = app.find_task(id).unwrap();
     assert_eq!(task.sub_status, SubStatus::Approved);
-    assert!(cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+    )));
 }
 
 #[test]
@@ -1304,7 +1417,10 @@ fn pr_review_state_changes_requested() {
     }));
     let task = app.find_task(id).unwrap();
     assert_eq!(task.sub_status, SubStatus::ChangesRequested);
-    assert!(cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+    )));
 }
 
 #[test]
@@ -1374,7 +1490,7 @@ fn quick_dispatch_enter_selects_cursor_repo() {
     let cmds = app.handle_key(make_key(KeyCode::Enter));
     assert_eq!(cmds.len(), 1);
     assert!(
-        matches!(&cmds[0], Command::QuickDispatch { ref draft, epic_id: None } if draft.repo_path == "/repo3")
+        matches!(&cmds[0], Command::Task(crate::tui::commands::TaskCommand::QuickDispatch { ref draft, epic_id: None }) if draft.repo_path == "/repo3")
     );
     assert_eq!(app.input.mode, InputMode::Normal);
 }
@@ -1460,7 +1576,7 @@ fn quick_dispatch_enter_selects_from_filtered_list() {
     let cmds = app.handle_key(make_key(KeyCode::Enter));
     assert_eq!(cmds.len(), 1);
     assert!(
-        matches!(&cmds[0], Command::QuickDispatch { ref draft, .. } if draft.repo_path == "/api-gateway")
+        matches!(&cmds[0], Command::Task(crate::tui::commands::TaskCommand::QuickDispatch { ref draft, .. }) if draft.repo_path == "/api-gateway")
     );
 }
 
@@ -1497,7 +1613,7 @@ fn quick_dispatch_enter_uses_cursor_within_filtered_list() {
     let cmds = app.handle_key(make_key(KeyCode::Enter));
     assert_eq!(cmds.len(), 1);
     assert!(
-        matches!(&cmds[0], Command::QuickDispatch { ref draft, .. } if draft.repo_path == "/api-gateway")
+        matches!(&cmds[0], Command::Task(crate::tui::commands::TaskCommand::QuickDispatch { ref draft, .. }) if draft.repo_path == "/api-gateway")
     );
 }
 
@@ -1515,10 +1631,19 @@ fn tab_hint_absent_from_tab_bar() {
 fn dispatch_in_flight_blocks_second_dispatch() {
     let mut app = make_app();
     // First dispatch succeeds
-    let cmds = app.update(Message::DispatchTask(TaskId(1), DispatchMode::Dispatch));
-    assert!(matches!(cmds[0], Command::DispatchAgent { .. }));
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Dispatch(
+        TaskId(1),
+        DispatchMode::Dispatch,
+    )));
+    assert!(matches!(
+        cmds[0],
+        Command::Task(crate::tui::commands::TaskCommand::DispatchAgent { .. })
+    ));
     // Second dispatch of same task is blocked
-    let cmds = app.update(Message::DispatchTask(TaskId(1), DispatchMode::Dispatch));
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Dispatch(
+        TaskId(1),
+        DispatchMode::Dispatch,
+    )));
     assert!(cmds.is_empty());
 }
 
@@ -1526,14 +1651,19 @@ fn dispatch_in_flight_blocks_second_dispatch() {
 fn dispatched_clears_in_flight() {
     let mut app = make_app();
     // Dispatch task 1
-    app.update(Message::DispatchTask(TaskId(1), DispatchMode::Dispatch));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Dispatch(
+        TaskId(1),
+        DispatchMode::Dispatch,
+    )));
     // Dispatched message clears the in-flight guard
-    app.update(Message::Dispatched {
-        id: TaskId(1),
-        worktree: "/wt".to_string(),
-        tmux_window: "win".to_string(),
-        switch_focus: false,
-    });
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::Dispatched {
+            id: TaskId(1),
+            worktree: "/wt".to_string(),
+            tmux_window: "win".to_string(),
+            switch_focus: false,
+        },
+    ));
     // Task is now Running, so dispatch is a no-op for a different reason,
     // but the in-flight set should be clear
     assert!(!app.is_dispatching(TaskId(1)));
@@ -1543,33 +1673,60 @@ fn dispatched_clears_in_flight() {
 fn dispatch_failed_clears_in_flight() {
     let mut app = make_app();
     // Dispatch task 1
-    app.update(Message::DispatchTask(TaskId(1), DispatchMode::Dispatch));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Dispatch(
+        TaskId(1),
+        DispatchMode::Dispatch,
+    )));
     assert!(app.is_dispatching(TaskId(1)));
     // DispatchFailed clears the in-flight guard
-    app.update(Message::DispatchFailed(TaskId(1)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::DispatchFailed(TaskId(1)),
+    ));
     assert!(!app.is_dispatching(TaskId(1)));
     // Can dispatch again
-    let cmds = app.update(Message::DispatchTask(TaskId(1), DispatchMode::Dispatch));
-    assert!(matches!(cmds[0], Command::DispatchAgent { .. }));
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Dispatch(
+        TaskId(1),
+        DispatchMode::Dispatch,
+    )));
+    assert!(matches!(
+        cmds[0],
+        Command::Task(crate::tui::commands::TaskCommand::DispatchAgent { .. })
+    ));
 }
 
 #[test]
 fn dispatch_different_tasks_both_succeed() {
     let mut app = make_app();
     // Dispatch task 1
-    let cmds = app.update(Message::DispatchTask(TaskId(1), DispatchMode::Dispatch));
-    assert!(matches!(cmds[0], Command::DispatchAgent { .. }));
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Dispatch(
+        TaskId(1),
+        DispatchMode::Dispatch,
+    )));
+    assert!(matches!(
+        cmds[0],
+        Command::Task(crate::tui::commands::TaskCommand::DispatchAgent { .. })
+    ));
     // Dispatch task 2 — different task, should succeed
-    let cmds = app.update(Message::DispatchTask(TaskId(2), DispatchMode::Dispatch));
-    assert!(matches!(cmds[0], Command::DispatchAgent { .. }));
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Dispatch(
+        TaskId(2),
+        DispatchMode::Dispatch,
+    )));
+    assert!(matches!(
+        cmds[0],
+        Command::Task(crate::tui::commands::TaskCommand::DispatchAgent { .. })
+    ));
 }
 
 #[test]
 fn dispatch_failed_clears_mark_dispatching_guard() {
     let mut app = make_app();
-    app.update(Message::MarkDispatching(TaskId(1)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::MarkDispatching(TaskId(1)),
+    ));
     assert!(app.is_dispatching(TaskId(1)));
-    app.update(Message::DispatchFailed(TaskId(1)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::DispatchFailed(TaskId(1)),
+    ));
     assert!(!app.is_dispatching(TaskId(1)));
 }
 
@@ -1585,7 +1742,9 @@ fn window_gone_ignored_for_split_pinned_task() {
     app.board.split.pinned_task_id = Some(TaskId(4));
 
     // Even if WindowGone fires for the pinned task, it should NOT crash
-    app.update(Message::WindowGone(TaskId(4)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::WindowGone(TaskId(4)),
+    ));
     assert!(
         !app.is_crashed(TaskId(4)),
         "split-pinned task should not be marked as crashed"
@@ -1605,7 +1764,9 @@ fn agent_crashed_stores_last_error_from_tmux_output() {
         "Error: connection refused\npanicked at main.rs:42".to_string(),
     );
 
-    app.update(Message::AgentCrashed(TaskId(4)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::AgentCrashed(TaskId(4)),
+    ));
 
     assert_eq!(
         app.agents.last_error.get(&TaskId(4)).map(|s| s.as_str()),
@@ -1623,7 +1784,9 @@ fn retry_fresh_clears_last_error() {
         .insert(TaskId(4), "some crash".to_string());
     app.input.mode = InputMode::ConfirmRetry(TaskId(4));
 
-    app.update(Message::RetryFresh(TaskId(4)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::RetryFresh(TaskId(4)),
+    ));
 
     assert!(!app.agents.last_error.contains_key(&TaskId(4)));
 }
@@ -1663,10 +1826,16 @@ fn workflow_column_count_is_three() {
 #[test]
 fn handle_dispatch_task_sets_sticky_status() {
     let mut app = make_app(); // task 1 is Backlog with title "Task 1"
-    let cmds = app.update(Message::DispatchTask(TaskId(1), DispatchMode::Dispatch));
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Dispatch(
+        TaskId(1),
+        DispatchMode::Dispatch,
+    )));
 
     // The DispatchAgent command is still produced.
-    assert!(matches!(cmds[0], Command::DispatchAgent { .. }));
+    assert!(matches!(
+        cmds[0],
+        Command::Task(crate::tui::commands::TaskCommand::DispatchAgent { .. })
+    ));
     // And the sticky status is set so the user sees feedback while
     // git fetch / worktree creation runs in spawn_blocking.
     let msg = app.status.message.as_deref().expect("sticky status set");
@@ -1680,11 +1849,20 @@ fn handle_dispatch_task_sets_sticky_status() {
 fn handle_dispatch_task_rejects_when_already_dispatching() {
     let mut app = make_app();
     // First dispatch sets the in-flight guard
-    let cmds = app.update(Message::DispatchTask(TaskId(1), DispatchMode::Dispatch));
-    assert!(matches!(cmds[0], Command::DispatchAgent { .. }));
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Dispatch(
+        TaskId(1),
+        DispatchMode::Dispatch,
+    )));
+    assert!(matches!(
+        cmds[0],
+        Command::Task(crate::tui::commands::TaskCommand::DispatchAgent { .. })
+    ));
 
     // Second dispatch of the same task is debounced — no new command.
-    let cmds = app.update(Message::DispatchTask(TaskId(1), DispatchMode::Dispatch));
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Dispatch(
+        TaskId(1),
+        DispatchMode::Dispatch,
+    )));
     assert!(cmds.is_empty(), "second dispatch should be rejected");
     // Sticky status remains set (we're still in flight).
     assert!(app.status.message_sticky);
@@ -1693,7 +1871,9 @@ fn handle_dispatch_task_rejects_when_already_dispatching() {
 #[test]
 fn dispatching_timeout_clears_stuck_task() {
     let mut app = make_app();
-    app.update(Message::MarkDispatching(TaskId(1)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::MarkDispatching(TaskId(1)),
+    ));
     assert!(app.is_dispatching(TaskId(1)));
 
     // Backdate the start time past the 60-second watchdog deadline.
@@ -1720,7 +1900,9 @@ fn dispatching_timeout_clears_stuck_task() {
 #[test]
 fn dispatching_start_time_recorded_on_mark() {
     let mut app = make_app();
-    app.update(Message::MarkDispatching(TaskId(1)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::MarkDispatching(TaskId(1)),
+    ));
     assert!(
         app.dispatching.contains_key(&TaskId(1)),
         "mark_dispatching should record the start time for the watchdog"
@@ -1730,15 +1912,19 @@ fn dispatching_start_time_recorded_on_mark() {
 #[test]
 fn dispatching_start_time_cleared_on_dispatched() {
     let mut app = make_app();
-    app.update(Message::MarkDispatching(TaskId(1)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::MarkDispatching(TaskId(1)),
+    ));
     assert!(app.dispatching.contains_key(&TaskId(1)));
 
-    app.update(Message::Dispatched {
-        id: TaskId(1),
-        worktree: "/wt".to_string(),
-        tmux_window: "win-1".to_string(),
-        switch_focus: false,
-    });
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::Dispatched {
+            id: TaskId(1),
+            worktree: "/wt".to_string(),
+            tmux_window: "win-1".to_string(),
+            switch_focus: false,
+        },
+    ));
 
     assert!(
         !app.dispatching.contains_key(&TaskId(1)),
@@ -1749,7 +1935,9 @@ fn dispatching_start_time_cleared_on_dispatched() {
 #[test]
 fn dispatching_card_renders_with_indicator_text() {
     let mut app = make_app(); // task 1 is Backlog
-    app.update(Message::MarkDispatching(TaskId(1)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::MarkDispatching(TaskId(1)),
+    ));
 
     let buf = render_to_buffer(&mut app, 120, 40);
     assert!(
@@ -1761,7 +1949,9 @@ fn dispatching_card_renders_with_indicator_text() {
 #[test]
 fn spinner_tick_advances_only_on_tick_when_dispatching_nonempty() {
     let mut app = make_app();
-    app.update(Message::MarkDispatching(TaskId(1)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::MarkDispatching(TaskId(1)),
+    ));
     let before = app.spinner_tick;
 
     app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
@@ -1788,7 +1978,9 @@ fn spinner_tick_does_not_advance_when_dispatching_empty() {
 #[test]
 fn spinner_tick_wraps_modulo_ten() {
     let mut app = make_app();
-    app.update(Message::MarkDispatching(TaskId(1)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::MarkDispatching(TaskId(1)),
+    ));
 
     // 10 ticks should bring us back to the starting frame.
     let start = app.spinner_tick;
@@ -1830,8 +2022,12 @@ fn quick_dispatch_status_uses_freshly_created_title() {
         project_id: ProjectId(1),
     };
 
-    app.update(Message::TaskCreated { task });
-    app.update(Message::MarkDispatching(TaskId(42)));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Created {
+        task,
+    }));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::MarkDispatching(TaskId(42)),
+    ));
 
     let msg = app.status.message.as_deref().expect("status set");
     assert!(msg.contains("Quick task"), "got: {msg}");

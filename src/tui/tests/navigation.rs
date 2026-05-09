@@ -25,10 +25,10 @@ fn tasks_by_status_filters() {
 fn move_task_forward() {
     let mut app = make_app();
     // Task 1 is in Backlog; move it forward -> Running
-    let cmds = app.update(Message::MoveTask {
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Move {
         id: TaskId(1),
         direction: MoveDirection::Forward,
-    });
+    }));
     assert_eq!(
         app.board
             .tasks
@@ -39,17 +39,20 @@ fn move_task_forward() {
         TaskStatus::Running
     );
     // Should produce a PersistTask command
-    assert!(matches!(cmds[0], Command::PersistTask(_)));
+    assert!(matches!(
+        cmds[0],
+        Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+    ));
 }
 
 #[test]
 fn move_task_backward_at_start_is_noop() {
     let mut app = make_app();
     // Task 1 is in Backlog; prev() stays Backlog
-    let cmds = app.update(Message::MoveTask {
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Move {
         id: TaskId(1),
         direction: MoveDirection::Backward,
-    });
+    }));
     assert_eq!(
         app.board
             .tasks
@@ -133,19 +136,30 @@ fn delete_task_with_worktree_emits_cleanup() {
     task.worktree = Some("/repo/.worktrees/4-task".to_string());
     task.tmux_window = Some("task-4".to_string());
 
-    let cmds = app.update(Message::DeleteTask(TaskId(4)));
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Delete(
+        TaskId(4),
+    )));
     assert!(app.board.tasks.iter().all(|t| t.id != TaskId(4)));
-    assert!(cmds.iter().any(|c| matches!(c, Command::Cleanup { .. })));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::DeleteTask(TaskId(4)))));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Cleanup { .. })
+    )));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Delete(TaskId(4)))
+    )));
 }
 
 #[test]
 fn delete_task_without_worktree_no_cleanup() {
     let mut app = make_app();
-    let cmds = app.update(Message::DeleteTask(TaskId(1)));
-    assert!(!cmds.iter().any(|c| matches!(c, Command::Cleanup { .. })));
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Delete(
+        TaskId(1),
+    )));
+    assert!(!cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Cleanup { .. })
+    )));
 }
 
 #[test]
@@ -167,15 +181,20 @@ fn move_backward_from_running_detaches_but_keeps_worktree() {
     task.tmux_window = Some("task-4".to_string());
     let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
 
-    let cmds = app.update(Message::MoveTask {
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Move {
         id: TaskId(4),
         direction: MoveDirection::Backward,
-    });
+    }));
 
     // Should emit KillTmuxWindow then PersistTask (no Cleanup)
     assert_eq!(cmds.len(), 2);
-    assert!(matches!(&cmds[0], Command::KillTmuxWindow { window } if window == "task-4"));
-    assert!(matches!(&cmds[1], Command::PersistTask(_)));
+    assert!(
+        matches!(&cmds[0], Command::Task(crate::tui::commands::TaskCommand::KillTmuxWindow { window }) if window == "task-4")
+    );
+    assert!(matches!(
+        &cmds[1],
+        Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+    ));
 
     // Worktree preserved, tmux_window cleared
     let task = app.board.tasks.iter().find(|t| t.id == TaskId(4)).unwrap();
@@ -188,12 +207,15 @@ fn move_backward_from_running_detaches_but_keeps_worktree() {
 fn move_backward_from_running_without_dispatch_fields() {
     let task = make_task(3, TaskStatus::Running);
     let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
-    let cmds = app.update(Message::MoveTask {
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Move {
         id: TaskId(3),
         direction: MoveDirection::Backward,
-    });
+    }));
     assert_eq!(cmds.len(), 1);
-    assert!(matches!(cmds[0], Command::PersistTask(_)));
+    assert!(matches!(
+        cmds[0],
+        Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+    ));
 }
 
 #[test]
@@ -203,10 +225,10 @@ fn move_forward_to_done_enters_confirm_mode() {
     task.tmux_window = None; // session closed, but worktree remains
     let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
 
-    let cmds = app.update(Message::MoveTask {
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Move {
         id: TaskId(5),
         direction: MoveDirection::Forward,
-    });
+    }));
 
     // Should enter confirmation mode, not move immediately
     assert!(cmds.is_empty());
@@ -224,10 +246,10 @@ fn move_forward_to_done_with_live_window_enters_confirm_mode() {
     task.tmux_window = Some("task-5".to_string());
     let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
 
-    let cmds = app.update(Message::MoveTask {
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Move {
         id: TaskId(5),
         direction: MoveDirection::Forward,
-    });
+    }));
 
     // Should enter confirmation mode, not move immediately
     assert!(cmds.is_empty());
@@ -241,7 +263,9 @@ fn g_key_with_live_window_jumps() {
     let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
     app.selection_mut().set_column(2); // Running = nav col 2
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
-    assert!(matches!(&cmds[0], Command::JumpToTmux { window } if window == "task-4"));
+    assert!(
+        matches!(&cmds[0], Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "task-4")
+    );
 }
 
 #[test]
@@ -294,13 +318,16 @@ fn resumed_sets_tmux_window() {
     let mut task = make_task(4, TaskStatus::Running);
     task.worktree = Some("/wt".to_string());
     let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
-    let cmds = app.update(Message::Resumed {
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Resumed {
         id: TaskId(4),
         tmux_window: "win-4".to_string(),
-    });
+    }));
     assert_eq!(app.board.tasks[0].tmux_window.as_deref(), Some("win-4"));
     assert_eq!(cmds.len(), 1);
-    assert!(matches!(&cmds[0], Command::PersistTask(_)));
+    assert!(matches!(
+        &cmds[0],
+        Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+    ));
 }
 
 #[test]
@@ -310,10 +337,10 @@ fn resumed_unknown_id_is_noop() {
         ProjectId(1),
         TEST_TIMEOUT,
     );
-    let cmds = app.update(Message::Resumed {
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Resumed {
         id: TaskId(999),
         tmux_window: "win".to_string(),
-    });
+    }));
     assert!(cmds.is_empty());
 }
 
@@ -324,26 +351,27 @@ fn resumed_sets_status_to_running() {
     task.tmux_window = None;
     let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
 
-    let cmds = app.update(Message::Resumed {
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Resumed {
         id: TaskId(4),
         tmux_window: "task-4".to_string(),
-    });
+    }));
 
     let task = app.board.tasks.iter().find(|t| t.id == TaskId(4)).unwrap();
     assert_eq!(task.status, TaskStatus::Running);
     assert_eq!(task.tmux_window.as_deref(), Some("task-4"));
     assert_eq!(cmds.len(), 1);
-    assert!(matches!(&cmds[0], Command::PersistTask(t) if t.status == TaskStatus::Running));
+    assert!(
+        matches!(&cmds[0], Command::Task(crate::tui::commands::TaskCommand::Persist(t)) if t.status == TaskStatus::Running)
+    );
 }
 
 #[test]
 fn refresh_tasks_replaces_and_clamps() {
     let mut app = make_app();
     app.selection_mut().set_row(1, 1); // row 1 of Backlog (nav col 1, has 2 items)
-    app.update(Message::RefreshTasks(vec![make_task(
-        10,
-        TaskStatus::Backlog,
-    )]));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        vec![make_task(10, TaskStatus::Backlog)],
+    )));
     assert_eq!(app.board.tasks.len(), 1);
     assert_eq!(app.board.tasks[0].id, TaskId(10));
     assert_eq!(app.selection().row(1), 0); // clamped from 1 to 0
@@ -354,7 +382,9 @@ fn refresh_tasks_empty_clamps_all_rows_to_zero() {
     let mut app = make_app();
     app.selection_mut().set_row(0, 1);
     app.selection_mut().set_row(1, 1);
-    app.update(Message::RefreshTasks(vec![]));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        vec![],
+    )));
     assert!(app.board.tasks.is_empty());
     assert!(app.selection().selected_row.iter().all(|&r| r == 0));
 }
@@ -444,7 +474,7 @@ fn select_quick_dispatch_repo_dispatches() {
     ));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(cmds.iter().any(
-        |c| matches!(c, Command::QuickDispatch { ref draft, .. } if draft.repo_path == "/repo2")
+        |c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::QuickDispatch { ref draft, .. }) if draft.repo_path == "/repo2")
     ));
 }
 
@@ -485,8 +515,12 @@ fn space_on_empty_column_is_noop() {
 fn batch_move_forward_moves_all_selected() {
     let mut app = make_app();
     // Select both Backlog tasks
-    app.update(Message::ToggleSelect(TaskId(1)));
-    app.update(Message::ToggleSelect(TaskId(2)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(1)),
+    ));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(2)),
+    ));
 
     // Press m to batch move forward
     let cmds = app.handle_key(make_key(KeyCode::Char('L')));
@@ -503,7 +537,12 @@ fn batch_move_forward_moves_all_selected() {
     // Should have PersistTask commands
     let persist_count = cmds
         .iter()
-        .filter(|c| matches!(c, Command::PersistTask(_)))
+        .filter(|c| {
+            matches!(
+                c,
+                Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+            )
+        })
         .count();
     assert_eq!(persist_count, 2);
 }
@@ -511,8 +550,12 @@ fn batch_move_forward_moves_all_selected() {
 #[test]
 fn batch_move_clears_selection() {
     let mut app = make_app();
-    app.update(Message::ToggleSelect(TaskId(1)));
-    app.update(Message::ToggleSelect(TaskId(2)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(1)),
+    ));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(2)),
+    ));
 
     app.handle_key(make_key(KeyCode::Char('L')));
 
@@ -531,8 +574,12 @@ fn batch_move_backward() {
         TEST_TIMEOUT,
     );
 
-    app.update(Message::ToggleSelect(TaskId(1)));
-    app.update(Message::ToggleSelect(TaskId(2)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(1)),
+    ));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(2)),
+    ));
 
     app.handle_key(make_key(KeyCode::Char('H')));
 
@@ -559,14 +606,17 @@ fn single_task_operations_work_without_selection() {
 #[test]
 fn refresh_tasks_prunes_stale_selections() {
     let mut app = make_app();
-    app.update(Message::ToggleSelect(TaskId(1)));
-    app.update(Message::ToggleSelect(TaskId(99))); // non-existent
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(1)),
+    ));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(99)),
+    )); // non-existent
 
     // Refresh with only task 1
-    app.update(Message::RefreshTasks(vec![make_task(
-        1,
-        TaskStatus::Backlog,
-    )]));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        vec![make_task(1, TaskStatus::Backlog)],
+    )));
 
     assert!(app.select.tasks.contains(&TaskId(1)));
     assert!(!app.select.tasks.contains(&TaskId(99)));
@@ -697,7 +747,10 @@ fn move_backlog_to_running_no_confirmation() {
     assert_eq!(app.input.mode, InputMode::Normal);
     let task = app.board.tasks.iter().find(|t| t.id == TaskId(1)).unwrap();
     assert_eq!(task.status, TaskStatus::Running);
-    assert!(cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+    )));
 }
 
 #[test]
@@ -710,19 +763,25 @@ fn batch_move_mixed_statuses_moves_non_review_immediately() {
         ProjectId(1),
         TEST_TIMEOUT,
     );
-    app.update(Message::ToggleSelect(TaskId(1)));
-    app.update(Message::ToggleSelect(TaskId(2)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(1)),
+    ));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(2)),
+    ));
 
-    let cmds = app.update(Message::BatchMoveTasks {
-        ids: vec![TaskId(1), TaskId(2)],
-        direction: MoveDirection::Forward,
-    });
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::BatchMove {
+            ids: vec![TaskId(1), TaskId(2)],
+            direction: MoveDirection::Forward,
+        },
+    ));
     // Running→Review moved immediately
     let t1 = app.board.tasks.iter().find(|t| t.id == TaskId(1)).unwrap();
     assert_eq!(t1.status, TaskStatus::Review);
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::PersistTask(t) if t.id == TaskId(1))));
+        .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::Persist(t)) if t.id == TaskId(1))));
 
     // Review→Done waiting for confirmation
     let t2 = app.board.tasks.iter().find(|t| t.id == TaskId(2)).unwrap();
@@ -823,7 +882,9 @@ fn refresh_tasks_emits_notification_on_review_transition() {
     // Simulate DB refresh where task 3 moved to Review
     let mut updated = app.board.tasks.to_vec();
     updated[2].status = TaskStatus::Review;
-    let cmds = app.update(Message::RefreshTasks(updated));
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        updated,
+    )));
 
     let notif_cmds: Vec<_> = cmds
         .iter()
@@ -855,7 +916,9 @@ fn refresh_tasks_emits_urgent_notification_on_needs_input() {
 
     let mut updated = app.board.tasks.to_vec();
     updated[2].sub_status = SubStatus::NeedsInput;
-    let cmds = app.update(Message::RefreshTasks(updated));
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        updated,
+    )));
 
     let notif_cmds: Vec<_> = cmds
         .iter()
@@ -883,9 +946,13 @@ fn refresh_tasks_does_not_duplicate_notifications() {
 
     let mut updated = app.board.tasks.to_vec();
     updated[2].status = TaskStatus::Review;
-    app.update(Message::RefreshTasks(updated.clone()));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        updated.clone(),
+    )));
     // Second refresh with same state should not re-notify
-    let cmds = app.update(Message::RefreshTasks(updated));
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        updated,
+    )));
     let notif_cmds: Vec<_> = cmds
         .iter()
         .filter(|c| {
@@ -904,9 +971,13 @@ fn refresh_tasks_does_not_duplicate_needs_input_notifications() {
 
     let mut updated = app.board.tasks.to_vec();
     updated[2].sub_status = SubStatus::NeedsInput;
-    app.update(Message::RefreshTasks(updated.clone()));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        updated.clone(),
+    )));
     // Second refresh with same state should not re-notify
-    let cmds = app.update(Message::RefreshTasks(updated));
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        updated,
+    )));
     let notif_cmds: Vec<_> = cmds
         .iter()
         .filter(|c| {
@@ -927,7 +998,9 @@ fn refresh_tasks_renotifies_needs_input_after_clearing() {
     // First transition to NeedsInput
     let mut updated = app.board.tasks.to_vec();
     updated[2].sub_status = SubStatus::NeedsInput;
-    let cmds = app.update(Message::RefreshTasks(updated.clone()));
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        updated.clone(),
+    )));
     assert_eq!(
         cmds.iter()
             .filter(|c| matches!(
@@ -940,11 +1013,15 @@ fn refresh_tasks_renotifies_needs_input_after_clearing() {
 
     // Clear NeedsInput (agent resumes)
     updated[2].sub_status = SubStatus::Active;
-    app.update(Message::RefreshTasks(updated.clone()));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        updated.clone(),
+    )));
 
     // Second transition to NeedsInput should re-notify
     updated[2].sub_status = SubStatus::NeedsInput;
-    let cmds = app.update(Message::RefreshTasks(updated));
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        updated,
+    )));
     assert_eq!(
         cmds.iter()
             .filter(|c| matches!(
@@ -963,7 +1040,9 @@ fn refresh_tasks_skips_notification_when_disabled() {
 
     let mut updated = app.board.tasks.to_vec();
     updated[2].status = TaskStatus::Review;
-    let cmds = app.update(Message::RefreshTasks(updated));
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        updated,
+    )));
 
     let notif_cmds: Vec<_> = cmds
         .iter()
@@ -999,17 +1078,23 @@ fn refresh_tasks_clears_notified_when_task_leaves_review() {
     // Move to review — triggers notification
     let mut updated = app.board.tasks.to_vec();
     updated[2].status = TaskStatus::Review;
-    app.update(Message::RefreshTasks(updated));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        updated,
+    )));
 
     // Move to done — should clear notified state
     let mut updated2 = app.board.tasks.to_vec();
     updated2[2].status = TaskStatus::Done;
-    app.update(Message::RefreshTasks(updated2));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        updated2,
+    )));
 
     // Move back to review — should re-notify
     let mut updated3 = app.board.tasks.to_vec();
     updated3[2].status = TaskStatus::Review;
-    let cmds = app.update(Message::RefreshTasks(updated3));
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        updated3,
+    )));
     let notif_cmds: Vec<_> = cmds
         .iter()
         .filter(|c| {
@@ -1030,7 +1115,9 @@ fn refresh_tasks_clears_notified_state_even_when_disabled() {
     // Task transitions to review while notifications enabled — gets notified
     let mut updated = app.board.tasks.to_vec();
     updated[2].status = TaskStatus::Review;
-    let cmds = app.update(Message::RefreshTasks(updated));
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        updated,
+    )));
     assert_eq!(
         cmds.iter()
             .filter(|c| matches!(
@@ -1049,7 +1136,9 @@ fn refresh_tasks_clears_notified_state_even_when_disabled() {
     // Task leaves review while disabled
     let mut updated2 = app.board.tasks.to_vec();
     updated2[2].status = TaskStatus::Done;
-    app.update(Message::RefreshTasks(updated2));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        updated2,
+    )));
 
     // Re-enable notifications
     app.update(Message::System(
@@ -1059,7 +1148,9 @@ fn refresh_tasks_clears_notified_state_even_when_disabled() {
     // Task returns to review — should re-notify because notified state was cleared
     let mut updated3 = app.board.tasks.to_vec();
     updated3[2].status = TaskStatus::Review;
-    let cmds = app.update(Message::RefreshTasks(updated3));
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        updated3,
+    )));
     let notif_cmds: Vec<_> = cmds
         .iter()
         .filter(|c| {
@@ -1104,7 +1195,9 @@ fn detail_panel_shows_pr_url() {
         app.update(Message::NavigateColumn(1));
     }
     // The old detail panel is replaced by the TaskDetail overlay (Task 6).
-    app.update(Message::OpenTaskDetail(1));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::OpenDetail(1),
+    ));
     let _buf = render_to_buffer(&mut app, 200, 20);
 }
 
@@ -1175,16 +1268,18 @@ fn recovery_from_stale_resets_substatus_to_active() {
     app.board.tasks[0].sub_status = SubStatus::Stale;
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
 
-    let cmds = app.update(Message::TmuxOutput {
-        id: TaskId(3),
-        output: "new output".to_string(),
-        activity_ts: 1,
-    });
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::TmuxOutput {
+            id: TaskId(3),
+            output: "new output".to_string(),
+            activity_ts: 1,
+        },
+    ));
     let task = app.find_task(TaskId(3)).unwrap();
     assert_eq!(task.sub_status, SubStatus::Active);
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::PersistTask(t) if t.id == TaskId(3))));
+        .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::Persist(t)) if t.id == TaskId(3))));
 }
 
 #[test]
@@ -1197,16 +1292,18 @@ fn recovery_from_crashed_resets_substatus_to_active() {
     app.board.tasks[0].sub_status = SubStatus::Crashed;
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
 
-    let cmds = app.update(Message::TmuxOutput {
-        id: TaskId(3),
-        output: "new output".to_string(),
-        activity_ts: 1,
-    });
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::TmuxOutput {
+            id: TaskId(3),
+            output: "new output".to_string(),
+            activity_ts: 1,
+        },
+    ));
     let task = app.find_task(TaskId(3)).unwrap();
     assert_eq!(task.sub_status, SubStatus::Active);
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::PersistTask(t) if t.id == TaskId(3))));
+        .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::Persist(t)) if t.id == TaskId(3))));
 }
 
 #[test]
@@ -1219,15 +1316,20 @@ fn active_task_output_does_not_emit_persist() {
     app.board.tasks[0].sub_status = SubStatus::Active;
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
 
-    let cmds = app.update(Message::TmuxOutput {
-        id: TaskId(3),
-        output: "output".to_string(),
-        activity_ts: 1,
-    });
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::TmuxOutput {
+            id: TaskId(3),
+            output: "output".to_string(),
+            activity_ts: 1,
+        },
+    ));
     let task = app.find_task(TaskId(3)).unwrap();
     assert_eq!(task.sub_status, SubStatus::Active); // unchanged
                                                     // No PersistTask since sub_status didn't change
-    assert!(!cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
+    assert!(!cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+    )));
 }
 
 #[test]
@@ -1246,7 +1348,10 @@ fn tick_skips_already_stale_tasks() {
     let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
     // Tick should NOT re-emit PersistTask for already-stale tasks
     // (only CaptureTmux and RefreshFromDb expected)
-    assert!(!cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
+    assert!(!cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+    )));
 }
 
 #[test]
@@ -1263,7 +1368,10 @@ fn tick_skips_already_crashed_tasks() {
         .insert(TaskId(3), Instant::now() - Duration::from_secs(301));
 
     let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
-    assert!(!cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
+    assert!(!cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+    )));
 }
 
 #[test]
@@ -1280,7 +1388,10 @@ fn tick_skips_conflict_tasks_for_stale_detection() {
         .insert(TaskId(3), Instant::now() - Duration::from_secs(301));
 
     let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
-    assert!(!cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
+    assert!(!cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+    )));
     assert_eq!(app.board.tasks[0].sub_status, SubStatus::Conflict);
 }
 
@@ -1301,7 +1412,9 @@ fn refresh_from_stale_to_active_resets_last_active_at() {
     refreshed.sub_status = SubStatus::Active;
     refreshed.tmux_window = Some("win-3".to_string());
 
-    app.update(Message::RefreshTasks(vec![refreshed]));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        vec![refreshed],
+    )));
     let elapsed = app.agents.last_active_at[&TaskId(3)].elapsed();
     assert!(elapsed < Duration::from_secs(1), "timer should be reset");
 }
@@ -1322,7 +1435,9 @@ fn refresh_staying_stale_does_not_reset_last_active_at() {
     refreshed.sub_status = SubStatus::Stale;
     refreshed.tmux_window = Some("win-3".to_string());
 
-    app.update(Message::RefreshTasks(vec![refreshed]));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        vec![refreshed],
+    )));
     let elapsed = app.agents.last_active_at[&TaskId(3)].elapsed();
     assert!(
         elapsed > Duration::from_secs(200),
@@ -1347,7 +1462,9 @@ fn refresh_from_crashed_to_active_resets_last_active_at() {
     refreshed.sub_status = SubStatus::Active;
     refreshed.tmux_window = Some("win-3".to_string());
 
-    app.update(Message::RefreshTasks(vec![refreshed]));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        vec![refreshed],
+    )));
     let elapsed = app.agents.last_active_at[&TaskId(3)].elapsed();
     assert!(elapsed < Duration::from_secs(1), "timer should be reset");
 }
@@ -1357,10 +1474,10 @@ fn move_task_forward_resets_substatus() {
     let mut app = make_app();
     let id = TaskId(3); // Running
     app.find_task_mut(id).unwrap().sub_status = SubStatus::Stale;
-    app.update(Message::MoveTask {
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Move {
         id,
         direction: MoveDirection::Forward,
-    });
+    }));
     let task = app.find_task(id).unwrap();
     assert_eq!(task.status, TaskStatus::Review);
     assert_eq!(task.sub_status, SubStatus::AwaitingReview);
@@ -1370,10 +1487,10 @@ fn move_task_forward_resets_substatus() {
 fn move_task_backward_resets_substatus() {
     let mut app = make_app();
     let id = TaskId(3); // Running
-    app.update(Message::MoveTask {
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Move {
         id,
         direction: MoveDirection::Backward,
-    });
+    }));
     let task = app.find_task(id).unwrap();
     assert_eq!(task.status, TaskStatus::Backlog);
     assert_eq!(task.sub_status, SubStatus::None);
@@ -1387,7 +1504,9 @@ fn shift_l_with_mixed_selection_moves_tasks_only() {
         TEST_TIMEOUT,
     );
     app.board.epics = vec![make_epic(10)];
-    app.update(Message::ToggleSelect(TaskId(1)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(1)),
+    ));
     app.update(Message::Epic(
         crate::tui::messages::EpicMessage::ToggleSelect(EpicId(10)),
     ));
@@ -1412,7 +1531,9 @@ fn detach_tmux_single_sets_confirm_mode() {
     );
     app.board.tasks[0].tmux_window = Some("task-1".to_string());
 
-    app.update(Message::DetachTmux(TaskId(1)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::DetachTmux(TaskId(1)),
+    ));
 
     assert!(
         matches!(&app.input.mode, InputMode::ConfirmDetachTmux(ids) if ids == &[TaskId(1)]),
@@ -1432,7 +1553,9 @@ fn detach_tmux_running_task_with_window_is_detachable() {
     );
     app.board.tasks[0].tmux_window = Some("task-1".to_string());
 
-    app.update(Message::DetachTmux(TaskId(1)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::DetachTmux(TaskId(1)),
+    ));
 
     assert!(
         matches!(&app.input.mode, InputMode::ConfirmDetachTmux(ids) if ids == &[TaskId(1)]),
@@ -1450,7 +1573,9 @@ fn detach_tmux_noop_on_task_without_window() {
     );
     // tmux_window is None by default from make_task
 
-    let cmds = app.update(Message::DetachTmux(TaskId(1)));
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::DetachTmux(TaskId(1)),
+    ));
 
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(cmds.is_empty(), "should produce no commands");
@@ -1469,7 +1594,9 @@ fn batch_detach_tmux() {
     app.board.tasks[0].tmux_window = Some("task-1".to_string());
     app.board.tasks[1].tmux_window = Some("task-2".to_string());
 
-    app.update(Message::BatchDetachTmux(vec![TaskId(1), TaskId(2)]));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::BatchDetachTmux(vec![TaskId(1), TaskId(2)]),
+    ));
     let cmds = app.update(Message::Input(
         crate::tui::messages::InputMessage::ConfirmDetachTmux,
     ));
@@ -1485,13 +1612,23 @@ fn batch_detach_tmux() {
 
     let kill_count = cmds
         .iter()
-        .filter(|c| matches!(c, Command::KillTmuxWindow { .. }))
+        .filter(|c| {
+            matches!(
+                c,
+                Command::Task(crate::tui::commands::TaskCommand::KillTmuxWindow { .. })
+            )
+        })
         .count();
     assert_eq!(kill_count, 2, "should kill 2 windows");
 
     let persist_count = cmds
         .iter()
-        .filter(|c| matches!(c, Command::PersistTask(_)))
+        .filter(|c| {
+            matches!(
+                c,
+                Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+            )
+        })
         .count();
     assert_eq!(persist_count, 2, "should persist 2 tasks");
 }
@@ -1625,7 +1762,9 @@ fn is_detached_returns_false_for_conflict() {
 fn mark_dispatching_sets_guard_and_returns_no_commands() {
     let mut app = make_app();
     assert!(!app.is_dispatching(TaskId(1)));
-    let cmds = app.update(Message::MarkDispatching(TaskId(1)));
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::MarkDispatching(TaskId(1)),
+    ));
     assert!(cmds.is_empty());
     assert!(app.is_dispatching(TaskId(1)));
 }
@@ -1666,9 +1805,10 @@ fn tick_skips_capture_for_split_pinned_task() {
 
     // Should NOT emit CaptureTmux for the pinned task (its window is a pane now)
     assert!(
-        !cmds
-            .iter()
-            .any(|c| matches!(c, Command::CaptureTmux { id: TaskId(4), .. })),
+        !cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::CaptureTmux { id: TaskId(4), .. })
+        )),
         "split-pinned task should be excluded from CaptureTmux"
     );
 }
@@ -1682,10 +1822,10 @@ fn resumed_clears_last_error() {
         .last_error
         .insert(TaskId(4), "some crash".to_string());
 
-    app.update(Message::Resumed {
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Resumed {
         id: TaskId(4),
         tmux_window: "win-4".to_string(),
-    });
+    }));
 
     assert!(!app.agents.last_error.contains_key(&TaskId(4)));
 }
@@ -1976,11 +2116,13 @@ fn test_selection_preserved_when_task_above_cursor_moves() {
     assert_eq!(app.selection().row(1), 1);
 
     // Task 1 moves out; Task 2 follows to row 0.
-    app.update(Message::RefreshTasks(vec![
-        make_task(1, TaskStatus::Running),
-        make_task(2, TaskStatus::Backlog),
-        make_task(3, TaskStatus::Backlog),
-    ]));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        vec![
+            make_task(1, TaskStatus::Running),
+            make_task(2, TaskStatus::Backlog),
+            make_task(3, TaskStatus::Backlog),
+        ],
+    )));
 
     // Anchor follows task 2 — stays in Backlog (nav col 1) at row 0.
     assert_eq!(app.selection().column(), 1);
@@ -2004,10 +2146,12 @@ fn test_selection_follows_task_to_new_column() {
     assert_eq!(app.selection().row(1), 0);
 
     // Task 1 dispatched to Running
-    app.update(Message::RefreshTasks(vec![
-        make_task(1, TaskStatus::Running),
-        make_task(2, TaskStatus::Backlog),
-    ]));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        vec![
+            make_task(1, TaskStatus::Running),
+            make_task(2, TaskStatus::Backlog),
+        ],
+    )));
 
     assert_eq!(app.selection().column(), 2); // Running = nav col 2
     assert_eq!(app.selection().row(2), 0);
@@ -2032,10 +2176,12 @@ fn test_selection_falls_back_when_task_deleted() {
     assert_eq!(app.selection().row(1), 2); // Task 3
 
     // Task 3 deleted
-    app.update(Message::RefreshTasks(vec![
-        make_task(1, TaskStatus::Backlog),
-        make_task(2, TaskStatus::Backlog),
-    ]));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        vec![
+            make_task(1, TaskStatus::Backlog),
+            make_task(2, TaskStatus::Backlog),
+        ],
+    )));
 
     assert_eq!(app.selection().column(), 1);
     assert_eq!(app.selection().row(1), 1); // clamped to last valid row
@@ -2056,11 +2202,13 @@ fn test_selection_preserved_on_same_data_refresh() {
     app.update(Message::NavigateRow(1));
     assert_eq!(app.selection().row(1), 1);
 
-    app.update(Message::RefreshTasks(vec![
-        make_task(1, TaskStatus::Backlog),
-        make_task(2, TaskStatus::Backlog),
-        make_task(3, TaskStatus::Backlog),
-    ]));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        vec![
+            make_task(1, TaskStatus::Backlog),
+            make_task(2, TaskStatus::Backlog),
+            make_task(3, TaskStatus::Backlog),
+        ],
+    )));
 
     assert_eq!(app.selection().row(1), 1);
     let items = app.column_items_for_status(TaskStatus::Backlog);
@@ -2082,10 +2230,9 @@ fn test_selection_falls_back_when_column_empties() {
     assert_eq!(app.selection().column(), 2);
 
     // Task 2 deleted — Running column empties, anchor not found
-    app.update(Message::RefreshTasks(vec![make_task(
-        1,
-        TaskStatus::Backlog,
-    )]));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        vec![make_task(1, TaskStatus::Backlog)],
+    )));
 
     // Cursor must be in a valid state: row 0 in the empty Running column
     assert_eq!(app.selection().column(), 2);

@@ -376,7 +376,9 @@ fn render_task_detail_overlay_shows_metadata() {
         ProjectId(1),
         TEST_TIMEOUT,
     );
-    app.update(Message::OpenTaskDetail(1));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::OpenDetail(1),
+    ));
     let _buf = render_to_buffer(&mut app, 120, 20);
 }
 
@@ -573,10 +575,10 @@ fn stress_rapid_status_transitions() {
     // Rapidly move task through all statuses and back.
     // Moving forward will stop at Review because Done requires confirmation.
     for _ in 0..100 {
-        app.update(Message::MoveTask {
+        app.update(Message::Task(crate::tui::messages::TaskMessage::Move {
             id: TaskId(1),
             direction: MoveDirection::Forward,
-        });
+        }));
     }
     // Should be at Review (blocked by Done confirmation)
     assert_eq!(app.board.tasks[0].status, TaskStatus::Review);
@@ -589,10 +591,10 @@ fn stress_rapid_status_transitions() {
     assert_eq!(app.board.tasks[0].status, TaskStatus::Done);
 
     for _ in 0..100 {
-        app.update(Message::MoveTask {
+        app.update(Message::Task(crate::tui::messages::TaskMessage::Move {
             id: TaskId(1),
             direction: MoveDirection::Backward,
-        });
+        }));
     }
     // Should be at Backlog (clamped)
     assert_eq!(app.board.tasks[0].status, TaskStatus::Backlog);
@@ -782,7 +784,9 @@ fn select_all_column_deselects_when_all_selected() {
 #[test]
 fn select_all_column_selects_remaining_when_partially_selected() {
     let mut app = make_app();
-    app.update(Message::ToggleSelect(TaskId(1)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(1)),
+    ));
     assert_eq!(app.select.tasks.len(), 1);
 
     app.update(Message::SelectAllColumn);
@@ -804,7 +808,9 @@ fn select_all_column_noop_on_empty_column() {
 fn select_all_column_only_affects_current_column() {
     let mut app = make_app();
     // TaskId(3) is in Running column, pre-select it
-    app.update(Message::ToggleSelect(TaskId(3)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(3)),
+    ));
     // SelectAllColumn selects all in current (Backlog) column
     app.update(Message::SelectAllColumn);
     assert!(app.select.tasks.contains(&TaskId(1)));
@@ -816,7 +822,9 @@ fn select_all_column_only_affects_current_column() {
 #[test]
 fn select_all_deselect_only_affects_current_column() {
     let mut app = make_app();
-    app.update(Message::ToggleSelect(TaskId(3)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(3)),
+    ));
     app.update(Message::SelectAllColumn);
     assert_eq!(app.select.tasks.len(), 3);
 
@@ -944,7 +952,9 @@ fn reorder_task_down_swaps_sort_order() {
     app.board.tasks = vec![t1, t2];
 
     // Cursor on first task (row 0, column 0 = Backlog)
-    let cmds = app.update(Message::ReorderItem(1));
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ReorderItem(1),
+    ));
 
     // After reorder, task 1 should have a higher sort value than task 2
     let t1 = app.find_task(TaskId(1)).unwrap();
@@ -958,7 +968,10 @@ fn reorder_task_down_swaps_sort_order() {
     // Should emit PersistTask for both
     assert_eq!(
         cmds.iter()
-            .filter(|c| matches!(c, Command::PersistTask(_)))
+            .filter(|c| matches!(
+                c,
+                Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+            ))
             .count(),
         2
     );
@@ -972,7 +985,9 @@ fn reorder_task_up_at_top_is_noop() {
     let t1 = make_task(1, TaskStatus::Backlog);
     app.board.tasks = vec![t1];
 
-    let cmds = app.update(Message::ReorderItem(-1));
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ReorderItem(-1),
+    ));
     assert!(cmds.is_empty());
 }
 
@@ -982,7 +997,9 @@ fn reorder_task_down_at_bottom_is_noop() {
     let t1 = make_task(1, TaskStatus::Backlog);
     app.board.tasks = vec![t1];
 
-    let cmds = app.update(Message::ReorderItem(1));
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ReorderItem(1),
+    ));
     assert!(cmds.is_empty());
 }
 
@@ -995,7 +1012,9 @@ fn reorder_task_up_swaps_sort_order() {
 
     // Move cursor to row 1 (second task), then reorder up
     app.selection_mut().set_row(1, 1);
-    let cmds = app.update(Message::ReorderItem(-1));
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ReorderItem(-1),
+    ));
 
     // After reorder, task 2 should have a lower sort value than task 1
     let t1 = app.find_task(TaskId(1)).unwrap();
@@ -1008,7 +1027,10 @@ fn reorder_task_up_swaps_sort_order() {
     );
     assert_eq!(
         cmds.iter()
-            .filter(|c| matches!(c, Command::PersistTask(_)))
+            .filter(|c| matches!(
+                c,
+                Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+            ))
             .count(),
         2
     );
@@ -1070,7 +1092,9 @@ fn render_detail_shows_sub_status() {
     app.update(Message::NavigateColumn(1));
     // The old detail panel is replaced by the TaskDetail overlay (Task 6).
     // Placeholder: verify that the overlay renderer does not crash.
-    app.update(Message::OpenTaskDetail(1));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::OpenDetail(1),
+    ));
     let _buf = render_to_buffer(&mut app, 160, 30);
 }
 
@@ -1242,7 +1266,9 @@ fn render_detail_task_with_tag_shows_tag() {
     task.tag = Some(TaskTag::Bug);
     let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
     // The old detail panel is replaced by the TaskDetail overlay (Task 6).
-    app.update(Message::OpenTaskDetail(1));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::OpenDetail(1),
+    ));
     let _buf = render_to_buffer(&mut app, 120, 30);
 }
 
@@ -1254,7 +1280,9 @@ fn render_detail_task_with_pr_url() {
     // Navigate to Review column (index 2)
     app.update(Message::NavigateColumn(2));
     // The old detail panel is replaced by the TaskDetail overlay (Task 6).
-    app.update(Message::OpenTaskDetail(1));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::OpenDetail(1),
+    ));
     let _buf = render_to_buffer(&mut app, 160, 30);
 }
 
@@ -1333,7 +1361,10 @@ fn handle_key_normal_reorder_j_down() {
     app.selection_mut().set_row(1, 0);
     let cmds = app.handle_key(make_key(KeyCode::Char('J')));
     // Reorder should produce a persist command
-    assert!(cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+    )));
 }
 
 #[test]
@@ -1342,7 +1373,10 @@ fn handle_key_normal_reorder_k_up() {
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 1);
     let cmds = app.handle_key(make_key(KeyCode::Char('K')));
-    assert!(cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+    )));
 }
 
 #[test]
@@ -1474,10 +1508,12 @@ fn test_on_select_all_preserved_on_refresh() {
     app.update(Message::NavigateRow(-1));
     assert!(app.selection().on_select_all);
 
-    app.update(Message::RefreshTasks(vec![
-        make_task(1, TaskStatus::Backlog),
-        make_task(2, TaskStatus::Backlog),
-    ]));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        vec![
+            make_task(1, TaskStatus::Backlog),
+            make_task(2, TaskStatus::Backlog),
+        ],
+    )));
 
     assert!(app.selection().on_select_all);
     assert_eq!(app.selection().anchor, None);

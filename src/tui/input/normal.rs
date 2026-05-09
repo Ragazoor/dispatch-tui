@@ -138,8 +138,12 @@ impl App {
             KeyCode::Char('l') | KeyCode::Right => self.update(Message::NavigateColumn(1)),
             KeyCode::Char('j') | KeyCode::Down => self.update(Message::NavigateRow(1)),
             KeyCode::Char('k') | KeyCode::Up => self.update(Message::NavigateRow(-1)),
-            KeyCode::Char('J') => self.update(Message::ReorderItem(1)),
-            KeyCode::Char('K') => self.update(Message::ReorderItem(-1)),
+            KeyCode::Char('J') => self.update(Message::Task(
+                crate::tui::messages::TaskMessage::ReorderItem(1),
+            )),
+            KeyCode::Char('K') => self.update(Message::Task(
+                crate::tui::messages::TaskMessage::ReorderItem(-1),
+            )),
 
             KeyCode::Char('n') => self.update(Message::Input(
                 crate::tui::messages::InputMessage::StartNewTask,
@@ -206,9 +210,11 @@ impl App {
                         }
                     }
                     if let Some(window) = &task.tmux_window {
-                        vec![Command::JumpToTmux {
-                            window: window.clone(),
-                        }]
+                        vec![Command::Task(
+                            crate::tui::commands::TaskCommand::JumpToTmux {
+                                window: window.clone(),
+                            },
+                        )]
                     } else {
                         self.update(Message::System(
                             crate::tui::messages::SystemMessage::StatusInfo(
@@ -258,7 +264,9 @@ impl App {
                         .and_then(|t| t.tmux_window.clone());
 
                     if let Some(window) = window {
-                        vec![Command::JumpToTmux { window }]
+                        vec![Command::Task(
+                            crate::tui::commands::TaskCommand::JumpToTmux { window },
+                        )]
                     } else {
                         self.update(Message::System(
                             crate::tui::messages::SystemMessage::StatusInfo(
@@ -295,7 +303,11 @@ impl App {
             KeyCode::Char('a') => self.update(Message::SelectAllColumn),
 
             KeyCode::Char(' ') => self.dispatch_selection(
-                |s, id| s.update(Message::ToggleSelect(id)),
+                |s, id| {
+                    s.update(Message::Task(
+                        crate::tui::messages::TaskMessage::ToggleSelect(id),
+                    ))
+                },
                 |s, id| {
                     s.update(Message::Epic(
                         crate::tui::messages::EpicMessage::ToggleSelect(id),
@@ -309,7 +321,9 @@ impl App {
                 }
                 if let Some(task) = self.selected_task() {
                     let id = task.id.0;
-                    return self.update(Message::OpenTaskDetail(id));
+                    return self.update(Message::Task(
+                        crate::tui::messages::TaskMessage::OpenDetail(id),
+                    ));
                 }
                 vec![]
             }
@@ -374,7 +388,9 @@ impl App {
                     )),
                     1 => {
                         let repo_path = self.board.repo_paths[0].clone();
-                        self.update(Message::QuickDispatch { repo_path, epic_id })
+                        self.update(Message::Task(
+                            crate::tui::messages::TaskMessage::QuickDispatch { repo_path, epic_id },
+                        ))
                     }
                     _ => self.update(Message::Input(
                         crate::tui::messages::InputMessage::StartQuickDispatchSelection,
@@ -393,7 +409,9 @@ impl App {
                 }
             }
 
-            KeyCode::Char('F') => self.update(Message::ToggleFlattened),
+            KeyCode::Char('F') => self.update(Message::Task(
+                crate::tui::messages::TaskMessage::ToggleFlattened,
+            )),
 
             KeyCode::Char('I') => self.update(Message::Learning(LearningMessage::Open)),
 
@@ -406,11 +424,15 @@ impl App {
             KeyCode::Char('T') => {
                 if !self.select.tasks.is_empty() {
                     let ids: Vec<_> = self.select.tasks.iter().copied().collect();
-                    self.update(Message::BatchDetachTmux(ids))
+                    self.update(Message::Task(
+                        crate::tui::messages::TaskMessage::BatchDetachTmux(ids),
+                    ))
                 } else if let Some(task) = self.selected_task() {
                     if task.tmux_window.is_some() {
                         let id = task.id;
-                        self.update(Message::DetachTmux(id))
+                        self.update(Message::Task(
+                            crate::tui::messages::TaskMessage::DetachTmux(id),
+                        ))
                     } else {
                         vec![]
                     }

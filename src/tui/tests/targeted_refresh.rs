@@ -25,7 +25,7 @@ fn task_updated_replaces_existing_row() {
     updated.sub_status = SubStatus::default_for(TaskStatus::Running);
     let other_count_before = app.board.tasks.len();
 
-    app.update(Message::TaskUpdated(updated));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Updated(updated)));
 
     let now = app
         .board
@@ -47,7 +47,7 @@ fn task_updated_appends_new_task() {
     let before = app.board.tasks.len();
     let new_task = make_task(99, TaskStatus::Backlog);
 
-    app.update(Message::TaskUpdated(new_task));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Updated(new_task)));
 
     assert_eq!(app.board.tasks.len(), before + 1);
     assert!(app.board.tasks.iter().any(|t| t.id == TaskId(99)));
@@ -100,7 +100,7 @@ fn task_updated_fires_review_notification_on_transition() {
     updated.status = TaskStatus::Review;
     updated.sub_status = SubStatus::default_for(TaskStatus::Review);
 
-    let cmds = app.update(Message::TaskUpdated(updated));
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Updated(updated)));
 
     assert!(
         cmds.iter()

@@ -16,13 +16,18 @@ fn finish_complete_moves_to_done() {
         TEST_TIMEOUT,
     );
 
-    let cmds = app.update(Message::FinishComplete(TaskId(1)));
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::FinishComplete(TaskId(1)),
+    ));
     let task = app.board.tasks.iter().find(|t| t.id == TaskId(1)).unwrap();
     assert_eq!(task.status, TaskStatus::Done);
     // Worktree is preserved — will be cleaned up during archive
     assert!(task.worktree.is_some());
     assert!(task.tmux_window.is_none());
-    assert!(cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+    )));
 }
 
 #[test]
@@ -37,11 +42,13 @@ fn finish_failed_with_conflict_sets_flag() {
         TEST_TIMEOUT,
     );
 
-    app.update(Message::FinishFailed {
-        id: TaskId(1),
-        error: "Rebase conflict".to_string(),
-        is_conflict: true,
-    });
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::FinishFailed {
+            id: TaskId(1),
+            error: "Rebase conflict".to_string(),
+            is_conflict: true,
+        },
+    ));
     assert!(app
         .find_task(TaskId(1))
         .is_some_and(|t| t.sub_status == SubStatus::Conflict));
@@ -65,11 +72,13 @@ fn finish_failed_without_conflict_does_not_set_flag() {
         TEST_TIMEOUT,
     );
 
-    app.update(Message::FinishFailed {
-        id: TaskId(1),
-        error: "Not on main".to_string(),
-        is_conflict: false,
-    });
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::FinishFailed {
+            id: TaskId(1),
+            error: "Not on main".to_string(),
+            is_conflict: false,
+        },
+    ));
     assert!(!app
         .find_task(TaskId(1))
         .is_some_and(|t| t.sub_status == SubStatus::Conflict));
@@ -89,7 +98,10 @@ fn confirm_done_y_moves_task() {
     assert_eq!(app.input.mode, InputMode::Normal);
     let task = app.board.tasks.iter().find(|t| t.id == TaskId(1)).unwrap();
     assert_eq!(task.status, TaskStatus::Done);
-    assert!(cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+    )));
 }
 
 #[test]
@@ -124,21 +136,25 @@ fn confirm_done_kills_tmux_but_preserves_worktree() {
     app.selection_mut().set_column(3);
 
     // Enter confirm mode and confirm
-    app.update(Message::MoveTask {
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Move {
         id: TaskId(1),
         direction: MoveDirection::Forward,
-    });
+    }));
     assert!(matches!(app.input.mode, InputMode::ConfirmDone(TaskId(1))));
 
     let cmds = app.update(Message::Input(
         crate::tui::messages::InputMessage::ConfirmDone,
     ));
     // No Cleanup command — worktree stays for archive to clean up later
-    assert!(!cmds.iter().any(|c| matches!(c, Command::Cleanup { .. })));
+    assert!(!cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Cleanup { .. })
+    )));
     // Tmux window should be killed
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::KillTmuxWindow { .. })));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::KillTmuxWindow { .. })
+    )));
     let task = app.board.tasks.iter().find(|t| t.id == TaskId(1)).unwrap();
     assert_eq!(task.status, TaskStatus::Done);
     // Worktree is preserved (not taken), tmux_window cleared
@@ -157,8 +173,12 @@ fn batch_move_with_review_tasks_enters_confirm_done() {
         TEST_TIMEOUT,
     );
     app.selection_mut().set_column(3);
-    app.update(Message::ToggleSelect(TaskId(1)));
-    app.update(Message::ToggleSelect(TaskId(2)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(1)),
+    ));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(2)),
+    ));
 
     let cmds = app.handle_key(make_key(KeyCode::Char('L')));
     assert!(cmds.is_empty());
@@ -177,14 +197,20 @@ fn batch_confirm_done_moves_all_review_tasks() {
         TEST_TIMEOUT,
     );
     app.selection_mut().set_column(3);
-    app.update(Message::ToggleSelect(TaskId(1)));
-    app.update(Message::ToggleSelect(TaskId(2)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(1)),
+    ));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(2)),
+    ));
 
     // Trigger batch move
-    app.update(Message::BatchMoveTasks {
-        ids: vec![TaskId(1), TaskId(2)],
-        direction: MoveDirection::Forward,
-    });
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::BatchMove {
+            ids: vec![TaskId(1), TaskId(2)],
+            direction: MoveDirection::Forward,
+        },
+    ));
     // Confirm
     let cmds = app.update(Message::Input(
         crate::tui::messages::InputMessage::ConfirmDone,
@@ -253,7 +279,10 @@ fn wrap_up_r_emits_finish_command() {
         TaskId(1),
     )));
     let cmds = app.update(Message::WrapUp(crate::tui::messages::WrapUpMessage::Rebase));
-    assert!(cmds.iter().any(|c| matches!(c, Command::Finish { .. })));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Finish { .. })
+    )));
     assert_eq!(app.input.mode, InputMode::Normal);
 }
 
@@ -441,7 +470,7 @@ fn epic_wrap_up_rebase_creates_queue_and_emits_first_finish() {
     assert_eq!(queue.current, Some(TaskId(2)));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::Finish { id, .. } if *id == TaskId(2))));
+        .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::Finish { id, .. }) if *id == TaskId(2))));
 }
 
 #[test]
@@ -458,14 +487,16 @@ fn epic_wrap_up_finish_complete_advances_queue() {
     ));
 
     // First task completes
-    let cmds = app.update(Message::FinishComplete(TaskId(2)));
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::FinishComplete(TaskId(2)),
+    ));
 
     let queue = app.merge_queue.as_ref().expect("queue should still exist");
     assert_eq!(queue.completed, 1);
     assert_eq!(queue.current, Some(TaskId(1)));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::Finish { id, .. } if *id == TaskId(1))));
+        .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::Finish { id, .. }) if *id == TaskId(1))));
 }
 
 #[test]
@@ -481,8 +512,12 @@ fn epic_wrap_up_all_complete_clears_queue() {
         crate::tui::messages::WrapUpMessage::EpicRebase,
     ));
 
-    app.update(Message::FinishComplete(TaskId(2)));
-    app.update(Message::FinishComplete(TaskId(1)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::FinishComplete(TaskId(2)),
+    ));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::FinishComplete(TaskId(1)),
+    ));
 
     assert!(
         app.merge_queue.is_none(),
@@ -503,11 +538,13 @@ fn epic_wrap_up_finish_failed_pauses_queue() {
         crate::tui::messages::WrapUpMessage::EpicRebase,
     ));
 
-    app.update(Message::FinishFailed {
-        id: TaskId(2),
-        error: "rebase conflict".to_string(),
-        is_conflict: true,
-    });
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::FinishFailed {
+            id: TaskId(2),
+            error: "rebase conflict".to_string(),
+            is_conflict: true,
+        },
+    ));
 
     let queue = app.merge_queue.as_ref().expect("queue should still exist");
     assert_eq!(queue.failed, Some(TaskId(2)));
@@ -552,7 +589,7 @@ fn handle_key_confirm_done_yes() {
 
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert_eq!(*app.mode(), InputMode::Normal);
-    assert!(cmds.iter().any(|c| matches!(c, Command::PersistTask(t) if t.id == TaskId(3) && t.status == TaskStatus::Done)));
+    assert!(cmds.iter().any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::Persist(t)) if t.id == TaskId(3) && t.status == TaskStatus::Done)));
 }
 
 #[test]
@@ -575,7 +612,7 @@ fn handle_key_confirm_wrap_up_rebase() {
     let cmds = app.handle_key(make_key(KeyCode::Char('r')));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::Finish { id, .. } if *id == TaskId(10))));
+        .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::Finish { id, .. }) if *id == TaskId(10))));
     assert_eq!(*app.mode(), InputMode::Normal);
 }
 

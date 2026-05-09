@@ -48,14 +48,14 @@ impl App {
         self.archived_tasks()
             .get(self.selected_archive_row())
             .map(|t| t.id)
-            .map(|id| self.update(Message::DeleteTask(id)))
+            .map(|id| self.update(Message::Task(crate::tui::messages::TaskMessage::Delete(id))))
             .unwrap_or_default()
     }
 
     pub(in crate::tui) fn confirm_delete_selected(&mut self) -> Vec<Command> {
         self.selected_task()
             .map(|t| t.id)
-            .map(|id| self.update(Message::DeleteTask(id)))
+            .map(|id| self.update(Message::Task(crate::tui::messages::TaskMessage::Delete(id))))
             .unwrap_or_default()
     }
 
@@ -65,8 +65,12 @@ impl App {
         id: TaskId,
     ) -> Vec<Command> {
         match key.code {
-            KeyCode::Char('r') => self.update(Message::RetryResume(id)),
-            KeyCode::Char('f') => self.update(Message::RetryFresh(id)),
+            KeyCode::Char('r') => self.update(Message::Task(
+                crate::tui::messages::TaskMessage::RetryResume(id),
+            )),
+            KeyCode::Char('f') => self.update(Message::Task(
+                crate::tui::messages::TaskMessage::RetryFresh(id),
+            )),
             KeyCode::Esc => self.update(Message::Input(
                 crate::tui::messages::InputMessage::CancelRetry,
             )),
@@ -84,7 +88,9 @@ impl App {
                 let mut cmds = Vec::new();
                 if !s.select.tasks.is_empty() {
                     let ids: Vec<_> = s.select.tasks.iter().copied().collect();
-                    cmds.extend(s.update(Message::BatchArchiveTasks(ids)));
+                    cmds.extend(s.update(Message::Task(
+                        crate::tui::messages::TaskMessage::BatchArchive(ids),
+                    )));
                 }
                 if !s.select.epics.is_empty() {
                     let ids: Vec<_> = s.select.epics.iter().copied().collect();
@@ -94,7 +100,9 @@ impl App {
                 }
                 cmds
             } else if let Some(id) = task_id {
-                s.update(Message::ArchiveTask(id))
+                s.update(Message::Task(crate::tui::messages::TaskMessage::Archive(
+                    id,
+                )))
             } else {
                 vec![]
             }

@@ -36,7 +36,9 @@ impl App {
         count: usize,
     ) -> Vec<Command> {
         self.set_status(format!("Feed for '{epic_title}': {count} task(s) synced"));
-        vec![Command::RefreshFromDb]
+        vec![Command::Task(
+            crate::tui::commands::TaskCommand::RefreshFromDb,
+        )]
     }
 
     pub(in crate::tui) fn handle_feed_failed(

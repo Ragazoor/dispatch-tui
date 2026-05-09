@@ -1027,12 +1027,12 @@ impl App {
     /// Returns `None` if the task has no worktree (still clears tmux_window).
     pub(in crate::tui) fn take_cleanup(task: &mut Task) -> Option<Command> {
         match task.worktree.take() {
-            Some(wt) => Some(Command::Cleanup {
+            Some(wt) => Some(Command::Task(crate::tui::commands::TaskCommand::Cleanup {
                 id: task.id,
                 repo_path: task.repo_path.clone(),
                 worktree: wt,
                 tmux_window: task.tmux_window.take(),
-            }),
+            })),
             None => {
                 task.tmux_window.take();
                 None
@@ -1043,9 +1043,9 @@ impl App {
     /// Take the tmux_window from a task and build a KillTmuxWindow command.
     /// Leaves the worktree intact so the task can be resumed later.
     pub(in crate::tui) fn take_detach(task: &mut Task) -> Option<Command> {
-        task.tmux_window
-            .take()
-            .map(|window| Command::KillTmuxWindow { window })
+        task.tmux_window.take().map(|window| {
+            Command::Task(crate::tui::commands::TaskCommand::KillTmuxWindow { window })
+        })
     }
 
     /// Process a message and return a list of side-effect commands.
@@ -1098,14 +1098,18 @@ impl App {
             self.clear_agent_tracking(id);
             if let Some(task) = self.find_task_mut(id) {
                 if let Some(window) = task.tmux_window.take() {
-                    cmds.push(Command::KillTmuxWindow { window });
+                    cmds.push(Command::Task(
+                        crate::tui::commands::TaskCommand::KillTmuxWindow { window },
+                    ));
                 }
                 // Reset sub_status when detaching (e.g. Stale/Crashed -> default)
                 if task.sub_status == SubStatus::Stale || task.sub_status == SubStatus::Crashed {
                     task.sub_status = SubStatus::default_for(task.status);
                 }
                 let task_clone = task.clone();
-                cmds.push(Command::PersistTask(task_clone));
+                cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
+                    task_clone,
+                )));
             }
         }
         cmds

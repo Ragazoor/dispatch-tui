@@ -8,9 +8,13 @@ use ratatui::style::{Color, Modifier};
 fn toggle_flattened_message_flips_state() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     assert!(!app.board.flattened);
-    app.update(Message::ToggleFlattened);
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleFlattened,
+    ));
     assert!(app.board.flattened);
-    app.update(Message::ToggleFlattened);
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleFlattened,
+    ));
     assert!(!app.board.flattened);
 }
 
@@ -239,7 +243,9 @@ fn toggle_flattened_clamps_selection_when_epic_disappears() {
 
     // Toggle flatten: epic card disappears, subtask appears in its place.
     // Count stays 1 so row 0 is still valid, but now points at the task.
-    app.update(Message::ToggleFlattened);
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleFlattened,
+    ));
     assert!(app.board.flattened);
     assert_eq!(app.selected_row()[0], 0);
 
@@ -248,7 +254,9 @@ fn toggle_flattened_clamps_selection_when_epic_disappears() {
     // un-flattening, the column has one epic + whatever standalone tasks
     // (none). Row must be clamped to 0.
     app.selection_mut().set_row(1, 5);
-    app.update(Message::ToggleFlattened);
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleFlattened,
+    ));
     assert!(!app.board.flattened);
     let count = app.column_items_for_status(TaskStatus::Backlog).len();
     assert!(count > 0);
@@ -259,7 +267,9 @@ fn toggle_flattened_clamps_selection_when_epic_disappears() {
 fn flattened_survives_enter_and_exit_epic() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
-    app.update(Message::ToggleFlattened);
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleFlattened,
+    ));
     assert!(app.board.flattened);
 
     app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
@@ -274,13 +284,14 @@ fn flattened_survives_enter_and_exit_epic() {
 #[test]
 fn flattened_survives_refresh_tasks() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
-    app.update(Message::ToggleFlattened);
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleFlattened,
+    ));
     assert!(app.board.flattened);
 
-    app.update(Message::RefreshTasks(vec![make_task(
-        1,
-        TaskStatus::Backlog,
-    )]));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        vec![make_task(1, TaskStatus::Backlog)],
+    )));
     assert!(app.board.flattened);
 }
 
@@ -925,7 +936,9 @@ fn shift_g_on_epic_jumps_to_review_subtask() {
     app.selection_mut().set_row(3, 0);
 
     let cmds = app.handle_key(make_key(KeyCode::Char('G')));
-    assert!(matches!(&cmds[0], Command::JumpToTmux { window } if window == "win-1"));
+    assert!(
+        matches!(&cmds[0], Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "win-1")
+    );
 }
 
 #[test]
@@ -959,7 +972,9 @@ fn shift_g_on_epic_jumps_to_blocked_running_subtask() {
     app.selection_mut().set_row(2, 0);
 
     let cmds = app.handle_key(make_key(KeyCode::Char('G')));
-    assert!(matches!(&cmds[0], Command::JumpToTmux { window } if window == "win-blocked"));
+    assert!(
+        matches!(&cmds[0], Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "win-blocked")
+    );
 }
 
 #[test]
@@ -1005,7 +1020,9 @@ fn shift_g_on_epic_prefers_blocked_running_over_review() {
     app.selection_mut().set_row(2, 0);
 
     let cmds = app.handle_key(make_key(KeyCode::Char('G')));
-    assert!(matches!(&cmds[0], Command::JumpToTmux { window } if window == "win-running"));
+    assert!(
+        matches!(&cmds[0], Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "win-running")
+    );
 }
 
 #[test]
@@ -1030,7 +1047,9 @@ fn shift_g_on_epic_active_running_falls_through_to_review() {
     app.selection_mut().set_row(2, 0);
 
     let cmds = app.handle_key(make_key(KeyCode::Char('G')));
-    assert!(matches!(&cmds[0], Command::JumpToTmux { window } if window == "win-review"));
+    assert!(
+        matches!(&cmds[0], Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "win-review")
+    );
 }
 
 #[test]
@@ -1058,7 +1077,9 @@ fn shift_g_on_epic_picks_lowest_sort_order() {
     app.selection_mut().set_row(2, 0);
 
     let cmds = app.handle_key(make_key(KeyCode::Char('G')));
-    assert!(matches!(&cmds[0], Command::JumpToTmux { window } if window == "win-low"));
+    assert!(
+        matches!(&cmds[0], Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "win-low")
+    );
 }
 
 #[test]
@@ -2113,7 +2134,9 @@ fn test_epic_anchor_preserved_on_refresh() {
     ));
 
     // Refresh same data
-    app.update(Message::RefreshTasks(tasks));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+        tasks,
+    )));
     app.update(Message::Epic(crate::tui::messages::EpicMessage::Refresh(
         epics,
     )));
@@ -2184,8 +2207,12 @@ fn test_selection_survives_flatten_toggle() {
         _ => panic!("expected task at cursor"),
     };
 
-    app.update(Message::ToggleFlattened);
-    app.update(Message::ToggleFlattened);
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleFlattened,
+    ));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleFlattened,
+    ));
 
     let items = app.column_items_for_status(TaskStatus::Backlog);
     let post_id: TaskId = match &items[app.selection().row(0)] {
@@ -2271,7 +2298,10 @@ fn feed_refreshed_sets_status_and_returns_refresh_from_db() {
         "status should mention task count, got: {status}"
     );
     assert!(
-        cmds.iter().any(|c| matches!(c, Command::RefreshFromDb)),
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::RefreshFromDb)
+        )),
         "should return RefreshFromDb command"
     );
 }
@@ -2288,7 +2318,10 @@ fn feed_refreshed_zero_items_still_succeeds() {
     ));
 
     assert!(
-        cmds.iter().any(|c| matches!(c, Command::RefreshFromDb)),
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::RefreshFromDb)
+        )),
         "zero-item refresh should still return RefreshFromDb"
     );
 }
@@ -2312,7 +2345,10 @@ fn feed_failed_sets_status_no_refresh() {
         "status should mention the error, got: {status}"
     );
     assert!(
-        !cmds.iter().any(|c| matches!(c, Command::RefreshFromDb)),
+        !cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::RefreshFromDb)
+        )),
         "failed feed should NOT return RefreshFromDb"
     );
 }

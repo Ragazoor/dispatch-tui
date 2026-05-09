@@ -23,7 +23,9 @@ impl App {
             if !in_queue {
                 self.set_status(format!("Task {} finished", id));
             }
-            vec![Command::PersistTask(task_clone)]
+            vec![Command::Task(crate::tui::commands::TaskCommand::Persist(
+                task_clone,
+            ))]
         } else {
             vec![]
         };
@@ -53,10 +55,12 @@ impl App {
             if let Some(task) = self.find_task_mut(id) {
                 task.sub_status = SubStatus::Conflict;
             }
-            cmds.push(Command::PatchSubStatus {
-                id,
-                sub_status: SubStatus::Conflict,
-            });
+            cmds.push(Command::Task(
+                crate::tui::commands::TaskCommand::PatchSubStatus {
+                    id,
+                    sub_status: SubStatus::Conflict,
+                },
+            ));
         }
 
         if let Some(q) = &mut self.merge_queue {
@@ -122,14 +126,14 @@ impl App {
                 Some(b) => b,
                 None => return vec![],
             };
-            vec![Command::Finish {
+            vec![Command::Task(crate::tui::commands::TaskCommand::Finish {
                 id,
                 repo_path: task.repo_path.clone(),
                 branch,
                 base_branch: task.base_branch.clone(),
                 worktree,
                 tmux_window: task.tmux_window.clone(),
-            }]
+            })]
         } else {
             vec![]
         }

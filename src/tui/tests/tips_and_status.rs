@@ -10,10 +10,10 @@ fn resumed_sets_success_status_message() {
     task.worktree = Some("/wt".to_string());
     let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
 
-    app.update(Message::Resumed {
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Resumed {
         id: TaskId(4),
         tmux_window: "win-4".to_string(),
-    });
+    }));
 
     assert_eq!(app.status.message.as_deref(), Some("Task 4 resumed"),);
 }
@@ -21,15 +21,23 @@ fn resumed_sets_success_status_message() {
 #[test]
 fn batch_move_multiple_steps() {
     let mut app = make_app();
-    app.update(Message::ToggleSelect(TaskId(1)));
-    app.update(Message::ToggleSelect(TaskId(2)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(1)),
+    ));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(2)),
+    ));
 
     // Move Backlog -> Running (clears selection)
     app.handle_key(make_key(KeyCode::Char('L')));
 
     // Re-select and move Running -> Review
-    app.update(Message::ToggleSelect(TaskId(1)));
-    app.update(Message::ToggleSelect(TaskId(2)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(1)),
+    ));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(2)),
+    ));
     app.handle_key(make_key(KeyCode::Char('L')));
 
     assert_eq!(app.find_task(TaskId(1)).unwrap().status, TaskStatus::Review);
@@ -1120,7 +1128,9 @@ fn clear_status_resets_message_sticky() {
 #[test]
 fn dispatching_status_message_set_on_mark_dispatching() {
     let mut app = make_app(); // task 1 has title "Task 1"
-    app.update(Message::MarkDispatching(TaskId(1)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::MarkDispatching(TaskId(1)),
+    ));
 
     let msg = app.status.message.as_deref().expect("status set");
     assert!(msg.contains("Task 1"), "got: {msg}");
@@ -1131,7 +1141,9 @@ fn dispatching_status_message_set_on_mark_dispatching() {
 #[test]
 fn dispatching_status_does_not_expire_on_tick() {
     let mut app = make_app();
-    app.update(Message::MarkDispatching(TaskId(1)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::MarkDispatching(TaskId(1)),
+    ));
     // Backdate so a non-sticky message would auto-clear
     app.status.message_set_at = Some(Instant::now() - Duration::from_secs(10));
 
@@ -1145,15 +1157,19 @@ fn dispatching_status_does_not_expire_on_tick() {
 #[test]
 fn dispatching_status_cleared_on_dispatched() {
     let mut app = make_app();
-    app.update(Message::MarkDispatching(TaskId(1)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::MarkDispatching(TaskId(1)),
+    ));
     assert!(app.status.message.is_some());
 
-    app.update(Message::Dispatched {
-        id: TaskId(1),
-        worktree: "/wt".to_string(),
-        tmux_window: "win-1".to_string(),
-        switch_focus: false,
-    });
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::Dispatched {
+            id: TaskId(1),
+            worktree: "/wt".to_string(),
+            tmux_window: "win-1".to_string(),
+            switch_focus: false,
+        },
+    ));
 
     assert!(app.status.message.is_none());
     assert!(!app.status.message_sticky);
@@ -1162,10 +1178,14 @@ fn dispatching_status_cleared_on_dispatched() {
 #[test]
 fn dispatching_status_cleared_on_dispatch_failed() {
     let mut app = make_app();
-    app.update(Message::MarkDispatching(TaskId(1)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::MarkDispatching(TaskId(1)),
+    ));
     assert!(app.status.message.is_some());
 
-    app.update(Message::DispatchFailed(TaskId(1)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::DispatchFailed(TaskId(1)),
+    ));
 
     assert!(app.status.message.is_none());
     assert!(!app.status.message_sticky);
@@ -1174,8 +1194,12 @@ fn dispatching_status_cleared_on_dispatch_failed() {
 #[test]
 fn dispatching_status_pluralizes_when_multiple() {
     let mut app = make_app();
-    app.update(Message::MarkDispatching(TaskId(1)));
-    app.update(Message::MarkDispatching(TaskId(2)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::MarkDispatching(TaskId(1)),
+    ));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::MarkDispatching(TaskId(2)),
+    ));
 
     let msg = app.status.message.as_deref().expect("status set");
     assert!(msg.contains("2 tasks"), "got: {msg}");
@@ -1185,16 +1209,22 @@ fn dispatching_status_pluralizes_when_multiple() {
 #[test]
 fn dispatching_status_persists_when_one_completes() {
     let mut app = make_app();
-    app.update(Message::MarkDispatching(TaskId(1)));
-    app.update(Message::MarkDispatching(TaskId(2)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::MarkDispatching(TaskId(1)),
+    ));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::MarkDispatching(TaskId(2)),
+    ));
     assert!(app.status.message.as_deref().unwrap().contains("2 tasks"));
 
-    app.update(Message::Dispatched {
-        id: TaskId(1),
-        worktree: "/wt".to_string(),
-        tmux_window: "win-1".to_string(),
-        switch_focus: false,
-    });
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::Dispatched {
+            id: TaskId(1),
+            worktree: "/wt".to_string(),
+            tmux_window: "win-1".to_string(),
+            switch_focus: false,
+        },
+    ));
 
     let msg = app.status.message.as_deref().expect("still set");
     assert!(msg.contains("Task 2"), "got: {msg}");
@@ -1208,7 +1238,9 @@ fn dispatching_status_handles_empty_title() {
         t.title = "   ".to_string();
     }
 
-    app.update(Message::MarkDispatching(TaskId(1)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::MarkDispatching(TaskId(1)),
+    ));
 
     let msg = app.status.message.as_deref().expect("status set");
     assert!(msg.contains("#1"), "expected ID fallback, got: {msg}");
@@ -1218,7 +1250,9 @@ fn dispatching_status_handles_empty_title() {
 #[test]
 fn dispatching_status_skips_deleted_task() {
     let mut app = make_app();
-    app.update(Message::MarkDispatching(TaskId(1)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::MarkDispatching(TaskId(1)),
+    ));
     // Task is deleted while dispatching is in flight.
     app.board.tasks.retain(|t| t.id != TaskId(1));
 
@@ -1237,7 +1271,9 @@ fn dispatching_status_skips_deleted_task() {
 #[test]
 fn mark_dispatching_for_unknown_task_id_is_noop() {
     let mut app = make_app();
-    app.update(Message::MarkDispatching(TaskId(9999)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::MarkDispatching(TaskId(9999)),
+    ));
 
     // Unknown ID should not pollute the dispatching set with a phantom entry
     // that the next Tick would have to clean up.
@@ -1276,18 +1312,18 @@ mod property_tests {
             for op in ops {
                 match op {
                     DispatchOp::Mark(id) => {
-                        app.update(Message::MarkDispatching(TaskId(id)));
+                        app.update(Message::Task(crate::tui::messages::TaskMessage::MarkDispatching(TaskId(id))));
                     }
                     DispatchOp::Done(id) => {
-                        app.update(Message::Dispatched {
+                        app.update(Message::Task(crate::tui::messages::TaskMessage::Dispatched {
                             id: TaskId(id),
                             worktree: format!("/wt/{id}"),
                             tmux_window: format!("win-{id}"),
                             switch_focus: false,
-                        });
+                        }));
                     }
                     DispatchOp::Failed(id) => {
-                        app.update(Message::DispatchFailed(TaskId(id)));
+                        app.update(Message::Task(crate::tui::messages::TaskMessage::DispatchFailed(TaskId(id))));
                     }
                 }
             }

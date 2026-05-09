@@ -104,7 +104,9 @@ impl App {
     pub(in crate::tui) fn handle_key_task_detail(&mut self, key: KeyEvent) -> Vec<Command> {
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc | KeyCode::Enter => {
-                return self.update(Message::CloseTaskDetail);
+                return self.update(Message::Task(
+                    crate::tui::messages::TaskMessage::CloseDetail,
+                ));
             }
             KeyCode::Char('j') | KeyCode::Down => {
                 if let ViewMode::TaskDetail {
@@ -198,11 +200,15 @@ impl App {
                 match status {
                     TaskStatus::Backlog => {
                         let mode = DispatchMode::for_task(task);
-                        self.update(Message::DispatchTask(id, mode))
+                        self.update(Message::Task(crate::tui::messages::TaskMessage::Dispatch(
+                            id, mode,
+                        )))
                     }
                     TaskStatus::Running | TaskStatus::Review => {
                         if is_problematic {
-                            self.update(Message::KillAndRetry(id))
+                            self.update(Message::Task(
+                                crate::tui::messages::TaskMessage::KillAndRetry(id),
+                            ))
                         } else if has_window {
                             self.update(Message::System(
                                 crate::tui::messages::SystemMessage::StatusInfo(
@@ -210,7 +216,9 @@ impl App {
                                 ),
                             ))
                         } else if has_worktree {
-                            self.update(Message::ResumeTask(id))
+                            self.update(Message::Task(crate::tui::messages::TaskMessage::Resume(
+                                id,
+                            )))
                         } else {
                             self.update(Message::System(
                                 crate::tui::messages::SystemMessage::StatusInfo(
@@ -255,10 +263,15 @@ impl App {
                 ));
             }
             let ids: Vec<_> = self.select.tasks.iter().copied().collect();
-            self.update(Message::BatchMoveTasks { ids, direction })
+            self.update(Message::Task(
+                crate::tui::messages::TaskMessage::BatchMove { ids, direction },
+            ))
         } else if let Some(task) = self.selected_task() {
             let id = task.id;
-            self.update(Message::MoveTask { id, direction })
+            self.update(Message::Task(crate::tui::messages::TaskMessage::Move {
+                id,
+                direction,
+            }))
         } else {
             vec![]
         }

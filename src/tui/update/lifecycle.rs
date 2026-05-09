@@ -45,7 +45,9 @@ impl App {
             if let Some(c) = detach {
                 cmds.push(c);
             }
-            cmds.push(Command::PersistTask(task_clone));
+            cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
+                task_clone,
+            )));
             cmds
         } else {
             vec![]
@@ -78,7 +80,9 @@ impl App {
                 if let Some(c) = detach {
                     cmds.push(c);
                 }
-                cmds.push(Command::PersistTask(task_clone));
+                cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
+                    task_clone,
+                )));
                 cmds.extend(self.maybe_respawn_split_pane(id));
             }
         }
@@ -122,7 +126,9 @@ impl App {
             .cloned();
         if let Some(task) = task {
             self.mark_dispatching(id);
-            return vec![Command::DispatchAgent { task, mode }];
+            return vec![Command::Task(
+                crate::tui::commands::TaskCommand::DispatchAgent { task, mode },
+            )];
         }
         vec![]
     }
@@ -143,11 +149,15 @@ impl App {
             let task_clone = task.clone();
             self.agents.mark_active(id);
             self.sync_board_selection();
-            let mut cmds = vec![Command::PersistTask(task_clone)];
+            let mut cmds = vec![Command::Task(crate::tui::commands::TaskCommand::Persist(
+                task_clone,
+            ))];
             if switch_focus {
-                cmds.push(Command::JumpToTmux {
-                    window: tmux_window,
-                });
+                cmds.push(Command::Task(
+                    crate::tui::commands::TaskCommand::JumpToTmux {
+                        window: tmux_window,
+                    },
+                ));
             }
             cmds
         } else {
@@ -176,7 +186,7 @@ impl App {
         if let Some(c) = cleanup {
             cmds.push(c);
         }
-        cmds.push(Command::DeleteTask(id));
+        cmds.push(Command::Task(crate::tui::commands::TaskCommand::Delete(id)));
         cmds
     }
 

@@ -366,7 +366,10 @@ async fn exec_dispatch_sends_dispatched_message() {
         .unwrap()
         .unwrap();
     assert!(
-        matches!(msg, Message::Dispatched { .. }),
+        matches!(
+            msg,
+            Message::Task(crate::tui::messages::TaskMessage::Dispatched { .. })
+        ),
         "Expected Dispatched, got: {msg:?}"
     );
 }
@@ -397,7 +400,7 @@ async fn exec_dispatch_sends_error_on_failure() {
         .unwrap()
         .unwrap();
     assert!(
-        matches!(msg1, Message::DispatchFailed(id) if id == task.id),
+        matches!(msg1, Message::Task(crate::tui::messages::TaskMessage::DispatchFailed(id)) if id == task.id),
         "Expected DispatchFailed, got: {msg1:?}"
     );
 
@@ -434,11 +437,11 @@ async fn exec_capture_tmux_sends_output() {
         .await
         .unwrap()
         .unwrap();
-    let Message::TmuxOutput {
+    let Message::Task(crate::tui::messages::TaskMessage::TmuxOutput {
         id,
         output,
         activity_ts,
-    } = msg
+    }) = msg
     else {
         panic!("Expected TmuxOutput, got: {msg:?}");
     };
@@ -464,7 +467,10 @@ async fn exec_capture_tmux_window_gone() {
         .unwrap()
         .unwrap();
     assert!(
-        matches!(msg, Message::WindowGone(TaskId(1))),
+        matches!(
+            msg,
+            Message::Task(crate::tui::messages::TaskMessage::WindowGone(TaskId(1)))
+        ),
         "Expected WindowGone, got: {msg:?}"
     );
 }
@@ -587,7 +593,7 @@ async fn exec_finish_happy_path_sends_complete() {
         .unwrap()
         .unwrap();
     assert!(
-        matches!(msg, Message::FinishComplete(tid) if tid == id),
+        matches!(msg, Message::Task(crate::tui::messages::TaskMessage::FinishComplete(tid)) if tid == id),
         "Expected FinishComplete, got: {msg:?}"
     );
 }
@@ -637,11 +643,11 @@ async fn exec_finish_conflict_sends_failed() {
         .await
         .unwrap()
         .unwrap();
-    let Message::FinishFailed {
+    let Message::Task(crate::tui::messages::TaskMessage::FinishFailed {
         id: tid,
         is_conflict,
         ..
-    } = msg
+    }) = msg
     else {
         panic!("Expected FinishFailed, got: {msg:?}");
     };
@@ -712,11 +718,11 @@ async fn exec_finish_not_on_main_sends_failed() {
         .await
         .unwrap()
         .unwrap();
-    let Message::FinishFailed {
+    let Message::Task(crate::tui::messages::TaskMessage::FinishFailed {
         id: tid,
         is_conflict,
         ..
-    } = msg
+    }) = msg
     else {
         panic!("Expected FinishFailed, got: {msg:?}");
     };
@@ -885,10 +891,10 @@ async fn exec_quick_dispatch_creates_task_and_dispatches() {
     assert!(
         matches!(
             msg,
-            Message::Dispatched {
+            Message::Task(crate::tui::messages::TaskMessage::Dispatched {
                 switch_focus: true,
                 ..
-            }
+            })
         ),
         "Expected Dispatched, got: {msg:?}"
     );
@@ -984,7 +990,10 @@ async fn exec_quick_dispatch_with_epic_dispatches_successfully() {
         .unwrap()
         .unwrap();
     assert!(
-        matches!(msg, Message::Dispatched { .. }),
+        matches!(
+            msg,
+            Message::Task(crate::tui::messages::TaskMessage::Dispatched { .. })
+        ),
         "Expected Dispatched, got: {msg:?}"
     );
 }
@@ -1021,7 +1030,7 @@ async fn exec_quick_dispatch_sends_error_on_failure() {
     assert!(
         matches!(
             msg,
-            Message::DispatchFailed(_)
+            Message::Task(crate::tui::messages::TaskMessage::DispatchFailed(_))
                 | Message::System(crate::tui::messages::SystemMessage::Error(_))
         ),
         "Expected DispatchFailed or Error, got: {msg:?}"
@@ -1060,7 +1069,7 @@ async fn exec_quick_dispatch_failure_sends_dispatch_failed_and_error() {
         .unwrap()
         .unwrap();
     assert!(
-        matches!(msg1, Message::DispatchFailed(id) if id == created_id),
+        matches!(msg1, Message::Task(crate::tui::messages::TaskMessage::DispatchFailed(id)) if id == created_id),
         "Expected DispatchFailed, got: {msg1:?}"
     );
     let msg2 = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
@@ -1107,10 +1116,10 @@ async fn exec_resume_sends_resumed_message() {
         .await
         .unwrap()
         .unwrap();
-    let Message::Resumed {
+    let Message::Task(crate::tui::messages::TaskMessage::Resumed {
         id: tid,
         tmux_window,
-    } = msg
+    }) = msg
     else {
         panic!("Expected Resumed, got: {msg:?}");
     };

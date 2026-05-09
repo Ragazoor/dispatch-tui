@@ -23,7 +23,9 @@ impl App {
 
             // Detach: kill tmux window but preserve worktree
             if let Some(window) = task.tmux_window.take() {
-                cmds.push(Command::KillTmuxWindow { window });
+                cmds.push(Command::Task(
+                    crate::tui::commands::TaskCommand::KillTmuxWindow { window },
+                ));
             }
             task.status = TaskStatus::Done;
             task.sub_status = SubStatus::default_for(TaskStatus::Done);
@@ -35,7 +37,9 @@ impl App {
                 "{pr_label} merged \u{2014} task #{id} moved to Done"
             ));
 
-            cmds.push(Command::PersistTask(task_clone));
+            cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
+                task_clone,
+            )));
 
             if self.notifications_enabled {
                 cmds.push(Command::System(
@@ -156,7 +160,9 @@ impl App {
             if task.sub_status != new_sub {
                 task.sub_status = new_sub;
                 let task_clone = task.clone();
-                return vec![Command::PersistTask(task_clone)];
+                return vec![Command::Task(crate::tui::commands::TaskCommand::Persist(
+                    task_clone,
+                ))];
             }
         }
         vec![]

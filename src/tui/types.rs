@@ -4,8 +4,8 @@ use std::time::{Duration, Instant};
 use ratatui::widgets::ListState;
 
 use crate::models::{
-    AlertKind, DispatchMode, Epic, EpicId, EpicSubstatus, Project, ProjectId, SubStatus, Task,
-    TaskId, TaskStatus, TaskTag, TaskUsage, TipsShowMode, DEFAULT_BASE_BRANCH,
+    AlertKind, Epic, EpicId, EpicSubstatus, Project, ProjectId, Task, TaskId, TaskStatus, TaskTag,
+    TaskUsage, TipsShowMode, DEFAULT_BASE_BRANCH,
 };
 
 // ---------------------------------------------------------------------------
@@ -179,65 +179,13 @@ pub enum TreeNav {
 pub enum Message {
     /// System-level messages — see [`crate::tui::messages::SystemMessage`].
     System(crate::tui::messages::SystemMessage),
+    /// Task-domain messages — see [`crate::tui::messages::TaskMessage`].
+    Task(crate::tui::messages::TaskMessage),
     NavigateColumn(isize),
     NavigateRow(isize),
-    MoveTask {
-        id: TaskId,
-        direction: MoveDirection,
-    },
-    ReorderItem(isize), // +1 = down, -1 = up
-    DispatchTask(TaskId, DispatchMode),
-    Dispatched {
-        id: TaskId,
-        worktree: String,
-        tmux_window: String,
-        switch_focus: bool,
-    },
-    TaskCreated {
-        task: Task,
-    },
-    DeleteTask(TaskId),
-    OpenTaskDetail(i64),
-    CloseTaskDetail,
-    ToggleFlattened,
-    TmuxOutput {
-        id: TaskId,
-        output: String,
-        activity_ts: u64,
-    },
-    WindowGone(TaskId),
-    RefreshTasks(Vec<Task>),
-    /// Splice a single fresh task into `app.board.tasks` (replace if id
-    /// matches, otherwise append). Targeted counterpart to `RefreshTasks`
-    /// emitted from `McpEvent::TaskChanged`.
-    TaskUpdated(Task),
-    ResumeTask(TaskId),
-    Resumed {
-        id: TaskId,
-        tmux_window: String,
-    },
-    DispatchFailed(TaskId),
-    MarkDispatching(TaskId),
-    TaskEdited(TaskEdit),
     RepoPathsUpdated(Vec<String>),
-    QuickDispatch {
-        repo_path: String,
-        epic_id: Option<EpicId>,
-    },
-    StaleAgent(TaskId),
-    AgentCrashed(TaskId),
-    KillAndRetry(TaskId),
-    RetryResume(TaskId),
-    RetryFresh(TaskId),
-    ArchiveTask(TaskId),
-    ToggleSelect(TaskId),
     ClearSelection,
     SelectAllColumn,
-    BatchMoveTasks {
-        ids: Vec<TaskId>,
-        direction: MoveDirection,
-    },
-    BatchArchiveTasks(Vec<TaskId>),
     /// Form-input flow messages — see [`crate::tui::messages::InputMessage`].
     Input(crate::tui::messages::InputMessage),
     /// Pop-out `$EDITOR` flow messages — see
@@ -254,13 +202,6 @@ pub enum Message {
     /// Epic-domain messages — see [`crate::tui::messages::EpicMessage`].
     Epic(crate::tui::messages::EpicMessage),
     RefreshUsage(Vec<TaskUsage>),
-    // Finish (rebase + cleanup)
-    FinishComplete(TaskId),
-    FinishFailed {
-        id: TaskId,
-        error: String,
-        is_conflict: bool,
-    },
     /// PR flow messages — see [`crate::tui::messages::PrMessage`].
     Pr(crate::tui::messages::PrMessage),
     // Repo filter
@@ -283,9 +224,6 @@ pub enum Message {
     /// Wrap-up flow messages (rebase only — PR creation is agent-driven via the
     /// `/wrap-up` skill). See [`crate::tui::messages::WrapUpMessage`].
     WrapUp(crate::tui::messages::WrapUpMessage),
-    // Detach tmux panel (Review tasks only)
-    DetachTmux(TaskId),
-    BatchDetachTmux(Vec<TaskId>),
     // Tips overlay
     ShowTips {
         tips: Vec<crate::tips::Tip>,
@@ -316,40 +254,9 @@ pub enum Message {
 
 #[derive(Debug, Clone)]
 pub enum Command {
-    PersistTask(Task),
-    InsertTask {
-        draft: TaskDraft,
-        epic_id: Option<EpicId>,
-    },
-    DeleteTask(TaskId),
-    DispatchAgent {
-        task: Task,
-        mode: DispatchMode,
-    },
-    Cleanup {
-        id: TaskId,
-        repo_path: String,
-        worktree: String,
-        tmux_window: Option<String>,
-    },
-    Finish {
-        id: TaskId,
-        repo_path: String,
-        branch: String,
-        base_branch: String,
-        worktree: String,
-        tmux_window: Option<String>,
-    },
-    CaptureTmux {
-        id: TaskId,
-        window: String,
-    },
-    Resume {
-        task: Task,
-    },
-    JumpToTmux {
-        window: String,
-    },
+    /// Task-domain side-effect commands — see
+    /// [`crate::tui::commands::TaskCommand`].
+    Task(crate::tui::commands::TaskCommand),
     // Split mode commands
     EnterSplitMode,
     EnterSplitModeWithTask {
@@ -375,18 +282,10 @@ pub enum Command {
     RespawnSplitPane {
         pane_id: String,
     },
-    KillTmuxWindow {
-        window: String,
-    },
     /// Pop-out `$EDITOR` flow side-effect commands — see
     /// [`crate::tui::commands::EditorCommand`].
     Editor(crate::tui::commands::EditorCommand),
     SaveRepoPath(String),
-    RefreshFromDb,
-    QuickDispatch {
-        draft: TaskDraft,
-        epic_id: Option<EpicId>,
-    },
     /// Epic-domain side-effect commands — see
     /// [`crate::tui::commands::EpicCommand`].
     Epic(crate::tui::commands::EpicCommand),
@@ -413,10 +312,6 @@ pub enum Command {
     DeleteRepoPath(String),
     /// PR flow side-effect commands — see [`crate::tui::commands::PrCommand`].
     Pr(crate::tui::commands::PrCommand),
-    PatchSubStatus {
-        id: TaskId,
-        sub_status: SubStatus,
-    },
     // Tips persistence
     SaveTipsState {
         seen_up_to: u32,

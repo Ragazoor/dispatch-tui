@@ -28,7 +28,9 @@ fn task_created_adds_to_list() {
         project_id: ProjectId(1),
     };
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
-    let cmds = app.update(Message::TaskCreated { task });
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Created {
+        task,
+    }));
     assert_eq!(app.board.tasks.len(), 1);
     assert_eq!(app.board.tasks[0].id, TaskId(42));
     assert_eq!(app.board.tasks[0].status, TaskStatus::Backlog);
@@ -60,7 +62,7 @@ fn repo_path_empty_uses_saved_path() {
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(cmds2.iter().any(|c| matches!(
         c,
-        Command::InsertTask { ref draft, .. } if draft.repo_path == "/tmp"
+        Command::Task(crate::tui::commands::TaskCommand::Insert { ref draft, .. }) if draft.repo_path == "/tmp"
     )));
 }
 
@@ -129,7 +131,7 @@ fn repo_path_nonempty_used_as_is() {
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(cmds2
         .iter()
-        .any(|c| matches!(c, Command::InsertTask { ref draft, .. } if draft.repo_path == "/tmp")));
+        .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::Insert { ref draft, .. }) if draft.repo_path == "/tmp")));
     assert_eq!(app.board.tasks.len(), 0); // task not added until TaskCreated
 }
 
@@ -140,16 +142,18 @@ fn task_edited_updates_fields() {
         ProjectId(1),
         TEST_TIMEOUT,
     );
-    app.update(Message::TaskEdited(TaskEdit {
-        id: TaskId(1),
-        title: "New".into(),
-        description: "Desc".into(),
-        repo_path: "/new".into(),
-        status: TaskStatus::Running,
-        plan_path: Some("docs/plan.md".into()),
-        tag: None,
-        base_branch: None,
-    }));
+    app.update(Message::Task(crate::tui::messages::TaskMessage::Edited(
+        TaskEdit {
+            id: TaskId(1),
+            title: "New".into(),
+            description: "Desc".into(),
+            repo_path: "/new".into(),
+            status: TaskStatus::Running,
+            plan_path: Some("docs/plan.md".into()),
+            tag: None,
+            base_branch: None,
+        },
+    )));
     assert_eq!(app.board.tasks[0].title, "New");
     assert_eq!(app.board.tasks[0].description, "Desc");
     assert_eq!(app.board.tasks[0].repo_path, "/new");
@@ -353,7 +357,10 @@ fn confirm_delete_y_deletes_task() {
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(app.board.tasks.iter().all(|t| t.id != TaskId(1))); // task 1 deleted
-    assert!(matches!(&cmds[0], Command::DeleteTask(TaskId(1))));
+    assert!(matches!(
+        &cmds[0],
+        Command::Task(crate::tui::commands::TaskCommand::Delete(TaskId(1)))
+    ));
     assert!(app.status.message.is_none());
 }
 
@@ -365,7 +372,10 @@ fn confirm_delete_uppercase_y_deletes_task() {
     let cmds = app.handle_key(make_key(KeyCode::Char('Y')));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(app.board.tasks.iter().all(|t| t.id != TaskId(1)));
-    assert!(matches!(&cmds[0], Command::DeleteTask(TaskId(1))));
+    assert!(matches!(
+        &cmds[0],
+        Command::Task(crate::tui::commands::TaskCommand::Delete(TaskId(1)))
+    ));
 }
 
 #[test]
@@ -403,9 +413,13 @@ fn x_key_on_empty_column_is_noop() {
 fn open_close_task_detail_via_messages() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
-    app.update(Message::OpenTaskDetail(1));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::OpenDetail(1),
+    ));
     assert!(matches!(app.board.view_mode, ViewMode::TaskDetail { .. }));
-    app.update(Message::CloseTaskDetail);
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::CloseDetail,
+    ));
     assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
 }
 
@@ -486,7 +500,10 @@ fn confirm_retry_r_key_emits_resume() {
 
     let cmds = app.handle_key(make_key(KeyCode::Char('r')));
     assert_eq!(app.input.mode, InputMode::Normal);
-    assert!(cmds.iter().any(|c| matches!(c, Command::Resume { .. })));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Resume { .. })
+    )));
 }
 
 #[test]
@@ -502,9 +519,10 @@ fn confirm_retry_f_key_emits_fresh() {
 
     let cmds = app.handle_key(make_key(KeyCode::Char('f')));
     assert_eq!(app.input.mode, InputMode::Normal);
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::DispatchAgent { .. })));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::DispatchAgent { .. })
+    )));
 }
 
 #[test]
@@ -782,7 +800,7 @@ fn submit_base_branch_creates_task_with_branch() {
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(cmds.iter().any(|c| matches!(
         c,
-        Command::InsertTask { ref draft, .. }
+        Command::Task(crate::tui::commands::TaskCommand::Insert { ref draft, .. })
             if draft.repo_path == "/tmp"
                 && draft.tag == Some(TaskTag::Bug)
                 && draft.base_branch == "develop"
@@ -807,7 +825,7 @@ fn submit_base_branch_empty_uses_draft_default() {
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(cmds.iter().any(|c| matches!(
         c,
-        Command::InsertTask { ref draft, .. } if draft.base_branch == "main"
+        Command::Task(crate::tui::commands::TaskCommand::Insert { ref draft, .. }) if draft.base_branch == "main"
     )));
 }
 
@@ -852,8 +870,12 @@ fn cancel_retry_returns_to_normal() {
 #[test]
 fn esc_clears_selection() {
     let mut app = make_app();
-    app.update(Message::ToggleSelect(TaskId(1)));
-    app.update(Message::ToggleSelect(TaskId(2)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(1)),
+    ));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(2)),
+    ));
     assert_eq!(app.select.tasks.len(), 2);
 
     app.handle_key(make_key(KeyCode::Esc));
@@ -871,8 +893,12 @@ fn esc_with_no_selection_is_noop() {
 #[test]
 fn x_key_with_selection_shows_count_in_confirm() {
     let mut app = make_app();
-    app.update(Message::ToggleSelect(TaskId(1)));
-    app.update(Message::ToggleSelect(TaskId(2)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(1)),
+    ));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(2)),
+    ));
 
     app.handle_key(make_key(KeyCode::Char('x')));
     assert!(matches!(app.input.mode, InputMode::ConfirmArchive(None)));
@@ -1135,10 +1161,14 @@ fn handle_key_confirm_retry_resume() {
 
     let cmds = app.handle_key(make_key(KeyCode::Char('r')));
     // Should produce KillTmuxWindow + Resume
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::KillTmuxWindow { .. })));
-    assert!(cmds.iter().any(|c| matches!(c, Command::Resume { .. })));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::KillTmuxWindow { .. })
+    )));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Resume { .. })
+    )));
     assert_eq!(*app.mode(), InputMode::Normal);
 }
 
@@ -1153,10 +1183,14 @@ fn handle_key_confirm_retry_fresh() {
 
     let cmds = app.handle_key(make_key(KeyCode::Char('f')));
     // Should produce Cleanup + Dispatch
-    assert!(cmds.iter().any(|c| matches!(c, Command::Cleanup { .. })));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::DispatchAgent { .. })));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Cleanup { .. })
+    )));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::DispatchAgent { .. })
+    )));
     assert_eq!(*app.mode(), InputMode::Normal);
 }
 
@@ -1238,9 +1272,10 @@ fn handle_key_normal_dispatch_backlog_task() {
     app.selection_mut().set_row(1, 0);
 
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::DispatchAgent { .. })));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::DispatchAgent { .. })
+    )));
 }
 
 #[test]
@@ -1291,7 +1326,7 @@ fn handle_key_normal_jump_to_tmux() {
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::JumpToTmux { window } if window == "main:task-3")));
+        .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "main:task-3")));
 }
 
 #[test]
@@ -1334,7 +1369,9 @@ fn esc_clears_mixed_selection() {
         TEST_TIMEOUT,
     );
     app.board.epics = vec![make_epic(10)];
-    app.update(Message::ToggleSelect(TaskId(1)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(1)),
+    ));
     app.update(Message::Epic(
         crate::tui::messages::EpicMessage::ToggleSelect(EpicId(10)),
     ));
@@ -1357,7 +1394,9 @@ fn confirm_detach_tmux_clears_window() {
         .tmux_outputs
         .insert(TaskId(1), "some output".to_string());
 
-    app.update(Message::DetachTmux(TaskId(1)));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::DetachTmux(TaskId(1)),
+    ));
     let cmds = app.update(Message::Input(
         crate::tui::messages::InputMessage::ConfirmDetachTmux,
     ));
@@ -1378,11 +1417,14 @@ fn confirm_detach_tmux_clears_window() {
     );
     assert!(
         cmds.iter()
-            .any(|c| matches!(c, Command::KillTmuxWindow { window } if window == "task-1")),
+            .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::KillTmuxWindow { window }) if window == "task-1")),
         "should emit KillTmuxWindow for task-1"
     );
     assert!(
-        cmds.iter().any(|c| matches!(c, Command::PersistTask(_))),
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+        )),
         "should emit PersistTask"
     );
 }
@@ -1472,7 +1514,7 @@ fn handle_key_normal_move_forward_via_handle_key() {
     // Task 1 should move from Backlog to Running
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::PersistTask(t) if t.id == TaskId(1) && t.status == TaskStatus::Running)));
+        .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::Persist(t)) if t.id == TaskId(1) && t.status == TaskStatus::Running)));
 }
 
 #[test]
@@ -1485,7 +1527,7 @@ fn handle_key_normal_move_backward_via_handle_key() {
     // Task 3 should move from Running to Backlog
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::PersistTask(t) if t.id == TaskId(3) && t.status == TaskStatus::Backlog)));
+        .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::Persist(t)) if t.id == TaskId(3) && t.status == TaskStatus::Backlog)));
 }
 
 #[test]
@@ -1619,9 +1661,10 @@ fn handle_key_text_input_repo_enter_selects_cursor_repo() {
     let cmds2 = app.update(Message::Input(
         crate::tui::messages::InputMessage::SubmitBaseBranch("main".to_string()),
     ));
-    assert!(cmds2
-        .iter()
-        .any(|c| matches!(c, Command::InsertTask { .. })));
+    assert!(cmds2.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Insert { .. })
+    )));
 }
 
 #[test]
@@ -1642,9 +1685,10 @@ fn handle_key_text_input_enter_submits_typed_text() {
     let cmds2 = app.update(Message::Input(
         crate::tui::messages::InputMessage::SubmitBaseBranch("main".to_string()),
     ));
-    assert!(cmds2
-        .iter()
-        .any(|c| matches!(c, Command::InsertTask { .. })));
+    assert!(cmds2.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Insert { .. })
+    )));
 }
 
 // ── QuickDispatch picker: text-input contract (no j/k or digit hijacks) ──
@@ -1680,9 +1724,10 @@ fn handle_key_quick_dispatch_digits_typed_into_buffer() {
         let mut app = quick_dispatch_app(&["/repo-1", "/repo-2", "/repo-3"]);
         let cmds = app.handle_key(make_key(KeyCode::Char(c)));
         assert!(
-            !cmds
-                .iter()
-                .any(|c| matches!(c, Command::QuickDispatch { .. })),
+            !cmds.iter().any(|c| matches!(
+                c,
+                Command::Task(crate::tui::commands::TaskCommand::QuickDispatch { .. })
+            )),
             "digit '{c}' must not select"
         );
         assert_eq!(app.input.buffer, c.to_string(), "digit '{c}'");
@@ -1711,9 +1756,10 @@ fn handle_key_quick_dispatch_enter_selects_cursor_entry() {
     let mut app = quick_dispatch_app(&["/a", "/b"]);
     app.input.repo_cursor = 1;
     let cmds = app.handle_key(make_key(KeyCode::Enter));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::QuickDispatch { .. })));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::QuickDispatch { .. })
+    )));
 }
 
 #[test]
@@ -1742,9 +1788,10 @@ fn handle_key_quick_dispatch_typing_digit_filters_by_digit() {
     let mut app = quick_dispatch_app(&["/foo-1", "/bar-2"]);
     let cmds = app.handle_key(make_key(KeyCode::Char('2')));
     assert!(
-        !cmds
-            .iter()
-            .any(|c| matches!(c, Command::QuickDispatch { .. })),
+        !cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::QuickDispatch { .. })
+        )),
         "typing '2' must not select"
     );
     assert_eq!(app.input.buffer, "2");
@@ -1775,7 +1822,10 @@ fn handle_key_input_repo_path_typing_digit_filters_not_selects() {
     });
     let cmds = app.handle_key(make_key(KeyCode::Char('2')));
     assert!(
-        !cmds.iter().any(|c| matches!(c, Command::InsertTask { .. })),
+        !cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::Insert { .. })
+        )),
         "digit must not submit a repo path; cmds: {cmds:?}"
     );
     assert_eq!(app.input.buffer, "2");
