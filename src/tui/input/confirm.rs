@@ -160,7 +160,9 @@ impl App {
 
     pub(in crate::tui) fn handle_key_confirm_wrap_up(&mut self, key: KeyEvent) -> Vec<Command> {
         match key.code {
-            KeyCode::Char('r') => self.update(Message::WrapUpRebase),
+            KeyCode::Char('r') => {
+                self.update(Message::WrapUp(crate::tui::messages::WrapUpMessage::Rebase))
+            }
             KeyCode::Char('p') => {
                 // PR creation moved to the agent /wrap-up skill so the
                 // body actually reflects the diff rather than the stale
@@ -174,7 +176,9 @@ impl App {
                 );
                 vec![]
             }
-            KeyCode::Esc => self.update(Message::CancelWrapUp),
+            KeyCode::Esc => {
+                self.update(Message::WrapUp(crate::tui::messages::WrapUpMessage::Cancel))
+            }
             _ => vec![],
         }
     }
@@ -184,7 +188,9 @@ impl App {
         key: KeyEvent,
     ) -> Vec<Command> {
         match key.code {
-            KeyCode::Char('r') => self.update(Message::EpicWrapUpRebase),
+            KeyCode::Char('r') => self.update(Message::WrapUp(
+                crate::tui::messages::WrapUpMessage::EpicRebase,
+            )),
             KeyCode::Char('p') => {
                 // Epic-merge batched PR creation had the same defect as
                 // W+p (auto-generated bodies). Removed; the user can
@@ -197,7 +203,9 @@ impl App {
                 );
                 vec![]
             }
-            KeyCode::Esc => self.update(Message::CancelEpicWrapUp),
+            KeyCode::Esc => self.update(Message::WrapUp(
+                crate::tui::messages::WrapUpMessage::EpicCancel,
+            )),
             _ => vec![],
         }
     }

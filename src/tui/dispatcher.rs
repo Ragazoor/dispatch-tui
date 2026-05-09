@@ -5,7 +5,7 @@
 //! lifecycle methods live in `mod.rs`; per-message handlers live in
 //! `update/*.rs`.
 
-use crate::tui::messages::{EditorMessage, LearningMessage};
+use crate::tui::messages::{EditorMessage, LearningMessage, WrapUpMessage};
 use crate::tui::types::{Command, Message};
 use crate::tui::App;
 
@@ -14,6 +14,19 @@ fn dispatch_editor(app: &mut App, msg: EditorMessage) -> Vec<Command> {
     match msg {
         EditorMessage::DescriptionResult(value) => app.handle_description_editor_result(value),
         EditorMessage::Result { kind, outcome } => app.handle_editor_result(kind, outcome),
+    }
+}
+
+/// Per-domain dispatcher for [`WrapUpMessage`] variants.
+fn dispatch_wrap_up(app: &mut App, msg: WrapUpMessage) -> Vec<Command> {
+    match msg {
+        WrapUpMessage::Start(id) => app.handle_start_wrap_up(id),
+        WrapUpMessage::Rebase => app.handle_wrap_up_rebase(),
+        WrapUpMessage::Cancel => app.handle_cancel_wrap_up(),
+        WrapUpMessage::EpicStart(id) => app.handle_start_epic_wrap_up(id),
+        WrapUpMessage::EpicRebase => app.handle_epic_wrap_up(),
+        WrapUpMessage::EpicCancel => app.handle_cancel_epic_wrap_up(),
+        WrapUpMessage::CancelMergeQueue => app.handle_cancel_merge_queue(),
     }
 }
 
@@ -113,9 +126,7 @@ pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
         } => app.handle_finish_failed(id, error, is_conflict),
         Message::ConfirmDone => app.handle_confirm_done(),
         Message::CancelDone => app.handle_cancel_done(),
-        Message::StartWrapUp(id) => app.handle_start_wrap_up(id),
-        Message::WrapUpRebase => app.handle_wrap_up_rebase(),
-        Message::CancelWrapUp => app.handle_cancel_wrap_up(),
+        Message::WrapUp(wm) => dispatch_wrap_up(app, wm),
         Message::DetachTmux(id) => app.handle_detach_tmux(vec![id]),
         Message::BatchDetachTmux(ids) => app.handle_detach_tmux(ids),
         Message::ConfirmDetachTmux => app.handle_confirm_detach_tmux(),
@@ -160,10 +171,6 @@ pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
         Message::SubmitEpicTitle(v) => app.handle_submit_epic_title(v),
         Message::SubmitEpicDescription(v) => app.handle_submit_epic_description(v),
         Message::SubmitEpicRepoPath(v) => app.handle_submit_epic_repo_path(v),
-        Message::StartEpicWrapUp(id) => app.handle_start_epic_wrap_up(id),
-        Message::EpicWrapUpRebase => app.handle_epic_wrap_up(),
-        Message::CancelEpicWrapUp => app.handle_cancel_epic_wrap_up(),
-        Message::CancelMergeQueue => app.handle_cancel_merge_queue(),
         Message::ToggleSelectEpic(id) => app.handle_toggle_select_epic(id),
         Message::BatchArchiveEpics(ids) => app.handle_batch_archive_epics(ids),
         Message::ToggleEpicAutoDispatch(id) => app.handle_toggle_epic_auto_dispatch(id),

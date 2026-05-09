@@ -148,8 +148,16 @@ impl App {
             KeyCode::Char('d') => self.handle_key_dispatch(),
             KeyCode::Char('f') => self.update(Message::StartRepoFilter),
             KeyCode::Char('W') => self.dispatch_selection(
-                |s, id| s.update(Message::StartWrapUp(id)),
-                |s, id| s.update(Message::StartEpicWrapUp(id)),
+                |s, id| {
+                    s.update(Message::WrapUp(crate::tui::messages::WrapUpMessage::Start(
+                        id,
+                    )))
+                },
+                |s, id| {
+                    s.update(Message::WrapUp(
+                        crate::tui::messages::WrapUpMessage::EpicStart(id),
+                    ))
+                },
             ),
             KeyCode::Char('L') => {
                 if let Some(id) = self.selected_epic_id() {

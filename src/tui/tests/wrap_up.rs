@@ -245,8 +245,10 @@ fn wrap_up_r_emits_finish_command() {
     );
     app.update(Message::NavigateColumn(4));
 
-    app.update(Message::StartWrapUp(TaskId(1)));
-    let cmds = app.update(Message::WrapUpRebase);
+    app.update(Message::WrapUp(crate::tui::messages::WrapUpMessage::Start(
+        TaskId(1),
+    )));
+    let cmds = app.update(Message::WrapUp(crate::tui::messages::WrapUpMessage::Rebase));
     assert!(cmds.iter().any(|c| matches!(c, Command::Finish { .. })));
     assert_eq!(app.input.mode, InputMode::Normal);
 }
@@ -268,7 +270,9 @@ fn wrap_up_p_emits_no_command_and_points_at_skill() {
     );
     app.update(Message::NavigateColumn(4));
 
-    app.update(Message::StartWrapUp(TaskId(1)));
+    app.update(Message::WrapUp(crate::tui::messages::WrapUpMessage::Start(
+        TaskId(1),
+    )));
     app.input.mode = InputMode::ConfirmWrapUp(TaskId(1));
     let cmds = app.handle_key(make_key(KeyCode::Char('p')));
     assert!(
@@ -300,8 +304,10 @@ fn wrap_up_esc_cancels() {
     );
     app.update(Message::NavigateColumn(4));
 
-    app.update(Message::StartWrapUp(TaskId(1)));
-    app.update(Message::CancelWrapUp);
+    app.update(Message::WrapUp(crate::tui::messages::WrapUpMessage::Start(
+        TaskId(1),
+    )));
+    app.update(Message::WrapUp(crate::tui::messages::WrapUpMessage::Cancel));
     assert_eq!(app.input.mode, InputMode::Normal);
 }
 
@@ -319,8 +325,10 @@ fn wrap_up_rebase_clears_conflict_flag() {
     );
 
     app.find_task_mut(TaskId(1)).unwrap().sub_status = SubStatus::Conflict;
-    app.update(Message::StartWrapUp(TaskId(1)));
-    app.update(Message::WrapUpRebase);
+    app.update(Message::WrapUp(crate::tui::messages::WrapUpMessage::Start(
+        TaskId(1),
+    )));
+    app.update(Message::WrapUp(crate::tui::messages::WrapUpMessage::Rebase));
     assert!(!app
         .find_task(TaskId(1))
         .is_some_and(|t| t.sub_status == SubStatus::Conflict));
@@ -333,7 +341,9 @@ fn wrap_up_available_on_running_blocked() {
     app.find_task_mut(id).unwrap().sub_status = SubStatus::NeedsInput;
     app.find_task_mut(id).unwrap().worktree = Some("/tmp/wt".to_string());
     app.selection_mut().set_column(3); // Blocked column
-    app.update(Message::StartWrapUp(id));
+    app.update(Message::WrapUp(crate::tui::messages::WrapUpMessage::Start(
+        id,
+    )));
     assert!(matches!(app.mode(), InputMode::ConfirmWrapUp(_)));
 }
 
@@ -342,7 +352,9 @@ fn wrap_up_available_on_running_active() {
     let mut app = make_app();
     let id = TaskId(3); // Running, Active by default
     app.find_task_mut(id).unwrap().worktree = Some("/tmp/wt".to_string());
-    app.update(Message::StartWrapUp(id));
+    app.update(Message::WrapUp(crate::tui::messages::WrapUpMessage::Start(
+        id,
+    )));
     assert!(matches!(app.mode(), InputMode::ConfirmWrapUp(_)));
 }
 
@@ -374,7 +386,9 @@ fn epic_wrap_up_with_review_tasks_enters_confirm() {
     );
     app.board.epics = vec![make_epic(10)];
 
-    app.update(Message::StartEpicWrapUp(EpicId(10)));
+    app.update(Message::WrapUp(
+        crate::tui::messages::WrapUpMessage::EpicStart(EpicId(10)),
+    ));
 
     assert!(matches!(
         app.input.mode,
@@ -389,7 +403,9 @@ fn epic_wrap_up_without_review_tasks_shows_info() {
     let mut app = App::new(vec![task], ProjectId(1), TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
 
-    app.update(Message::StartEpicWrapUp(EpicId(10)));
+    app.update(Message::WrapUp(
+        crate::tui::messages::WrapUpMessage::EpicStart(EpicId(10)),
+    ));
 
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(app
@@ -410,7 +426,9 @@ fn epic_wrap_up_rebase_creates_queue_and_emits_first_finish() {
     app.board.epics = vec![make_epic(10)];
     app.input.mode = InputMode::ConfirmEpicWrapUp(EpicId(10));
 
-    let cmds = app.update(Message::EpicWrapUpRebase);
+    let cmds = app.update(Message::WrapUp(
+        crate::tui::messages::WrapUpMessage::EpicRebase,
+    ));
 
     assert_eq!(app.input.mode, InputMode::Normal);
     let queue = app.merge_queue.as_ref().expect("merge queue should exist");
@@ -431,7 +449,9 @@ fn epic_wrap_up_finish_complete_advances_queue() {
     );
     app.board.epics = vec![make_epic(10)];
     app.input.mode = InputMode::ConfirmEpicWrapUp(EpicId(10));
-    app.update(Message::EpicWrapUpRebase);
+    app.update(Message::WrapUp(
+        crate::tui::messages::WrapUpMessage::EpicRebase,
+    ));
 
     // First task completes
     let cmds = app.update(Message::FinishComplete(TaskId(2)));
@@ -453,7 +473,9 @@ fn epic_wrap_up_all_complete_clears_queue() {
     );
     app.board.epics = vec![make_epic(10)];
     app.input.mode = InputMode::ConfirmEpicWrapUp(EpicId(10));
-    app.update(Message::EpicWrapUpRebase);
+    app.update(Message::WrapUp(
+        crate::tui::messages::WrapUpMessage::EpicRebase,
+    ));
 
     app.update(Message::FinishComplete(TaskId(2)));
     app.update(Message::FinishComplete(TaskId(1)));
@@ -473,7 +495,9 @@ fn epic_wrap_up_finish_failed_pauses_queue() {
     );
     app.board.epics = vec![make_epic(10)];
     app.input.mode = InputMode::ConfirmEpicWrapUp(EpicId(10));
-    app.update(Message::EpicWrapUpRebase);
+    app.update(Message::WrapUp(
+        crate::tui::messages::WrapUpMessage::EpicRebase,
+    ));
 
     app.update(Message::FinishFailed {
         id: TaskId(2),
@@ -502,7 +526,9 @@ fn epic_wrap_up_cancel_clears_queue() {
         failed: None,
     });
 
-    app.update(Message::CancelMergeQueue);
+    app.update(Message::WrapUp(
+        crate::tui::messages::WrapUpMessage::CancelMergeQueue,
+    ));
 
     assert!(app.merge_queue.is_none());
 }

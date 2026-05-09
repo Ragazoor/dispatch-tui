@@ -6,6 +6,8 @@
 
 pub mod editor;
 pub mod learnings;
+pub mod wrap_up;
 
 pub use editor::EditorMessage;
 pub use learnings::LearningMessage;
+pub use wrap_up::WrapUpMessage;

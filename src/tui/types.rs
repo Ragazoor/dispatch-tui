@@ -342,16 +342,9 @@ pub enum Message {
     DeleteRepoPath(String),
     CancelPresetInput,
     FilterPresetsLoaded(Vec<(String, HashSet<String>, RepoFilterMode)>),
-    // Wrap up (rebase only — PR creation is agent-driven via the
-    // /wrap-up skill; see plugin/skills/wrap-up/SKILL.md)
-    StartWrapUp(TaskId),
-    WrapUpRebase,
-    CancelWrapUp,
-    // Epic batch wrap-up (rebase only)
-    StartEpicWrapUp(EpicId),
-    EpicWrapUpRebase,
-    CancelEpicWrapUp,
-    CancelMergeQueue,
+    /// Wrap-up flow messages (rebase only — PR creation is agent-driven via the
+    /// `/wrap-up` skill). See [`crate::tui::messages::WrapUpMessage`].
+    WrapUp(crate::tui::messages::WrapUpMessage),
     // Detach tmux panel (Review tasks only)
     DetachTmux(TaskId),
     BatchDetachTmux(Vec<TaskId>),

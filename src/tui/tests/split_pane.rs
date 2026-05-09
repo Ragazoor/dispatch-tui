@@ -542,7 +542,9 @@ fn epic_wrap_up_respawns_split_pane_only_once() {
     app.board.split.right_pane_id = Some("%5".to_string());
     app.board.split.pinned_task_id = Some(TaskId(2));
     app.input.mode = InputMode::ConfirmEpicWrapUp(EpicId(10));
-    app.update(Message::EpicWrapUpRebase);
+    app.update(Message::WrapUp(
+        crate::tui::messages::WrapUpMessage::EpicRebase,
+    ));
 
     // First task completes — this is the pinned one
     let cmds1 = app.update(Message::FinishComplete(TaskId(2)));
