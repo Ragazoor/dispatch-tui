@@ -5,12 +5,12 @@ use super::*;
 // Local helpers
 // ---------------------------------------------------------------------------
 
-fn default_project_id(state: &Arc<McpState>) -> ProjectId {
-    state.db.get_default_project().unwrap().id
+async fn default_project_id(state: &Arc<McpState>) -> ProjectId {
+    state.db.get_default_project().await.unwrap().id
 }
 
-fn create_task_in_repo(state: &Arc<McpState>, repo: &str) -> crate::models::TaskId {
-    let pid = default_project_id(state);
+async fn create_task_in_repo(state: &Arc<McpState>, repo: &str) -> crate::models::TaskId {
+    let pid = default_project_id(state).await;
     state
         .db
         .create_task(CreateTaskRequest {
@@ -63,7 +63,7 @@ fn create_approved_learning(
 #[tokio::test]
 async fn record_learning_creates_proposed_entry() {
     let state = test_state();
-    let task_id = create_task_in_repo(&state, "/repo/foo");
+    let task_id = create_task_in_repo(&state, "/repo/foo").await;
 
     let resp = call(
         &state,
@@ -101,7 +101,7 @@ async fn record_learning_creates_proposed_entry() {
 #[tokio::test]
 async fn record_learning_derives_scope_ref_for_repo() {
     let state = test_state();
-    let task_id = create_task_in_repo(&state, "/repo/bar");
+    let task_id = create_task_in_repo(&state, "/repo/bar").await;
 
     let resp = call(
         &state,
@@ -131,7 +131,7 @@ async fn record_learning_derives_scope_ref_for_repo() {
 #[tokio::test]
 async fn record_learning_derives_scope_ref_for_epic() {
     let state = test_state();
-    let pid = default_project_id(&state);
+    let pid = default_project_id(&state).await;
     let epic = state.db.create_epic("E", "", "/r", None, pid).unwrap();
     let task_id = state
         .db
@@ -180,7 +180,7 @@ async fn record_learning_derives_scope_ref_for_epic() {
 #[tokio::test]
 async fn record_learning_epic_scope_no_epic_fails() {
     let state = test_state();
-    let task_id = create_task_in_repo(&state, "/repo/baz");
+    let task_id = create_task_in_repo(&state, "/repo/baz").await;
 
     let resp = call(
         &state,
@@ -202,7 +202,7 @@ async fn record_learning_epic_scope_no_epic_fails() {
 #[tokio::test]
 async fn record_learning_user_scope_no_scope_ref() {
     let state = test_state();
-    let task_id = create_task_in_repo(&state, "/repo/foo");
+    let task_id = create_task_in_repo(&state, "/repo/foo").await;
 
     let resp = call(
         &state,
@@ -232,7 +232,7 @@ async fn record_learning_user_scope_no_scope_ref() {
 #[tokio::test]
 async fn record_learning_empty_summary_fails() {
     let state = test_state();
-    let task_id = create_task_in_repo(&state, "/repo");
+    let task_id = create_task_in_repo(&state, "/repo").await;
 
     let resp = call(
         &state,
@@ -277,7 +277,7 @@ async fn record_learning_unknown_task_fails() {
 #[tokio::test]
 async fn record_learning_echoes_similar_approved_entries() {
     let state = test_state();
-    let task_id = create_task_in_repo(&state, "/repo/foo");
+    let task_id = create_task_in_repo(&state, "/repo/foo").await;
 
     // Pre-seed an approved learning with same (kind=convention, scope=repo, scope_ref=/repo/foo)
     let existing_id = create_approved_learning(
@@ -319,7 +319,7 @@ async fn record_learning_echoes_similar_approved_entries() {
 #[tokio::test]
 async fn record_learning_no_echo_when_different_kind() {
     let state = test_state();
-    let task_id = create_task_in_repo(&state, "/repo/foo");
+    let task_id = create_task_in_repo(&state, "/repo/foo").await;
 
     // Pre-seed an approved convention learning; we will submit a pitfall learning.
     create_approved_learning(
@@ -356,7 +356,7 @@ async fn record_learning_no_echo_when_different_kind() {
 #[tokio::test]
 async fn record_learning_still_creates_when_similar_exists() {
     let state = test_state();
-    let task_id = create_task_in_repo(&state, "/repo/foo");
+    let task_id = create_task_in_repo(&state, "/repo/foo").await;
 
     create_approved_learning(
         &state,
@@ -402,7 +402,7 @@ async fn record_learning_does_not_echo_itself() {
     // When no pre-existing similar entry exists, the newly created entry must
     // not be echoed as a "similar" entry (it should exclude itself).
     let state = test_state();
-    let task_id = create_task_in_repo(&state, "/repo/foo");
+    let task_id = create_task_in_repo(&state, "/repo/foo").await;
 
     let resp = call(
         &state,
@@ -432,7 +432,7 @@ async fn record_learning_does_not_echo_itself() {
 #[tokio::test]
 async fn query_learnings_returns_approved_for_task() {
     let state = test_state();
-    let task_id = create_task_in_repo(&state, "/repo/myproject");
+    let task_id = create_task_in_repo(&state, "/repo/myproject").await;
     create_approved_learning(
         &state,
         "Use anyhow for errors",
@@ -461,7 +461,7 @@ async fn query_learnings_returns_approved_for_task() {
 #[tokio::test]
 async fn query_learnings_tag_filter_narrows_results() {
     let state = test_state();
-    let task_id = create_task_in_repo(&state, "/repo/tagged");
+    let task_id = create_task_in_repo(&state, "/repo/tagged").await;
     create_approved_learning(
         &state,
         "Rust tips",
@@ -498,7 +498,7 @@ async fn query_learnings_tag_filter_narrows_results() {
 #[tokio::test]
 async fn query_learnings_respects_limit() {
     let state = test_state();
-    let task_id = create_task_in_repo(&state, "/repo/limited");
+    let task_id = create_task_in_repo(&state, "/repo/limited").await;
     for i in 0..5 {
         create_approved_learning(
             &state,
@@ -528,7 +528,7 @@ async fn query_learnings_respects_limit() {
 #[tokio::test]
 async fn query_learnings_records_a_retrieval_per_returned_id() {
     let state = test_state();
-    let task_id = create_task_in_repo(&state, "/repo/retrievals");
+    let task_id = create_task_in_repo(&state, "/repo/retrievals").await;
     create_approved_learning(
         &state,
         "First entry",
@@ -588,7 +588,7 @@ async fn query_learnings_unknown_task_fails() {
 #[tokio::test]
 async fn upvote_learning_increments_count() {
     let state = test_state();
-    let task_id = create_task_in_repo(&state, "/repo");
+    let task_id = create_task_in_repo(&state, "/repo").await;
     let learning_id = create_approved_learning(
         &state,
         "Useful tip",
@@ -615,7 +615,7 @@ async fn upvote_learning_increments_count() {
 #[tokio::test]
 async fn upvote_learning_unknown_learning_fails() {
     let state = test_state();
-    let task_id = create_task_in_repo(&state, "/repo");
+    let task_id = create_task_in_repo(&state, "/repo").await;
 
     let resp = call(
         &state,

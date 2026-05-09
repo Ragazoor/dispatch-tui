@@ -96,7 +96,7 @@ impl TuiRuntime {
         }
     }
 
-    pub(super) fn exec_dispatch_epic(&self, app: &mut App, epic: models::Epic) {
+    pub(super) async fn exec_dispatch_epic(&self, app: &mut App, epic: models::Epic) {
         let title = format!("Plan: {}", epic.title);
         let description = format!(
             "Planning subtask for epic: {}\n\n{}",
@@ -126,7 +126,7 @@ impl TuiRuntime {
 
         app.update(Message::TaskCreated { task: task.clone() });
 
-        let project_ctx = dispatch::ProjectContext::from_db(&task, &*self.database);
+        let project_ctx = dispatch::ProjectContext::from_db(&task, &*self.database).await;
 
         // Dispatch the planning subtask asynchronously
         let tx = self.msg_tx.clone();

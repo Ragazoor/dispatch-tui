@@ -44,9 +44,10 @@ impl ProjectContext {
     /// Build project context for a task. Looks up the task's project_id; falls
     /// back to a synthetic name if the project record is missing (should not
     /// happen in practice — every task is FK-bound to a real project).
-    pub fn from_db(task: &Task, db: &dyn db::TaskStore) -> Self {
+    pub async fn from_db(task: &Task, db: &dyn db::TaskStore) -> Self {
         let lookup = db
             .list_projects()
+            .await
             .ok()
             .and_then(|projects| projects.into_iter().find(|p| p.id == task.project_id));
         match lookup {

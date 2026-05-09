@@ -8,7 +8,7 @@ use super::*;
 #[tokio::test]
 async fn create_task_with_project_id_assigns_correctly() {
     let (state, db) = test_state_with_db();
-    let other = db.create_project("Other", 1).unwrap();
+    let other = db.create_project("Other", 1).await.unwrap();
 
     let resp = call(
         &state,
@@ -55,14 +55,14 @@ async fn create_epic_without_project_id_assigns_to_default() {
 
     let epics = db.list_epics().unwrap();
     assert_eq!(epics.len(), 1);
-    let default_id = db.get_default_project().unwrap().id;
+    let default_id = db.get_default_project().await.unwrap().id;
     assert_eq!(epics[0].project_id, default_id);
 }
 
 #[tokio::test]
 async fn create_epic_with_project_id_assigns_correctly() {
     let (state, db) = test_state_with_db();
-    let other = db.create_project("Other", 1).unwrap();
+    let other = db.create_project("Other", 1).await.unwrap();
 
     let resp = call(
         &state,
@@ -91,8 +91,8 @@ async fn create_epic_with_project_id_assigns_correctly() {
 #[tokio::test]
 async fn list_projects_returns_all_projects() {
     let (state, db) = test_state_with_db();
-    db.create_project("Dispatch", 1).unwrap();
-    db.create_project("wizard_game", 2).unwrap();
+    db.create_project("Dispatch", 1).await.unwrap();
+    db.create_project("wizard_game", 2).await.unwrap();
 
     let resp = call(
         &state,
@@ -121,10 +121,10 @@ async fn list_projects_returns_all_projects() {
 #[tokio::test]
 async fn update_task_project_id_moves_task() {
     let (state, db) = test_state_with_db();
-    let other = db.create_project("Dispatch", 1).unwrap();
+    let other = db.create_project("Dispatch", 1).await.unwrap();
 
     let task_id = create_task_fixture(&state);
-    let default_id = db.get_default_project().unwrap().id;
+    let default_id = db.get_default_project().await.unwrap().id;
     let task_before = db.get_task(task_id).unwrap().unwrap();
     assert_eq!(task_before.project_id, default_id);
 
@@ -168,7 +168,7 @@ async fn update_task_invalid_project_id_returns_error() {
 #[tokio::test]
 async fn update_epic_project_id_moves_epic() {
     let (state, db) = test_state_with_db();
-    let other = db.create_project("Dispatch", 1).unwrap();
+    let other = db.create_project("Dispatch", 1).await.unwrap();
 
     let epic = db
         .create_epic(
@@ -176,10 +176,10 @@ async fn update_epic_project_id_moves_epic() {
             "",
             "/repo",
             None,
-            db.get_default_project().unwrap().id,
+            db.get_default_project().await.unwrap().id,
         )
         .unwrap();
-    let default_id = db.get_default_project().unwrap().id;
+    let default_id = db.get_default_project().await.unwrap().id;
     assert_eq!(epic.project_id, default_id);
 
     let resp = call(
@@ -203,7 +203,13 @@ async fn update_epic_invalid_project_id_returns_error() {
     let (state, db) = test_state_with_db();
 
     let epic = db
-        .create_epic("E", "", "/r", None, db.get_default_project().unwrap().id)
+        .create_epic(
+            "E",
+            "",
+            "/r",
+            None,
+            db.get_default_project().await.unwrap().id,
+        )
         .unwrap();
 
     let resp = call(

@@ -25,7 +25,7 @@ impl TuiRuntime {
         }
     }
 
-    pub(super) fn exec_quick_dispatch(
+    pub(super) async fn exec_quick_dispatch(
         &self,
         app: &mut App,
         draft: tui::TaskDraft,
@@ -59,7 +59,7 @@ impl TuiRuntime {
         let paths = self.database.list_repo_paths().unwrap_or_default();
         app.update(Message::RepoPathsUpdated(paths));
         let epic_ctx = dispatch::EpicContext::from_db(&task, &*self.database);
-        let project_ctx = dispatch::ProjectContext::from_db(&task, &*self.database);
+        let project_ctx = dispatch::ProjectContext::from_db(&task, &*self.database).await;
         let (procedural, tiered) = dispatch::build_and_record_injections(&*self.database, &task);
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
@@ -129,9 +129,9 @@ impl TuiRuntime {
         }
     }
 
-    pub(super) fn exec_dispatch_agent(&self, task: models::Task, mode: models::DispatchMode) {
+    pub(super) async fn exec_dispatch_agent(&self, task: models::Task, mode: models::DispatchMode) {
         let epic_ctx = dispatch::EpicContext::from_db(&task, &*self.database);
-        let project_ctx = dispatch::ProjectContext::from_db(&task, &*self.database);
+        let project_ctx = dispatch::ProjectContext::from_db(&task, &*self.database).await;
         let (procedural, tiered) = dispatch::build_and_record_injections(&*self.database, &task);
         let label = mode.label();
         self.spawn_dispatch(
@@ -390,8 +390,8 @@ impl TuiRuntime {
         });
     }
 
-    fn exec_refresh_projects_from_db(&self, app: &mut App) {
-        match self.database.list_projects() {
+    pub(super) async fn exec_refresh_projects_from_db(&self, app: &mut App) {
+        match self.database.list_projects().await {
             Ok(projects) => {
                 app.update(Message::ProjectsUpdated(projects));
             }
@@ -401,20 +401,20 @@ impl TuiRuntime {
         }
     }
 
-    pub(super) fn exec_create_project(&self, app: &mut App, name: String) {
+    pub(super) async fn exec_create_project(&self, app: &mut App, name: String) {
         let max_order = app
             .projects()
             .iter()
             .map(|p| p.sort_order)
             .max()
             .unwrap_or(0);
-        match self.database.create_project(&name, max_order + 1) {
+        match self.database.create_project(&name, max_order + 1).await {
             Ok(project) => {
                 app.update(Message::StatusInfo(format!(
                     "Created project \"{}\"",
                     project.name
                 )));
-                self.exec_refresh_projects_from_db(app);
+                self.exec_refresh_projects_from_db(app).await;
             }
             Err(e) => {
                 app.update(Message::Error(Self::db_error("creating project", e)));
@@ -422,31 +422,35 @@ impl TuiRuntime {
         }
     }
 
-    pub(super) fn exec_rename_project(&self, app: &mut App, id: ProjectId, name: String) {
-        match self.database.rename_project(id, &name) {
-            Ok(()) => self.exec_refresh_projects_from_db(app),
+    pub(super) async fn exec_rename_project(&self, app: &mut App, id: ProjectId, name: String) {
+        match self.database.rename_project(id, &name).await {
+            Ok(()) => self.exec_refresh_projects_from_db(app).await,
             Err(e) => {
                 app.update(Message::Error(Self::db_error("renaming project", e)));
             }
         }
     }
 
-    pub(super) fn exec_delete_project(&self, app: &mut App, id: ProjectId) {
+    pub(super) async fn exec_delete_project(&self, app: &mut App, id: ProjectId) {
         let Some(default_id) = app.projects().iter().find(|p| p.is_default).map(|p| p.id) else {
             app.update(Message::Error("No default project found".to_string()));
             return;
         };
-        if let Err(e) = self.database.delete_project_and_move_items(id, default_id) {
+        if let Err(e) = self
+            .database
+            .delete_project_and_move_items(id, default_id)
+            .await
+        {
             app.update(Message::Error(Self::db_error("deleting project", e)));
             return;
         }
         if app.active_project() == id {
             app.update(Message::SelectProject(default_id));
         }
-        self.exec_refresh_projects_from_db(app);
+        self.exec_refresh_projects_from_db(app).await;
     }
 
-    pub(super) fn exec_reorder_project(&self, app: &mut App, id: ProjectId, delta: i8) {
+    pub(super) async fn exec_reorder_project(&self, app: &mut App, id: ProjectId, delta: i8) {
         let projects = app.projects().to_vec();
         let Some(idx) = projects.iter().position(|p| p.id == id) else {
             return;
@@ -466,11 +470,12 @@ impl TuiRuntime {
         let neighbor_order = projects[neighbor_idx].sort_order;
         // Swap sort_order values — let _ is intentional: partial failure is non-critical,
         // exec_refresh_projects_from_db below will reflect whatever state the DB is in.
-        let _ = self.database.reorder_project(id, neighbor_order);
+        let _ = self.database.reorder_project(id, neighbor_order).await;
         let _ = self
             .database
-            .reorder_project(projects[neighbor_idx].id, current_order);
-        self.exec_refresh_projects_from_db(app);
+            .reorder_project(projects[neighbor_idx].id, current_order)
+            .await;
+        self.exec_refresh_projects_from_db(app).await;
         app.update(Message::FollowProject(id));
     }
 

@@ -63,7 +63,7 @@ pub(super) struct UpdateEpicArgs {
 // Epic tool handlers (thin wrappers over EpicService)
 // ---------------------------------------------------------------------------
 
-pub(super) fn handle_create_epic(
+pub(super) async fn handle_create_epic(
     state: &McpState,
     id: Option<Value>,
     args: Value,
@@ -74,7 +74,7 @@ pub(super) fn handle_create_epic(
     };
     tracing::info!(title = %parsed.title, "MCP create_epic");
 
-    let project_id = match resolve_project_id(&id, parsed.project_id, &*state.db) {
+    let project_id = match resolve_project_id(&id, parsed.project_id, &*state.db).await {
         Ok(pid) => pid,
         Err(resp) => return resp,
     };
@@ -191,7 +191,7 @@ pub(super) fn handle_list_epics(
     }
 }
 
-pub(super) fn handle_update_epic(
+pub(super) async fn handle_update_epic(
     state: &McpState,
     id: Option<Value>,
     args: Value,
@@ -216,6 +216,7 @@ pub(super) fn handle_update_epic(
         if !state
             .db
             .list_projects()
+            .await
             .unwrap_or_default()
             .iter()
             .any(|p| p.id == ProjectId(project_id))

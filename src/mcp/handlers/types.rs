@@ -265,14 +265,14 @@ pub(super) fn parse_args<T: serde::de::DeserializeOwned>(
 
 /// Resolve an optional `project_id` argument: use it if provided, otherwise
 /// fetch the default project from the DB.
-pub(super) fn resolve_project_id(
+pub(super) async fn resolve_project_id(
     id: &Option<Value>,
     opt_project_id: Option<i64>,
     db: &dyn crate::db::ProjectCrud,
 ) -> Result<crate::models::ProjectId, JsonRpcResponse> {
     match opt_project_id {
         Some(pid) => Ok(crate::models::ProjectId(pid)),
-        None => db.get_default_project().map(|p| p.id).map_err(|e| {
+        None => db.get_default_project().await.map(|p| p.id).map_err(|e| {
             JsonRpcResponse::err(
                 id.clone(),
                 -32603,

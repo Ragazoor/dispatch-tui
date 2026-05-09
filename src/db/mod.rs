@@ -378,15 +378,20 @@ pub trait PrWorkflowStore: Send + Sync {
 // ProjectCrud — CRUD for the projects table
 // ---------------------------------------------------------------------------
 
+#[async_trait::async_trait]
 pub trait ProjectCrud: Send + Sync {
-    fn create_project(&self, name: &str, sort_order: i64) -> Result<Project>;
-    fn list_projects(&self) -> Result<Vec<Project>>;
-    fn get_default_project(&self) -> Result<Project>;
-    fn rename_project(&self, id: ProjectId, name: &str) -> Result<()>;
+    async fn create_project(&self, name: &str, sort_order: i64) -> Result<Project>;
+    async fn list_projects(&self) -> Result<Vec<Project>>;
+    async fn get_default_project(&self) -> Result<Project>;
+    async fn rename_project(&self, id: ProjectId, name: &str) -> Result<()>;
     /// Move all tasks and epics from `from` to `to`, then delete the `from` project.
     /// The entire operation runs in a single transaction.
-    fn delete_project_and_move_items(&self, id: ProjectId, default_id: ProjectId) -> Result<()>;
-    fn reorder_project(&self, id: ProjectId, new_sort_order: i64) -> Result<()>;
+    async fn delete_project_and_move_items(
+        &self,
+        id: ProjectId,
+        default_id: ProjectId,
+    ) -> Result<()>;
+    async fn reorder_project(&self, id: ProjectId, new_sort_order: i64) -> Result<()>;
 }
 
 // ---------------------------------------------------------------------------

@@ -71,7 +71,7 @@ macro_rules! mcp_tools {
 // ---------------------------------------------------------------------------
 
 mcp_tools! {
-    sync "update_task" => tasks::handle_update_task,
+    async "update_task" => tasks::handle_update_task,
         "Update a task's status, sub_status, title, description, repo_path, plan, and/or PR fields. At least one field besides task_id must be provided.",
         {
             "type": "object",
@@ -148,7 +148,7 @@ mcp_tools! {
             "required": ["task_id"]
         };
 
-    sync "create_task" => tasks::handle_create_task,
+    async "create_task" => tasks::handle_create_task,
         "Create a new task on the kanban board. Tasks always start in 'backlog' status.",
         {
             "type": "object",
@@ -247,7 +247,7 @@ mcp_tools! {
             "required": ["task_id", "worktree", "tmux_window"]
         };
 
-    sync "create_epic" => epics::handle_create_epic,
+    async "create_epic" => epics::handle_create_epic,
         "Create a new epic on the kanban board.",
         {
             "type": "object",
@@ -276,7 +276,7 @@ mcp_tools! {
         "List all epics on the kanban board.",
         { "type": "object", "properties": {} };
 
-    sync "update_epic" => epics::handle_update_epic,
+    async "update_epic" => epics::handle_update_epic,
         "Update an epic's title, description, status, plan, sort order, repo path, project, or feed configuration.",
         {
             "type": "object",
@@ -524,7 +524,7 @@ mcp_tools! {
             "required": ["repo", "number", "kind", "local_repo"]
         };
 
-    sync "list_projects" => handle_list_projects,
+    async "list_projects" => handle_list_projects,
         "List all projects on the board so you can look up a project_id by name.",
         { "type": "object", "properties": {} };
 
@@ -630,8 +630,12 @@ the final call closes the session.",
 // list_projects handler
 // ---------------------------------------------------------------------------
 
-fn handle_list_projects(state: &McpState, id: Option<Value>, _args: Value) -> JsonRpcResponse {
-    match state.db.list_projects() {
+async fn handle_list_projects(
+    state: &McpState,
+    id: Option<Value>,
+    _args: Value,
+) -> JsonRpcResponse {
+    match state.db.list_projects().await {
         Ok(projects) => {
             let text = projects
                 .iter()

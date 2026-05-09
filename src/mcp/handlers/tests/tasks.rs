@@ -182,7 +182,7 @@ async fn unknown_method() {
 #[tokio::test]
 async fn create_task_minimal() {
     let state = test_state();
-    let default_id = state.db.get_default_project().unwrap().id;
+    let default_id = state.db.get_default_project().await.unwrap().id;
     let resp = call(
         &state,
         "tools/call",
@@ -216,7 +216,7 @@ async fn create_task_with_plan_stays_backlog() {
     std::fs::write(&plan_file, "# Plan").unwrap();
 
     let state = test_state();
-    let default_id = state.db.get_default_project().unwrap().id;
+    let default_id = state.db.get_default_project().await.unwrap().id;
     let resp = call(
         &state,
         "tools/call",
@@ -250,7 +250,7 @@ async fn create_task_with_plan_stays_backlog() {
 #[tokio::test]
 async fn create_task_with_description() {
     let state = test_state();
-    let default_id = state.db.get_default_project().unwrap().id;
+    let default_id = state.db.get_default_project().await.unwrap().id;
     let resp = call(
         &state,
         "tools/call",
@@ -274,7 +274,7 @@ async fn create_task_with_description() {
 #[tokio::test]
 async fn create_task_missing_title() {
     let state = test_state();
-    let default_id = state.db.get_default_project().unwrap().id;
+    let default_id = state.db.get_default_project().await.unwrap().id;
     let resp = call(
         &state,
         "tools/call",
@@ -330,7 +330,7 @@ async fn create_task_with_unknown_project_id_is_invalid_params() {
 #[tokio::test]
 async fn create_task_assigns_to_provided_project() {
     let state = test_state();
-    let other = state.db.create_project("Other", 1).unwrap();
+    let other = state.db.create_project("Other", 1).await.unwrap();
     let resp = call(
         &state,
         "tools/call",
@@ -1772,7 +1772,7 @@ async fn claim_task_worktree_without_worktrees_dir() {
 #[tokio::test]
 async fn create_task_with_epic_id() {
     let state = test_state();
-    let default_id = state.db.get_default_project().unwrap().id;
+    let default_id = state.db.get_default_project().await.unwrap().id;
     let epic = state
         .db
         .create_epic("Parent Epic", "", "/repo", None, ProjectId(1))
@@ -1802,7 +1802,7 @@ async fn create_task_with_epic_id() {
 #[tokio::test]
 async fn create_task_with_string_epic_id() {
     let state = test_state();
-    let default_id = state.db.get_default_project().unwrap().id;
+    let default_id = state.db.get_default_project().await.unwrap().id;
     let epic = state
         .db
         .create_epic("Parent", "", "/repo", None, ProjectId(1))
@@ -3417,7 +3417,7 @@ async fn update_task_sends_refresh_notification() {
 #[tokio::test]
 async fn create_task_sends_refresh_notification() {
     let (state, mut rx) = test_state_with_notify();
-    let default_id = state.db.get_default_project().unwrap().id;
+    let default_id = state.db.get_default_project().await.unwrap().id;
 
     let resp = call(
         &state,
@@ -3630,7 +3630,7 @@ async fn update_task_sort_order() {
 #[tokio::test]
 async fn create_task_invalid_tag() {
     let state = test_state();
-    let default_id = state.db.get_default_project().unwrap().id;
+    let default_id = state.db.get_default_project().await.unwrap().id;
     let resp = call(
         &state,
         "tools/call",
@@ -3646,7 +3646,7 @@ async fn create_task_invalid_tag() {
 #[tokio::test]
 async fn create_task_valid_tag() {
     let state = test_state();
-    let default_id = state.db.get_default_project().unwrap().id;
+    let default_id = state.db.get_default_project().await.unwrap().id;
     let resp = call(
         &state,
         "tools/call",
@@ -3665,7 +3665,7 @@ async fn create_task_valid_tag() {
 #[tokio::test]
 async fn create_task_with_sort_order() {
     let state = test_state();
-    let default_id = state.db.get_default_project().unwrap().id;
+    let default_id = state.db.get_default_project().await.unwrap().id;
     let resp = call(
         &state,
         "tools/call",
@@ -3684,7 +3684,7 @@ async fn create_task_with_sort_order() {
 #[tokio::test]
 async fn create_task_with_nonexistent_epic() {
     let state = test_state();
-    let default_id = state.db.get_default_project().unwrap().id;
+    let default_id = state.db.get_default_project().await.unwrap().id;
     let resp = call(
         &state,
         "tools/call",
@@ -5107,7 +5107,7 @@ async fn wrap_up_rebase_clears_conflict_substatus_on_non_conflict_error() {
 #[tokio::test]
 async fn create_task_with_base_branch_stores_it() {
     let state = test_state();
-    let default_id = state.db.get_default_project().unwrap().id;
+    let default_id = state.db.get_default_project().await.unwrap().id;
 
     let resp = call(
         &state,
@@ -5133,7 +5133,7 @@ async fn create_task_with_base_branch_stores_it() {
 #[tokio::test]
 async fn create_task_without_base_branch_defaults_to_main() {
     let state = test_state();
-    let default_id = state.db.get_default_project().unwrap().id;
+    let default_id = state.db.get_default_project().await.unwrap().id;
 
     let resp = call(
         &state,
@@ -6235,7 +6235,7 @@ async fn dispatch_task_returns_error_when_dispatch_fails() {
 #[tokio::test]
 async fn create_task_with_project_id_assigns_correctly() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
-    let other = db.create_project("Other", 1).unwrap();
+    let other = db.create_project("Other", 1).await.unwrap();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let state = Arc::new(McpState {
         db: db.clone(),
@@ -6294,14 +6294,14 @@ async fn create_epic_without_project_id_assigns_to_default() {
 
     let epics = db.list_epics().unwrap();
     assert_eq!(epics.len(), 1);
-    let default_id = db.get_default_project().unwrap().id;
+    let default_id = db.get_default_project().await.unwrap().id;
     assert_eq!(epics[0].project_id, default_id);
 }
 
 #[tokio::test]
 async fn create_epic_with_project_id_assigns_correctly() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
-    let other = db.create_project("Other", 1).unwrap();
+    let other = db.create_project("Other", 1).await.unwrap();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let state = Arc::new(McpState {
         db: db.clone(),
@@ -6336,8 +6336,8 @@ async fn create_epic_with_project_id_assigns_correctly() {
 #[tokio::test]
 async fn list_projects_returns_all_projects() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
-    db.create_project("Dispatch", 1).unwrap();
-    db.create_project("wizard_game", 2).unwrap();
+    db.create_project("Dispatch", 1).await.unwrap();
+    db.create_project("wizard_game", 2).await.unwrap();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let state = Arc::new(McpState {
         db: db.clone(),
@@ -6372,7 +6372,7 @@ async fn list_projects_returns_all_projects() {
 #[tokio::test]
 async fn update_task_project_id_moves_task() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
-    let other = db.create_project("Dispatch", 1).unwrap();
+    let other = db.create_project("Dispatch", 1).await.unwrap();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let state = Arc::new(McpState {
         db: db.clone(),
@@ -6381,7 +6381,7 @@ async fn update_task_project_id_moves_task() {
     });
 
     let task_id = create_task_fixture(&state);
-    let default_id = db.get_default_project().unwrap().id;
+    let default_id = db.get_default_project().await.unwrap().id;
     let task_before = db.get_task(task_id).unwrap().unwrap();
     assert_eq!(task_before.project_id, default_id);
 
@@ -6425,7 +6425,7 @@ async fn update_task_invalid_project_id_returns_error() {
 #[tokio::test]
 async fn update_epic_project_id_moves_epic() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
-    let other = db.create_project("Dispatch", 1).unwrap();
+    let other = db.create_project("Dispatch", 1).await.unwrap();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let state = Arc::new(McpState {
         db: db.clone(),
@@ -6439,10 +6439,10 @@ async fn update_epic_project_id_moves_epic() {
             "",
             "/repo",
             None,
-            db.get_default_project().unwrap().id,
+            db.get_default_project().await.unwrap().id,
         )
         .unwrap();
-    let default_id = db.get_default_project().unwrap().id;
+    let default_id = db.get_default_project().await.unwrap().id;
     assert_eq!(epic.project_id, default_id);
 
     let resp = call(
@@ -6472,7 +6472,13 @@ async fn update_epic_invalid_project_id_returns_error() {
     });
 
     let epic = db
-        .create_epic("E", "", "/r", None, db.get_default_project().unwrap().id)
+        .create_epic(
+            "E",
+            "",
+            "/r",
+            None,
+            db.get_default_project().await.unwrap().id,
+        )
         .unwrap();
 
     let resp = call(
@@ -6492,12 +6498,12 @@ async fn update_epic_invalid_project_id_returns_error() {
 // Learning tool tests
 // ---------------------------------------------------------------------------
 
-fn default_project_id(state: &Arc<McpState>) -> ProjectId {
-    state.db.get_default_project().unwrap().id
+async fn default_project_id(state: &Arc<McpState>) -> ProjectId {
+    state.db.get_default_project().await.unwrap().id
 }
 
-fn create_task_in_repo(state: &Arc<McpState>, repo: &str) -> crate::models::TaskId {
-    let pid = default_project_id(state);
+async fn create_task_in_repo(state: &Arc<McpState>, repo: &str) -> crate::models::TaskId {
+    let pid = default_project_id(state).await;
     state
         .db
         .create_task(CreateTaskRequest {
@@ -6550,7 +6556,7 @@ fn create_approved_learning(
 #[tokio::test]
 async fn record_learning_creates_proposed_entry() {
     let state = test_state();
-    let task_id = create_task_in_repo(&state, "/repo/foo");
+    let task_id = create_task_in_repo(&state, "/repo/foo").await;
 
     let resp = call(
         &state,
@@ -6588,7 +6594,7 @@ async fn record_learning_creates_proposed_entry() {
 #[tokio::test]
 async fn record_learning_derives_scope_ref_for_repo() {
     let state = test_state();
-    let task_id = create_task_in_repo(&state, "/repo/bar");
+    let task_id = create_task_in_repo(&state, "/repo/bar").await;
 
     let resp = call(
         &state,
@@ -6618,7 +6624,7 @@ async fn record_learning_derives_scope_ref_for_repo() {
 #[tokio::test]
 async fn record_learning_derives_scope_ref_for_epic() {
     let state = test_state();
-    let pid = default_project_id(&state);
+    let pid = default_project_id(&state).await;
     let epic = state.db.create_epic("E", "", "/r", None, pid).unwrap();
     let task_id = state
         .db
@@ -6667,7 +6673,7 @@ async fn record_learning_derives_scope_ref_for_epic() {
 #[tokio::test]
 async fn record_learning_epic_scope_no_epic_fails() {
     let state = test_state();
-    let task_id = create_task_in_repo(&state, "/repo/baz");
+    let task_id = create_task_in_repo(&state, "/repo/baz").await;
 
     let resp = call(
         &state,
@@ -6689,7 +6695,7 @@ async fn record_learning_epic_scope_no_epic_fails() {
 #[tokio::test]
 async fn record_learning_user_scope_no_scope_ref() {
     let state = test_state();
-    let task_id = create_task_in_repo(&state, "/repo/foo");
+    let task_id = create_task_in_repo(&state, "/repo/foo").await;
 
     let resp = call(
         &state,
@@ -6719,7 +6725,7 @@ async fn record_learning_user_scope_no_scope_ref() {
 #[tokio::test]
 async fn record_learning_empty_summary_fails() {
     let state = test_state();
-    let task_id = create_task_in_repo(&state, "/repo");
+    let task_id = create_task_in_repo(&state, "/repo").await;
 
     let resp = call(
         &state,
@@ -6764,7 +6770,7 @@ async fn record_learning_unknown_task_fails() {
 #[tokio::test]
 async fn query_learnings_returns_approved_for_task() {
     let state = test_state();
-    let task_id = create_task_in_repo(&state, "/repo/myproject");
+    let task_id = create_task_in_repo(&state, "/repo/myproject").await;
     create_approved_learning(
         &state,
         "Use anyhow for errors",
@@ -6793,7 +6799,7 @@ async fn query_learnings_returns_approved_for_task() {
 #[tokio::test]
 async fn query_learnings_tag_filter_narrows_results() {
     let state = test_state();
-    let task_id = create_task_in_repo(&state, "/repo/tagged");
+    let task_id = create_task_in_repo(&state, "/repo/tagged").await;
     create_approved_learning(
         &state,
         "Rust tips",
@@ -6830,7 +6836,7 @@ async fn query_learnings_tag_filter_narrows_results() {
 #[tokio::test]
 async fn query_learnings_respects_limit() {
     let state = test_state();
-    let task_id = create_task_in_repo(&state, "/repo/limited");
+    let task_id = create_task_in_repo(&state, "/repo/limited").await;
     for i in 0..5 {
         create_approved_learning(
             &state,
@@ -6878,7 +6884,7 @@ async fn query_learnings_unknown_task_fails() {
 #[tokio::test]
 async fn upvote_learning_increments_count() {
     let state = test_state();
-    let task_id = create_task_in_repo(&state, "/repo");
+    let task_id = create_task_in_repo(&state, "/repo").await;
     let learning_id = create_approved_learning(
         &state,
         "Useful tip",
@@ -6905,7 +6911,7 @@ async fn upvote_learning_increments_count() {
 #[tokio::test]
 async fn upvote_learning_unknown_learning_fails() {
     let state = test_state();
-    let task_id = create_task_in_repo(&state, "/repo");
+    let task_id = create_task_in_repo(&state, "/repo").await;
 
     let resp = call(
         &state,

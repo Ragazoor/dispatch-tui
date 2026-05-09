@@ -32,7 +32,8 @@ fn make_plan_file(title: &str, goal: &str) -> NamedTempFile {
 /// subcommand.
 fn seed_task(db_path: &Path, title: &str) -> TaskId {
     let db = Database::open(db_path).unwrap();
-    let project_id = db.get_default_project().unwrap().id;
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let project_id = rt.block_on(db.get_default_project()).unwrap().id;
     db.create_task(CreateTaskRequest {
         title,
         description: "",

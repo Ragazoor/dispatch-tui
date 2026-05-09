@@ -5,13 +5,13 @@
 use dispatch_tui::db::{CreateTaskRequest, Database, EpicCrud, ProjectCrud, TaskCrud};
 use dispatch_tui::models::TaskStatus;
 
-#[test]
-fn delete_project_moves_tasks_and_epics_to_default() {
+#[tokio::test]
+async fn delete_project_moves_tasks_and_epics_to_default() {
     let db = Database::open_in_memory().unwrap();
-    let default = db.get_default_project().unwrap();
+    let default = db.get_default_project().await.unwrap();
 
     // Create a non-default project P with 3 tasks and 1 epic.
-    let p = db.create_project("P", 100).unwrap();
+    let p = db.create_project("P", 100).await.unwrap();
     assert_ne!(p.id, default.id);
     assert!(!p.is_default);
 
@@ -41,7 +41,9 @@ fn delete_project_moves_tasks_and_epics_to_default() {
     assert_eq!(db.get_epic(epic.id).unwrap().unwrap().project_id, p.id);
 
     // Delete P → all items move to Default in a single transaction.
-    db.delete_project_and_move_items(p.id, default.id).unwrap();
+    db.delete_project_and_move_items(p.id, default.id)
+        .await
+        .unwrap();
 
     for id in &task_ids {
         assert_eq!(
@@ -57,22 +59,24 @@ fn delete_project_moves_tasks_and_epics_to_default() {
     );
 
     // Project row is gone.
-    let projects = db.list_projects().unwrap();
+    let projects = db.list_projects().await.unwrap();
     assert!(
         projects.iter().all(|proj| proj.id != p.id),
         "deleted project must not appear in list_projects"
     );
 }
 
-#[test]
-fn delete_default_project_is_rejected() {
+#[tokio::test]
+async fn delete_default_project_is_rejected() {
     let db = Database::open_in_memory().unwrap();
-    let default = db.get_default_project().unwrap();
+    let default = db.get_default_project().await.unwrap();
 
-    let result = db.delete_project_and_move_items(default.id, default.id);
+    let result = db
+        .delete_project_and_move_items(default.id, default.id)
+        .await;
     assert!(result.is_err(), "deleting the default project must error");
 
     // Default still present.
-    let projects = db.list_projects().unwrap();
+    let projects = db.list_projects().await.unwrap();
     assert!(projects.iter().any(|p| p.id == default.id && p.is_default));
 }

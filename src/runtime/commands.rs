@@ -2,7 +2,7 @@
 ///
 /// Returns any follow-on commands that should be added to the execution queue.
 /// The caller (`execute_commands`) extends the queue with the returned vec.
-pub(super) fn dispatch(
+pub(super) async fn dispatch(
     command: super::Command,
     app: &mut super::App,
     rt: &super::TuiRuntime,
@@ -22,7 +22,7 @@ pub(super) fn dispatch(
             vec![]
         }
         DispatchAgent { task, mode } => {
-            rt.exec_dispatch_agent(task, mode);
+            rt.exec_dispatch_agent(task, mode).await;
             vec![]
         }
         CaptureTmux { id, window } => {
@@ -67,7 +67,7 @@ pub(super) fn dispatch(
             vec![]
         }
         QuickDispatch { draft, epic_id } => {
-            rt.exec_quick_dispatch(app, draft, epic_id);
+            rt.exec_quick_dispatch(app, draft, epic_id).await;
             vec![]
         }
         KillTmuxWindow { window } => {
@@ -121,7 +121,7 @@ pub(super) fn dispatch(
             vec![]
         }
         DispatchEpic { epic } => {
-            rt.exec_dispatch_epic(app, epic);
+            rt.exec_dispatch_epic(app, epic).await;
             vec![]
         }
         ToggleEpicAutoDispatch { id, auto_dispatch } => {
@@ -234,19 +234,19 @@ pub(super) fn dispatch(
         }
         // Project commands
         CreateProject { name } => {
-            rt.exec_create_project(app, name);
+            rt.exec_create_project(app, name).await;
             vec![]
         }
         RenameProject { id, name } => {
-            rt.exec_rename_project(app, id, name);
+            rt.exec_rename_project(app, id, name).await;
             vec![]
         }
         DeleteProject { id } => {
-            rt.exec_delete_project(app, id);
+            rt.exec_delete_project(app, id).await;
             vec![]
         }
         ReorderProject { id, delta } => {
-            rt.exec_reorder_project(app, id, delta);
+            rt.exec_reorder_project(app, id, delta).await;
             vec![]
         }
         Learning(cmd) => {

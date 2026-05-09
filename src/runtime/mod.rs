@@ -83,7 +83,7 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     });
 
     // 3. Create App and load saved repo paths
-    let projects = database.list_projects()?;
+    let projects = database.list_projects().await?;
     let saved_project = database.get_setting_string("last_project").ok().flatten();
     let initial_project_id = resolve_initial_project(&projects, saved_project);
     let mut app = App::new(
@@ -405,7 +405,7 @@ async fn execute_commands(
 ) -> Result<()> {
     let mut queue = std::collections::VecDeque::from(cmds);
     while let Some(command) = queue.pop_front() {
-        let extra = commands::dispatch(command, app, rt);
+        let extra = commands::dispatch(command, app, rt).await;
         queue.extend(extra);
     }
     Ok(())

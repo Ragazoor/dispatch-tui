@@ -357,7 +357,8 @@ async fn exec_dispatch_sends_dispatched_message() {
         models::TaskStatus::Backlog,
     )
     .unwrap();
-    rt.exec_dispatch_agent(task, models::DispatchMode::Dispatch);
+    rt.exec_dispatch_agent(task, models::DispatchMode::Dispatch)
+        .await;
 
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
@@ -387,7 +388,8 @@ async fn exec_dispatch_sends_error_on_failure() {
         models::TaskStatus::Backlog,
     )
     .unwrap();
-    rt.exec_dispatch_agent(task.clone(), models::DispatchMode::Dispatch);
+    rt.exec_dispatch_agent(task.clone(), models::DispatchMode::Dispatch)
+        .await;
 
     let msg1 = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
@@ -653,7 +655,7 @@ async fn exec_dispatch_epic_creates_planning_subtask() {
         .create_epic("Auth redesign", "Rework login", "/repo", None, ProjectId(1))
         .unwrap();
 
-    rt.exec_dispatch_epic(&mut app, epic.clone());
+    rt.exec_dispatch_epic(&mut app, epic.clone()).await;
 
     // Planning subtask was created in DB and added to app
     assert_eq!(app.tasks().len(), 1);
@@ -857,7 +859,8 @@ async fn exec_quick_dispatch_creates_task_and_dispatches() {
             base_branch: "main".into(),
         },
         None,
-    );
+    )
+    .await;
 
     // Task was created in app and DB synchronously
     assert_eq!(app.tasks().len(), 1);
@@ -917,7 +920,8 @@ async fn exec_quick_dispatch_sets_base_branch_to_repo_default() {
             base_branch: "main".into(),
         },
         None,
-    );
+    )
+    .await;
 
     let stored = db.list_all().unwrap();
     assert_eq!(stored.len(), 1);
@@ -961,7 +965,8 @@ async fn exec_quick_dispatch_with_epic_dispatches_successfully() {
             base_branch: "main".into(),
         },
         Some(epic.id),
-    );
+    )
+    .await;
 
     // Task was created with epic linkage
     assert_eq!(app.tasks().len(), 1);
@@ -999,7 +1004,8 @@ async fn exec_quick_dispatch_sends_error_on_failure() {
             base_branch: "main".into(),
         },
         None,
-    );
+    )
+    .await;
 
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
@@ -1032,7 +1038,8 @@ async fn exec_quick_dispatch_failure_sends_dispatch_failed_and_error() {
             base_branch: "main".into(),
         },
         None,
-    );
+    )
+    .await;
 
     // The task was created synchronously
     let created_id = app.tasks()[0].id;

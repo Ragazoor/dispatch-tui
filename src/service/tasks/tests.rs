@@ -1674,12 +1674,12 @@ fn validate_send_message_target_not_found() {
 // project_id propagation tests
 // -------------------------------------------------------------------------
 
-#[test]
-fn create_task_with_explicit_project_id() {
+#[tokio::test]
+async fn create_task_with_explicit_project_id() {
     let db = Arc::new(Database::open_in_memory().unwrap());
     let svc = TaskService::new(db.clone() as Arc<dyn db::TaskAndEpicStore>);
-    let default_id = db.get_default_project().unwrap().id;
-    let other = db.create_project("Other", 1).unwrap();
+    let default_id = db.get_default_project().await.unwrap().id;
+    let other = db.create_project("Other", 1).await.unwrap();
 
     let result = svc.create_task(CreateTaskParams {
         title: "T".to_string(),
@@ -1814,12 +1814,12 @@ fn list_sub_epics_service() {
 
 // -- project_id in update_task --------------------------------------------
 
-#[test]
-fn update_task_project_id_moves_task() {
+#[tokio::test]
+async fn update_task_project_id_moves_task() {
     let db = test_db();
     let svc = task_svc(&db);
     let d: Arc<dyn db::ProjectCrud> = db.clone();
-    let other = d.create_project("Dispatch", 1).unwrap();
+    let other = d.create_project("Dispatch", 1).await.unwrap();
 
     let id = svc
         .create_task(CreateTaskParams {
@@ -1845,12 +1845,12 @@ fn update_task_project_id_moves_task() {
 
 // -- project_id in update_epic --------------------------------------------
 
-#[test]
-fn update_epic_project_id_moves_epic() {
+#[tokio::test]
+async fn update_epic_project_id_moves_epic() {
     let db = test_db();
     let svc = epic_svc(&db);
     let d: Arc<dyn db::ProjectCrud> = db.clone();
-    let other = d.create_project("Dispatch", 1).unwrap();
+    let other = d.create_project("Dispatch", 1).await.unwrap();
 
     let epic = svc
         .create_epic(CreateEpicParams {

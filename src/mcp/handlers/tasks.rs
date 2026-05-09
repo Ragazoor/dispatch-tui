@@ -283,7 +283,7 @@ fn format_task_line(t: &Task, epic_titles: &HashMap<EpicId, String>, goal: &str)
 // Task tool handlers (thin wrappers over TaskService)
 // ---------------------------------------------------------------------------
 
-fn validate_project_id(
+async fn validate_project_id(
     state: &McpState,
     id: &Option<Value>,
     project_id: i64,
@@ -291,6 +291,7 @@ fn validate_project_id(
     if state
         .db
         .list_projects()
+        .await
         .unwrap_or_default()
         .iter()
         .any(|p| p.id == ProjectId(project_id))
@@ -303,7 +304,7 @@ fn validate_project_id(
     ))
 }
 
-pub(super) fn handle_update_task(
+pub(super) async fn handle_update_task(
     state: &McpState,
     id: Option<Value>,
     args: Value,
@@ -355,7 +356,7 @@ pub(super) fn handle_update_task(
         params = params.epic_id(EpicId(epic_id));
     }
     if let Some(project_id) = parsed.project_id {
-        if let Err(resp) = validate_project_id(state, &id, project_id) {
+        if let Err(resp) = validate_project_id(state, &id, project_id).await {
             return resp;
         }
         params = params.project_id(ProjectId(project_id));
@@ -380,7 +381,7 @@ pub(super) fn handle_update_task(
     }
 }
 
-pub(super) fn handle_create_task(
+pub(super) async fn handle_create_task(
     state: &McpState,
     id: Option<Value>,
     args: Value,
@@ -396,7 +397,7 @@ pub(super) fn handle_create_task(
         "MCP create_task"
     );
 
-    if let Err(resp) = validate_project_id(state, &id, parsed.project_id) {
+    if let Err(resp) = validate_project_id(state, &id, parsed.project_id).await {
         return resp;
     }
 
@@ -790,9 +791,9 @@ fn do_dispatch(
     task: &crate::models::Task,
     db: &dyn crate::db::TaskStore,
     runner: &dyn crate::process::ProcessRunner,
+    project_ctx: dispatch::ProjectContext,
 ) -> anyhow::Result<crate::models::DispatchResult> {
     let epic_ctx = dispatch::EpicContext::from_db(task, db);
-    let project_ctx = dispatch::ProjectContext::from_db(task, db);
     let (procedural, tiered) = dispatch::build_and_record_injections(db, task);
     let injections = dispatch::LearningInjections {
         procedural: procedural.iter().collect(),
@@ -868,12 +869,13 @@ pub(super) async fn handle_dispatch_next(
     let next_id = next_task.id;
     let next_title = next_task.title.clone();
     let next_epic_id = next_task.epic_id;
+    let project_ctx = dispatch::ProjectContext::from_db(&next_task, &*state.db).await;
     let db = state.db.clone();
     let runner = state.runner.clone();
     let notify_tx = state.notify_tx.clone();
 
     tokio::task::spawn_blocking(move || {
-        let result = do_dispatch(&next_task, &*db, &*runner);
+        let result = do_dispatch(&next_task, &*db, &*runner, project_ctx);
 
         match result {
             Ok(dispatch_result) => {
@@ -951,12 +953,14 @@ pub(super) async fn handle_dispatch_task(
         );
     }
 
+    let project_ctx = dispatch::ProjectContext::from_db(&task, &*state.db).await;
     let db = state.db.clone();
     let runner = state.runner.clone();
     let notify_tx = state.notify_tx.clone();
     let epic_id = task.epic_id;
 
-    let result = tokio::task::spawn_blocking(move || do_dispatch(&task, &*db, &*runner)).await;
+    let result =
+        tokio::task::spawn_blocking(move || do_dispatch(&task, &*db, &*runner, project_ctx)).await;
 
     match result {
         Ok(Ok(dr)) => {
