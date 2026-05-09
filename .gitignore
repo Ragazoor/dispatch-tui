@@ -5,3 +5,4 @@ docs/plans/**
 .superpowers/
 .claude-prompt
 .claude-messages/
+scripts/local/
