@@ -14,7 +14,7 @@
 
 # ---------------------------------------------------------------------------
 # Configure your repositories here (space-separated "owner/repo" slugs).
-REPOS="annotell/scala-common annotell/gha-scala annotell/gha-database-bootstrapper annotell/airflow-dags annotell/annotell-data-warehouse annotell/bigquery-export"
+REPOS=""
 # ---------------------------------------------------------------------------
 
 if [ -z "$REPOS" ]; then
