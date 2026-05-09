@@ -9,7 +9,7 @@ use crate::models::{
     LearningVerdict, ProjectId, RetrievalSource, TaskId,
 };
 
-use super::super::{Database, LearningFilter, LearningPatch};
+use super::super::{CreateLearningRow, Database, LearningFilter, LearningPatch};
 use super::{read_json_string_vec, write_json_string_vec};
 
 const LEARNING_COLUMNS: &str =
@@ -50,30 +50,20 @@ fn row_to_learning(row: &rusqlite::Row<'_>) -> rusqlite::Result<Learning> {
 }
 
 impl super::super::LearningStore for Database {
-    #[allow(clippy::too_many_arguments)]
-    fn create_learning(
-        &self,
-        kind: LearningKind,
-        summary: &str,
-        detail: Option<&str>,
-        scope: LearningScope,
-        scope_ref: Option<&str>,
-        tags: &[String],
-        source_task_id: Option<TaskId>,
-    ) -> Result<LearningId> {
+    fn create_learning(&self, row: CreateLearningRow<'_>) -> Result<LearningId> {
         let conn = self.conn()?;
-        let tags_json = write_json_string_vec(tags)?;
+        let tags_json = write_json_string_vec(row.tags)?;
         conn.execute(
             "INSERT INTO learnings (kind, summary, detail, scope, scope_ref, tags, status, source_task_id)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'approved', ?7)",
             params![
-                kind.as_str(),
-                summary,
-                detail,
-                scope.as_str(),
-                scope_ref,
+                row.kind.as_str(),
+                row.summary,
+                row.detail,
+                row.scope.as_str(),
+                row.scope_ref,
                 tags_json,
-                source_task_id.map(|t| t.0),
+                row.source_task_id.map(|t| t.0),
             ],
         )
         .context("Failed to insert learning")?;

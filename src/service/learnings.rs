@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::db::{self, LearningFilter, LearningPatch};
+use crate::db::{self, CreateLearningRow, LearningFilter, LearningPatch};
 use crate::models::{
     Learning, LearningId, LearningKind, LearningScope, LearningStatus, LearningVerdict,
     RetrievalSource, TaskId,
@@ -68,15 +68,15 @@ impl LearningService {
             }
         }
         self.db
-            .create_learning(
-                params.kind,
-                &params.summary,
-                params.detail.as_deref(),
-                params.scope,
-                params.scope_ref.as_deref(),
-                &params.tags,
-                params.source_task_id,
-            )
+            .create_learning(CreateLearningRow {
+                kind: params.kind,
+                summary: &params.summary,
+                detail: params.detail.as_deref(),
+                scope: params.scope,
+                scope_ref: params.scope_ref.as_deref(),
+                tags: &params.tags,
+                source_task_id: params.source_task_id,
+            })
             .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
     }
 

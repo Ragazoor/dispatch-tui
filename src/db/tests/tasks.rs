@@ -1924,15 +1924,15 @@ fn upsert_feed_tasks_can_purge_task_with_associated_learning() {
     let task_id = db.list_tasks_for_epic(epic.id).unwrap()[0].id;
 
     // The dispatched agent records a learning referencing the task as its source.
-    db.create_learning(
-        LearningKind::Pitfall,
-        "watch out",
-        None,
-        LearningScope::User,
-        None,
-        &[],
-        Some(task_id),
-    )
+    db.create_learning(CreateLearningRow {
+        kind: LearningKind::Pitfall,
+        summary: "watch out",
+        detail: None,
+        scope: LearningScope::User,
+        scope_ref: None,
+        tags: &[],
+        source_task_id: Some(task_id),
+    })
     .unwrap();
 
     // Second feed run with a different external_id — the previous task should

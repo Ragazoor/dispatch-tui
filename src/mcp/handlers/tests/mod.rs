@@ -10,7 +10,7 @@ use std::sync::Arc;
 use axum::{extract::State, Json};
 use serde_json::{json, Value};
 
-use crate::db::{self, CreateTaskRequest, Database};
+use crate::db::{self, CreateLearningRow, CreateTaskRequest, Database};
 use crate::mcp::McpState;
 use crate::models::{ProjectId, SubStatus, TaskStatus};
 use crate::process::{MockProcessRunner, ProcessRunner};

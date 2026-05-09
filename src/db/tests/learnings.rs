@@ -6,15 +6,15 @@ fn landscape_kind_can_be_recorded() {
     use crate::models::{LearningKind, LearningScope};
     let db = in_memory_db();
     let id = db
-        .create_learning(
-            LearningKind::Landscape,
-            "Service X owns auth, service Y owns billing",
-            None,
-            LearningScope::Repo,
-            Some("/home/user/repo"),
-            &[],
-            None,
-        )
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Landscape,
+            summary: "Service X owns auth, service Y owns billing",
+            detail: None,
+            scope: LearningScope::Repo,
+            scope_ref: Some("/home/user/repo"),
+            tags: &[],
+            source_task_id: None,
+        })
         .unwrap();
     let l = db.get_learning(id).unwrap().unwrap();
     assert_eq!(l.kind, LearningKind::Landscape);
@@ -42,15 +42,15 @@ fn create_and_get_learning() {
     use crate::models::{LearningKind, LearningScope, LearningStatus};
     let db = in_memory_db();
     let id = db
-        .create_learning(
-            LearningKind::Convention,
-            "Always use Arc for shared DB state",
-            Some("Avoids locking issues in async contexts"),
-            LearningScope::Repo,
-            Some("/home/user/repo"),
-            &["rust".to_string(), "async".to_string()],
-            None,
-        )
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Convention,
+            summary: "Always use Arc for shared DB state",
+            detail: Some("Avoids locking issues in async contexts"),
+            scope: LearningScope::Repo,
+            scope_ref: Some("/home/user/repo"),
+            tags: &["rust".to_string(), "async".to_string()],
+            source_task_id: None,
+        })
         .unwrap();
     let learning = db.get_learning(id).unwrap().expect("learning should exist");
     assert_eq!(learning.id, id);
@@ -74,15 +74,15 @@ fn create_learning_user_scope_has_null_scope_ref() {
     use crate::models::{LearningKind, LearningScope};
     let db = in_memory_db();
     let id = db
-        .create_learning(
-            LearningKind::Preference,
-            "Prefer short commits",
-            None,
-            LearningScope::User,
-            None,
-            &[],
-            None,
-        )
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Preference,
+            summary: "Prefer short commits",
+            detail: None,
+            scope: LearningScope::User,
+            scope_ref: None,
+            tags: &[],
+            source_task_id: None,
+        })
         .unwrap();
     let learning = db.get_learning(id).unwrap().unwrap();
     assert!(learning.scope_ref.is_none());
@@ -93,15 +93,15 @@ fn scope_ref_consistency_constraint_is_enforced() {
     use crate::models::{LearningKind, LearningScope};
     let db = in_memory_db();
     // user scope with a non-null scope_ref should violate the CHECK constraint
-    let result = db.create_learning(
-        LearningKind::Preference,
-        "Should fail",
-        None,
-        LearningScope::User,
-        Some("should-not-be-here"),
-        &[],
-        None,
-    );
+    let result = db.create_learning(CreateLearningRow {
+        kind: LearningKind::Preference,
+        summary: "Should fail",
+        detail: None,
+        scope: LearningScope::User,
+        scope_ref: Some("should-not-be-here"),
+        tags: &[],
+        source_task_id: None,
+    });
     assert!(
         result.is_err(),
         "user scope with scope_ref must be rejected"
@@ -114,26 +114,26 @@ fn list_learnings_filter_by_status() {
     use crate::models::{LearningKind, LearningScope, LearningStatus};
     let db = in_memory_db();
     let id1 = db
-        .create_learning(
-            LearningKind::Pitfall,
-            "A pitfall",
-            None,
-            LearningScope::User,
-            None,
-            &[],
-            None,
-        )
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Pitfall,
+            summary: "A pitfall",
+            detail: None,
+            scope: LearningScope::User,
+            scope_ref: None,
+            tags: &[],
+            source_task_id: None,
+        })
         .unwrap();
     let id2 = db
-        .create_learning(
-            LearningKind::Convention,
-            "A convention",
-            None,
-            LearningScope::User,
-            None,
-            &[],
-            None,
-        )
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Convention,
+            summary: "A convention",
+            detail: None,
+            scope: LearningScope::User,
+            scope_ref: None,
+            tags: &[],
+            source_task_id: None,
+        })
         .unwrap();
     // Both learnings default to Approved. Archive id2 so we can filter by status.
     db.patch_learning(
@@ -167,37 +167,37 @@ fn list_learnings_approved_filter_excludes_rejected_and_archived() {
     use crate::models::{LearningKind, LearningScope, LearningStatus};
     let db = in_memory_db();
     let approved_id = db
-        .create_learning(
-            LearningKind::Pitfall,
-            "approved one",
-            None,
-            LearningScope::User,
-            None,
-            &[],
-            None,
-        )
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Pitfall,
+            summary: "approved one",
+            detail: None,
+            scope: LearningScope::User,
+            scope_ref: None,
+            tags: &[],
+            source_task_id: None,
+        })
         .unwrap();
     let rejected_id = db
-        .create_learning(
-            LearningKind::Convention,
-            "rejected one",
-            None,
-            LearningScope::User,
-            None,
-            &[],
-            None,
-        )
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Convention,
+            summary: "rejected one",
+            detail: None,
+            scope: LearningScope::User,
+            scope_ref: None,
+            tags: &[],
+            source_task_id: None,
+        })
         .unwrap();
     let archived_id = db
-        .create_learning(
-            LearningKind::Preference,
-            "archived one",
-            None,
-            LearningScope::User,
-            None,
-            &[],
-            None,
-        )
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Preference,
+            summary: "archived one",
+            detail: None,
+            scope: LearningScope::User,
+            scope_ref: None,
+            tags: &[],
+            source_task_id: None,
+        })
         .unwrap();
     // Transition rejected and archived
     db.patch_learning(
@@ -228,15 +228,15 @@ fn patch_learning_updates_summary_and_updated_at() {
     use crate::models::{LearningKind, LearningScope};
     let db = in_memory_db();
     let id = db
-        .create_learning(
-            LearningKind::Convention,
-            "Original",
-            None,
-            LearningScope::User,
-            None,
-            &[],
-            None,
-        )
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Convention,
+            summary: "Original",
+            detail: None,
+            scope: LearningScope::User,
+            scope_ref: None,
+            tags: &[],
+            source_task_id: None,
+        })
         .unwrap();
     let before = db.get_learning(id).unwrap().unwrap();
     db.patch_learning(id, &LearningPatch::new().summary("Updated"))
@@ -252,15 +252,15 @@ fn upvote_learning_increments_count_and_timestamps() {
     use crate::models::{LearningKind, LearningScope, LearningStatus};
     let db = in_memory_db();
     let id = db
-        .create_learning(
-            LearningKind::Convention,
-            "A convention",
-            None,
-            LearningScope::User,
-            None,
-            &[],
-            None,
-        )
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Convention,
+            summary: "A convention",
+            detail: None,
+            scope: LearningScope::User,
+            scope_ref: None,
+            tags: &[],
+            source_task_id: None,
+        })
         .unwrap();
     // must be approved first
     db.patch_learning(id, &LearningPatch::new().status(LearningStatus::Approved))
@@ -285,15 +285,15 @@ fn delete_learning_removes_row() {
     use crate::models::{LearningKind, LearningScope};
     let db = in_memory_db();
     let id = db
-        .create_learning(
-            LearningKind::Pitfall,
-            "To be deleted",
-            None,
-            LearningScope::User,
-            None,
-            &[],
-            None,
-        )
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Pitfall,
+            summary: "To be deleted",
+            detail: None,
+            scope: LearningScope::User,
+            scope_ref: None,
+            tags: &[],
+            source_task_id: None,
+        })
         .unwrap();
     assert!(db.get_learning(id).unwrap().is_some());
     db.delete_learning(id).unwrap();
@@ -308,51 +308,51 @@ fn list_learnings_for_dispatch_unions_scopes() {
 
     // user-scoped: should appear
     let u = db
-        .create_learning(
-            LearningKind::Convention,
-            "User learning",
-            None,
-            LearningScope::User,
-            None,
-            &[],
-            None,
-        )
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Convention,
+            summary: "User learning",
+            detail: None,
+            scope: LearningScope::User,
+            scope_ref: None,
+            tags: &[],
+            source_task_id: None,
+        })
         .unwrap();
     // repo-scoped matching: should appear
     let r = db
-        .create_learning(
-            LearningKind::Convention,
-            "Repo learning",
-            None,
-            LearningScope::Repo,
-            Some("/repo/a"),
-            &[],
-            None,
-        )
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Convention,
+            summary: "Repo learning",
+            detail: None,
+            scope: LearningScope::Repo,
+            scope_ref: Some("/repo/a"),
+            tags: &[],
+            source_task_id: None,
+        })
         .unwrap();
     // repo-scoped not matching: should NOT appear
     let _r2 = db
-        .create_learning(
-            LearningKind::Convention,
-            "Other repo",
-            None,
-            LearningScope::Repo,
-            Some("/repo/b"),
-            &[],
-            None,
-        )
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Convention,
+            summary: "Other repo",
+            detail: None,
+            scope: LearningScope::Repo,
+            scope_ref: Some("/repo/b"),
+            tags: &[],
+            source_task_id: None,
+        })
         .unwrap();
     // task-scoped: should NOT appear (task scope excluded from auto-dispatch)
     let _t = db
-        .create_learning(
-            LearningKind::Convention,
-            "Task outcome",
-            None,
-            LearningScope::Task,
-            Some("42"),
-            &[],
-            None,
-        )
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Convention,
+            summary: "Task outcome",
+            detail: None,
+            scope: LearningScope::Task,
+            scope_ref: Some("42"),
+            tags: &[],
+            source_task_id: None,
+        })
         .unwrap();
 
     // approve all
@@ -381,26 +381,26 @@ fn list_learnings_for_dispatch_procedural_first() {
     let db = in_memory_db();
 
     let convention = db
-        .create_learning(
-            LearningKind::Convention,
-            "A convention",
-            None,
-            LearningScope::User,
-            None,
-            &[],
-            None,
-        )
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Convention,
+            summary: "A convention",
+            detail: None,
+            scope: LearningScope::User,
+            scope_ref: None,
+            tags: &[],
+            source_task_id: None,
+        })
         .unwrap();
     let procedural = db
-        .create_learning(
-            LearningKind::Procedural,
-            "A procedure",
-            None,
-            LearningScope::User,
-            None,
-            &[],
-            None,
-        )
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Procedural,
+            summary: "A procedure",
+            detail: None,
+            scope: LearningScope::User,
+            scope_ref: None,
+            tags: &[],
+            source_task_id: None,
+        })
         .unwrap();
 
     for id in [convention, procedural] {
@@ -423,15 +423,15 @@ fn list_learnings_for_dispatch_excludes_non_approved() {
 
     // Create a learning and reject it — rejected learnings should be excluded from dispatch.
     let rejected = db
-        .create_learning(
-            LearningKind::Convention,
-            "Rejected",
-            None,
-            LearningScope::User,
-            None,
-            &[],
-            None,
-        )
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Convention,
+            summary: "Rejected",
+            detail: None,
+            scope: LearningScope::User,
+            scope_ref: None,
+            tags: &[],
+            source_task_id: None,
+        })
         .unwrap();
     db.patch_learning(
         rejected,
@@ -441,15 +441,15 @@ fn list_learnings_for_dispatch_excludes_non_approved() {
 
     // Create an approved learning (default).
     let approved = db
-        .create_learning(
-            LearningKind::Convention,
-            "Approved",
-            None,
-            LearningScope::User,
-            None,
-            &[],
-            None,
-        )
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Convention,
+            summary: "Approved",
+            detail: None,
+            scope: LearningScope::User,
+            scope_ref: None,
+            tags: &[],
+            source_task_id: None,
+        })
         .unwrap();
 
     let results = db.list_learnings_for_dispatch(None, "/any", None).unwrap();
@@ -471,15 +471,15 @@ fn make_db_with_task_and_learning() -> (Database, crate::models::TaskId, Learnin
     )
     .unwrap();
     let learning = db
-        .create_learning(
-            LearningKind::Convention,
-            "Some convention",
-            None,
-            LearningScope::Repo,
-            Some("/repo/a"),
-            &[],
-            None,
-        )
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Convention,
+            summary: "Some convention",
+            detail: None,
+            scope: LearningScope::Repo,
+            scope_ref: Some("/repo/a"),
+            tags: &[],
+            source_task_id: None,
+        })
         .unwrap();
     (db, task.id, learning)
 }
@@ -565,15 +565,15 @@ fn list_learnings_for_dispatch_excludes_needs_review() {
     use crate::models::{LearningKind, LearningScope, LearningVerdict, RetrievalSource};
     let (db, task_id, flagged) = make_db_with_task_and_learning();
     let healthy = db
-        .create_learning(
-            LearningKind::Convention,
-            "Healthy convention",
-            None,
-            LearningScope::Repo,
-            Some("/repo/a"),
-            &[],
-            None,
-        )
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Convention,
+            summary: "Healthy convention",
+            detail: None,
+            scope: LearningScope::Repo,
+            scope_ref: Some("/repo/a"),
+            tags: &[],
+            source_task_id: None,
+        })
         .unwrap();
 
     db.record_retrieval(task_id, flagged, RetrievalSource::PromptInjection)

@@ -2451,15 +2451,15 @@ fn create_approved_user_learning(
     summary: &str,
 ) -> crate::models::LearningId {
     let id = db
-        .create_learning(
-            crate::models::LearningKind::Convention,
+        .create_learning(CreateLearningRow {
+            kind: crate::models::LearningKind::Convention,
             summary,
-            None,
-            crate::models::LearningScope::User,
-            None,
-            &[],
-            None,
-        )
+            detail: None,
+            scope: crate::models::LearningScope::User,
+            scope_ref: None,
+            tags: &[],
+            source_task_id: None,
+        })
         .unwrap();
     db.patch_learning(
         id,
@@ -6447,15 +6447,15 @@ fn create_approved_learning(
     let tag_strings: Vec<String> = tags.iter().map(|s| s.to_string()).collect();
     let id = state
         .db
-        .create_learning(
-            crate::models::LearningKind::Convention,
+        .create_learning(CreateLearningRow {
+            kind: crate::models::LearningKind::Convention,
             summary,
-            None,
+            detail: None,
             scope,
             scope_ref,
-            &tag_strings,
-            None,
-        )
+            tags: &tag_strings,
+            source_task_id: None,
+        })
         .unwrap();
     state
         .db

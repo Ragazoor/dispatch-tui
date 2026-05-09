@@ -417,21 +417,25 @@ pub struct LearningFilter {
 }
 
 // ---------------------------------------------------------------------------
+// CreateLearningRow — DB-layer params for inserting a learning row
+// ---------------------------------------------------------------------------
+
+pub struct CreateLearningRow<'a> {
+    pub kind: LearningKind,
+    pub summary: &'a str,
+    pub detail: Option<&'a str>,
+    pub scope: LearningScope,
+    pub scope_ref: Option<&'a str>,
+    pub tags: &'a [String],
+    pub source_task_id: Option<TaskId>,
+}
+
+// ---------------------------------------------------------------------------
 // LearningStore — narrow sub-trait for the learnings table
 // ---------------------------------------------------------------------------
 
 pub trait LearningStore: Send + Sync {
-    #[allow(clippy::too_many_arguments)]
-    fn create_learning(
-        &self,
-        kind: LearningKind,
-        summary: &str,
-        detail: Option<&str>,
-        scope: LearningScope,
-        scope_ref: Option<&str>,
-        tags: &[String],
-        source_task_id: Option<TaskId>,
-    ) -> Result<LearningId>;
+    fn create_learning(&self, row: CreateLearningRow<'_>) -> Result<LearningId>;
 
     fn get_learning(&self, id: LearningId) -> Result<Option<Learning>>;
 

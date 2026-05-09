@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
 
-use crate::db::{CreateTaskRequest, Database};
+use crate::db::{CreateLearningRow, CreateTaskRequest, Database};
 use crate::models::ProjectId;
 use crate::process::MockProcessRunner;
 
@@ -2172,27 +2172,27 @@ fn build_learning_injections_partitions_and_records_retrievals() {
     // a task in /repo/a.
     let proc_id = rt
         .database
-        .create_learning(
-            LearningKind::Procedural,
-            "Always run tests before committing.",
-            None,
-            LearningScope::User,
-            None,
-            &[],
-            None,
-        )
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Procedural,
+            summary: "Always run tests before committing.",
+            detail: None,
+            scope: LearningScope::User,
+            scope_ref: None,
+            tags: &[],
+            source_task_id: None,
+        })
         .unwrap();
     let repo_id = rt
         .database
-        .create_learning(
-            LearningKind::Convention,
-            "Use Arc for shared state.",
-            None,
-            LearningScope::Repo,
-            Some("/repo/a"),
-            &[],
-            None,
-        )
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Convention,
+            summary: "Use Arc for shared state.",
+            detail: None,
+            scope: LearningScope::Repo,
+            scope_ref: Some("/repo/a"),
+            tags: &[],
+            source_task_id: None,
+        })
         .unwrap();
 
     let (procedural, tiered) = crate::dispatch::build_and_record_injections(&*rt.database, &task);

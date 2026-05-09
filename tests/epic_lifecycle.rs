@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use dispatch_tui::db::{
-    CreateTaskRequest, Database, EpicCrud, EpicPatch, LearningStore, TaskCrud, TaskPatch,
+    CreateLearningRow, CreateTaskRequest, Database, EpicCrud, EpicPatch, LearningStore, TaskCrud,
+    TaskPatch,
 };
 use dispatch_tui::models::*;
 
@@ -128,15 +129,15 @@ fn soft_archive_epic_does_not_violate_foreign_keys() {
     .unwrap();
 
     // Insert a learning that references the task as its source.
-    db.create_learning(
-        LearningKind::Convention,
-        "Test learning",
-        None,
-        LearningScope::Repo,
-        Some("/repo"),
-        &[],
-        Some(task_id),
-    )
+    db.create_learning(CreateLearningRow {
+        kind: LearningKind::Convention,
+        summary: "Test learning",
+        detail: None,
+        scope: LearningScope::Repo,
+        scope_ref: Some("/repo"),
+        tags: &[],
+        source_task_id: Some(task_id),
+    })
     .unwrap();
 
     // Soft-archive code path: patch the task and the epic to status=Archived.

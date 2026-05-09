@@ -116,7 +116,7 @@ impl TuiRuntime {
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
-    use crate::db::{Database, LearningStore};
+    use crate::db::{CreateLearningRow, Database, LearningStore};
     use crate::models::{Learning, LearningId, LearningKind, LearningScope, LearningStatus};
     use crate::tui::ViewMode;
     use chrono::Utc;
@@ -164,15 +164,15 @@ mod tests {
     }
 
     fn insert_learning(db: &Arc<Database>) -> LearningId {
-        db.create_learning(
-            LearningKind::Convention,
-            "test learning",
-            None,
-            LearningScope::User,
-            None,
-            &[],
-            None,
-        )
+        db.create_learning(CreateLearningRow {
+            kind: LearningKind::Convention,
+            summary: "test learning",
+            detail: None,
+            scope: LearningScope::User,
+            scope_ref: None,
+            tags: &[],
+            source_task_id: None,
+        })
         .unwrap()
     }
 
@@ -223,26 +223,26 @@ mod tests {
 
         // Insert two learnings; bump the second one's confirmed_count via patch.
         let id1 = db
-            .create_learning(
-                LearningKind::Convention,
-                "learning 1",
-                None,
-                LearningScope::Repo,
-                Some("/repo"),
-                &[],
-                None,
-            )
+            .create_learning(CreateLearningRow {
+                kind: LearningKind::Convention,
+                summary: "learning 1",
+                detail: None,
+                scope: LearningScope::Repo,
+                scope_ref: Some("/repo"),
+                tags: &[],
+                source_task_id: None,
+            })
             .unwrap();
         let id2 = db
-            .create_learning(
-                LearningKind::Convention,
-                "learning 2",
-                None,
-                LearningScope::User,
-                None,
-                &[],
-                None,
-            )
+            .create_learning(CreateLearningRow {
+                kind: LearningKind::Convention,
+                summary: "learning 2",
+                detail: None,
+                scope: LearningScope::User,
+                scope_ref: None,
+                tags: &[],
+                source_task_id: None,
+            })
             .unwrap();
         // Bump id2's confirmed_count so it sorts first.
         db.upvote_learning(id2).unwrap();

@@ -423,7 +423,7 @@ fn clear_session_slot(slot: &Arc<Mutex<Option<EditorSession>>>) {
 mod learning_editor_tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
-    use crate::db::{Database, LearningStore};
+    use crate::db::{CreateLearningRow, Database, LearningStore};
     use crate::models::{Learning, LearningId, LearningKind, LearningScope, LearningStatus};
     use crate::tui::ViewMode;
     use crate::tui::{App, Message};
@@ -482,15 +482,15 @@ mod learning_editor_tests {
     fn saved_valid_content_updates_db_and_sends_learning_edited() {
         let db = Arc::new(Database::open_in_memory().unwrap());
         let id = db
-            .create_learning(
-                LearningKind::Convention,
-                "original summary",
-                None,
-                LearningScope::User,
-                None,
-                &[],
-                None,
-            )
+            .create_learning(CreateLearningRow {
+                kind: LearningKind::Convention,
+                summary: "original summary",
+                detail: None,
+                scope: LearningScope::User,
+                scope_ref: None,
+                tags: &[],
+                source_task_id: None,
+            })
             .unwrap();
         let learning = make_learning(id);
         let rt = make_runtime(db.clone());
@@ -525,15 +525,15 @@ mod learning_editor_tests {
         // Empty SUMMARY → treat as "no change" (consistent with task editor).
         let db = Arc::new(Database::open_in_memory().unwrap());
         let id = db
-            .create_learning(
-                LearningKind::Convention,
-                "original summary",
-                None,
-                LearningScope::User,
-                None,
-                &[],
-                None,
-            )
+            .create_learning(CreateLearningRow {
+                kind: LearningKind::Convention,
+                summary: "original summary",
+                detail: None,
+                scope: LearningScope::User,
+                scope_ref: None,
+                tags: &[],
+                source_task_id: None,
+            })
             .unwrap();
         let learning = make_learning(id);
         let rt = make_runtime(db.clone());
@@ -561,15 +561,15 @@ mod learning_editor_tests {
     fn cancelled_edit_is_noop() {
         let db = Arc::new(Database::open_in_memory().unwrap());
         let id = db
-            .create_learning(
-                LearningKind::Convention,
-                "original summary",
-                None,
-                LearningScope::User,
-                None,
-                &[],
-                None,
-            )
+            .create_learning(CreateLearningRow {
+                kind: LearningKind::Convention,
+                summary: "original summary",
+                detail: None,
+                scope: LearningScope::User,
+                scope_ref: None,
+                tags: &[],
+                source_task_id: None,
+            })
             .unwrap();
         let learning = make_learning(id);
         let rt = make_runtime(db.clone());
@@ -591,15 +591,15 @@ mod learning_editor_tests {
         // error surfaces as StatusInfo and does not update DB.
         let db = Arc::new(Database::open_in_memory().unwrap());
         let id = db
-            .create_learning(
-                LearningKind::Convention,
-                "original summary",
-                None,
-                LearningScope::User,
-                None,
-                &[],
-                None,
-            )
+            .create_learning(CreateLearningRow {
+                kind: LearningKind::Convention,
+                summary: "original summary",
+                detail: None,
+                scope: LearningScope::User,
+                scope_ref: None,
+                tags: &[],
+                source_task_id: None,
+            })
             .unwrap();
         // Reject it so it's in an un-editable state
         crate::service::LearningService::new(db.clone() as Arc<dyn crate::db::TaskStore>)
