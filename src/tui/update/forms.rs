@@ -162,9 +162,9 @@ impl App {
         }
         self.input.mode = InputMode::InputDescription;
         self.set_status("Opening editor for description...".to_string());
-        vec![Command::PopOutEditor(EditKind::Description {
-            is_epic: false,
-        })]
+        vec![Command::Editor(
+            crate::tui::commands::EditorCommand::PopOut(EditKind::Description { is_epic: false }),
+        )]
     }
 
     pub(in crate::tui) fn handle_input_char(&mut self, c: char) -> Vec<Command> {

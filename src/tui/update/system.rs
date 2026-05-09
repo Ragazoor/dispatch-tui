@@ -130,23 +130,28 @@ impl App {
     }
 
     /// Router for editor results that come back from a pop-out editor. Each
-    /// `EditKind` is finalized by a `FinalizeEditorResult` command dispatched
-    /// to the runtime, except the `Description` variant which threads straight
-    /// through the existing description-flow messages.
+    /// `EditKind` is finalized by an `EditorCommand::FinalizeResult` command
+    /// dispatched to the runtime, except the `Description` variant which
+    /// threads straight through the existing description-flow messages.
     pub(in crate::tui) fn handle_editor_result(
         &mut self,
         kind: EditKind,
         outcome: EditorOutcome,
     ) -> Vec<Command> {
+        use crate::tui::commands::EditorCommand;
+        use crate::tui::messages::EditorMessage;
         match (&kind, &outcome) {
             (EditKind::Description { .. }, EditorOutcome::Saved(text)) => {
                 let text = crate::editor::parse_description_editor_output(text);
-                self.update(Message::DescriptionEditorResult(text))
+                self.update(Message::Editor(EditorMessage::DescriptionResult(text)))
             }
             (EditKind::Description { .. }, EditorOutcome::Cancelled) => {
                 self.update(Message::CancelInput)
             }
-            _ => vec![Command::FinalizeEditorResult { kind, outcome }],
+            _ => vec![Command::Editor(EditorCommand::FinalizeResult {
+                kind,
+                outcome,
+            })],
         }
     }
 

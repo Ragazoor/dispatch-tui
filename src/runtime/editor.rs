@@ -124,9 +124,9 @@ fn new_window_name() -> String {
 }
 
 impl TuiRuntime {
-    /// Entry point for `Command::PopOutEditor`. Opens the editor in a new
-    /// tmux window, spawns a watcher task, and emits a
-    /// [`Message::EditorResult`] when the editor exits.
+    /// Entry point for `EditorCommand::PopOut`. Opens the editor in a new
+    /// tmux window, spawns a watcher task, and emits an
+    /// [`EditorMessage::Result`] when the editor exits.
     pub(super) fn exec_pop_out_editor(&self, app: &mut App, kind: EditKind) {
         // Enforce "one editor at a time".
         let mut guard = match self.editor_session.lock() {
@@ -223,10 +223,12 @@ impl TuiRuntime {
             // the handler runs so retries don't pick up a stale file.
             let _ = std::fs::remove_file(&path);
 
-            let _ = msg_tx.send(Message::EditorResult {
-                kind: kind_for_result,
-                outcome,
-            });
+            let _ = msg_tx.send(Message::Editor(
+                crate::tui::messages::EditorMessage::Result {
+                    kind: kind_for_result,
+                    outcome,
+                },
+            ));
         });
     }
 

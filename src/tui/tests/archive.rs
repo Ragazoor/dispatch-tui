@@ -745,7 +745,9 @@ fn archive_panel_e_edits_task() {
     ));
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert_eq!(cmds.len(), 1);
-    assert!(matches!(&cmds[0], Command::PopOutEditor(EditKind::TaskEdit(t)) if t.id == TaskId(1)));
+    assert!(
+        matches!(&cmds[0], Command::Editor(crate::tui::commands::EditorCommand::PopOut(EditKind::TaskEdit(t))) if t.id == TaskId(1))
+    );
 }
 
 #[test]

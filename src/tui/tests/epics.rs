@@ -72,8 +72,8 @@ fn description_editor_result_for_epic() {
         title: "E".to_string(),
         ..Default::default()
     });
-    app.update(Message::DescriptionEditorResult(
-        "epic desc\nline 2".to_string(),
+    app.update(Message::Editor(
+        crate::tui::messages::EditorMessage::DescriptionResult("epic desc\nline 2".to_string()),
     ));
     assert_eq!(app.input.mode, InputMode::InputEpicRepoPath);
     assert_eq!(
@@ -303,7 +303,9 @@ fn e_on_epic_opens_editor() {
     app.selection_mut().set_row(1, 0);
 
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
-    assert!(matches!(&cmds[0], Command::PopOutEditor(EditKind::EpicEdit(e)) if e.id == EpicId(10)));
+    assert!(
+        matches!(&cmds[0], Command::Editor(crate::tui::commands::EditorCommand::PopOut(EditKind::EpicEdit(e))) if e.id == EpicId(10))
+    );
 }
 
 #[test]
@@ -548,7 +550,9 @@ fn e_key_in_epic_view_edits_epic() {
     };
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
     assert_eq!(cmds.len(), 1);
-    assert!(matches!(&cmds[0], Command::PopOutEditor(EditKind::EpicEdit(e)) if e.id == EpicId(10)));
+    assert!(
+        matches!(&cmds[0], Command::Editor(crate::tui::commands::EditorCommand::PopOut(EditKind::EpicEdit(e))) if e.id == EpicId(10))
+    );
 }
 
 #[test]
@@ -573,7 +577,7 @@ fn e_key_on_task_in_epic_view_edits_task_not_epic() {
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert_eq!(cmds.len(), 1, "expected exactly one command");
     assert!(
-        matches!(&cmds[0], Command::PopOutEditor(EditKind::TaskEdit(t)) if t.id == TaskId(1)),
+        matches!(&cmds[0], Command::Editor(crate::tui::commands::EditorCommand::PopOut(EditKind::TaskEdit(t))) if t.id == TaskId(1)),
         "expected PopOutEditor(TaskEdit(task 1), got {:?}",
         cmds
     );

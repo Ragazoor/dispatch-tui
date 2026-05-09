@@ -248,7 +248,9 @@ impl App {
 
     pub(in crate::tui) fn handle_edit_epic(&mut self, id: EpicId) -> Vec<Command> {
         if let Some(epic) = self.board.epics.iter().find(|e| e.id == id) {
-            vec![Command::PopOutEditor(EditKind::EpicEdit(epic.clone()))]
+            vec![Command::Editor(
+                crate::tui::commands::EditorCommand::PopOut(EditKind::EpicEdit(epic.clone())),
+            )]
         } else {
             vec![]
         }
@@ -449,9 +451,11 @@ impl App {
             });
             self.input.mode = InputMode::InputEpicDescription;
             self.set_status("Opening editor for description...".to_string());
-            vec![Command::PopOutEditor(EditKind::Description {
-                is_epic: true,
-            })]
+            vec![Command::Editor(
+                crate::tui::commands::EditorCommand::PopOut(EditKind::Description {
+                    is_epic: true,
+                }),
+            )]
         }
     }
 

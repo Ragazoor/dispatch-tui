@@ -4,6 +4,8 @@
 //! migrated into per-domain inner enums. Each module here owns one domain's
 //! side-effect commands.
 
+pub mod editor;
 pub mod learnings;
 
+pub use editor::EditorCommand;
 pub use learnings::LearningCommand;

@@ -4,6 +4,8 @@
 //! migrated into per-domain inner enums to keep the dispatcher manageable as
 //! the TUI grows. Each module here owns one domain's messages.
 
+pub mod editor;
 pub mod learnings;
 
+pub use editor::EditorMessage;
 pub use learnings::LearningMessage;

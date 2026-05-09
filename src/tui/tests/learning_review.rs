@@ -188,7 +188,7 @@ fn edit_learning_returns_pop_out_editor_command() {
     let cmds = app.update(Message::Learning(LearningMessage::Edit(LearningId(2))));
     assert!(cmds.iter().any(|c| matches!(
         c,
-        Command::PopOutEditor(EditKind::Learning(l)) if l.id == LearningId(2)
+        Command::Editor(crate::tui::commands::EditorCommand::PopOut(EditKind::Learning(l))) if l.id == LearningId(2)
     )));
 }
 
@@ -332,7 +332,7 @@ fn e_key_emits_pop_out_editor_command() {
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
     // selected=0, first learning has id=1
     assert!(cmds.iter().any(
-        |c| matches!(c, Command::PopOutEditor(EditKind::Learning(l)) if l.id == LearningId(1))
+        |c| matches!(c, Command::Editor(crate::tui::commands::EditorCommand::PopOut(EditKind::Learning(l))) if l.id == LearningId(1))
     ));
 }
 

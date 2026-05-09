@@ -29,17 +29,7 @@ pub(super) async fn dispatch(
             rt.exec_capture_tmux(id, window);
             vec![]
         }
-        PopOutEditor(kind) => {
-            rt.exec_pop_out_editor(app, kind);
-            vec![]
-        }
-        // FinalizeEditorResult is the only command that re-enters the queue:
-        // post-edit `app.update(...)` calls inside `exec_finalize_editor_result`
-        // can produce follow-on commands (DB persistence, status messages),
-        // which we forward verbatim. See `Command::FinalizeEditorResult` doc.
-        FinalizeEditorResult { kind, outcome } => {
-            rt.exec_finalize_editor_result(app, kind, outcome)
-        }
+        Editor(cmd) => dispatch_editor(rt, app, cmd),
         SaveRepoPath(path) => {
             rt.exec_save_repo_path(app, path);
             vec![]
@@ -267,5 +257,25 @@ fn dispatch_learning(
         Archive(id) => rt.exec_archive_learning(app, id),
         Reject(id) => rt.exec_reject_learning(app, id),
         Approve(id) => rt.exec_approve_learning(app, id),
+    }
+}
+
+/// Per-domain dispatcher for [`crate::tui::commands::EditorCommand`] variants.
+///
+/// `FinalizeResult` re-enters the queue: post-edit `app.update(...)` calls
+/// inside `exec_finalize_editor_result` can produce follow-on commands
+/// (DB persistence, status messages), which the runtime queue then drains.
+fn dispatch_editor(
+    rt: &super::TuiRuntime,
+    app: &mut super::App,
+    cmd: crate::tui::commands::EditorCommand,
+) -> Vec<super::Command> {
+    use crate::tui::commands::EditorCommand::*;
+    match cmd {
+        PopOut(kind) => {
+            rt.exec_pop_out_editor(app, kind);
+            vec![]
+        }
+        FinalizeResult { kind, outcome } => rt.exec_finalize_editor_result(app, kind, outcome),
     }
 }

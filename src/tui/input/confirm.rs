@@ -149,7 +149,9 @@ impl App {
     ) -> Vec<Command> {
         self.confirm_dialog(key, |s| {
             if let Some(task) = s.board.tasks.iter().find(|t| t.id == id) {
-                vec![Command::PopOutEditor(EditKind::TaskEdit(task.clone()))]
+                vec![Command::Editor(
+                    crate::tui::commands::EditorCommand::PopOut(EditKind::TaskEdit(task.clone())),
+                )]
             } else {
                 vec![]
             }

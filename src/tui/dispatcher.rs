@@ -5,9 +5,17 @@
 //! lifecycle methods live in `mod.rs`; per-message handlers live in
 //! `update/*.rs`.
 
-use crate::tui::messages::LearningMessage;
+use crate::tui::messages::{EditorMessage, LearningMessage};
 use crate::tui::types::{Command, Message};
 use crate::tui::App;
+
+/// Per-domain dispatcher for [`EditorMessage`] variants.
+fn dispatch_editor(app: &mut App, msg: EditorMessage) -> Vec<Command> {
+    match msg {
+        EditorMessage::DescriptionResult(value) => app.handle_description_editor_result(value),
+        EditorMessage::Result { kind, outcome } => app.handle_editor_result(kind, outcome),
+    }
+}
 
 /// Per-domain dispatcher for [`LearningMessage`] variants.
 fn dispatch_learning(app: &mut App, msg: LearningMessage) -> Vec<Command> {
@@ -126,8 +134,7 @@ pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
         Message::CancelDelete => app.handle_cancel_delete(),
         Message::SubmitTitle(value) => app.handle_submit_title(value),
         Message::SubmitDescription(value) => app.handle_submit_description(value),
-        Message::DescriptionEditorResult(value) => app.handle_description_editor_result(value),
-        Message::EditorResult { kind, outcome } => app.handle_editor_result(kind, outcome),
+        Message::Editor(em) => dispatch_editor(app, em),
         Message::SubmitRepoPath(value) => app.handle_submit_repo_path(value),
         Message::SubmitTag(tag) => app.handle_submit_tag(tag),
         Message::SubmitBaseBranch(value) => app.handle_submit_base_branch(value),

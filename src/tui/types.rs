@@ -256,13 +256,9 @@ pub enum Message {
     CancelDelete,
     SubmitTitle(String),
     SubmitDescription(String),
-    DescriptionEditorResult(String),
-    /// Result from an editor popped out into a tmux window. Carries the
-    /// tag identifying which edit was in flight and the editor outcome.
-    EditorResult {
-        kind: EditKind,
-        outcome: EditorOutcome,
-    },
+    /// Pop-out `$EDITOR` flow messages — see
+    /// [`crate::tui::messages::EditorMessage`].
+    Editor(crate::tui::messages::EditorMessage),
     SubmitRepoPath(String),
     SubmitTag(Option<TaskTag>),
     SubmitBaseBranch(String),
@@ -461,21 +457,9 @@ pub enum Command {
     KillTmuxWindow {
         window: String,
     },
-    /// Launch $EDITOR in a new tmux window. The `kind` decides both what
-    /// to put in the initial file and what post-processing to apply when
-    /// the editor closes.
-    PopOutEditor(EditKind),
-    /// Finalize an editor session: apply the user's edits (if any) to
-    /// the database via the appropriate service. Dispatches on the
-    /// [`EditKind`] to reach the right code path.
-    ///
-    /// Unique among commands: the handler returns follow-on commands from
-    /// `app.update(...)` invocations made while applying the edit (e.g. DB
-    /// persistence, status messages), which the runtime queue then drains.
-    FinalizeEditorResult {
-        kind: EditKind,
-        outcome: EditorOutcome,
-    },
+    /// Pop-out `$EDITOR` flow side-effect commands — see
+    /// [`crate::tui::commands::EditorCommand`].
+    Editor(crate::tui::commands::EditorCommand),
     SaveRepoPath(String),
     RefreshFromDb,
     QuickDispatch {

@@ -97,7 +97,9 @@ impl App {
     ) -> Vec<Command> {
         if let ViewMode::Learnings { ref learnings, .. } = self.board.view_mode {
             if let Some(learning) = learnings.iter().find(|l| l.id == id).cloned() {
-                return vec![Command::PopOutEditor(EditKind::Learning(learning))];
+                return vec![Command::Editor(
+                    crate::tui::commands::EditorCommand::PopOut(EditKind::Learning(learning)),
+                )];
             }
         }
         vec![]
