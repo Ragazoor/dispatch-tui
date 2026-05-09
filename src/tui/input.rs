@@ -182,7 +182,9 @@ impl App {
         match self.selected_column_item() {
             Some(ColumnItem::Epic(epic)) => {
                 let id = epic.id;
-                self.update(Message::DispatchEpic(id))
+                self.update(Message::Epic(crate::tui::messages::EpicMessage::Dispatch(
+                    id,
+                )))
             }
             Some(ColumnItem::Task(task)) => {
                 let id = task.id;
@@ -231,7 +233,9 @@ impl App {
             Some(ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_)) => vec![],
             None => {
                 if let ViewMode::Epic { epic_id, .. } = self.board.view_mode {
-                    self.update(Message::DispatchEpic(epic_id))
+                    self.update(Message::Epic(crate::tui::messages::EpicMessage::Dispatch(
+                        epic_id,
+                    )))
                 } else {
                     vec![]
                 }
@@ -287,7 +291,9 @@ impl App {
                         let idx = self.input.repo_cursor.min(filtered.len() - 1);
                         let path = filtered[idx].clone();
                         let msg = match self.input.mode {
-                            InputMode::InputEpicRepoPath => Message::SubmitEpicRepoPath(path),
+                            InputMode::InputEpicRepoPath => Message::Epic(
+                                crate::tui::messages::EpicMessage::SubmitRepoPath(path),
+                            ),
                             InputMode::MainSessionDir => Message::SubmitMainSessionDir(path),
                             _ => Message::Input(
                                 crate::tui::messages::InputMessage::SubmitRepoPath(path),
@@ -308,11 +314,15 @@ impl App {
                     InputMode::InputRepoPath => self.update(Message::Input(
                         crate::tui::messages::InputMessage::SubmitRepoPath(value),
                     )),
-                    InputMode::InputEpicTitle => self.update(Message::SubmitEpicTitle(value)),
-                    InputMode::InputEpicDescription => {
-                        self.update(Message::SubmitEpicDescription(value))
-                    }
-                    InputMode::InputEpicRepoPath => self.update(Message::SubmitEpicRepoPath(value)),
+                    InputMode::InputEpicTitle => self.update(Message::Epic(
+                        crate::tui::messages::EpicMessage::SubmitTitle(value),
+                    )),
+                    InputMode::InputEpicDescription => self.update(Message::Epic(
+                        crate::tui::messages::EpicMessage::SubmitDescription(value),
+                    )),
+                    InputMode::InputEpicRepoPath => self.update(Message::Epic(
+                        crate::tui::messages::EpicMessage::SubmitRepoPath(value),
+                    )),
                     InputMode::InputBaseBranch => self.update(Message::Input(
                         crate::tui::messages::InputMessage::SubmitBaseBranch(value),
                     )),

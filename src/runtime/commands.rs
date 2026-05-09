@@ -80,38 +80,8 @@ pub(super) async fn dispatch(
             vec![]
         }
         // Epic commands
-        InsertEpic(draft) => {
-            rt.exec_insert_epic(
-                app,
-                draft.title,
-                draft.description,
-                draft.repo_path,
-                draft.parent_epic_id,
-            );
-            vec![]
-        }
-        DeleteEpic(id) => {
-            rt.exec_delete_epic(app, id);
-            vec![]
-        }
-        PersistEpic {
-            id,
-            status,
-            sort_order,
-        } => {
-            rt.exec_persist_epic(app, id, status, sort_order);
-            vec![]
-        }
-        RefreshEpicsFromDb => {
-            rt.exec_refresh_epics_from_db(app);
-            vec![]
-        }
-        DispatchEpic { epic } => {
-            rt.exec_dispatch_epic(app, epic).await;
-            vec![]
-        }
-        ToggleEpicAutoDispatch { id, auto_dispatch } => {
-            rt.exec_toggle_epic_auto_dispatch(app, id, auto_dispatch);
+        Epic(cmd) => {
+            dispatch_epic(rt, app, cmd).await;
             vec![]
         }
         System(cmd) => {
@@ -239,6 +209,35 @@ fn dispatch_learning(
         Archive(id) => rt.exec_archive_learning(app, id),
         Reject(id) => rt.exec_reject_learning(app, id),
         Approve(id) => rt.exec_approve_learning(app, id),
+    }
+}
+
+/// Per-domain dispatcher for [`crate::tui::commands::EpicCommand`] variants.
+async fn dispatch_epic(
+    rt: &super::TuiRuntime,
+    app: &mut super::App,
+    cmd: crate::tui::commands::EpicCommand,
+) {
+    use crate::tui::commands::EpicCommand::*;
+    match cmd {
+        Dispatch { epic } => rt.exec_dispatch_epic(app, epic).await,
+        Insert(draft) => rt.exec_insert_epic(
+            app,
+            draft.title,
+            draft.description,
+            draft.repo_path,
+            draft.parent_epic_id,
+        ),
+        Delete(id) => rt.exec_delete_epic(app, id),
+        Persist {
+            id,
+            status,
+            sort_order,
+        } => rt.exec_persist_epic(app, id, status, sort_order),
+        ToggleAutoDispatch { id, auto_dispatch } => {
+            rt.exec_toggle_epic_auto_dispatch(app, id, auto_dispatch)
+        }
+        RefreshFromDb => rt.exec_refresh_epics_from_db(app),
     }
 }
 

@@ -211,9 +211,6 @@ pub enum Message {
     /// matches, otherwise append). Targeted counterpart to `RefreshTasks`
     /// emitted from `McpEvent::TaskChanged`.
     TaskUpdated(Task),
-    /// Splice a single fresh epic into `app.board.epics` (replace if id
-    /// matches, otherwise append). Targeted counterpart to `RefreshEpics`.
-    EpicUpdated(Epic),
     ResumeTask(TaskId),
     Resumed {
         id: TaskId,
@@ -234,7 +231,6 @@ pub enum Message {
     RetryFresh(TaskId),
     ArchiveTask(TaskId),
     ToggleSelect(TaskId),
-    ToggleSelectEpic(EpicId),
     ClearSelection,
     SelectAllColumn,
     BatchMoveTasks {
@@ -242,7 +238,6 @@ pub enum Message {
         direction: MoveDirection,
     },
     BatchArchiveTasks(Vec<TaskId>),
-    BatchArchiveEpics(Vec<EpicId>),
     /// Form-input flow messages — see [`crate::tui::messages::InputMessage`].
     Input(crate::tui::messages::InputMessage),
     /// Pop-out `$EDITOR` flow messages — see
@@ -256,25 +251,9 @@ pub enum Message {
         task_id: Option<TaskId>,
     },
     SplitPaneClosed,
-    // Epic messages
-    DispatchEpic(EpicId),
-    EnterEpic(EpicId),
-    ExitEpic,
-    RefreshEpics(Vec<Epic>),
+    /// Epic-domain messages — see [`crate::tui::messages::EpicMessage`].
+    Epic(crate::tui::messages::EpicMessage),
     RefreshUsage(Vec<TaskUsage>),
-    EpicCreated(Epic),
-    EditEpic(EpicId),
-    EpicEdited(Epic),
-    DeleteEpic(EpicId),
-    ToggleEpicAutoDispatch(EpicId),
-    ConfirmDeleteEpic,
-    MoveEpicStatus(EpicId, MoveDirection),
-    ArchiveEpic(EpicId),
-    ConfirmArchiveEpic,
-    StartNewEpic,
-    SubmitEpicTitle(String),
-    SubmitEpicDescription(String),
-    SubmitEpicRepoPath(String),
     // Finish (rebase + cleanup)
     FinishComplete(TaskId),
     FinishFailed {
@@ -408,22 +387,9 @@ pub enum Command {
         draft: TaskDraft,
         epic_id: Option<EpicId>,
     },
-    // Epic commands
-    DispatchEpic {
-        epic: Epic,
-    },
-    InsertEpic(EpicDraft),
-    DeleteEpic(EpicId),
-    PersistEpic {
-        id: EpicId,
-        status: Option<TaskStatus>,
-        sort_order: Option<i64>,
-    },
-    ToggleEpicAutoDispatch {
-        id: EpicId,
-        auto_dispatch: bool,
-    },
-    RefreshEpicsFromDb,
+    /// Epic-domain side-effect commands — see
+    /// [`crate::tui::commands::EpicCommand`].
+    Epic(crate::tui::commands::EpicCommand),
     /// Feed-epic refresh side-effect commands — see
     /// [`crate::tui::commands::FeedCommand`].
     Feed(crate::tui::commands::FeedCommand),

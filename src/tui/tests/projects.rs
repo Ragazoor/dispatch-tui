@@ -135,7 +135,9 @@ fn h_in_epic_view_does_not_open_projects_panel() {
     use crate::models::EpicId;
     let mut app = two_project_app();
     app.board.epics = vec![super::helpers::make_epic(10)];
-    app.update(Message::EnterEpic(EpicId(10)));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        EpicId(10),
+    )));
     assert!(matches!(
         app.view_mode(),
         crate::tui::types::ViewMode::Epic { .. }
@@ -824,7 +826,9 @@ fn q_in_epic_view_exits_epic_not_projects_panel() {
     use crate::models::EpicId;
     let mut app = two_project_app();
     app.board.epics = vec![super::helpers::make_epic(10)];
-    app.update(Message::EnterEpic(EpicId(10)));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        EpicId(10),
+    )));
     assert!(matches!(
         app.view_mode(),
         crate::tui::types::ViewMode::Epic { .. }

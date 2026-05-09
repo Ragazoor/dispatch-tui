@@ -5,12 +5,14 @@
 //! side-effect commands.
 
 pub mod editor;
+pub mod epic;
 pub mod feed;
 pub mod learnings;
 pub mod pr;
 pub mod system;
 
 pub use editor::EditorCommand;
+pub use epic::EpicCommand;
 pub use feed::FeedCommand;
 pub use learnings::LearningCommand;
 pub use pr::PrCommand;

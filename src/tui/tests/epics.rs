@@ -217,7 +217,9 @@ fn shift_f_key_toggles_flattened() {
 fn shift_f_toggles_flattened_inside_epic_view() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
-    app.update(Message::EnterEpic(EpicId(10)));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        EpicId(10),
+    )));
     app.handle_key(KeyEvent::new(KeyCode::Char('F'), KeyModifiers::SHIFT));
     assert!(app.board.flattened);
 }
@@ -260,10 +262,12 @@ fn flattened_survives_enter_and_exit_epic() {
     app.update(Message::ToggleFlattened);
     assert!(app.board.flattened);
 
-    app.update(Message::EnterEpic(EpicId(10)));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        EpicId(10),
+    )));
     assert!(app.board.flattened, "flatten should persist into epic view");
 
-    app.update(Message::ExitEpic);
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Exit));
     assert!(app.board.flattened, "flatten should persist back to board");
 }
 
@@ -314,7 +318,9 @@ fn enter_epic_switches_to_epic_view() {
     app.board.epics = vec![make_epic(10)];
     app.selection_mut().set_column(2);
 
-    app.update(Message::EnterEpic(EpicId(10)));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        EpicId(10),
+    )));
 
     match &app.board.view_mode {
         ViewMode::Epic {
@@ -335,10 +341,12 @@ fn exit_epic_restores_board_selection() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.selection_mut().set_column(3);
 
-    app.update(Message::EnterEpic(EpicId(10)));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        EpicId(10),
+    )));
     app.selection_mut().set_column(1);
 
-    app.update(Message::ExitEpic);
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Exit));
 
     match &app.board.view_mode {
         ViewMode::Board(sel) => {
@@ -351,7 +359,7 @@ fn exit_epic_restores_board_selection() {
 #[test]
 fn exit_epic_when_on_board_is_noop() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
-    app.update(Message::ExitEpic);
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Exit));
     assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
 }
 
@@ -407,7 +415,7 @@ fn selected_column_item_returns_epic() {
 #[test]
 fn start_new_epic_sets_input_mode() {
     let mut app = make_app();
-    app.update(Message::StartNewEpic);
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::StartNew));
     assert_eq!(*app.mode(), InputMode::InputEpicTitle);
 }
 
@@ -415,7 +423,9 @@ fn start_new_epic_sets_input_mode() {
 fn epic_created_adds_to_state() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     let epic = make_epic(1);
-    app.update(Message::EpicCreated(epic));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Created(
+        epic,
+    )));
     assert_eq!(app.board.epics.len(), 1);
 }
 
@@ -427,28 +437,32 @@ fn delete_epic_removes_from_state_and_tasks() {
     subtask.epic_id = Some(EpicId(10));
     app.board.tasks = vec![subtask, make_task(2, TaskStatus::Backlog)];
 
-    let cmds = app.update(Message::DeleteEpic(EpicId(10)));
+    let cmds = app.update(Message::Epic(crate::tui::messages::EpicMessage::Delete(
+        EpicId(10),
+    )));
     assert!(app.board.epics.is_empty());
     assert_eq!(app.board.tasks.len(), 1);
     assert_eq!(app.board.tasks[0].id, TaskId(2));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::DeleteEpic(id) if *id == EpicId(10))));
+        .any(|c| matches!(c, Command::Epic(crate::tui::commands::EpicCommand::Delete(id)) if *id == EpicId(10))));
 }
 
 #[test]
 fn move_epic_status_forward() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)]; // starts as Backlog
-    let cmds = app.update(Message::MoveEpicStatus(EpicId(10), MoveDirection::Forward));
+    let cmds = app.update(Message::Epic(
+        crate::tui::messages::EpicMessage::MoveStatus(EpicId(10), MoveDirection::Forward),
+    ));
     assert_eq!(app.board.epics[0].status, TaskStatus::Running);
     assert!(cmds.iter().any(|c| matches!(
         c,
-        Command::PersistEpic {
+        Command::Epic(crate::tui::commands::EpicCommand::Persist {
             id: EpicId(10),
             status: Some(TaskStatus::Running),
             ..
-        }
+        })
     )));
 }
 
@@ -458,15 +472,17 @@ fn move_epic_status_backward() {
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Done;
     app.board.epics = vec![epic];
-    let cmds = app.update(Message::MoveEpicStatus(EpicId(10), MoveDirection::Backward));
+    let cmds = app.update(Message::Epic(
+        crate::tui::messages::EpicMessage::MoveStatus(EpicId(10), MoveDirection::Backward),
+    ));
     assert_eq!(app.board.epics[0].status, TaskStatus::Review);
     assert!(cmds.iter().any(|c| matches!(
         c,
-        Command::PersistEpic {
+        Command::Epic(crate::tui::commands::EpicCommand::Persist {
             id: EpicId(10),
             status: Some(TaskStatus::Review),
             ..
-        }
+        })
     )));
 }
 
@@ -475,9 +491,10 @@ fn shift_l_key_on_epic_moves_status_forward() {
     let mut app = make_app_with_epic_selected();
     let cmds = app.handle_key(make_key(KeyCode::Char('L')));
     assert_eq!(app.board.epics[0].status, TaskStatus::Running);
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::PersistEpic { .. })));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Epic(crate::tui::commands::EpicCommand::Persist { .. })
+    )));
 }
 
 #[test]
@@ -510,11 +527,11 @@ fn shift_h_on_done_epic_moves_to_review() {
     assert_eq!(app.board.epics[0].status, TaskStatus::Review);
     assert!(cmds.iter().any(|c| matches!(
         c,
-        Command::PersistEpic {
+        Command::Epic(crate::tui::commands::EpicCommand::Persist {
             id: EpicId(10),
             status: Some(TaskStatus::Review),
             ..
-        }
+        })
     )));
 }
 
@@ -562,7 +579,9 @@ fn e_key_on_task_in_epic_view_edits_task_not_epic() {
     let mut subtask = make_task(1, TaskStatus::Backlog);
     subtask.epic_id = Some(EpicId(10));
     app.board.tasks = vec![subtask];
-    app.update(Message::EnterEpic(EpicId(10)));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        EpicId(10),
+    )));
 
     // Cursor on the subtask in the Backlog column (col 1, row 0)
     app.selection_mut().set_column(1);
@@ -603,16 +622,18 @@ fn shift_u_in_epic_view_toggles_auto_dispatch() {
     app.board.epics = vec![epic];
 
     // Enter epic view
-    app.update(Message::EnterEpic(EpicId(42)));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        EpicId(42),
+    )));
 
     // Press Shift+U — should return ToggleEpicAutoDispatch command with auto_dispatch = false
     let cmds = app.handle_key(make_key(KeyCode::Char('U')));
     assert!(cmds.iter().any(|c| matches!(
         c,
-        Command::ToggleEpicAutoDispatch {
+        Command::Epic(crate::tui::commands::EpicCommand::ToggleAutoDispatch {
             id: EpicId(42),
             auto_dispatch: false
-        }
+        })
     )));
 
     // Also verify in-memory state was updated
@@ -681,7 +702,7 @@ fn epic_repo_path_enter_with_text_completes() {
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::InsertEpic(ref d) if d.repo_path == "/tmp")));
+        .any(|c| matches!(c, Command::Epic(crate::tui::commands::EpicCommand::Insert(ref d)) if d.repo_path == "/tmp")));
 }
 
 #[test]
@@ -699,7 +720,7 @@ fn epic_repo_path_enter_empty_uses_saved_path() {
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::InsertEpic(ref d) if d.repo_path == "/tmp")));
+        .any(|c| matches!(c, Command::Epic(crate::tui::commands::EpicCommand::Insert(ref d)) if d.repo_path == "/tmp")));
 }
 
 #[test]
@@ -763,7 +784,10 @@ fn epic_repo_path_digit_filters_not_selects() {
     assert_eq!(app.input.mode, InputMode::InputEpicRepoPath);
     assert_eq!(app.input.buffer, "2");
     assert!(
-        !cmds.iter().any(|c| matches!(c, Command::InsertEpic(_))),
+        !cmds.iter().any(|c| matches!(
+            c,
+            Command::Epic(crate::tui::commands::EpicCommand::Insert(_))
+        )),
         "digit must not submit an epic"
     );
 }
@@ -808,7 +832,9 @@ fn confirm_delete_epic_enters_mode_with_title() {
     app.board.epics = vec![make_epic(10)];
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 1); // cursor on epic (same priority as task, sorts after by id)
-    app.update(Message::ConfirmDeleteEpic);
+    app.update(Message::Epic(
+        crate::tui::messages::EpicMessage::ConfirmDelete,
+    ));
     assert_eq!(app.input.mode, InputMode::ConfirmDeleteEpic);
     assert_eq!(
         app.status.message.as_deref(),
@@ -825,7 +851,7 @@ fn confirm_delete_epic_y_deletes() {
     assert!(app.board.epics.is_empty());
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::DeleteEpic(id) if *id == EpicId(10))));
+        .any(|c| matches!(c, Command::Epic(crate::tui::commands::EpicCommand::Delete(id)) if *id == EpicId(10))));
 }
 
 #[test]
@@ -836,7 +862,7 @@ fn confirm_delete_epic_uppercase_y_deletes() {
     assert!(app.board.epics.is_empty());
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::DeleteEpic(id) if *id == EpicId(10))));
+        .any(|c| matches!(c, Command::Epic(crate::tui::commands::EpicCommand::Delete(id)) if *id == EpicId(10))));
 }
 
 #[test]
@@ -1200,7 +1226,9 @@ fn select_all_column_with_only_epics() {
 fn esc_clears_epic_selection() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
-    app.update(Message::ToggleSelectEpic(EpicId(10)));
+    app.update(Message::Epic(
+        crate::tui::messages::EpicMessage::ToggleSelect(EpicId(10)),
+    ));
     assert_eq!(app.select.epics.len(), 1);
 
     app.handle_key(make_key(KeyCode::Esc));
@@ -1211,8 +1239,12 @@ fn esc_clears_epic_selection() {
 fn x_key_with_epic_selection_shows_count_in_confirm() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10), make_epic(20)];
-    app.update(Message::ToggleSelectEpic(EpicId(10)));
-    app.update(Message::ToggleSelectEpic(EpicId(20)));
+    app.update(Message::Epic(
+        crate::tui::messages::EpicMessage::ToggleSelect(EpicId(10)),
+    ));
+    app.update(Message::Epic(
+        crate::tui::messages::EpicMessage::ToggleSelect(EpicId(20)),
+    ));
 
     app.handle_key(make_key(KeyCode::Char('x')));
     assert!(matches!(app.input.mode, InputMode::ConfirmArchive(None)));
@@ -1234,11 +1266,11 @@ fn shift_l_on_epic_moves_status_forward() {
     assert_eq!(app.board.epics[0].status, TaskStatus::Running);
     assert!(cmds.iter().any(|c| matches!(
         c,
-        Command::PersistEpic {
+        Command::Epic(crate::tui::commands::EpicCommand::Persist {
             id: EpicId(10),
             status: Some(TaskStatus::Running),
             ..
-        }
+        })
     )));
 }
 
@@ -1246,7 +1278,9 @@ fn shift_l_on_epic_moves_status_forward() {
 fn render_selected_epic_shows_star_prefix() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
-    app.update(Message::ToggleSelectEpic(EpicId(10)));
+    app.update(Message::Epic(
+        crate::tui::messages::EpicMessage::ToggleSelect(EpicId(10)),
+    ));
 
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
@@ -1280,7 +1314,9 @@ fn render_unselected_epic_no_star() {
 fn render_batch_hints_with_epic_selection() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
-    app.update(Message::ToggleSelectEpic(EpicId(10)));
+    app.update(Message::Epic(
+        crate::tui::messages::EpicMessage::ToggleSelect(EpicId(10)),
+    ));
 
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
@@ -1312,11 +1348,17 @@ fn render_column_header_checked_with_epics() {
 fn refresh_epics_prunes_stale_epic_selections() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
-    app.update(Message::ToggleSelectEpic(EpicId(10)));
-    app.update(Message::ToggleSelectEpic(EpicId(99))); // non-existent
+    app.update(Message::Epic(
+        crate::tui::messages::EpicMessage::ToggleSelect(EpicId(10)),
+    ));
+    app.update(Message::Epic(
+        crate::tui::messages::EpicMessage::ToggleSelect(EpicId(99)),
+    )); // non-existent
 
     // Refresh with only epic 10
-    app.update(Message::RefreshEpics(vec![make_epic(10)]));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Refresh(
+        vec![make_epic(10)],
+    )));
     assert!(app.select.epics.contains(&EpicId(10)));
     assert!(!app.select.epics.contains(&EpicId(99)));
 }
@@ -1597,7 +1639,9 @@ fn epic_card_title_truncated_in_narrow_terminal() {
     let mut epic = make_epic(1);
     epic.title = "This is a very long epic title that should be truncated to fit".to_string();
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
-    app.update(Message::RefreshEpics(vec![epic]));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Refresh(
+        vec![epic],
+    )));
 
     let buf = render_to_buffer(&mut app, 80, 10);
     assert!(
@@ -1613,7 +1657,9 @@ fn epic_card_title_truncated_in_narrow_terminal() {
 fn handle_key_normal_esc_in_epic_view_exits() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
-    app.update(Message::EnterEpic(EpicId(10)));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        EpicId(10),
+    )));
     assert!(matches!(app.board.view_mode, ViewMode::Epic { .. }));
 
     app.handle_key(make_key(KeyCode::Esc));
@@ -1624,7 +1670,9 @@ fn handle_key_normal_esc_in_epic_view_exits() {
 fn handle_key_normal_q_in_epic_view_exits() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
-    app.update(Message::EnterEpic(EpicId(10)));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        EpicId(10),
+    )));
 
     app.handle_key(make_key(KeyCode::Char('q')));
     assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
@@ -1644,7 +1692,10 @@ fn handle_key_epic_repo_path_enter_selects_cursor() {
     app.input.repo_cursor = 0;
 
     let cmds = app.handle_key(make_key(KeyCode::Enter));
-    assert!(cmds.iter().any(|c| matches!(c, Command::InsertEpic(_))));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Epic(crate::tui::commands::EpicCommand::Insert(_))
+    )));
 }
 
 #[test]
@@ -1664,13 +1715,16 @@ fn handle_key_e_in_tag_input_does_not_set_a_tag() {
 fn handle_key_normal_dispatch_in_epic_view_with_no_items() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
-    app.update(Message::EnterEpic(EpicId(10)));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        EpicId(10),
+    )));
     // No subtasks, cursor on empty column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     // Should dispatch the epic itself
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::DispatchEpic { .. })));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Epic(crate::tui::commands::EpicCommand::Dispatch { .. })
+    )));
 }
 
 #[test]
@@ -1680,9 +1734,10 @@ fn handle_key_normal_shift_l_on_epic_moves_status() {
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 0);
     let cmds = app.handle_key(make_key(KeyCode::Char('L')));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::PersistEpic { .. })));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Epic(crate::tui::commands::EpicCommand::Persist { .. })
+    )));
 }
 
 #[test]
@@ -1694,9 +1749,10 @@ fn handle_key_normal_shift_h_on_epic_moves_backward() {
     app.selection_mut().set_column(2);
     app.selection_mut().set_row(2, 0);
     let cmds = app.handle_key(make_key(KeyCode::Char('H')));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::PersistEpic { .. })));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Epic(crate::tui::commands::EpicCommand::Persist { .. })
+    )));
 }
 
 /// InputEpicTitle mode routes to the text input handler.
@@ -1760,7 +1816,9 @@ fn epic_view_header_shows_auto_dispatch_indicator() {
     let mut epic = make_epic(1);
     epic.auto_dispatch = true;
     app.board.epics = vec![epic];
-    app.update(Message::EnterEpic(EpicId(1)));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        EpicId(1),
+    )));
 
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
@@ -1775,7 +1833,9 @@ fn epic_view_header_shows_manual_dispatch_indicator() {
     let mut epic = make_epic(1);
     epic.auto_dispatch = false;
     app.board.epics = vec![epic];
-    app.update(Message::EnterEpic(EpicId(1)));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        EpicId(1),
+    )));
 
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
@@ -1804,10 +1864,14 @@ fn repo_cursor_resets_on_entering_epic_repo_path_mode() {
 fn exit_sub_epic_returns_to_parent_epic() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.board.epics = vec![make_epic(1), make_epic(2)];
-    app.update(Message::EnterEpic(EpicId(1)));
-    app.update(Message::EnterEpic(EpicId(2)));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        EpicId(1),
+    )));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        EpicId(2),
+    )));
 
-    app.update(Message::ExitEpic);
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Exit));
 
     match &app.board.view_mode {
         ViewMode::Epic { epic_id, .. } => {
@@ -1822,8 +1886,10 @@ fn exit_from_root_epic_returns_to_board() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.board.epics = vec![make_epic(1)];
     app.selection_mut().set_column(3);
-    app.update(Message::EnterEpic(EpicId(1)));
-    app.update(Message::ExitEpic);
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        EpicId(1),
+    )));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Exit));
 
     match &app.board.view_mode {
         ViewMode::Board(sel) => {
@@ -1862,7 +1928,9 @@ fn epic_view_includes_sub_epics_as_column_items() {
     sub.parent_epic_id = Some(EpicId(10));
     app.board.epics = vec![make_epic(10), sub];
 
-    app.update(Message::EnterEpic(EpicId(10)));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        EpicId(10),
+    )));
 
     let items = app.column_items_for_status(TaskStatus::Backlog);
     // sub-epic (id=20) should appear as an Epic column item
@@ -1945,7 +2013,7 @@ fn create_epic_in_epic_view_inherits_parent() {
     };
 
     // Enter the epic creation flow
-    app.update(Message::StartNewEpic);
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::StartNew));
     assert_eq!(app.input.mode, InputMode::InputEpicTitle);
 
     // The draft should already know about the parent
@@ -1957,14 +2025,20 @@ fn create_epic_in_epic_view_inherits_parent() {
     );
 
     // Submit title, description, repo path — the final command must carry parent_epic_id
-    app.update(Message::SubmitEpicTitle("Sub Epic".to_string()));
-    app.update(Message::SubmitEpicDescription("desc".to_string()));
-    let cmds = app.update(Message::SubmitEpicRepoPath("/tmp".to_string()));
+    app.update(Message::Epic(
+        crate::tui::messages::EpicMessage::SubmitTitle("Sub Epic".to_string()),
+    ));
+    app.update(Message::Epic(
+        crate::tui::messages::EpicMessage::SubmitDescription("desc".to_string()),
+    ));
+    let cmds = app.update(Message::Epic(
+        crate::tui::messages::EpicMessage::SubmitRepoPath("/tmp".to_string()),
+    ));
 
     let draft = cmds
         .iter()
         .find_map(|c| {
-            if let Command::InsertEpic(d) = c {
+            if let Command::Epic(crate::tui::commands::EpicCommand::Insert(d)) = c {
                 Some(d)
             } else {
                 None
@@ -2021,7 +2095,9 @@ fn test_epic_anchor_preserved_on_refresh() {
     let tasks = vec![make_task(1, TaskStatus::Backlog)];
     let epics = vec![make_epic(1)];
     let mut app = App::new(tasks.clone(), ProjectId(1), TEST_TIMEOUT);
-    app.update(Message::RefreshEpics(epics.clone()));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Refresh(
+        epics.clone(),
+    )));
 
     let items = app.column_items_for_status(TaskStatus::Backlog);
     let epic_row = items
@@ -2038,7 +2114,9 @@ fn test_epic_anchor_preserved_on_refresh() {
 
     // Refresh same data
     app.update(Message::RefreshTasks(tasks));
-    app.update(Message::RefreshEpics(epics));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Refresh(
+        epics,
+    )));
 
     // Still on the epic
     assert!(matches!(
@@ -2051,7 +2129,9 @@ fn test_epic_anchor_preserved_on_refresh() {
 fn epic_view_navigation_does_not_enter_projects_or_archive() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
-    app.update(Message::EnterEpic(EpicId(10)));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        EpicId(10),
+    )));
     assert!(matches!(app.board.view_mode, ViewMode::Epic { .. }));
 
     // Starts at Backlog (column 1)
@@ -2092,7 +2172,9 @@ fn test_selection_survives_flatten_toggle() {
     ];
     let epics = vec![make_epic(1)];
     let mut app = App::new(tasks.clone(), ProjectId(1), TEST_TIMEOUT);
-    app.update(Message::RefreshEpics(epics.clone()));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Refresh(
+        epics.clone(),
+    )));
 
     app.update(Message::NavigateRow(1)); // row 1 — Epic(1)
     app.update(Message::NavigateRow(1)); // row 2 — Task(2)

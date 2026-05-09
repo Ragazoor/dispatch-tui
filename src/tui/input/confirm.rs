@@ -88,7 +88,9 @@ impl App {
                 }
                 if !s.select.epics.is_empty() {
                     let ids: Vec<_> = s.select.epics.iter().copied().collect();
-                    cmds.extend(s.update(Message::BatchArchiveEpics(ids)));
+                    cmds.extend(s.update(Message::Epic(
+                        crate::tui::messages::EpicMessage::BatchArchive(ids),
+                    )));
                 }
                 cmds
             } else if let Some(id) = task_id {
@@ -122,7 +124,7 @@ impl App {
     pub(in crate::tui) fn handle_key_confirm_delete_epic(&mut self, key: KeyEvent) -> Vec<Command> {
         self.confirm_dialog(key, |s| {
             if let Some(id) = s.selected_epic_id() {
-                s.update(Message::DeleteEpic(id))
+                s.update(Message::Epic(crate::tui::messages::EpicMessage::Delete(id)))
             } else {
                 vec![]
             }
@@ -135,7 +137,9 @@ impl App {
     ) -> Vec<Command> {
         self.confirm_dialog(key, |s| {
             if let Some(id) = s.selected_epic_id() {
-                s.update(Message::ArchiveEpic(id))
+                s.update(Message::Epic(crate::tui::messages::EpicMessage::Archive(
+                    id,
+                )))
             } else {
                 vec![]
             }

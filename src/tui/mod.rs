@@ -1116,7 +1116,10 @@ impl App {
         draft.repo_path = repo_path.clone();
         self.input.mode = InputMode::Normal;
         self.clear_status();
-        vec![Command::InsertEpic(draft), Command::SaveRepoPath(repo_path)]
+        vec![
+            Command::Epic(crate::tui::commands::EpicCommand::Insert(draft)),
+            Command::SaveRepoPath(repo_path),
+        ]
     }
 }
 

@@ -274,7 +274,9 @@ fn snapshot_tab_bar_with_feed_epics_feed_active() {
         .find(|e| e.feed_command.is_some())
         .unwrap()
         .id;
-    app.update(Message::EnterEpic(feed_epic_id));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        feed_epic_id,
+    )));
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);
 }

@@ -1388,7 +1388,9 @@ fn shift_l_with_mixed_selection_moves_tasks_only() {
     );
     app.board.epics = vec![make_epic(10)];
     app.update(Message::ToggleSelect(TaskId(1)));
-    app.update(Message::ToggleSelectEpic(EpicId(10)));
+    app.update(Message::Epic(
+        crate::tui::messages::EpicMessage::ToggleSelect(EpicId(10)),
+    ));
     // Cursor on the task (row 0) so 'm' triggers batch move, not epic move
     app.selection_mut().set_column(1); // Backlog = nav col 1
     app.selection_mut().set_row(1, 0);

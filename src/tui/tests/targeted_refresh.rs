@@ -63,7 +63,7 @@ fn epic_updated_replaces_existing_row() {
     renamed.title = "renamed".to_string();
     let count_before = app.board.epics.len();
 
-    app.update(Message::EpicUpdated(renamed));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Updated(renamed)));
 
     let now = app
         .board
@@ -80,7 +80,7 @@ fn epic_updated_appends_new_epic() {
     let mut app = make_app();
     let before = app.board.epics.len();
 
-    app.update(Message::EpicUpdated(make_epic(42)));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Updated(make_epic(42))));
 
     assert_eq!(app.board.epics.len(), before + 1);
     assert!(app.board.epics.iter().any(|e| e.id == EpicId(42)));

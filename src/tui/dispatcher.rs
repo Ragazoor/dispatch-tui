@@ -6,8 +6,8 @@
 //! `update/*.rs`.
 
 use crate::tui::messages::{
-    EditorMessage, FeedMessage, InputMessage, LearningMessage, PrMessage, SystemMessage,
-    WrapUpMessage,
+    EditorMessage, EpicMessage, FeedMessage, InputMessage, LearningMessage, PrMessage,
+    SystemMessage, WrapUpMessage,
 };
 use crate::tui::types::{Command, Message};
 use crate::tui::App;
@@ -17,6 +17,32 @@ fn dispatch_editor(app: &mut App, msg: EditorMessage) -> Vec<Command> {
     match msg {
         EditorMessage::DescriptionResult(value) => app.handle_description_editor_result(value),
         EditorMessage::Result { kind, outcome } => app.handle_editor_result(kind, outcome),
+    }
+}
+
+/// Per-domain dispatcher for [`EpicMessage`] variants.
+fn dispatch_epic(app: &mut App, msg: EpicMessage) -> Vec<Command> {
+    match msg {
+        EpicMessage::Dispatch(id) => app.handle_dispatch_epic(id),
+        EpicMessage::Enter(id) => app.handle_enter_epic(id),
+        EpicMessage::Exit => app.handle_exit_epic(),
+        EpicMessage::Refresh(epics) => app.handle_refresh_epics(epics),
+        EpicMessage::Updated(epic) => app.handle_epic_updated(epic),
+        EpicMessage::Created(epic) => app.handle_epic_created(epic),
+        EpicMessage::Edit(id) => app.handle_edit_epic(id),
+        EpicMessage::Edited(epic) => app.handle_epic_edited(epic),
+        EpicMessage::Delete(id) => app.handle_delete_epic(id),
+        EpicMessage::ToggleAutoDispatch(id) => app.handle_toggle_epic_auto_dispatch(id),
+        EpicMessage::ConfirmDelete => app.handle_confirm_delete_epic(),
+        EpicMessage::MoveStatus(id, dir) => app.handle_move_epic_status(id, dir),
+        EpicMessage::Archive(id) => app.handle_archive_epic(id),
+        EpicMessage::ConfirmArchive => app.handle_confirm_archive_epic(),
+        EpicMessage::StartNew => app.handle_start_new_epic(),
+        EpicMessage::SubmitTitle(v) => app.handle_submit_epic_title(v),
+        EpicMessage::SubmitDescription(v) => app.handle_submit_epic_description(v),
+        EpicMessage::SubmitRepoPath(v) => app.handle_submit_epic_repo_path(v),
+        EpicMessage::ToggleSelect(id) => app.handle_toggle_select_epic(id),
+        EpicMessage::BatchArchive(ids) => app.handle_batch_archive_epics(ids),
     }
 }
 
@@ -197,26 +223,7 @@ pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
         Message::Editor(em) => dispatch_editor(app, em),
 
         // ── Epic CRUD, lifecycle, wrap-up ──
-        Message::DispatchEpic(id) => app.handle_dispatch_epic(id),
-        Message::EnterEpic(epic_id) => app.handle_enter_epic(epic_id),
-        Message::ExitEpic => app.handle_exit_epic(),
-        Message::RefreshEpics(epics) => app.handle_refresh_epics(epics),
-        Message::EpicUpdated(epic) => app.handle_epic_updated(epic),
-        Message::EpicCreated(epic) => app.handle_epic_created(epic),
-        Message::EditEpic(id) => app.handle_edit_epic(id),
-        Message::EpicEdited(epic) => app.handle_epic_edited(epic),
-        Message::DeleteEpic(id) => app.handle_delete_epic(id),
-        Message::ConfirmDeleteEpic => app.handle_confirm_delete_epic(),
-        Message::MoveEpicStatus(id, dir) => app.handle_move_epic_status(id, dir),
-        Message::ArchiveEpic(id) => app.handle_archive_epic(id),
-        Message::ConfirmArchiveEpic => app.handle_confirm_archive_epic(),
-        Message::StartNewEpic => app.handle_start_new_epic(),
-        Message::SubmitEpicTitle(v) => app.handle_submit_epic_title(v),
-        Message::SubmitEpicDescription(v) => app.handle_submit_epic_description(v),
-        Message::SubmitEpicRepoPath(v) => app.handle_submit_epic_repo_path(v),
-        Message::ToggleSelectEpic(id) => app.handle_toggle_select_epic(id),
-        Message::BatchArchiveEpics(ids) => app.handle_batch_archive_epics(ids),
-        Message::ToggleEpicAutoDispatch(id) => app.handle_toggle_epic_auto_dispatch(id),
+        Message::Epic(em) => dispatch_epic(app, em),
 
         // ── PR flow: creation, merge, review state ──
         Message::Pr(pm) => dispatch_pr(app, pm),

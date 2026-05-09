@@ -254,7 +254,7 @@ impl TuiRuntime {
                 return vec![];
             }
         };
-        let mut cmds = app.update(Message::EpicUpdated(epic));
+        let mut cmds = app.update(Message::Epic(crate::tui::messages::EpicMessage::Updated(epic)));
         // Feed-sync upserts whole batches under the epic — reload the
         // epic's tasks so card lists reflect the new rows in one shot.
         match self.database.list_tasks_for_epic(epic_id) {

@@ -20,7 +20,9 @@ impl TuiRuntime {
             project_id: app.active_project(),
         }) {
             Ok(epic) => {
-                app.update(Message::EpicCreated(epic));
+                app.update(Message::Epic(crate::tui::messages::EpicMessage::Created(
+                    epic,
+                )));
             }
             Err(e) => {
                 app.update(Message::System(crate::tui::messages::SystemMessage::Error(
@@ -96,7 +98,9 @@ impl TuiRuntime {
     pub(super) fn exec_refresh_epics_from_db(&self, app: &mut App) {
         match self.database.list_epics() {
             Ok(epics) => {
-                app.update(Message::RefreshEpics(epics));
+                app.update(Message::Epic(crate::tui::messages::EpicMessage::Refresh(
+                    epics,
+                )));
             }
             Err(e) => {
                 app.update(Message::System(crate::tui::messages::SystemMessage::Error(

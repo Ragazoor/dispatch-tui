@@ -156,11 +156,11 @@ impl App {
         if let Some(eid) = a_epic_id {
             if let Some(e) = self.board.epics.iter_mut().find(|e2| e2.id == eid) {
                 e.sort_order = Some(new_a);
-                cmds.push(Command::PersistEpic {
+                cmds.push(Command::Epic(crate::tui::commands::EpicCommand::Persist {
                     id: eid,
                     status: None,
                     sort_order: Some(new_a),
-                });
+                }));
             }
         }
         if let Some(tid) = b_task_id {
@@ -172,11 +172,11 @@ impl App {
         if let Some(eid) = b_epic_id {
             if let Some(e) = self.board.epics.iter_mut().find(|e2| e2.id == eid) {
                 e.sort_order = Some(new_b);
-                cmds.push(Command::PersistEpic {
+                cmds.push(Command::Epic(crate::tui::commands::EpicCommand::Persist {
                     id: eid,
                     status: None,
                     sort_order: Some(new_b),
-                });
+                }));
             }
         }
 

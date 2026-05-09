@@ -1335,7 +1335,9 @@ fn esc_clears_mixed_selection() {
     );
     app.board.epics = vec![make_epic(10)];
     app.update(Message::ToggleSelect(TaskId(1)));
-    app.update(Message::ToggleSelectEpic(EpicId(10)));
+    app.update(Message::Epic(
+        crate::tui::messages::EpicMessage::ToggleSelect(EpicId(10)),
+    ));
 
     app.handle_key(make_key(KeyCode::Esc));
     assert!(app.select.tasks.is_empty());
@@ -1805,7 +1807,10 @@ fn handle_key_input_epic_repo_path_typing_digit_filters_not_selects() {
     });
     let cmds = app.handle_key(make_key(KeyCode::Char('2')));
     assert!(
-        !cmds.iter().any(|c| matches!(c, Command::InsertEpic { .. })),
+        !cmds.iter().any(|c| matches!(
+            c,
+            Command::Epic(crate::tui::commands::EpicCommand::Insert(_))
+        )),
         "digit must not submit an epic; cmds: {cmds:?}"
     );
     assert_eq!(app.input.buffer, "2");

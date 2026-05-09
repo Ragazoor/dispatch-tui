@@ -1016,11 +1016,15 @@ fn enter_sub_epic_from_epic_view_nests_parent() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     app.board.epics = vec![make_epic(1), make_epic(2)];
     // Start in Epic view for epic 1
-    app.update(Message::EnterEpic(EpicId(1)));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        EpicId(1),
+    )));
     app.selection_mut().set_column(2);
 
     // Enter sub-epic 2 from within epic 1
-    app.update(Message::EnterEpic(EpicId(2)));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        EpicId(2),
+    )));
 
     match &app.board.view_mode {
         ViewMode::Epic {

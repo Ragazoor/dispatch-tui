@@ -100,10 +100,12 @@ impl App {
         if let Some(epic) = self.board.epics.iter_mut().find(|e| e.id == id) {
             let new_val = !epic.auto_dispatch;
             epic.auto_dispatch = new_val;
-            vec![Command::ToggleEpicAutoDispatch {
-                id,
-                auto_dispatch: new_val,
-            }]
+            vec![Command::Epic(
+                crate::tui::commands::EpicCommand::ToggleAutoDispatch {
+                    id,
+                    auto_dispatch: new_val,
+                },
+            )]
         } else {
             vec![]
         }

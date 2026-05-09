@@ -714,7 +714,9 @@ fn d_key_on_backlog_epic_dispatches_epic() {
     let mut app = make_app_with_epic_selected(); // epic at row 1 in Backlog
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert_eq!(cmds.len(), 1);
-    assert!(matches!(cmds[0], Command::DispatchEpic { ref epic } if epic.id == EpicId(10)));
+    assert!(
+        matches!(cmds[0], Command::Epic(crate::tui::commands::EpicCommand::Dispatch { ref epic }) if epic.id == EpicId(10))
+    );
 }
 
 #[test]
@@ -722,20 +724,26 @@ fn d_key_in_epic_view_with_no_subtasks_dispatches_epic() {
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     let epic = make_epic(10);
     app.board.epics = vec![epic];
-    app.update(Message::EnterEpic(EpicId(10)));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        EpicId(10),
+    )));
 
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::DispatchEpic { ref epic } if epic.id == EpicId(10))));
+        .any(|c| matches!(c, Command::Epic(crate::tui::commands::EpicCommand::Dispatch { ref epic }) if epic.id == EpicId(10))));
 }
 
 #[test]
 fn dispatch_epic_on_backlog_epic_produces_command() {
     let mut app = make_app_with_epic_selected(); // epic at row 1, Backlog column
-    let cmds = app.update(Message::DispatchEpic(EpicId(10)));
+    let cmds = app.update(Message::Epic(crate::tui::messages::EpicMessage::Dispatch(
+        EpicId(10),
+    )));
     assert_eq!(cmds.len(), 1);
-    assert!(matches!(cmds[0], Command::DispatchEpic { ref epic } if epic.id == EpicId(10)));
+    assert!(
+        matches!(cmds[0], Command::Epic(crate::tui::commands::EpicCommand::Dispatch { ref epic }) if epic.id == EpicId(10))
+    );
 }
 
 #[test]
@@ -754,7 +762,9 @@ fn dispatch_epic_on_non_backlog_shows_status() {
     app.board.epics = vec![epic];
 
     // Epic status is Running (not Backlog) — dispatch should be rejected
-    let cmds = app.update(Message::DispatchEpic(EpicId(10)));
+    let cmds = app.update(Message::Epic(crate::tui::messages::EpicMessage::Dispatch(
+        EpicId(10),
+    )));
     assert!(cmds.is_empty());
     assert!(app
         .status
@@ -784,7 +794,9 @@ fn dispatch_epic_with_plan_dispatches_next_backlog_subtask() {
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 0);
 
-    let cmds = app.update(Message::DispatchEpic(EpicId(10)));
+    let cmds = app.update(Message::Epic(crate::tui::messages::EpicMessage::Dispatch(
+        EpicId(10),
+    )));
     // Should dispatch task1 (first backlog subtask, has plan)
     assert_eq!(cmds.len(), 1);
     assert!(matches!(cmds[0], Command::DispatchAgent { ref task, .. } if task.id == TaskId(1)));
@@ -804,7 +816,9 @@ fn dispatch_epic_with_plan_dispatches_subtask_without_plan() {
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 0);
 
-    let cmds = app.update(Message::DispatchEpic(EpicId(10)));
+    let cmds = app.update(Message::Epic(crate::tui::messages::EpicMessage::Dispatch(
+        EpicId(10),
+    )));
     assert_eq!(cmds.len(), 1);
     assert!(
         matches!(cmds[0], Command::DispatchAgent { ref task, mode: DispatchMode::Dispatch } if task.id == TaskId(1))
@@ -827,7 +841,9 @@ fn dispatch_epic_with_plan_no_backlog_subtasks_shows_status() {
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 0);
 
-    let cmds = app.update(Message::DispatchEpic(EpicId(10)));
+    let cmds = app.update(Message::Epic(crate::tui::messages::EpicMessage::Dispatch(
+        EpicId(10),
+    )));
     assert!(cmds.is_empty());
 }
 
@@ -1002,7 +1018,9 @@ fn dispatch_epic_with_backlog_subtasks_dispatches_first_by_sort_order() {
     t2.plan_path = Some("docs/plans/task-11.md".to_string());
     app.board.tasks = vec![t1, t2];
 
-    let cmds = app.update(Message::DispatchEpic(EpicId(1)));
+    let cmds = app.update(Message::Epic(crate::tui::messages::EpicMessage::Dispatch(
+        EpicId(1),
+    )));
 
     // Should dispatch the task with lower sort_order (task 11, sort_order=100)
     assert!(cmds
@@ -1018,12 +1036,15 @@ fn dispatch_epic_no_subtasks_falls_back_to_planning() {
     app.board.epics = vec![epic];
     // No subtasks
 
-    let cmds = app.update(Message::DispatchEpic(EpicId(1)));
+    let cmds = app.update(Message::Epic(crate::tui::messages::EpicMessage::Dispatch(
+        EpicId(1),
+    )));
 
     // Should fall back to planning dispatch
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::DispatchEpic { .. })));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Epic(crate::tui::commands::EpicCommand::Dispatch { .. })
+    )));
 }
 
 #[test]
@@ -1038,7 +1059,9 @@ fn dispatch_epic_no_plan_with_subtasks_does_not_create_planning() {
     t1.epic_id = Some(EpicId(1));
     app.board.tasks = vec![t1];
 
-    let cmds = app.update(Message::DispatchEpic(EpicId(1)));
+    let cmds = app.update(Message::Epic(crate::tui::messages::EpicMessage::Dispatch(
+        EpicId(1),
+    )));
     // Epic status is Running, so it's blocked by the Backlog check
     assert!(cmds.is_empty());
 }
@@ -1058,7 +1081,9 @@ fn dispatch_epic_no_plan_with_backlog_subtask_does_not_create_planning() {
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 0);
 
-    let cmds = app.update(Message::DispatchEpic(EpicId(1)));
+    let cmds = app.update(Message::Epic(crate::tui::messages::EpicMessage::Dispatch(
+        EpicId(1),
+    )));
     // Should NOT create planning subtask since subtasks already exist
     assert!(cmds.is_empty());
     assert!(app.status.message.as_deref().unwrap().contains("no plan"));
@@ -1076,7 +1101,9 @@ fn dispatch_epic_all_done_shows_message() {
     t1.epic_id = Some(EpicId(1));
     app.board.tasks = vec![t1];
 
-    let cmds = app.update(Message::DispatchEpic(EpicId(1)));
+    let cmds = app.update(Message::Epic(crate::tui::messages::EpicMessage::Dispatch(
+        EpicId(1),
+    )));
 
     // Epic status is Done — should not dispatch
     assert!(cmds.is_empty());

@@ -125,7 +125,7 @@ impl App {
         match key.code {
             KeyCode::Char('q') => {
                 if matches!(self.board.view_mode, ViewMode::Epic { .. }) {
-                    self.update(Message::ExitEpic)
+                    self.update(Message::Epic(crate::tui::messages::EpicMessage::Exit))
                 } else {
                     self.selection_mut().set_column(0);
                     self.clamp_selection();
@@ -150,7 +150,9 @@ impl App {
             KeyCode::Char('N') => self.update(Message::System(
                 crate::tui::messages::SystemMessage::ToggleNotifications,
             )),
-            KeyCode::Char('E') => self.update(Message::StartNewEpic),
+            KeyCode::Char('E') => {
+                self.update(Message::Epic(crate::tui::messages::EpicMessage::StartNew))
+            }
             KeyCode::Char('d') => self.handle_key_dispatch(),
             KeyCode::Char('f') => self.update(Message::StartRepoFilter),
             KeyCode::Char('W') => self.dispatch_selection(
@@ -167,13 +169,17 @@ impl App {
             ),
             KeyCode::Char('L') => {
                 if let Some(id) = self.selected_epic_id() {
-                    return self.update(Message::MoveEpicStatus(id, MoveDirection::Forward));
+                    return self.update(Message::Epic(
+                        crate::tui::messages::EpicMessage::MoveStatus(id, MoveDirection::Forward),
+                    ));
                 }
                 self.handle_key_move(MoveDirection::Forward)
             }
             KeyCode::Char('H') => {
                 if let Some(id) = self.selected_epic_id() {
-                    return self.update(Message::MoveEpicStatus(id, MoveDirection::Backward));
+                    return self.update(Message::Epic(
+                        crate::tui::messages::EpicMessage::MoveStatus(id, MoveDirection::Backward),
+                    ));
                 }
                 self.handle_key_move(MoveDirection::Backward)
             }
@@ -211,7 +217,7 @@ impl App {
                         ))
                     }
                 } else if let Some(id) = self.selected_epic_id() {
-                    self.update(Message::EnterEpic(id))
+                    self.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(id)))
                 } else {
                     vec![]
                 }
@@ -290,7 +296,11 @@ impl App {
 
             KeyCode::Char(' ') => self.dispatch_selection(
                 |s, id| s.update(Message::ToggleSelect(id)),
-                |s, id| s.update(Message::ToggleSelectEpic(id)),
+                |s, id| {
+                    s.update(Message::Epic(
+                        crate::tui::messages::EpicMessage::ToggleSelect(id),
+                    ))
+                },
             ),
 
             KeyCode::Enter => {
@@ -313,13 +323,13 @@ impl App {
                 }
                 Some(ColumnItem::Epic(epic)) => {
                     let id = epic.id;
-                    self.update(Message::EditEpic(id))
+                    self.update(Message::Epic(crate::tui::messages::EpicMessage::Edit(id)))
                 }
                 Some(ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_)) => vec![],
                 None => {
                     if let ViewMode::Epic { epic_id, .. } = &self.board.view_mode {
                         let id = *epic_id;
-                        self.update(Message::EditEpic(id))
+                        self.update(Message::Epic(crate::tui::messages::EpicMessage::Edit(id)))
                     } else {
                         vec![]
                     }
@@ -334,7 +344,9 @@ impl App {
                     vec![]
                 } else {
                     match self.selected_column_item() {
-                        Some(ColumnItem::Epic(_)) => self.update(Message::ConfirmArchiveEpic),
+                        Some(ColumnItem::Epic(_)) => self.update(Message::Epic(
+                            crate::tui::messages::EpicMessage::ConfirmArchive,
+                        )),
                         _ => {
                             if let Some(task) = self.selected_task() {
                                 let id = task.id;
@@ -373,7 +385,9 @@ impl App {
             KeyCode::Char('U') => {
                 if let ViewMode::Epic { epic_id, .. } = &self.board.view_mode {
                     let id = *epic_id;
-                    self.update(Message::ToggleEpicAutoDispatch(id))
+                    self.update(Message::Epic(
+                        crate::tui::messages::EpicMessage::ToggleAutoDispatch(id),
+                    ))
                 } else {
                     vec![]
                 }
@@ -431,7 +445,7 @@ impl App {
 
             KeyCode::Esc => {
                 if matches!(self.board.view_mode, ViewMode::Epic { .. }) {
-                    self.update(Message::ExitEpic)
+                    self.update(Message::Epic(crate::tui::messages::EpicMessage::Exit))
                 } else if self.has_selection() || self.selection().on_select_all {
                     self.update(Message::ClearSelection)
                 } else {

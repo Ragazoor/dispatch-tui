@@ -385,7 +385,9 @@ impl TuiRuntime {
             updated.feed_command = None;
         }
         updated.feed_interval_secs = applied.feed_interval_secs;
-        app.update(Message::EpicEdited(updated))
+        app.update(Message::Epic(crate::tui::messages::EpicMessage::Edited(
+            updated,
+        )))
     }
 }
 

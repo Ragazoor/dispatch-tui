@@ -198,7 +198,9 @@ impl App {
                 self.set_status("Epic has subtasks but no plan".to_string());
                 vec![]
             } else {
-                vec![Command::DispatchEpic { epic: epic.clone() }]
+                vec![Command::Epic(crate::tui::commands::EpicCommand::Dispatch {
+                    epic: epic.clone(),
+                })]
             }
         }
     }
@@ -294,7 +296,7 @@ impl App {
             self.handle_exit_epic();
         }
         self.sync_board_selection();
-        cmds.push(Command::DeleteEpic(id));
+        cmds.push(Command::Epic(crate::tui::commands::EpicCommand::Delete(id)));
         cmds
     }
 
@@ -323,11 +325,11 @@ impl App {
             return vec![];
         }
         epic.status = new_status;
-        let mut cmds = vec![Command::PersistEpic {
+        let mut cmds = vec![Command::Epic(crate::tui::commands::EpicCommand::Persist {
             id,
             status: Some(new_status),
             sort_order: None,
-        }];
+        })];
 
         // Moving to Done cleans up all subtask tmux windows
         if new_status == TaskStatus::Done {
@@ -375,11 +377,11 @@ impl App {
             if let Some(epic) = self.board.epics.iter_mut().find(|e| e.id == *epic_id) {
                 if epic.status != TaskStatus::Archived {
                     epic.status = TaskStatus::Archived;
-                    cmds.push(Command::PersistEpic {
+                    cmds.push(Command::Epic(crate::tui::commands::EpicCommand::Persist {
                         id: *epic_id,
                         status: Some(TaskStatus::Archived),
                         sort_order: None,
-                    });
+                    }));
                 }
             }
         }
