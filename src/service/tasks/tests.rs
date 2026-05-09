@@ -1886,6 +1886,114 @@ fn update_epic_project_id_moves_epic() {
     assert_eq!(updated.project_id, other.id);
 }
 
+// -- TOCTOU regression -----------------------------------------------------
+//
+// `validate_sub_status` in `crud.rs` reads the current task status before
+// writing the patch. A second writer can land between the read and the
+// write. Per the docs/conventions.md "Sub-status validation TOCTOU" note,
+// this is accepted: simultaneous status changes from two agents on the
+// same task are user error, and the result is last-write-wins. These
+// tests pin that behaviour so the policy can't drift silently.
+
+#[test]
+fn update_task_toctou_last_write_wins() {
+    let db = test_db();
+    let svc_a = task_svc(&db);
+    let svc_b = task_svc(&db);
+
+    let id = svc_a
+        .create_task(CreateTaskParams {
+            title: "T".into(),
+            description: "".into(),
+            repo_path: "/repo".into(),
+            plan_path: None,
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            base_branch: None,
+            project_id: ProjectId(1),
+        })
+        .unwrap();
+
+    // svc_a moves the task to Running/Active.
+    svc_a
+        .update_task(
+            UpdateTaskParams::for_task(id)
+                .status(TaskStatus::Running)
+                .sub_status(SubStatus::Active),
+        )
+        .unwrap();
+
+    // svc_b moves it on to Review/AwaitingReview. The sub_status is valid
+    // for the requested status, so validation passes despite the write
+    // landing on top of svc_a's state. Last write wins.
+    svc_b
+        .update_task(
+            UpdateTaskParams::for_task(id)
+                .status(TaskStatus::Review)
+                .sub_status(SubStatus::AwaitingReview),
+        )
+        .unwrap();
+
+    let task = svc_a.get_task(id).unwrap();
+    assert_eq!(task.status, TaskStatus::Review);
+    assert_eq!(task.sub_status, SubStatus::AwaitingReview);
+}
+
+#[test]
+fn update_task_sub_status_validated_against_persisted_status() {
+    // A sub-status update without a status change is validated against the
+    // currently-persisted status. If a previous writer changed status, the
+    // later sub_status-only update sees the new status — this is the
+    // TOCTOU-accepting behaviour: validation uses *current* state, not the
+    // state the caller may have observed earlier.
+    let db = test_db();
+    let svc_a = task_svc(&db);
+    let svc_b = task_svc(&db);
+
+    let id = svc_a
+        .create_task(CreateTaskParams {
+            title: "T".into(),
+            description: "".into(),
+            repo_path: "/repo".into(),
+            plan_path: None,
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            base_branch: None,
+            project_id: ProjectId(1),
+        })
+        .unwrap();
+
+    svc_a
+        .update_task(
+            UpdateTaskParams::for_task(id)
+                .status(TaskStatus::Running)
+                .sub_status(SubStatus::Active),
+        )
+        .unwrap();
+
+    // svc_b sees Running (sub_status Stale is valid for Running).
+    svc_b
+        .update_task(UpdateTaskParams::for_task(id).sub_status(SubStatus::Stale))
+        .unwrap();
+    assert_eq!(svc_a.get_task(id).unwrap().sub_status, SubStatus::Stale);
+
+    // Now svc_a moves status to Review without specifying sub_status.
+    svc_a
+        .update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Review))
+        .unwrap();
+
+    // svc_b attempts a sub_status-only update with `Active`, which is
+    // valid for Running but NOT for Review. Validation reads the current
+    // status (Review) and rejects the update — no panic, just a
+    // Validation error.
+    let err = svc_b
+        .update_task(UpdateTaskParams::for_task(id).sub_status(SubStatus::Active))
+        .unwrap_err();
+    assert!(matches!(err, ServiceError::Validation(_)), "got {err:?}");
+}
+
 mod property_tests {
     use super::*;
     use proptest::prelude::*;

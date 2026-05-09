@@ -350,3 +350,87 @@ mod status_filter_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod flexible_i64_tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    use super::{deserialize_flexible_i64, deserialize_optional_flexible_i64};
+    use proptest::prelude::*;
+    use serde::Deserialize;
+
+    #[derive(Debug, Deserialize, PartialEq)]
+    struct Wrap {
+        #[serde(deserialize_with = "deserialize_flexible_i64")]
+        v: i64,
+    }
+
+    #[derive(Debug, Deserialize, PartialEq)]
+    struct OptWrap {
+        #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
+        v: Option<i64>,
+    }
+
+    #[test]
+    fn flexible_i64_rejects_non_numeric_string() {
+        let json = r#"{"v":"not-a-number"}"#;
+        let err = serde_json::from_str::<Wrap>(json).unwrap_err();
+        assert!(err.to_string().contains("invalid integer string"));
+    }
+
+    #[test]
+    fn flexible_i64_rejects_float() {
+        let json = r#"{"v":1.5}"#;
+        assert!(serde_json::from_str::<Wrap>(json).is_err());
+    }
+
+    #[test]
+    fn flexible_i64_accepts_negative_string() {
+        let parsed: Wrap = serde_json::from_str(r#"{"v":"-42"}"#).unwrap();
+        assert_eq!(parsed.v, -42);
+    }
+
+    proptest! {
+        /// Native integer JSON decodes losslessly via the flexible deserializer.
+        #[test]
+        fn flexible_i64_roundtrip_integer(v: i64) {
+            let json = format!(r#"{{"v":{v}}}"#);
+            let parsed: Wrap = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(parsed.v, v);
+        }
+
+        /// String-encoded integer JSON decodes to the same i64 — this is the
+        /// path Claude Code occasionally takes for MCP integer arguments.
+        #[test]
+        fn flexible_i64_roundtrip_string(v: i64) {
+            let json = format!(r#"{{"v":"{v}"}}"#);
+            let parsed: Wrap = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(parsed.v, v);
+        }
+
+        /// Both encodings yield identical results.
+        #[test]
+        fn flexible_i64_int_and_string_agree(v: i64) {
+            let from_int: Wrap = serde_json::from_str(&format!(r#"{{"v":{v}}}"#)).unwrap();
+            let from_str: Wrap = serde_json::from_str(&format!(r#"{{"v":"{v}"}}"#)).unwrap();
+            prop_assert_eq!(from_int.v, from_str.v);
+        }
+
+        /// The optional variant carries the same flexibility through `Some(v)`,
+        /// while still treating `null` and absent as `None`.
+        #[test]
+        fn optional_flexible_i64_roundtrip(v: i64) {
+            let from_int: OptWrap = serde_json::from_str(&format!(r#"{{"v":{v}}}"#)).unwrap();
+            let from_str: OptWrap = serde_json::from_str(&format!(r#"{{"v":"{v}"}}"#)).unwrap();
+            prop_assert_eq!(from_int.v, Some(v));
+            prop_assert_eq!(from_str.v, Some(v));
+        }
+    }
+
+    #[test]
+    fn optional_flexible_i64_handles_null_and_absent() {
+        let null_case: OptWrap = serde_json::from_str(r#"{"v":null}"#).unwrap();
+        assert_eq!(null_case.v, None);
+        let absent_case: OptWrap = serde_json::from_str(r#"{}"#).unwrap();
+        assert_eq!(absent_case.v, None);
+    }
+}
