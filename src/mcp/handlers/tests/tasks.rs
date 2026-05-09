@@ -2233,6 +2233,75 @@ async fn wrap_up_accepts_running_active_task() {
 }
 
 #[tokio::test]
+async fn wrap_up_rebase_response_demands_exit_session_imperatively() {
+    // The wrap_up rebase response is the agent's primary cue to call
+    // exit_session. It must:
+    //   - name exit_session as the next call,
+    //   - be imperative (not advisory like "when ready"),
+    //   - say the session is not yet closed so the agent does not stop.
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse --abbrev-ref HEAD
+        MockProcessRunner::fail(""),                  // git remote get-url (no remote)
+        MockProcessRunner::ok(),                      // git rebase main
+        MockProcessRunner::ok(),                      // git merge --ff-only
+    ]));
+    let state = Arc::new(McpState {
+        db: db.clone(),
+        notify_tx: None,
+        runner,
+    });
+
+    let task_id = db
+        .create_task(CreateTaskRequest {
+            title: "T",
+            description: "d",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Running,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+        })
+        .unwrap();
+    db.patch_task(
+        task_id,
+        &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
+    )
+    .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "wrap_up",
+            "arguments": { "task_id": task_id.0, "action": "rebase" }
+        })),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+
+    assert!(
+        text.contains("exit_session"),
+        "response must name exit_session as the next call; got: {text}"
+    );
+    assert!(
+        text.contains("MUST"),
+        "response must be imperative (contain 'MUST'); got: {text}"
+    );
+    assert!(
+        text.contains("NOT") || text.contains("not yet"),
+        "response must clearly say the session is not yet closed; got: {text}"
+    );
+    assert!(
+        !text.contains("when ready"),
+        "response must not be advisory ('when ready'); got: {text}"
+    );
+}
+
+#[tokio::test]
 async fn wrap_up_task_no_worktree() {
     let state = test_state();
     let task_id = state

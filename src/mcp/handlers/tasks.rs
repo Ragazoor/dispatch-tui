@@ -673,7 +673,9 @@ pub(super) async fn handle_wrap_up(
             JsonRpcResponse::ok(
                 id,
                 json!({"content": [{"type": "text", "text": format!(
-                    "wrap_up complete (task {}, action: rebase). Call `exit_session` to close your session when ready.",
+                    "wrap_up complete (task {}, action: rebase). The session is NOT yet closed. \
+                You MUST call `exit_session` next as your final action — without it, the tmux window stays alive \
+                and the task remains in its current status. Do not stop, and do not call any other tool first.",
                     parsed.task_id
                 )}]}),
             )

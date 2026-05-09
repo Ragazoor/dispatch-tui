@@ -98,16 +98,25 @@ The task is automatically moved to "done" (rebase) or "review" (PR) on success. 
 
 ### If rebase:
 
+This is a **two-call** sequence. Both calls are mandatory.
+
 Before calling `wrap_up`, decide on **learning verdicts** for any knowledge surfaced during this task — see *Validate retrieved knowledge* below.
 
-Call the `dispatch` MCP tool `wrap_up` with:
+**Call 1 — rebase.** Call the `dispatch` MCP tool `wrap_up` with:
 - `task_id`: the integer from Step 1
 - `action`: `"rebase"`
 - `learning_verdicts` (optional): the list you assembled in *Validate retrieved knowledge*
 
-The tool blocks until the rebase completes. On success, the task is moved to "done" and the tmux window is killed, ending this session. Do not attempt any further actions after a successful rebase.
+The tool blocks until the rebase completes and fast-forwards `{base_branch}`. It does **not** close the session — the tmux window stays alive and the task stays in its current status until you make the second call.
 
-If the tool returns an error (e.g. rebase conflict, repo not on `{base_branch}`), show the user the exact error message from the response and suggest resolution steps. The task remains in its current status.
+If `wrap_up` returns an error (e.g. rebase conflict, repo not on `{base_branch}`), show the user the exact error message and suggest resolution steps. Do not call `exit_session`. The task remains in its current status.
+
+**Call 2 — close.** On a successful `wrap_up` response, immediately call the `dispatch` MCP tool `exit_session` with:
+- `task_id`: the integer from Step 1
+
+`exit_session` may return a reflection prompt (asking whether you discovered any pitfalls / conventions / preferences worth recording). Follow its instructions: optionally call `record_learning` for each finding, then call `exit_session` again — repeat until it closes the session. The session ends only after `exit_session` finalises it.
+
+Do NOT stop between Call 1 and Call 2. Skipping `exit_session` leaves the tmux window alive and the task stuck.
 
 #### Validate retrieved knowledge
 
