@@ -1208,22 +1208,75 @@ fn dispatch_epic_all_done_shows_message() {
 }
 
 #[test]
-fn stale_detection_sets_substatus_and_persists() {
+fn tick_reclassifies_running_task_to_stale_when_pre_tool_use_is_old() {
     let mut app = App::new(
         vec![make_task(3, TaskStatus::Running)],
         ProjectId(1),
         TEST_TIMEOUT,
     );
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
+    app.board.tasks[0].sub_status = SubStatus::Active;
+    let old = chrono::Utc::now() - chrono::Duration::minutes(2) - chrono::Duration::seconds(5);
+    app.board.tasks[0].last_pre_tool_use_at = Some(old);
 
-    let cmds = app.update(Message::Task(
-        crate::tui::messages::TaskMessage::StaleAgent(TaskId(3)),
-    ));
+    let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
     let task = app.find_task(TaskId(3)).unwrap();
     assert_eq!(task.sub_status, SubStatus::Stale);
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::Persist(t)) if t.id == TaskId(3))));
+        .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::Persist(t)) if t.id == TaskId(3) && t.sub_status == SubStatus::Stale)));
+}
+
+#[test]
+fn tick_reclassifies_running_task_to_needs_input_when_notification_newer() {
+    let mut app = App::new(
+        vec![make_task(3, TaskStatus::Running)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
+    app.board.tasks[0].tmux_window = Some("win-3".to_string());
+    app.board.tasks[0].sub_status = SubStatus::Active;
+    let now = chrono::Utc::now();
+    app.board.tasks[0].last_pre_tool_use_at = Some(now - chrono::Duration::seconds(30));
+    app.board.tasks[0].last_notification_at = Some(now - chrono::Duration::seconds(5));
+
+    app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
+    let task = app.find_task(TaskId(3)).unwrap();
+    assert_eq!(task.sub_status, SubStatus::NeedsInput);
+}
+
+#[test]
+fn tick_does_not_overwrite_crashed() {
+    let mut app = App::new(
+        vec![make_task(3, TaskStatus::Running)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
+    app.board.tasks[0].tmux_window = Some("win-3".to_string());
+    app.board.tasks[0].sub_status = SubStatus::Crashed;
+    let old = chrono::Utc::now() - chrono::Duration::minutes(5);
+    app.board.tasks[0].last_pre_tool_use_at = Some(old);
+
+    app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
+    let task = app.find_task(TaskId(3)).unwrap();
+    assert_eq!(task.sub_status, SubStatus::Crashed);
+}
+
+#[test]
+fn tick_does_not_overwrite_conflict() {
+    let mut app = App::new(
+        vec![make_task(3, TaskStatus::Running)],
+        ProjectId(1),
+        TEST_TIMEOUT,
+    );
+    app.board.tasks[0].tmux_window = Some("win-3".to_string());
+    app.board.tasks[0].sub_status = SubStatus::Conflict;
+    let old = chrono::Utc::now() - chrono::Duration::minutes(5);
+    app.board.tasks[0].last_pre_tool_use_at = Some(old);
+
+    app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
+    let task = app.find_task(TaskId(3)).unwrap();
+    assert_eq!(task.sub_status, SubStatus::Conflict);
 }
 
 #[test]
@@ -1246,40 +1299,6 @@ fn crashed_detection_sets_substatus_and_persists() {
 }
 
 #[test]
-fn stale_does_not_overwrite_crashed() {
-    let mut app = App::new(
-        vec![make_task(3, TaskStatus::Running)],
-        ProjectId(1),
-        TEST_TIMEOUT,
-    );
-    app.board.tasks[0].tmux_window = Some("win-3".to_string());
-    app.board.tasks[0].sub_status = SubStatus::Crashed;
-
-    let cmds = app.update(Message::Task(
-        crate::tui::messages::TaskMessage::StaleAgent(TaskId(3)),
-    ));
-    let task = app.find_task(TaskId(3)).unwrap();
-    assert_eq!(task.sub_status, SubStatus::Crashed); // unchanged
-    assert!(cmds.is_empty()); // no persist needed
-}
-
-#[test]
-fn stale_skips_non_running_task() {
-    let mut app = App::new(
-        vec![make_task(3, TaskStatus::Backlog)],
-        ProjectId(1),
-        TEST_TIMEOUT,
-    );
-
-    let cmds = app.update(Message::Task(
-        crate::tui::messages::TaskMessage::StaleAgent(TaskId(3)),
-    ));
-    let task = app.find_task(TaskId(3)).unwrap();
-    assert_eq!(task.sub_status, SubStatus::None); // unchanged
-    assert!(cmds.is_empty());
-}
-
-#[test]
 fn crashed_skips_non_running_task() {
     let mut app = App::new(
         vec![make_task(3, TaskStatus::Review)],
@@ -1293,47 +1312,6 @@ fn crashed_skips_non_running_task() {
     let task = app.find_task(TaskId(3)).unwrap();
     assert_eq!(task.sub_status, SubStatus::AwaitingReview); // unchanged
     assert!(cmds.is_empty());
-}
-
-#[test]
-fn stale_notification_sent_when_enabled() {
-    let mut app = App::new(
-        vec![make_task(3, TaskStatus::Running)],
-        ProjectId(1),
-        TEST_TIMEOUT,
-    );
-    app.board.tasks[0].tmux_window = Some("win-3".to_string());
-    app.set_notifications_enabled(true);
-
-    let cmds = app.update(Message::Task(
-        crate::tui::messages::TaskMessage::StaleAgent(TaskId(3)),
-    ));
-    assert!(cmds.iter().any(|c| matches!(
-        c,
-        Command::System(crate::tui::commands::SystemCommand::SendNotification {
-            urgent: false,
-            ..
-        })
-    )));
-}
-
-#[test]
-fn stale_notification_not_sent_when_disabled() {
-    let mut app = App::new(
-        vec![make_task(3, TaskStatus::Running)],
-        ProjectId(1),
-        TEST_TIMEOUT,
-    );
-    app.board.tasks[0].tmux_window = Some("win-3".to_string());
-    app.set_notifications_enabled(false);
-
-    let cmds = app.update(Message::Task(
-        crate::tui::messages::TaskMessage::StaleAgent(TaskId(3)),
-    ));
-    assert!(!cmds.iter().any(|c| matches!(
-        c,
-        Command::System(crate::tui::commands::SystemCommand::SendNotification { .. })
-    )));
 }
 
 #[test]

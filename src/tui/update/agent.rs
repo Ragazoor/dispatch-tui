@@ -230,30 +230,34 @@ impl App {
             })
             .collect();
 
-        // Check for stale agents
-        let timeout = self.agents.inactivity_timeout;
-        let newly_stale: Vec<TaskId> = self
+        // Reclassify running-agent activity from hook event timestamps.
+        let now = chrono::Utc::now();
+        let updates: Vec<(TaskId, SubStatus)> = self
             .board
             .tasks
             .iter()
             .filter(|t| t.status == TaskStatus::Running && t.tmux_window.is_some())
-            .filter(|t| {
-                !matches!(
-                    t.sub_status,
-                    SubStatus::Stale | SubStatus::Crashed | SubStatus::Conflict
-                )
+            .filter(|t| !matches!(t.sub_status, SubStatus::Crashed | SubStatus::Conflict))
+            .filter_map(|t| {
+                let activity = crate::models::classify_agent_activity(
+                    t.last_pre_tool_use_at,
+                    t.last_notification_at,
+                    now,
+                );
+                let target = activity.to_sub_status();
+                (t.sub_status != target).then_some((t.id, target))
             })
-            .filter(|t| {
-                self.agents
-                    .inactive_duration(t.id)
-                    .is_some_and(|d| d > timeout)
-            })
-            .map(|t| t.id)
             .collect();
 
-        for id in newly_stale {
-            let stale_cmds = self.handle_stale_agent(id);
-            cmds.extend(stale_cmds);
+        for (id, target) in updates {
+            if let Some(task) = self.find_task_mut(id) {
+                task.sub_status = target;
+            }
+            if let Some(task) = self.find_task(id) {
+                cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
+                    task.clone(),
+                )));
+            }
         }
 
         // Poll PR status for review tasks with open PRs
@@ -291,52 +295,6 @@ impl App {
         cmds.push(Command::Task(
             crate::tui::commands::TaskCommand::RefreshFromDb,
         ));
-        cmds
-    }
-
-    pub(in crate::tui) fn handle_stale_agent(&mut self, id: TaskId) -> Vec<Command> {
-        // Only applies to Running tasks
-        let dominated = match self.find_task(id) {
-            Some(t) if t.status == TaskStatus::Running => {
-                // Escalation only: don't downgrade Crashed to Stale
-                t.sub_status == SubStatus::Crashed
-            }
-            _ => return vec![],
-        };
-        if dominated {
-            return vec![];
-        }
-
-        let mut cmds = Vec::new();
-
-        if let Some(task) = self.find_task_mut(id) {
-            task.sub_status = SubStatus::Stale;
-        }
-        let elapsed = self
-            .agents
-            .inactive_duration(id)
-            .map(|d| d.as_secs() / 60)
-            .unwrap_or(0);
-        if let Some(task) = self.find_task(id) {
-            cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
-                task.clone(),
-            )));
-        }
-        self.set_status(format!(
-            "Task {id} inactive for {elapsed}m - press d to retry",
-        ));
-
-        if self.notifications_enabled {
-            if let Some(task) = self.find_task(id) {
-                cmds.push(Command::System(
-                    crate::tui::commands::SystemCommand::SendNotification {
-                        title: format!("Task #{}: {}", task.id.0, task.title),
-                        body: format!("Agent inactive for {elapsed}m"),
-                        urgent: false,
-                    },
-                ));
-            }
-        }
         cmds
     }
 

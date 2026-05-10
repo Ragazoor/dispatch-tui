@@ -53,7 +53,6 @@ fn dispatch_task(app: &mut App, msg: TaskMessage) -> Vec<Command> {
         TaskMessage::QuickDispatch { repo_path, epic_id } => {
             app.handle_quick_dispatch(repo_path, epic_id)
         }
-        TaskMessage::StaleAgent(id) => app.handle_stale_agent(id),
         TaskMessage::AgentCrashed(id) => app.handle_agent_crashed(id),
         TaskMessage::KillAndRetry(id) => app.handle_kill_and_retry(id),
         TaskMessage::RetryResume(id) => app.handle_retry_resume(id),

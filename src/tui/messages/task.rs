@@ -51,7 +51,6 @@ pub enum TaskMessage {
         repo_path: String,
         epic_id: Option<EpicId>,
     },
-    StaleAgent(TaskId),
     AgentCrashed(TaskId),
     KillAndRetry(TaskId),
     RetryResume(TaskId),
