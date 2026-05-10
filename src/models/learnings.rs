@@ -170,8 +170,8 @@ pub struct Learning {
     pub tags: Vec<String>,
     pub status: LearningStatus,
     pub source_task_id: Option<TaskId>,
-    pub confirmed_count: i64,
-    pub last_confirmed_at: Option<DateTime<Utc>>,
+    pub upvote_count: i64,
+    pub last_upvoted_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

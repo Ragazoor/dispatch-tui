@@ -844,11 +844,7 @@ pub(super) async fn handle_dispatch_next(
         }
         Ok(Some(_)) => {} // auto_dispatch is true — proceed normally
         Ok(None) => {
-            return JsonRpcResponse::err(
-                id,
-                -32602,
-                format!("epic #{} not found", parsed.epic_id),
-            );
+            return JsonRpcResponse::err(id, -32602, format!("epic #{} not found", parsed.epic_id));
         }
         Err(e) => {
             tracing::warn!(

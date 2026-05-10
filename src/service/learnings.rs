@@ -538,7 +538,7 @@ mod learning_tests {
             .unwrap();
         svc.upvote_learning(id).await.unwrap();
         let learning = svc.get_learning(id).await.unwrap();
-        assert_eq!(learning.confirmed_count, 1);
+        assert_eq!(learning.upvote_count, 1);
     }
 
     #[tokio::test]
@@ -572,7 +572,7 @@ mod learning_tests {
             .await
             .unwrap();
         let l = svc.get_learning(learning_id).await.unwrap();
-        assert_eq!(l.confirmed_count, 1);
+        assert_eq!(l.upvote_count, 1);
     }
 
     #[tokio::test]

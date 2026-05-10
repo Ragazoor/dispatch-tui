@@ -2584,7 +2584,7 @@ async fn wrap_up_with_verdicts_applies_them() {
     // rebase outcome. Assert on DB state.
     let l1 = db.get_learning(l1_id).await.unwrap().unwrap();
     let l2 = db.get_learning(l2_id).await.unwrap().unwrap();
-    assert_eq!(l1.confirmed_count, 1);
+    assert_eq!(l1.upvote_count, 1);
     assert_eq!(l2.status, crate::models::LearningStatus::NeedsReview);
     let _ = resp;
 }
@@ -6944,7 +6944,7 @@ async fn upvote_learning_increments_count() {
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
 
     let learning = state.db.get_learning(learning_id).await.unwrap().unwrap();
-    assert_eq!(learning.confirmed_count, 1);
+    assert_eq!(learning.upvote_count, 1);
 }
 
 #[tokio::test]

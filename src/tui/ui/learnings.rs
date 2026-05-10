@@ -163,7 +163,7 @@ fn learning_row(l: &Learning) -> ListItem<'static> {
         Span::raw(truncate(&l.summary, 55)),
         Span::raw("  "),
         Span::styled(
-            format!("\u{2191}{}", l.confirmed_count),
+            format!("\u{2191}{}", l.upvote_count),
             Style::default().fg(Color::Green),
         ),
         Span::raw("  "),
@@ -320,7 +320,7 @@ fn render_detail(
                 ),
                 Span::raw("  "),
                 Span::styled(
-                    format!("upvotes:{}", l.confirmed_count),
+                    format!("upvotes:{}", l.upvote_count),
                     Style::default().fg(Color::Green),
                 ),
             ]));
@@ -351,7 +351,7 @@ pub fn build_learning_tree(
             "{} {}  \u{2713}{}",
             kind_icon(l.kind),
             truncate(&l.summary, 55),
-            l.confirmed_count
+            l.upvote_count
         );
         tui_tree_widget::TreeItem::new_leaf(format!("learning:{}", l.id), text)
     }
@@ -604,8 +604,8 @@ mod tests {
             tags: vec![],
             status: LearningStatus::Approved,
             source_task_id: None,
-            confirmed_count: 0,
-            last_confirmed_at: None,
+            upvote_count: 0,
+            last_upvoted_at: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

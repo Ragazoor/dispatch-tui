@@ -465,12 +465,12 @@ pub trait LearningStore: Send + Sync {
 
     async fn delete_learning(&self, id: LearningId) -> Result<()>;
 
-    /// Atomically increments `confirmed_count` and updates `last_confirmed_at` and `updated_at`.
+    /// Atomically increments `upvote_count` and updates `last_upvoted_at` and `updated_at`.
     async fn upvote_learning(&self, id: LearningId) -> Result<()>;
 
     /// Returns approved learnings for the given task context, unioning user + project + repo + epic
     /// scopes. Task-scoped learnings are excluded (they surface via explicit query only).
-    /// Ordered by scope priority (procedural > epic > repo > project > user), then confirmed_count DESC.
+    /// Ordered by scope priority (procedural > epic > repo > project > user), then upvote_count DESC.
     async fn list_learnings_for_dispatch(
         &self,
         project_id: Option<ProjectId>,
@@ -499,7 +499,7 @@ pub trait LearningRetrievalStore: Send + Sync {
 
     /// Apply a batch of verdicts atomically. Each verdict is recorded in
     /// `learning_verdicts`; in addition, `Helped` bumps the learning's
-    /// `confirmed_count` and `Wrong` flips an approved learning to
+    /// `upvote_count` and `Wrong` flips an approved learning to
     /// `needs_review`. `Unused` only records a row.
     async fn apply_verdicts_tx(
         &self,

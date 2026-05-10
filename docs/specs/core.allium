@@ -265,8 +265,8 @@ entity Learning {
     tags: Set<String>        -- free-form labels for filtering (e.g. "rust", "testing")
     status: LearningStatus
     source_task: Task?       -- the task whose agent proposed this entry; null for human-authored entries
-    confirmed_count: Integer -- times an agent confirmed this learning as applicable
-    last_confirmed_at: Timestamp?
+    upvote_count: Integer -- times an agent confirmed this learning as applicable
+    last_upvoted_at: Timestamp?
     created_at: Timestamp
     updated_at: Timestamp
 
@@ -316,7 +316,7 @@ entity Retrieval {
 
 -- Verdict records an agent's wrap-up evaluation of a retrieved learning.
 -- See learnings.allium for the rules that consume verdicts.
---   helped → increments learning.confirmed_count and updates last_confirmed_at
+--   helped → increments learning.upvote_count and updates last_upvoted_at
 --   unused → recorded only (no mutation of the learning)
 --   wrong  → if the learning is approved, transitions it to needs_review
 entity Verdict {

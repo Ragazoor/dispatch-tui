@@ -8,7 +8,7 @@ fn fresh_db_has_latest_schema_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 48);
+    assert_eq!(version, 49);
 }
 
 #[test]
@@ -34,6 +34,66 @@ fn v48_accepts_needs_review_status() {
         [],
     )
     .unwrap();
+}
+
+#[test]
+fn v49_renames_confirmed_columns_to_upvote() {
+    let db = in_memory_db();
+    let conn = db.conn().unwrap();
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('learnings')
+             WHERE name IN ('upvote_count','last_upvoted_at')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        count, 2,
+        "expected upvote_count and last_upvoted_at columns"
+    );
+
+    let stale: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('learnings')
+             WHERE name IN ('confirmed_count','last_confirmed_at')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(stale, 0, "old confirmed_* columns must be removed");
+}
+
+#[test]
+fn migrate_v49_preserves_existing_counts() {
+    use rusqlite::Connection as RawConn;
+    let conn = RawConn::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE learnings (
+             id                INTEGER PRIMARY KEY,
+             kind              TEXT NOT NULL,
+             summary           TEXT NOT NULL,
+             scope             TEXT NOT NULL,
+             status            TEXT NOT NULL,
+             confirmed_count   INTEGER NOT NULL DEFAULT 0,
+             last_confirmed_at TEXT
+         );
+         INSERT INTO learnings (kind, summary, scope, status, confirmed_count, last_confirmed_at)
+         VALUES ('pitfall','one','user','approved', 7, '2026-05-09T12:00:00Z');",
+    )
+    .unwrap();
+
+    crate::db::migrations::migrate_v49_rename_confirmed_to_upvote(&conn).unwrap();
+
+    let (count, ts): (i64, String) = conn
+        .query_row(
+            "SELECT upvote_count, last_upvoted_at FROM learnings WHERE summary='one'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(count, 7);
+    assert_eq!(ts, "2026-05-09T12:00:00Z");
 }
 
 #[test]
@@ -235,7 +295,7 @@ fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 48);
+    assert_eq!(version, 49);
 }
 
 #[test]
@@ -324,7 +384,7 @@ fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 48);
+    assert_eq!(version, 49);
 }
 
 #[test]
@@ -435,7 +495,7 @@ fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 48);
+    assert_eq!(version, 49);
 }
 
 #[test]
@@ -516,7 +576,7 @@ fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 48);
+    assert_eq!(version, 49);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -637,7 +697,7 @@ fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 48);
+    assert_eq!(version, 49);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -1636,7 +1696,7 @@ fn migration_31_re_expands_tilde_paths() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 48);
+    assert_eq!(version, 49);
 }
 
 #[test]
@@ -1712,7 +1772,7 @@ fn migrate_v32_adds_base_branch_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 48);
+    assert_eq!(version, 49);
 }
 
 #[test]
@@ -1835,7 +1895,7 @@ fn migration_v38_feed_epic_columns() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 48);
+    assert_eq!(version, 49);
 }
 
 #[test]
@@ -1845,7 +1905,7 @@ fn fresh_db_schema_version_is_40() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 48);
+    assert_eq!(version, 49);
 }
 
 #[test]
@@ -1915,7 +1975,7 @@ fn migration_v40_creates_learnings_table() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 48);
+    assert_eq!(version, 49);
 }
 
 #[test]
@@ -1986,7 +2046,7 @@ fn migration_v41_drops_cost_usd_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 48);
+    assert_eq!(version, 49);
     // Original token data is preserved
     let row: (i64, i64, i64, i64, i64) = conn
         .query_row(
@@ -2098,7 +2158,7 @@ fn test_migrate_v43_proposed_to_approved() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 48);
+    assert_eq!(version, 49);
 }
 
 #[test]

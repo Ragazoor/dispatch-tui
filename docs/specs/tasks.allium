@@ -1730,7 +1730,7 @@ rule RecordLearningViaMcp {
         tags: tags ?? {},
         status: approved,
         source_task: task,
-        confirmed_count: 0,
+        upvote_count: 0,
         created_at: now,
         updated_at: now
     )
@@ -1759,7 +1759,7 @@ rule QueryLearningsViaMcp {
 
     ensures: returns approved core/Learning records where applies_to_dispatch(task),
              filtered to those whose tags intersect tag_filter (when tag_filter is provided),
-             ordered by scope_priority(scope) then confirmed_count desc,
+             ordered by scope_priority(scope) then upvote_count desc,
              limited to min(limit ?? 20, 50)
 
     @guidance
@@ -1777,13 +1777,13 @@ rule UpvoteLearningViaMcp {
 
     requires: learning.status = approved
 
-    ensures: learning.confirmed_count = learning.confirmed_count + 1
-    ensures: learning.last_confirmed_at = now
+    ensures: learning.upvote_count = learning.upvote_count + 1
+    ensures: learning.last_upvoted_at = now
     ensures: learning.updated_at = now
 
     @guidance
         -- Agents call this (MCP tool: upvote_learning) when they act on a
-        -- learning and it proves correct. confirmed_count is an evidence
+        -- learning and it proves correct. upvote_count is an evidence
         -- signal used to rank query results. No status change: an upvote
         -- strengthens an approved entry but does not alter its lifecycle.
         -- Implemented in src/mcp/handlers/learnings.rs.

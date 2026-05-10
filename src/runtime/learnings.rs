@@ -180,8 +180,8 @@ mod tests {
             tags: vec![],
             status: LearningStatus::Approved,
             source_task_id: None,
-            confirmed_count: 0,
-            last_confirmed_at: None,
+            upvote_count: 0,
+            last_upvoted_at: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -243,10 +243,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn exec_load_passes_learnings_to_show_learnings_sorted_by_confirmed_count() {
+    async fn exec_load_passes_learnings_to_show_learnings_sorted_by_upvote_count() {
         let db = Arc::new(Database::open_in_memory().unwrap());
 
-        // Insert two learnings; bump the second one's confirmed_count via patch.
+        // Insert two learnings; bump the second one's upvote_count via patch.
         let id1 = db
             .create_learning(CreateLearningRow {
                 kind: LearningKind::Convention,
@@ -280,16 +280,16 @@ mod tests {
 
         rt.exec_load_learnings(&mut app).await;
 
-        // TUI handler sorts by confirmed_count DESC: id2 (count=3) before id1 (count=0).
+        // TUI handler sorts by upvote_count DESC: id2 (count=3) before id1 (count=0).
         if let ViewMode::Learnings { learnings, .. } = app.view_mode() {
             assert_eq!(learnings.len(), 2);
             assert_eq!(
                 learnings[0].id, id2,
-                "higher confirmed_count should sort first"
+                "higher upvote_count should sort first"
             );
             assert_eq!(
                 learnings[1].id, id1,
-                "lower confirmed_count should sort second"
+                "lower upvote_count should sort second"
             );
         } else {
             panic!("expected Learnings view mode");

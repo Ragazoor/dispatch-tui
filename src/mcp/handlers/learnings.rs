@@ -139,9 +139,9 @@ pub(super) async fn handle_record_learning(
                 ));
                 for l in &similar {
                     text.push_str(&format!(
-                        "\n  [{}] {} (confirmed {}x) \
+                        "\n  [{}] {} (upvoted {}x) \
                          → upvote_learning(learning_id={}, task_id={})",
-                        l.id, l.summary, l.confirmed_count, l.id, task_id.0
+                        l.id, l.summary, l.upvote_count, l.id, task_id.0
                     ));
                 }
                 text.push_str(
@@ -226,8 +226,8 @@ pub(super) async fn handle_query_learnings(
                 l.tags.join(", ")
             };
             format!(
-                "[{}] ({}/{}) {}\n  Tags: {} | Confirmed: {}x",
-                l.id, l.kind, l.scope, l.summary, tags, l.confirmed_count
+                "[{}] ({}/{}) {}\n  Tags: {} | Upvotes: {}",
+                l.id, l.kind, l.scope, l.summary, tags, l.upvote_count
             )
         })
         .collect::<Vec<_>>()

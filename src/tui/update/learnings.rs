@@ -11,12 +11,12 @@ impl App {
     ) -> Vec<Command> {
         // Group `needs_review` first (so they always surface at the top of the
         // overlay regardless of upvote count), then sort each group by
-        // confirmed_count DESC. Stable sort preserves insertion order as a
+        // upvote_count DESC. Stable sort preserves insertion order as a
         // tiebreaker.
         learnings.sort_by_key(|b| {
             (
                 b.status != crate::models::LearningStatus::NeedsReview,
-                std::cmp::Reverse(b.confirmed_count),
+                std::cmp::Reverse(b.upvote_count),
             )
         });
         let previous = Box::new(std::mem::replace(
@@ -189,8 +189,8 @@ mod tests {
             tags: vec![],
             status: LearningStatus::Approved,
             source_task_id: None,
-            confirmed_count: 0,
-            last_confirmed_at: None,
+            upvote_count: 0,
+            last_upvoted_at: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -319,15 +319,15 @@ mod tests {
     }
 
     #[test]
-    fn show_learnings_sorts_by_confirmed_count_desc() {
+    fn show_learnings_sorts_by_upvote_count_desc() {
         let mut app = make_app();
         // Assign distinct counts so sort order is deterministic.
         let mut l1 = make_learning(LearningId(1));
-        l1.confirmed_count = 5;
+        l1.upvote_count = 5;
         let mut l2 = make_learning(LearningId(2));
-        l2.confirmed_count = 10;
+        l2.upvote_count = 10;
         let mut l3 = make_learning(LearningId(3));
-        l3.confirmed_count = 1;
+        l3.upvote_count = 1;
         app.handle_show_learnings(vec![l1, l2, l3]);
         if let ViewMode::Learnings { learnings, .. } = &app.board.view_mode {
             assert_eq!(learnings[0].id, LearningId(2), "highest count first");
@@ -341,7 +341,7 @@ mod tests {
     #[test]
     fn show_learnings_preserves_order_for_equal_counts() {
         let mut app = make_app();
-        // All equal confirmed_count — stable sort preserves insertion order.
+        // All equal upvote_count — stable sort preserves insertion order.
         let l1 = make_learning(LearningId(1));
         let l2 = make_learning(LearningId(2));
         let l3 = make_learning(LearningId(3));

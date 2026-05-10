@@ -14,13 +14,13 @@ use super::{read_json_string_vec, write_json_string_vec};
 
 const LEARNING_COLUMNS: &str =
     "id, kind, summary, detail, scope, scope_ref, tags, status, source_task_id, \
-     confirmed_count, last_confirmed_at, created_at, updated_at";
+     upvote_count, last_upvoted_at, created_at, updated_at";
 
 fn row_to_learning(row: &rusqlite::Row<'_>) -> rusqlite::Result<Learning> {
     let kind_str: String = row.get(1)?;
     let scope_str: String = row.get(4)?;
     let status_str: String = row.get(7)?;
-    let last_confirmed_str: Option<String> = row.get(10)?;
+    let last_upvoted_str: Option<String> = row.get(10)?;
     let created_str: String = row.get(11)?;
     let updated_str: String = row.get(12)?;
 
@@ -42,8 +42,8 @@ fn row_to_learning(row: &rusqlite::Row<'_>) -> rusqlite::Result<Learning> {
         tags,
         status: LearningStatus::parse(&status_str).unwrap_or(LearningStatus::Approved),
         source_task_id: row.get::<_, Option<i64>>(8)?.map(crate::models::TaskId),
-        confirmed_count: row.get(9)?,
-        last_confirmed_at: last_confirmed_str.as_deref().map(parse_dt),
+        upvote_count: row.get(9)?,
+        last_upvoted_at: last_upvoted_str.as_deref().map(parse_dt),
         created_at: parse_dt(&created_str),
         updated_at: parse_dt(&updated_str),
     })
@@ -217,8 +217,8 @@ impl super::super::LearningStore for Database {
             let changed = conn
                 .execute(
                     "UPDATE learnings
-                     SET confirmed_count = confirmed_count + 1,
-                         last_confirmed_at = datetime('now'),
+                     SET upvote_count = upvote_count + 1,
+                         last_upvoted_at = datetime('now'),
                          updated_at = datetime('now')
                      WHERE id = ?1 AND status = 'approved'",
                     params![id.0],
@@ -276,7 +276,7 @@ impl super::super::LearningStore for Database {
                      WHEN 'user'    THEN 4
                      ELSE 5
                    END,
-                   confirmed_count DESC
+                   upvote_count DESC
                  LIMIT 10"
             );
 
@@ -379,13 +379,13 @@ impl super::super::LearningRetrievalStore for Database {
                     LearningVerdict::Helped => {
                         tx.execute(
                             "UPDATE learnings
-                             SET confirmed_count = confirmed_count + 1,
-                                 last_confirmed_at = datetime('now'),
+                             SET upvote_count = upvote_count + 1,
+                                 last_upvoted_at = datetime('now'),
                                  updated_at = datetime('now')
                              WHERE id = ?1",
                             params![lid.0],
                         )
-                        .context("Failed to bump confirmed_count for helped verdict")?;
+                        .context("Failed to bump upvote_count for helped verdict")?;
                     }
                     LearningVerdict::Wrong => {
                         tx.execute(

@@ -71,6 +71,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (46, migrate_v46_learning_source_task_set_null),
     (47, migrate_v47_task_usage_restore_cascade),
     (48, migrate_v48_learning_validation),
+    (49, migrate_v49_rename_confirmed_to_upvote),
 ];
 
 fn migrate_v1_add_plan_column(conn: &Connection) -> Result<()> {
@@ -1108,4 +1109,12 @@ fn migrate_v48_learning_validation(conn: &Connection) -> Result<()> {
          CREATE INDEX idx_lv_learning ON learning_verdicts(learning_id);",
     )
     .context("Failed to create learning validation tables (migration v48)")
+}
+
+pub(super) fn migrate_v49_rename_confirmed_to_upvote(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "ALTER TABLE learnings RENAME COLUMN confirmed_count TO upvote_count;
+         ALTER TABLE learnings RENAME COLUMN last_confirmed_at TO last_upvoted_at;",
+    )
+    .context("Failed to rename confirmed_* columns to upvote_* on learnings (migration v49)")
 }

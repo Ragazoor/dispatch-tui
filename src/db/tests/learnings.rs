@@ -70,8 +70,8 @@ async fn create_and_get_learning() {
     assert_eq!(learning.scope_ref.as_deref(), Some("/home/user/repo"));
     assert_eq!(learning.tags, vec!["rust", "async"]);
     assert_eq!(learning.status, LearningStatus::Approved);
-    assert_eq!(learning.confirmed_count, 0);
-    assert!(learning.last_confirmed_at.is_none());
+    assert_eq!(learning.upvote_count, 0);
+    assert!(learning.last_upvoted_at.is_none());
     assert!(learning.source_task_id.is_none());
 }
 
@@ -290,18 +290,18 @@ async fn upvote_learning_increments_count_and_timestamps() {
         .await
         .unwrap();
     let before = db.get_learning(id).await.unwrap().unwrap();
-    assert_eq!(before.confirmed_count, 0);
-    assert!(before.last_confirmed_at.is_none());
+    assert_eq!(before.upvote_count, 0);
+    assert!(before.last_upvoted_at.is_none());
 
     db.upvote_learning(id).await.unwrap();
     let after = db.get_learning(id).await.unwrap().unwrap();
-    assert_eq!(after.confirmed_count, 1);
-    assert!(after.last_confirmed_at.is_some());
+    assert_eq!(after.upvote_count, 1);
+    assert!(after.last_upvoted_at.is_some());
     assert!(after.updated_at >= before.updated_at);
 
     db.upvote_learning(id).await.unwrap();
     let after2 = db.get_learning(id).await.unwrap().unwrap();
-    assert_eq!(after2.confirmed_count, 2);
+    assert_eq!(after2.upvote_count, 2);
 }
 
 #[tokio::test]
@@ -557,8 +557,8 @@ async fn apply_verdicts_helped_increments_count() {
         .await
         .unwrap();
     let l = db.get_learning(learning_id).await.unwrap().unwrap();
-    assert_eq!(l.confirmed_count, 1);
-    assert!(l.last_confirmed_at.is_some());
+    assert_eq!(l.upvote_count, 1);
+    assert!(l.last_upvoted_at.is_some());
     assert_eq!(l.status, LearningStatus::Approved);
 }
 
@@ -574,7 +574,7 @@ async fn apply_verdicts_wrong_sets_needs_review() {
         .unwrap();
     let l = db.get_learning(learning_id).await.unwrap().unwrap();
     assert_eq!(l.status, LearningStatus::NeedsReview);
-    assert_eq!(l.confirmed_count, 0);
+    assert_eq!(l.upvote_count, 0);
 }
 
 #[tokio::test]
@@ -589,7 +589,7 @@ async fn apply_verdicts_unused_records_only() {
         .unwrap();
     let l = db.get_learning(learning_id).await.unwrap().unwrap();
     assert_eq!(l.status, LearningStatus::Approved);
-    assert_eq!(l.confirmed_count, 0);
+    assert_eq!(l.upvote_count, 0);
     let conn = db.conn().unwrap();
     let n: i64 = conn
         .query_row(

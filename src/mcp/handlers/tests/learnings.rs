@@ -622,7 +622,7 @@ async fn upvote_learning_increments_count() {
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
 
     let learning = state.db.get_learning(learning_id).await.unwrap().unwrap();
-    assert_eq!(learning.confirmed_count, 1);
+    assert_eq!(learning.upvote_count, 1);
 }
 
 #[tokio::test]

@@ -66,7 +66,7 @@ use "./core.allium" as core
 --   4. project     — project-wide preferences
 --   5. user        — global preferences
 --
--- Within the same priority level, entries are ordered by confirmed_count DESC
+-- Within the same priority level, entries are ordered by upvote_count DESC
 -- (most-confirmed first), so well-validated learnings surface earliest.
 --
 -- kind=procedural learnings are segregated from the rest regardless of their
@@ -96,7 +96,7 @@ use "./core.allium" as core
 -- Editing (EditLearning) updates summary/detail/kind/tags without changing status.
 -- Editing is available for approved and needs_review entries.
 --
--- confirmed_count is incremented by ConfirmLearning when an agent acts on a
+-- upvote_count is incremented by ConfirmLearning when an agent acts on a
 -- learning and it proves correct. The same effect arises from a `helped`
 -- verdict at wrap-up. No status change occurs on confirmation; the count feeds
 -- the priority ordering within a scope level.
@@ -122,14 +122,14 @@ use "./core.allium" as core
 --   Entries with status in {needs_review, rejected, archived} are excluded.
 --   Excludes task-scoped entries from the auto-retrieved set.
 --   When tag_filter is provided, only entries whose tags set contains tag_filter.
---   Ordered by scope_priority(scope) then confirmed_count DESC.
+--   Ordered by scope_priority(scope) then upvote_count DESC.
 --   limit capped at 50 (default: 20).
 --   For each returned learning, the runtime records a core/Retrieval with
 --   source = query_learnings (see Retrievals & Verdicts below).
 --
 -- upvote_learning(learning_id, task_id)
 --   Requires: learning.status = approved
---   Increments confirmed_count; updates last_confirmed_at and updated_at.
+--   Increments upvote_count; updates last_upvoted_at and updated_at.
 --   No status change.
 --
 -- wrap_up(task_id, learning_verdicts?)
@@ -151,7 +151,7 @@ use "./core.allium" as core
 --      needs_review, rejected, or archived are excluded.
 --   2. Partition by kind: procedural vs. all others.
 --   3. Prepend procedural entries as prompt-prefix instructions (verbatim text,
---      in scope-priority then confirmed_count order).
+--      in scope-priority then upvote_count order).
 --   4. Append remaining entries under a "Relevant learnings" section.
 --   5. If the relevant set is empty, no augmentation occurs (no section appended).
 --   6. For every learning included in the prompt (procedural or otherwise),
@@ -182,15 +182,15 @@ use "./core.allium" as core
 -- At wrap-up, the agent may submit a list of verdicts. Each verdict records a
 -- core/Verdict row and applies the rules below in a single transaction.
 --
--- Rule: a `helped` verdict on any learning increments confirmed_count and
--- sets last_confirmed_at to now. Status is unchanged. This is the same
+-- Rule: a `helped` verdict on any learning increments upvote_count and
+-- sets last_upvoted_at to now. Status is unchanged. This is the same
 -- effect as upvote_learning.
 --
 -- Rule: an `unused` verdict records the verdict only. The learning is not
 -- mutated. (Used to compute exposure-vs-usefulness telemetry.)
 --
 -- Rule: a `wrong` verdict on a learning whose status = approved transitions
--- the learning to needs_review. last_confirmed_at is unchanged. A `wrong`
+-- the learning to needs_review. last_upvoted_at is unchanged. A `wrong`
 -- verdict on a learning that is already in needs_review, rejected, or
 -- archived records the verdict but performs no transition (the entry is
 -- already out of the active retrieval pool).

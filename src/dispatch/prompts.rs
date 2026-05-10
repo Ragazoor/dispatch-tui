@@ -196,7 +196,7 @@ pub(super) fn trailing_block() -> String {
 
 /// Render procedural-kind learnings as verbatim prompt-prefix instructions.
 /// `procedurals` is expected to already be ordered by scope priority then
-/// `confirmed_count DESC`.
+/// `upvote_count DESC`.
 pub(super) fn render_procedural_prefix(procedurals: &[&Learning]) -> String {
     if procedurals.is_empty() {
         return String::new();
@@ -230,7 +230,7 @@ return a verdict for each entry at wrap-up via the `learning_verdicts` argument 
             "- [#{} {}, \u{2191}{}] {}\n",
             l.id.0,
             l.scope.as_str(),
-            l.confirmed_count,
+            l.upvote_count,
             l.summary
         ));
     }
@@ -473,7 +473,7 @@ pub const INJECTION_CAP: usize = 8;
 #[derive(Default)]
 pub struct LearningInjections<'a> {
     /// Procedural-kind learnings, rendered verbatim near the top of the prompt.
-    /// Expected to be ordered by scope priority then `confirmed_count DESC`.
+    /// Expected to be ordered by scope priority then `upvote_count DESC`.
     pub procedural: Vec<&'a Learning>,
     /// Non-procedural learnings selected by `select_tiered_learnings`.
     pub tiered: Vec<&'a Learning>,
@@ -526,8 +526,8 @@ pub(crate) fn select_tiered_learnings(learnings: &[Learning], cap: usize) -> Vec
             .filter(|l| l.scope == tier && l.kind != LearningKind::Procedural)
             .collect();
         tier_items.sort_by(|a, b| {
-            b.confirmed_count
-                .cmp(&a.confirmed_count)
+            b.upvote_count
+                .cmp(&a.upvote_count)
                 .then(b.updated_at.cmp(&a.updated_at))
         });
         for l in tier_items.into_iter().take(PER_TIER) {
@@ -562,8 +562,8 @@ mod tiered_selection_tests {
             tags: vec![],
             status: LearningStatus::Approved,
             source_task_id: None,
-            confirmed_count: count,
-            last_confirmed_at: None,
+            upvote_count: count,
+            last_upvoted_at: None,
             created_at: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
             updated_at: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
         }
@@ -831,8 +831,8 @@ mod tests {
             tags: vec![],
             status: LearningStatus::Approved,
             source_task_id: None,
-            confirmed_count: count,
-            last_confirmed_at: None,
+            upvote_count: count,
+            last_upvoted_at: None,
             created_at: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
             updated_at: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
         }
