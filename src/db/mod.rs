@@ -561,7 +561,7 @@ static IN_MEMORY_DB_COUNTER: AtomicU64 = AtomicU64::new(0);
 ///
 /// - `conn` — a sync [`rusqlite::Connection`] guarded by a [`Mutex`]. Used by
 ///   every store impl that has not yet been migrated to async, by
-///   [`Database::init_schema`], and for opaque sync helpers like
+///   `Database::init_schema`, and for opaque sync helpers like
 ///   `get_tips_state`.
 /// - `async_conn` — a [`tokio_rusqlite::Connection`] lazily opened on first
 ///   call to [`Database::db_call`]. Future work-package migrations move trait
@@ -639,7 +639,7 @@ impl Database {
     ///
     /// This helper is intended for trait impls that are migrating from sync to
     /// async (see WP-2..WP-6 in the DB async migration). Sync impls continue
-    /// to use [`Database::conn`].
+    /// to use `Database::conn`.
     pub async fn db_call<R, F>(&self, f: F) -> Result<R>
     where
         F: FnOnce(&mut Connection) -> Result<R> + Send + 'static,

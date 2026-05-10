@@ -568,7 +568,7 @@ impl App {
     /// In epic view, only subtasks are included (no epic cards).
     ///
     /// **Test-only.** Passes `stats = None`, which causes epic sort order to be derived by
-    /// cloning subtasks on every call. Use [`column_items_for_status_with_stats`] with
+    /// cloning subtasks on every call. Use [`Self::column_items_for_status_with_stats`] with
     /// pre-computed stats in production render paths to avoid per-frame allocations.
     pub fn column_items_for_status(&self, status: TaskStatus) -> Vec<ColumnItem<'_>> {
         self.column_items_for_status_with_stats(status, None)

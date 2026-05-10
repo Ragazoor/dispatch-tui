@@ -1,5 +1,5 @@
 //! PR flow messages (creation is agent-driven via the `/wrap-up` skill;
-//! these messages cover status polling and the [P] merge action).
+//! these messages cover status polling and the `P` merge action).
 
 use crate::models::{ReviewDecision, TaskId};
 

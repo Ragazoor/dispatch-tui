@@ -1,9 +1,9 @@
 //! First-run setup: MCP config merging, plugin installation (hooks, skills, commands).
 //!
 //! Split into submodules:
-//! - [`config`] — Claude Code MCP config + permissions read/write/merge
-//! - [`plugins`] — embedded plugin install (skills, slash commands, hooks, example feed script)
-//! - [`hooks`] — tests for the embedded hook scripts (the install path lives in [`plugins`])
+//! - `config` — Claude Code MCP config + permissions read/write/merge
+//! - `plugins` — embedded plugin install (skills, slash commands, hooks, example feed script)
+//! - `hooks` — tests for the embedded hook scripts (the install path lives in `plugins`)
 
 mod config;
 mod hooks;
