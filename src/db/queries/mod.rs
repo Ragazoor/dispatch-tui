@@ -32,7 +32,7 @@ fn bump_decode_fallback() -> u64 {
 pub(super) const TASK_COLUMNS: &str =
     "id, title, description, repo_path, status, worktree, tmux_window, \
      plan_path, epic_id, sub_status, pr_url, tag, sort_order, base_branch, external_id, \
-     created_at, updated_at, project_id, labels";
+     created_at, updated_at, project_id, labels, last_pre_tool_use_at, last_notification_at";
 
 pub(super) fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     let status_str: String = row.get("status")?;
@@ -75,6 +75,16 @@ pub(super) fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         labels: read_json_string_vec(row, "labels"),
         created_at: parse_datetime(&created_str),
         updated_at: parse_datetime(&updated_str),
+        last_pre_tool_use_at: row
+            .get::<_, Option<String>>("last_pre_tool_use_at")
+            .ok()
+            .flatten()
+            .map(|s| parse_datetime(&s)),
+        last_notification_at: row
+            .get::<_, Option<String>>("last_notification_at")
+            .ok()
+            .flatten()
+            .map(|s| parse_datetime(&s)),
     })
 }
 

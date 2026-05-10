@@ -62,6 +62,8 @@ pub(in crate::tui) fn make_task(id: i64, status: TaskStatus) -> Task {
         created_at: now,
         updated_at: now,
         project_id: ProjectId(1),
+        last_pre_tool_use_at: None,
+        last_notification_at: None,
     }
 }
 

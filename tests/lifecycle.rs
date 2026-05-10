@@ -83,6 +83,8 @@ async fn full_lifecycle() {
                 created_at: now,
                 updated_at: now,
                 project_id: dispatch_tui::models::ProjectId(1),
+                last_pre_tool_use_at: None,
+                last_notification_at: None,
             },
         },
     ));

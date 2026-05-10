@@ -60,6 +60,8 @@ struct OwnedTaskPatch {
     external_id: Option<Option<String>>,
     project_id: Option<ProjectId>,
     labels: Option<Vec<String>>,
+    last_pre_tool_use_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
+    last_notification_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
 }
 
 impl OwnedTaskPatch {
@@ -79,6 +81,8 @@ impl OwnedTaskPatch {
             || self.external_id.is_some()
             || self.project_id.is_some()
             || self.labels.is_some()
+            || self.last_pre_tool_use_at.is_some()
+            || self.last_notification_at.is_some()
     }
 }
 
@@ -100,6 +104,8 @@ impl<'a> From<&TaskPatch<'a>> for OwnedTaskPatch {
             external_id: p.external_id.map(|o| o.map(|s| s.to_string())),
             project_id: p.project_id,
             labels: p.labels.map(|s| s.to_vec()),
+            last_pre_tool_use_at: p.last_pre_tool_use_at,
+            last_notification_at: p.last_notification_at,
         }
     }
 }
@@ -313,6 +319,18 @@ impl super::super::TaskCrud for Database {
             if let Some(json) = labels_json {
                 sets.push("labels = ?");
                 values.push(Box::new(json));
+            }
+            if let Some(t) = patch.last_pre_tool_use_at {
+                sets.push("last_pre_tool_use_at = ?");
+                values.push(Box::new(
+                    t.map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string()),
+                ));
+            }
+            if let Some(t) = patch.last_notification_at {
+                sets.push("last_notification_at = ?");
+                values.push(Box::new(
+                    t.map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string()),
+                ));
             }
 
             sets.push("updated_at = datetime('now')");

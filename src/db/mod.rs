@@ -86,6 +86,8 @@ patch_struct! {
         nullable external_id:  &'a str,
         plain    project_id:   ProjectId,
         plain    labels:       &'a [String],
+        nullable last_pre_tool_use_at: chrono::DateTime<chrono::Utc>,
+        nullable last_notification_at: chrono::DateTime<chrono::Utc>,
     }
 }
 

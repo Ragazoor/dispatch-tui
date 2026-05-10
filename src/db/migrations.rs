@@ -1122,18 +1122,12 @@ pub(super) fn migrate_v49_rename_confirmed_to_upvote(conn: &Connection) -> Resul
 
 fn migrate_v50_add_hook_timestamps(conn: &Connection) -> Result<()> {
     if !column_exists(conn, "tasks", "last_pre_tool_use_at") {
-        conn.execute(
-            "ALTER TABLE tasks ADD COLUMN last_pre_tool_use_at TEXT",
-            [],
-        )
-        .context("migration v50: add last_pre_tool_use_at")?;
+        conn.execute("ALTER TABLE tasks ADD COLUMN last_pre_tool_use_at TEXT", [])
+            .context("migration v50: add last_pre_tool_use_at")?;
     }
     if !column_exists(conn, "tasks", "last_notification_at") {
-        conn.execute(
-            "ALTER TABLE tasks ADD COLUMN last_notification_at TEXT",
-            [],
-        )
-        .context("migration v50: add last_notification_at")?;
+        conn.execute("ALTER TABLE tasks ADD COLUMN last_notification_at TEXT", [])
+            .context("migration v50: add last_notification_at")?;
     }
     Ok(())
 }

@@ -2020,6 +2020,8 @@ fn quick_dispatch_status_uses_freshly_created_title() {
         created_at: now,
         updated_at: now,
         project_id: ProjectId(1),
+        last_pre_tool_use_at: None,
+        last_notification_at: None,
     };
 
     app.update(Message::Task(crate::tui::messages::TaskMessage::Created {

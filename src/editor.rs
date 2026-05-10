@@ -439,6 +439,8 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             project_id: ProjectId(1),
+            last_pre_tool_use_at: None,
+            last_notification_at: None,
         }
     }
 

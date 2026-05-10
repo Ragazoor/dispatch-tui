@@ -26,6 +26,8 @@ fn task_created_adds_to_list() {
         created_at: now,
         updated_at: now,
         project_id: ProjectId(1),
+        last_pre_tool_use_at: None,
+        last_notification_at: None,
     };
     let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
     let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Created {
@@ -743,6 +745,8 @@ fn editor_result_task_edit_returns_finalize_command() {
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
         project_id: ProjectId(1),
+        last_pre_tool_use_at: None,
+        last_notification_at: None,
     };
     let mut app = App::new(vec![task.clone()], ProjectId(1), TEST_TIMEOUT);
     let cmds = app.update(Message::Editor(

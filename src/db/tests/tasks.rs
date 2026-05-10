@@ -438,6 +438,53 @@ async fn patch_task_clears_labels_to_empty() {
 }
 
 #[tokio::test]
+async fn patch_task_round_trips_hook_event_timestamps() {
+    let db = in_memory_db().await;
+    let id = db
+        .create_task(CreateTaskRequest {
+            title: "t",
+            description: "",
+            repo_path: "/r",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+        })
+        .await
+        .unwrap();
+
+    let task = db.get_task(id).await.unwrap().unwrap();
+    assert!(task.last_pre_tool_use_at.is_none());
+    assert!(task.last_notification_at.is_none());
+
+    let pre_tool = chrono::Utc::now();
+    let notification = pre_tool - chrono::Duration::seconds(30);
+    db.patch_task(
+        id,
+        &TaskPatch::new()
+            .last_pre_tool_use_at(Some(pre_tool))
+            .last_notification_at(Some(notification)),
+    )
+    .await
+    .unwrap();
+
+    let task = db.get_task(id).await.unwrap().unwrap();
+    let stored_pre = task.last_pre_tool_use_at.expect("pre_tool_use written");
+    let stored_notif = task.last_notification_at.expect("notification written");
+    assert!(
+        (stored_pre - pre_tool).num_seconds().abs() <= 1,
+        "stored pre_tool_use {stored_pre} too far from {pre_tool}"
+    );
+    assert!(
+        (stored_notif - notification).num_seconds().abs() <= 1,
+        "stored notification {stored_notif} too far from {notification}"
+    );
+}
+
+#[tokio::test]
 async fn patch_task_none_preserves_labels() {
     let db = in_memory_db().await;
     let id = db

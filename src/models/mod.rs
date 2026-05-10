@@ -753,6 +753,8 @@ mod tests {
             created_at: now,
             updated_at: now,
             project_id: ProjectId(1),
+            last_pre_tool_use_at: None,
+            last_notification_at: None,
         };
         assert!(task.epic_id.is_none());
     }
@@ -780,6 +782,8 @@ mod tests {
             created_at: now,
             updated_at: now,
             project_id: ProjectId(1),
+            last_pre_tool_use_at: None,
+            last_notification_at: None,
         };
         assert_eq!(task.epic_id, Some(EpicId(5)));
     }
@@ -1129,6 +1133,8 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             project_id: ProjectId(1),
+            last_pre_tool_use_at: None,
+            last_notification_at: None,
         }
     }
 
@@ -1329,6 +1335,8 @@ mod tests {
             created_at: now,
             updated_at: now,
             project_id: ProjectId(1),
+            last_pre_tool_use_at: None,
+            last_notification_at: None,
         }
     }
 
@@ -1431,6 +1439,8 @@ mod tests {
             created_at: now,
             updated_at: now,
             project_id: ProjectId(1),
+            last_pre_tool_use_at: None,
+            last_notification_at: None,
         }
     }
 

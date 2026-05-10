@@ -331,6 +331,8 @@ pub struct Task {
     pub labels: Vec<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub last_pre_tool_use_at: Option<DateTime<Utc>>,
+    pub last_notification_at: Option<DateTime<Utc>>,
 }
 
 impl Task {
