@@ -1,8 +1,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
 
-#[test]
-fn security_alerts_round_trip() {
+#[tokio::test]
+async fn security_alerts_round_trip() {
     use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
 
     let db = in_memory_db();
@@ -41,8 +41,8 @@ fn security_alerts_round_trip() {
         },
     ];
 
-    db.save_security_alerts(&alerts).unwrap();
-    let loaded = db.load_security_alerts().unwrap();
+    db.save_security_alerts(&alerts).await.unwrap();
+    let loaded = db.load_security_alerts().await.unwrap();
 
     assert_eq!(loaded.len(), 2);
     assert_eq!(loaded[0].number, 1);
@@ -60,8 +60,8 @@ fn security_alerts_round_trip() {
     assert!(loaded[1].cvss_score.is_none());
 }
 
-#[test]
-fn get_security_alert_found() {
+#[tokio::test]
+async fn get_security_alert_found() {
     use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
 
     let db = Database::open_in_memory().unwrap();
@@ -80,10 +80,11 @@ fn get_security_alert_found() {
         state: "open".to_string(),
         description: "Buffer overflow in openssl".to_string(),
     };
-    db.save_security_alerts(&[alert]).unwrap();
+    db.save_security_alerts(&[alert]).await.unwrap();
 
     let found = db
         .get_security_alert("acme/api", 7, AlertKind::Dependabot)
+        .await
         .unwrap();
     assert!(found.is_some());
     let found = found.unwrap();
@@ -93,8 +94,8 @@ fn get_security_alert_found() {
     assert_eq!(found.fixed_version.as_deref(), Some("3.0.0"));
 }
 
-#[test]
-fn get_security_alert_wrong_kind_returns_none() {
+#[tokio::test]
+async fn get_security_alert_wrong_kind_returns_none() {
     use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
 
     let db = Database::open_in_memory().unwrap();
@@ -113,27 +114,29 @@ fn get_security_alert_wrong_kind_returns_none() {
         state: "open".to_string(),
         description: String::new(),
     };
-    db.save_security_alerts(&[alert]).unwrap();
+    db.save_security_alerts(&[alert]).await.unwrap();
 
     // Same number, wrong kind
     let result = db
         .get_security_alert("acme/api", 7, AlertKind::CodeScanning)
+        .await
         .unwrap();
     assert!(result.is_none());
 }
 
-#[test]
-fn get_security_alert_not_found() {
+#[tokio::test]
+async fn get_security_alert_not_found() {
     use crate::models::AlertKind;
     let db = Database::open_in_memory().unwrap();
     let result = db
         .get_security_alert("acme/api", 999, AlertKind::Dependabot)
+        .await
         .unwrap();
     assert!(result.is_none());
 }
 
-#[test]
-fn security_alerts_save_replaces_previous() {
+#[tokio::test]
+async fn security_alerts_save_replaces_previous() {
     use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
 
     let db = in_memory_db();
@@ -154,8 +157,8 @@ fn security_alerts_save_replaces_previous() {
         state: "open".to_string(),
         description: "".to_string(),
     }];
-    db.save_security_alerts(&alerts1).unwrap();
-    assert_eq!(db.load_security_alerts().unwrap().len(), 1);
+    db.save_security_alerts(&alerts1).await.unwrap();
+    assert_eq!(db.load_security_alerts().await.unwrap().len(), 1);
 
     let alerts2 = vec![SecurityAlert {
         number: 10,
@@ -172,14 +175,14 @@ fn security_alerts_save_replaces_previous() {
         state: "open".to_string(),
         description: "".to_string(),
     }];
-    db.save_security_alerts(&alerts2).unwrap();
-    let loaded = db.load_security_alerts().unwrap();
+    db.save_security_alerts(&alerts2).await.unwrap();
+    let loaded = db.load_security_alerts().await.unwrap();
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].title, "New alert");
 }
 
-#[test]
-fn save_security_alerts_preserves_agent_fields() {
+#[tokio::test]
+async fn save_security_alerts_preserves_agent_fields() {
     use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
     use chrono::Utc;
 
@@ -200,7 +203,7 @@ fn save_security_alerts_preserves_agent_fields() {
         state: "open".to_string(),
         description: "Prototype pollution".to_string(),
     };
-    db.save_security_alerts(&[alert]).unwrap();
+    db.save_security_alerts(&[alert]).await.unwrap();
 
     // Simulate agent dispatch via the proper set_alert_agent method
     db.set_alert_agent(
@@ -210,6 +213,7 @@ fn save_security_alerts_preserves_agent_fields() {
         "dispatch:fix-1",
         "/tmp/wt",
     )
+    .await
     .unwrap();
 
     // Refresh with updated alert data
@@ -228,9 +232,9 @@ fn save_security_alerts_preserves_agent_fields() {
         state: "open".to_string(),
         description: "Prototype pollution".to_string(),
     };
-    db.save_security_alerts(&[refreshed]).unwrap();
+    db.save_security_alerts(&[refreshed]).await.unwrap();
 
-    let loaded = db.load_security_alerts().unwrap();
+    let loaded = db.load_security_alerts().await.unwrap();
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].title, "CVE-2024-1234 (updated)");
     assert_eq!(loaded[0].fixed_version.as_deref(), Some("4.17.22"));
@@ -238,12 +242,13 @@ fn save_security_alerts_preserves_agent_fields() {
     // Agent status should still be present after refresh
     let status = db
         .alert_agent_status("acme/app", 1, AlertKind::Dependabot)
+        .await
         .unwrap();
     assert!(status.is_some(), "agent status should be preserved");
 }
 
-#[test]
-fn set_alert_agent_updates_fields() {
+#[tokio::test]
+async fn set_alert_agent_updates_fields() {
     use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
     use chrono::Utc;
 
@@ -264,7 +269,7 @@ fn set_alert_agent_updates_fields() {
         state: "open".to_string(),
         description: String::new(),
     };
-    db.save_security_alerts(&[alert]).unwrap();
+    db.save_security_alerts(&[alert]).await.unwrap();
 
     db.set_alert_agent(
         "acme/app",
@@ -273,10 +278,12 @@ fn set_alert_agent_updates_fields() {
         "dispatch:fix-1",
         "/tmp/wt",
     )
+    .await
     .unwrap();
 
     let status = db
         .alert_agent_status("acme/app", 1, AlertKind::Dependabot)
+        .await
         .unwrap();
     assert_eq!(
         status,
@@ -285,8 +292,8 @@ fn set_alert_agent_updates_fields() {
     );
 }
 
-#[test]
-fn update_agent_status_finds_security_alert() {
+#[tokio::test]
+async fn update_agent_status_finds_security_alert() {
     use crate::models::{AlertKind, AlertSeverity, ReviewAgentStatus, SecurityAlert};
     use chrono::Utc;
 
@@ -306,7 +313,7 @@ fn update_agent_status_finds_security_alert() {
         state: "open".to_string(),
         description: String::new(),
     };
-    db.save_security_alerts(&[alert]).unwrap();
+    db.save_security_alerts(&[alert]).await.unwrap();
     db.set_alert_agent(
         "acme/app",
         1,
@@ -314,15 +321,18 @@ fn update_agent_status_finds_security_alert() {
         "dispatch:fix-1",
         "/tmp/wt",
     )
+    .await
     .unwrap();
 
     let table = db
         .update_agent_status("acme/app", 1, Some("findings_ready"))
+        .await
         .unwrap();
     assert_eq!(table, "security_alerts");
 
     let status = db
         .alert_agent_status("acme/app", 1, AlertKind::Dependabot)
+        .await
         .unwrap();
     assert_eq!(status, Some(ReviewAgentStatus::FindingsReady));
 }

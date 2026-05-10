@@ -365,7 +365,7 @@ mcp_tools! {
             "required": ["task_id", "input_tokens", "output_tokens"]
         };
 
-    sync "update_review_status" => tasks::handle_update_review_status,
+    async "update_review_status" => tasks::handle_update_review_status,
         "Update the agent status for a dispatched review or fix agent.",
         {
             "type": "object",
@@ -399,7 +399,7 @@ mcp_tools! {
             "required": ["from_task_id", "to_task_id", "body"]
         };
 
-    sync "list_review_prs" => review::handle_list_review_prs,
+    async "list_review_prs" => review::handle_list_review_prs,
         "List review PRs from the board. Returns PRs from the most recently fetched board state.",
         {
             "type": "object",
@@ -416,7 +416,7 @@ mcp_tools! {
             }
         };
 
-    sync "get_review_pr" => review::handle_get_review_pr,
+    async "get_review_pr" => review::handle_get_review_pr,
         "Get details about a specific review PR by repo and number.",
         {
             "type": "object",
@@ -454,7 +454,7 @@ mcp_tools! {
             "required": ["repo", "number", "local_repo"]
         };
 
-    sync "list_security_alerts" => review::handle_list_security_alerts,
+    async "list_security_alerts" => review::handle_list_security_alerts,
         "List security alerts from the board. Returns alerts from the most recently fetched board state.",
         {
             "type": "object",
@@ -476,7 +476,7 @@ mcp_tools! {
             }
         };
 
-    sync "get_security_alert" => review::handle_get_security_alert,
+    async "get_security_alert" => review::handle_get_security_alert,
         "Get details about a specific security alert by repo, number, and kind.",
         {
             "type": "object",

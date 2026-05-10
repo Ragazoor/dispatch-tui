@@ -6,18 +6,19 @@ use crate::models::ReviewAgentStatus;
 
 use super::super::Database;
 
+#[async_trait::async_trait]
 impl super::super::AlertStore for Database {
-    fn save_security_alerts(&self, alerts: &[crate::models::SecurityAlert]) -> Result<()> {
-        let conn = self.conn()?;
-        save_security_alerts_impl(&conn, alerts)
+    async fn save_security_alerts(&self, alerts: &[crate::models::SecurityAlert]) -> Result<()> {
+        let alerts_owned = alerts.to_vec();
+        self.db_call(move |conn| save_security_alerts_impl(conn, &alerts_owned))
+            .await
     }
 
-    fn load_security_alerts(&self) -> Result<Vec<crate::models::SecurityAlert>> {
-        let conn = self.conn()?;
-        load_security_alerts_impl(&conn)
+    async fn load_security_alerts(&self) -> Result<Vec<crate::models::SecurityAlert>> {
+        self.db_call(|conn| load_security_alerts_impl(conn)).await
     }
 
-    fn set_alert_agent(
+    async fn set_alert_agent(
         &self,
         repo: &str,
         number: i64,
@@ -25,55 +26,66 @@ impl super::super::AlertStore for Database {
         tmux_window: &str,
         worktree: &str,
     ) -> Result<bool> {
-        let conn = self.conn()?;
-        let rows = conn.execute(
-            "UPDATE security_alerts SET tmux_window = ?1, worktree = ?2, agent_status = 'reviewing' WHERE repo = ?3 AND number = ?4 AND kind = ?5",
-            params![tmux_window, worktree, repo, number, kind.as_db_str()],
-        )?;
-        Ok(rows > 0)
+        let repo = repo.to_string();
+        let tmux_window = tmux_window.to_string();
+        let worktree = worktree.to_string();
+        self.db_call(move |conn| {
+            let rows = conn.execute(
+                "UPDATE security_alerts SET tmux_window = ?1, worktree = ?2, agent_status = 'reviewing' WHERE repo = ?3 AND number = ?4 AND kind = ?5",
+                params![tmux_window, worktree, repo, number, kind.as_db_str()],
+            )?;
+            Ok(rows > 0)
+        })
+        .await
     }
 
-    fn get_security_alert(
+    async fn get_security_alert(
         &self,
         repo: &str,
         number: i64,
         kind: crate::models::AlertKind,
     ) -> Result<Option<crate::models::SecurityAlert>> {
-        let conn = self.conn()?;
-        let mut stmt = conn.prepare(
-            "SELECT repo, number, kind, severity, title, package,
-                    vulnerable_range, fixed_version, cvss_score, url,
-                    created_at, state, description
-             FROM security_alerts
-             WHERE repo = ?1 AND number = ?2 AND kind = ?3",
-        )?;
-        let kind_str = kind.as_db_str();
-        let mut rows = stmt.query(rusqlite::params![repo, number, kind_str])?;
-        if let Some(row) = rows.next()? {
-            return Ok(Some(parse_security_alert_row(row)?));
-        }
-        Ok(None)
+        let repo = repo.to_string();
+        self.db_call(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT repo, number, kind, severity, title, package,
+                        vulnerable_range, fixed_version, cvss_score, url,
+                        created_at, state, description
+                 FROM security_alerts
+                 WHERE repo = ?1 AND number = ?2 AND kind = ?3",
+            )?;
+            let kind_str = kind.as_db_str();
+            let mut rows = stmt.query(rusqlite::params![repo, number, kind_str])?;
+            if let Some(row) = rows.next()? {
+                return Ok(Some(parse_security_alert_row(row)?));
+            }
+            Ok(None)
+        })
+        .await
     }
 
-    fn alert_agent_status(
+    async fn alert_agent_status(
         &self,
         repo: &str,
         number: i64,
         kind: crate::models::AlertKind,
     ) -> Result<Option<ReviewAgentStatus>> {
-        let conn = self.conn()?;
-        let result: Option<Option<String>> = conn
-            .query_row(
-                "SELECT agent_status FROM security_alerts WHERE repo = ?1 AND number = ?2 AND kind = ?3 AND tmux_window IS NOT NULL",
-                params![repo, number, kind.as_db_str()],
-                |row| row.get(0),
-            )
-            .optional()
-            .context("Failed to query alert_agent_status")?;
-        Ok(result
-            .flatten()
-            .as_deref()
-            .and_then(ReviewAgentStatus::from_db_str))
+        let repo = repo.to_string();
+        self.db_call(move |conn| {
+            let result: Option<Option<String>> = conn
+                .query_row(
+                    "SELECT agent_status FROM security_alerts WHERE repo = ?1 AND number = ?2 AND kind = ?3 AND tmux_window IS NOT NULL",
+                    params![repo, number, kind.as_db_str()],
+                    |row| row.get(0),
+                )
+                .optional()
+                .context("Failed to query alert_agent_status")?;
+            Ok(result
+                .flatten()
+                .as_deref()
+                .and_then(ReviewAgentStatus::from_db_str))
+        })
+        .await
     }
 }
 

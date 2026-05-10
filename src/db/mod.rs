@@ -236,10 +236,11 @@ pub trait EpicCrud: Send + Sync {
 }
 
 /// Save/load PRs (all kinds) and agent tracking on PRs.
+#[async_trait::async_trait]
 pub trait PrStore: Send + Sync {
-    fn save_prs(&self, kind: PrKind, prs: &[crate::models::ReviewPr]) -> Result<()>;
-    fn load_prs(&self, kind: PrKind) -> Result<Vec<crate::models::ReviewPr>>;
-    fn set_pr_agent(
+    async fn save_prs(&self, kind: PrKind, prs: &[crate::models::ReviewPr]) -> Result<()>;
+    async fn load_prs(&self, kind: PrKind) -> Result<Vec<crate::models::ReviewPr>>;
+    async fn set_pr_agent(
         &self,
         kind: PrKind,
         repo: &str,
@@ -247,11 +248,20 @@ pub trait PrStore: Send + Sync {
         tmux_window: &str,
         worktree: &str,
     ) -> Result<bool>; // true = row updated
-    fn update_agent_status(&self, repo: &str, number: i64, status: Option<&str>) -> Result<String>;
+    async fn update_agent_status(
+        &self,
+        repo: &str,
+        number: i64,
+        status: Option<&str>,
+    ) -> Result<String>;
     /// Look up a single PR by (repo, number) — checks review_prs then my_prs.
-    fn get_review_pr(&self, repo: &str, number: i64) -> Result<Option<crate::models::ReviewPr>>;
+    async fn get_review_pr(
+        &self,
+        repo: &str,
+        number: i64,
+    ) -> Result<Option<crate::models::ReviewPr>>;
     /// Returns the agent status for a single PR if an agent is active, without loading all rows.
-    fn pr_agent_status(
+    async fn pr_agent_status(
         &self,
         table: &str,
         repo: &str,
@@ -260,10 +270,11 @@ pub trait PrStore: Send + Sync {
 }
 
 /// Save/load security alerts and agent tracking on alerts.
+#[async_trait::async_trait]
 pub trait AlertStore: Send + Sync {
-    fn save_security_alerts(&self, alerts: &[crate::models::SecurityAlert]) -> Result<()>;
-    fn load_security_alerts(&self) -> Result<Vec<crate::models::SecurityAlert>>;
-    fn set_alert_agent(
+    async fn save_security_alerts(&self, alerts: &[crate::models::SecurityAlert]) -> Result<()>;
+    async fn load_security_alerts(&self) -> Result<Vec<crate::models::SecurityAlert>>;
+    async fn set_alert_agent(
         &self,
         repo: &str,
         number: i64,
@@ -272,14 +283,14 @@ pub trait AlertStore: Send + Sync {
         worktree: &str,
     ) -> Result<bool>; // true = row updated
     /// Look up a single security alert by (repo, number, kind).
-    fn get_security_alert(
+    async fn get_security_alert(
         &self,
         repo: &str,
         number: i64,
         kind: crate::models::AlertKind,
     ) -> Result<Option<crate::models::SecurityAlert>>;
     /// Returns the agent status for a single alert if an agent is active, without loading all rows.
-    fn alert_agent_status(
+    async fn alert_agent_status(
         &self,
         repo: &str,
         number: i64,
@@ -335,9 +346,10 @@ pub struct PrWorkflowRow {
 // PrWorkflowStore — CRUD for the pr_workflow_states table
 // ---------------------------------------------------------------------------
 
+#[async_trait::async_trait]
 pub trait PrWorkflowStore: Send + Sync {
     /// INSERT OR IGNORE — never overwrites an existing row (preserves workflow state).
-    fn insert_pr_workflow_if_absent(
+    async fn insert_pr_workflow_if_absent(
         &self,
         repo: &str,
         number: i64,
@@ -345,7 +357,7 @@ pub trait PrWorkflowStore: Send + Sync {
     ) -> anyhow::Result<()>;
 
     /// INSERT OR REPLACE — always sets state and sub_state.
-    fn upsert_pr_workflow(
+    async fn upsert_pr_workflow(
         &self,
         repo: &str,
         number: i64,
@@ -354,24 +366,24 @@ pub trait PrWorkflowStore: Send + Sync {
         sub_state: Option<&str>,
     ) -> anyhow::Result<()>;
 
-    fn get_pr_workflow(
+    async fn get_pr_workflow(
         &self,
         repo: &str,
         number: i64,
         kind: crate::models::WorkflowItemKind,
     ) -> anyhow::Result<Option<PrWorkflowRow>>;
 
-    fn list_pr_workflows(&self) -> anyhow::Result<Vec<PrWorkflowRow>>;
+    async fn list_pr_workflows(&self) -> anyhow::Result<Vec<PrWorkflowRow>>;
 
     /// Return the kind of the first workflow row for (repo, number), or None if absent.
-    fn find_pr_workflow_kind(
+    async fn find_pr_workflow_kind(
         &self,
         repo: &str,
         number: i64,
     ) -> anyhow::Result<Option<crate::models::WorkflowItemKind>>;
 
     /// Delete rows where state = 'done' AND updated_at < (now - older_than).
-    fn prune_done_pr_workflows(&self, older_than: chrono::Duration) -> anyhow::Result<()>;
+    async fn prune_done_pr_workflows(&self, older_than: chrono::Duration) -> anyhow::Result<()>;
 }
 
 // ---------------------------------------------------------------------------

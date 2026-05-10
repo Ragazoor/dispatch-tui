@@ -1095,7 +1095,7 @@ pub(super) struct UpdateReviewStatusArgs {
     status: crate::models::ReviewAgentStatus,
 }
 
-pub(super) fn handle_update_review_status(
+pub(super) async fn handle_update_review_status(
     state: &McpState,
     id: Option<Value>,
     args: Value,
@@ -1108,19 +1108,25 @@ pub(super) fn handle_update_review_status(
     match state
         .db
         .update_agent_status(&parsed.repo, parsed.number, Some(parsed.status.as_db_str()))
+        .await
     {
         Ok(_table) => {
             state.notify();
             if parsed.status == crate::models::ReviewAgentStatus::FindingsReady {
                 // Move the workflow item to ActionRequired so the board reflects the new state
-                if let Some(kind) = find_workflow_kind_for(&state.db, &parsed.repo, parsed.number) {
-                    let _ = state.db.upsert_pr_workflow(
-                        &parsed.repo,
-                        parsed.number,
-                        kind,
-                        crate::models::ReviewWorkflowState::ActionRequired.as_db_str(),
-                        Some(crate::models::ReviewWorkflowSubState::FindingsReady.as_db_str()),
-                    );
+                if let Some(kind) =
+                    find_workflow_kind_for(&state.db, &parsed.repo, parsed.number).await
+                {
+                    let _ = state
+                        .db
+                        .upsert_pr_workflow(
+                            &parsed.repo,
+                            parsed.number,
+                            kind,
+                            crate::models::ReviewWorkflowState::ActionRequired.as_db_str(),
+                            Some(crate::models::ReviewWorkflowSubState::FindingsReady.as_db_str()),
+                        )
+                        .await;
                 }
             }
             JsonRpcResponse::ok(
@@ -1135,12 +1141,12 @@ pub(super) fn handle_update_review_status(
     }
 }
 
-fn find_workflow_kind_for(
+async fn find_workflow_kind_for(
     db: &std::sync::Arc<dyn crate::db::TaskStore>,
     repo: &str,
     number: i64,
 ) -> Option<crate::models::WorkflowItemKind> {
-    db.find_pr_workflow_kind(repo, number).ok().flatten()
+    db.find_pr_workflow_kind(repo, number).await.ok().flatten()
 }
 
 pub(super) fn handle_report_usage(

@@ -33,14 +33,15 @@ fn pr_fixture(repo: &str, number: i64) -> ReviewPr {
     }
 }
 
-#[test]
-fn review_agent_full_state_machine() {
+#[tokio::test]
+async fn review_agent_full_state_machine() {
     let db = Database::open_in_memory().unwrap();
     let repo = "acme/app";
     let number = 42i64;
 
     // 1. Persist a PR and dispatch a review agent (set tmux_window + worktree).
     db.save_prs(PrKind::Review, &[pr_fixture(repo, number)])
+        .await
         .unwrap();
     let updated = db
         .set_pr_agent(
@@ -50,11 +51,15 @@ fn review_agent_full_state_machine() {
             "dispatch:review-42",
             "/tmp/wt-42",
         )
+        .await
         .unwrap();
     assert!(updated, "set_pr_agent should report a row change");
 
     // Agent is in Reviewing.
-    let status = db.pr_agent_status("review_prs", repo, number).unwrap();
+    let status = db
+        .pr_agent_status("review_prs", repo, number)
+        .await
+        .unwrap();
     assert_eq!(
         status,
         Some(ReviewAgentStatus::Reviewing),
@@ -64,6 +69,7 @@ fn review_agent_full_state_machine() {
     // Pre-insert workflow row in Ongoing/Reviewing so update_review_status
     // has something to upsert against.
     db.insert_pr_workflow_if_absent(repo, number, WorkflowItemKind::ReviewerPr)
+        .await
         .unwrap();
     db.upsert_pr_workflow(
         repo,
@@ -72,20 +78,30 @@ fn review_agent_full_state_machine() {
         "ongoing",
         Some("reviewing"),
     )
+    .await
     .unwrap();
 
     // 2. Agent calls update_review_status(findings_ready).
     let table = db
         .update_agent_status(repo, number, Some("findings_ready"))
+        .await
         .unwrap();
     assert_eq!(table, "review_prs");
 
-    let status = db.pr_agent_status("review_prs", repo, number).unwrap();
+    let status = db
+        .pr_agent_status("review_prs", repo, number)
+        .await
+        .unwrap();
     assert_eq!(status, Some(ReviewAgentStatus::FindingsReady));
 
     // 3. Agent calls update_review_status(idle) — re-review allowed from here.
-    db.update_agent_status(repo, number, Some("idle")).unwrap();
-    let status = db.pr_agent_status("review_prs", repo, number).unwrap();
+    db.update_agent_status(repo, number, Some("idle"))
+        .await
+        .unwrap();
+    let status = db
+        .pr_agent_status("review_prs", repo, number)
+        .await
+        .unwrap();
     assert_eq!(status, Some(ReviewAgentStatus::Idle));
 
     // 4. Re-dispatch from Idle resets agent_status back to Reviewing.
@@ -97,20 +113,25 @@ fn review_agent_full_state_machine() {
             "dispatch:review-42",
             "/tmp/wt-42",
         )
+        .await
         .unwrap();
     assert!(updated);
-    let status = db.pr_agent_status("review_prs", repo, number).unwrap();
+    let status = db
+        .pr_agent_status("review_prs", repo, number)
+        .await
+        .unwrap();
     assert_eq!(status, Some(ReviewAgentStatus::Reviewing));
 }
 
-#[test]
-fn update_agent_status_errors_when_no_active_agent() {
+#[tokio::test]
+async fn update_agent_status_errors_when_no_active_agent() {
     let db = Database::open_in_memory().unwrap();
     db.save_prs(PrKind::Review, &[pr_fixture("acme/app", 7)])
+        .await
         .unwrap();
 
     // No set_pr_agent call: tmux_window is still NULL.
-    let result = db.update_agent_status("acme/app", 7, Some("idle"));
+    let result = db.update_agent_status("acme/app", 7, Some("idle")).await;
     assert!(
         result.is_err(),
         "update_agent_status should fail when no agent has been dispatched"

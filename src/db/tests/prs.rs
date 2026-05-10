@@ -1,15 +1,15 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
 
-#[test]
-fn save_and_load_review_prs() {
+#[tokio::test]
+async fn save_and_load_review_prs() {
     use crate::models::{CiStatus, ReviewDecision, ReviewPr};
     use chrono::Utc;
 
     let db = Database::open_in_memory().unwrap();
 
     // Initially empty
-    let prs = db.load_prs(super::super::PrKind::Review).unwrap();
+    let prs = db.load_prs(super::super::PrKind::Review).await.unwrap();
     assert!(prs.is_empty());
 
     // Save some PRs
@@ -51,9 +51,10 @@ fn save_and_load_review_prs() {
     };
 
     db.save_prs(super::super::PrKind::Review, &[pr1, pr2])
+        .await
         .unwrap();
 
-    let loaded = db.load_prs(super::super::PrKind::Review).unwrap();
+    let loaded = db.load_prs(super::super::PrKind::Review).await.unwrap();
     assert_eq!(loaded.len(), 2);
 
     let p1 = loaded.iter().find(|p| p.number == 42).unwrap();
@@ -71,8 +72,8 @@ fn save_and_load_review_prs() {
     assert!(p2.labels.is_empty());
 }
 
-#[test]
-fn get_review_pr_found_in_review_prs_table() {
+#[tokio::test]
+async fn get_review_pr_found_in_review_prs_table() {
     use crate::models::{CiStatus, ReviewDecision, ReviewPr};
 
     let db = Database::open_in_memory().unwrap();
@@ -94,9 +95,11 @@ fn get_review_pr_found_in_review_prs_table() {
         ci_status: CiStatus::None,
         reviewers: vec![],
     };
-    db.save_prs(super::super::PrKind::Review, &[pr]).unwrap();
+    db.save_prs(super::super::PrKind::Review, &[pr])
+        .await
+        .unwrap();
 
-    let found = db.get_review_pr("acme/app", 42).unwrap();
+    let found = db.get_review_pr("acme/app", 42).await.unwrap();
     assert!(found.is_some());
     let found = found.unwrap();
     assert_eq!(found.number, 42);
@@ -104,8 +107,8 @@ fn get_review_pr_found_in_review_prs_table() {
     assert_eq!(found.head_ref, "feature/fix");
 }
 
-#[test]
-fn get_review_pr_found_in_my_prs_table() {
+#[tokio::test]
+async fn get_review_pr_found_in_my_prs_table() {
     use crate::models::{CiStatus, ReviewDecision, ReviewPr};
 
     let db = Database::open_in_memory().unwrap();
@@ -127,23 +130,23 @@ fn get_review_pr_found_in_my_prs_table() {
         ci_status: CiStatus::None,
         reviewers: vec![],
     };
-    db.save_prs(super::super::PrKind::My, &[pr]).unwrap();
+    db.save_prs(super::super::PrKind::My, &[pr]).await.unwrap();
 
     // Not in review_prs — should fall back to my_prs
-    let found = db.get_review_pr("acme/lib", 99).unwrap();
+    let found = db.get_review_pr("acme/lib", 99).await.unwrap();
     assert!(found.is_some());
     assert_eq!(found.unwrap().title, "My authored PR");
 }
 
-#[test]
-fn get_review_pr_not_found() {
+#[tokio::test]
+async fn get_review_pr_not_found() {
     let db = Database::open_in_memory().unwrap();
-    let result = db.get_review_pr("acme/app", 999).unwrap();
+    let result = db.get_review_pr("acme/app", 999).await.unwrap();
     assert!(result.is_none());
 }
 
-#[test]
-fn save_review_prs_replaces_all() {
+#[tokio::test]
+async fn save_review_prs_replaces_all() {
     use crate::models::{CiStatus, ReviewDecision, ReviewPr, Reviewer};
     use chrono::Utc;
 
@@ -170,11 +173,19 @@ fn save_review_prs_replaces_all() {
             decision: None,
         }],
     };
-    db.save_prs(super::super::PrKind::Review, &[pr1]).unwrap();
-    assert_eq!(db.load_prs(super::super::PrKind::Review).unwrap().len(), 1);
+    db.save_prs(super::super::PrKind::Review, &[pr1])
+        .await
+        .unwrap();
+    assert_eq!(
+        db.load_prs(super::super::PrKind::Review)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
 
     // Verify new fields round-trip on the first save
-    let loaded_first = db.load_prs(super::super::PrKind::Review).unwrap();
+    let loaded_first = db.load_prs(super::super::PrKind::Review).await.unwrap();
     assert_eq!(loaded_first[0].body, "Initial body");
     assert_eq!(loaded_first[0].head_ref, "feature/old-branch");
     assert_eq!(loaded_first[0].ci_status, CiStatus::Pending);
@@ -204,9 +215,11 @@ fn save_review_prs_replaces_all() {
             decision: Some(ReviewDecision::ChangesRequested),
         }],
     };
-    db.save_prs(super::super::PrKind::Review, &[pr2]).unwrap();
+    db.save_prs(super::super::PrKind::Review, &[pr2])
+        .await
+        .unwrap();
 
-    let loaded = db.load_prs(super::super::PrKind::Review).unwrap();
+    let loaded = db.load_prs(super::super::PrKind::Review).await.unwrap();
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].number, 2);
     assert_eq!(loaded[0].repo, "acme/other");
@@ -221,8 +234,8 @@ fn save_review_prs_replaces_all() {
     );
 }
 
-#[test]
-fn save_review_prs_preserves_agent_fields() {
+#[tokio::test]
+async fn save_review_prs_preserves_agent_fields() {
     use crate::models::{CiStatus, ReviewDecision, ReviewPr};
     use chrono::Utc;
 
@@ -247,7 +260,9 @@ fn save_review_prs_preserves_agent_fields() {
         ci_status: CiStatus::None,
         reviewers: vec![],
     };
-    db.save_prs(super::super::PrKind::Review, &[pr]).unwrap();
+    db.save_prs(super::super::PrKind::Review, &[pr])
+        .await
+        .unwrap();
 
     // Simulate agent dispatch via the proper set_pr_agent method
     db.set_pr_agent(
@@ -257,6 +272,7 @@ fn save_review_prs_preserves_agent_fields() {
         "dispatch:review-42",
         "/tmp/wt",
     )
+    .await
     .unwrap();
 
     // Now save a refreshed version of the same PR (as if GitHub API returned it)
@@ -279,21 +295,25 @@ fn save_review_prs_preserves_agent_fields() {
         reviewers: vec![],
     };
     db.save_prs(super::super::PrKind::Review, &[refreshed_pr])
+        .await
         .unwrap();
 
     // Agent fields in DB should be preserved, GitHub fields should be updated
-    let loaded = db.load_prs(super::super::PrKind::Review).unwrap();
+    let loaded = db.load_prs(super::super::PrKind::Review).await.unwrap();
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].title, "Updated title");
     assert_eq!(loaded[0].review_decision, ReviewDecision::Approved);
 
     // Agent status should still be present after refresh
-    let status = db.pr_agent_status("review_prs", "acme/app", 42).unwrap();
+    let status = db
+        .pr_agent_status("review_prs", "acme/app", 42)
+        .await
+        .unwrap();
     assert!(status.is_some(), "agent status should be preserved");
 }
 
-#[test]
-fn save_review_prs_removes_stale_prs() {
+#[tokio::test]
+async fn save_review_prs_removes_stale_prs() {
     use crate::models::{CiStatus, ReviewDecision, ReviewPr};
     use chrono::Utc;
 
@@ -323,19 +343,27 @@ fn save_review_prs_removes_stale_prs() {
         super::super::PrKind::Review,
         &[make_pr(1, "acme/app"), make_pr(2, "acme/other")],
     )
+    .await
     .unwrap();
-    assert_eq!(db.load_prs(super::super::PrKind::Review).unwrap().len(), 2);
+    assert_eq!(
+        db.load_prs(super::super::PrKind::Review)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
 
     // Refresh with only one — the other should be removed
     db.save_prs(super::super::PrKind::Review, &[make_pr(1, "acme/app")])
+        .await
         .unwrap();
-    let loaded = db.load_prs(super::super::PrKind::Review).unwrap();
+    let loaded = db.load_prs(super::super::PrKind::Review).await.unwrap();
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].number, 1);
 }
 
-#[test]
-fn set_pr_agent_updates_fields() {
+#[tokio::test]
+async fn set_pr_agent_updates_fields() {
     use crate::models::{CiStatus, ReviewDecision, ReviewPr};
     use chrono::Utc;
 
@@ -359,7 +387,9 @@ fn set_pr_agent_updates_fields() {
         ci_status: CiStatus::None,
         reviewers: vec![],
     };
-    db.save_prs(super::super::PrKind::Review, &[pr]).unwrap();
+    db.save_prs(super::super::PrKind::Review, &[pr])
+        .await
+        .unwrap();
 
     db.set_pr_agent(
         super::super::PrKind::Review,
@@ -368,9 +398,13 @@ fn set_pr_agent_updates_fields() {
         "dispatch:review-42",
         "/tmp/wt",
     )
+    .await
     .unwrap();
 
-    let status = db.pr_agent_status("review_prs", "acme/app", 42).unwrap();
+    let status = db
+        .pr_agent_status("review_prs", "acme/app", 42)
+        .await
+        .unwrap();
     assert_eq!(
         status,
         Some(crate::models::ReviewAgentStatus::Reviewing),
@@ -378,8 +412,8 @@ fn set_pr_agent_updates_fields() {
     );
 }
 
-#[test]
-fn update_agent_status_finds_review_pr() {
+#[tokio::test]
+async fn update_agent_status_finds_review_pr() {
     use crate::models::{CiStatus, ReviewAgentStatus, ReviewDecision, ReviewPr};
     use chrono::Utc;
 
@@ -402,7 +436,9 @@ fn update_agent_status_finds_review_pr() {
         ci_status: CiStatus::None,
         reviewers: vec![],
     };
-    db.save_prs(super::super::PrKind::Review, &[pr]).unwrap();
+    db.save_prs(super::super::PrKind::Review, &[pr])
+        .await
+        .unwrap();
     db.set_pr_agent(
         super::super::PrKind::Review,
         "acme/app",
@@ -410,19 +446,24 @@ fn update_agent_status_finds_review_pr() {
         "dispatch:review-42",
         "/tmp/wt",
     )
+    .await
     .unwrap();
 
     let table = db
         .update_agent_status("acme/app", 42, Some("findings_ready"))
+        .await
         .unwrap();
     assert_eq!(table, "review_prs");
 
-    let status = db.pr_agent_status("review_prs", "acme/app", 42).unwrap();
+    let status = db
+        .pr_agent_status("review_prs", "acme/app", 42)
+        .await
+        .unwrap();
     assert_eq!(status, Some(ReviewAgentStatus::FindingsReady));
 }
 
-#[test]
-fn update_agent_status_finds_bot_pr() {
+#[tokio::test]
+async fn update_agent_status_finds_bot_pr() {
     use crate::models::{CiStatus, ReviewAgentStatus, ReviewDecision, ReviewPr};
     use chrono::Utc;
 
@@ -445,7 +486,7 @@ fn update_agent_status_finds_bot_pr() {
         ci_status: CiStatus::None,
         reviewers: vec![],
     };
-    db.save_prs(super::super::PrKind::Bot, &[pr]).unwrap();
+    db.save_prs(super::super::PrKind::Bot, &[pr]).await.unwrap();
     db.set_pr_agent(
         super::super::PrKind::Bot,
         "acme/app",
@@ -453,26 +494,30 @@ fn update_agent_status_finds_bot_pr() {
         "dispatch:review-10",
         "/tmp/wt",
     )
+    .await
     .unwrap();
 
     let table = db
         .update_agent_status("acme/app", 10, Some("idle"))
+        .await
         .unwrap();
     assert_eq!(table, "bot_prs");
 
-    let status = db.pr_agent_status("bot_prs", "acme/app", 10).unwrap();
+    let status = db.pr_agent_status("bot_prs", "acme/app", 10).await.unwrap();
     assert_eq!(status, Some(ReviewAgentStatus::Idle));
 }
 
-#[test]
-fn update_agent_status_errors_when_no_match() {
+#[tokio::test]
+async fn update_agent_status_errors_when_no_match() {
     let db = Database::open_in_memory().unwrap();
-    let result = db.update_agent_status("acme/unknown", 999, Some("idle"));
+    let result = db
+        .update_agent_status("acme/unknown", 999, Some("idle"))
+        .await;
     assert!(result.is_err());
 }
 
-#[test]
-fn update_agent_status_skips_pr_without_tmux() {
+#[tokio::test]
+async fn update_agent_status_skips_pr_without_tmux() {
     use crate::models::{CiStatus, ReviewDecision, ReviewPr};
     use chrono::Utc;
 
@@ -495,10 +540,14 @@ fn update_agent_status_skips_pr_without_tmux() {
         ci_status: CiStatus::None,
         reviewers: vec![],
     };
-    db.save_prs(super::super::PrKind::Review, &[pr]).unwrap();
+    db.save_prs(super::super::PrKind::Review, &[pr])
+        .await
+        .unwrap();
 
     // PR has no tmux_window, so update should fail
-    let result = db.update_agent_status("acme/app", 42, Some("findings_ready"));
+    let result = db
+        .update_agent_status("acme/app", 42, Some("findings_ready"))
+        .await;
     assert!(result.is_err());
 }
 
@@ -506,13 +555,17 @@ fn update_agent_status_skips_pr_without_tmux() {
 // Query coverage: my_prs / bot_prs round-trip
 // ---------------------------------------------------------------------------
 
-#[test]
-fn save_and_load_my_prs() {
+#[tokio::test]
+async fn save_and_load_my_prs() {
     use crate::models::{CiStatus, ReviewDecision, ReviewPr};
     use chrono::Utc;
 
     let db = Database::open_in_memory().unwrap();
-    assert!(db.load_prs(super::super::PrKind::My).unwrap().is_empty());
+    assert!(db
+        .load_prs(super::super::PrKind::My)
+        .await
+        .unwrap()
+        .is_empty());
 
     let pr = ReviewPr {
         number: 7,
@@ -532,9 +585,9 @@ fn save_and_load_my_prs() {
         ci_status: CiStatus::Success,
         reviewers: vec![],
     };
-    db.save_prs(super::super::PrKind::My, &[pr]).unwrap();
+    db.save_prs(super::super::PrKind::My, &[pr]).await.unwrap();
 
-    let loaded = db.load_prs(super::super::PrKind::My).unwrap();
+    let loaded = db.load_prs(super::super::PrKind::My).await.unwrap();
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].number, 7);
     assert_eq!(loaded[0].title, "My feature");
@@ -545,13 +598,17 @@ fn save_and_load_my_prs() {
     assert_eq!(loaded[0].ci_status, CiStatus::Success);
 }
 
-#[test]
-fn save_and_load_bot_prs() {
+#[tokio::test]
+async fn save_and_load_bot_prs() {
     use crate::models::{CiStatus, ReviewDecision, ReviewPr};
     use chrono::Utc;
 
     let db = Database::open_in_memory().unwrap();
-    assert!(db.load_prs(super::super::PrKind::Bot).unwrap().is_empty());
+    assert!(db
+        .load_prs(super::super::PrKind::Bot)
+        .await
+        .unwrap()
+        .is_empty());
 
     let pr = ReviewPr {
         number: 55,
@@ -571,9 +628,9 @@ fn save_and_load_bot_prs() {
         ci_status: CiStatus::Pending,
         reviewers: vec![],
     };
-    db.save_prs(super::super::PrKind::Bot, &[pr]).unwrap();
+    db.save_prs(super::super::PrKind::Bot, &[pr]).await.unwrap();
 
-    let loaded = db.load_prs(super::super::PrKind::Bot).unwrap();
+    let loaded = db.load_prs(super::super::PrKind::Bot).await.unwrap();
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].number, 55);
     assert_eq!(loaded[0].title, "Bump lodash");
@@ -581,8 +638,8 @@ fn save_and_load_bot_prs() {
     assert_eq!(loaded[0].ci_status, CiStatus::Pending);
 }
 
-#[test]
-fn my_prs_and_review_prs_are_independent() {
+#[tokio::test]
+async fn my_prs_and_review_prs_are_independent() {
     use crate::models::{CiStatus, ReviewDecision, ReviewPr};
     use chrono::Utc;
 
@@ -608,177 +665,225 @@ fn my_prs_and_review_prs_are_independent() {
     };
 
     db.save_prs(super::super::PrKind::My, &[make_pr(1, "My PR")])
+        .await
         .unwrap();
     db.save_prs(super::super::PrKind::Review, &[make_pr(2, "Review PR")])
+        .await
         .unwrap();
     db.save_prs(super::super::PrKind::Bot, &[make_pr(3, "Bot PR")])
+        .await
         .unwrap();
 
-    assert_eq!(db.load_prs(super::super::PrKind::My).unwrap().len(), 1);
-    assert_eq!(db.load_prs(super::super::PrKind::Review).unwrap().len(), 1);
-    assert_eq!(db.load_prs(super::super::PrKind::Bot).unwrap().len(), 1);
+    assert_eq!(
+        db.load_prs(super::super::PrKind::My).await.unwrap().len(),
+        1
+    );
+    assert_eq!(
+        db.load_prs(super::super::PrKind::Review)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        db.load_prs(super::super::PrKind::Bot).await.unwrap().len(),
+        1
+    );
 
     // Saving empty to one table doesn't affect others
-    db.save_prs(super::super::PrKind::My, &[]).unwrap();
-    assert!(db.load_prs(super::super::PrKind::My).unwrap().is_empty());
-    assert_eq!(db.load_prs(super::super::PrKind::Review).unwrap().len(), 1);
-    assert_eq!(db.load_prs(super::super::PrKind::Bot).unwrap().len(), 1);
+    db.save_prs(super::super::PrKind::My, &[]).await.unwrap();
+    assert!(db
+        .load_prs(super::super::PrKind::My)
+        .await
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        db.load_prs(super::super::PrKind::Review)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        db.load_prs(super::super::PrKind::Bot).await.unwrap().len(),
+        1
+    );
 }
 
 // ---------------------------------------------------------------------------
 // PrWorkflowStore tests
 // ---------------------------------------------------------------------------
 
-#[test]
-fn pr_workflow_insert_if_absent_is_idempotent() {
+#[tokio::test]
+async fn pr_workflow_insert_if_absent_is_idempotent() {
     let db = in_memory_db();
     use crate::models::WorkflowItemKind::*;
 
     db.insert_pr_workflow_if_absent("org/repo", 42, ReviewerPr)
+        .await
         .unwrap();
     db.insert_pr_workflow_if_absent("org/repo", 42, ReviewerPr)
+        .await
         .unwrap(); // no-op
 
     let row = db
         .get_pr_workflow("org/repo", 42, ReviewerPr)
+        .await
         .unwrap()
         .unwrap();
     assert_eq!(row.state, "backlog");
     assert!(row.sub_state.is_none());
 }
 
-#[test]
-fn pr_workflow_upsert_updates_state_and_sub_state() {
+#[tokio::test]
+async fn pr_workflow_upsert_updates_state_and_sub_state() {
     let db = in_memory_db();
     use crate::models::WorkflowItemKind::*;
 
     db.insert_pr_workflow_if_absent("org/repo", 1, ReviewerPr)
+        .await
         .unwrap();
     db.upsert_pr_workflow("org/repo", 1, ReviewerPr, "ongoing", Some("reviewing"))
+        .await
         .unwrap();
 
     let row = db
         .get_pr_workflow("org/repo", 1, ReviewerPr)
+        .await
         .unwrap()
         .unwrap();
     assert_eq!(row.state, "ongoing");
     assert_eq!(row.sub_state.as_deref(), Some("reviewing"));
 }
 
-#[test]
-fn pr_workflow_get_returns_none_when_absent() {
+#[tokio::test]
+async fn pr_workflow_get_returns_none_when_absent() {
     let db = in_memory_db();
     use crate::models::WorkflowItemKind::*;
-    let result = db.get_pr_workflow("org/repo", 99, ReviewerPr).unwrap();
+    let result = db
+        .get_pr_workflow("org/repo", 99, ReviewerPr)
+        .await
+        .unwrap();
     assert!(result.is_none());
 }
 
-#[test]
-fn pr_workflow_list_returns_all_rows() {
+#[tokio::test]
+async fn pr_workflow_list_returns_all_rows() {
     let db = in_memory_db();
     use crate::models::WorkflowItemKind::*;
 
     db.insert_pr_workflow_if_absent("org/a", 1, ReviewerPr)
+        .await
         .unwrap();
     db.insert_pr_workflow_if_absent("org/b", 2, DependabotAlert)
+        .await
         .unwrap();
     db.insert_pr_workflow_if_absent("org/a", 1, CodeScanAlert)
+        .await
         .unwrap();
 
-    let rows = db.list_pr_workflows().unwrap();
+    let rows = db.list_pr_workflows().await.unwrap();
     assert_eq!(rows.len(), 3);
 }
 
-#[test]
-fn pr_workflow_prune_removes_done_older_than_threshold() {
+#[tokio::test]
+async fn pr_workflow_prune_removes_done_older_than_threshold() {
     let db = in_memory_db();
 
-    // Insert a done row with an old timestamp
-    let conn = db.conn().unwrap();
-    conn.execute(
-        "INSERT INTO pr_workflow_states (repo, number, kind, state, updated_at)
-         VALUES ('org/repo', 1, 'reviewer_pr', 'done', '2020-01-01T00:00:00Z')",
-        [],
-    )
-    .unwrap();
-    // Insert a recent done row — should NOT be pruned
-    conn.execute(
-        "INSERT INTO pr_workflow_states (repo, number, kind, state, updated_at)
-         VALUES ('org/repo', 2, 'reviewer_pr', 'done', ?1)",
-        rusqlite::params![chrono::Utc::now().to_rfc3339()],
-    )
-    .unwrap();
-    // Insert an ongoing row — should NOT be pruned regardless of age
-    conn.execute(
-        "INSERT INTO pr_workflow_states (repo, number, kind, state, updated_at)
-         VALUES ('org/repo', 3, 'reviewer_pr', 'ongoing', '2020-01-01T00:00:00Z')",
-        [],
-    )
-    .unwrap();
-    drop(conn);
+    // Insert seed rows synchronously, scoping the MutexGuard so it does not
+    // straddle a later `.await` (clippy::await_holding_lock).
+    {
+        let conn = db.conn().unwrap();
+        conn.execute(
+            "INSERT INTO pr_workflow_states (repo, number, kind, state, updated_at)
+             VALUES ('org/repo', 1, 'reviewer_pr', 'done', '2020-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        // Insert a recent done row — should NOT be pruned
+        conn.execute(
+            "INSERT INTO pr_workflow_states (repo, number, kind, state, updated_at)
+             VALUES ('org/repo', 2, 'reviewer_pr', 'done', ?1)",
+            rusqlite::params![chrono::Utc::now().to_rfc3339()],
+        )
+        .unwrap();
+        // Insert an ongoing row — should NOT be pruned regardless of age
+        conn.execute(
+            "INSERT INTO pr_workflow_states (repo, number, kind, state, updated_at)
+             VALUES ('org/repo', 3, 'reviewer_pr', 'ongoing', '2020-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+    }
 
     db.prune_done_pr_workflows(chrono::Duration::days(7))
+        .await
         .unwrap();
 
-    let rows = db.list_pr_workflows().unwrap();
+    let rows = db.list_pr_workflows().await.unwrap();
     // Only old done row removed; recent done and ongoing remain
     assert_eq!(rows.len(), 2);
     assert!(rows.iter().all(|r| !(r.state == "done" && r.number == 1)));
 }
 
-#[test]
-fn pr_workflow_kind_roundtrip_in_db() {
+#[tokio::test]
+async fn pr_workflow_kind_roundtrip_in_db() {
     let db = in_memory_db();
     use crate::models::WorkflowItemKind::*;
 
     for kind in [ReviewerPr, DependabotPr, DependabotAlert, CodeScanAlert] {
         db.insert_pr_workflow_if_absent("org/repo", kind as i64, kind)
+            .await
             .unwrap();
         let row = db
             .get_pr_workflow("org/repo", kind as i64, kind)
+            .await
             .unwrap()
             .unwrap();
         assert_eq!(row.kind, kind);
     }
 }
 
-#[test]
-fn find_pr_workflow_kind_returns_kind_when_row_exists() {
+#[tokio::test]
+async fn find_pr_workflow_kind_returns_kind_when_row_exists() {
     let db = in_memory_db();
     use crate::models::WorkflowItemKind::*;
 
     // Insert a workflow row for ReviewerPr
     db.insert_pr_workflow_if_absent("org/repo", 42, ReviewerPr)
+        .await
         .unwrap();
 
     // find_pr_workflow_kind should return the kind
-    let kind = db.find_pr_workflow_kind("org/repo", 42).unwrap();
+    let kind = db.find_pr_workflow_kind("org/repo", 42).await.unwrap();
     assert_eq!(kind, Some(ReviewerPr));
 }
 
-#[test]
-fn find_pr_workflow_kind_returns_none_when_no_row_exists() {
+#[tokio::test]
+async fn find_pr_workflow_kind_returns_none_when_no_row_exists() {
     let db = in_memory_db();
 
     // No workflow row exists for this (repo, number) pair
-    let kind = db.find_pr_workflow_kind("org/repo", 99).unwrap();
+    let kind = db.find_pr_workflow_kind("org/repo", 99).await.unwrap();
     assert_eq!(kind, None);
 }
 
-#[test]
-fn find_pr_workflow_kind_with_multiple_kinds_returns_first() {
+#[tokio::test]
+async fn find_pr_workflow_kind_with_multiple_kinds_returns_first() {
     let db = in_memory_db();
     use crate::models::WorkflowItemKind::*;
 
     // Insert multiple workflow rows for the same (repo, number) with different kinds
     db.insert_pr_workflow_if_absent("org/repo", 5, ReviewerPr)
+        .await
         .unwrap();
     db.insert_pr_workflow_if_absent("org/repo", 5, DependabotAlert)
+        .await
         .unwrap();
 
     // find_pr_workflow_kind uses LIMIT 1, so it returns one of them
     // (the one from the LIMIT 1 query — typically the first inserted)
-    let kind = db.find_pr_workflow_kind("org/repo", 5).unwrap();
+    let kind = db.find_pr_workflow_kind("org/repo", 5).await.unwrap();
     assert!(kind.is_some(), "Should find one of the kinds");
     // We don't assert which one because LIMIT 1 order is undefined without ORDER BY
 }

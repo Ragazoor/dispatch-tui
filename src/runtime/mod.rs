@@ -120,7 +120,10 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     }
 
     // Prune stale "done" workflow rows on startup (best-effort)
-    if let Err(e) = database.prune_done_pr_workflows(chrono::Duration::days(7)) {
+    if let Err(e) = database
+        .prune_done_pr_workflows(chrono::Duration::days(7))
+        .await
+    {
         tracing::warn!("Failed to prune done pr workflows on startup: {e}");
     }
 

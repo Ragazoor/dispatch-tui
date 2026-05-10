@@ -4715,7 +4715,11 @@ async fn update_review_status_updates_pr() {
         ci_status: CiStatus::None,
         reviewers: vec![],
     };
-    state.db.save_prs(crate::db::PrKind::Review, &[pr]).unwrap();
+    state
+        .db
+        .save_prs(crate::db::PrKind::Review, &[pr])
+        .await
+        .unwrap();
     state
         .db
         .set_pr_agent(
@@ -4725,6 +4729,7 @@ async fn update_review_status_updates_pr() {
             "dispatch:review-42",
             "/tmp/wt",
         )
+        .await
         .unwrap();
 
     let resp = call(
@@ -4741,6 +4746,7 @@ async fn update_review_status_updates_pr() {
     let status = state
         .db
         .pr_agent_status("review_prs", "acme/app", 42)
+        .await
         .unwrap();
     assert_eq!(status, Some(ReviewAgentStatus::FindingsReady));
 }
@@ -4801,7 +4807,11 @@ async fn update_review_status_findings_ready_sets_action_required() {
         ci_status: CiStatus::None,
         reviewers: vec![],
     };
-    state.db.save_prs(crate::db::PrKind::Review, &[pr]).unwrap();
+    state
+        .db
+        .save_prs(crate::db::PrKind::Review, &[pr])
+        .await
+        .unwrap();
     state
         .db
         .set_pr_agent(
@@ -4811,12 +4821,14 @@ async fn update_review_status_findings_ready_sets_action_required() {
             "dispatch:review-42",
             "/tmp/wt",
         )
+        .await
         .unwrap();
 
     // Pre-insert a workflow row in Ongoing/Reviewing
     state
         .db
         .insert_pr_workflow_if_absent("org/repo", 42, WorkflowItemKind::ReviewerPr)
+        .await
         .unwrap();
     state
         .db
@@ -4827,6 +4839,7 @@ async fn update_review_status_findings_ready_sets_action_required() {
             "ongoing",
             Some("reviewing"),
         )
+        .await
         .unwrap();
 
     let resp = call(
@@ -4843,6 +4856,7 @@ async fn update_review_status_findings_ready_sets_action_required() {
     let row = state
         .db
         .get_pr_workflow("org/repo", 42, WorkflowItemKind::ReviewerPr)
+        .await
         .unwrap()
         .unwrap();
     assert_eq!(row.state, "action_required");
@@ -4875,7 +4889,11 @@ async fn update_review_status_findings_ready_without_workflow_row() {
         ci_status: CiStatus::None,
         reviewers: vec![],
     };
-    state.db.save_prs(crate::db::PrKind::Review, &[pr]).unwrap();
+    state
+        .db
+        .save_prs(crate::db::PrKind::Review, &[pr])
+        .await
+        .unwrap();
     state
         .db
         .set_pr_agent(
@@ -4885,6 +4903,7 @@ async fn update_review_status_findings_ready_without_workflow_row() {
             "dispatch:review-88",
             "/tmp/wt",
         )
+        .await
         .unwrap();
 
     // NOTE: NO workflow row is inserted — find_pr_workflow_kind will return None
@@ -4906,6 +4925,7 @@ async fn update_review_status_findings_ready_without_workflow_row() {
     let status = state
         .db
         .pr_agent_status("review_prs", "acme/product", 88)
+        .await
         .unwrap();
     assert_eq!(status.map(|s| s.as_db_str()), Some("findings_ready"));
 
@@ -4913,6 +4933,7 @@ async fn update_review_status_findings_ready_without_workflow_row() {
     let no_workflow = state
         .db
         .get_pr_workflow("acme/product", 88, WorkflowItemKind::ReviewerPr)
+        .await
         .unwrap();
     assert!(no_workflow.is_none());
 }
@@ -5323,7 +5344,7 @@ async fn create_epic_tool_schema_includes_parent_epic_id() {
 // Fixtures for review/security tests
 // ---------------------------------------------------------------------------
 
-fn insert_my_pr_fixture(state: &Arc<McpState>, number: i64, repo: &str) {
+async fn insert_my_pr_fixture(state: &Arc<McpState>, number: i64, repo: &str) {
     use crate::db::PrKind;
     use crate::models::{CiStatus, ReviewDecision, ReviewPr};
     let pr = ReviewPr {
@@ -5344,13 +5365,13 @@ fn insert_my_pr_fixture(state: &Arc<McpState>, number: i64, repo: &str) {
         ci_status: CiStatus::None,
         reviewers: vec![],
     };
-    let mut existing = state.db.load_prs(PrKind::My).unwrap_or_default();
+    let mut existing = state.db.load_prs(PrKind::My).await.unwrap_or_default();
     existing.retain(|p| !(p.repo == repo && p.number == number));
     existing.push(pr);
-    state.db.save_prs(PrKind::My, &existing).unwrap();
+    state.db.save_prs(PrKind::My, &existing).await.unwrap();
 }
 
-fn insert_review_pr_fixture(state: &Arc<McpState>, number: i64, repo: &str) {
+async fn insert_review_pr_fixture(state: &Arc<McpState>, number: i64, repo: &str) {
     use crate::db::PrKind;
     use crate::models::{CiStatus, ReviewDecision, ReviewPr};
     let pr = ReviewPr {
@@ -5372,13 +5393,13 @@ fn insert_review_pr_fixture(state: &Arc<McpState>, number: i64, repo: &str) {
         reviewers: vec![],
     };
     // Load existing PRs and append to avoid batch-replace deleting prior inserts.
-    let mut existing = state.db.load_prs(PrKind::Review).unwrap_or_default();
+    let mut existing = state.db.load_prs(PrKind::Review).await.unwrap_or_default();
     existing.retain(|p| !(p.repo == repo && p.number == number));
     existing.push(pr);
-    state.db.save_prs(PrKind::Review, &existing).unwrap();
+    state.db.save_prs(PrKind::Review, &existing).await.unwrap();
 }
 
-fn insert_security_alert_fixture(
+async fn insert_security_alert_fixture(
     state: &Arc<McpState>,
     number: i64,
     repo: &str,
@@ -5401,10 +5422,10 @@ fn insert_security_alert_fixture(
         description: "A vulnerability".to_string(),
     };
     // Load existing alerts and append to avoid batch-replace deleting prior inserts.
-    let mut existing = state.db.load_security_alerts().unwrap_or_default();
+    let mut existing = state.db.load_security_alerts().await.unwrap_or_default();
     existing.retain(|a| !(a.repo == repo && a.number == number && a.kind == kind));
     existing.push(alert);
-    state.db.save_security_alerts(&existing).unwrap();
+    state.db.save_security_alerts(&existing).await.unwrap();
 }
 
 // ---------------------------------------------------------------------------
@@ -5427,8 +5448,8 @@ async fn list_review_prs_empty() {
 #[tokio::test]
 async fn list_review_prs_returns_stored_prs() {
     let state = test_state();
-    insert_review_pr_fixture(&state, 42, "acme/app");
-    insert_review_pr_fixture(&state, 99, "acme/app");
+    insert_review_pr_fixture(&state, 42, "acme/app").await;
+    insert_review_pr_fixture(&state, 99, "acme/app").await;
 
     let resp = call(
         &state,
@@ -5444,8 +5465,8 @@ async fn list_review_prs_returns_stored_prs() {
 #[tokio::test]
 async fn list_review_prs_filters_by_repo() {
     let state = test_state();
-    insert_review_pr_fixture(&state, 1, "acme/app");
-    insert_review_pr_fixture(&state, 2, "acme/other");
+    insert_review_pr_fixture(&state, 1, "acme/app").await;
+    insert_review_pr_fixture(&state, 2, "acme/other").await;
 
     let resp = call(
         &state,
@@ -5465,7 +5486,7 @@ async fn list_review_prs_filters_by_repo() {
 #[tokio::test]
 async fn get_review_pr_found() {
     let state = test_state();
-    insert_review_pr_fixture(&state, 42, "acme/app");
+    insert_review_pr_fixture(&state, 42, "acme/app").await;
 
     let resp = call(
         &state,
@@ -5494,7 +5515,7 @@ async fn get_review_pr_not_found() {
 #[tokio::test]
 async fn get_review_pr_found_in_my_prs() {
     let state = test_state();
-    insert_my_pr_fixture(&state, 55, "acme/app");
+    insert_my_pr_fixture(&state, 55, "acme/app").await;
 
     let resp = call(
         &state,
@@ -5529,8 +5550,8 @@ async fn list_security_alerts_empty() {
 async fn list_security_alerts_returns_stored_alerts() {
     use crate::models::AlertKind;
     let state = test_state();
-    insert_security_alert_fixture(&state, 1, "acme/api", AlertKind::Dependabot);
-    insert_security_alert_fixture(&state, 2, "acme/api", AlertKind::CodeScanning);
+    insert_security_alert_fixture(&state, 1, "acme/api", AlertKind::Dependabot).await;
+    insert_security_alert_fixture(&state, 2, "acme/api", AlertKind::CodeScanning).await;
 
     let resp = call(
         &state,
@@ -5547,8 +5568,8 @@ async fn list_security_alerts_returns_stored_alerts() {
 async fn list_security_alerts_filters_by_kind() {
     use crate::models::AlertKind;
     let state = test_state();
-    insert_security_alert_fixture(&state, 1, "acme/api", AlertKind::Dependabot);
-    insert_security_alert_fixture(&state, 2, "acme/api", AlertKind::CodeScanning);
+    insert_security_alert_fixture(&state, 1, "acme/api", AlertKind::Dependabot).await;
+    insert_security_alert_fixture(&state, 2, "acme/api", AlertKind::CodeScanning).await;
 
     let resp = call(
         &state,
@@ -5569,7 +5590,7 @@ async fn list_security_alerts_filters_by_kind() {
 async fn get_security_alert_found() {
     use crate::models::AlertKind;
     let state = test_state();
-    insert_security_alert_fixture(&state, 7, "acme/api", AlertKind::Dependabot);
+    insert_security_alert_fixture(&state, 7, "acme/api", AlertKind::Dependabot).await;
 
     let resp = call(
         &state,
@@ -5643,7 +5664,7 @@ async fn dispatch_review_agent_already_reviewing() {
         ci_status: CiStatus::None,
         reviewers: vec![],
     };
-    state.db.save_prs(PrKind::Review, &[pr]).unwrap();
+    state.db.save_prs(PrKind::Review, &[pr]).await.unwrap();
     // Persist the agent tracking fields (save_prs does not write these).
     state
         .db
@@ -5654,6 +5675,7 @@ async fn dispatch_review_agent_already_reviewing() {
             "review-42",
             "/repo/.worktrees/review-42",
         )
+        .await
         .unwrap();
     let _ = ReviewAgentStatus::Reviewing; // confirm variant exists
 
@@ -5710,7 +5732,7 @@ async fn dispatch_fix_agent_already_reviewing() {
         state: "open".to_string(),
         description: "A vuln".to_string(),
     };
-    state.db.save_security_alerts(&[alert]).unwrap();
+    state.db.save_security_alerts(&[alert]).await.unwrap();
     // Persist the agent tracking fields (save_security_alerts does not write these).
     state
         .db
@@ -5721,6 +5743,7 @@ async fn dispatch_fix_agent_already_reviewing() {
             "fix-7",
             "/repo/.worktrees/fix-vuln-7",
         )
+        .await
         .unwrap();
     let _ = ReviewAgentStatus::Reviewing; // confirm variant exists
 
@@ -5742,7 +5765,7 @@ async fn dispatch_fix_agent_already_reviewing() {
 #[tokio::test]
 async fn list_review_prs_mode_author() {
     let state = test_state();
-    insert_my_pr_fixture(&state, 55, "acme/app");
+    insert_my_pr_fixture(&state, 55, "acme/app").await;
 
     let resp = call(
         &state,
@@ -5757,8 +5780,8 @@ async fn list_review_prs_mode_author() {
 #[tokio::test]
 async fn list_review_prs_mode_all() {
     let state = test_state();
-    insert_review_pr_fixture(&state, 10, "acme/app");
-    insert_my_pr_fixture(&state, 20, "acme/app");
+    insert_review_pr_fixture(&state, 10, "acme/app").await;
+    insert_my_pr_fixture(&state, 20, "acme/app").await;
 
     let resp = call(
         &state,
@@ -5815,6 +5838,7 @@ async fn list_security_alerts_filters_by_severity() {
     state
         .db
         .save_security_alerts(&[high_alert, critical_alert])
+        .await
         .unwrap();
 
     let resp = call(
@@ -5835,8 +5859,8 @@ async fn list_security_alerts_filters_by_severity() {
 async fn list_security_alerts_filters_by_repo() {
     use crate::models::AlertKind;
     let state = test_state();
-    insert_security_alert_fixture(&state, 1, "acme/api", AlertKind::Dependabot);
-    insert_security_alert_fixture(&state, 2, "acme/web", AlertKind::Dependabot);
+    insert_security_alert_fixture(&state, 1, "acme/api", AlertKind::Dependabot).await;
+    insert_security_alert_fixture(&state, 2, "acme/web", AlertKind::Dependabot).await;
 
     let resp = call(
         &state,
@@ -5875,7 +5899,7 @@ async fn dispatch_review_agent_success() {
         runner,
     });
 
-    insert_review_pr_fixture(&state, 42, "acme/app");
+    insert_review_pr_fixture(&state, 42, "acme/app").await;
 
     let resp = call(
         &state,
@@ -5898,7 +5922,10 @@ async fn dispatch_review_agent_success() {
         "expected dispatch confirmation: {text}"
     );
 
-    let status = db.pr_agent_status("review_prs", "acme/app", 42).unwrap();
+    let status = db
+        .pr_agent_status("review_prs", "acme/app", 42)
+        .await
+        .unwrap();
     assert_eq!(
         status,
         Some(crate::models::ReviewAgentStatus::Reviewing),
@@ -5947,7 +5974,7 @@ async fn dispatch_fix_agent_success() {
         state: "open".to_string(),
         description: "Prototype pollution".to_string(),
     };
-    db.save_security_alerts(&[alert]).unwrap();
+    db.save_security_alerts(&[alert]).await.unwrap();
 
     let resp = call(
         &state,
@@ -5975,6 +6002,7 @@ async fn dispatch_fix_agent_success() {
 
     let status = db
         .alert_agent_status("acme/api", 7, AlertKind::Dependabot)
+        .await
         .unwrap();
     assert_eq!(
         status,

@@ -112,13 +112,13 @@ fn format_security_alert(
     )
 }
 
-fn pr_agent_status_any_table(
+async fn pr_agent_status_any_table(
     db: &dyn crate::db::TaskStore,
     repo: &str,
     number: i64,
 ) -> Option<ReviewAgentStatus> {
     for table in &["review_prs", "my_prs", "bot_prs"] {
-        if let Ok(Some(status)) = db.pr_agent_status(table, repo, number) {
+        if let Ok(Some(status)) = db.pr_agent_status(table, repo, number).await {
             return Some(status);
         }
     }
@@ -129,7 +129,7 @@ fn pr_agent_status_any_table(
 // Read handlers
 // ---------------------------------------------------------------------------
 
-pub(super) fn handle_list_review_prs(
+pub(super) async fn handle_list_review_prs(
     state: &McpState,
     id: Option<Value>,
     args: Value,
@@ -151,13 +151,13 @@ pub(super) fn handle_list_review_prs(
 
     let mut prs: Vec<crate::models::ReviewPr> = Vec::new();
     if mode == "reviewer" || mode == "all" {
-        match state.db.load_prs(PrKind::Review) {
+        match state.db.load_prs(PrKind::Review).await {
             Ok(loaded) => prs.extend(loaded),
             Err(e) => return JsonRpcResponse::err(id, -32603, format!("DB error: {e}")),
         }
     }
     if mode == "author" || mode == "all" {
-        match state.db.load_prs(PrKind::My) {
+        match state.db.load_prs(PrKind::My).await {
             Ok(loaded) => prs.extend(loaded),
             Err(e) => return JsonRpcResponse::err(id, -32603, format!("DB error: {e}")),
         }
@@ -174,20 +174,18 @@ pub(super) fn handle_list_review_prs(
         );
     }
 
-    let lines: Vec<String> = prs
-        .iter()
-        .map(|pr| {
-            let status = pr_agent_status_any_table(&*state.db, &pr.repo, pr.number);
-            format_review_pr(pr, status)
-        })
-        .collect();
+    let mut lines: Vec<String> = Vec::with_capacity(prs.len());
+    for pr in &prs {
+        let status = pr_agent_status_any_table(&*state.db, &pr.repo, pr.number).await;
+        lines.push(format_review_pr(pr, status));
+    }
     JsonRpcResponse::ok(
         id,
         json!({"content": [{"type": "text", "text": lines.join("\n\n")}]}),
     )
 }
 
-pub(super) fn handle_get_review_pr(
+pub(super) async fn handle_get_review_pr(
     state: &McpState,
     id: Option<Value>,
     args: Value,
@@ -197,9 +195,10 @@ pub(super) fn handle_get_review_pr(
         Err(resp) => return resp,
     };
 
-    match state.db.get_review_pr(&parsed.repo, parsed.number) {
+    match state.db.get_review_pr(&parsed.repo, parsed.number).await {
         Ok(Some(pr)) => {
-            let agent_status = pr_agent_status_any_table(&*state.db, &parsed.repo, parsed.number);
+            let agent_status =
+                pr_agent_status_any_table(&*state.db, &parsed.repo, parsed.number).await;
             JsonRpcResponse::ok(
                 id,
                 json!({"content": [{"type": "text", "text": format_review_pr(&pr, agent_status)}]}),
@@ -214,7 +213,7 @@ pub(super) fn handle_get_review_pr(
     }
 }
 
-pub(super) fn handle_list_security_alerts(
+pub(super) async fn handle_list_security_alerts(
     state: &McpState,
     id: Option<Value>,
     args: Value,
@@ -224,7 +223,7 @@ pub(super) fn handle_list_security_alerts(
         Err(resp) => return resp,
     };
 
-    let mut alerts = match state.db.load_security_alerts() {
+    let mut alerts = match state.db.load_security_alerts().await {
         Ok(a) => a,
         Err(e) => return JsonRpcResponse::err(id, -32603, format!("DB error: {e}")),
     };
@@ -270,24 +269,23 @@ pub(super) fn handle_list_security_alerts(
         );
     }
 
-    let lines: Vec<String> = alerts
-        .iter()
-        .map(|alert| {
-            let status = state
-                .db
-                .alert_agent_status(&alert.repo, alert.number, alert.kind)
-                .ok()
-                .flatten();
-            format_security_alert(alert, status)
-        })
-        .collect();
+    let mut lines: Vec<String> = Vec::with_capacity(alerts.len());
+    for alert in &alerts {
+        let status = state
+            .db
+            .alert_agent_status(&alert.repo, alert.number, alert.kind)
+            .await
+            .ok()
+            .flatten();
+        lines.push(format_security_alert(alert, status));
+    }
     JsonRpcResponse::ok(
         id,
         json!({"content": [{"type": "text", "text": lines.join("\n\n")}]}),
     )
 }
 
-pub(super) fn handle_get_security_alert(
+pub(super) async fn handle_get_security_alert(
     state: &McpState,
     id: Option<Value>,
     args: Value,
@@ -312,11 +310,13 @@ pub(super) fn handle_get_security_alert(
     match state
         .db
         .get_security_alert(&parsed.repo, parsed.number, kind)
+        .await
     {
         Ok(Some(alert)) => {
             let agent_status = state
                 .db
                 .alert_agent_status(&parsed.repo, parsed.number, kind)
+                .await
                 .ok()
                 .flatten();
             JsonRpcResponse::ok(
@@ -351,7 +351,7 @@ pub(super) async fn handle_dispatch_review_agent(
     };
     tracing::info!(repo = %parsed.repo, number = parsed.number, "MCP dispatch_review_agent");
 
-    let pr = match state.db.get_review_pr(&parsed.repo, parsed.number) {
+    let pr = match state.db.get_review_pr(&parsed.repo, parsed.number).await {
         Ok(Some(pr)) => pr,
         Ok(None) => {
             return JsonRpcResponse::err(
@@ -365,15 +365,21 @@ pub(super) async fn handle_dispatch_review_agent(
 
     // FindingsReady is intentionally excluded: it means the agent completed successfully
     // and re-dispatching is allowed (e.g. to do a fresh review pass).
-    let has_active_agent = ["review_prs", "my_prs", "bot_prs"].iter().any(|table| {
-        state
+    let mut has_active_agent = false;
+    for table in &["review_prs", "my_prs", "bot_prs"] {
+        if state
             .db
             .pr_agent_status(table, &parsed.repo, parsed.number)
+            .await
             .ok()
             .flatten()
             .map(|s| s == ReviewAgentStatus::Reviewing)
             .unwrap_or(false)
-    });
+        {
+            has_active_agent = true;
+            break;
+        }
+    }
     if has_active_agent {
         return JsonRpcResponse::err(
             id,
@@ -413,13 +419,16 @@ pub(super) async fn handle_dispatch_review_agent(
             // matching table will be updated. Warn only if neither table was updated.
             let mut persisted = false;
             for kind in [PrKind::Review, PrKind::My] {
-                match db.set_pr_agent(
-                    kind,
-                    &repo,
-                    number,
-                    &dispatch_result.tmux_window,
-                    &dispatch_result.worktree_path,
-                ) {
+                match db
+                    .set_pr_agent(
+                        kind,
+                        &repo,
+                        number,
+                        &dispatch_result.tmux_window,
+                        &dispatch_result.worktree_path,
+                    )
+                    .await
+                {
                     Ok(true) => {
                         persisted = true;
                         break;
@@ -476,6 +485,7 @@ pub(super) async fn handle_dispatch_fix_agent(
     let alert = match state
         .db
         .get_security_alert(&parsed.repo, parsed.number, kind)
+        .await
     {
         Ok(Some(a)) => a,
         Ok(None) => {
@@ -496,6 +506,7 @@ pub(super) async fn handle_dispatch_fix_agent(
     let has_active_fix_agent = state
         .db
         .alert_agent_status(&parsed.repo, parsed.number, kind)
+        .await
         .ok()
         .flatten()
         .map(|s| s == ReviewAgentStatus::Reviewing)
@@ -539,13 +550,16 @@ pub(super) async fn handle_dispatch_fix_agent(
     match result {
         Ok(dispatch_result) => {
             // set_alert_agent also sets agent_status = 'reviewing'
-            match db.set_alert_agent(
-                &repo,
-                number,
-                kind,
-                &dispatch_result.tmux_window,
-                &dispatch_result.worktree_path,
-            ) {
+            match db
+                .set_alert_agent(
+                    &repo,
+                    number,
+                    kind,
+                    &dispatch_result.tmux_window,
+                    &dispatch_result.worktree_path,
+                )
+                .await
+            {
                 Ok(true) => {}
                 Ok(false) => tracing::warn!(
                     "dispatch_fix_agent: alert {repo}#{number} not found in DB to persist agent"

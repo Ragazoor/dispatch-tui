@@ -6,18 +6,20 @@ use crate::models::{CiStatus, ReviewAgentStatus, ReviewDecision, ReviewPr, Revie
 
 use super::super::Database;
 
+#[async_trait::async_trait]
 impl super::super::PrStore for Database {
-    fn save_prs(&self, kind: super::super::PrKind, prs: &[ReviewPr]) -> Result<()> {
-        let conn = self.conn()?;
-        save_prs_to_table(&conn, kind.table_name(), prs)
+    async fn save_prs(&self, kind: super::super::PrKind, prs: &[ReviewPr]) -> Result<()> {
+        let prs_owned = prs.to_vec();
+        self.db_call(move |conn| save_prs_to_table(conn, kind.table_name(), &prs_owned))
+            .await
     }
 
-    fn load_prs(&self, kind: super::super::PrKind) -> Result<Vec<ReviewPr>> {
-        let conn = self.conn()?;
-        load_prs_from_table(&conn, kind.table_name())
+    async fn load_prs(&self, kind: super::super::PrKind) -> Result<Vec<ReviewPr>> {
+        self.db_call(move |conn| load_prs_from_table(conn, kind.table_name()))
+            .await
     }
 
-    fn set_pr_agent(
+    async fn set_pr_agent(
         &self,
         kind: super::super::PrKind,
         repo: &str,
@@ -26,47 +28,64 @@ impl super::super::PrStore for Database {
         worktree: &str,
     ) -> Result<bool> {
         let table = kind.table_name();
-        let conn = self.conn()?;
-        let rows = conn.execute(
-            &format!("UPDATE {table} SET tmux_window = ?1, worktree = ?2, agent_status = 'reviewing' WHERE repo = ?3 AND number = ?4"),
-            params![tmux_window, worktree, repo, number],
-        )?;
-        Ok(rows > 0)
+        let repo = repo.to_string();
+        let tmux_window = tmux_window.to_string();
+        let worktree = worktree.to_string();
+        self.db_call(move |conn| {
+            let rows = conn.execute(
+                &format!("UPDATE {table} SET tmux_window = ?1, worktree = ?2, agent_status = 'reviewing' WHERE repo = ?3 AND number = ?4"),
+                params![tmux_window, worktree, repo, number],
+            )?;
+            Ok(rows > 0)
+        })
+        .await
     }
 
-    fn get_review_pr(&self, repo: &str, number: i64) -> Result<Option<ReviewPr>> {
-        let conn = self.conn()?;
-        for table in &["review_prs", "my_prs"] {
-            let result = load_pr_by_key(&conn, table, repo, number)?;
-            if result.is_some() {
-                return Ok(result);
+    async fn get_review_pr(&self, repo: &str, number: i64) -> Result<Option<ReviewPr>> {
+        let repo = repo.to_string();
+        self.db_call(move |conn| {
+            for table in &["review_prs", "my_prs"] {
+                let result = load_pr_by_key(conn, table, &repo, number)?;
+                if result.is_some() {
+                    return Ok(result);
+                }
             }
-        }
-        Ok(None)
+            Ok(None)
+        })
+        .await
     }
 
-    fn update_agent_status(&self, repo: &str, number: i64, status: Option<&str>) -> Result<String> {
-        let conn = self.conn()?;
-        for table in &["review_prs", "my_prs", "bot_prs"] {
+    async fn update_agent_status(
+        &self,
+        repo: &str,
+        number: i64,
+        status: Option<&str>,
+    ) -> Result<String> {
+        let repo = repo.to_string();
+        let status = status.map(|s| s.to_string());
+        self.db_call(move |conn| {
+            for table in &["review_prs", "my_prs", "bot_prs"] {
+                let affected = conn.execute(
+                    &format!("UPDATE {table} SET agent_status = ?1 WHERE repo = ?2 AND number = ?3 AND tmux_window IS NOT NULL"),
+                    params![status, repo, number],
+                )?;
+                if affected > 0 {
+                    return Ok(table.to_string());
+                }
+            }
             let affected = conn.execute(
-                &format!("UPDATE {table} SET agent_status = ?1 WHERE repo = ?2 AND number = ?3 AND tmux_window IS NOT NULL"),
+                "UPDATE security_alerts SET agent_status = ?1 WHERE repo = ?2 AND number = ?3 AND tmux_window IS NOT NULL",
                 params![status, repo, number],
             )?;
             if affected > 0 {
-                return Ok(table.to_string());
+                return Ok("security_alerts".to_string());
             }
-        }
-        let affected = conn.execute(
-            "UPDATE security_alerts SET agent_status = ?1 WHERE repo = ?2 AND number = ?3 AND tmux_window IS NOT NULL",
-            params![status, repo, number],
-        )?;
-        if affected > 0 {
-            return Ok("security_alerts".to_string());
-        }
-        anyhow::bail!("No active agent found for {repo}#{number}");
+            anyhow::bail!("No active agent found for {repo}#{number}");
+        })
+        .await
     }
 
-    fn pr_agent_status(
+    async fn pr_agent_status(
         &self,
         table: &str,
         repo: &str,
@@ -76,21 +95,25 @@ impl super::super::PrStore for Database {
             matches!(table, "review_prs" | "my_prs" | "bot_prs"),
             "invalid PR table: {table}"
         );
-        let conn = self.conn()?;
-        let result: Option<Option<String>> = conn
-            .query_row(
-                &format!(
-                    "SELECT agent_status FROM {table} WHERE repo = ?1 AND number = ?2 AND tmux_window IS NOT NULL"
-                ),
-                params![repo, number],
-                |row| row.get(0),
-            )
-            .optional()
-            .context("Failed to query pr_agent_status")?;
-        Ok(result
-            .flatten()
-            .as_deref()
-            .and_then(ReviewAgentStatus::from_db_str))
+        let table = table.to_string();
+        let repo = repo.to_string();
+        self.db_call(move |conn| {
+            let result: Option<Option<String>> = conn
+                .query_row(
+                    &format!(
+                        "SELECT agent_status FROM {table} WHERE repo = ?1 AND number = ?2 AND tmux_window IS NOT NULL"
+                    ),
+                    params![repo, number],
+                    |row| row.get(0),
+                )
+                .optional()
+                .context("Failed to query pr_agent_status")?;
+            Ok(result
+                .flatten()
+                .as_deref()
+                .and_then(ReviewAgentStatus::from_db_str))
+        })
+        .await
     }
 }
 
@@ -98,28 +121,32 @@ impl super::super::PrStore for Database {
 // PrWorkflowStore
 // ---------------------------------------------------------------------------
 
+#[async_trait::async_trait]
 impl super::super::PrWorkflowStore for Database {
-    fn insert_pr_workflow_if_absent(
+    async fn insert_pr_workflow_if_absent(
         &self,
         repo: &str,
         number: i64,
         kind: crate::models::WorkflowItemKind,
     ) -> anyhow::Result<()> {
-        let conn = self.conn()?;
-        conn.execute(
-            "INSERT OR IGNORE INTO pr_workflow_states (repo, number, kind, state, updated_at)
-             VALUES (?1, ?2, ?3, 'backlog', ?4)",
-            params![
-                repo,
-                number,
-                kind.as_db_str(),
-                chrono::Utc::now().to_rfc3339(),
-            ],
-        )?;
-        Ok(())
+        let repo = repo.to_string();
+        self.db_call(move |conn| {
+            conn.execute(
+                "INSERT OR IGNORE INTO pr_workflow_states (repo, number, kind, state, updated_at)
+                 VALUES (?1, ?2, ?3, 'backlog', ?4)",
+                params![
+                    repo,
+                    number,
+                    kind.as_db_str(),
+                    chrono::Utc::now().to_rfc3339(),
+                ],
+            )?;
+            Ok(())
+        })
+        .await
     }
 
-    fn upsert_pr_workflow(
+    async fn upsert_pr_workflow(
         &self,
         repo: &str,
         number: i64,
@@ -127,133 +154,148 @@ impl super::super::PrWorkflowStore for Database {
         state: &str,
         sub_state: Option<&str>,
     ) -> anyhow::Result<()> {
-        let conn = self.conn()?;
-        conn.execute(
-            "INSERT INTO pr_workflow_states (repo, number, kind, state, sub_state, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-             ON CONFLICT(repo, number, kind) DO UPDATE SET
-                 state = excluded.state,
-                 sub_state = excluded.sub_state,
-                 updated_at = excluded.updated_at",
-            params![
-                repo,
-                number,
-                kind.as_db_str(),
-                state,
-                sub_state,
-                chrono::Utc::now().to_rfc3339(),
-            ],
-        )?;
-        Ok(())
+        let repo = repo.to_string();
+        let state = state.to_string();
+        let sub_state = sub_state.map(|s| s.to_string());
+        self.db_call(move |conn| {
+            conn.execute(
+                "INSERT INTO pr_workflow_states (repo, number, kind, state, sub_state, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(repo, number, kind) DO UPDATE SET
+                     state = excluded.state,
+                     sub_state = excluded.sub_state,
+                     updated_at = excluded.updated_at",
+                params![
+                    repo,
+                    number,
+                    kind.as_db_str(),
+                    state,
+                    sub_state,
+                    chrono::Utc::now().to_rfc3339(),
+                ],
+            )?;
+            Ok(())
+        })
+        .await
     }
 
-    fn get_pr_workflow(
+    async fn get_pr_workflow(
         &self,
         repo: &str,
         number: i64,
         kind: crate::models::WorkflowItemKind,
     ) -> anyhow::Result<Option<super::super::PrWorkflowRow>> {
-        let conn = self.conn()?;
-        let mut stmt = conn.prepare(
-            "SELECT repo, number, kind, state, sub_state, updated_at
-             FROM pr_workflow_states
-             WHERE repo = ?1 AND number = ?2 AND kind = ?3",
-        )?;
-        let row = stmt
-            .query_row(params![repo, number, kind.as_db_str()], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, Option<String>>(4)?,
-                    row.get::<_, String>(5)?,
-                ))
-            })
-            .optional()?;
-
-        let Some((repo, number, kind_str, state, sub_state, updated_str)) = row else {
-            return Ok(None);
-        };
-        let kind = crate::models::WorkflowItemKind::from_db_str(&kind_str)
-            .ok_or_else(|| anyhow::anyhow!("unknown workflow kind: {kind_str}"))?;
-        let updated_at = updated_str
-            .parse::<chrono::DateTime<chrono::Utc>>()
-            .map_err(|e| anyhow::anyhow!("bad updated_at timestamp: {e}"))?;
-        Ok(Some(super::super::PrWorkflowRow {
-            repo,
-            number,
-            kind,
-            state,
-            sub_state,
-            updated_at,
-        }))
-    }
-
-    fn list_pr_workflows(&self) -> anyhow::Result<Vec<super::super::PrWorkflowRow>> {
-        let conn = self.conn()?;
-        let mut stmt = conn.prepare(
-            "SELECT repo, number, kind, state, sub_state, updated_at
-             FROM pr_workflow_states",
-        )?;
-        let rows = stmt
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, Option<String>>(4)?,
-                    row.get::<_, String>(5)?,
-                ))
-            })?
-            .map(|r| {
-                let (repo, number, kind_str, state, sub_state, updated_str) = r?;
-                let kind = crate::models::WorkflowItemKind::from_db_str(&kind_str)
-                    .ok_or_else(|| rusqlite::Error::InvalidQuery)?;
-                let updated_at = updated_str
-                    .parse::<chrono::DateTime<chrono::Utc>>()
-                    .map_err(|_| rusqlite::Error::InvalidQuery)?;
-                Ok(super::super::PrWorkflowRow {
-                    repo,
-                    number,
-                    kind,
-                    state,
-                    sub_state,
-                    updated_at,
+        let repo = repo.to_string();
+        self.db_call(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT repo, number, kind, state, sub_state, updated_at
+                 FROM pr_workflow_states
+                 WHERE repo = ?1 AND number = ?2 AND kind = ?3",
+            )?;
+            let row = stmt
+                .query_row(params![repo, number, kind.as_db_str()], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, String>(5)?,
+                    ))
                 })
-            })
-            .collect::<Result<Vec<_>, rusqlite::Error>>()?;
-        Ok(rows)
+                .optional()?;
+
+            let Some((repo, number, kind_str, state, sub_state, updated_str)) = row else {
+                return Ok(None);
+            };
+            let kind = crate::models::WorkflowItemKind::from_db_str(&kind_str)
+                .ok_or_else(|| anyhow::anyhow!("unknown workflow kind: {kind_str}"))?;
+            let updated_at = updated_str
+                .parse::<chrono::DateTime<chrono::Utc>>()
+                .map_err(|e| anyhow::anyhow!("bad updated_at timestamp: {e}"))?;
+            Ok(Some(super::super::PrWorkflowRow {
+                repo,
+                number,
+                kind,
+                state,
+                sub_state,
+                updated_at,
+            }))
+        })
+        .await
     }
 
-    fn find_pr_workflow_kind(
+    async fn list_pr_workflows(&self) -> anyhow::Result<Vec<super::super::PrWorkflowRow>> {
+        self.db_call(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT repo, number, kind, state, sub_state, updated_at
+                 FROM pr_workflow_states",
+            )?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, String>(5)?,
+                    ))
+                })?
+                .map(|r| {
+                    let (repo, number, kind_str, state, sub_state, updated_str) = r?;
+                    let kind = crate::models::WorkflowItemKind::from_db_str(&kind_str)
+                        .ok_or_else(|| rusqlite::Error::InvalidQuery)?;
+                    let updated_at = updated_str
+                        .parse::<chrono::DateTime<chrono::Utc>>()
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?;
+                    Ok(super::super::PrWorkflowRow {
+                        repo,
+                        number,
+                        kind,
+                        state,
+                        sub_state,
+                        updated_at,
+                    })
+                })
+                .collect::<Result<Vec<_>, rusqlite::Error>>()?;
+            Ok(rows)
+        })
+        .await
+    }
+
+    async fn find_pr_workflow_kind(
         &self,
         repo: &str,
         number: i64,
     ) -> anyhow::Result<Option<crate::models::WorkflowItemKind>> {
-        let conn = self.conn()?;
-        let kind_str: Option<String> = conn
-            .query_row(
-                "SELECT kind FROM pr_workflow_states WHERE repo = ?1 AND number = ?2 LIMIT 1",
-                params![repo, number],
-                |row| row.get(0),
-            )
-            .optional()?;
-        Ok(kind_str
-            .as_deref()
-            .and_then(crate::models::WorkflowItemKind::from_db_str))
+        let repo = repo.to_string();
+        self.db_call(move |conn| {
+            let kind_str: Option<String> = conn
+                .query_row(
+                    "SELECT kind FROM pr_workflow_states WHERE repo = ?1 AND number = ?2 LIMIT 1",
+                    params![repo, number],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            Ok(kind_str
+                .as_deref()
+                .and_then(crate::models::WorkflowItemKind::from_db_str))
+        })
+        .await
     }
 
-    fn prune_done_pr_workflows(&self, older_than: chrono::Duration) -> anyhow::Result<()> {
-        let conn = self.conn()?;
-        let cutoff = chrono::Utc::now() - older_than;
-        conn.execute(
-            "DELETE FROM pr_workflow_states
-             WHERE state = 'done' AND updated_at < ?1",
-            params![cutoff.to_rfc3339()],
-        )?;
-        Ok(())
+    async fn prune_done_pr_workflows(&self, older_than: chrono::Duration) -> anyhow::Result<()> {
+        self.db_call(move |conn| {
+            let cutoff = chrono::Utc::now() - older_than;
+            conn.execute(
+                "DELETE FROM pr_workflow_states
+                 WHERE state = 'done' AND updated_at < ?1",
+                params![cutoff.to_rfc3339()],
+            )?;
+            Ok(())
+        })
+        .await
     }
 }
 
