@@ -644,3 +644,131 @@ pub fn format_detail_age(updated_at: DateTime<Utc>, now: DateTime<Utc>) -> Strin
         }
     }
 }
+
+/// Time without a PreToolUse event before a running agent is considered Stale.
+pub const ACTIVE_THRESHOLD: chrono::Duration = chrono::Duration::minutes(2);
+
+/// Live activity classification for a running agent, derived from hook event
+/// timestamps. Distinct from the wallclock `Staleness` enum (which colors card
+/// ages across all statuses).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentActivity {
+    Active,
+    Waiting,
+    Stale,
+}
+
+impl AgentActivity {
+    /// Map the classifier output to the visible `SubStatus` for a Running task.
+    pub fn to_sub_status(self) -> SubStatus {
+        match self {
+            AgentActivity::Active => SubStatus::Active,
+            AgentActivity::Waiting => SubStatus::NeedsInput,
+            AgentActivity::Stale => SubStatus::Stale,
+        }
+    }
+}
+
+/// Classify a running agent's activity from its hook event timestamps.
+///
+/// Rules (in order):
+/// 1. Notification newer than PreToolUse (or no PreToolUse) → Waiting.
+/// 2. PreToolUse within ACTIVE_THRESHOLD → Active.
+/// 3. Otherwise → Stale (includes the no-events-yet case).
+pub fn classify_agent_activity(
+    last_pre_tool_use_at: Option<chrono::DateTime<chrono::Utc>>,
+    last_notification_at: Option<chrono::DateTime<chrono::Utc>>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> AgentActivity {
+    if let Some(notif) = last_notification_at {
+        let notif_is_newer = last_pre_tool_use_at.is_none_or(|p| notif > p);
+        if notif_is_newer {
+            return AgentActivity::Waiting;
+        }
+    }
+    match last_pre_tool_use_at {
+        Some(ts) if now.signed_duration_since(ts) <= ACTIVE_THRESHOLD => AgentActivity::Active,
+        _ => AgentActivity::Stale,
+    }
+}
+
+#[cfg(test)]
+mod activity_tests {
+    use super::*;
+    use chrono::{Duration, Utc};
+
+    fn at(min_ago: i64, now: chrono::DateTime<Utc>) -> chrono::DateTime<Utc> {
+        now - Duration::minutes(min_ago)
+    }
+
+    #[test]
+    fn no_events_classifies_stale() {
+        let now = Utc::now();
+        assert_eq!(classify_agent_activity(None, None, now), AgentActivity::Stale);
+    }
+
+    #[test]
+    fn recent_pre_tool_use_classifies_active() {
+        let now = Utc::now();
+        assert_eq!(
+            classify_agent_activity(Some(at(1, now)), None, now),
+            AgentActivity::Active
+        );
+    }
+
+    #[test]
+    fn old_pre_tool_use_classifies_stale() {
+        let now = Utc::now();
+        assert_eq!(
+            classify_agent_activity(Some(at(10, now)), None, now),
+            AgentActivity::Stale
+        );
+    }
+
+    #[test]
+    fn notification_after_pre_tool_use_classifies_waiting() {
+        let now = Utc::now();
+        assert_eq!(
+            classify_agent_activity(Some(at(5, now)), Some(at(1, now)), now),
+            AgentActivity::Waiting
+        );
+    }
+
+    #[test]
+    fn pre_tool_use_after_notification_classifies_active() {
+        let now = Utc::now();
+        assert_eq!(
+            classify_agent_activity(Some(at(1, now)), Some(at(5, now)), now),
+            AgentActivity::Active
+        );
+    }
+
+    #[test]
+    fn notification_only_classifies_waiting() {
+        let now = Utc::now();
+        assert_eq!(
+            classify_agent_activity(None, Some(at(1, now)), now),
+            AgentActivity::Waiting
+        );
+    }
+
+    #[test]
+    fn boundary_exactly_at_threshold_classifies_active() {
+        let now = Utc::now();
+        let exactly = now - ACTIVE_THRESHOLD;
+        assert_eq!(
+            classify_agent_activity(Some(exactly), None, now),
+            AgentActivity::Active
+        );
+    }
+
+    #[test]
+    fn just_past_threshold_classifies_stale() {
+        let now = Utc::now();
+        let past = now - ACTIVE_THRESHOLD - Duration::seconds(1);
+        assert_eq!(
+            classify_agent_activity(Some(past), None, now),
+            AgentActivity::Stale
+        );
+    }
+}
