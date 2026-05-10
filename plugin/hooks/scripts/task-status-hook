@@ -3,7 +3,9 @@
 #
 # Installed alongside dispatch (or symlinked into PATH).
 # Called by Claude Code PreToolUse, Stop, and Notification hooks with JSON on stdin.
-# Extracts the task ID from the worktree directory name and updates task status.
+# Extracts the task ID from the worktree directory name and forwards the event
+# to `dispatch hook <id> <event>` which records the timestamp and applies the
+# appropriate side effects.
 
 set -euo pipefail
 
@@ -21,9 +23,9 @@ case "$EVENT" in
         # Skip dispatch MCP calls — management operations, not implementation work.
         # Without this, the wrap-up skill's get_task and wrap_up calls clobber review status.
         [[ "$TOOL" == mcp__dispatch__* ]] && exit 0
-        dispatch update "$ID" running
+        dispatch hook "$ID" pre_tool_use
         ;;
-    Stop)         dispatch update "$ID" review  --only-if running ;;
-    Notification) dispatch update "$ID" running --only-if running --sub-status needs_input ;;
+    Stop)         dispatch hook "$ID" stop ;;
+    Notification) dispatch hook "$ID" notification ;;
     *)            exit 0 ;;
 esac

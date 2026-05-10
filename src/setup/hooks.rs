@@ -62,17 +62,22 @@ mod tests {
     }
 
     #[test]
-    fn hook_script_notification_uses_sub_status_needs_input() {
-        // Notification must NOT change status to review — it keeps running and
-        // sets sub_status=needs_input so the task stays in the Blocked visual column.
+    fn hook_script_uses_dispatch_hook_subcommand() {
         let s = hook_script();
         assert!(
-            s.contains("--sub-status needs_input"),
-            "Notification handler must use --sub-status needs_input, not --needs-input"
+            s.contains("dispatch hook"),
+            "must use new `dispatch hook` subcommand"
+        );
+        assert!(s.contains("pre_tool_use"));
+        assert!(s.contains("notification"));
+        assert!(s.contains("stop"));
+        assert!(
+            !s.contains("--sub-status"),
+            "old --sub-status flag must not appear"
         );
         assert!(
             !s.contains("--needs-input"),
-            "Deprecated --needs-input flag must not appear in the hook script"
+            "deprecated --needs-input flag must not appear"
         );
     }
 
