@@ -240,11 +240,17 @@ entity Project {
     @guidance
         -- is_default is set at seeding time and is never modified.
         -- The service layer prevents deletion of the default project.
+
+    @invariant DefaultProjectIsUndeletable
+        -- The Project where is_default = true cannot be deleted.
+        -- delete_project_and_move_items rejects the call before any DB
+        -- mutation when the target project has is_default = true.
 }
 
--- Learning captures knowledge a dispatched agent discovered and proposes back for
--- human review. Approved learnings are injected into future dispatch prompts for the
--- matching scope. Human approval is always required before an entry affects dispatches.
+-- Learning captures knowledge a dispatched agent discovered. Entries land as
+-- approved immediately and are injected into future dispatch prompts for the
+-- matching scope; humans curate the active pool by rejecting or archiving entries
+-- via the TUI knowledge-base panel.
 entity Learning {
     kind: LearningKind
     summary: String          -- one-sentence digest; injected into dispatch prompts
@@ -265,10 +271,8 @@ entity Learning {
     updated_at: Timestamp
 
     transitions status {
-        proposed -> approved
-        proposed -> rejected
-        approved -> archived
         approved -> rejected
+        approved -> archived
         approved -> needs_review     -- system-driven: a `wrong` verdict on an
                                      -- approved learning flags it for human curation
         needs_review -> approved     -- human-driven: curator confirms the entry is fine

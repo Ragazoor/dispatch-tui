@@ -148,6 +148,8 @@ rule DispatchReviewAgent {
         --   + src/dispatch.rs::dispatch_review_agent.
         -- set_pr_agent() in the DB layer sets tmux_window, worktree, and
         --   agent_status = 'reviewing' atomically.
+        -- Uses `--permission-mode acceptEdits` so the agent can make edits
+        --   without per-tool prompts (contrast: task-tag agents use `plan`).
 }
 
 rule DispatchFixAgent {
@@ -168,6 +170,82 @@ rule DispatchFixAgent {
         -- set_alert_agent() in the DB layer is the write path.
         -- Implementation: src/mcp/handlers/review.rs::handle_dispatch_fix_agent
         --   + src/dispatch.rs::dispatch_fix_agent.
+        -- Uses `--permission-mode acceptEdits` so the agent can make edits
+        --   without per-tool prompts (contrast: task-tag agents use `plan`).
+}
+
+-- == Read surfaces (MCP) ==
+
+rule ListReviewPrsViaMcp {
+    when: McpListReviewPrs(mode?, repo?)
+
+    -- Read-only listing of PRs from the most recently fetched board state.
+    -- mode filters by reviewer (PRs where the user is a requested reviewer),
+    -- author (PRs the user authored), or all (default). repo filters by the
+    -- "owner/repo" GitHub identifier.
+
+    ensures:
+        ReviewPrListReturned(mode: mode, repo: repo)
+
+    @guidance
+        -- MCP tool: list_review_prs(mode?, repo?)
+        -- Filters: mode in {reviewer, author, all (default)}; repo is an
+        --   exact "owner/repo" match. Both optional, combined with AND.
+        -- Read-only: returns the matching ReviewPr records with key fields.
+        -- Implementation: src/mcp/handlers/review.rs::handle_list_review_prs.
+        -- Returns key fields per PR (number, repo, title, author, url,
+        --   review_decision, ci_status, agent_status, ...).
+}
+
+rule GetReviewPrViaMcp {
+    when: McpGetReviewPr(repo, number)
+
+    requires: repo != null
+    requires: number != null
+
+    ensures:
+        ReviewPrDetailReturned(repo: repo, number: number)
+
+    @guidance
+        -- MCP tool: get_review_pr(repo, number)
+        -- Read-only: returns the ReviewPr record matching (repo, number)
+        --   with full detail (body, labels, reviewers, agent fields).
+        -- Implementation: src/mcp/handlers/review.rs::handle_get_review_pr.
+}
+
+rule ListSecurityAlertsViaMcp {
+    when: McpListSecurityAlerts(repo?, severity?, kind?)
+
+    -- Read-only listing of security alerts from the most recently fetched
+    -- board state. Filters are all optional and combined with AND.
+
+    ensures:
+        SecurityAlertListReturned(repo: repo, severity: severity, kind: kind)
+
+    @guidance
+        -- MCP tool: list_security_alerts(repo?, severity?, kind?)
+        -- severity in {critical, high, medium, low}.
+        -- kind in {dependabot, code_scanning}.
+        -- Read-only: returns matching SecurityAlert records.
+        -- Implementation: src/mcp/handlers/review.rs::handle_list_security_alerts.
+}
+
+rule GetSecurityAlertViaMcp {
+    when: McpGetSecurityAlert(repo, number, kind)
+
+    requires: repo != null
+    requires: number != null
+    requires: kind != null
+
+    ensures:
+        SecurityAlertDetailReturned(repo: repo, number: number, kind: kind)
+
+    @guidance
+        -- MCP tool: get_security_alert(repo, number, kind)
+        -- Read-only: returns the SecurityAlert record matching
+        --   (repo, number, kind) with full detail (package, vulnerable_range,
+        --   fixed_version, cvss_score, description, agent fields).
+        -- Implementation: src/mcp/handlers/review.rs::handle_get_security_alert.
 }
 
 -- == Agent Status Update (MCP) ==

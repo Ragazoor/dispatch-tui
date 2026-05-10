@@ -178,6 +178,10 @@ rule FeedTick {
         -- Command execution MUST NOT block the event loop. Each eligible
         -- epic's command is spawned as a background tokio::task so that
         -- key events and MCP notifications remain responsive during fetch.
+        -- FeedRunner runs in its own loop at FEED_POLL_INTERVAL (2s,
+        -- src/feed.rs:46), independent from the TUI's TickInterval /
+        -- TICK_INTERVAL. Both are 2s today, but the constants are kept
+        -- separate so the two concerns can evolve independently.
         -- Implementation: src/feed.rs::FeedRunner.
 }
 

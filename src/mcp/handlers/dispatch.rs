@@ -111,8 +111,8 @@ mcp_tools! {
                 },
                 "tag": {
                     "type": "string",
-                    "description": "Task tag: bug, feature, or chore. Controls dispatch behavior.",
-                    "enum": ["bug", "feature", "chore"]
+                    "description": "Task tag: bug, feature, chore, pr-review, research, or fix. Controls dispatch behavior.",
+                    "enum": ["bug", "feature", "chore", "pr-review", "research", "fix"]
                 },
                 "sub_status": {
                     "type": "string",
@@ -179,8 +179,8 @@ mcp_tools! {
                 },
                 "tag": {
                     "type": "string",
-                    "description": "Task tag: bug, feature, or chore. Controls dispatch behavior.",
-                    "enum": ["bug", "feature", "chore"]
+                    "description": "Task tag: bug, feature, chore, pr-review, research, or fix. Controls dispatch behavior.",
+                    "enum": ["bug", "feature", "chore", "pr-review", "research", "fix"]
                 },
                 "base_branch": {
                     "type": "string",
@@ -326,7 +326,7 @@ mcp_tools! {
         };
 
     async "dispatch_next" => tasks::handle_dispatch_next,
-        "Dispatch the next backlog subtask for an epic. Creates a worktree from main and launches a tmux session. Returns success even if there are no backlog tasks remaining.",
+        "Dispatch the next backlog subtask for an epic. Creates a worktree from the task's base_branch (origin/<base_branch> when reachable) and launches a tmux session. Returns success even if there are no backlog tasks remaining.",
         {
             "type": "object",
             "properties": {

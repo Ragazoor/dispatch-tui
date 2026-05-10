@@ -93,12 +93,13 @@ impl EpicService {
     }
 
     pub fn create_epic(&self, params: CreateEpicParams) -> Result<Epic, ServiceError> {
+        let repo_path = crate::models::expand_tilde(&params.repo_path);
         let epic = self
             .db
             .create_epic(
                 &params.title,
                 &params.description,
-                &params.repo_path,
+                &repo_path,
                 params.parent_epic_id,
                 params.project_id,
             )
