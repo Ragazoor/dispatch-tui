@@ -72,8 +72,8 @@ pub async fn run_tui(
     }
 
     // 1. Open database and load initial tasks
-    let database = Arc::new(db::Database::open(db_path)?);
-    let tasks = database.list_all()?;
+    let database = Arc::new(db::Database::open(db_path).await?);
+    let tasks = database.list_all().await?;
 
     // 2. Spawn MCP server with notification channel
     let runner: Arc<dyn ProcessRunner> = Arc::new(RealProcessRunner);
@@ -108,7 +108,11 @@ pub async fn run_tui(
 
     // 3. Create App and load saved repo paths
     let projects = database.list_projects().await?;
-    let saved_project = database.get_setting_string("last_project").ok().flatten();
+    let saved_project = database
+        .get_setting_string("last_project")
+        .await
+        .ok()
+        .flatten();
     let initial_project_id = resolve_initial_project(&projects, saved_project);
     let mut app = App::new(
         tasks,
@@ -116,13 +120,13 @@ pub async fn run_tui(
         Duration::from_secs(inactivity_timeout),
     );
     app.update(Message::ProjectsUpdated(projects));
-    let paths = database.list_repo_paths().unwrap_or_default();
+    let paths = database.list_repo_paths().await.unwrap_or_default();
     app.update(Message::RepoPathsUpdated(paths));
-    let usage = database.get_all_usage().unwrap_or_default();
+    let usage = database.get_all_usage().await.unwrap_or_default();
     app.update(Message::RefreshUsage(usage));
 
     // Seed default GitHub query strings (no-op if already set)
-    if let Err(e) = database.seed_github_query_defaults() {
+    if let Err(e) = database.seed_github_query_defaults().await {
         app.update(Message::System(
             crate::tui::messages::SystemMessage::StatusInfo(format!(
                 "Failed to seed GitHub query defaults: {e}"
@@ -130,11 +134,11 @@ pub async fn run_tui(
         ));
     }
 
-    load_notifications_pref(&*database, &mut app);
-    load_main_session(&*database, &*runner, &mut app);
-    load_per_project_repo_filters(&*database, &mut app);
+    load_notifications_pref(&*database, &mut app).await;
+    load_main_session(&*database, &*runner, &mut app).await;
+    load_per_project_repo_filters(&*database, &mut app).await;
     for msg in [
-        load_filter_presets(&*database, &mut app),
+        load_filter_presets(&*database, &mut app).await,
         apply_tmux_focus_warning(&*runner),
     ]
     .into_iter()
@@ -155,6 +159,7 @@ pub async fn run_tui(
     let tips = crate::tips::embedded_tips();
     let (seen_up_to, show_mode) = database
         .get_tips_state()
+        .await
         .unwrap_or((0, crate::models::TipsShowMode::Always));
     if let Some(starting_index) = tips_starting_index(&tips, seen_up_to, show_mode) {
         app.update(Message::ShowTips {
@@ -302,12 +307,12 @@ impl TuiRuntime {
         format!("DB error {action}: {e}")
     }
 
-    fn create_task(
+    async fn create_task(
         &self,
         app: &mut App,
         params: crate::service::CreateTaskParams,
     ) -> Option<models::Task> {
-        match self.task_svc.create_task_returning(params) {
+        match self.task_svc.create_task_returning(params).await {
             Ok(task) => Some(task),
             Err(e) => {
                 app.update(Message::System(crate::tui::messages::SystemMessage::Error(
@@ -464,29 +469,40 @@ async fn execute_commands(
 // init load helpers — extracted from run_tui's startup block
 // ---------------------------------------------------------------------------
 
-fn load_main_session(
+async fn load_main_session(
     db: &dyn db::SettingsStore,
     runner: &dyn crate::process::ProcessRunner,
     app: &mut App,
 ) {
-    if let Some(dir) = db.get_setting_string("main_session.dir").ok().flatten() {
+    if let Some(dir) = db
+        .get_setting_string("main_session.dir")
+        .await
+        .ok()
+        .flatten()
+    {
         if !dir.is_empty() {
             app.set_main_session_dir(Some(dir));
         }
     }
-    if let Some(window) = db.get_setting_string("main_session.window").ok().flatten() {
+    if let Some(window) = db
+        .get_setting_string("main_session.window")
+        .await
+        .ok()
+        .flatten()
+    {
         if !window.is_empty() && tmux::has_window(&window, runner).unwrap_or(false) {
             app.set_main_session(Some(window));
         } else if !window.is_empty() {
             // Window stored but no longer alive — clear stale entry.
-            let _ = db.set_setting_string("main_session.window", "");
+            let _ = db.set_setting_string("main_session.window", "").await;
         }
     }
 }
 
-fn load_notifications_pref(db: &dyn db::SettingsStore, app: &mut App) {
+async fn load_notifications_pref(db: &dyn db::SettingsStore, app: &mut App) {
     let enabled = db
         .get_setting_bool("notifications_enabled")
+        .await
         .unwrap_or(None)
         .unwrap_or(false);
     app.set_notifications_enabled(enabled);
@@ -545,7 +561,10 @@ fn parse_repo_filter_mode(raw: Option<&str>) -> RepoFilterMode {
 /// Legacy migration: if the old global `repo_filter` / `repo_filter_mode`
 /// keys exist and the seeded default project has no per-project entry yet,
 /// copy them into the default project's slot. Legacy keys are left in place.
-pub(super) fn load_per_project_repo_filters(db: &(dyn db::SettingsStore + Sync), app: &mut App) {
+pub(super) async fn load_per_project_repo_filters(
+    db: &(dyn db::SettingsStore + Sync),
+    app: &mut App,
+) {
     let known_repos: HashSet<String> = app.repo_paths().iter().cloned().collect();
 
     // Per-project saved filters. Cloning the project list is required because
@@ -554,9 +573,11 @@ pub(super) fn load_per_project_repo_filters(db: &(dyn db::SettingsStore + Sync),
         let pid = project.id;
         let raw_repos = db
             .get_setting_string(&format!("repo_filter:{}", pid.0))
+            .await
             .unwrap_or(None);
         let raw_mode = db
             .get_setting_string(&format!("repo_filter_mode:{}", pid.0))
+            .await
             .unwrap_or(None);
         if raw_repos.is_none() && raw_mode.is_none() {
             continue;
@@ -565,20 +586,23 @@ pub(super) fn load_per_project_repo_filters(db: &(dyn db::SettingsStore + Sync),
         app.set_per_project_filter(pid, repos, mode);
     }
 
-    migrate_legacy_global_filter(db, app, &known_repos);
+    migrate_legacy_global_filter(db, app, &known_repos).await;
     app.activate_filter_for_active_project();
 }
 
 /// Fold the pre-555 global `repo_filter` / `repo_filter_mode` keys into the
 /// default project's slot, but only when no per-project entry exists yet
 /// (so a subsequent save under the new keying always wins).
-fn migrate_legacy_global_filter(
+async fn migrate_legacy_global_filter(
     db: &dyn db::SettingsStore,
     app: &mut App,
     known_repos: &HashSet<String>,
 ) {
-    let legacy_repos = db.get_setting_string("repo_filter").unwrap_or(None);
-    let legacy_mode = db.get_setting_string("repo_filter_mode").unwrap_or(None);
+    let legacy_repos = db.get_setting_string("repo_filter").await.unwrap_or(None);
+    let legacy_mode = db
+        .get_setting_string("repo_filter_mode")
+        .await
+        .unwrap_or(None);
     if legacy_repos.is_none() && legacy_mode.is_none() {
         return;
     }
@@ -592,8 +616,8 @@ fn migrate_legacy_global_filter(
     app.set_per_project_filter(default_id, repos, mode);
 }
 
-fn load_filter_presets(db: &dyn db::SettingsStore, app: &mut App) -> Option<Message> {
-    match db.list_filter_presets() {
+async fn load_filter_presets(db: &dyn db::SettingsStore, app: &mut App) -> Option<Message> {
+    match db.list_filter_presets().await {
         Ok(raw) => {
             let _ = app.update(Message::FilterPresetsLoaded(parse_raw_presets(raw, None)));
             None

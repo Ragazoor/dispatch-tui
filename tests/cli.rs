@@ -30,10 +30,9 @@ fn make_plan_file(title: &str, goal: &str) -> NamedTempFile {
 /// Seed a backlog task directly via the DB API so we can drive the
 /// `update` / `list` / `plan` subcommands without the (removed) `create`
 /// subcommand.
-fn seed_task(db_path: &Path, title: &str) -> TaskId {
-    let db = Database::open(db_path).unwrap();
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let project_id = rt.block_on(db.get_default_project()).unwrap().id;
+async fn seed_task(db_path: &Path, title: &str) -> TaskId {
+    let db = Database::open(db_path).await.unwrap();
+    let project_id = db.get_default_project().await.unwrap().id;
     db.create_task(CreateTaskRequest {
         title,
         description: "",
@@ -46,6 +45,7 @@ fn seed_task(db_path: &Path, title: &str) -> TaskId {
         tag: None,
         project_id,
     })
+    .await
     .unwrap()
 }
 
@@ -53,8 +53,8 @@ fn seed_task(db_path: &Path, title: &str) -> TaskId {
 // list
 // ---------------------------------------------------------------------------
 
-#[test]
-fn list_empty_db() {
+#[tokio::test]
+async fn list_empty_db() {
     let db = NamedTempFile::new().unwrap();
     let out = binary()
         .args(["--db", db.path().to_str().unwrap(), "list"])
@@ -68,8 +68,8 @@ fn list_empty_db() {
     );
 }
 
-#[test]
-fn list_unknown_status_fails() {
+#[tokio::test]
+async fn list_unknown_status_fails() {
     let db = NamedTempFile::new().unwrap();
     let out = binary()
         .args([
@@ -84,11 +84,11 @@ fn list_unknown_status_fails() {
     assert!(!out.status.success(), "Expected failure for unknown status");
 }
 
-#[test]
-fn list_filter_by_status() {
+#[tokio::test]
+async fn list_filter_by_status() {
     let db = NamedTempFile::new().unwrap();
     let db_path = db.path().to_str().unwrap();
-    seed_task(db.path(), "Filter Test");
+    seed_task(db.path(), "Filter Test").await;
 
     // list --status backlog -> shows the task
     let out = binary()
@@ -119,8 +119,8 @@ fn list_filter_by_status() {
 // create subcommand removed (tasks are created via MCP only)
 // ---------------------------------------------------------------------------
 
-#[test]
-fn create_subcommand_removed() {
+#[tokio::test]
+async fn create_subcommand_removed() {
     let db = NamedTempFile::new().unwrap();
     let out = binary()
         .args(["--db", db.path().to_str().unwrap(), "create"])
@@ -141,11 +141,11 @@ fn create_subcommand_removed() {
 // update
 // ---------------------------------------------------------------------------
 
-#[test]
-fn update_changes_status() {
+#[tokio::test]
+async fn update_changes_status() {
     let db = NamedTempFile::new().unwrap();
     let db_path = db.path().to_str().unwrap();
-    let id = seed_task(db.path(), "Update Test");
+    let id = seed_task(db.path(), "Update Test").await;
 
     // Update to running
     let out = binary()
@@ -175,11 +175,11 @@ fn update_changes_status() {
     );
 }
 
-#[test]
-fn update_unknown_status_fails() {
+#[tokio::test]
+async fn update_unknown_status_fails() {
     let db = NamedTempFile::new().unwrap();
     let db_path = db.path().to_str().unwrap();
-    let id = seed_task(db.path(), "Error Test");
+    let id = seed_task(db.path(), "Error Test").await;
 
     let out = binary()
         .args(["--db", db_path, "update", &id.0.to_string(), "bogus-status"])
@@ -192,11 +192,11 @@ fn update_unknown_status_fails() {
 // plan
 // ---------------------------------------------------------------------------
 
-#[test]
-fn plan_attaches_to_existing_task() {
+#[tokio::test]
+async fn plan_attaches_to_existing_task() {
     let db = NamedTempFile::new().unwrap();
     let db_path = db.path().to_str().unwrap();
-    let id = seed_task(db.path(), "Plan Target");
+    let id = seed_task(db.path(), "Plan Target").await;
 
     let attach_plan = make_plan_file("Detailed Plan", "Step by step.");
 
@@ -222,8 +222,8 @@ fn plan_attaches_to_existing_task() {
     );
 }
 
-#[test]
-fn plan_nonexistent_file_fails() {
+#[tokio::test]
+async fn plan_nonexistent_file_fails() {
     let db = NamedTempFile::new().unwrap();
     let out = binary()
         .args([
@@ -247,8 +247,8 @@ fn plan_nonexistent_file_fails() {
 // re-introduction has to opt back in deliberately.
 // ---------------------------------------------------------------------------
 
-#[test]
-fn fetch_reviews_subcommand_removed() {
+#[tokio::test]
+async fn fetch_reviews_subcommand_removed() {
     let db = NamedTempFile::new().unwrap();
     let out = binary()
         .args(["--db", db.path().to_str().unwrap(), "fetch-reviews"])
@@ -265,8 +265,8 @@ fn fetch_reviews_subcommand_removed() {
     );
 }
 
-#[test]
-fn fetch_security_subcommand_removed() {
+#[tokio::test]
+async fn fetch_security_subcommand_removed() {
     let db = NamedTempFile::new().unwrap();
     let out = binary()
         .args(["--db", db.path().to_str().unwrap(), "fetch-security"])
@@ -287,8 +287,8 @@ fn fetch_security_subcommand_removed() {
 // verify-feed
 // ---------------------------------------------------------------------------
 
-#[test]
-fn verify_feed_valid_empty_array_succeeds() {
+#[tokio::test]
+async fn verify_feed_valid_empty_array_succeeds() {
     let db = NamedTempFile::new().unwrap();
     let out = binary()
         .args([
@@ -306,8 +306,8 @@ fn verify_feed_valid_empty_array_succeeds() {
     );
 }
 
-#[test]
-fn verify_feed_valid_items_succeeds() {
+#[tokio::test]
+async fn verify_feed_valid_items_succeeds() {
     let db = NamedTempFile::new().unwrap();
     let out = binary()
         .args([
@@ -338,8 +338,8 @@ fn verify_feed_valid_items_succeeds() {
     );
 }
 
-#[test]
-fn verify_feed_missing_tag_fails() {
+#[tokio::test]
+async fn verify_feed_missing_tag_fails() {
     let db = NamedTempFile::new().unwrap();
     let out = binary()
         .args([
@@ -361,8 +361,8 @@ fn verify_feed_missing_tag_fails() {
     );
 }
 
-#[test]
-fn verify_feed_invalid_tag_fails() {
+#[tokio::test]
+async fn verify_feed_invalid_tag_fails() {
     let db = NamedTempFile::new().unwrap();
     let out = binary()
         .args([
@@ -384,8 +384,8 @@ fn verify_feed_invalid_tag_fails() {
     );
 }
 
-#[test]
-fn verify_feed_invalid_json_fails() {
+#[tokio::test]
+async fn verify_feed_invalid_json_fails() {
     let db = NamedTempFile::new().unwrap();
     let out = binary()
         .args([
@@ -407,8 +407,8 @@ fn verify_feed_invalid_json_fails() {
     );
 }
 
-#[test]
-fn verify_feed_command_failure_exits_nonzero() {
+#[tokio::test]
+async fn verify_feed_command_failure_exits_nonzero() {
     let db = NamedTempFile::new().unwrap();
     let out = binary()
         .args(["--db", db.path().to_str().unwrap(), "verify-feed", "exit 7"])

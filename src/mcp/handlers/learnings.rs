@@ -63,7 +63,7 @@ pub(super) async fn handle_record_learning(
     };
 
     let task_id = crate::models::TaskId(parsed.task_id);
-    let task = match state.db.get_task(task_id) {
+    let task = match state.db.get_task(task_id).await {
         Ok(Some(t)) => t,
         Ok(None) => return JsonRpcResponse::err(id, -32602, format!("task {task_id} not found")),
         Err(e) => return JsonRpcResponse::err(id, -32603, format!("database error: {e}")),
@@ -167,7 +167,7 @@ pub(super) async fn handle_query_learnings(
     };
 
     let task_id = crate::models::TaskId(parsed.task_id);
-    let task = match state.db.get_task(task_id) {
+    let task = match state.db.get_task(task_id).await {
         Ok(Some(t)) => t,
         Ok(None) => return JsonRpcResponse::err(id, -32602, format!("task {task_id} not found")),
         Err(e) => return JsonRpcResponse::err(id, -32603, format!("database error: {e}")),

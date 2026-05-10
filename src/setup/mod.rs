@@ -106,7 +106,7 @@ pub fn remove_database(db_path: &std::path::Path) -> Result<bool> {
 // ---------------------------------------------------------------------------
 
 pub async fn run_setup(port: u16, yes: bool, db_path: &Path) -> Result<()> {
-    let db = Database::open(db_path)?;
+    let db = Database::open(db_path).await?;
     let data_dir = db_path
         .parent()
         .context("database path has no parent directory")?;

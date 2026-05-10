@@ -59,7 +59,7 @@ impl TaskService {
 
         let task_id = params.task_id;
         let expanded_repo_path = params.repo_path.as_deref().map(crate::models::expand_tilde);
-        let validated_sub_status = self.validate_sub_status(task_id, &params)?;
+        let validated_sub_status = self.validate_sub_status(task_id, &params).await?;
         let patch = build_task_patch(&params, expanded_repo_path.as_deref(), validated_sub_status);
 
         // Snapshot the task before the patch so we can detect the
@@ -74,7 +74,7 @@ impl TaskService {
                     Some(FieldUpdate::Set(s)) if !s.is_empty()
                 ));
         let prior = if needs_prior {
-            self.db.get_task(task_id).ok().flatten()
+            self.db.get_task(task_id).await.ok().flatten()
         } else {
             None
         };
@@ -87,6 +87,7 @@ impl TaskService {
 
         self.db
             .patch_task(task_id, &patch)
+            .await
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
 
         if let Some(new_epic_id) = params.epic_id {
@@ -120,7 +121,7 @@ impl TaskService {
     /// in practice — Dispatch is a single-process tokio runtime with
     /// cooperative scheduling, so no two MCP handlers run truly concurrently
     /// on the same task. SQLite serialises writes regardless.
-    fn validate_sub_status(
+    async fn validate_sub_status(
         &self,
         task_id: TaskId,
         params: &UpdateTaskParams,
@@ -128,9 +129,16 @@ impl TaskService {
         let Some(ss) = params.sub_status else {
             return Ok(None);
         };
-        let effective_status = params
-            .status
-            .or_else(|| self.db.get_task(task_id).ok().flatten().map(|t| t.status));
+        let effective_status = match params.status {
+            Some(s) => Some(s),
+            None => self
+                .db
+                .get_task(task_id)
+                .await
+                .ok()
+                .flatten()
+                .map(|t| t.status),
+        };
         if let Some(eff) = effective_status {
             if !ss.is_valid_for(eff) {
                 return Err(ServiceError::Validation(format!(
@@ -155,7 +163,7 @@ impl TaskService {
 
     /// Recalculate the parent epic of the given task, if it has one.
     async fn recalculate_epic_for_task(&self, task_id: TaskId) {
-        if let Ok(Some(task)) = self.db.get_task(task_id) {
+        if let Ok(Some(task)) = self.db.get_task(task_id).await {
             if let Some(epic_id) = task.epic_id {
                 self.recalculate_epic(epic_id).await;
             }
@@ -184,11 +192,13 @@ impl TaskService {
             let changed = self
                 .db
                 .update_status_if(task_id, new_status, expected)
+                .await
                 .map_err(|e| ServiceError::Internal(e.to_string()))?;
             if changed {
                 if let Some(ss) = sub_status {
                     self.db
                         .patch_task(task_id, &crate::db::TaskPatch::new().sub_status(ss))
+                        .await
                         .map_err(|e| ServiceError::Internal(e.to_string()))?;
                 }
             }
@@ -200,6 +210,7 @@ impl TaskService {
             }
             self.db
                 .patch_task(task_id, &patch)
+                .await
                 .map_err(|e| ServiceError::Internal(e.to_string()))?;
             true
         };
@@ -211,12 +222,15 @@ impl TaskService {
         Ok(updated)
     }
 
-    pub fn create_task(&self, params: CreateTaskParams) -> Result<TaskId, ServiceError> {
-        Ok(self.create_task_returning(params)?.id)
+    pub async fn create_task(&self, params: CreateTaskParams) -> Result<TaskId, ServiceError> {
+        Ok(self.create_task_returning(params).await?.id)
     }
 
     /// Create a task and return the full Task object (used by TUI).
-    pub fn create_task_returning(&self, params: CreateTaskParams) -> Result<Task, ServiceError> {
+    pub async fn create_task_returning(
+        &self,
+        params: CreateTaskParams,
+    ) -> Result<Task, ServiceError> {
         let repo_path = crate::models::expand_tilde(&params.repo_path);
 
         let plan = params.plan_path.as_deref().map(|p| {
@@ -240,22 +254,24 @@ impl TaskService {
                 tag: params.tag,
                 project_id: params.project_id,
             })
+            .await
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
 
-        self.get_task(task_id)
+        self.get_task(task_id).await
     }
 
-    pub fn delete_task(&self, task_id: TaskId) -> Result<(), ServiceError> {
+    pub async fn delete_task(&self, task_id: TaskId) -> Result<(), ServiceError> {
         // Verify task exists
-        self.get_task(task_id)?;
+        self.get_task(task_id).await?;
 
         self.db
             .delete_task(task_id)
+            .await
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))
     }
 
-    pub fn get_task(&self, task_id: TaskId) -> Result<Task, ServiceError> {
-        match self.db.get_task(task_id) {
+    pub async fn get_task(&self, task_id: TaskId) -> Result<Task, ServiceError> {
+        match self.db.get_task(task_id).await {
             Ok(Some(task)) => Ok(task),
             Ok(None) => Err(ServiceError::NotFound(format!(
                 "Task {} not found",
@@ -265,10 +281,11 @@ impl TaskService {
         }
     }
 
-    pub fn list_tasks(&self, filter: ListTasksFilter) -> Result<Vec<Task>, ServiceError> {
+    pub async fn list_tasks(&self, filter: ListTasksFilter) -> Result<Vec<Task>, ServiceError> {
         let tasks = self
             .db
             .list_all()
+            .await
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
 
         let filtered: Vec<_> = tasks
@@ -298,8 +315,8 @@ impl TaskService {
         Ok(filtered)
     }
 
-    pub fn claim_task(&self, params: ClaimTaskParams) -> Result<Task, ServiceError> {
-        let task = self.get_task(params.task_id)?;
+    pub async fn claim_task(&self, params: ClaimTaskParams) -> Result<Task, ServiceError> {
+        let task = self.get_task(params.task_id).await?;
 
         if task.status != TaskStatus::Backlog {
             return Err(ServiceError::Validation(format!(
@@ -331,13 +348,14 @@ impl TaskService {
                     .worktree(Some(&params.worktree))
                     .tmux_window(Some(&params.tmux_window)),
             )
+            .await
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
 
         Ok(task)
     }
 
-    pub fn validate_wrap_up(&self, task_id: TaskId) -> Result<Task, ServiceError> {
-        let task = self.get_task(task_id)?;
+    pub async fn validate_wrap_up(&self, task_id: TaskId) -> Result<Task, ServiceError> {
+        let task = self.get_task(task_id).await?;
 
         if !crate::dispatch::is_wrappable(&task) {
             return Err(ServiceError::Validation(format!(
@@ -349,21 +367,26 @@ impl TaskService {
         Ok(task)
     }
 
-    pub fn report_usage(&self, task_id: TaskId, usage: &UsageReport) -> Result<(), ServiceError> {
+    pub async fn report_usage(
+        &self,
+        task_id: TaskId,
+        usage: &UsageReport,
+    ) -> Result<(), ServiceError> {
         // Verify task exists
-        self.get_task(task_id)?;
+        self.get_task(task_id).await?;
 
         self.db
             .report_usage(task_id, usage)
+            .await
             .map_err(|e| ServiceError::Internal(format!("Failed to record usage: {e}")))
     }
 
-    pub fn validate_send_message(
+    pub async fn validate_send_message(
         &self,
         from_task_id: TaskId,
         to_task_id: TaskId,
     ) -> Result<(Task, Task), ServiceError> {
-        let from_task = match self.db.get_task(from_task_id) {
+        let from_task = match self.db.get_task(from_task_id).await {
             Ok(Some(t)) => t,
             Ok(None) => {
                 return Err(ServiceError::NotFound(format!(
@@ -378,7 +401,7 @@ impl TaskService {
             }
         };
 
-        let to_task = match self.db.get_task(to_task_id) {
+        let to_task = match self.db.get_task(to_task_id).await {
             Ok(Some(t)) => t,
             Ok(None) => {
                 return Err(ServiceError::NotFound(format!(

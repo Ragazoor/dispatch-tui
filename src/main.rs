@@ -143,7 +143,7 @@ async fn main() -> Result<()> {
             needs_input,
         } => {
             let new_status = parse_status(&status)?;
-            let db = db::Database::open(&cli.db)?;
+            let db = db::Database::open(&cli.db).await?;
             let task_id = models::TaskId(id);
 
             // Resolve sub_status: explicit --sub-status takes precedence over --needs-input
@@ -179,13 +179,13 @@ async fn main() -> Result<()> {
             }
         }
         Commands::List { status } => {
-            let db = db::Database::open(&cli.db)?;
+            let db = db::Database::open(&cli.db).await?;
             let tasks = match status {
                 Some(s) => {
                     let filter = parse_status(&s)?;
-                    db.list_by_status(filter)?
+                    db.list_by_status(filter).await?
                 }
-                None => db.list_all()?,
+                None => db.list_all().await?,
             };
             if tasks.is_empty() {
                 println!("No tasks found.");
@@ -258,11 +258,12 @@ async fn main() -> Result<()> {
             })?;
             let plan_str = plan_path.to_string_lossy();
 
-            let db = db::Database::open(&cli.db)?;
+            let db = db::Database::open(&cli.db).await?;
             db.patch_task(
                 models::TaskId(id),
                 &db::TaskPatch::new().plan_path(Some(&plan_str)),
-            )?;
+            )
+            .await?;
             println!("Plan attached to task #{}: {}", id, plan_str);
         }
     }

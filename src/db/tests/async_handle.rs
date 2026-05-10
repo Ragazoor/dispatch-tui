@@ -10,7 +10,7 @@ use super::in_memory_db;
 /// `db_call` runs the closure and returns its result.
 #[tokio::test]
 async fn db_call_returns_closure_result() {
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let value = db.db_call(|_conn| Ok(42_i64)).await.unwrap();
     assert_eq!(value, 42);
 }
@@ -22,8 +22,8 @@ async fn db_call_returns_closure_result() {
 async fn async_connection_sees_sync_writes() {
     use crate::db::SettingsStore;
 
-    let db = in_memory_db();
-    db.save_repo_path("/tmp/example-repo").unwrap();
+    let db = in_memory_db().await;
+    db.save_repo_path("/tmp/example-repo").await.unwrap();
 
     let count: i64 = db
         .db_call(|conn| {
@@ -39,7 +39,7 @@ async fn async_connection_sees_sync_writes() {
 /// `tokio_rusqlite::Error::Other`).
 #[tokio::test]
 async fn db_call_propagates_closure_errors() {
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let err = db
         .db_call(|_conn| -> anyhow::Result<()> { Err(anyhow::anyhow!("boom: 12345")) })
         .await
@@ -54,7 +54,7 @@ async fn db_call_propagates_closure_errors() {
 /// SQL diagnostic preserved.
 #[tokio::test]
 async fn db_call_propagates_rusqlite_errors() {
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let err = db
         .db_call(|conn| {
             conn.execute("SELECT * FROM does_not_exist", [])?;
@@ -76,9 +76,9 @@ async fn db_call_propagates_rusqlite_errors() {
 async fn distinct_in_memory_dbs_are_isolated() {
     use crate::db::SettingsStore;
 
-    let db_a = in_memory_db();
-    let db_b = in_memory_db();
-    db_a.save_repo_path("/only-in-a").unwrap();
+    let db_a = in_memory_db().await;
+    let db_b = in_memory_db().await;
+    db_a.save_repo_path("/only-in-a").await.unwrap();
 
     let count_b: i64 = db_b
         .db_call(|conn| {

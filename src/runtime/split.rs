@@ -9,7 +9,7 @@ impl TuiRuntime {
         }
     }
 
-    pub(super) fn exec_open_main_session(&self, app: &mut App) {
+    pub(super) async fn exec_open_main_session(&self, app: &mut App) {
         let dir = match app.main_session_dir() {
             Some(d) => d.to_string(),
             None => {
@@ -34,7 +34,10 @@ impl TuiRuntime {
                 _ => {
                     // Window is gone — clear stale reference and fall through to create.
                     app.set_main_session(None);
-                    let _ = self.database.set_setting_string("main_session.window", "");
+                    let _ = self
+                        .database
+                        .set_setting_string("main_session.window", "")
+                        .await;
                 }
             }
         }

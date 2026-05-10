@@ -7,7 +7,7 @@ use dispatch_tui::models::*;
 
 #[tokio::test]
 async fn full_epic_lifecycle() {
-    let db = Database::open_in_memory().unwrap();
+    let db = Database::open_in_memory().await.unwrap();
 
     // 1. Create an epic
     let epic = db
@@ -35,6 +35,7 @@ async fn full_epic_lifecycle() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     let sub2 = db
         .create_task(CreateTaskRequest {
@@ -49,6 +50,7 @@ async fn full_epic_lifecycle() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.set_task_epic_id(sub1, Some(epic.id)).await.unwrap();
     db.set_task_epic_id(sub2, Some(epic.id)).await.unwrap();
@@ -66,8 +68,10 @@ async fn full_epic_lifecycle() {
 
     // 5. Move all subtasks to Done, advance epic to Review
     db.patch_task(sub1, &TaskPatch::new().status(TaskStatus::Done))
+        .await
         .unwrap();
     db.patch_task(sub2, &TaskPatch::new().status(TaskStatus::Done))
+        .await
         .unwrap();
     db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Review))
         .await
@@ -85,8 +89,8 @@ async fn full_epic_lifecycle() {
     // 7. Delete epic cascades
     db.delete_epic(epic.id).await.unwrap();
     assert!(db.get_epic(epic.id).await.unwrap().is_none());
-    assert!(db.get_task(sub1).unwrap().is_none());
-    assert!(db.get_task(sub2).unwrap().is_none());
+    assert!(db.get_task(sub1).await.unwrap().is_none());
+    assert!(db.get_task(sub2).await.unwrap().is_none());
 }
 
 /// Regression: archiving an epic must not violate FK constraints, even when
@@ -98,7 +102,7 @@ async fn full_epic_lifecycle() {
 /// `DELETE FROM tasks WHERE epic_id = ?` which failed with FK violations.
 #[tokio::test]
 async fn soft_archive_epic_does_not_violate_foreign_keys() {
-    let db = Database::open_in_memory().unwrap();
+    let db = Database::open_in_memory().await.unwrap();
 
     let epic = db
         .create_epic("Auth Rewrite", "desc", "/repo", None, ProjectId(1))
@@ -118,6 +122,7 @@ async fn soft_archive_epic_does_not_violate_foreign_keys() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.set_task_epic_id(task_id, Some(epic.id)).await.unwrap();
 
@@ -131,6 +136,7 @@ async fn soft_archive_epic_does_not_violate_foreign_keys() {
             cache_write_tokens: 0,
         },
     )
+    .await
     .unwrap();
 
     // Insert a learning that references the task as its source.
@@ -150,18 +156,19 @@ async fn soft_archive_epic_does_not_violate_foreign_keys() {
     // This is what the TUI's handle_archive_epic now produces (one PersistTask
     // per subtask + one PersistEpic for the epic).
     db.patch_task(task_id, &TaskPatch::new().status(TaskStatus::Archived))
+        .await
         .unwrap();
     db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Archived))
         .await
         .unwrap();
 
     // Both rows survive and are now archived; FK rows are untouched.
-    let archived_task = db.get_task(task_id).unwrap().unwrap();
+    let archived_task = db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(archived_task.status, TaskStatus::Archived);
     let archived_epic = db.get_epic(epic.id).await.unwrap().unwrap();
     assert_eq!(archived_epic.status, TaskStatus::Archived);
 
     // Usage row still references the (still-existing) task.
-    let usage_rows = db.get_all_usage().unwrap();
+    let usage_rows = db.get_all_usage().await.unwrap();
     assert!(usage_rows.iter().any(|u| u.task_id == task_id));
 }

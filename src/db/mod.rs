@@ -6,16 +6,13 @@ mod tests;
 pub use queries::decode_fallback_count;
 
 use anyhow::{Context, Result};
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::Connection;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
-use tokio::sync::OnceCell;
 
 use crate::models::{
     Epic, EpicId, FeedItem, Learning, LearningId, LearningKind, LearningRetrieval, LearningScope,
     LearningStatus, LearningVerdict, Project, ProjectId, RetrievalSource, SubStatus, Task, TaskId,
-    TaskStatus, TaskTag, TaskUsage, TipsShowMode, UsageReport,
+    TaskStatus, TaskTag, TaskUsage, UsageReport,
 };
 
 // ---------------------------------------------------------------------------
@@ -164,24 +161,29 @@ impl PrKind {
 // ---------------------------------------------------------------------------
 
 /// Task CRUD, list, patch, status updates.
+#[async_trait::async_trait]
 pub trait TaskCrud: Send + Sync {
-    fn create_task(&self, req: CreateTaskRequest<'_>) -> Result<TaskId>;
-    fn get_task(&self, id: TaskId) -> Result<Option<Task>>;
-    fn list_all(&self) -> Result<Vec<Task>>;
-    fn list_by_status(&self, status: TaskStatus) -> Result<Vec<Task>>;
+    async fn create_task(&self, req: CreateTaskRequest<'_>) -> Result<TaskId>;
+    async fn get_task(&self, id: TaskId) -> Result<Option<Task>>;
+    async fn list_all(&self) -> Result<Vec<Task>>;
+    async fn list_by_status(&self, status: TaskStatus) -> Result<Vec<Task>>;
     /// Update status only if current status matches `expected`. Returns true if updated.
-    fn update_status_if(
+    async fn update_status_if(
         &self,
         id: TaskId,
         new_status: TaskStatus,
         expected: TaskStatus,
     ) -> Result<bool>;
-    fn delete_task(&self, id: TaskId) -> Result<()>;
-    fn find_task_by_plan(&self, plan: &str) -> Result<Option<Task>>;
-    fn patch_task(&self, id: TaskId, patch: &TaskPatch<'_>) -> Result<()>;
-    fn has_other_tasks_with_worktree(&self, worktree: &str, exclude_id: TaskId) -> Result<bool>;
-    fn report_usage(&self, task_id: TaskId, usage: &UsageReport) -> Result<()>;
-    fn get_all_usage(&self) -> Result<Vec<TaskUsage>>;
+    async fn delete_task(&self, id: TaskId) -> Result<()>;
+    async fn find_task_by_plan(&self, plan: &str) -> Result<Option<Task>>;
+    async fn patch_task(&self, id: TaskId, patch: &TaskPatch<'_>) -> Result<()>;
+    async fn has_other_tasks_with_worktree(
+        &self,
+        worktree: &str,
+        exclude_id: TaskId,
+    ) -> Result<bool>;
+    async fn report_usage(&self, task_id: TaskId, usage: &UsageReport) -> Result<()>;
+    async fn get_all_usage(&self) -> Result<Vec<TaskUsage>>;
     /// Upsert tasks from a feed. Inserts new tasks; on conflict (epic_id, external_id)
     /// updates title and description only — status and other user-managed fields are preserved.
     ///
@@ -193,7 +195,7 @@ pub trait TaskCrud: Send + Sync {
     /// inserted task should use for its worktree. The caller is expected to resolve the
     /// repo's default branch (typically via [`crate::git::detect_default_branch`]),
     /// falling back to `"main"` when no path is known.
-    fn upsert_feed_tasks(
+    async fn upsert_feed_tasks(
         &self,
         epic_id: EpicId,
         items: &[FeedItem],
@@ -300,21 +302,23 @@ pub trait AlertStore: Send + Sync {
 }
 
 /// Settings, filter presets, repo paths, and usage tracking.
+#[async_trait::async_trait]
 pub trait SettingsStore: Send + Sync {
-    fn list_repo_paths(&self) -> Result<Vec<String>>;
-    fn save_repo_path(&self, path: &str) -> Result<()>;
-    fn delete_repo_path(&self, path: &str) -> Result<()>;
-    fn get_setting_bool(&self, key: &str) -> Result<Option<bool>>;
-    fn set_setting_bool(&self, key: &str, value: bool) -> Result<()>;
-    fn get_setting_string(&self, key: &str) -> Result<Option<String>>;
-    fn set_setting_string(&self, key: &str, value: &str) -> Result<()>;
+    async fn list_repo_paths(&self) -> Result<Vec<String>>;
+    async fn save_repo_path(&self, path: &str) -> Result<()>;
+    async fn delete_repo_path(&self, path: &str) -> Result<()>;
+    async fn get_setting_bool(&self, key: &str) -> Result<Option<bool>>;
+    async fn set_setting_bool(&self, key: &str, value: bool) -> Result<()>;
+    async fn get_setting_string(&self, key: &str) -> Result<Option<String>>;
+    async fn set_setting_string(&self, key: &str, value: &str) -> Result<()>;
     /// Seed default GitHub query strings if not already set.
-    fn seed_github_query_defaults(&self) -> Result<()>;
-    fn save_filter_preset(&self, name: &str, repo_paths: &[String], mode: &str) -> Result<()>;
-    fn delete_filter_preset(&self, name: &str) -> Result<()>;
-    fn list_filter_presets(&self) -> Result<Vec<(String, Vec<String>, String)>>;
-    fn get_tips_state(&self) -> Result<(u32, crate::models::TipsShowMode)>;
-    fn save_tips_state(
+    async fn seed_github_query_defaults(&self) -> Result<()>;
+    async fn save_filter_preset(&self, name: &str, repo_paths: &[String], mode: &str)
+        -> Result<()>;
+    async fn delete_filter_preset(&self, name: &str) -> Result<()>;
+    async fn list_filter_presets(&self) -> Result<Vec<(String, Vec<String>, String)>>;
+    async fn get_tips_state(&self) -> Result<(u32, crate::models::TipsShowMode)>;
+    async fn save_tips_state(
         &self,
         seen_up_to: u32,
         show_mode: crate::models::TipsShowMode,
@@ -560,81 +564,40 @@ impl std::fmt::Display for AnyhowErr {
 
 impl std::error::Error for AnyhowErr {}
 
-/// Process-wide counter for unique in-memory shared-cache URIs.
+/// Async-only storage backing for the [`Database`].
 ///
-/// Each `open_in_memory()` call mints a fresh URI like
-/// `file:dispatch_inmem_<n>?mode=memory&cache=shared`, so that the sync
-/// `rusqlite::Connection` and the lazily-opened `tokio_rusqlite::Connection`
-/// can both reach the same in-memory database without collisions across tests.
-static IN_MEMORY_DB_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-/// Storage backing for the [`Database`].
-///
-/// Two connection handles share the same underlying SQLite database:
-///
-/// - `conn` — a sync [`rusqlite::Connection`] guarded by a [`Mutex`]. Used by
-///   every store impl that has not yet been migrated to async, by
-///   `Database::init_schema`, and for opaque sync helpers like
-///   `get_tips_state`.
-/// - `async_conn` — a [`tokio_rusqlite::Connection`] lazily opened on first
-///   call to [`Database::db_call`]. Future work-package migrations move trait
-///   impls onto this handle so that async MCP/runtime callers no longer block
-///   the Tokio worker thread.
-///
-/// Both handles connect to the same SQLite database via `db_uri`. For file
-/// paths this is just the path; for in-memory tests we use a shared-cache URI
-/// so the two connections share state.
+/// Wraps a single [`tokio_rusqlite::Connection`] — a dedicated worker thread
+/// owning a `rusqlite::Connection` that all async store impls dispatch to via
+/// [`Database::db_call`]. There is no sync connection or `Mutex` anymore;
+/// schema init and migrations also run on the worker thread via the same
+/// closure mechanism.
 pub struct Database {
-    /// Sync connection used by un-migrated stores and by schema init/migrations.
-    conn: Mutex<Connection>,
-    /// Lazily-opened async handle. `None` until the first `db_call`.
-    async_conn: OnceCell<tokio_rusqlite::Connection>,
-    /// SQLite open string (file path or `file:…?mode=memory&cache=shared` URI).
-    db_uri: String,
-    /// Whether `db_uri` is a URI (must be opened with `SQLITE_OPEN_URI`) rather
-    /// than a plain file path.
-    db_uri_is_uri: bool,
+    conn: tokio_rusqlite::Connection,
 }
 
 impl Database {
-    pub fn open(path: &Path) -> Result<Self> {
+    pub async fn open(path: &Path) -> Result<Self> {
         // Ensure the parent directory exists
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("Failed to create db directory: {}", parent.display()))?;
         }
 
-        let conn = Connection::open(path)
+        let conn = tokio_rusqlite::Connection::open(path)
+            .await
             .with_context(|| format!("Failed to open database at {}", path.display()))?;
 
-        Self::init_schema(&conn)?;
+        Self::init_schema(&conn).await?;
 
-        Ok(Database {
-            conn: Mutex::new(conn),
-            async_conn: OnceCell::new(),
-            db_uri: path.to_string_lossy().into_owned(),
-            db_uri_is_uri: false,
-        })
+        Ok(Database { conn })
     }
 
-    pub fn open_in_memory() -> Result<Self> {
-        // Use a unique shared-cache URI per instance so a later async-conn open
-        // can attach to the same in-memory database. Without `cache=shared`
-        // each connection would see its own empty database.
-        let id = IN_MEMORY_DB_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let uri = format!("file:dispatch_inmem_{id}?mode=memory&cache=shared");
-        let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
-            | OpenFlags::SQLITE_OPEN_CREATE
-            | OpenFlags::SQLITE_OPEN_URI;
-        let conn = Connection::open_with_flags(&uri, flags)
+    pub async fn open_in_memory() -> Result<Self> {
+        let conn = tokio_rusqlite::Connection::open_in_memory()
+            .await
             .context("Failed to open in-memory database")?;
-        Self::init_schema(&conn)?;
-        Ok(Database {
-            conn: Mutex::new(conn),
-            async_conn: OnceCell::new(),
-            db_uri: uri,
-            db_uri_is_uri: true,
-        })
+        Self::init_schema(&conn).await?;
+        Ok(Database { conn })
     }
 
     /// Run a synchronous closure against the underlying SQLite database from an
@@ -647,19 +610,13 @@ impl Database {
     ///
     /// Errors returned from the closure are wrapped in
     /// [`tokio_rusqlite::Error::Other`] and surfaced as `anyhow::Error`.
-    ///
-    /// # Note
-    ///
-    /// This helper is intended for trait impls that are migrating from sync to
-    /// async (see WP-2..WP-6 in the DB async migration). Sync impls continue
-    /// to use `Database::conn`.
     pub async fn db_call<R, F>(&self, f: F) -> Result<R>
     where
         F: FnOnce(&mut Connection) -> Result<R> + Send + 'static,
         R: Send + 'static,
     {
-        let conn = self.async_conn().await?;
-        match conn
+        match self
+            .conn
             .call(move |c| f(c).map_err(|e| tokio_rusqlite::Error::Other(Box::new(AnyhowErr(e)))))
             .await
         {
@@ -672,81 +629,61 @@ impl Database {
         }
     }
 
-    /// Lazily open (or return) the dedicated async connection.
-    async fn async_conn(&self) -> Result<&tokio_rusqlite::Connection> {
-        self.async_conn
-            .get_or_try_init(|| async {
-                let mut flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
-                    | rusqlite::OpenFlags::SQLITE_OPEN_CREATE;
-                if self.db_uri_is_uri {
-                    flags |= rusqlite::OpenFlags::SQLITE_OPEN_URI;
-                }
-                let uri = self.db_uri.clone();
-                tokio_rusqlite::Connection::open_with_flags(uri, flags)
-                    .await
-                    .context("Failed to open async database connection")
-            })
-            .await
+    async fn init_schema(conn: &tokio_rusqlite::Connection) -> Result<()> {
+        conn.call(|c| {
+            init_schema_sync(c).map_err(|e| tokio_rusqlite::Error::Other(Box::new(AnyhowErr(e))))
+        })
+        .await
+        .map_err(|e| match e {
+            tokio_rusqlite::Error::Other(other) => match other.downcast::<AnyhowErr>() {
+                Ok(boxed) => boxed.0,
+                Err(other) => anyhow::anyhow!(other.to_string()),
+            },
+            other => anyhow::Error::from(other),
+        })
     }
+}
 
-    fn init_schema(conn: &Connection) -> Result<()> {
-        conn.execute_batch(
-            "PRAGMA journal_mode=WAL;
-             PRAGMA foreign_keys=ON;
-             PRAGMA busy_timeout=5000;",
-        )
-        .context("Failed to set PRAGMAs")?;
+fn init_schema_sync(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "PRAGMA journal_mode=WAL;
+         PRAGMA foreign_keys=ON;
+         PRAGMA busy_timeout=5000;",
+    )
+    .context("Failed to set PRAGMAs")?;
 
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS tasks (
-                id          INTEGER PRIMARY KEY,
-                title       TEXT NOT NULL,
-                description TEXT NOT NULL,
-                repo_path   TEXT NOT NULL,
-                status      TEXT NOT NULL DEFAULT 'backlog',
-                worktree    TEXT,
-                tmux_window TEXT,
-                plan_path   TEXT,
-                tag         TEXT,
-                created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-                updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-            CREATE TABLE IF NOT EXISTS repo_paths (
-                id        INTEGER PRIMARY KEY,
-                path      TEXT NOT NULL UNIQUE,
-                last_used TEXT NOT NULL DEFAULT (datetime('now'))
-            );",
-        )
-        .context("Failed to create schema")?;
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS tasks (
+            id          INTEGER PRIMARY KEY,
+            title       TEXT NOT NULL,
+            description TEXT NOT NULL,
+            repo_path   TEXT NOT NULL,
+            status      TEXT NOT NULL DEFAULT 'backlog',
+            worktree    TEXT,
+            tmux_window TEXT,
+            plan_path   TEXT,
+            tag         TEXT,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS repo_paths (
+            id        INTEGER PRIMARY KEY,
+            path      TEXT NOT NULL UNIQUE,
+            last_used TEXT NOT NULL DEFAULT (datetime('now'))
+        );",
+    )
+    .context("Failed to create schema")?;
 
-        // Versioned migrations using PRAGMA user_version
-        let current_version: i64 =
-            conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    // Versioned migrations using PRAGMA user_version
+    let current_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
 
-        for &(version, migrate_fn) in migrations::MIGRATIONS {
-            if current_version < version {
-                migrate_fn(conn)?;
-                conn.pragma_update(None, "user_version", version)
-                    .with_context(|| format!("Failed to update schema version to {version}"))?;
-            }
+    for &(version, migrate_fn) in migrations::MIGRATIONS {
+        if current_version < version {
+            migrate_fn(conn)?;
+            conn.pragma_update(None, "user_version", version)
+                .with_context(|| format!("Failed to update schema version to {version}"))?;
         }
-
-        Ok(())
     }
 
-    fn conn(&self) -> Result<std::sync::MutexGuard<'_, Connection>> {
-        self.conn
-            .lock()
-            .map_err(|_| anyhow::anyhow!("db lock poisoned"))
-    }
-
-    pub fn get_tips_state(&self) -> Result<(u32, TipsShowMode)> {
-        let conn = self.conn()?;
-        queries::get_tips_state(&conn)
-    }
-
-    pub fn save_tips_state(&self, seen_up_to: u32, show_mode: TipsShowMode) -> Result<()> {
-        let conn = self.conn()?;
-        queries::save_tips_state(&conn, seen_up_to, show_mode)
-    }
+    Ok(())
 }

@@ -39,8 +39,8 @@ fn make_app(task: Task) -> App {
     App::new(vec![task], ProjectId(1), Duration::from_secs(300))
 }
 
-#[test]
-fn dispatching_status_visible_across_lifecycle_success() {
+#[tokio::test]
+async fn dispatching_status_visible_across_lifecycle_success() {
     let mut app = make_app(make_task(7, "Fix login bug"));
 
     // 1. Pre-mark: no status, not dispatching.
@@ -83,8 +83,8 @@ fn dispatching_status_visible_across_lifecycle_success() {
     );
 }
 
-#[test]
-fn dispatching_status_visible_across_lifecycle_failure() {
+#[tokio::test]
+async fn dispatching_status_visible_across_lifecycle_failure() {
     let mut app = make_app(make_task(8, "Refactor module"));
 
     app.update(Message::Task(
@@ -103,8 +103,8 @@ fn dispatching_status_visible_across_lifecycle_failure() {
     );
 }
 
-#[test]
-fn multiple_dispatches_show_pluralized_status() {
+#[tokio::test]
+async fn multiple_dispatches_show_pluralized_status() {
     let mut app = App::new(
         vec![make_task(1, "Task A"), make_task(2, "Task B")],
         ProjectId(1),

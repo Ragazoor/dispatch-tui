@@ -33,7 +33,7 @@ async fn wait_for_refresh(rx: &mut mpsc::UnboundedReceiver<McpEvent>) {
 
 #[tokio::test]
 async fn feed_sync_creates_then_updates_tasks_via_external_id() {
-    let db = Arc::new(Database::open_in_memory().unwrap());
+    let db = Arc::new(Database::open_in_memory().await.unwrap());
     let epic = db
         .create_epic("Feed Epic", "", "/repo", None, ProjectId(1))
         .await

@@ -369,7 +369,7 @@ pub(super) async fn handle_update_task(
         Ok(result) => {
             state.notify_task_changed(TaskId(parsed.task_id));
             let nudge = if result.was_pr_finalisation {
-                reflection_nudge(&*state.db)
+                reflection_nudge(&*state.db).await
             } else {
                 ""
             };
@@ -403,17 +403,20 @@ pub(super) async fn handle_create_task(
     }
 
     let svc = TaskService::new(state.db.clone());
-    match svc.create_task(CreateTaskParams {
-        title: parsed.title,
-        description: parsed.description,
-        repo_path: parsed.repo_path,
-        plan_path: parsed.plan_path,
-        epic_id: parsed.epic_id.map(EpicId),
-        sort_order: parsed.sort_order,
-        tag: parsed.tag,
-        base_branch: parsed.base_branch,
-        project_id: ProjectId(parsed.project_id),
-    }) {
+    match svc
+        .create_task(CreateTaskParams {
+            title: parsed.title,
+            description: parsed.description,
+            repo_path: parsed.repo_path,
+            plan_path: parsed.plan_path,
+            epic_id: parsed.epic_id.map(EpicId),
+            sort_order: parsed.sort_order,
+            tag: parsed.tag,
+            base_branch: parsed.base_branch,
+            project_id: ProjectId(parsed.project_id),
+        })
+        .await
+    {
         Ok(task_id) => {
             state.notify_task_changed(task_id);
             JsonRpcResponse::ok(
@@ -437,7 +440,7 @@ pub(super) async fn handle_get_task(
     tracing::info!(task_id = parsed.task_id, "MCP get_task");
 
     let svc = TaskService::new(state.db.clone());
-    match svc.get_task(TaskId(parsed.task_id)) {
+    match svc.get_task(TaskId(parsed.task_id)).await {
         Ok(task) => {
             let epic_titles = build_epic_titles(state).await;
             let text = format_task_detail(&task, &epic_titles);
@@ -463,7 +466,7 @@ pub(super) async fn handle_list_tasks(
     let (derived_epic_id, derived_project_id, exclude_task_id) = if let Some(caller_id) =
         parsed.caller_task_id
     {
-        let caller = match state.db.get_task(TaskId(caller_id)) {
+        let caller = match state.db.get_task(TaskId(caller_id)).await {
             Ok(Some(t)) => t,
             Ok(None) => {
                 return JsonRpcResponse::err(
@@ -494,13 +497,16 @@ pub(super) async fn handle_list_tasks(
     let project_id = parsed.project_id.map(ProjectId).or(derived_project_id);
 
     let svc = TaskService::new(state.db.clone());
-    match svc.list_tasks(ListTasksFilter {
-        statuses: status_filter,
-        epic_id,
-        project_id,
-        repo_paths: parsed.repo_paths,
-        exclude_task_id,
-    }) {
+    match svc
+        .list_tasks(ListTasksFilter {
+            statuses: status_filter,
+            epic_id,
+            project_id,
+            repo_paths: parsed.repo_paths,
+            exclude_task_id,
+        })
+        .await
+    {
         Ok(filtered) => {
             if filtered.is_empty() {
                 return JsonRpcResponse::ok(
@@ -540,7 +546,7 @@ pub(super) async fn handle_list_tasks(
     }
 }
 
-pub(super) fn handle_claim_task(
+pub(super) async fn handle_claim_task(
     state: &McpState,
     id: Option<Value>,
     args: Value,
@@ -552,11 +558,14 @@ pub(super) fn handle_claim_task(
     tracing::info!(task_id = parsed.task_id, worktree = %parsed.worktree, "MCP claim_task");
 
     let svc = TaskService::new(state.db.clone());
-    match svc.claim_task(ClaimTaskParams {
-        task_id: TaskId(parsed.task_id),
-        worktree: parsed.worktree,
-        tmux_window: parsed.tmux_window,
-    }) {
+    match svc
+        .claim_task(ClaimTaskParams {
+            task_id: TaskId(parsed.task_id),
+            worktree: parsed.worktree,
+            tmux_window: parsed.tmux_window,
+        })
+        .await
+    {
         Ok(task) => {
             state.notify_task_changed(task.id);
             JsonRpcResponse::ok(
@@ -568,9 +577,10 @@ pub(super) fn handle_claim_task(
     }
 }
 
-fn reflection_nudge(db: &dyn crate::db::TaskStore) -> &'static str {
+async fn reflection_nudge(db: &dyn crate::db::TaskStore) -> &'static str {
     let enabled = db
         .get_setting_bool("learning_reflection_enabled")
+        .await
         .unwrap_or(None)
         .unwrap_or(true);
     if enabled {
@@ -593,7 +603,7 @@ pub(super) async fn handle_wrap_up(
     tracing::info!(task_id = parsed.task_id, action = ?parsed.action, "MCP wrap_up");
 
     let svc = TaskService::new(state.db.clone());
-    let task = match svc.validate_wrap_up(TaskId(parsed.task_id)) {
+    let task = match svc.validate_wrap_up(TaskId(parsed.task_id)).await {
         Ok(t) => t,
         Err(e) => return service_err_to_response(id, e),
     };
@@ -652,7 +662,7 @@ pub(super) async fn handle_wrap_up(
     // matching the TUI behavior.
     if task.sub_status == SubStatus::Conflict {
         let clear_patch = db::TaskPatch::new().sub_status(SubStatus::default_for(task.status));
-        let _ = db.patch_task(task_id, &clear_patch);
+        let _ = db.patch_task(task_id, &clear_patch).await;
     }
     let rebase_runner = runner.clone();
     let rebase_base = base_branch.clone();
@@ -689,7 +699,7 @@ pub(super) async fn handle_wrap_up(
         Err(e) => {
             if matches!(e, dispatch::FinishError::RebaseConflict(_)) {
                 let patch = db::TaskPatch::new().sub_status(SubStatus::Conflict);
-                let _ = db.patch_task(task_id, &patch);
+                let _ = db.patch_task(task_id, &patch).await;
             }
             if let Some(tx) = notify_tx {
                 let _ = tx.send(crate::mcp::McpEvent::TaskChanged(task_id));
@@ -710,7 +720,7 @@ pub(super) async fn handle_exit_session(
     };
     let task_id = TaskId(parsed.task_id);
 
-    let task = match state.db.get_task(task_id) {
+    let task = match state.db.get_task(task_id).await {
         Ok(Some(t)) => t,
         Ok(None) => {
             return JsonRpcResponse::err(id, -32602, format!("task #{} not found", parsed.task_id))
@@ -759,7 +769,7 @@ Call exit_session(has_learnings=false) when done to close the session."}]}),
                 .status(TaskStatus::Done)
                 .sub_status(SubStatus::default_for(TaskStatus::Done))
                 .tmux_window(None);
-            if let Err(e) = state.db.patch_task(task_id, &patch) {
+            if let Err(e) = state.db.patch_task(task_id, &patch).await {
                 tracing::warn!(
                     task_id = task_id.0,
                     "exit_session: failed to apply closing patch: {e}"
@@ -909,7 +919,7 @@ pub(super) async fn handle_dispatch_next(
                     .status(TaskStatus::Running)
                     .worktree(Some(&dispatch_result.worktree_path))
                     .tmux_window(Some(&dispatch_result.tmux_window));
-                if let Err(e) = db.patch_task(next_id, &patch) {
+                if let Err(e) = db.patch_task(next_id, &patch).await {
                     tracing::warn!(
                         task_id = next_id.0,
                         "dispatch_next: failed to update task: {e}"
@@ -963,7 +973,7 @@ pub(super) async fn handle_dispatch_task(
     };
     let task_id = crate::models::TaskId(parsed.task_id);
 
-    let task = match state.db.get_task(task_id) {
+    let task = match state.db.get_task(task_id).await {
         Ok(Some(t)) => t,
         Ok(None) => {
             return service_err_to_response(
@@ -1004,7 +1014,7 @@ pub(super) async fn handle_dispatch_task(
                 .status(TaskStatus::Running)
                 .worktree(Some(&dr.worktree_path))
                 .tmux_window(Some(&dr.tmux_window));
-            let _ = state.db.patch_task(task_id, &patch);
+            let _ = state.db.patch_task(task_id, &patch).await;
             if let Some(eid) = epic_id {
                 let _ = state.db.recalculate_epic_status(eid).await;
             }
@@ -1027,7 +1037,7 @@ pub(super) async fn handle_dispatch_task(
     }
 }
 
-pub(super) fn handle_send_message(
+pub(super) async fn handle_send_message(
     state: &McpState,
     id: Option<Value>,
     args: Value,
@@ -1038,11 +1048,13 @@ pub(super) fn handle_send_message(
     };
 
     let svc = TaskService::new(state.db.clone());
-    let (from_task, to_task) =
-        match svc.validate_send_message(TaskId(parsed.from_task_id), TaskId(parsed.to_task_id)) {
-            Ok(pair) => pair,
-            Err(e) => return service_err_to_response(id, e),
-        };
+    let (from_task, to_task) = match svc
+        .validate_send_message(TaskId(parsed.from_task_id), TaskId(parsed.to_task_id))
+        .await
+    {
+        Ok(pair) => pair,
+        Err(e) => return service_err_to_response(id, e),
+    };
 
     let Some(worktree) = to_task.worktree.as_ref() else {
         return JsonRpcResponse::err(id, -32603, "target task has no worktree (internal error)");
@@ -1172,7 +1184,7 @@ async fn find_workflow_kind_for(
     db.find_pr_workflow_kind(repo, number).await.ok().flatten()
 }
 
-pub(super) fn handle_report_usage(
+pub(super) async fn handle_report_usage(
     state: &McpState,
     id: Option<Value>,
     args: Value,
@@ -1184,15 +1196,18 @@ pub(super) fn handle_report_usage(
     tracing::info!(task_id = parsed.task_id, "MCP report_usage");
 
     let svc = TaskService::new(state.db.clone());
-    match svc.report_usage(
-        TaskId(parsed.task_id),
-        &crate::models::UsageReport {
-            input_tokens: parsed.input_tokens,
-            output_tokens: parsed.output_tokens,
-            cache_read_tokens: parsed.cache_read_tokens,
-            cache_write_tokens: parsed.cache_write_tokens,
-        },
-    ) {
+    match svc
+        .report_usage(
+            TaskId(parsed.task_id),
+            &crate::models::UsageReport {
+                input_tokens: parsed.input_tokens,
+                output_tokens: parsed.output_tokens,
+                cache_read_tokens: parsed.cache_read_tokens,
+                cache_write_tokens: parsed.cache_write_tokens,
+            },
+        )
+        .await
+    {
         Ok(()) => {
             state.notify();
             JsonRpcResponse::ok(

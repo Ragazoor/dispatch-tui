@@ -98,7 +98,7 @@ async fn update_review_status_updates_pr() {
     use crate::models::{CiStatus, ReviewAgentStatus, ReviewDecision, ReviewPr};
     use chrono::Utc;
 
-    let state = test_state();
+    let state = test_state().await;
     let pr = ReviewPr {
         number: 42,
         title: "Test PR".to_string(),
@@ -155,7 +155,7 @@ async fn update_review_status_updates_pr() {
 
 #[tokio::test]
 async fn update_review_status_no_match_errors() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -170,7 +170,7 @@ async fn update_review_status_no_match_errors() {
 
 #[tokio::test]
 async fn update_review_status_invalid_status_errors() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -188,7 +188,7 @@ async fn update_review_status_findings_ready_sets_action_required() {
     use crate::models::{CiStatus, ReviewDecision, ReviewPr, WorkflowItemKind};
     use chrono::Utc;
 
-    let state = test_state();
+    let state = test_state().await;
 
     // Insert a PR and set an active review agent so update_agent_status succeeds
     let pr = ReviewPr {
@@ -270,7 +270,7 @@ async fn update_review_status_findings_ready_without_workflow_row() {
     use crate::models::{CiStatus, ReviewDecision, ReviewPr, WorkflowItemKind};
     use chrono::Utc;
 
-    let state = test_state();
+    let state = test_state().await;
 
     // Insert a PR and set an active review agent so update_agent_status succeeds
     let pr = ReviewPr {
@@ -346,7 +346,7 @@ async fn update_review_status_findings_ready_without_workflow_row() {
 
 #[tokio::test]
 async fn list_review_prs_empty() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -359,7 +359,7 @@ async fn list_review_prs_empty() {
 
 #[tokio::test]
 async fn list_review_prs_returns_stored_prs() {
-    let state = test_state();
+    let state = test_state().await;
     insert_review_pr_fixture(&state, 42, "acme/app").await;
     insert_review_pr_fixture(&state, 99, "acme/app").await;
 
@@ -376,7 +376,7 @@ async fn list_review_prs_returns_stored_prs() {
 
 #[tokio::test]
 async fn list_review_prs_filters_by_repo() {
-    let state = test_state();
+    let state = test_state().await;
     insert_review_pr_fixture(&state, 1, "acme/app").await;
     insert_review_pr_fixture(&state, 2, "acme/other").await;
 
@@ -393,7 +393,7 @@ async fn list_review_prs_filters_by_repo() {
 
 #[tokio::test]
 async fn list_review_prs_mode_author() {
-    let state = test_state();
+    let state = test_state().await;
     insert_my_pr_fixture(&state, 55, "acme/app").await;
 
     let resp = call(
@@ -408,7 +408,7 @@ async fn list_review_prs_mode_author() {
 
 #[tokio::test]
 async fn list_review_prs_mode_all() {
-    let state = test_state();
+    let state = test_state().await;
     insert_review_pr_fixture(&state, 10, "acme/app").await;
     insert_my_pr_fixture(&state, 20, "acme/app").await;
 
@@ -435,7 +435,7 @@ async fn list_review_prs_mode_all() {
 
 #[tokio::test]
 async fn get_review_pr_found() {
-    let state = test_state();
+    let state = test_state().await;
     insert_review_pr_fixture(&state, 42, "acme/app").await;
 
     let resp = call(
@@ -452,7 +452,7 @@ async fn get_review_pr_found() {
 
 #[tokio::test]
 async fn get_review_pr_not_found() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -464,7 +464,7 @@ async fn get_review_pr_not_found() {
 
 #[tokio::test]
 async fn get_review_pr_found_in_my_prs() {
-    let state = test_state();
+    let state = test_state().await;
     insert_my_pr_fixture(&state, 55, "acme/app").await;
 
     let resp = call(
@@ -485,7 +485,7 @@ async fn get_review_pr_found_in_my_prs() {
 
 #[tokio::test]
 async fn list_security_alerts_empty() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -499,7 +499,7 @@ async fn list_security_alerts_empty() {
 #[tokio::test]
 async fn list_security_alerts_returns_stored_alerts() {
     use crate::models::AlertKind;
-    let state = test_state();
+    let state = test_state().await;
     insert_security_alert_fixture(&state, 1, "acme/api", AlertKind::Dependabot).await;
     insert_security_alert_fixture(&state, 2, "acme/api", AlertKind::CodeScanning).await;
 
@@ -517,7 +517,7 @@ async fn list_security_alerts_returns_stored_alerts() {
 #[tokio::test]
 async fn list_security_alerts_filters_by_kind() {
     use crate::models::AlertKind;
-    let state = test_state();
+    let state = test_state().await;
     insert_security_alert_fixture(&state, 1, "acme/api", AlertKind::Dependabot).await;
     insert_security_alert_fixture(&state, 2, "acme/api", AlertKind::CodeScanning).await;
 
@@ -535,7 +535,7 @@ async fn list_security_alerts_filters_by_kind() {
 #[tokio::test]
 async fn list_security_alerts_filters_by_severity() {
     use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
-    let state = test_state();
+    let state = test_state().await;
 
     let high_alert = SecurityAlert {
         number: 1,
@@ -590,7 +590,7 @@ async fn list_security_alerts_filters_by_severity() {
 #[tokio::test]
 async fn list_security_alerts_filters_by_repo() {
     use crate::models::AlertKind;
-    let state = test_state();
+    let state = test_state().await;
     insert_security_alert_fixture(&state, 1, "acme/api", AlertKind::Dependabot).await;
     insert_security_alert_fixture(&state, 2, "acme/web", AlertKind::Dependabot).await;
 
@@ -615,7 +615,7 @@ async fn list_security_alerts_filters_by_repo() {
 #[tokio::test]
 async fn get_security_alert_found() {
     use crate::models::AlertKind;
-    let state = test_state();
+    let state = test_state().await;
     insert_security_alert_fixture(&state, 7, "acme/api", AlertKind::Dependabot).await;
 
     let resp = call(
@@ -635,7 +635,7 @@ async fn get_security_alert_found() {
 
 #[tokio::test]
 async fn get_security_alert_not_found() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -654,7 +654,7 @@ async fn get_security_alert_not_found() {
 
 #[tokio::test]
 async fn dispatch_review_agent_pr_not_found() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -671,7 +671,7 @@ async fn dispatch_review_agent_pr_not_found() {
 async fn dispatch_review_agent_already_reviewing() {
     use crate::db::PrKind;
     use crate::models::{CiStatus, ReviewAgentStatus, ReviewDecision, ReviewPr};
-    let state = test_state();
+    let state = test_state().await;
     let pr = ReviewPr {
         number: 42,
         title: "PR #42".to_string(),
@@ -724,7 +724,7 @@ async fn dispatch_review_agent_success() {
     // Pre-create worktree dir so git worktree add is skipped.
     std::fs::create_dir_all(dir.path().join(".worktrees").join("review-42")).unwrap();
 
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // tmux list-windows (has_window → false, empty stdout)
         MockProcessRunner::ok(), // git worktree prune
@@ -780,7 +780,7 @@ async fn dispatch_review_agent_success() {
 
 #[tokio::test]
 async fn dispatch_fix_agent_alert_not_found() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -799,7 +799,7 @@ async fn dispatch_fix_agent_alert_not_found() {
 #[tokio::test]
 async fn dispatch_fix_agent_already_reviewing() {
     use crate::models::{AlertKind, AlertSeverity, ReviewAgentStatus, SecurityAlert};
-    let state = test_state();
+    let state = test_state().await;
     let alert = SecurityAlert {
         number: 7,
         repo: "acme/api".to_string(),
@@ -854,7 +854,7 @@ async fn dispatch_fix_agent_success() {
     // Pre-create worktree dir so git worktree add is skipped.
     std::fs::create_dir_all(dir.path().join(".worktrees").join("fix-vuln-7")).unwrap();
 
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // tmux list-windows (has_window)
         MockProcessRunner::ok(), // git worktree prune

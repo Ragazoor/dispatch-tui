@@ -7,7 +7,7 @@ use dispatch_tui::models::TaskStatus;
 
 #[tokio::test]
 async fn delete_project_moves_tasks_and_epics_to_default() {
-    let db = Database::open_in_memory().unwrap();
+    let db = Database::open_in_memory().await.unwrap();
     let default = db.get_default_project().await.unwrap();
 
     // Create a non-default project P with 3 tasks and 1 epic.
@@ -15,9 +15,10 @@ async fn delete_project_moves_tasks_and_epics_to_default() {
     assert_ne!(p.id, default.id);
     assert!(!p.is_default);
 
-    let task_ids: Vec<_> = (0..3)
-        .map(|i| {
-            db.create_task(CreateTaskRequest {
+    let mut task_ids = Vec::new();
+    for i in 0..3 {
+        let id = db
+            .create_task(CreateTaskRequest {
                 title: &format!("T{i}"),
                 description: "",
                 repo_path: "/repo",
@@ -29,9 +30,10 @@ async fn delete_project_moves_tasks_and_epics_to_default() {
                 tag: None,
                 project_id: p.id,
             })
-            .unwrap()
-        })
-        .collect();
+            .await
+            .unwrap();
+        task_ids.push(id);
+    }
     let epic = db
         .create_epic("Epic", "", "/repo", None, p.id)
         .await
@@ -39,7 +41,7 @@ async fn delete_project_moves_tasks_and_epics_to_default() {
 
     // Sanity: items belong to P.
     for id in &task_ids {
-        assert_eq!(db.get_task(*id).unwrap().unwrap().project_id, p.id);
+        assert_eq!(db.get_task(*id).await.unwrap().unwrap().project_id, p.id);
     }
     assert_eq!(
         db.get_epic(epic.id).await.unwrap().unwrap().project_id,
@@ -53,7 +55,7 @@ async fn delete_project_moves_tasks_and_epics_to_default() {
 
     for id in &task_ids {
         assert_eq!(
-            db.get_task(*id).unwrap().unwrap().project_id,
+            db.get_task(*id).await.unwrap().unwrap().project_id,
             default.id,
             "task {id:?} should be reassigned to default"
         );
@@ -74,7 +76,7 @@ async fn delete_project_moves_tasks_and_epics_to_default() {
 
 #[tokio::test]
 async fn delete_default_project_is_rejected() {
-    let db = Database::open_in_memory().unwrap();
+    let db = Database::open_in_memory().await.unwrap();
     let default = db.get_default_project().await.unwrap();
 
     let result = db

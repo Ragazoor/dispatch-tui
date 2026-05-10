@@ -16,11 +16,11 @@ pub(super) async fn dispatch(
             vec![]
         }
         SaveRepoPath(path) => {
-            rt.exec_save_repo_path(app, path);
+            rt.exec_save_repo_path(app, path).await;
             vec![]
         }
         OpenMainSession => {
-            rt.exec_open_main_session(app);
+            rt.exec_open_main_session(app).await;
             vec![]
         }
         // Epic commands
@@ -34,11 +34,11 @@ pub(super) async fn dispatch(
         }
         // Settings
         PersistSetting { key, value } => {
-            rt.exec_persist_setting(app, &key, value);
+            rt.exec_persist_setting(app, &key, value).await;
             vec![]
         }
         PersistStringSetting { key, value } => {
-            rt.exec_persist_string_setting(app, &key, &value);
+            rt.exec_persist_string_setting(app, &key, &value).await;
             vec![]
         }
         PersistFilterPreset {
@@ -46,15 +46,16 @@ pub(super) async fn dispatch(
             repo_paths,
             mode,
         } => {
-            rt.exec_persist_filter_preset(app, &name, &repo_paths, mode.as_str());
+            rt.exec_persist_filter_preset(app, &name, &repo_paths, mode.as_str())
+                .await;
             vec![]
         }
         DeleteFilterPreset(name) => {
-            rt.exec_delete_filter_preset(app, &name);
+            rt.exec_delete_filter_preset(app, &name).await;
             vec![]
         }
         DeleteRepoPath(path) => {
-            rt.exec_delete_repo_path(app, &path);
+            rt.exec_delete_repo_path(app, &path).await;
             vec![]
         }
         // PR commands (creation is agent-driven via the /wrap-up skill)
@@ -110,7 +111,7 @@ pub(super) async fn dispatch(
             seen_up_to,
             show_mode,
         } => {
-            rt.exec_save_tips_state(seen_up_to, show_mode);
+            rt.exec_save_tips_state(seen_up_to, show_mode).await;
             vec![]
         }
         // Project commands
@@ -164,11 +165,11 @@ async fn dispatch_task(
             vec![]
         }
         Insert { draft, epic_id } => {
-            rt.exec_insert_task(app, draft, epic_id);
+            rt.exec_insert_task(app, draft, epic_id).await;
             vec![]
         }
         Delete(id) => {
-            rt.exec_delete_task(app, id);
+            rt.exec_delete_task(app, id).await;
             vec![]
         }
         DispatchAgent { task, mode } => {

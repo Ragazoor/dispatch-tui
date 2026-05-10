@@ -5,8 +5,8 @@ use super::*;
 
 #[tokio::test]
 async fn update_task_valid() {
-    let state = test_state();
-    let task_id = create_task_fixture(&state);
+    let state = test_state().await;
+    let task_id = create_task_fixture(&state).await;
 
     let resp = call(
         &state,
@@ -20,14 +20,14 @@ async fn update_task_valid() {
     assert!(resp.result.is_some());
     assert!(resp.error.is_none());
 
-    let task = state.db.get_task(task_id).unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task.status, crate::models::TaskStatus::Running);
 }
 
 #[tokio::test]
 async fn update_task_invalid_status() {
-    let state = test_state();
-    let task_id = create_task_fixture(&state);
+    let state = test_state().await;
+    let task_id = create_task_fixture(&state).await;
 
     let resp = call(
         &state,
@@ -43,8 +43,8 @@ async fn update_task_invalid_status() {
 
 #[tokio::test]
 async fn update_task_rejects_done_status() {
-    let state = test_state();
-    let task_id = create_task_fixture(&state);
+    let state = test_state().await;
+    let task_id = create_task_fixture(&state).await;
 
     let resp = call(
         &state,
@@ -58,7 +58,7 @@ async fn update_task_rejects_done_status() {
     assert_error(&resp, "Cannot set status to done or archived via MCP");
 
     // Verify task status unchanged
-    let task = state.db.get_task(task_id).unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
     assert_ne!(task.status, crate::models::TaskStatus::Done);
 
     // Also verify archived is rejected
@@ -76,8 +76,8 @@ async fn update_task_rejects_done_status() {
 
 #[tokio::test]
 async fn update_task_still_allows_other_statuses() {
-    let state = test_state();
-    let task_id = create_task_fixture(&state);
+    let state = test_state().await;
+    let task_id = create_task_fixture(&state).await;
 
     for status in &["running", "review", "ready", "backlog"] {
         let resp = call(
@@ -99,7 +99,7 @@ async fn update_task_still_allows_other_statuses() {
 
 #[tokio::test]
 async fn update_task_missing_args() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -111,7 +111,7 @@ async fn update_task_missing_args() {
 
 #[tokio::test]
 async fn get_task_found() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -126,6 +126,7 @@ async fn get_task_found() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -144,7 +145,7 @@ async fn get_task_found() {
 
 #[tokio::test]
 async fn get_task_not_found() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -160,7 +161,7 @@ async fn get_task_not_found() {
 
 #[tokio::test]
 async fn unknown_tool() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -173,7 +174,7 @@ async fn unknown_tool() {
 
 #[tokio::test]
 async fn unknown_method() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(&state, "bogus/method", None).await;
     assert!(resp.error.is_some());
     assert!(resp.error.unwrap().message.contains("Method not found"));
@@ -181,7 +182,7 @@ async fn unknown_method() {
 
 #[tokio::test]
 async fn create_task_minimal() {
-    let state = test_state();
+    let state = test_state().await;
     let default_id = state.db.get_default_project().await.unwrap().id;
     let resp = call(
         &state,
@@ -202,7 +203,7 @@ async fn create_task_minimal() {
     assert!(text.contains("created"));
 
     // Verify task was created in DB
-    let tasks = state.db.list_all().unwrap();
+    let tasks = state.db.list_all().await.unwrap();
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].title, "New Task");
     assert_eq!(tasks[0].status, TaskStatus::Backlog);
@@ -215,7 +216,7 @@ async fn create_task_with_plan_stays_backlog() {
     let plan_file = dir.path().join("plan.md");
     std::fs::write(&plan_file, "# Plan").unwrap();
 
-    let state = test_state();
+    let state = test_state().await;
     let default_id = state.db.get_default_project().await.unwrap().id;
     let resp = call(
         &state,
@@ -233,7 +234,7 @@ async fn create_task_with_plan_stays_backlog() {
     .await;
     assert!(resp.error.is_none());
 
-    let tasks = state.db.list_all().unwrap();
+    let tasks = state.db.list_all().await.unwrap();
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].status, TaskStatus::Backlog);
     let stored = tasks[0].plan_path.as_deref().unwrap();
@@ -249,7 +250,7 @@ async fn create_task_with_plan_stays_backlog() {
 
 #[tokio::test]
 async fn create_task_with_description() {
-    let state = test_state();
+    let state = test_state().await;
     let default_id = state.db.get_default_project().await.unwrap().id;
     let resp = call(
         &state,
@@ -267,13 +268,13 @@ async fn create_task_with_description() {
     .await;
     assert!(resp.error.is_none());
 
-    let tasks = state.db.list_all().unwrap();
+    let tasks = state.db.list_all().await.unwrap();
     assert_eq!(tasks[0].description, "Some details");
 }
 
 #[tokio::test]
 async fn create_task_missing_title() {
-    let state = test_state();
+    let state = test_state().await;
     let default_id = state.db.get_default_project().await.unwrap().id;
     let resp = call(
         &state,
@@ -289,7 +290,7 @@ async fn create_task_missing_title() {
 
 #[tokio::test]
 async fn create_task_missing_project_id_is_invalid_params() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -301,13 +302,13 @@ async fn create_task_missing_project_id_is_invalid_params() {
     .await;
     assert_error(&resp, "project_id");
     assert_eq!(resp.error.as_ref().unwrap().code, -32602);
-    let tasks = state.db.list_all().unwrap();
+    let tasks = state.db.list_all().await.unwrap();
     assert!(tasks.is_empty(), "no task should be created");
 }
 
 #[tokio::test]
 async fn create_task_with_unknown_project_id_is_invalid_params() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -323,13 +324,13 @@ async fn create_task_with_unknown_project_id_is_invalid_params() {
     .await;
     assert_error(&resp, "project");
     assert_eq!(resp.error.as_ref().unwrap().code, -32602);
-    let tasks = state.db.list_all().unwrap();
+    let tasks = state.db.list_all().await.unwrap();
     assert!(tasks.is_empty(), "no task should be created");
 }
 
 #[tokio::test]
 async fn create_task_assigns_to_provided_project() {
-    let state = test_state();
+    let state = test_state().await;
     let other = state.db.create_project("Other", 1).await.unwrap();
     let resp = call(
         &state,
@@ -345,7 +346,7 @@ async fn create_task_assigns_to_provided_project() {
     )
     .await;
     assert!(resp.error.is_none(), "got error: {:?}", resp.error);
-    let tasks = state.db.list_all().unwrap();
+    let tasks = state.db.list_all().await.unwrap();
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].project_id, other.id);
 }
@@ -354,7 +355,7 @@ async fn create_task_assigns_to_provided_project() {
 
 #[tokio::test]
 async fn update_task_accepts_string_task_id() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -369,6 +370,7 @@ async fn update_task_accepts_string_task_id() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -386,13 +388,13 @@ async fn update_task_accepts_string_task_id() {
         resp.error
     );
 
-    let task = state.db.get_task(task_id).unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task.status, crate::models::TaskStatus::Running);
 }
 
 #[tokio::test]
 async fn get_task_accepts_string_task_id() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -407,6 +409,7 @@ async fn get_task_accepts_string_task_id() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -430,7 +433,7 @@ async fn get_task_accepts_string_task_id() {
 
 #[tokio::test]
 async fn update_task_with_plan() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -445,6 +448,7 @@ async fn update_task_with_plan() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -458,14 +462,14 @@ async fn update_task_with_plan() {
     .await;
     assert!(resp.error.is_none());
 
-    let task = state.db.get_task(task_id).unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task.status, crate::models::TaskStatus::Backlog);
     assert_eq!(task.plan_path.as_deref(), Some("/path/to/plan.md"));
 }
 
 #[tokio::test]
 async fn update_task_title_only() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -480,6 +484,7 @@ async fn update_task_title_only() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -497,14 +502,14 @@ async fn update_task_title_only() {
         resp.error
     );
 
-    let task = state.db.get_task(task_id).unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task.title, "New Title");
     assert_eq!(task.status, crate::models::TaskStatus::Backlog); // unchanged
 }
 
 #[tokio::test]
 async fn update_task_status_optional() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -519,6 +524,7 @@ async fn update_task_status_optional() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -532,14 +538,14 @@ async fn update_task_status_optional() {
     .await;
     assert!(resp.error.is_none());
 
-    let task = state.db.get_task(task_id).unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task.title, "Renamed");
     assert_eq!(task.status, crate::models::TaskStatus::Backlog);
 }
 
 #[tokio::test]
 async fn update_task_title_and_description() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -554,6 +560,7 @@ async fn update_task_title_and_description() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -567,14 +574,14 @@ async fn update_task_title_and_description() {
     .await;
     assert!(resp.error.is_none());
 
-    let task = state.db.get_task(task_id).unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task.title, "New");
     assert_eq!(task.description, "new desc");
 }
 
 #[tokio::test]
 async fn update_task_repo_path() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -589,6 +596,7 @@ async fn update_task_repo_path() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -606,14 +614,14 @@ async fn update_task_repo_path() {
         resp.error
     );
 
-    let task = state.db.get_task(task_id).unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task.repo_path, "/new/repo");
     assert_eq!(task.status, crate::models::TaskStatus::Backlog); // unchanged
 }
 
 #[tokio::test]
 async fn update_task_no_fields_errors() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -628,6 +636,7 @@ async fn update_task_no_fields_errors() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -647,7 +656,7 @@ async fn update_task_no_fields_errors() {
 
 #[tokio::test]
 async fn patch_task_sets_multiple_fields() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -662,6 +671,7 @@ async fn patch_task_sets_multiple_fields() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -679,14 +689,14 @@ async fn patch_task_sets_multiple_fields() {
     .await;
     assert!(resp.error.is_none());
 
-    let task = state.db.get_task(task_id).unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Backlog);
     assert_eq!(task.title, "Updated Title");
 }
 
 #[tokio::test]
 async fn update_task_without_plan_preserves_existing() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -701,6 +711,7 @@ async fn update_task_without_plan_preserves_existing() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -714,7 +725,7 @@ async fn update_task_without_plan_preserves_existing() {
     .await;
     assert!(resp.error.is_none());
 
-    let task = state.db.get_task(task_id).unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(
         task.plan_path.as_deref(),
         Some("/existing.md"),
@@ -724,7 +735,7 @@ async fn update_task_without_plan_preserves_existing() {
 
 #[tokio::test]
 async fn update_task_sets_pr_fields() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -739,6 +750,7 @@ async fn update_task_sets_pr_fields() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -759,7 +771,7 @@ async fn update_task_sets_pr_fields() {
         resp.error
     );
 
-    let updated = state.db.get_task(task_id).unwrap().unwrap();
+    let updated = state.db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(
         updated.pr_url.as_deref(),
         Some("https://github.com/org/repo/pull/99")
@@ -770,7 +782,7 @@ async fn update_task_sets_pr_fields() {
 
 #[tokio::test]
 async fn list_tasks_returns_all_when_no_filter() {
-    let state = test_state();
+    let state = test_state().await;
     state
         .db
         .create_task(CreateTaskRequest {
@@ -785,6 +797,7 @@ async fn list_tasks_returns_all_when_no_filter() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     state
         .db
@@ -800,6 +813,7 @@ async fn list_tasks_returns_all_when_no_filter() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -817,7 +831,7 @@ async fn list_tasks_returns_all_when_no_filter() {
 
 #[tokio::test]
 async fn list_tasks_filters_by_single_status() {
-    let state = test_state();
+    let state = test_state().await;
     state
         .db
         .create_task(CreateTaskRequest {
@@ -832,6 +846,7 @@ async fn list_tasks_filters_by_single_status() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     state
         .db
@@ -847,6 +862,7 @@ async fn list_tasks_filters_by_single_status() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -864,7 +880,7 @@ async fn list_tasks_filters_by_single_status() {
 
 #[tokio::test]
 async fn list_tasks_filters_by_multiple_statuses() {
-    let state = test_state();
+    let state = test_state().await;
     state
         .db
         .create_task(CreateTaskRequest {
@@ -879,6 +895,7 @@ async fn list_tasks_filters_by_multiple_statuses() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     state
         .db
@@ -894,6 +911,7 @@ async fn list_tasks_filters_by_multiple_statuses() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     state
         .db
@@ -909,6 +927,7 @@ async fn list_tasks_filters_by_multiple_statuses() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -927,7 +946,7 @@ async fn list_tasks_filters_by_multiple_statuses() {
 
 #[tokio::test]
 async fn list_tasks_empty_result() {
-    let state = test_state();
+    let state = test_state().await;
 
     let resp = call(
         &state,
@@ -945,7 +964,7 @@ async fn list_tasks_empty_result() {
 
 #[tokio::test]
 async fn claim_task_success() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -960,6 +979,7 @@ async fn claim_task_success() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -981,7 +1001,7 @@ async fn claim_task_success() {
         resp.error
     );
 
-    let task = state.db.get_task(task_id).unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Running);
     assert_eq!(
         task.worktree.as_deref(),
@@ -992,7 +1012,7 @@ async fn claim_task_success() {
 
 #[tokio::test]
 async fn claim_task_rejects_running_task() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -1007,6 +1027,7 @@ async fn claim_task_rejects_running_task() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -1028,7 +1049,7 @@ async fn claim_task_rejects_running_task() {
 
 #[tokio::test]
 async fn claim_task_rejects_different_repo() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -1043,6 +1064,7 @@ async fn claim_task_rejects_different_repo() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -1064,7 +1086,7 @@ async fn claim_task_rejects_different_repo() {
 
 #[tokio::test]
 async fn claim_task_not_found() {
-    let state = test_state();
+    let state = test_state().await;
 
     let resp = call(
         &state,
@@ -1085,8 +1107,8 @@ async fn claim_task_not_found() {
 
 #[tokio::test]
 async fn report_usage_stores_and_accumulates() {
-    let state = test_state();
-    let task_id = create_task_fixture(&state);
+    let state = test_state().await;
+    let task_id = create_task_fixture(&state).await;
 
     // First session
     let resp = call(
@@ -1126,7 +1148,7 @@ async fn report_usage_stores_and_accumulates() {
         resp2.error
     );
 
-    let all = state.db.get_all_usage().unwrap();
+    let all = state.db.get_all_usage().await.unwrap();
     assert_eq!(all.len(), 1);
     let u = &all[0];
     assert_eq!(u.task_id, task_id);
@@ -1138,7 +1160,7 @@ async fn report_usage_stores_and_accumulates() {
 
 #[tokio::test]
 async fn report_usage_unknown_task_returns_error() {
-    let state = test_state();
+    let state = test_state().await;
 
     let resp = call(
         &state,
@@ -1160,7 +1182,7 @@ async fn report_usage_unknown_task_returns_error() {
 
 #[tokio::test]
 async fn claim_task_accepts_string_task_id() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -1175,6 +1197,7 @@ async fn claim_task_accepts_string_task_id() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -1203,7 +1226,7 @@ async fn claim_task_accepts_string_task_id() {
 
 #[tokio::test]
 async fn create_epic_minimal() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -1225,7 +1248,7 @@ async fn create_epic_minimal() {
 
 #[tokio::test]
 async fn create_epic_with_all_fields() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -1247,7 +1270,7 @@ async fn create_epic_with_all_fields() {
 
 #[tokio::test]
 async fn create_epic_missing_title() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -1262,7 +1285,7 @@ async fn create_epic_missing_title() {
 
 #[tokio::test]
 async fn create_epic_missing_repo_path() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -1277,7 +1300,7 @@ async fn create_epic_missing_repo_path() {
 
 #[tokio::test]
 async fn get_epic_found() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("Get Me", "desc", "/repo", None, ProjectId(1))
@@ -1301,7 +1324,7 @@ async fn get_epic_found() {
 
 #[tokio::test]
 async fn get_epic_not_found() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -1316,7 +1339,7 @@ async fn get_epic_not_found() {
 
 #[tokio::test]
 async fn get_epic_shows_subtask_summary() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("With Tasks", "", "/repo", None, ProjectId(1))
@@ -1336,6 +1359,7 @@ async fn get_epic_shows_subtask_summary() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     let t2 = state
         .db
@@ -1351,6 +1375,7 @@ async fn get_epic_shows_subtask_summary() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     state.db.set_task_epic_id(t1, Some(epic.id)).await.unwrap();
     state.db.set_task_epic_id(t2, Some(epic.id)).await.unwrap();
@@ -1373,7 +1398,7 @@ async fn get_epic_shows_subtask_summary() {
 
 #[tokio::test]
 async fn get_epic_accepts_string_id() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("String ID", "", "/repo", None, ProjectId(1))
@@ -1400,7 +1425,7 @@ async fn get_epic_accepts_string_id() {
 
 #[tokio::test]
 async fn list_epics_empty() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -1413,7 +1438,7 @@ async fn list_epics_empty() {
 
 #[tokio::test]
 async fn list_epics_with_items() {
-    let state = test_state();
+    let state = test_state().await;
     state
         .db
         .create_epic("Epic A", "desc a", "/repo", None, ProjectId(1))
@@ -1438,7 +1463,7 @@ async fn list_epics_with_items() {
 
 #[tokio::test]
 async fn list_epics_shows_subtask_counts() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("Tracked", "", "/repo", None, ProjectId(1))
@@ -1458,6 +1483,7 @@ async fn list_epics_shows_subtask_counts() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     let t2 = state
         .db
@@ -1473,6 +1499,7 @@ async fn list_epics_shows_subtask_counts() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     state.db.set_task_epic_id(t1, Some(epic.id)).await.unwrap();
     state.db.set_task_epic_id(t2, Some(epic.id)).await.unwrap();
@@ -1492,7 +1519,7 @@ async fn list_epics_shows_subtask_counts() {
 
 #[tokio::test]
 async fn update_epic_title() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("Old Title", "", "/repo", None, ProjectId(1))
@@ -1518,7 +1545,7 @@ async fn update_epic_title() {
 
 #[tokio::test]
 async fn update_epic_mark_done() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("To Finish", "", "/repo", None, ProjectId(1))
@@ -1546,7 +1573,7 @@ async fn update_epic_mark_done() {
 
 #[tokio::test]
 async fn update_epic_multiple_fields() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("Old", "old desc", "/repo", None, ProjectId(1))
@@ -1575,7 +1602,7 @@ async fn update_epic_multiple_fields() {
 
 #[tokio::test]
 async fn update_epic_accepts_string_id() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("Str Epic", "", "/repo", None, ProjectId(1))
@@ -1600,7 +1627,7 @@ async fn update_epic_accepts_string_id() {
 
 #[tokio::test]
 async fn update_epic_plan() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("Planned Epic", "", "/repo", None, ProjectId(1))
@@ -1635,7 +1662,7 @@ async fn update_epic_plan() {
 
 #[tokio::test]
 async fn list_tasks_invalid_status_string() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -1647,7 +1674,7 @@ async fn list_tasks_invalid_status_string() {
 
 #[tokio::test]
 async fn list_tasks_invalid_status_in_array() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -1659,7 +1686,7 @@ async fn list_tasks_invalid_status_in_array() {
 
 #[tokio::test]
 async fn list_tasks_status_as_number_errors() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -1671,7 +1698,7 @@ async fn list_tasks_status_as_number_errors() {
 
 #[tokio::test]
 async fn claim_task_rejects_done_task() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -1686,6 +1713,7 @@ async fn claim_task_rejects_done_task() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -1706,7 +1734,7 @@ async fn claim_task_rejects_done_task() {
 
 #[tokio::test]
 async fn claim_task_rejects_review_task() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -1721,6 +1749,7 @@ async fn claim_task_rejects_review_task() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -1741,7 +1770,7 @@ async fn claim_task_rejects_review_task() {
 
 #[tokio::test]
 async fn claim_task_worktree_without_worktrees_dir() {
-    let state = test_state();
+    let state = test_state().await;
     // Task repo is "/repo", worktree path has no /.worktrees/ segment
     // so the full path is used as the repo — should match when equal
     let task_id = state
@@ -1758,6 +1787,7 @@ async fn claim_task_worktree_without_worktrees_dir() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -1782,7 +1812,7 @@ async fn claim_task_worktree_without_worktrees_dir() {
 
 #[tokio::test]
 async fn create_task_with_epic_id() {
-    let state = test_state();
+    let state = test_state().await;
     let default_id = state.db.get_default_project().await.unwrap().id;
     let epic = state
         .db
@@ -1813,7 +1843,7 @@ async fn create_task_with_epic_id() {
 
 #[tokio::test]
 async fn create_task_with_string_epic_id() {
-    let state = test_state();
+    let state = test_state().await;
     let default_id = state.db.get_default_project().await.unwrap().id;
     let epic = state
         .db
@@ -1847,7 +1877,7 @@ async fn create_task_with_string_epic_id() {
 
 #[tokio::test]
 async fn update_epic_no_fields_errors() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("Test", "", "/repo", None, ProjectId(1))
@@ -1868,7 +1898,7 @@ async fn update_epic_no_fields_errors() {
 
 #[tokio::test]
 async fn update_epic_feed_command_set() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("Feed Epic", "", "/repo", None, ProjectId(1))
@@ -1892,7 +1922,7 @@ async fn update_epic_feed_command_set() {
 
 #[tokio::test]
 async fn update_epic_feed_command_clear() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("Feed Epic", "", "/repo", None, ProjectId(1))
@@ -1927,7 +1957,7 @@ async fn update_epic_feed_command_clear() {
 
 #[tokio::test]
 async fn update_epic_feed_command_absent_preserves_existing() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("Feed Epic", "", "/repo", None, ProjectId(1))
@@ -1959,7 +1989,7 @@ async fn update_epic_feed_command_absent_preserves_existing() {
 
 #[tokio::test]
 async fn update_epic_feed_interval_secs_set() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("Feed Epic", "", "/repo", None, ProjectId(1))
@@ -1983,7 +2013,7 @@ async fn update_epic_feed_interval_secs_set() {
 
 #[tokio::test]
 async fn update_epic_feed_interval_secs_clear() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("Feed Epic", "", "/repo", None, ProjectId(1))
@@ -2018,7 +2048,7 @@ async fn update_epic_feed_interval_secs_clear() {
 
 #[tokio::test]
 async fn get_epic_shows_feed_command() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("Feed Epic", "", "/repo", None, ProjectId(1))
@@ -2057,7 +2087,7 @@ async fn get_epic_shows_feed_command() {
 
 #[tokio::test]
 async fn claim_task_updates_status_to_running() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -2072,6 +2102,7 @@ async fn claim_task_updates_status_to_running() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -2092,6 +2123,7 @@ async fn claim_task_updates_status_to_running() {
     let task = state
         .db
         .get_task(crate::models::TaskId(task_id.0))
+        .await
         .unwrap()
         .unwrap();
     assert_eq!(task.status, TaskStatus::Running);
@@ -2105,7 +2137,7 @@ async fn claim_task_updates_status_to_running() {
 
 #[tokio::test]
 async fn wrap_up_task_not_found() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -2120,7 +2152,7 @@ async fn wrap_up_task_not_found() {
 
 #[tokio::test]
 async fn wrap_up_rejects_backlog_task() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -2135,6 +2167,7 @@ async fn wrap_up_rejects_backlog_task() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -2151,7 +2184,7 @@ async fn wrap_up_rejects_backlog_task() {
 
 #[tokio::test]
 async fn wrap_up_accepts_running_blocked_task() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         // task.base_branch = "main" is passed explicitly to finish_task; no symbolic-ref call
         MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse --abbrev-ref HEAD
@@ -2178,6 +2211,7 @@ async fn wrap_up_accepts_running_blocked_task() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.patch_task(
         task_id,
@@ -2185,6 +2219,7 @@ async fn wrap_up_accepts_running_blocked_task() {
             .worktree(Some("/repo/.worktrees/1-my-task"))
             .sub_status(crate::models::SubStatus::NeedsInput),
     )
+    .await
     .unwrap();
 
     let resp = call(
@@ -2206,7 +2241,7 @@ async fn wrap_up_accepts_running_blocked_task() {
 
 #[tokio::test]
 async fn wrap_up_accepts_running_active_task() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         // task.base_branch = "main" is passed explicitly to finish_task; no symbolic-ref call
         MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse --abbrev-ref HEAD
@@ -2233,11 +2268,13 @@ async fn wrap_up_accepts_running_active_task() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.patch_task(
         task_id,
         &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
     )
+    .await
     .unwrap();
 
     let resp = call(
@@ -2263,7 +2300,7 @@ async fn wrap_up_rebase_response_demands_exit_session_imperatively() {
     //   - name exit_session as the next call,
     //   - be imperative (not advisory like "when ready"),
     //   - say the session is not yet closed so the agent does not stop.
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse --abbrev-ref HEAD
         MockProcessRunner::fail(""),                  // git remote get-url (no remote)
@@ -2289,11 +2326,13 @@ async fn wrap_up_rebase_response_demands_exit_session_imperatively() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.patch_task(
         task_id,
         &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
     )
+    .await
     .unwrap();
 
     let resp = call(
@@ -2327,7 +2366,7 @@ async fn wrap_up_rebase_response_demands_exit_session_imperatively() {
 
 #[tokio::test]
 async fn wrap_up_task_no_worktree() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -2342,6 +2381,7 @@ async fn wrap_up_task_no_worktree() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -2358,7 +2398,7 @@ async fn wrap_up_task_no_worktree() {
 
 #[tokio::test]
 async fn wrap_up_invalid_action() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -2373,6 +2413,7 @@ async fn wrap_up_invalid_action() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     state
         .db
@@ -2380,6 +2421,7 @@ async fn wrap_up_invalid_action() {
             task_id,
             &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
         )
+        .await
         .unwrap();
 
     let resp = call(
@@ -2396,7 +2438,7 @@ async fn wrap_up_invalid_action() {
 
 #[tokio::test]
 async fn wrap_up_rebase_returns_started() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         // task.base_branch = "main" is passed explicitly to finish_task; no symbolic-ref call
         MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse --abbrev-ref HEAD
@@ -2423,11 +2465,13 @@ async fn wrap_up_rebase_returns_started() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.patch_task(
         task_id,
         &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-my-task")),
     )
+    .await
     .unwrap();
 
     let resp = call(
@@ -2452,7 +2496,7 @@ async fn wrap_up_rejects_pr_action() {
     // PR creation is now agent-driven. The /wrap-up skill instructs the
     // agent to author the title/body, run gh pr create itself, and
     // record the result via update_task. wrap_up only handles rebase.
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -2467,6 +2511,7 @@ async fn wrap_up_rejects_pr_action() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     state
         .db
@@ -2474,6 +2519,7 @@ async fn wrap_up_rejects_pr_action() {
             task_id,
             &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
         )
+        .await
         .unwrap();
 
     let resp = call(
@@ -2495,10 +2541,10 @@ async fn wrap_up_rejects_pr_action() {
 // wrap_up + learning_verdicts tests
 // ---------------------------------------------------------------------------
 
-fn make_state_with_runner(
+async fn make_state_with_runner(
     runner: Arc<dyn ProcessRunner>,
 ) -> (Arc<McpState>, Arc<dyn db::TaskStore>) {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let state = Arc::new(McpState {
         db: db.clone(),
         notify_tx: None,
@@ -2516,7 +2562,7 @@ fn rebase_ok_runner() -> Arc<dyn ProcessRunner> {
     ]))
 }
 
-fn create_wrappable_task(db: &Arc<dyn db::TaskStore>) -> crate::models::TaskId {
+async fn create_wrappable_task(db: &Arc<dyn db::TaskStore>) -> crate::models::TaskId {
     let task_id = db
         .create_task(CreateTaskRequest {
             title: "T",
@@ -2530,11 +2576,13 @@ fn create_wrappable_task(db: &Arc<dyn db::TaskStore>) -> crate::models::TaskId {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.patch_task(
         task_id,
         &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
     )
+    .await
     .unwrap();
     task_id
 }
@@ -2571,8 +2619,8 @@ async fn setup_state_after_dispatch_with_two_retrieved_approved_learnings() -> (
     crate::models::LearningId,
     crate::models::LearningId,
 ) {
-    let (state, db) = make_state_with_runner(rebase_ok_runner());
-    let task_id = create_wrappable_task(&db);
+    let (state, db) = make_state_with_runner(rebase_ok_runner()).await;
+    let task_id = create_wrappable_task(&db).await;
     let l1 = create_approved_user_learning(&db, "first learning").await;
     let l2 = create_approved_user_learning(&db, "second learning").await;
     db.record_retrieval(task_id, l1, crate::models::RetrievalSource::PromptInjection)
@@ -2615,8 +2663,8 @@ async fn wrap_up_with_verdicts_applies_them() {
 
 #[tokio::test]
 async fn wrap_up_without_verdicts_still_succeeds() {
-    let (state, db) = make_state_with_runner(rebase_ok_runner());
-    let task_id = create_wrappable_task(&db);
+    let (state, db) = make_state_with_runner(rebase_ok_runner()).await;
+    let task_id = create_wrappable_task(&db).await;
     let resp = call(
         &state,
         "tools/call",
@@ -2681,7 +2729,7 @@ async fn wrap_up_rejects_unknown_verdict_string() {
 
 #[tokio::test]
 async fn update_task_sets_sub_status() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -2696,6 +2744,7 @@ async fn update_task_sets_sub_status() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -2714,13 +2763,13 @@ async fn update_task_sets_sub_status() {
         "response should mention sub_status: {text}"
     );
 
-    let task = state.db.get_task(task_id).unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task.sub_status, crate::models::SubStatus::NeedsInput);
 }
 
 #[tokio::test]
 async fn update_task_rejects_invalid_sub_status_for_status() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -2735,6 +2784,7 @@ async fn update_task_rejects_invalid_sub_status_for_status() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -2751,7 +2801,7 @@ async fn update_task_rejects_invalid_sub_status_for_status() {
 
 #[tokio::test]
 async fn update_task_rejects_bogus_sub_status() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -2766,6 +2816,7 @@ async fn update_task_rejects_bogus_sub_status() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -2782,7 +2833,7 @@ async fn update_task_rejects_bogus_sub_status() {
 
 #[tokio::test]
 async fn update_task_sub_status_with_status_change() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -2797,6 +2848,7 @@ async fn update_task_sub_status_with_status_change() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     // Change status to review and set sub_status to approved in one call
@@ -2811,14 +2863,14 @@ async fn update_task_sub_status_with_status_change() {
     .await;
     assert!(resp.error.is_none(), "expected success: {:?}", resp.error);
 
-    let task = state.db.get_task(task_id).unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Review);
     assert_eq!(task.sub_status, crate::models::SubStatus::Approved);
 }
 
 #[tokio::test]
 async fn update_task_status_running_with_needs_input() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -2833,6 +2885,7 @@ async fn update_task_status_running_with_needs_input() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     // Set status=running and sub_status=needs_input in one call.
@@ -2849,14 +2902,14 @@ async fn update_task_status_running_with_needs_input() {
     .await;
     assert!(resp.error.is_none(), "expected success: {:?}", resp.error);
 
-    let task = state.db.get_task(task_id).unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Running);
     assert_eq!(task.sub_status, crate::models::SubStatus::NeedsInput);
 }
 
 #[tokio::test]
 async fn update_task_sub_status_invalid_for_new_status() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -2871,6 +2924,7 @@ async fn update_task_sub_status_invalid_for_new_status() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     // Change status to review but set sub_status to active (valid for running, not review)
@@ -2888,7 +2942,7 @@ async fn update_task_sub_status_invalid_for_new_status() {
 
 #[tokio::test]
 async fn list_tasks_shows_sub_status() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -2903,6 +2957,7 @@ async fn list_tasks_shows_sub_status() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     state
         .db
@@ -2910,6 +2965,7 @@ async fn list_tasks_shows_sub_status() {
             task_id,
             &db::TaskPatch::new().sub_status(crate::models::SubStatus::NeedsInput),
         )
+        .await
         .unwrap();
 
     let resp = call(
@@ -2927,7 +2983,7 @@ async fn list_tasks_shows_sub_status() {
 
 #[tokio::test]
 async fn get_task_shows_sub_status() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -2942,6 +2998,7 @@ async fn get_task_shows_sub_status() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     state
         .db
@@ -2949,6 +3006,7 @@ async fn get_task_shows_sub_status() {
             task_id,
             &db::TaskPatch::new().sub_status(crate::models::SubStatus::ChangesRequested),
         )
+        .await
         .unwrap();
 
     let resp = call(
@@ -2969,7 +3027,7 @@ async fn get_task_shows_sub_status() {
 
 #[tokio::test]
 async fn wrap_up_rebase_conflict_returns_error() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse HEAD
         MockProcessRunner::fail(""),                  // git remote get-url (no remote)
@@ -2995,11 +3053,13 @@ async fn wrap_up_rebase_conflict_returns_error() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.patch_task(
         task_id,
         &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-conflict-task")),
     )
+    .await
     .unwrap();
 
     let resp = call(
@@ -3013,7 +3073,7 @@ async fn wrap_up_rebase_conflict_returns_error() {
     .await;
 
     assert_error(&resp, "conflict");
-    let task = db.get_task(task_id).unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(
         task.status,
         TaskStatus::Review,
@@ -3023,7 +3083,7 @@ async fn wrap_up_rebase_conflict_returns_error() {
 
 #[tokio::test]
 async fn wrap_up_rebase_not_on_main_returns_error() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::fail(""), // git rev-parse (empty stdout → treated as non-main)
         MockProcessRunner::ok_with_stdout(b"feature\n"), // unused
@@ -3047,11 +3107,13 @@ async fn wrap_up_rebase_not_on_main_returns_error() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.patch_task(
         task_id,
         &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-wrong-branch")),
     )
+    .await
     .unwrap();
 
     let resp = call(
@@ -3065,7 +3127,7 @@ async fn wrap_up_rebase_not_on_main_returns_error() {
     .await;
 
     assert_error(&resp, "not on main");
-    let task = db.get_task(task_id).unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(
         task.status,
         TaskStatus::Review,
@@ -3075,7 +3137,7 @@ async fn wrap_up_rebase_not_on_main_returns_error() {
 
 #[tokio::test]
 async fn update_task_status_recalculates_epic_status() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("E", "", "/repo", None, ProjectId(1))
@@ -3095,6 +3157,7 @@ async fn update_task_status_recalculates_epic_status() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     state
         .db
@@ -3132,7 +3195,7 @@ async fn send_message_writes_file_and_sends_keys() {
     let tmp = tempfile::tempdir().unwrap();
     let worktree_path = tmp.path().to_str().unwrap().to_string();
 
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // tmux send-keys -l (notification text)
         MockProcessRunner::ok(), // tmux send-keys Enter
@@ -3157,6 +3220,7 @@ async fn send_message_writes_file_and_sends_keys() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     let receiver_id = db
         .create_task(CreateTaskRequest {
@@ -3171,6 +3235,7 @@ async fn send_message_writes_file_and_sends_keys() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.patch_task(
         receiver_id,
@@ -3178,6 +3243,7 @@ async fn send_message_writes_file_and_sends_keys() {
             .worktree(Some(&worktree_path))
             .tmux_window(Some("task-2")),
     )
+    .await
     .unwrap();
 
     let resp = call(
@@ -3228,7 +3294,7 @@ async fn send_message_writes_file_and_sends_keys() {
 
 #[tokio::test]
 async fn send_message_target_not_found() {
-    let state = test_state();
+    let state = test_state().await;
 
     let sender_id = state
         .db
@@ -3244,6 +3310,7 @@ async fn send_message_target_not_found() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -3274,7 +3341,7 @@ async fn send_message_target_not_found() {
 
 #[tokio::test]
 async fn send_message_target_no_worktree() {
-    let state = test_state();
+    let state = test_state().await;
 
     let sender_id = state
         .db
@@ -3290,6 +3357,7 @@ async fn send_message_target_no_worktree() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     let receiver_id = state
         .db
@@ -3305,6 +3373,7 @@ async fn send_message_target_no_worktree() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -3335,7 +3404,7 @@ async fn send_message_target_no_worktree() {
 
 #[tokio::test]
 async fn send_message_target_no_tmux_window() {
-    let state = test_state();
+    let state = test_state().await;
 
     let sender_id = state
         .db
@@ -3351,6 +3420,7 @@ async fn send_message_target_no_tmux_window() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     let receiver_id = state
         .db
@@ -3366,6 +3436,7 @@ async fn send_message_target_no_tmux_window() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     state
         .db
@@ -3373,6 +3444,7 @@ async fn send_message_target_no_tmux_window() {
             receiver_id,
             &db::TaskPatch::new().worktree(Some("/some/worktree")),
         )
+        .await
         .unwrap();
 
     let resp = call(
@@ -3406,11 +3478,11 @@ async fn send_message_target_no_tmux_window() {
 // =======================================================================
 
 /// Helper: creates a test state with a real notification channel.
-fn test_state_with_notify() -> (
+async fn test_state_with_notify() -> (
     Arc<McpState>,
     tokio::sync::mpsc::UnboundedReceiver<crate::mcp::McpEvent>,
 ) {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let state = Arc::new(McpState {
@@ -3423,8 +3495,8 @@ fn test_state_with_notify() -> (
 
 #[tokio::test]
 async fn update_task_sends_refresh_notification() {
-    let (state, mut rx) = test_state_with_notify();
-    let task_id = create_task_fixture(&state);
+    let (state, mut rx) = test_state_with_notify().await;
+    let task_id = create_task_fixture(&state).await;
 
     let resp = call(
         &state,
@@ -3449,7 +3521,7 @@ async fn update_task_sends_refresh_notification() {
 
 #[tokio::test]
 async fn create_task_sends_refresh_notification() {
-    let (state, mut rx) = test_state_with_notify();
+    let (state, mut rx) = test_state_with_notify().await;
     let default_id = state.db.get_default_project().await.unwrap().id;
 
     let resp = call(
@@ -3474,8 +3546,8 @@ async fn create_task_sends_refresh_notification() {
 
 #[tokio::test]
 async fn claim_task_sends_refresh_notification() {
-    let (state, mut rx) = test_state_with_notify();
-    let task_id = create_task_fixture(&state);
+    let (state, mut rx) = test_state_with_notify().await;
+    let task_id = create_task_fixture(&state).await;
 
     let resp = call(
         &state,
@@ -3503,8 +3575,8 @@ async fn claim_task_sends_refresh_notification() {
 
 #[tokio::test]
 async fn failed_update_does_not_send_notification() {
-    let (state, mut rx) = test_state_with_notify();
-    let task_id = create_task_fixture(&state);
+    let (state, mut rx) = test_state_with_notify().await;
+    let task_id = create_task_fixture(&state).await;
 
     // Invalid status should not trigger notification
     let resp = call(
@@ -3530,7 +3602,7 @@ async fn failed_update_does_not_send_notification() {
 
 #[tokio::test]
 async fn update_task_nonexistent_task_returns_error() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -3545,8 +3617,8 @@ async fn update_task_nonexistent_task_returns_error() {
 
 #[tokio::test]
 async fn update_task_invalid_tag() {
-    let state = test_state();
-    let task_id = create_task_fixture(&state);
+    let state = test_state().await;
+    let task_id = create_task_fixture(&state).await;
 
     let resp = call(
         &state,
@@ -3562,8 +3634,8 @@ async fn update_task_invalid_tag() {
 
 #[tokio::test]
 async fn update_task_valid_tag() {
-    let state = test_state();
-    let task_id = create_task_fixture(&state);
+    let state = test_state().await;
+    let task_id = create_task_fixture(&state).await;
 
     for tag in &["bug", "feature", "chore"] {
         let resp = call(
@@ -3583,14 +3655,14 @@ async fn update_task_valid_tag() {
     }
 
     // Verify last tag persisted
-    let task = state.db.get_task(task_id).unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task.tag, Some(crate::models::TaskTag::Chore));
 }
 
 #[tokio::test]
 async fn update_task_rejects_epic_tag() {
-    let state = test_state();
-    let task_id = create_task_fixture(&state);
+    let state = test_state().await;
+    let task_id = create_task_fixture(&state).await;
 
     let resp = call(
         &state,
@@ -3609,13 +3681,13 @@ async fn update_task_rejects_epic_tag() {
 
 #[tokio::test]
 async fn update_task_sets_epic_id() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("Parent", "", "/repo", None, ProjectId(1))
         .await
         .unwrap();
-    let task_id = create_task_fixture(&state);
+    let task_id = create_task_fixture(&state).await;
 
     let resp = call(
         &state,
@@ -3633,14 +3705,14 @@ async fn update_task_sets_epic_id() {
         "response should list epic_id: {text}"
     );
 
-    let task = state.db.get_task(task_id).unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task.epic_id, Some(epic.id));
 }
 
 #[tokio::test]
 async fn update_task_sort_order() {
-    let state = test_state();
-    let task_id = create_task_fixture(&state);
+    let state = test_state().await;
+    let task_id = create_task_fixture(&state).await;
 
     let resp = call(
         &state,
@@ -3653,7 +3725,7 @@ async fn update_task_sort_order() {
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
 
-    let task = state.db.get_task(task_id).unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task.sort_order, Some(42));
 }
 
@@ -3663,7 +3735,7 @@ async fn update_task_sort_order() {
 
 #[tokio::test]
 async fn create_task_invalid_tag() {
-    let state = test_state();
+    let state = test_state().await;
     let default_id = state.db.get_default_project().await.unwrap().id;
     let resp = call(
         &state,
@@ -3679,7 +3751,7 @@ async fn create_task_invalid_tag() {
 
 #[tokio::test]
 async fn create_task_valid_tag() {
-    let state = test_state();
+    let state = test_state().await;
     let default_id = state.db.get_default_project().await.unwrap().id;
     let resp = call(
         &state,
@@ -3692,13 +3764,13 @@ async fn create_task_valid_tag() {
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
 
-    let tasks = state.db.list_all().unwrap();
+    let tasks = state.db.list_all().await.unwrap();
     assert_eq!(tasks[0].tag, Some(crate::models::TaskTag::Bug));
 }
 
 #[tokio::test]
 async fn create_task_with_sort_order() {
-    let state = test_state();
+    let state = test_state().await;
     let default_id = state.db.get_default_project().await.unwrap().id;
     let resp = call(
         &state,
@@ -3711,13 +3783,13 @@ async fn create_task_with_sort_order() {
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
 
-    let tasks = state.db.list_all().unwrap();
+    let tasks = state.db.list_all().await.unwrap();
     assert_eq!(tasks[0].sort_order, Some(99));
 }
 
 #[tokio::test]
 async fn create_task_with_nonexistent_epic() {
-    let state = test_state();
+    let state = test_state().await;
     let default_id = state.db.get_default_project().await.unwrap().id;
     let resp = call(
         &state,
@@ -3738,7 +3810,7 @@ async fn create_task_with_nonexistent_epic() {
 
 #[tokio::test]
 async fn list_tasks_filters_by_epic_id() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("My Epic", "", "/repo", None, ProjectId(1))
@@ -3758,6 +3830,7 @@ async fn list_tasks_filters_by_epic_id() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     state
         .db
@@ -3773,6 +3846,7 @@ async fn list_tasks_filters_by_epic_id() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     state.db.set_task_epic_id(t1, Some(epic.id)).await.unwrap();
 
@@ -3796,7 +3870,7 @@ async fn list_tasks_filters_by_epic_id() {
 
 #[tokio::test]
 async fn list_tasks_filters_by_status_and_epic_id() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("Combined Filter", "", "/repo", None, ProjectId(1))
@@ -3816,6 +3890,7 @@ async fn list_tasks_filters_by_status_and_epic_id() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     let t2 = state
         .db
@@ -3831,6 +3906,7 @@ async fn list_tasks_filters_by_status_and_epic_id() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     state.db.set_task_epic_id(t1, Some(epic.id)).await.unwrap();
     state.db.set_task_epic_id(t2, Some(epic.id)).await.unwrap();
@@ -3858,7 +3934,7 @@ async fn list_tasks_filters_by_status_and_epic_id() {
 
 #[tokio::test]
 async fn list_tasks_epic_filter_no_match() {
-    let state = test_state();
+    let state = test_state().await;
     state
         .db
         .create_task(CreateTaskRequest {
@@ -3873,6 +3949,7 @@ async fn list_tasks_epic_filter_no_match() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -3888,7 +3965,7 @@ async fn list_tasks_epic_filter_no_match() {
 
 #[tokio::test]
 async fn list_tasks_done_status_filter() {
-    let state = test_state();
+    let state = test_state().await;
     state
         .db
         .create_task(CreateTaskRequest {
@@ -3903,6 +3980,7 @@ async fn list_tasks_done_status_filter() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     state
         .db
@@ -3918,6 +3996,7 @@ async fn list_tasks_done_status_filter() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -3938,7 +4017,7 @@ async fn list_tasks_done_status_filter() {
 
 #[tokio::test]
 async fn wrap_up_rebase_does_not_change_status() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse --abbrev-ref HEAD
         MockProcessRunner::fail(""),                  // git remote get-url (no remote)
@@ -3964,11 +4043,13 @@ async fn wrap_up_rebase_does_not_change_status() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.patch_task(
         task_id,
         &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-rebase-done")),
     )
+    .await
     .unwrap();
 
     let resp = call(
@@ -3983,7 +4064,7 @@ async fn wrap_up_rebase_does_not_change_status() {
     let text = extract_response_text(&resp);
     assert!(text.contains("wrap_up complete"));
 
-    let task = db.get_task(task_id).unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(
         task.status,
         TaskStatus::Review,
@@ -3993,7 +4074,7 @@ async fn wrap_up_rebase_does_not_change_status() {
 
 #[tokio::test]
 async fn wrap_up_rebase_does_not_recalculate_epic_status() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse --abbrev-ref HEAD
         MockProcessRunner::fail(""),                  // git remote get-url (no remote)
@@ -4023,12 +4104,14 @@ async fn wrap_up_rebase_does_not_recalculate_epic_status() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.set_task_epic_id(task_id, Some(epic.id)).await.unwrap();
     db.patch_task(
         task_id,
         &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-only-task")),
     )
+    .await
     .unwrap();
     db.recalculate_epic_status(epic.id).await.unwrap();
     let epic_status_before = db.get_epic(epic.id).await.unwrap().unwrap().status;
@@ -4053,7 +4136,7 @@ async fn wrap_up_rebase_does_not_recalculate_epic_status() {
 
 #[tokio::test]
 async fn wrap_up_accepts_string_task_id() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse
         MockProcessRunner::fail(""),                  // git remote get-url
@@ -4079,11 +4162,13 @@ async fn wrap_up_accepts_string_task_id() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.patch_task(
         task_id,
         &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
     )
+    .await
     .unwrap();
 
     let resp = call(
@@ -4108,7 +4193,7 @@ async fn wrap_up_accepts_string_task_id() {
 
 #[tokio::test]
 async fn get_task_shows_all_fields() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("Parent Epic", "", "/repo", None, ProjectId(1))
@@ -4128,6 +4213,7 @@ async fn get_task_shows_all_fields() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     state
         .db
@@ -4145,6 +4231,7 @@ async fn get_task_shows_all_fields() {
                 .tag(Some(crate::models::TaskTag::Feature))
                 .sort_order(Some(10)),
         )
+        .await
         .unwrap();
 
     let resp = call(
@@ -4174,7 +4261,7 @@ async fn get_task_shows_all_fields() {
 
 #[tokio::test]
 async fn get_task_without_epic_omits_epic_line() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -4189,6 +4276,7 @@ async fn get_task_without_epic_omits_epic_line() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -4213,7 +4301,7 @@ async fn get_task_without_epic_omits_epic_line() {
 
 #[tokio::test]
 async fn list_tasks_shows_tag_and_plan_indicators() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -4228,6 +4316,7 @@ async fn list_tasks_shows_tag_and_plan_indicators() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     state
         .db
@@ -4235,6 +4324,7 @@ async fn list_tasks_shows_tag_and_plan_indicators() {
             task_id,
             &db::TaskPatch::new().tag(Some(crate::models::TaskTag::Bug)),
         )
+        .await
         .unwrap();
 
     let resp = call(
@@ -4255,7 +4345,7 @@ async fn list_tasks_shows_tag_and_plan_indicators() {
 
 #[tokio::test]
 async fn list_tasks_shows_epic_indicator() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("Sprint 1", "", "/repo", None, ProjectId(1))
@@ -4275,6 +4365,7 @@ async fn list_tasks_shows_epic_indicator() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     state
         .db
@@ -4297,7 +4388,7 @@ async fn list_tasks_shows_epic_indicator() {
 
 #[tokio::test]
 async fn list_tasks_truncates_long_descriptions() {
-    let state = test_state();
+    let state = test_state().await;
     let long_desc = "x".repeat(300);
     state
         .db
@@ -4313,6 +4404,7 @@ async fn list_tasks_truncates_long_descriptions() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -4334,7 +4426,7 @@ async fn list_tasks_truncates_long_descriptions() {
 
 #[tokio::test]
 async fn list_tasks_excludes_archived_by_default() {
-    let state = test_state();
+    let state = test_state().await;
     state
         .db
         .create_task(CreateTaskRequest {
@@ -4349,6 +4441,7 @@ async fn list_tasks_excludes_archived_by_default() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     state
         .db
@@ -4364,6 +4457,7 @@ async fn list_tasks_excludes_archived_by_default() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -4383,7 +4477,7 @@ async fn list_tasks_excludes_archived_by_default() {
 
 #[tokio::test]
 async fn list_epics_excludes_archived() {
-    let state = test_state();
+    let state = test_state().await;
     state
         .db
         .create_epic("Active Epic", "desc", "/repo", None, ProjectId(1))
@@ -4421,7 +4515,7 @@ async fn list_epics_excludes_archived() {
 
 #[tokio::test]
 async fn dispatch_next_epic_not_found_returns_error() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -4436,7 +4530,7 @@ async fn dispatch_next_epic_not_found_returns_error() {
 
 #[tokio::test]
 async fn dispatch_next_no_backlog_returns_success_noop() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("Test Epic", "desc", "/repo", None, ProjectId(1))
@@ -4458,6 +4552,7 @@ async fn dispatch_next_no_backlog_returns_success_noop() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     state
         .db
@@ -4488,7 +4583,7 @@ async fn dispatch_next_picks_first_backlog_subtask() {
     let repo_path = dir.path().to_str().unwrap().to_string();
     std::fs::create_dir_all(dir.path().join(".worktrees")).unwrap();
 
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // tmux new-window
         MockProcessRunner::ok(), // tmux set-option @dispatch_dir
@@ -4519,6 +4614,7 @@ async fn dispatch_next_picks_first_backlog_subtask() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     let task2_id = db
         .create_task(CreateTaskRequest {
@@ -4533,6 +4629,7 @@ async fn dispatch_next_picks_first_backlog_subtask() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.set_task_epic_id(task1_id, Some(epic.id)).await.unwrap();
     db.set_task_epic_id(task2_id, Some(epic.id)).await.unwrap();
@@ -4565,13 +4662,13 @@ async fn dispatch_next_picks_first_backlog_subtask() {
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
     // Verify the task was dispatched
-    let task1 = db.get_task(task1_id).unwrap().unwrap();
+    let task1 = db.get_task(task1_id).await.unwrap().unwrap();
     assert_eq!(task1.status, TaskStatus::Running);
     assert!(task1.worktree.is_some());
     assert!(task1.tmux_window.is_some());
 
     // task2 should still be Backlog
-    let task2 = db.get_task(task2_id).unwrap().unwrap();
+    let task2 = db.get_task(task2_id).await.unwrap().unwrap();
     assert_eq!(task2.status, TaskStatus::Backlog);
 }
 
@@ -4581,7 +4678,7 @@ async fn dispatch_next_respects_sort_order() {
     let repo_path = dir.path().to_str().unwrap().to_string();
     std::fs::create_dir_all(dir.path().join(".worktrees")).unwrap();
 
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // tmux new-window
         MockProcessRunner::ok(), // tmux set-option @dispatch_dir
@@ -4614,6 +4711,7 @@ async fn dispatch_next_respects_sort_order() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     let task2_id = db
         .create_task(CreateTaskRequest {
@@ -4628,14 +4726,17 @@ async fn dispatch_next_respects_sort_order() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.set_task_epic_id(task1_id, Some(epic.id)).await.unwrap();
     db.set_task_epic_id(task2_id, Some(epic.id)).await.unwrap();
 
     // Give task2 a lower sort_order so it should be picked first
     db.patch_task(task2_id, &db::TaskPatch::new().sort_order(Some(1)))
+        .await
         .unwrap();
     db.patch_task(task1_id, &db::TaskPatch::new().sort_order(Some(2)))
+        .await
         .unwrap();
 
     // Pre-create worktree dir for task2 (the one that should be dispatched)
@@ -4669,7 +4770,7 @@ async fn dispatch_next_respects_tag_routing() {
     let repo_path = dir.path().to_str().unwrap().to_string();
     std::fs::create_dir_all(dir.path().join(".worktrees")).unwrap();
 
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // tmux new-window
         MockProcessRunner::ok(), // tmux set-option @dispatch_dir
@@ -4702,12 +4803,14 @@ async fn dispatch_next_respects_tag_routing() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.set_task_epic_id(task_id, Some(epic.id)).await.unwrap();
     db.patch_task(
         task_id,
         &db::TaskPatch::new().tag(Some(crate::models::TaskTag::Feature)),
     )
+    .await
     .unwrap();
 
     // Pre-create worktree dir
@@ -4737,7 +4840,7 @@ async fn dispatch_next_respects_tag_routing() {
     // Wait for spawn_blocking
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
-    let task = db.get_task(task_id).unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Running);
 }
 
@@ -4750,7 +4853,7 @@ async fn update_review_status_updates_pr() {
     use crate::models::{CiStatus, ReviewAgentStatus, ReviewDecision, ReviewPr};
     use chrono::Utc;
 
-    let state = test_state();
+    let state = test_state().await;
     let pr = ReviewPr {
         number: 42,
         title: "Test PR".to_string(),
@@ -4807,7 +4910,7 @@ async fn update_review_status_updates_pr() {
 
 #[tokio::test]
 async fn update_review_status_no_match_errors() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -4822,7 +4925,7 @@ async fn update_review_status_no_match_errors() {
 
 #[tokio::test]
 async fn update_review_status_invalid_status_errors() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -4840,7 +4943,7 @@ async fn update_review_status_findings_ready_sets_action_required() {
     use crate::models::{CiStatus, ReviewDecision, ReviewPr, WorkflowItemKind};
     use chrono::Utc;
 
-    let state = test_state();
+    let state = test_state().await;
 
     // Insert a PR and set an active review agent so update_agent_status succeeds
     let pr = ReviewPr {
@@ -4922,7 +5025,7 @@ async fn update_review_status_findings_ready_without_workflow_row() {
     use crate::models::{CiStatus, ReviewDecision, ReviewPr, WorkflowItemKind};
     use chrono::Utc;
 
-    let state = test_state();
+    let state = test_state().await;
 
     // Insert a PR and set an active review agent so update_agent_status succeeds
     let pr = ReviewPr {
@@ -4994,7 +5097,7 @@ async fn update_review_status_findings_ready_without_workflow_row() {
 
 #[tokio::test]
 async fn wrap_up_rebase_preserves_tmux_window() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse --abbrev-ref HEAD
         MockProcessRunner::fail(""),                  // git remote get-url (no remote)
@@ -5020,6 +5123,7 @@ async fn wrap_up_rebase_preserves_tmux_window() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.patch_task(
         task_id,
@@ -5027,6 +5131,7 @@ async fn wrap_up_rebase_preserves_tmux_window() {
             .worktree(Some("/repo/.worktrees/1-rebase-preserve"))
             .tmux_window(Some("task-99")),
     )
+    .await
     .unwrap();
 
     let resp = call(
@@ -5045,7 +5150,7 @@ async fn wrap_up_rebase_preserves_tmux_window() {
         "response should instruct agent to call exit_session; got: {text}"
     );
 
-    let task = db.get_task(task_id).unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(
         task.status,
         TaskStatus::Review,
@@ -5059,7 +5164,7 @@ async fn wrap_up_rebase_preserves_tmux_window() {
 
 #[tokio::test]
 async fn wrap_up_rebase_conflict_sets_conflict_substatus() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse HEAD
         MockProcessRunner::fail(""),                  // git remote get-url (no remote)
@@ -5085,11 +5190,13 @@ async fn wrap_up_rebase_conflict_sets_conflict_substatus() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.patch_task(
         task_id,
         &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-conflict-sub")),
     )
+    .await
     .unwrap();
 
     let resp = call(
@@ -5103,7 +5210,7 @@ async fn wrap_up_rebase_conflict_sets_conflict_substatus() {
     .await;
 
     assert_error(&resp, "conflict");
-    let task = db.get_task(task_id).unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(
         task.status,
         TaskStatus::Review,
@@ -5121,7 +5228,7 @@ async fn wrap_up_rebase_clears_conflict_substatus_on_non_conflict_error() {
     // When a task has Conflict sub_status from a previous rebase attempt,
     // and a new rebase fails with a non-conflict error (e.g. Other), the
     // stale Conflict sub_status should be cleared — matching TUI behavior.
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::fail(""), // detect_default_branch (symbolic-ref)
         MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse --abbrev-ref HEAD
@@ -5148,6 +5255,7 @@ async fn wrap_up_rebase_clears_conflict_substatus_on_non_conflict_error() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.patch_task(
         task_id,
@@ -5155,10 +5263,11 @@ async fn wrap_up_rebase_clears_conflict_substatus_on_non_conflict_error() {
             .worktree(Some("/repo/.worktrees/1-stale-conflict"))
             .sub_status(SubStatus::Conflict),
     )
+    .await
     .unwrap();
 
     // Verify conflict is set before wrap_up
-    let task = db.get_task(task_id).unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task.sub_status, SubStatus::Conflict);
 
     let _resp = call(
@@ -5171,7 +5280,7 @@ async fn wrap_up_rebase_clears_conflict_substatus_on_non_conflict_error() {
     )
     .await;
 
-    let task = db.get_task(task_id).unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap().unwrap();
     assert_ne!(
         task.sub_status,
         SubStatus::Conflict,
@@ -5185,7 +5294,7 @@ async fn wrap_up_rebase_clears_conflict_substatus_on_non_conflict_error() {
 
 #[tokio::test]
 async fn create_task_with_base_branch_stores_it() {
-    let state = test_state();
+    let state = test_state().await;
     let default_id = state.db.get_default_project().await.unwrap().id;
 
     let resp = call(
@@ -5204,14 +5313,14 @@ async fn create_task_with_base_branch_stores_it() {
     .await;
 
     assert!(resp.error.is_none(), "{:?}", resp.error);
-    let tasks = state.db.list_all().unwrap();
+    let tasks = state.db.list_all().await.unwrap();
     let task = tasks.iter().find(|t| t.title == "My Feature").unwrap();
     assert_eq!(task.base_branch, "develop");
 }
 
 #[tokio::test]
 async fn create_task_without_base_branch_defaults_to_main() {
-    let state = test_state();
+    let state = test_state().await;
     let default_id = state.db.get_default_project().await.unwrap().id;
 
     let resp = call(
@@ -5229,7 +5338,7 @@ async fn create_task_without_base_branch_defaults_to_main() {
     .await;
 
     assert!(resp.error.is_none(), "{:?}", resp.error);
-    let tasks = state.db.list_all().unwrap();
+    let tasks = state.db.list_all().await.unwrap();
     let task = tasks
         .iter()
         .find(|t| t.title == "Default Branch Task")
@@ -5239,7 +5348,7 @@ async fn create_task_without_base_branch_defaults_to_main() {
 
 #[tokio::test]
 async fn update_task_with_base_branch_updates_it() {
-    let state = test_state();
+    let state = test_state().await;
 
     let task_id = state
         .db
@@ -5255,6 +5364,7 @@ async fn update_task_with_base_branch_updates_it() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -5271,13 +5381,13 @@ async fn update_task_with_base_branch_updates_it() {
     .await;
 
     assert!(resp.error.is_none(), "{:?}", resp.error);
-    let task = state.db.get_task(task_id).unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task.base_branch, "release/2.0");
 }
 
 #[tokio::test]
 async fn dispatch_next_returns_disabled_when_auto_dispatch_off() {
-    let state = test_state();
+    let state = test_state().await;
 
     // Create epic with auto_dispatch = false
     let epic = state
@@ -5306,6 +5416,7 @@ async fn dispatch_next_returns_disabled_when_auto_dispatch_off() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     state
         .db
@@ -5331,7 +5442,7 @@ async fn dispatch_next_returns_disabled_when_auto_dispatch_off() {
     );
 
     // Task must still be in backlog — not dispatched
-    let task_after = state.db.get_task(task_id).unwrap().unwrap();
+    let task_after = state.db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task_after.status, TaskStatus::Backlog);
 }
 
@@ -5341,7 +5452,7 @@ async fn dispatch_next_returns_disabled_when_auto_dispatch_off() {
 
 #[tokio::test]
 async fn mcp_create_sub_epic() {
-    let state = test_state();
+    let state = test_state().await;
 
     // Create parent epic first
     let parent = state
@@ -5387,7 +5498,7 @@ async fn mcp_create_sub_epic() {
 
 #[tokio::test]
 async fn create_epic_tool_schema_includes_parent_epic_id() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(&state, "tools/list", None).await;
     let tools = resp.result.as_ref().unwrap()["tools"].as_array().unwrap();
     let create_epic = tools
@@ -5495,7 +5606,7 @@ async fn insert_security_alert_fixture(
 
 #[tokio::test]
 async fn list_review_prs_empty() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -5508,7 +5619,7 @@ async fn list_review_prs_empty() {
 
 #[tokio::test]
 async fn list_review_prs_returns_stored_prs() {
-    let state = test_state();
+    let state = test_state().await;
     insert_review_pr_fixture(&state, 42, "acme/app").await;
     insert_review_pr_fixture(&state, 99, "acme/app").await;
 
@@ -5525,7 +5636,7 @@ async fn list_review_prs_returns_stored_prs() {
 
 #[tokio::test]
 async fn list_review_prs_filters_by_repo() {
-    let state = test_state();
+    let state = test_state().await;
     insert_review_pr_fixture(&state, 1, "acme/app").await;
     insert_review_pr_fixture(&state, 2, "acme/other").await;
 
@@ -5546,7 +5657,7 @@ async fn list_review_prs_filters_by_repo() {
 
 #[tokio::test]
 async fn get_review_pr_found() {
-    let state = test_state();
+    let state = test_state().await;
     insert_review_pr_fixture(&state, 42, "acme/app").await;
 
     let resp = call(
@@ -5563,7 +5674,7 @@ async fn get_review_pr_found() {
 
 #[tokio::test]
 async fn get_review_pr_not_found() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -5575,7 +5686,7 @@ async fn get_review_pr_not_found() {
 
 #[tokio::test]
 async fn get_review_pr_found_in_my_prs() {
-    let state = test_state();
+    let state = test_state().await;
     insert_my_pr_fixture(&state, 55, "acme/app").await;
 
     let resp = call(
@@ -5596,7 +5707,7 @@ async fn get_review_pr_found_in_my_prs() {
 
 #[tokio::test]
 async fn list_security_alerts_empty() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -5610,7 +5721,7 @@ async fn list_security_alerts_empty() {
 #[tokio::test]
 async fn list_security_alerts_returns_stored_alerts() {
     use crate::models::AlertKind;
-    let state = test_state();
+    let state = test_state().await;
     insert_security_alert_fixture(&state, 1, "acme/api", AlertKind::Dependabot).await;
     insert_security_alert_fixture(&state, 2, "acme/api", AlertKind::CodeScanning).await;
 
@@ -5628,7 +5739,7 @@ async fn list_security_alerts_returns_stored_alerts() {
 #[tokio::test]
 async fn list_security_alerts_filters_by_kind() {
     use crate::models::AlertKind;
-    let state = test_state();
+    let state = test_state().await;
     insert_security_alert_fixture(&state, 1, "acme/api", AlertKind::Dependabot).await;
     insert_security_alert_fixture(&state, 2, "acme/api", AlertKind::CodeScanning).await;
 
@@ -5650,7 +5761,7 @@ async fn list_security_alerts_filters_by_kind() {
 #[tokio::test]
 async fn get_security_alert_found() {
     use crate::models::AlertKind;
-    let state = test_state();
+    let state = test_state().await;
     insert_security_alert_fixture(&state, 7, "acme/api", AlertKind::Dependabot).await;
 
     let resp = call(
@@ -5670,7 +5781,7 @@ async fn get_security_alert_found() {
 
 #[tokio::test]
 async fn get_security_alert_not_found() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -5689,7 +5800,7 @@ async fn get_security_alert_not_found() {
 
 #[tokio::test]
 async fn dispatch_review_agent_pr_not_found() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -5706,7 +5817,7 @@ async fn dispatch_review_agent_pr_not_found() {
 async fn dispatch_review_agent_already_reviewing() {
     use crate::db::PrKind;
     use crate::models::{CiStatus, ReviewAgentStatus, ReviewDecision, ReviewPr};
-    let state = test_state();
+    let state = test_state().await;
     let pr = ReviewPr {
         number: 42,
         title: "PR #42".to_string(),
@@ -5758,7 +5869,7 @@ async fn dispatch_review_agent_already_reviewing() {
 
 #[tokio::test]
 async fn dispatch_fix_agent_alert_not_found() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -5777,7 +5888,7 @@ async fn dispatch_fix_agent_alert_not_found() {
 #[tokio::test]
 async fn dispatch_fix_agent_already_reviewing() {
     use crate::models::{AlertKind, AlertSeverity, ReviewAgentStatus, SecurityAlert};
-    let state = test_state();
+    let state = test_state().await;
     let alert = SecurityAlert {
         number: 7,
         repo: "acme/api".to_string(),
@@ -5825,7 +5936,7 @@ async fn dispatch_fix_agent_already_reviewing() {
 
 #[tokio::test]
 async fn list_review_prs_mode_author() {
-    let state = test_state();
+    let state = test_state().await;
     insert_my_pr_fixture(&state, 55, "acme/app").await;
 
     let resp = call(
@@ -5840,7 +5951,7 @@ async fn list_review_prs_mode_author() {
 
 #[tokio::test]
 async fn list_review_prs_mode_all() {
-    let state = test_state();
+    let state = test_state().await;
     insert_review_pr_fixture(&state, 10, "acme/app").await;
     insert_my_pr_fixture(&state, 20, "acme/app").await;
 
@@ -5864,7 +5975,7 @@ async fn list_review_prs_mode_all() {
 #[tokio::test]
 async fn list_security_alerts_filters_by_severity() {
     use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
-    let state = test_state();
+    let state = test_state().await;
 
     let high_alert = SecurityAlert {
         number: 1,
@@ -5919,7 +6030,7 @@ async fn list_security_alerts_filters_by_severity() {
 #[tokio::test]
 async fn list_security_alerts_filters_by_repo() {
     use crate::models::AlertKind;
-    let state = test_state();
+    let state = test_state().await;
     insert_security_alert_fixture(&state, 1, "acme/api", AlertKind::Dependabot).await;
     insert_security_alert_fixture(&state, 2, "acme/web", AlertKind::Dependabot).await;
 
@@ -5944,7 +6055,7 @@ async fn dispatch_review_agent_success() {
     // Pre-create worktree dir so git worktree add is skipped.
     std::fs::create_dir_all(dir.path().join(".worktrees").join("review-42")).unwrap();
 
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // tmux list-windows (has_window → false, empty stdout)
         MockProcessRunner::ok(), // git worktree prune
@@ -6003,7 +6114,7 @@ async fn dispatch_fix_agent_success() {
     // Pre-create worktree dir so git worktree add is skipped.
     std::fs::create_dir_all(dir.path().join(".worktrees").join("fix-vuln-7")).unwrap();
 
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // tmux list-windows (has_window)
         MockProcessRunner::ok(), // git worktree prune
@@ -6082,7 +6193,7 @@ async fn dispatch_task_dispatches_backlog_task() {
     let repo_path = dir.path().to_str().unwrap().to_string();
     std::fs::create_dir_all(dir.path().join(".worktrees")).unwrap();
 
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // tmux new-window
         MockProcessRunner::ok(), // tmux set-option @dispatch_dir
@@ -6109,6 +6220,7 @@ async fn dispatch_task_dispatches_backlog_task() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     // Pre-create worktree dir (mocked git won't create it)
@@ -6136,7 +6248,7 @@ async fn dispatch_task_dispatches_backlog_task() {
     );
 
     // dispatch_task is synchronous — no sleep needed
-    let task = db.get_task(task_id).unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Running);
     assert!(
         task.worktree.is_some(),
@@ -6150,7 +6262,7 @@ async fn dispatch_task_dispatches_backlog_task() {
 
 #[tokio::test]
 async fn dispatch_task_returns_error_for_non_backlog_task() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -6165,6 +6277,7 @@ async fn dispatch_task_returns_error_for_non_backlog_task() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -6182,7 +6295,7 @@ async fn dispatch_task_returns_error_for_non_backlog_task() {
 
 #[tokio::test]
 async fn dispatch_task_unknown_task_id_returns_error() {
-    let state = test_state();
+    let state = test_state().await;
 
     let resp = call(
         &state,
@@ -6203,7 +6316,7 @@ async fn dispatch_task_respects_tag_routing() {
     let repo_path = dir.path().to_str().unwrap().to_string();
     std::fs::create_dir_all(dir.path().join(".worktrees")).unwrap();
 
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // tmux new-window
         MockProcessRunner::ok(), // tmux set-option @dispatch_dir
@@ -6232,11 +6345,13 @@ async fn dispatch_task_respects_tag_routing() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.patch_task(
         task_id,
         &db::TaskPatch::new().tag(Some(crate::models::TaskTag::Feature)),
     )
+    .await
     .unwrap();
 
     // Pre-create worktree dir
@@ -6264,7 +6379,7 @@ async fn dispatch_task_respects_tag_routing() {
     );
 
     // Task should be Running — plan mode still dispatches an agent
-    let task = db.get_task(task_id).unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Running);
 }
 
@@ -6274,7 +6389,7 @@ async fn dispatch_task_returns_error_when_dispatch_fails() {
     let repo_path = dir.path().to_str().unwrap().to_string();
     std::fs::create_dir_all(dir.path().join(".worktrees")).unwrap();
 
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     // First mock call fails (tmux new-window fails) → dispatch errors out
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::fail("tmux: no server running"), // tmux new-window fails
@@ -6298,6 +6413,7 @@ async fn dispatch_task_returns_error_when_dispatch_fails() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -6313,7 +6429,7 @@ async fn dispatch_task_returns_error_when_dispatch_fails() {
     assert!(resp.error.is_some(), "expected error when dispatch fails");
 
     // Task status must remain Backlog — dispatch failure must not leave it as Running
-    let task = db.get_task(task_id).unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(
         task.status,
         TaskStatus::Backlog,
@@ -6327,7 +6443,7 @@ async fn dispatch_task_returns_error_when_dispatch_fails() {
 
 #[tokio::test]
 async fn create_task_with_project_id_assigns_correctly() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let other = db.create_project("Other", 1).await.unwrap();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let state = Arc::new(McpState {
@@ -6352,7 +6468,7 @@ async fn create_task_with_project_id_assigns_correctly() {
     .await;
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
 
-    let tasks = db.list_all().unwrap();
+    let tasks = db.list_all().await.unwrap();
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].project_id, other.id);
 }
@@ -6363,7 +6479,7 @@ async fn create_task_with_project_id_assigns_correctly() {
 
 #[tokio::test]
 async fn create_epic_without_project_id_assigns_to_default() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let state = Arc::new(McpState {
         db: db.clone(),
@@ -6393,7 +6509,7 @@ async fn create_epic_without_project_id_assigns_to_default() {
 
 #[tokio::test]
 async fn create_epic_with_project_id_assigns_correctly() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let other = db.create_project("Other", 1).await.unwrap();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let state = Arc::new(McpState {
@@ -6428,7 +6544,7 @@ async fn create_epic_with_project_id_assigns_correctly() {
 
 #[tokio::test]
 async fn list_projects_returns_all_projects() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     db.create_project("Dispatch", 1).await.unwrap();
     db.create_project("wizard_game", 2).await.unwrap();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
@@ -6464,7 +6580,7 @@ async fn list_projects_returns_all_projects() {
 
 #[tokio::test]
 async fn update_task_project_id_moves_task() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let other = db.create_project("Dispatch", 1).await.unwrap();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let state = Arc::new(McpState {
@@ -6473,9 +6589,9 @@ async fn update_task_project_id_moves_task() {
         runner,
     });
 
-    let task_id = create_task_fixture(&state);
+    let task_id = create_task_fixture(&state).await;
     let default_id = db.get_default_project().await.unwrap().id;
-    let task_before = db.get_task(task_id).unwrap().unwrap();
+    let task_before = db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task_before.project_id, default_id);
 
     let resp = call(
@@ -6489,14 +6605,14 @@ async fn update_task_project_id_moves_task() {
     .await;
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
 
-    let task_after = db.get_task(task_id).unwrap().unwrap();
+    let task_after = db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task_after.project_id, other.id);
 }
 
 #[tokio::test]
 async fn update_task_invalid_project_id_returns_error() {
-    let state = test_state();
-    let task_id = create_task_fixture(&state);
+    let state = test_state().await;
+    let task_id = create_task_fixture(&state).await;
 
     let resp = call(
         &state,
@@ -6517,7 +6633,7 @@ async fn update_task_invalid_project_id_returns_error() {
 
 #[tokio::test]
 async fn update_epic_project_id_moves_epic() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let other = db.create_project("Dispatch", 1).await.unwrap();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let state = Arc::new(McpState {
@@ -6557,7 +6673,7 @@ async fn update_epic_project_id_moves_epic() {
 
 #[tokio::test]
 async fn update_epic_invalid_project_id_returns_error() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let state = Arc::new(McpState {
         db: db.clone(),
@@ -6613,6 +6729,7 @@ async fn create_task_in_repo(state: &Arc<McpState>, repo: &str) -> crate::models
             tag: None,
             project_id: pid,
         })
+        .await
         .unwrap()
 }
 
@@ -6652,7 +6769,7 @@ async fn create_approved_learning(
 
 #[tokio::test]
 async fn record_learning_creates_proposed_entry() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = create_task_in_repo(&state, "/repo/foo").await;
 
     let resp = call(
@@ -6690,7 +6807,7 @@ async fn record_learning_creates_proposed_entry() {
 
 #[tokio::test]
 async fn record_learning_derives_scope_ref_for_repo() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = create_task_in_repo(&state, "/repo/bar").await;
 
     let resp = call(
@@ -6720,7 +6837,7 @@ async fn record_learning_derives_scope_ref_for_repo() {
 
 #[tokio::test]
 async fn record_learning_derives_scope_ref_for_epic() {
-    let state = test_state();
+    let state = test_state().await;
     let pid = default_project_id(&state).await;
     let epic = state
         .db
@@ -6741,6 +6858,7 @@ async fn record_learning_derives_scope_ref_for_epic() {
             tag: None,
             project_id: pid,
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -6773,7 +6891,7 @@ async fn record_learning_derives_scope_ref_for_epic() {
 
 #[tokio::test]
 async fn record_learning_epic_scope_no_epic_fails() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = create_task_in_repo(&state, "/repo/baz").await;
 
     let resp = call(
@@ -6795,7 +6913,7 @@ async fn record_learning_epic_scope_no_epic_fails() {
 
 #[tokio::test]
 async fn record_learning_user_scope_no_scope_ref() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = create_task_in_repo(&state, "/repo/foo").await;
 
     let resp = call(
@@ -6825,7 +6943,7 @@ async fn record_learning_user_scope_no_scope_ref() {
 
 #[tokio::test]
 async fn record_learning_empty_summary_fails() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = create_task_in_repo(&state, "/repo").await;
 
     let resp = call(
@@ -6847,7 +6965,7 @@ async fn record_learning_empty_summary_fails() {
 
 #[tokio::test]
 async fn record_learning_unknown_task_fails() {
-    let state = test_state();
+    let state = test_state().await;
 
     let resp = call(
         &state,
@@ -6870,7 +6988,7 @@ async fn record_learning_unknown_task_fails() {
 
 #[tokio::test]
 async fn query_learnings_returns_approved_for_task() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = create_task_in_repo(&state, "/repo/myproject").await;
     create_approved_learning(
         &state,
@@ -6900,7 +7018,7 @@ async fn query_learnings_returns_approved_for_task() {
 
 #[tokio::test]
 async fn query_learnings_tag_filter_narrows_results() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = create_task_in_repo(&state, "/repo/tagged").await;
     create_approved_learning(
         &state,
@@ -6939,7 +7057,7 @@ async fn query_learnings_tag_filter_narrows_results() {
 
 #[tokio::test]
 async fn query_learnings_respects_limit() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = create_task_in_repo(&state, "/repo/limited").await;
     for i in 0..5 {
         create_approved_learning(
@@ -6970,7 +7088,7 @@ async fn query_learnings_respects_limit() {
 
 #[tokio::test]
 async fn query_learnings_unknown_task_fails() {
-    let state = test_state();
+    let state = test_state().await;
 
     let resp = call(
         &state,
@@ -6988,7 +7106,7 @@ async fn query_learnings_unknown_task_fails() {
 
 #[tokio::test]
 async fn upvote_learning_increments_count() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = create_task_in_repo(&state, "/repo").await;
     let learning_id = create_approved_learning(
         &state,
@@ -7016,7 +7134,7 @@ async fn upvote_learning_increments_count() {
 
 #[tokio::test]
 async fn upvote_learning_unknown_learning_fails() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = create_task_in_repo(&state, "/repo").await;
 
     let resp = call(
@@ -7035,7 +7153,7 @@ async fn upvote_learning_unknown_learning_fails() {
 
 #[tokio::test]
 async fn list_tasks_caller_task_id_scopes_to_epic() {
-    let state = test_state();
+    let state = test_state().await;
 
     // Create epics directly via DB
     let epic = state
@@ -7064,6 +7182,7 @@ async fn list_tasks_caller_task_id_scopes_to_epic() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     // Task B (sibling) in the same epic
@@ -7081,6 +7200,7 @@ async fn list_tasks_caller_task_id_scopes_to_epic() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     // Task C in a different epic (should NOT appear)
@@ -7098,6 +7218,7 @@ async fn list_tasks_caller_task_id_scopes_to_epic() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -7121,7 +7242,7 @@ async fn list_tasks_caller_task_id_scopes_to_epic() {
 
 #[tokio::test]
 async fn list_tasks_caller_task_id_scopes_to_project_when_no_epic() {
-    let state = test_state();
+    let state = test_state().await;
 
     // Task A (caller) in project 1, no epic
     let id_a = state
@@ -7138,6 +7259,7 @@ async fn list_tasks_caller_task_id_scopes_to_project_when_no_epic() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     // Task B sibling in project 1
@@ -7155,6 +7277,7 @@ async fn list_tasks_caller_task_id_scopes_to_project_when_no_epic() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     // Task C in project 2 (should NOT appear)
@@ -7172,6 +7295,7 @@ async fn list_tasks_caller_task_id_scopes_to_project_when_no_epic() {
             tag: None,
             project_id: ProjectId(2),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -7198,7 +7322,7 @@ async fn list_tasks_caller_task_id_scopes_to_project_when_no_epic() {
 
 #[tokio::test]
 async fn list_tasks_explicit_scope_overrides_caller_derived_scope() {
-    let state = test_state();
+    let state = test_state().await;
 
     // Create epic directly via DB
     let epic = state
@@ -7222,6 +7346,7 @@ async fn list_tasks_explicit_scope_overrides_caller_derived_scope() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     // Task B also in the epic
@@ -7239,6 +7364,7 @@ async fn list_tasks_explicit_scope_overrides_caller_derived_scope() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     // Task C in project 2, no epic — explicit project_id=2 should match this
@@ -7256,6 +7382,7 @@ async fn list_tasks_explicit_scope_overrides_caller_derived_scope() {
             tag: None,
             project_id: ProjectId(2),
         })
+        .await
         .unwrap();
 
     // Pass caller_task_id (which has epic) BUT also explicit project_id=2 → project wins
@@ -7283,7 +7410,7 @@ async fn list_tasks_explicit_scope_overrides_caller_derived_scope() {
 
 #[tokio::test]
 async fn list_tasks_repo_paths_filter() {
-    let state = test_state();
+    let state = test_state().await;
 
     state
         .db
@@ -7299,6 +7426,7 @@ async fn list_tasks_repo_paths_filter() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     state
         .db
@@ -7314,6 +7442,7 @@ async fn list_tasks_repo_paths_filter() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -7333,7 +7462,7 @@ async fn list_tasks_repo_paths_filter() {
 
 #[tokio::test]
 async fn list_tasks_unknown_caller_task_id_returns_error() {
-    let state = test_state();
+    let state = test_state().await;
 
     let resp = call(
         &state,
@@ -7350,15 +7479,16 @@ async fn list_tasks_unknown_caller_task_id_returns_error() {
 
 #[tokio::test]
 async fn list_tasks_includes_pr_url_in_output() {
-    let state = test_state();
+    let state = test_state().await;
 
-    let task_id = create_task_fixture(&state);
+    let task_id = create_task_fixture(&state).await;
     state
         .db
         .patch_task(
             task_id,
             &crate::db::TaskPatch::new().pr_url(Some("https://github.com/org/repo/pull/42")),
         )
+        .await
         .unwrap();
 
     let resp = call(
@@ -7377,7 +7507,7 @@ async fn list_tasks_includes_pr_url_in_output() {
 
 #[tokio::test]
 async fn list_tasks_includes_plan_goal_in_output() {
-    let state = test_state();
+    let state = test_state().await;
 
     let plan_path = std::env::temp_dir().join("dispatch_test_plan_345.md");
     std::fs::write(
@@ -7401,6 +7531,7 @@ async fn list_tasks_includes_plan_goal_in_output() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -7421,7 +7552,7 @@ async fn list_tasks_includes_plan_goal_in_output() {
 
 #[tokio::test]
 async fn list_tasks_falls_back_to_description_when_no_plan() {
-    let state = test_state();
+    let state = test_state().await;
 
     state
         .db
@@ -7437,6 +7568,7 @@ async fn list_tasks_falls_back_to_description_when_no_plan() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -7455,8 +7587,8 @@ async fn list_tasks_falls_back_to_description_when_no_plan() {
 
 #[tokio::test]
 async fn list_tasks_omits_pr_segment_when_no_pr_url() {
-    let state = test_state();
-    create_task_fixture(&state);
+    let state = test_state().await;
+    create_task_fixture(&state).await;
 
     let resp = call(
         &state,
@@ -7476,8 +7608,8 @@ async fn list_tasks_omits_pr_segment_when_no_pr_url() {
 // wrap_up: reflection nudge
 // =======================================================================
 
-fn make_rebase_state() -> (Arc<dyn db::TaskStore>, Arc<McpState>) {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+async fn make_rebase_state() -> (Arc<dyn db::TaskStore>, Arc<McpState>) {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse --abbrev-ref HEAD
         MockProcessRunner::fail(""),                  // git remote get-url (no remote)
@@ -7492,7 +7624,10 @@ fn make_rebase_state() -> (Arc<dyn db::TaskStore>, Arc<McpState>) {
     (db, state)
 }
 
-fn seed_task_with_worktree(db: &Arc<dyn db::TaskStore>, suffix: &str) -> crate::models::TaskId {
+async fn seed_task_with_worktree(
+    db: &Arc<dyn db::TaskStore>,
+    suffix: &str,
+) -> crate::models::TaskId {
     let task_id = db
         .create_task(CreateTaskRequest {
             title: &format!("Task {suffix}"),
@@ -7506,6 +7641,7 @@ fn seed_task_with_worktree(db: &Arc<dyn db::TaskStore>, suffix: &str) -> crate::
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.patch_task(
         task_id,
@@ -7514,6 +7650,7 @@ fn seed_task_with_worktree(db: &Arc<dyn db::TaskStore>, suffix: &str) -> crate::
             task_id.0
         ))),
     )
+    .await
     .unwrap();
     task_id
 }
@@ -7523,8 +7660,8 @@ async fn wrap_up_rebase_directs_to_exit_session_not_reflection_nudge() {
     // After the behavioral change, wrap_up(rebase) no longer emits the
     // reflection nudge inline. Instead it tells the agent to call exit_session,
     // which handles the reflection prompt on first call.
-    let (db, state) = make_rebase_state();
-    let task_id = seed_task_with_worktree(&db, "nudge-default");
+    let (db, state) = make_rebase_state().await;
+    let task_id = seed_task_with_worktree(&db, "nudge-default").await;
 
     let resp = call(
         &state,
@@ -7551,10 +7688,11 @@ async fn wrap_up_rebase_directs_to_exit_session_not_reflection_nudge() {
 async fn wrap_up_rebase_omits_reflection_nudge_regardless_of_setting() {
     // The learning_reflection_enabled setting no longer affects wrap_up(rebase)
     // — the nudge has moved to exit_session.
-    let (db, state) = make_rebase_state();
+    let (db, state) = make_rebase_state().await;
     db.set_setting_bool("learning_reflection_enabled", true)
+        .await
         .unwrap();
-    let task_id = seed_task_with_worktree(&db, "nudge-setting-irrelevant");
+    let task_id = seed_task_with_worktree(&db, "nudge-setting-irrelevant").await;
 
     let resp = call(
         &state,
@@ -7586,7 +7724,7 @@ async fn wrap_up_rebase_omits_reflection_nudge_regardless_of_setting() {
 
 #[tokio::test]
 async fn update_task_pr_finalisation_appends_reflection_nudge_by_default() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -7601,6 +7739,7 @@ async fn update_task_pr_finalisation_appends_reflection_nudge_by_default() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -7626,10 +7765,11 @@ async fn update_task_pr_finalisation_appends_reflection_nudge_by_default() {
 
 #[tokio::test]
 async fn update_task_pr_finalisation_omits_nudge_when_disabled() {
-    let state = test_state();
+    let state = test_state().await;
     state
         .db
         .set_setting_bool("learning_reflection_enabled", false)
+        .await
         .unwrap();
     let task_id = state
         .db
@@ -7645,6 +7785,7 @@ async fn update_task_pr_finalisation_omits_nudge_when_disabled() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -7673,7 +7814,7 @@ async fn update_task_pr_set_without_status_does_not_nudge() {
     // Agent setting only pr_url (no status transition) is not a wrap-up
     // finalisation — don't nudge. This preserves current update_task UX
     // for non-wrap-up callers tweaking the URL.
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -7688,6 +7829,7 @@ async fn update_task_pr_set_without_status_does_not_nudge() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -7714,7 +7856,7 @@ async fn update_task_pr_set_without_status_does_not_nudge() {
 async fn update_task_status_review_without_pr_url_change_does_not_nudge() {
     // Re-confirming a task to review without setting a new pr_url is
     // not a wrap-up finalisation. No nudge.
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -7729,6 +7871,7 @@ async fn update_task_status_review_without_pr_url_change_does_not_nudge() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let resp = call(
@@ -7756,7 +7899,7 @@ async fn update_task_pr_url_already_set_does_not_nudge_again() {
     // The nudge should fire only on the first null->set transition.
     // Subsequent updates to pr_url (e.g. correcting the URL) must not
     // re-nudge.
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -7771,6 +7914,7 @@ async fn update_task_pr_url_already_set_does_not_nudge_again() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     state
         .db
@@ -7778,6 +7922,7 @@ async fn update_task_pr_url_already_set_does_not_nudge_again() {
             task_id,
             &db::TaskPatch::new().pr_url(Some("https://github.com/org/repo/pull/1")),
         )
+        .await
         .unwrap();
 
     let resp = call(
@@ -7805,8 +7950,8 @@ async fn update_task_pr_url_already_set_does_not_nudge_again() {
 
 #[tokio::test]
 async fn exit_session_first_call_returns_reflection_nudge() {
-    let state = test_state();
-    let task_id = create_running_task_with_window(&state);
+    let state = test_state().await;
+    let task_id = create_running_task_with_window(&state).await;
 
     let resp = call(
         &state,
@@ -7833,7 +7978,7 @@ async fn exit_session_first_call_returns_reflection_nudge() {
     );
 
     // Window must NOT be killed on first call
-    let task = state.db.get_task(task_id).unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
     assert!(
         task.tmux_window.is_some(),
         "tmux_window should still be set after first call"
@@ -7842,8 +7987,8 @@ async fn exit_session_first_call_returns_reflection_nudge() {
 
 #[tokio::test]
 async fn exit_session_has_learnings_true_returns_record_prompt() {
-    let state = test_state();
-    let task_id = create_running_task_with_window(&state);
+    let state = test_state().await;
+    let task_id = create_running_task_with_window(&state).await;
 
     // First call
     call(
@@ -7875,7 +8020,7 @@ async fn exit_session_has_learnings_true_returns_record_prompt() {
     );
 
     // Session must NOT be closed yet
-    let task = state.db.get_task(task_id).unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
     assert!(
         task.tmux_window.is_some(),
         "tmux_window should still be set after has_learnings=true"
@@ -7889,8 +8034,8 @@ async fn exit_session_has_learnings_true_returns_record_prompt() {
 
 #[tokio::test]
 async fn exit_session_has_learnings_false_closes_session() {
-    let state = test_state();
-    let task_id = create_running_task_with_window(&state);
+    let state = test_state().await;
+    let task_id = create_running_task_with_window(&state).await;
 
     // First call
     call(
@@ -7917,7 +8062,7 @@ async fn exit_session_has_learnings_false_closes_session() {
         "has_learnings=false should close session; got: {text}"
     );
 
-    let task = state.db.get_task(task_id).unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
     assert!(
         task.tmux_window.is_none(),
         "tmux_window should be cleared after has_learnings=false"
@@ -7929,8 +8074,8 @@ async fn exit_session_has_learnings_false_closes_session() {
 async fn exit_session_after_record_prompt_closes_with_has_learnings_false() {
     // Stateless flow: 1st call asks, 2nd with has_learnings=true returns the
     // record_learning prompt, 3rd with has_learnings=false closes.
-    let state = test_state();
-    let task_id = create_running_task_with_window(&state);
+    let state = test_state().await;
+    let task_id = create_running_task_with_window(&state).await;
 
     call(
         &state,
@@ -7965,7 +8110,7 @@ async fn exit_session_after_record_prompt_closes_with_has_learnings_false() {
         "has_learnings=false should close session; got: {text}"
     );
 
-    let task = state.db.get_task(task_id).unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
     assert!(task.tmux_window.is_none());
     assert_eq!(task.status, TaskStatus::Done);
 }
@@ -7975,8 +8120,8 @@ async fn exit_session_bare_call_after_has_learnings_true_still_asks() {
     // Regression guard for the stateless model: the server keeps no per-task
     // state, so a bare exit_session call always returns the reflection
     // question — even after a previous has_learnings=true.
-    let state = test_state();
-    let task_id = create_running_task_with_window(&state);
+    let state = test_state().await;
+    let task_id = create_running_task_with_window(&state).await;
 
     call(
         &state,
@@ -8001,14 +8146,14 @@ async fn exit_session_bare_call_after_has_learnings_true_still_asks() {
         "bare call should always ask for has_learnings; got: {text}"
     );
 
-    let task = state.db.get_task(task_id).unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Running);
     assert!(task.tmux_window.is_some());
 }
 
 #[tokio::test]
 async fn exit_session_unknown_task_returns_error() {
-    let state = test_state();
+    let state = test_state().await;
 
     let resp = call(
         &state,
@@ -8025,8 +8170,8 @@ async fn exit_session_unknown_task_returns_error() {
 
 #[tokio::test]
 async fn exit_session_task_without_window_returns_error() {
-    let state = test_state();
-    let task_id = create_task_fixture(&state); // Backlog task, no tmux_window
+    let state = test_state().await;
+    let task_id = create_task_fixture(&state).await; // Backlog task, no tmux_window
 
     let resp = call(
         &state,
@@ -8043,7 +8188,7 @@ async fn exit_session_task_without_window_returns_error() {
 
 #[tokio::test]
 async fn wrap_up_rebase_does_not_kill_window() {
-    let state = test_state();
+    let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -8058,13 +8203,14 @@ async fn wrap_up_rebase_does_not_kill_window() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     // Set up worktree + tmux_window so is_wrappable passes.
     let patch = crate::db::TaskPatch::new()
         .worktree(Some("/repo/.worktrees/task-rebase"))
         .tmux_window(Some("task-rebase-window"));
-    state.db.patch_task(task_id, &patch).unwrap();
+    state.db.patch_task(task_id, &patch).await.unwrap();
 
     // wrap_up calls finish_task which runs git commands. With MockProcessRunner
     // the git operations will fail, but the key assertion holds for BOTH paths:
@@ -8080,7 +8226,7 @@ async fn wrap_up_rebase_does_not_kill_window() {
     )
     .await;
 
-    let task = state.db.get_task(task_id).unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
     // tmux_window must NOT be cleared — exit_session owns the window kill.
     assert!(
         task.tmux_window.is_some(),
@@ -8095,8 +8241,8 @@ async fn exit_session_second_call_marks_task_done() {
     // No-epic branch: the closing call must mark the task Done even when
     // there is no epic to recalculate. Pins the `is_some()` guard around
     // recalculate_epic_status.
-    let state = test_state();
-    let task_id = create_running_task_with_window(&state);
+    let state = test_state().await;
+    let task_id = create_running_task_with_window(&state).await;
 
     let resp = call(
         &state,
@@ -8109,7 +8255,7 @@ async fn exit_session_second_call_marks_task_done() {
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
 
-    let task = state.db.get_task(task_id).unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Done);
     assert_eq!(task.sub_status, SubStatus::default_for(TaskStatus::Done));
     assert!(task.tmux_window.is_none());
@@ -8118,8 +8264,8 @@ async fn exit_session_second_call_marks_task_done() {
 
 #[tokio::test]
 async fn exit_session_first_call_does_not_change_status() {
-    let state = test_state();
-    let task_id = create_running_task_with_window(&state);
+    let state = test_state().await;
+    let task_id = create_running_task_with_window(&state).await;
 
     call(
         &state,
@@ -8131,7 +8277,7 @@ async fn exit_session_first_call_does_not_change_status() {
     )
     .await;
 
-    let task = state.db.get_task(task_id).unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(
         task.status,
         TaskStatus::Running,
@@ -8147,14 +8293,15 @@ async fn exit_session_first_call_does_not_change_status() {
 async fn exit_session_already_done_task_stays_done() {
     // Idempotency: a task that is somehow already Done before exit_session
     // closes must remain Done after the closing call.
-    let state = test_state();
-    let task_id = create_running_task_with_window(&state);
+    let state = test_state().await;
+    let task_id = create_running_task_with_window(&state).await;
     state
         .db
         .patch_task(
             task_id,
             &crate::db::TaskPatch::new().status(TaskStatus::Done),
         )
+        .await
         .unwrap();
 
     call(
@@ -8167,20 +8314,20 @@ async fn exit_session_already_done_task_stays_done() {
     )
     .await;
 
-    let task = state.db.get_task(task_id).unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Done);
     assert!(task.tmux_window.is_none());
 }
 
 #[tokio::test]
 async fn exit_session_recalculates_epic_status() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("E", "", "/repo", None, ProjectId(1))
         .await
         .unwrap();
-    let task_id = create_running_task_with_window(&state);
+    let task_id = create_running_task_with_window(&state).await;
     state
         .db
         .set_task_epic_id(task_id, Some(epic.id))
@@ -8216,14 +8363,15 @@ async fn exit_session_recalculates_epic_status() {
 async fn exit_session_resets_sub_status_to_default_for_done() {
     // A task that carries a non-default sub_status (e.g. Stale) into the
     // closing call must have it reset to the Done default.
-    let state = test_state();
-    let task_id = create_running_task_with_window(&state);
+    let state = test_state().await;
+    let task_id = create_running_task_with_window(&state).await;
     state
         .db
         .patch_task(
             task_id,
             &crate::db::TaskPatch::new().sub_status(SubStatus::Stale),
         )
+        .await
         .unwrap();
 
     call(
@@ -8236,7 +8384,7 @@ async fn exit_session_resets_sub_status_to_default_for_done() {
     )
     .await;
 
-    let task = state.db.get_task(task_id).unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Done);
     assert_eq!(
         task.sub_status,
@@ -8249,8 +8397,8 @@ async fn exit_session_resets_sub_status_to_default_for_done() {
 async fn exit_session_emits_refresh_after_done_patch() {
     // Pin the notify ordering: a Refresh event fires after the closing call
     // commits the Done patch, so the TUI re-renders the task in Done.
-    let (state, mut rx) = test_state_with_notify();
-    let task_id = create_running_task_with_window(&state);
+    let (state, mut rx) = test_state_with_notify().await;
+    let task_id = create_running_task_with_window(&state).await;
 
     call(
         &state,
@@ -8275,7 +8423,7 @@ async fn exit_session_emits_refresh_after_done_patch() {
     assert!(resp.error.is_none(), "{:?}", resp.error);
 
     // DB must already be Done by the time the Refresh fires.
-    let task = state.db.get_task(task_id).unwrap().unwrap();
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Done);
 
     let event = rx
@@ -8289,7 +8437,7 @@ async fn exit_session_emits_refresh_after_done_patch() {
 
 #[tokio::test]
 async fn wrap_up_then_exit_session_end_to_end() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse --abbrev-ref HEAD
         MockProcessRunner::fail(""),                  // git remote get-url (no remote)
@@ -8322,6 +8470,7 @@ async fn wrap_up_then_exit_session_end_to_end() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.set_task_epic_id(task_id, Some(epic.id)).await.unwrap();
     db.patch_task(
@@ -8330,6 +8479,7 @@ async fn wrap_up_then_exit_session_end_to_end() {
             .worktree(Some("/repo/.worktrees/e2e"))
             .tmux_window(Some("e2e-window")),
     )
+    .await
     .unwrap();
     db.recalculate_epic_status(epic.id).await.unwrap();
     let epic_before = db.get_epic(epic.id).await.unwrap().unwrap();
@@ -8346,7 +8496,7 @@ async fn wrap_up_then_exit_session_end_to_end() {
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
 
-    let after_wrap_up = db.get_task(task_id).unwrap().unwrap();
+    let after_wrap_up = db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(
         after_wrap_up.status,
         TaskStatus::Running,
@@ -8373,7 +8523,7 @@ async fn wrap_up_then_exit_session_end_to_end() {
     .await;
     assert!(close_resp.error.is_none(), "{:?}", close_resp.error);
 
-    let final_task = db.get_task(task_id).unwrap().unwrap();
+    let final_task = db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(final_task.status, TaskStatus::Done);
     assert_eq!(
         final_task.sub_status,

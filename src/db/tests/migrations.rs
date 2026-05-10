@@ -1,65 +1,82 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
 
-#[test]
-fn fresh_db_has_latest_schema_version() {
-    let db = in_memory_db();
-    let conn = db.conn().unwrap();
-    let version: i64 = conn
-        .pragma_query_value(None, "user_version", |row| row.get(0))
+#[tokio::test]
+async fn fresh_db_has_latest_schema_version() {
+    let db = in_memory_db().await;
+    let version: i64 = db
+        .db_call(|conn| {
+            conn.pragma_query_value(None, "user_version", |row| row.get(0))
+                .map_err(anyhow::Error::from)
+        })
+        .await
         .unwrap();
     assert_eq!(version, 49);
 }
 
-#[test]
-fn v48_creates_retrieval_and_verdict_tables() {
-    let db = in_memory_db();
-    let conn = db.conn().unwrap();
-    let count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('learning_retrievals','learning_verdicts')",
-            [],
-            |r| r.get(0),
-        )
+#[tokio::test]
+async fn v48_creates_retrieval_and_verdict_tables() {
+    let db = in_memory_db().await;
+    let count: i64 = db
+        .db_call(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('learning_retrievals','learning_verdicts')",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(anyhow::Error::from)
+        })
+        .await
         .unwrap();
     assert_eq!(count, 2);
 }
 
-#[test]
-fn v48_accepts_needs_review_status() {
-    let db = in_memory_db();
-    let conn = db.conn().unwrap();
-    conn.execute(
-        "INSERT INTO learnings (kind, summary, scope, status) VALUES ('pitfall','x','user','needs_review')",
-        [],
-    )
+#[tokio::test]
+async fn v48_accepts_needs_review_status() {
+    let db = in_memory_db().await;
+    db.db_call(|conn| {
+        conn.execute(
+            "INSERT INTO learnings (kind, summary, scope, status) VALUES ('pitfall','x','user','needs_review')",
+            [],
+        )
+        .map(|_| ())
+        .map_err(anyhow::Error::from)
+    })
+    .await
     .unwrap();
 }
 
-#[test]
-fn v49_renames_confirmed_columns_to_upvote() {
-    let db = in_memory_db();
-    let conn = db.conn().unwrap();
-    let count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM pragma_table_info('learnings')
-             WHERE name IN ('upvote_count','last_upvoted_at')",
-            [],
-            |r| r.get(0),
-        )
+#[tokio::test]
+async fn v49_renames_confirmed_columns_to_upvote() {
+    let db = in_memory_db().await;
+    let count: i64 = db
+        .db_call(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('learnings')
+                 WHERE name IN ('upvote_count','last_upvoted_at')",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(anyhow::Error::from)
+        })
+        .await
         .unwrap();
     assert_eq!(
         count, 2,
         "expected upvote_count and last_upvoted_at columns"
     );
 
-    let stale: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM pragma_table_info('learnings')
-             WHERE name IN ('confirmed_count','last_confirmed_at')",
-            [],
-            |r| r.get(0),
-        )
+    let stale: i64 = db
+        .db_call(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('learnings')
+                 WHERE name IN ('confirmed_count','last_confirmed_at')",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(anyhow::Error::from)
+        })
+        .await
         .unwrap();
     assert_eq!(stale, 0, "old confirmed_* columns must be removed");
 }
@@ -96,8 +113,8 @@ fn migrate_v49_preserves_existing_counts() {
     assert_eq!(ts, "2026-05-09T12:00:00Z");
 }
 
-#[test]
-fn migration_v42_nulls_out_epic_tag() {
+#[tokio::test]
+async fn migration_v42_nulls_out_epic_tag() {
     use rusqlite::Connection as RawConn;
     let conn = RawConn::open_in_memory().unwrap();
     conn.execute_batch(
@@ -158,8 +175,8 @@ fn migration_v42_nulls_out_epic_tag() {
     );
 }
 
-#[test]
-fn migration_v39_backfills_project_id_to_default() {
+#[tokio::test]
+async fn migration_v39_backfills_project_id_to_default() {
     use rusqlite::Connection as RawConn;
     // Build a pre-v39 database manually (v38 schema)
     let conn = RawConn::open_in_memory().unwrap();
@@ -206,7 +223,7 @@ fn migration_v39_backfills_project_id_to_default() {
     )
     .unwrap();
     // Apply pending migrations via init_schema
-    Database::init_schema(&conn).unwrap();
+    super::super::init_schema_sync(&conn).unwrap();
     // Verify project_id = 1 (Default project) was backfilled
     let task_pid: i64 = conn
         .query_row(
@@ -226,8 +243,8 @@ fn migration_v39_backfills_project_id_to_default() {
     assert_eq!(epic_pid, 1);
 }
 
-#[test]
-fn legacy_db_migrates_to_latest_version() {
+#[tokio::test]
+async fn legacy_db_migrates_to_latest_version() {
     // Simulate a pre-versioning DB: create tables manually including notes
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(
@@ -271,7 +288,7 @@ fn legacy_db_migrates_to_latest_version() {
     .unwrap();
 
     // Run init_schema which should migrate
-    Database::init_schema(&conn).unwrap();
+    super::super::init_schema_sync(&conn).unwrap();
 
     // Notes table should be gone
     let table_exists: bool = conn
@@ -298,8 +315,8 @@ fn legacy_db_migrates_to_latest_version() {
     assert_eq!(version, 49);
 }
 
-#[test]
-fn migration_25_renames_plan_to_plan_path() {
+#[tokio::test]
+async fn migration_25_renames_plan_to_plan_path() {
     // Simulate a v24 DB (plan column exists, plan_path does not)
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(
@@ -355,7 +372,7 @@ fn migration_25_renames_plan_to_plan_path() {
     .unwrap();
 
     // Apply migration 25
-    Database::init_schema(&conn).unwrap();
+    super::super::init_schema_sync(&conn).unwrap();
 
     // plan_path column exists with data preserved
     let task_plan_path: Option<String> = conn
@@ -387,57 +404,51 @@ fn migration_25_renames_plan_to_plan_path() {
     assert_eq!(version, 49);
 }
 
-#[test]
-fn migrate_v26_adds_agent_columns() {
-    let db = in_memory_db();
-    let conn = db.conn().unwrap();
+#[tokio::test]
+async fn migrate_v26_adds_agent_columns() {
+    let db = in_memory_db().await;
 
-    // Verify columns exist by inserting data with them
-    conn.execute(
-        "INSERT INTO review_prs (repo, number, title, author, url, is_draft,
-         created_at, updated_at, additions, deletions, review_decision,
-         labels, body, head_ref, ci_status, reviewers, tmux_window, worktree)
-         VALUES ('acme/app', 1, 'Test', 'alice', 'https://example.com', 0,
-         '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z', 0, 0, 'ReviewRequired',
-         '[]', '', '', 'None', '[]', 'dispatch:review-1', '/tmp/wt')",
-        [],
-    )
-    .unwrap();
-
-    let (tw, wt): (Option<String>, Option<String>) = conn
-        .query_row(
-            "SELECT tmux_window, worktree FROM review_prs WHERE repo = 'acme/app' AND number = 1",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
+    let (tw1, wt1, tw2, wt2): (Option<String>, Option<String>, Option<String>, Option<String>) = db
+        .db_call(|conn| {
+            conn.execute(
+                "INSERT INTO review_prs (repo, number, title, author, url, is_draft,
+                 created_at, updated_at, additions, deletions, review_decision,
+                 labels, body, head_ref, ci_status, reviewers, tmux_window, worktree)
+                 VALUES ('acme/app', 1, 'Test', 'alice', 'https://example.com', 0,
+                 '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z', 0, 0, 'ReviewRequired',
+                 '[]', '', '', 'None', '[]', 'dispatch:review-1', '/tmp/wt')",
+                [],
+            )?;
+            let (tw1, wt1): (Option<String>, Option<String>) = conn.query_row(
+                "SELECT tmux_window, worktree FROM review_prs WHERE repo = 'acme/app' AND number = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            conn.execute(
+                "INSERT INTO security_alerts (repo, number, kind, severity, title,
+                 url, created_at, state, description, tmux_window, worktree)
+                 VALUES ('acme/app', 1, 'dependabot', 'high', 'Alert',
+                 'https://example.com', '2024-01-01T00:00:00Z', 'open', 'desc',
+                 'dispatch:fix-1', '/tmp/wt4')",
+                [],
+            )?;
+            let (tw2, wt2): (Option<String>, Option<String>) = conn.query_row(
+                "SELECT tmux_window, worktree FROM security_alerts WHERE repo = 'acme/app'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            Ok((tw1, wt1, tw2, wt2))
+        })
+        .await
         .unwrap();
-    assert_eq!(tw.as_deref(), Some("dispatch:review-1"));
-    assert_eq!(wt.as_deref(), Some("/tmp/wt"));
-
-    // Verify security_alerts too
-    conn.execute(
-        "INSERT INTO security_alerts (repo, number, kind, severity, title,
-         url, created_at, state, description, tmux_window, worktree)
-         VALUES ('acme/app', 1, 'dependabot', 'high', 'Alert',
-         'https://example.com', '2024-01-01T00:00:00Z', 'open', 'desc',
-         'dispatch:fix-1', '/tmp/wt4')",
-        [],
-    )
-    .unwrap();
-
-    let (tw, wt): (Option<String>, Option<String>) = conn
-        .query_row(
-            "SELECT tmux_window, worktree FROM security_alerts WHERE repo = 'acme/app'",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .unwrap();
-    assert_eq!(tw.as_deref(), Some("dispatch:fix-1"));
-    assert_eq!(wt.as_deref(), Some("/tmp/wt4"));
+    assert_eq!(tw1.as_deref(), Some("dispatch:review-1"));
+    assert_eq!(wt1.as_deref(), Some("/tmp/wt"));
+    assert_eq!(tw2.as_deref(), Some("dispatch:fix-1"));
+    assert_eq!(wt2.as_deref(), Some("/tmp/wt4"));
 }
 
-#[test]
-fn migration_6_converts_ready_to_backlog() {
+#[tokio::test]
+async fn migration_6_converts_ready_to_backlog() {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(
         "PRAGMA foreign_keys=ON;
@@ -483,7 +494,7 @@ fn migration_6_converts_ready_to_backlog() {
         [],
     ).unwrap();
 
-    Database::init_schema(&conn).unwrap();
+    super::super::init_schema_sync(&conn).unwrap();
 
     let status: String = conn
         .query_row("SELECT status FROM tasks WHERE id = 1", [], |row| {
@@ -498,8 +509,8 @@ fn migration_6_converts_ready_to_backlog() {
     assert_eq!(version, 49);
 }
 
-#[test]
-fn migration_13_converts_needs_input() {
+#[tokio::test]
+async fn migration_13_converts_needs_input() {
     // Simulate a database at version 12 with needs_input column
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(
@@ -571,7 +582,7 @@ fn migration_13_converts_needs_input() {
     ).unwrap();
 
     // Run migration
-    Database::init_schema(&conn).unwrap();
+    super::super::init_schema_sync(&conn).unwrap();
 
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
@@ -612,8 +623,8 @@ fn migration_13_converts_needs_input() {
     );
 }
 
-#[test]
-fn migration_16_cleans_invalid_review_needs_input() {
+#[tokio::test]
+async fn migration_16_cleans_invalid_review_needs_input() {
     // Simulate a v15 DB that has (review, needs_input) rows from old hook behavior
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(
@@ -692,7 +703,7 @@ fn migration_16_cleans_invalid_review_needs_input() {
     .unwrap();
 
     // Run migrations
-    Database::init_schema(&conn).unwrap();
+    super::super::init_schema_sync(&conn).unwrap();
 
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
@@ -727,8 +738,8 @@ fn migration_16_cleans_invalid_review_needs_input() {
 // Migration-specific tests — verify data preservation through table rebuilds
 // ---------------------------------------------------------------------------
 
-#[test]
-fn migration_v4_preserves_epic_data_after_table_rebuild() {
+#[tokio::test]
+async fn migration_v4_preserves_epic_data_after_table_rebuild() {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(
         "PRAGMA foreign_keys=ON;
@@ -770,7 +781,7 @@ fn migration_v4_preserves_epic_data_after_table_rebuild() {
     )
     .unwrap();
 
-    Database::init_schema(&conn).unwrap();
+    super::super::init_schema_sync(&conn).unwrap();
 
     // Epic core data preserved through v4 table rebuild
     let (title, desc, repo): (String, String, String) = conn
@@ -804,8 +815,8 @@ fn migration_v4_preserves_epic_data_after_table_rebuild() {
     assert_eq!(epic_id, Some(1));
 }
 
-#[test]
-fn migration_v15_converts_needs_input_to_sub_status() {
+#[tokio::test]
+async fn migration_v15_converts_needs_input_to_sub_status() {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(
         "PRAGMA foreign_keys=ON;
@@ -862,7 +873,7 @@ fn migration_v15_converts_needs_input_to_sub_status() {
     )
     .unwrap();
 
-    Database::init_schema(&conn).unwrap();
+    super::super::init_schema_sync(&conn).unwrap();
 
     let rows: Vec<(String, String)> = conn
         .prepare("SELECT title, sub_status FROM tasks ORDER BY id")
@@ -884,8 +895,8 @@ fn migration_v15_converts_needs_input_to_sub_status() {
     );
 }
 
-#[test]
-fn migration_v16_cleans_invalid_status_pairs() {
+#[tokio::test]
+async fn migration_v16_cleans_invalid_status_pairs() {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(
         "PRAGMA foreign_keys=ON;
@@ -946,7 +957,7 @@ fn migration_v16_cleans_invalid_status_pairs() {
     )
     .unwrap();
 
-    Database::init_schema(&conn).unwrap();
+    super::super::init_schema_sync(&conn).unwrap();
 
     let rows: Vec<(String, String, String)> = conn
         .prepare("SELECT title, status, sub_status FROM tasks ORDER BY id")
@@ -989,8 +1000,8 @@ fn migration_v16_cleans_invalid_status_pairs() {
     );
 }
 
-#[test]
-fn migration_v18_expands_tilde_paths() {
+#[tokio::test]
+async fn migration_v18_expands_tilde_paths() {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(
         "PRAGMA foreign_keys=ON;
@@ -1056,7 +1067,7 @@ fn migration_v18_expands_tilde_paths() {
     )
     .unwrap();
 
-    Database::init_schema(&conn).unwrap();
+    super::super::init_schema_sync(&conn).unwrap();
 
     let home = std::env::var("HOME").expect("HOME must be set for this test");
 
@@ -1110,8 +1121,8 @@ fn migration_v18_expands_tilde_paths() {
     assert_eq!(preset_paths, vec![format!("{home}/project/e")]);
 }
 
-#[test]
-fn migration_v20_converts_done_boolean_to_status_enum() {
+#[tokio::test]
+async fn migration_v20_converts_done_boolean_to_status_enum() {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(
         "PRAGMA foreign_keys=ON;
@@ -1194,7 +1205,7 @@ fn migration_v20_converts_done_boolean_to_status_enum() {
     )
     .unwrap();
 
-    Database::init_schema(&conn).unwrap();
+    super::super::init_schema_sync(&conn).unwrap();
 
     let statuses: Vec<(String, String)> = conn
         .prepare("SELECT title, status FROM epics ORDER BY id")
@@ -1217,8 +1228,8 @@ fn migration_v20_converts_done_boolean_to_status_enum() {
     );
 }
 
-#[test]
-fn migration_v17_adds_conflict_sub_status() {
+#[tokio::test]
+async fn migration_v17_adds_conflict_sub_status() {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(
         "PRAGMA foreign_keys=ON;
@@ -1292,7 +1303,7 @@ fn migration_v17_adds_conflict_sub_status() {
         "pre-migration CHECK should reject 'conflict'"
     );
 
-    Database::init_schema(&conn).unwrap();
+    super::super::init_schema_sync(&conn).unwrap();
 
     // Existing data preserved
     let rows: Vec<(String, String, String)> = conn
@@ -1329,8 +1340,8 @@ fn migration_v17_adds_conflict_sub_status() {
     );
 }
 
-#[test]
-fn migration_v29_converts_newline_presets_to_json() {
+#[tokio::test]
+async fn migration_v29_converts_newline_presets_to_json() {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(
         "PRAGMA foreign_keys=ON;
@@ -1397,7 +1408,7 @@ fn migration_v29_converts_newline_presets_to_json() {
     )
     .unwrap();
 
-    Database::init_schema(&conn).unwrap();
+    super::super::init_schema_sync(&conn).unwrap();
 
     // Filter presets converted to JSON
     let multi: String = conn
@@ -1452,8 +1463,8 @@ fn migration_v29_converts_newline_presets_to_json() {
     assert_eq!(other, "some\nvalue");
 }
 
-#[test]
-fn migration_v29_skips_already_json_presets() {
+#[tokio::test]
+async fn migration_v29_skips_already_json_presets() {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(
         "PRAGMA foreign_keys=ON;
@@ -1515,7 +1526,7 @@ fn migration_v29_skips_already_json_presets() {
     )
     .unwrap();
 
-    Database::init_schema(&conn).unwrap();
+    super::super::init_schema_sync(&conn).unwrap();
 
     let preset: String = conn
         .query_row(
@@ -1538,8 +1549,8 @@ fn migration_v29_skips_already_json_presets() {
     assert_eq!(filter_paths, vec!["/repo/x".to_string()]);
 }
 
-#[test]
-fn migration_31_re_expands_tilde_paths() {
+#[tokio::test]
+async fn migration_31_re_expands_tilde_paths() {
     // Simulate a v30 DB where tilde paths snuck in after the v18 migration
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(
@@ -1629,7 +1640,7 @@ fn migration_31_re_expands_tilde_paths() {
     )
     .unwrap();
 
-    Database::init_schema(&conn).unwrap();
+    super::super::init_schema_sync(&conn).unwrap();
 
     // tasks.repo_path expanded
     let repo: String = conn
@@ -1699,8 +1710,8 @@ fn migration_31_re_expands_tilde_paths() {
     assert_eq!(version, 49);
 }
 
-#[test]
-fn migrate_v32_adds_base_branch_column() {
+#[tokio::test]
+async fn migrate_v32_adds_base_branch_column() {
     let conn = Connection::open_in_memory().unwrap();
     // Build a v31 schema (tasks table with CHECK constraint from v30, plus repo_paths).
     // Setting user_version = 31 ensures only v32 runs when init_schema is called.
@@ -1758,7 +1769,7 @@ fn migrate_v32_adds_base_branch_column() {
     .unwrap();
 
     // Run init_schema: only v32 should run (user_version = 31)
-    Database::init_schema(&conn).unwrap();
+    super::super::init_schema_sync(&conn).unwrap();
 
     // Existing task should have base_branch defaulted to 'main'
     let base_branch: String = conn
@@ -1775,8 +1786,8 @@ fn migrate_v32_adds_base_branch_column() {
     assert_eq!(version, 49);
 }
 
-#[test]
-fn migration_v33_adds_auto_dispatch_to_epics() {
+#[tokio::test]
+async fn migration_v33_adds_auto_dispatch_to_epics() {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(
         "PRAGMA foreign_keys=ON;
@@ -1808,46 +1819,49 @@ fn migration_v33_adds_auto_dispatch_to_epics() {
     assert_eq!(auto_dispatch, 1);
 }
 
-#[test]
-fn migrate_v37_creates_pr_workflow_states_table() {
-    let db = in_memory_db();
-    let conn = db.conn().unwrap();
+#[tokio::test]
+async fn migrate_v37_creates_pr_workflow_states_table() {
+    let db = in_memory_db().await;
 
-    // Table must exist
-    let count: i64 = conn
-        .query_row(
-            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='pr_workflow_states'",
-            [],
-            |r| r.get(0),
-        )
+    let (count, dup_failed) = db
+        .db_call(|conn| {
+            // Table must exist
+            let count: i64 = conn.query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='pr_workflow_states'",
+                [],
+                |r| r.get(0),
+            )?;
+
+            // Primary key enforced: duplicate (repo, number, kind) must fail
+            conn.execute(
+                "INSERT INTO pr_workflow_states (repo, number, kind, state, updated_at)
+                 VALUES ('org/repo', 1, 'reviewer_pr', 'backlog', '2026-01-01T00:00:00Z')",
+                [],
+            )?;
+            let dup_failed = conn
+                .execute(
+                    "INSERT INTO pr_workflow_states (repo, number, kind, state, updated_at)
+                     VALUES ('org/repo', 1, 'reviewer_pr', 'ongoing', '2026-01-01T00:00:00Z')",
+                    [],
+                )
+                .is_err();
+
+            // sub_state nullable: NULL is allowed
+            conn.execute(
+                "INSERT INTO pr_workflow_states (repo, number, kind, state, sub_state, updated_at)
+                 VALUES ('org/repo', 2, 'reviewer_pr', 'ongoing', NULL, '2026-01-01T00:00:00Z')",
+                [],
+            )?;
+            Ok((count, dup_failed))
+        })
+        .await
         .unwrap();
     assert_eq!(count, 1);
-
-    // Primary key enforced: duplicate (repo, number, kind) must fail
-    conn.execute(
-        "INSERT INTO pr_workflow_states (repo, number, kind, state, updated_at)
-         VALUES ('org/repo', 1, 'reviewer_pr', 'backlog', '2026-01-01T00:00:00Z')",
-        [],
-    )
-    .unwrap();
-    let result = conn.execute(
-        "INSERT INTO pr_workflow_states (repo, number, kind, state, updated_at)
-         VALUES ('org/repo', 1, 'reviewer_pr', 'ongoing', '2026-01-01T00:00:00Z')",
-        [],
-    );
-    assert!(result.is_err());
-
-    // sub_state nullable: NULL is allowed
-    conn.execute(
-        "INSERT INTO pr_workflow_states (repo, number, kind, state, sub_state, updated_at)
-         VALUES ('org/repo', 2, 'reviewer_pr', 'ongoing', NULL, '2026-01-01T00:00:00Z')",
-        [],
-    )
-    .unwrap();
+    assert!(dup_failed);
 }
 
-#[test]
-fn migration_v38_feed_epic_columns() {
+#[tokio::test]
+async fn migration_v38_feed_epic_columns() {
     let conn = Connection::open_in_memory().unwrap();
     // Minimal v37 schema: just the tables that v38 ALTER TABLEs
     conn.execute_batch(
@@ -1866,7 +1880,7 @@ fn migration_v38_feed_epic_columns() {
     )
     .unwrap();
 
-    Database::init_schema(&conn).unwrap();
+    super::super::init_schema_sync(&conn).unwrap();
 
     assert!(
         conn.prepare("SELECT feed_command FROM epics LIMIT 1")
@@ -1898,18 +1912,21 @@ fn migration_v38_feed_epic_columns() {
     assert_eq!(version, 49);
 }
 
-#[test]
-fn fresh_db_schema_version_is_40() {
-    let db = in_memory_db();
-    let conn = db.conn().unwrap();
-    let version: i64 = conn
-        .pragma_query_value(None, "user_version", |row| row.get(0))
+#[tokio::test]
+async fn fresh_db_schema_version_is_40() {
+    let db = in_memory_db().await;
+    let version: i64 = db
+        .db_call(|conn| {
+            conn.pragma_query_value(None, "user_version", |row| row.get(0))
+                .map_err(anyhow::Error::from)
+        })
+        .await
         .unwrap();
     assert_eq!(version, 49);
 }
 
-#[test]
-fn migration_v40_creates_learnings_table() {
+#[tokio::test]
+async fn migration_v40_creates_learnings_table() {
     use rusqlite::Connection as RawConn;
     let conn = RawConn::open_in_memory().unwrap();
     // Simulate a v39 database
@@ -1962,7 +1979,7 @@ fn migration_v40_creates_learnings_table() {
          PRAGMA user_version = 39;",
     )
     .unwrap();
-    Database::init_schema(&conn).unwrap();
+    super::super::init_schema_sync(&conn).unwrap();
     // learnings table must exist
     let count: i64 = conn
         .query_row(
@@ -1978,8 +1995,8 @@ fn migration_v40_creates_learnings_table() {
     assert_eq!(version, 49);
 }
 
-#[test]
-fn migration_v41_drops_cost_usd_column() {
+#[tokio::test]
+async fn migration_v41_drops_cost_usd_column() {
     use rusqlite::Connection as RawConn;
     let conn = RawConn::open_in_memory().unwrap();
     // Simulate a v40 database with task_usage including cost_usd
@@ -2042,7 +2059,7 @@ fn migration_v41_drops_cost_usd_column() {
          PRAGMA user_version = 40;",
     )
     .unwrap();
-    Database::init_schema(&conn).unwrap();
+    super::super::init_schema_sync(&conn).unwrap();
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
@@ -2072,8 +2089,8 @@ fn migration_v41_drops_cost_usd_column() {
     );
 }
 
-#[test]
-fn test_migrate_v43_proposed_to_approved() {
+#[tokio::test]
+async fn test_migrate_v43_proposed_to_approved() {
     use rusqlite::Connection as RawConn;
     let conn = RawConn::open_in_memory().unwrap();
     // Build a v42 database with the learnings table using DEFAULT 'proposed'
@@ -2127,7 +2144,7 @@ fn test_migrate_v43_proposed_to_approved() {
     .unwrap();
 
     // Apply v43 via init_schema
-    Database::init_schema(&conn).unwrap();
+    super::super::init_schema_sync(&conn).unwrap();
 
     // Assert: the previously proposed row is now approved
     let status: String = conn
@@ -2161,8 +2178,8 @@ fn test_migrate_v43_proposed_to_approved() {
     assert_eq!(version, 49);
 }
 
-#[test]
-fn migration_v44_converts_episodic_to_convention() {
+#[tokio::test]
+async fn migration_v44_converts_episodic_to_convention() {
     use rusqlite::Connection as RawConn;
     let conn = RawConn::open_in_memory().unwrap();
     conn.execute_batch(
@@ -2210,8 +2227,8 @@ fn migration_v44_converts_episodic_to_convention() {
     );
 }
 
-#[test]
-fn migration_v45_adds_labels_column_with_default() {
+#[tokio::test]
+async fn migration_v45_adds_labels_column_with_default() {
     use rusqlite::Connection as RawConn;
     let conn = RawConn::open_in_memory().unwrap();
     conn.execute_batch(
@@ -2257,8 +2274,8 @@ fn migration_v45_adds_labels_column_with_default() {
     assert_eq!(new_labels, "[]");
 }
 
-#[test]
-fn migration_v45_is_idempotent() {
+#[tokio::test]
+async fn migration_v45_is_idempotent() {
     use rusqlite::Connection as RawConn;
     let conn = RawConn::open_in_memory().unwrap();
     conn.execute_batch(

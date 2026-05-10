@@ -809,5 +809,4 @@ mod security_tests {
             assert_eq!(WorkflowItemKind::from_db_str(expected), Some(k));
         }
     }
-
 }

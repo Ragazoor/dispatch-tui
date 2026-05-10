@@ -6,7 +6,7 @@ async fn save_and_load_review_prs() {
     use crate::models::{CiStatus, ReviewDecision, ReviewPr};
     use chrono::Utc;
 
-    let db = Database::open_in_memory().unwrap();
+    let db = Database::open_in_memory().await.unwrap();
 
     // Initially empty
     let prs = db.load_prs(super::super::PrKind::Review).await.unwrap();
@@ -76,7 +76,7 @@ async fn save_and_load_review_prs() {
 async fn get_review_pr_found_in_review_prs_table() {
     use crate::models::{CiStatus, ReviewDecision, ReviewPr};
 
-    let db = Database::open_in_memory().unwrap();
+    let db = Database::open_in_memory().await.unwrap();
     let pr = ReviewPr {
         number: 42,
         title: "Fix bug".to_string(),
@@ -111,7 +111,7 @@ async fn get_review_pr_found_in_review_prs_table() {
 async fn get_review_pr_found_in_my_prs_table() {
     use crate::models::{CiStatus, ReviewDecision, ReviewPr};
 
-    let db = Database::open_in_memory().unwrap();
+    let db = Database::open_in_memory().await.unwrap();
     let pr = ReviewPr {
         number: 99,
         title: "My authored PR".to_string(),
@@ -140,7 +140,7 @@ async fn get_review_pr_found_in_my_prs_table() {
 
 #[tokio::test]
 async fn get_review_pr_not_found() {
-    let db = Database::open_in_memory().unwrap();
+    let db = Database::open_in_memory().await.unwrap();
     let result = db.get_review_pr("acme/app", 999).await.unwrap();
     assert!(result.is_none());
 }
@@ -150,7 +150,7 @@ async fn save_review_prs_replaces_all() {
     use crate::models::{CiStatus, ReviewDecision, ReviewPr, Reviewer};
     use chrono::Utc;
 
-    let db = Database::open_in_memory().unwrap();
+    let db = Database::open_in_memory().await.unwrap();
 
     let pr1 = ReviewPr {
         number: 1,
@@ -239,7 +239,7 @@ async fn save_review_prs_preserves_agent_fields() {
     use crate::models::{CiStatus, ReviewDecision, ReviewPr};
     use chrono::Utc;
 
-    let db = Database::open_in_memory().unwrap();
+    let db = Database::open_in_memory().await.unwrap();
 
     // Insert a PR and manually set agent fields
     let pr = ReviewPr {
@@ -317,7 +317,7 @@ async fn save_review_prs_removes_stale_prs() {
     use crate::models::{CiStatus, ReviewDecision, ReviewPr};
     use chrono::Utc;
 
-    let db = Database::open_in_memory().unwrap();
+    let db = Database::open_in_memory().await.unwrap();
 
     let make_pr = |number: i64, repo: &str| ReviewPr {
         number,
@@ -367,7 +367,7 @@ async fn set_pr_agent_updates_fields() {
     use crate::models::{CiStatus, ReviewDecision, ReviewPr};
     use chrono::Utc;
 
-    let db = Database::open_in_memory().unwrap();
+    let db = Database::open_in_memory().await.unwrap();
 
     let pr = ReviewPr {
         number: 42,
@@ -417,7 +417,7 @@ async fn update_agent_status_finds_review_pr() {
     use crate::models::{CiStatus, ReviewAgentStatus, ReviewDecision, ReviewPr};
     use chrono::Utc;
 
-    let db = Database::open_in_memory().unwrap();
+    let db = Database::open_in_memory().await.unwrap();
     let pr = ReviewPr {
         number: 42,
         title: "Test".to_string(),
@@ -467,7 +467,7 @@ async fn update_agent_status_finds_bot_pr() {
     use crate::models::{CiStatus, ReviewAgentStatus, ReviewDecision, ReviewPr};
     use chrono::Utc;
 
-    let db = Database::open_in_memory().unwrap();
+    let db = Database::open_in_memory().await.unwrap();
     let pr = ReviewPr {
         number: 10,
         title: "Bump dep".to_string(),
@@ -509,7 +509,7 @@ async fn update_agent_status_finds_bot_pr() {
 
 #[tokio::test]
 async fn update_agent_status_errors_when_no_match() {
-    let db = Database::open_in_memory().unwrap();
+    let db = Database::open_in_memory().await.unwrap();
     let result = db
         .update_agent_status("acme/unknown", 999, Some("idle"))
         .await;
@@ -521,7 +521,7 @@ async fn update_agent_status_skips_pr_without_tmux() {
     use crate::models::{CiStatus, ReviewDecision, ReviewPr};
     use chrono::Utc;
 
-    let db = Database::open_in_memory().unwrap();
+    let db = Database::open_in_memory().await.unwrap();
     let pr = ReviewPr {
         number: 42,
         title: "Test".to_string(),
@@ -560,7 +560,7 @@ async fn save_and_load_my_prs() {
     use crate::models::{CiStatus, ReviewDecision, ReviewPr};
     use chrono::Utc;
 
-    let db = Database::open_in_memory().unwrap();
+    let db = Database::open_in_memory().await.unwrap();
     assert!(db
         .load_prs(super::super::PrKind::My)
         .await
@@ -603,7 +603,7 @@ async fn save_and_load_bot_prs() {
     use crate::models::{CiStatus, ReviewDecision, ReviewPr};
     use chrono::Utc;
 
-    let db = Database::open_in_memory().unwrap();
+    let db = Database::open_in_memory().await.unwrap();
     assert!(db
         .load_prs(super::super::PrKind::Bot)
         .await
@@ -643,7 +643,7 @@ async fn my_prs_and_review_prs_are_independent() {
     use crate::models::{CiStatus, ReviewDecision, ReviewPr};
     use chrono::Utc;
 
-    let db = Database::open_in_memory().unwrap();
+    let db = Database::open_in_memory().await.unwrap();
 
     let make_pr = |number: i64, title: &str| ReviewPr {
         number,
@@ -716,7 +716,7 @@ async fn my_prs_and_review_prs_are_independent() {
 
 #[tokio::test]
 async fn pr_workflow_insert_if_absent_is_idempotent() {
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     use crate::models::WorkflowItemKind::*;
 
     db.insert_pr_workflow_if_absent("org/repo", 42, ReviewerPr)
@@ -737,7 +737,7 @@ async fn pr_workflow_insert_if_absent_is_idempotent() {
 
 #[tokio::test]
 async fn pr_workflow_upsert_updates_state_and_sub_state() {
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     use crate::models::WorkflowItemKind::*;
 
     db.insert_pr_workflow_if_absent("org/repo", 1, ReviewerPr)
@@ -758,7 +758,7 @@ async fn pr_workflow_upsert_updates_state_and_sub_state() {
 
 #[tokio::test]
 async fn pr_workflow_get_returns_none_when_absent() {
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     use crate::models::WorkflowItemKind::*;
     let result = db
         .get_pr_workflow("org/repo", 99, ReviewerPr)
@@ -769,7 +769,7 @@ async fn pr_workflow_get_returns_none_when_absent() {
 
 #[tokio::test]
 async fn pr_workflow_list_returns_all_rows() {
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     use crate::models::WorkflowItemKind::*;
 
     db.insert_pr_workflow_if_absent("org/a", 1, ReviewerPr)
@@ -788,33 +788,31 @@ async fn pr_workflow_list_returns_all_rows() {
 
 #[tokio::test]
 async fn pr_workflow_prune_removes_done_older_than_threshold() {
-    let db = in_memory_db();
+    let db = in_memory_db().await;
 
-    // Insert seed rows synchronously, scoping the MutexGuard so it does not
-    // straddle a later `.await` (clippy::await_holding_lock).
-    {
-        let conn = db.conn().unwrap();
+    let now = chrono::Utc::now().to_rfc3339();
+    db.db_call(move |conn| {
         conn.execute(
             "INSERT INTO pr_workflow_states (repo, number, kind, state, updated_at)
              VALUES ('org/repo', 1, 'reviewer_pr', 'done', '2020-01-01T00:00:00Z')",
             [],
-        )
-        .unwrap();
+        )?;
         // Insert a recent done row — should NOT be pruned
         conn.execute(
             "INSERT INTO pr_workflow_states (repo, number, kind, state, updated_at)
              VALUES ('org/repo', 2, 'reviewer_pr', 'done', ?1)",
-            rusqlite::params![chrono::Utc::now().to_rfc3339()],
-        )
-        .unwrap();
+            rusqlite::params![now],
+        )?;
         // Insert an ongoing row — should NOT be pruned regardless of age
         conn.execute(
             "INSERT INTO pr_workflow_states (repo, number, kind, state, updated_at)
              VALUES ('org/repo', 3, 'reviewer_pr', 'ongoing', '2020-01-01T00:00:00Z')",
             [],
-        )
-        .unwrap();
-    }
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
 
     db.prune_done_pr_workflows(chrono::Duration::days(7))
         .await
@@ -828,7 +826,7 @@ async fn pr_workflow_prune_removes_done_older_than_threshold() {
 
 #[tokio::test]
 async fn pr_workflow_kind_roundtrip_in_db() {
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     use crate::models::WorkflowItemKind::*;
 
     for kind in [ReviewerPr, DependabotPr, DependabotAlert, CodeScanAlert] {
@@ -846,7 +844,7 @@ async fn pr_workflow_kind_roundtrip_in_db() {
 
 #[tokio::test]
 async fn find_pr_workflow_kind_returns_kind_when_row_exists() {
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     use crate::models::WorkflowItemKind::*;
 
     // Insert a workflow row for ReviewerPr
@@ -861,7 +859,7 @@ async fn find_pr_workflow_kind_returns_kind_when_row_exists() {
 
 #[tokio::test]
 async fn find_pr_workflow_kind_returns_none_when_no_row_exists() {
-    let db = in_memory_db();
+    let db = in_memory_db().await;
 
     // No workflow row exists for this (repo, number) pair
     let kind = db.find_pr_workflow_kind("org/repo", 99).await.unwrap();
@@ -870,7 +868,7 @@ async fn find_pr_workflow_kind_returns_none_when_no_row_exists() {
 
 #[tokio::test]
 async fn find_pr_workflow_kind_with_multiple_kinds_returns_first() {
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     use crate::models::WorkflowItemKind::*;
 
     // Insert multiple workflow rows for the same (repo, number) with different kinds

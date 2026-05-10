@@ -4,7 +4,7 @@ use super::*;
 #[tokio::test]
 async fn landscape_kind_can_be_recorded() {
     use crate::models::{LearningKind, LearningScope};
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let id = db
         .create_learning(CreateLearningRow {
             kind: LearningKind::Landscape,
@@ -41,7 +41,7 @@ async fn test_learning_status_no_proposed() {
 #[tokio::test]
 async fn create_and_get_learning() {
     use crate::models::{LearningKind, LearningScope, LearningStatus};
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let id = db
         .create_learning(CreateLearningRow {
             kind: LearningKind::Convention,
@@ -78,7 +78,7 @@ async fn create_and_get_learning() {
 #[tokio::test]
 async fn create_learning_user_scope_has_null_scope_ref() {
     use crate::models::{LearningKind, LearningScope};
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let id = db
         .create_learning(CreateLearningRow {
             kind: LearningKind::Preference,
@@ -98,7 +98,7 @@ async fn create_learning_user_scope_has_null_scope_ref() {
 #[tokio::test]
 async fn scope_ref_consistency_constraint_is_enforced() {
     use crate::models::{LearningKind, LearningScope};
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     // user scope with a non-null scope_ref should violate the CHECK constraint
     let result = db
         .create_learning(CreateLearningRow {
@@ -121,7 +121,7 @@ async fn scope_ref_consistency_constraint_is_enforced() {
 async fn list_learnings_filter_by_status() {
     use crate::db::LearningFilter;
     use crate::models::{LearningKind, LearningScope, LearningStatus};
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let id1 = db
         .create_learning(CreateLearningRow {
             kind: LearningKind::Pitfall,
@@ -179,7 +179,7 @@ async fn list_learnings_filter_by_status() {
 async fn list_learnings_approved_filter_excludes_rejected_and_archived() {
     use crate::db::{LearningFilter, LearningPatch};
     use crate::models::{LearningKind, LearningScope, LearningStatus};
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let approved_id = db
         .create_learning(CreateLearningRow {
             kind: LearningKind::Pitfall,
@@ -246,7 +246,7 @@ async fn list_learnings_approved_filter_excludes_rejected_and_archived() {
 async fn patch_learning_updates_summary_and_updated_at() {
     use crate::db::LearningPatch;
     use crate::models::{LearningKind, LearningScope};
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let id = db
         .create_learning(CreateLearningRow {
             kind: LearningKind::Convention,
@@ -272,7 +272,7 @@ async fn patch_learning_updates_summary_and_updated_at() {
 async fn upvote_learning_increments_count_and_timestamps() {
     use crate::db::LearningPatch;
     use crate::models::{LearningKind, LearningScope, LearningStatus};
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let id = db
         .create_learning(CreateLearningRow {
             kind: LearningKind::Convention,
@@ -307,7 +307,7 @@ async fn upvote_learning_increments_count_and_timestamps() {
 #[tokio::test]
 async fn delete_learning_removes_row() {
     use crate::models::{LearningKind, LearningScope};
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let id = db
         .create_learning(CreateLearningRow {
             kind: LearningKind::Pitfall,
@@ -329,7 +329,7 @@ async fn delete_learning_removes_row() {
 async fn list_learnings_for_dispatch_unions_scopes() {
     use crate::db::LearningPatch;
     use crate::models::{LearningKind, LearningScope, LearningStatus};
-    let db = in_memory_db();
+    let db = in_memory_db().await;
 
     // user-scoped: should appear
     let u = db
@@ -409,7 +409,7 @@ async fn list_learnings_for_dispatch_unions_scopes() {
 async fn list_learnings_for_dispatch_procedural_first() {
     use crate::db::LearningPatch;
     use crate::models::{LearningKind, LearningScope, LearningStatus};
-    let db = in_memory_db();
+    let db = in_memory_db().await;
 
     let convention = db
         .create_learning(CreateLearningRow {
@@ -456,7 +456,7 @@ async fn list_learnings_for_dispatch_procedural_first() {
 async fn list_learnings_for_dispatch_excludes_non_approved() {
     use crate::db::LearningPatch;
     use crate::models::{LearningKind, LearningScope, LearningStatus};
-    let db = in_memory_db();
+    let db = in_memory_db().await;
 
     // Create a learning and reject it — rejected learnings should be excluded from dispatch.
     let rejected = db
@@ -503,7 +503,7 @@ async fn list_learnings_for_dispatch_excludes_non_approved() {
 
 async fn make_db_with_task_and_learning() -> (Database, crate::models::TaskId, LearningId) {
     use crate::models::{LearningKind, LearningScope};
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let task = create_task_returning(
         &db,
         "t",
@@ -512,6 +512,7 @@ async fn make_db_with_task_and_learning() -> (Database, crate::models::TaskId, L
         None,
         crate::models::TaskStatus::Backlog,
     )
+    .await
     .unwrap();
     let learning = db
         .create_learning(CreateLearningRow {
@@ -590,13 +591,17 @@ async fn apply_verdicts_unused_records_only() {
     let l = db.get_learning(learning_id).await.unwrap().unwrap();
     assert_eq!(l.status, LearningStatus::Approved);
     assert_eq!(l.upvote_count, 0);
-    let conn = db.conn().unwrap();
-    let n: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM learning_verdicts WHERE learning_id = ?1",
-            rusqlite::params![learning_id.0],
-            |r| r.get(0),
-        )
+    let lid = learning_id.0;
+    let n: i64 = db
+        .db_call(move |conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM learning_verdicts WHERE learning_id = ?1",
+                rusqlite::params![lid],
+                |r| r.get(0),
+            )
+            .map_err(anyhow::Error::from)
+        })
+        .await
         .unwrap();
     assert_eq!(n, 1);
 }

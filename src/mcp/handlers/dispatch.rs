@@ -226,7 +226,7 @@ mcp_tools! {
             }
         };
 
-    sync "claim_task" => tasks::handle_claim_task,
+    async "claim_task" => tasks::handle_claim_task,
         "Claim a backlog task into your current worktree. Sets the task to running and associates it with your worktree and tmux window. Only tasks in the same repo can be claimed.",
         {
             "type": "object",
@@ -351,7 +351,7 @@ mcp_tools! {
             "required": ["task_id"]
         };
 
-    sync "report_usage" => tasks::handle_report_usage,
+    async "report_usage" => tasks::handle_report_usage,
         "Report token usage for a task session. Accumulates across sessions.",
         {
             "type": "object",
@@ -387,7 +387,7 @@ mcp_tools! {
             "required": ["repo", "number", "status"]
         };
 
-    sync "send_message" => tasks::handle_send_message,
+    async "send_message" => tasks::handle_send_message,
         "Send a message/prompt to another running agent. The message is written to a file in the target's worktree and a notification is injected into their tmux window. Fire-and-forget — no response tracking.",
         {
             "type": "object",

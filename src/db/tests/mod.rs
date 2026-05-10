@@ -11,11 +11,11 @@ mod prs;
 mod settings;
 mod tasks;
 
-pub(super) fn in_memory_db() -> Database {
-    Database::open_in_memory().unwrap()
+pub(super) async fn in_memory_db() -> Database {
+    Database::open_in_memory().await.unwrap()
 }
 
-pub(super) fn create_task_returning(
+pub(super) async fn create_task_returning(
     db: &Database,
     title: &str,
     description: &str,
@@ -23,18 +23,21 @@ pub(super) fn create_task_returning(
     plan: Option<&str>,
     status: TaskStatus,
 ) -> anyhow::Result<Task> {
-    let id = db.create_task(CreateTaskRequest {
-        title,
-        description,
-        repo_path,
-        plan,
-        status,
-        base_branch: "main",
-        epic_id: None,
-        sort_order: None,
-        tag: None,
-        project_id: ProjectId(1),
-    })?;
-    db.get_task(id)?
+    let id = db
+        .create_task(CreateTaskRequest {
+            title,
+            description,
+            repo_path,
+            plan,
+            status,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+        })
+        .await?;
+    db.get_task(id)
+        .await?
         .ok_or_else(|| anyhow::anyhow!("Task {id} vanished after insert"))
 }

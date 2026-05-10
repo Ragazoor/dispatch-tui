@@ -7,8 +7,8 @@ use dispatch_tui::db::{self, CreateTaskRequest, Database, TaskCrud};
 use dispatch_tui::models::{DispatchMode, ProjectId, Task, TaskId, TaskStatus};
 use dispatch_tui::tui::{App, Command, Message, MoveDirection};
 
-fn make_app() -> (App, Database) {
-    let db = Database::open_in_memory().unwrap();
+async fn make_app() -> (App, Database) {
+    let db = Database::open_in_memory().await.unwrap();
     let app = App::new(
         vec![],
         dispatch_tui::models::ProjectId(1),
@@ -18,29 +18,31 @@ fn make_app() -> (App, Database) {
 }
 
 /// Helper: execute PersistTask/DeleteTask commands against the DB.
-fn execute(db: &Database, cmds: &[Command]) {
+async fn execute(db: &Database, cmds: &[Command]) {
     for cmd in cmds {
         match cmd {
             Command::Task(dispatch_tui::tui::commands::TaskCommand::Persist(task)) => {
-                let _ = db.patch_task(
-                    task.id,
-                    &db::TaskPatch::new()
-                        .status(task.status)
-                        .worktree(task.worktree.as_deref())
-                        .tmux_window(task.tmux_window.as_deref()),
-                );
+                let _ = db
+                    .patch_task(
+                        task.id,
+                        &db::TaskPatch::new()
+                            .status(task.status)
+                            .worktree(task.worktree.as_deref())
+                            .tmux_window(task.tmux_window.as_deref()),
+                    )
+                    .await;
             }
             Command::Task(dispatch_tui::tui::commands::TaskCommand::Delete(id)) => {
-                let _ = db.delete_task(*id);
+                let _ = db.delete_task(*id).await;
             }
             _ => {}
         }
     }
 }
 
-#[test]
-fn full_lifecycle() {
-    let (mut app, db) = make_app();
+#[tokio::test]
+async fn full_lifecycle() {
+    let (mut app, db) = make_app().await;
 
     // 1. Create task with a plan: simulate what exec_insert_task does (DB insert + TaskCreated message)
     let task_id = db
@@ -56,6 +58,7 @@ fn full_lifecycle() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     let now = chrono::Utc::now();
     let cmds = app.update(Message::Task(
@@ -89,7 +92,7 @@ fn full_lifecycle() {
     assert_ne!(app.tasks()[0].id, TaskId(0), "ID should be assigned by DB");
 
     // Verify DB has the task
-    let db_task = db.get_task(task_id).unwrap().unwrap();
+    let db_task = db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(db_task.title, "Fix auth bug");
 
     // 2. Dispatch directly from Backlog (task has a plan) → Dispatch command issued
@@ -110,7 +113,7 @@ fn full_lifecycle() {
             switch_focus: false,
         },
     ));
-    execute(&db, &cmds);
+    execute(&db, &cmds).await;
     assert_eq!(app.tasks()[0].status, TaskStatus::Running);
     assert_eq!(app.tasks()[0].tmux_window.as_deref(), Some("task-1"));
 
@@ -118,7 +121,7 @@ fn full_lifecycle() {
     let cmds = app.update(Message::Task(
         dispatch_tui::tui::messages::TaskMessage::WindowGone(task_id),
     ));
-    execute(&db, &cmds);
+    execute(&db, &cmds).await;
     assert_eq!(app.tasks()[0].status, TaskStatus::Running);
     // tmux_window is cleared — the window is gone by definition
     assert!(app.tasks()[0].tmux_window.is_none());
@@ -131,7 +134,7 @@ fn full_lifecycle() {
             direction: MoveDirection::Forward,
         },
     ));
-    execute(&db, &cmds);
+    execute(&db, &cmds).await;
     assert_eq!(app.tasks()[0].status, TaskStatus::Review);
 
     // 5. Move to Done → requires confirmation
@@ -155,19 +158,19 @@ fn full_lifecycle() {
     let cmds = app.update(Message::Input(
         dispatch_tui::tui::messages::InputMessage::ConfirmDone,
     ));
-    execute(&db, &cmds);
+    execute(&db, &cmds).await;
     assert_eq!(app.tasks()[0].status, TaskStatus::Done);
 
-    let db_task = db.get_task(task_id).unwrap().unwrap();
+    let db_task = db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(db_task.status, TaskStatus::Done);
 
     // 6. Delete → removed from state and DB
     let cmds = app.update(Message::Task(
         dispatch_tui::tui::messages::TaskMessage::Delete(task_id),
     ));
-    execute(&db, &cmds);
+    execute(&db, &cmds).await;
     assert!(app.tasks().is_empty());
 
-    let db_task = db.get_task(task_id).unwrap();
+    let db_task = db.get_task(task_id).await.unwrap();
     assert!(db_task.is_none());
 }

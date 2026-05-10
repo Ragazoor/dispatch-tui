@@ -7,8 +7,8 @@ use crate::models::{EpicId, ProjectId, SubStatus, TaskId, TaskStatus, TaskTag, U
 use crate::service::epics::{CreateEpicParams, EpicService, UpdateEpicParams};
 use crate::service::{FieldUpdate, ServiceError};
 
-fn test_db() -> Arc<dyn db::TaskStore> {
-    Arc::new(Database::open_in_memory().unwrap())
+async fn test_db() -> Arc<dyn db::TaskStore> {
+    Arc::new(Database::open_in_memory().await.unwrap())
 }
 
 fn task_svc(db: &Arc<dyn db::TaskStore>) -> TaskService {
@@ -23,9 +23,9 @@ fn epic_svc(db: &Arc<dyn db::TaskStore>) -> EpicService {
 
 // -- TaskService ----------------------------------------------------------
 
-#[test]
-fn create_and_get_task() {
-    let db = test_db();
+#[tokio::test]
+async fn create_and_get_task() {
+    let db = test_db().await;
     let svc = task_svc(&db);
 
     let id = svc
@@ -40,16 +40,17 @@ fn create_and_get_task() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
-    let task = svc.get_task(id).unwrap();
+    let task = svc.get_task(id).await.unwrap();
     assert_eq!(task.title, "Test");
     assert_eq!(task.status, TaskStatus::Backlog);
 }
 
-#[test]
-fn create_task_with_tag() {
-    let db = test_db();
+#[tokio::test]
+async fn create_task_with_tag() {
+    let db = test_db().await;
     let svc = task_svc(&db);
 
     let id = svc
@@ -64,16 +65,17 @@ fn create_task_with_tag() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
-    let task = svc.get_task(id).unwrap();
+    let task = svc.get_task(id).await.unwrap();
     assert_eq!(task.tag, Some(TaskTag::Bug));
     assert_eq!(task.sort_order, Some(5));
 }
 
-#[test]
-fn create_task_with_sort_order() {
-    let db = test_db();
+#[tokio::test]
+async fn create_task_with_sort_order() {
+    let db = test_db().await;
     let svc = task_svc(&db);
 
     let id = svc
@@ -88,15 +90,16 @@ fn create_task_with_sort_order() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
-    let task = svc.get_task(id).unwrap();
+    let task = svc.get_task(id).await.unwrap();
     assert_eq!(task.sort_order, Some(42));
 }
 
 #[tokio::test]
 async fn update_task_status() {
-    let db = test_db();
+    let db = test_db().await;
     let svc = task_svc(&db);
 
     let id = svc
@@ -111,13 +114,14 @@ async fn update_task_status() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Running))
         .await
         .unwrap();
 
-    let task = svc.get_task(id).unwrap();
+    let task = svc.get_task(id).await.unwrap();
     assert_eq!(task.status, TaskStatus::Running);
 }
 
@@ -126,7 +130,7 @@ async fn update_task_status() {
 
 #[tokio::test]
 async fn update_task_no_fields_returns_error() {
-    let db = test_db();
+    let db = test_db().await;
     let svc = task_svc(&db);
 
     let id = svc
@@ -141,6 +145,7 @@ async fn update_task_no_fields_returns_error() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let err = svc
@@ -152,7 +157,7 @@ async fn update_task_no_fields_returns_error() {
 
 #[tokio::test]
 async fn update_task_params_builder_compiles() {
-    let db = test_db();
+    let db = test_db().await;
     let svc = task_svc(&db);
 
     let id = svc
@@ -167,19 +172,20 @@ async fn update_task_params_builder_compiles() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Running))
         .await
         .unwrap();
 
-    let task = svc.get_task(id).unwrap();
+    let task = svc.get_task(id).await.unwrap();
     assert_eq!(task.status, TaskStatus::Running);
 }
 
 #[tokio::test]
 async fn update_task_invalid_substatus_for_status() {
-    let db = test_db();
+    let db = test_db().await;
     let svc = task_svc(&db);
 
     let id = svc
@@ -194,6 +200,7 @@ async fn update_task_invalid_substatus_for_status() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     // active is not valid for backlog
@@ -204,9 +211,9 @@ async fn update_task_invalid_substatus_for_status() {
     assert!(matches!(err, ServiceError::Validation(_)));
 }
 
-#[test]
-fn claim_task_success() {
-    let db = test_db();
+#[tokio::test]
+async fn claim_task_success() {
+    let db = test_db().await;
     let svc = task_svc(&db);
 
     let id = svc
@@ -221,6 +228,7 @@ fn claim_task_success() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let task = svc
@@ -229,18 +237,19 @@ fn claim_task_success() {
             worktree: "/repo/.worktrees/feature".into(),
             tmux_window: "win1".into(),
         })
+        .await
         .unwrap();
     assert_eq!(task.title, "T");
 
     // Verify it was actually updated
-    let task = svc.get_task(id).unwrap();
+    let task = svc.get_task(id).await.unwrap();
     assert_eq!(task.status, TaskStatus::Running);
     assert_eq!(task.worktree.as_deref(), Some("/repo/.worktrees/feature"));
 }
 
-#[test]
-fn claim_task_wrong_repo() {
-    let db = test_db();
+#[tokio::test]
+async fn claim_task_wrong_repo() {
+    let db = test_db().await;
     let svc = task_svc(&db);
 
     let id = svc
@@ -255,6 +264,7 @@ fn claim_task_wrong_repo() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let err = svc
@@ -263,13 +273,14 @@ fn claim_task_wrong_repo() {
             worktree: "/repo-b/.worktrees/feature".into(),
             tmux_window: "win1".into(),
         })
+        .await
         .unwrap_err();
     assert!(matches!(err, ServiceError::Validation(_)));
 }
 
 #[tokio::test]
 async fn claim_task_not_backlog() {
-    let db = test_db();
+    let db = test_db().await;
     let svc = task_svc(&db);
 
     let id = svc
@@ -284,6 +295,7 @@ async fn claim_task_not_backlog() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     // Move to running first
@@ -297,13 +309,14 @@ async fn claim_task_not_backlog() {
             worktree: "/repo/.worktrees/feature".into(),
             tmux_window: "win1".into(),
         })
+        .await
         .unwrap_err();
     assert!(matches!(err, ServiceError::Validation(_)));
 }
 
-#[test]
-fn list_tasks_with_filter() {
-    let db = test_db();
+#[tokio::test]
+async fn list_tasks_with_filter() {
+    let db = test_db().await;
     let svc = task_svc(&db);
 
     svc.create_task(CreateTaskParams {
@@ -317,6 +330,7 @@ fn list_tasks_with_filter() {
         base_branch: None,
         project_id: ProjectId(1),
     })
+    .await
     .unwrap();
 
     let tasks = svc
@@ -324,6 +338,7 @@ fn list_tasks_with_filter() {
             statuses: Some(vec![TaskStatus::Backlog]),
             ..Default::default()
         })
+        .await
         .unwrap();
     assert_eq!(tasks.len(), 1);
 
@@ -332,21 +347,22 @@ fn list_tasks_with_filter() {
             statuses: Some(vec![TaskStatus::Running]),
             ..Default::default()
         })
+        .await
         .unwrap();
     assert!(tasks.is_empty());
 }
 
-#[test]
-fn get_task_not_found() {
-    let db = test_db();
+#[tokio::test]
+async fn get_task_not_found() {
+    let db = test_db().await;
     let svc = task_svc(&db);
-    let err = svc.get_task(TaskId(999)).unwrap_err();
+    let err = svc.get_task(TaskId(999)).await.unwrap_err();
     assert!(matches!(err, ServiceError::NotFound(_)));
 }
 
-#[test]
-fn report_usage_for_nonexistent_task() {
-    let db = test_db();
+#[tokio::test]
+async fn report_usage_for_nonexistent_task() {
+    let db = test_db().await;
     let svc = task_svc(&db);
     let err = svc
         .report_usage(
@@ -358,13 +374,14 @@ fn report_usage_for_nonexistent_task() {
                 cache_write_tokens: 0,
             },
         )
+        .await
         .unwrap_err();
     assert!(matches!(err, ServiceError::NotFound(_)));
 }
 
 #[tokio::test]
 async fn update_task_with_epic_linkage() {
-    let db = test_db();
+    let db = test_db().await;
     let task_svc = task_svc(&db);
     let epic_svc = epic_svc(&db);
 
@@ -394,6 +411,7 @@ async fn update_task_with_epic_linkage() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     task_svc
@@ -401,7 +419,7 @@ async fn update_task_with_epic_linkage() {
         .await
         .unwrap();
 
-    let task = task_svc.get_task(id).unwrap();
+    let task = task_svc.get_task(id).await.unwrap();
     assert_eq!(task.epic_id, Some(epic.id));
 }
 
@@ -409,7 +427,7 @@ async fn update_task_with_epic_linkage() {
 async fn update_task_status_recalculates_parent_epic() {
     // Status-change branch of recalculate_epic_for_task: an epic that
     // contains a single task should follow the task's status.
-    let db = test_db();
+    let db = test_db().await;
     let task_svc = task_svc(&db);
     let epic_svc = epic_svc(&db);
 
@@ -439,6 +457,7 @@ async fn update_task_status_recalculates_parent_epic() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     task_svc
@@ -455,7 +474,7 @@ async fn update_task_relink_recalculates_old_and_new_epic() {
     // Linkage-change branch of recalculate_epic_for_task: moving a Running
     // task between two epics should leave the old epic empty (Backlog) and
     // the new epic Running.
-    let db = test_db();
+    let db = test_db().await;
     let task_svc = task_svc(&db);
     let epic_svc = epic_svc(&db);
 
@@ -498,6 +517,7 @@ async fn update_task_relink_recalculates_old_and_new_epic() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     task_svc
         .update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Running))
@@ -529,7 +549,7 @@ async fn update_task_relink_recalculates_old_and_new_epic() {
 
 #[tokio::test]
 async fn create_and_get_epic() {
-    let db = test_db();
+    let db = test_db().await;
     let svc = epic_svc(&db);
 
     let epic = svc
@@ -552,7 +572,7 @@ async fn create_and_get_epic() {
 
 #[tokio::test]
 async fn get_epic_not_found() {
-    let db = test_db();
+    let db = test_db().await;
     let svc = epic_svc(&db);
     let err = svc.get_epic(EpicId(999)).await.unwrap_err();
     assert!(matches!(err, ServiceError::NotFound(_)));
@@ -560,7 +580,7 @@ async fn get_epic_not_found() {
 
 #[tokio::test]
 async fn update_epic_status() {
-    let db = test_db();
+    let db = test_db().await;
     let svc = epic_svc(&db);
 
     let epic = svc
@@ -599,7 +619,7 @@ async fn update_epic_status() {
 
 #[tokio::test]
 async fn update_epic_no_fields_returns_error() {
-    let db = test_db();
+    let db = test_db().await;
     let svc = epic_svc(&db);
 
     let epic = svc
@@ -637,7 +657,7 @@ async fn update_epic_no_fields_returns_error() {
 
 #[tokio::test]
 async fn update_epic_auto_dispatch_persists() {
-    let db = test_db();
+    let db = test_db().await;
     let svc = epic_svc(&db);
 
     let epic = svc
@@ -677,7 +697,7 @@ async fn update_epic_auto_dispatch_persists() {
 
 #[tokio::test]
 async fn list_epics_with_progress() {
-    let db = test_db();
+    let db = test_db().await;
     let task_svc = task_svc(&db);
     let epic_svc = epic_svc(&db);
 
@@ -707,6 +727,7 @@ async fn list_epics_with_progress() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let list = epic_svc.list_epics_with_progress().await.unwrap();
@@ -718,7 +739,7 @@ async fn list_epics_with_progress() {
 
 #[tokio::test]
 async fn list_epics_with_progress_multiple_epics() {
-    let db = test_db();
+    let db = test_db().await;
     let task_svc = task_svc(&db);
     let epic_svc = epic_svc(&db);
 
@@ -762,6 +783,7 @@ async fn list_epics_with_progress_multiple_epics() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     task_svc
         .create_task(CreateTaskParams {
@@ -775,6 +797,7 @@ async fn list_epics_with_progress_multiple_epics() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     // 1 task in E2
     task_svc
@@ -789,6 +812,7 @@ async fn list_epics_with_progress_multiple_epics() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     // Mark T1 as done
@@ -809,7 +833,7 @@ async fn list_epics_with_progress_multiple_epics() {
 
 #[tokio::test]
 async fn update_task_status_recalculates_epic() {
-    let db = test_db();
+    let db = test_db().await;
     let task_svc = task_svc(&db);
     let epic_svc = epic_svc(&db);
 
@@ -839,6 +863,7 @@ async fn update_task_status_recalculates_epic() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     task_svc
@@ -852,7 +877,7 @@ async fn update_task_status_recalculates_epic() {
 
 #[tokio::test]
 async fn get_epic_with_subtasks() {
-    let db = test_db();
+    let db = test_db().await;
     let task_svc = task_svc(&db);
     let epic_svc = epic_svc(&db);
 
@@ -882,6 +907,7 @@ async fn get_epic_with_subtasks() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let (e, subtasks) = epic_svc.get_epic_with_subtasks(epic.id).await.unwrap();
@@ -893,7 +919,7 @@ async fn get_epic_with_subtasks() {
 
 #[tokio::test]
 async fn next_backlog_task_returns_first_by_sort_order() {
-    let db = test_db();
+    let db = test_db().await;
     let task_svc = task_svc(&db);
     let epic_svc = epic_svc(&db);
 
@@ -923,6 +949,7 @@ async fn next_backlog_task_returns_first_by_sort_order() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     task_svc
@@ -937,6 +964,7 @@ async fn next_backlog_task_returns_first_by_sort_order() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let next = task_svc.next_backlog_task(epic.id).await.unwrap();
@@ -945,7 +973,7 @@ async fn next_backlog_task_returns_first_by_sort_order() {
 
 #[tokio::test]
 async fn next_backlog_task_skips_non_backlog() {
-    let db = test_db();
+    let db = test_db().await;
     let task_svc = task_svc(&db);
     let epic_svc = epic_svc(&db);
 
@@ -975,6 +1003,7 @@ async fn next_backlog_task_skips_non_backlog() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     // Move to running
@@ -989,7 +1018,7 @@ async fn next_backlog_task_skips_non_backlog() {
 
 #[tokio::test]
 async fn next_backlog_task_epic_not_found() {
-    let db = test_db();
+    let db = test_db().await;
     let svc = task_svc(&db);
     let err = svc.next_backlog_task(EpicId(999)).await.unwrap_err();
     assert!(matches!(err, ServiceError::NotFound(_)));
@@ -997,9 +1026,9 @@ async fn next_backlog_task_epic_not_found() {
 
 // -- create_task_returning ---------------------------------------------------
 
-#[test]
-fn create_task_returning_gives_full_task() {
-    let db = test_db();
+#[tokio::test]
+async fn create_task_returning_gives_full_task() {
+    let db = test_db().await;
     let svc = task_svc(&db);
 
     let task = svc
@@ -1014,6 +1043,7 @@ fn create_task_returning_gives_full_task() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     assert_eq!(task.title, "Full task");
@@ -1024,7 +1054,7 @@ fn create_task_returning_gives_full_task() {
 
 #[tokio::test]
 async fn create_task_returning_with_epic() {
-    let db = test_db();
+    let db = test_db().await;
     let tsvc = task_svc(&db);
     let esvc = epic_svc(&db);
 
@@ -1054,6 +1084,7 @@ async fn create_task_returning_with_epic() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     assert_eq!(task.epic_id, Some(epic.id));
@@ -1061,7 +1092,7 @@ async fn create_task_returning_with_epic() {
 
 #[tokio::test]
 async fn create_task_returning_sets_all_optional_fields_atomically() {
-    let db = test_db();
+    let db = test_db().await;
     let tsvc = task_svc(&db);
     let esvc = epic_svc(&db);
 
@@ -1091,6 +1122,7 @@ async fn create_task_returning_sets_all_optional_fields_atomically() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     assert_eq!(task.epic_id, Some(epic.id));
@@ -1100,9 +1132,9 @@ async fn create_task_returning_sets_all_optional_fields_atomically() {
 
 // -- delete_task -------------------------------------------------------------
 
-#[test]
-fn delete_task_removes_it() {
-    let db = test_db();
+#[tokio::test]
+async fn delete_task_removes_it() {
+    let db = test_db().await;
     let svc = task_svc(&db);
 
     let id = svc
@@ -1117,19 +1149,20 @@ fn delete_task_removes_it() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
-    svc.delete_task(id).unwrap();
+    svc.delete_task(id).await.unwrap();
 
-    let err = svc.get_task(id).unwrap_err();
+    let err = svc.get_task(id).await.unwrap_err();
     assert!(matches!(err, ServiceError::NotFound(_)));
 }
 
-#[test]
-fn delete_task_not_found() {
-    let db = test_db();
+#[tokio::test]
+async fn delete_task_not_found() {
+    let db = test_db().await;
     let svc = task_svc(&db);
-    let err = svc.delete_task(TaskId(999)).unwrap_err();
+    let err = svc.delete_task(TaskId(999)).await.unwrap_err();
     assert!(matches!(err, ServiceError::NotFound(_)));
 }
 
@@ -1137,7 +1170,7 @@ fn delete_task_not_found() {
 
 #[tokio::test]
 async fn update_task_sets_worktree_and_tmux_window() {
-    let db = test_db();
+    let db = test_db().await;
     let svc = task_svc(&db);
 
     let id = svc
@@ -1152,6 +1185,7 @@ async fn update_task_sets_worktree_and_tmux_window() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     svc.update_task(
@@ -1163,14 +1197,14 @@ async fn update_task_sets_worktree_and_tmux_window() {
     .await
     .unwrap();
 
-    let task = svc.get_task(id).unwrap();
+    let task = svc.get_task(id).await.unwrap();
     assert_eq!(task.worktree.as_deref(), Some("/repo/.worktrees/feat"));
     assert_eq!(task.tmux_window.as_deref(), Some("task-1"));
 }
 
 #[tokio::test]
 async fn update_task_clears_worktree() {
-    let db = test_db();
+    let db = test_db().await;
     let svc = task_svc(&db);
 
     let id = svc
@@ -1185,6 +1219,7 @@ async fn update_task_clears_worktree() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     // Set worktree
@@ -1207,7 +1242,7 @@ async fn update_task_clears_worktree() {
     .await
     .unwrap();
 
-    let task = svc.get_task(id).unwrap();
+    let task = svc.get_task(id).await.unwrap();
     assert!(task.worktree.is_none());
     assert!(task.tmux_window.is_none());
 }
@@ -1216,7 +1251,7 @@ async fn update_task_clears_worktree() {
 
 #[tokio::test]
 async fn update_task_allows_done_status() {
-    let db = test_db();
+    let db = test_db().await;
     let svc = task_svc(&db);
 
     let id = svc
@@ -1231,13 +1266,14 @@ async fn update_task_allows_done_status() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Done))
         .await
         .unwrap();
 
-    let task = svc.get_task(id).unwrap();
+    let task = svc.get_task(id).await.unwrap();
     assert_eq!(task.status, TaskStatus::Done);
 }
 
@@ -1245,7 +1281,7 @@ async fn update_task_allows_done_status() {
 
 #[tokio::test]
 async fn delete_epic_removes_it() {
-    let db = test_db();
+    let db = test_db().await;
     let svc = epic_svc(&db);
 
     let epic = svc
@@ -1270,7 +1306,7 @@ async fn delete_epic_removes_it() {
 
 #[tokio::test]
 async fn delete_epic_not_found() {
-    let db = test_db();
+    let db = test_db().await;
     let svc = epic_svc(&db);
     let err = svc.delete_epic(EpicId(999)).await.unwrap_err();
     assert!(matches!(err, ServiceError::NotFound(_)));
@@ -1278,21 +1314,21 @@ async fn delete_epic_not_found() {
 
 // --- FieldUpdate ---
 
-#[test]
-fn field_update_set_has_value() {
+#[tokio::test]
+async fn field_update_set_has_value() {
     let fu: FieldUpdate = FieldUpdate::Set("hello".to_string());
     assert!(matches!(fu, FieldUpdate::Set(ref s) if s == "hello"));
 }
 
-#[test]
-fn field_update_clear_is_clear() {
+#[tokio::test]
+async fn field_update_clear_is_clear() {
     let fu: FieldUpdate = FieldUpdate::Clear;
     assert!(matches!(fu, FieldUpdate::Clear));
 }
 
 #[tokio::test]
 async fn update_task_worktree_set_persists() {
-    let db = test_db();
+    let db = test_db().await;
     let svc = task_svc(&db);
     let id = svc
         .create_task(CreateTaskParams {
@@ -1306,6 +1342,7 @@ async fn update_task_worktree_set_persists() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     svc.update_task(
         UpdateTaskParams::for_task(id)
@@ -1315,14 +1352,14 @@ async fn update_task_worktree_set_persists() {
     )
     .await
     .unwrap();
-    let task = db.get_task(TaskId(id.0)).unwrap().unwrap();
+    let task = db.get_task(TaskId(id.0)).await.unwrap().unwrap();
     assert_eq!(task.worktree.as_deref(), Some("/wt"));
     assert_eq!(task.tmux_window.as_deref(), Some("win"));
 }
 
 #[tokio::test]
 async fn update_task_worktree_clear_sets_null() {
-    let db = test_db();
+    let db = test_db().await;
     let svc = task_svc(&db);
     let id = svc
         .create_task(CreateTaskParams {
@@ -1336,6 +1373,7 @@ async fn update_task_worktree_clear_sets_null() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     // First set a value
     svc.update_task(
@@ -1354,14 +1392,14 @@ async fn update_task_worktree_clear_sets_null() {
     )
     .await
     .unwrap();
-    let task = db.get_task(TaskId(id.0)).unwrap().unwrap();
+    let task = db.get_task(TaskId(id.0)).await.unwrap().unwrap();
     assert_eq!(task.worktree, None);
     assert_eq!(task.tmux_window, None);
 }
 
 #[tokio::test]
 async fn update_task_pr_url_set_and_clear() {
-    let db = test_db();
+    let db = test_db().await;
     let svc = task_svc(&db);
     let id = svc
         .create_task(CreateTaskParams {
@@ -1375,6 +1413,7 @@ async fn update_task_pr_url_set_and_clear() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     // Set PR URL
     svc.update_task(UpdateTaskParams::for_task(id).pr_url(FieldUpdate::Set(
@@ -1382,7 +1421,7 @@ async fn update_task_pr_url_set_and_clear() {
     )))
     .await
     .unwrap();
-    let task = db.get_task(TaskId(id.0)).unwrap().unwrap();
+    let task = db.get_task(TaskId(id.0)).await.unwrap().unwrap();
     assert_eq!(
         task.pr_url.as_deref(),
         Some("https://github.com/org/repo/pull/1")
@@ -1391,13 +1430,13 @@ async fn update_task_pr_url_set_and_clear() {
     svc.update_task(UpdateTaskParams::for_task(id).pr_url(FieldUpdate::Clear))
         .await
         .unwrap();
-    let task = db.get_task(TaskId(id.0)).unwrap().unwrap();
+    let task = db.get_task(TaskId(id.0)).await.unwrap().unwrap();
     assert_eq!(task.pr_url, None);
 }
 
 #[tokio::test]
 async fn list_tasks_filters_by_epic_id() {
-    let db = test_db();
+    let db = test_db().await;
     let svc = task_svc(&db);
     let esvc = epic_svc(&db);
 
@@ -1427,6 +1466,7 @@ async fn list_tasks_filters_by_epic_id() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let _id2 = svc
@@ -1441,6 +1481,7 @@ async fn list_tasks_filters_by_epic_id() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let tasks = svc
@@ -1448,6 +1489,7 @@ async fn list_tasks_filters_by_epic_id() {
             epic_id: Some(epic.id),
             ..Default::default()
         })
+        .await
         .unwrap();
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].id, id1);
@@ -1455,7 +1497,7 @@ async fn list_tasks_filters_by_epic_id() {
 
 #[tokio::test]
 async fn list_tasks_excludes_archived_by_default() {
-    let db = test_db();
+    let db = test_db().await;
     let svc = task_svc(&db);
 
     let id = svc
@@ -1470,6 +1512,7 @@ async fn list_tasks_excludes_archived_by_default() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Archived))
@@ -1480,13 +1523,14 @@ async fn list_tasks_excludes_archived_by_default() {
         .list_tasks(ListTasksFilter {
             ..Default::default()
         })
+        .await
         .unwrap();
     assert!(tasks.is_empty());
 }
 
-#[test]
-fn list_tasks_filters_by_project_id() {
-    let db = test_db();
+#[tokio::test]
+async fn list_tasks_filters_by_project_id() {
+    let db = test_db().await;
     let svc = task_svc(&db);
 
     svc.create_task(CreateTaskParams {
@@ -1500,6 +1544,7 @@ fn list_tasks_filters_by_project_id() {
         base_branch: None,
         project_id: ProjectId(1),
     })
+    .await
     .unwrap();
 
     svc.create_task(CreateTaskParams {
@@ -1513,6 +1558,7 @@ fn list_tasks_filters_by_project_id() {
         base_branch: None,
         project_id: ProjectId(2),
     })
+    .await
     .unwrap();
 
     let tasks = svc
@@ -1520,14 +1566,15 @@ fn list_tasks_filters_by_project_id() {
             project_id: Some(ProjectId(2)),
             ..Default::default()
         })
+        .await
         .unwrap();
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].title, "P2 task");
 }
 
-#[test]
-fn list_tasks_filters_by_repo_paths() {
-    let db = test_db();
+#[tokio::test]
+async fn list_tasks_filters_by_repo_paths() {
+    let db = test_db().await;
     let svc = task_svc(&db);
 
     svc.create_task(CreateTaskParams {
@@ -1541,6 +1588,7 @@ fn list_tasks_filters_by_repo_paths() {
         base_branch: None,
         project_id: ProjectId(1),
     })
+    .await
     .unwrap();
 
     svc.create_task(CreateTaskParams {
@@ -1554,6 +1602,7 @@ fn list_tasks_filters_by_repo_paths() {
         base_branch: None,
         project_id: ProjectId(1),
     })
+    .await
     .unwrap();
 
     let tasks = svc
@@ -1561,14 +1610,15 @@ fn list_tasks_filters_by_repo_paths() {
             repo_paths: Some(vec!["/repo/a".to_string()]),
             ..Default::default()
         })
+        .await
         .unwrap();
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].title, "Repo A");
 }
 
-#[test]
-fn list_tasks_excludes_caller_task() {
-    let db = test_db();
+#[tokio::test]
+async fn list_tasks_excludes_caller_task() {
+    let db = test_db().await;
     let svc = task_svc(&db);
 
     let id1 = svc
@@ -1583,6 +1633,7 @@ fn list_tasks_excludes_caller_task() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     svc.create_task(CreateTaskParams {
@@ -1596,6 +1647,7 @@ fn list_tasks_excludes_caller_task() {
         base_branch: None,
         project_id: ProjectId(1),
     })
+    .await
     .unwrap();
 
     let tasks = svc
@@ -1603,14 +1655,15 @@ fn list_tasks_excludes_caller_task() {
             exclude_task_id: Some(id1),
             ..Default::default()
         })
+        .await
         .unwrap();
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].title, "T2");
 }
 
-#[test]
-fn validate_send_message_missing_worktree() {
-    let db = test_db();
+#[tokio::test]
+async fn validate_send_message_missing_worktree() {
+    let db = test_db().await;
     let svc = task_svc(&db);
 
     let from_id = svc
@@ -1625,6 +1678,7 @@ fn validate_send_message_missing_worktree() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     // Target task has no worktree (still backlog)
@@ -1640,16 +1694,17 @@ fn validate_send_message_missing_worktree() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
-    let err = svc.validate_send_message(from_id, to_id).unwrap_err();
+    let err = svc.validate_send_message(from_id, to_id).await.unwrap_err();
     assert!(matches!(err, ServiceError::Validation(_)));
     assert!(err.to_string().contains("no worktree"));
 }
 
 #[tokio::test]
 async fn validate_send_message_missing_tmux_window() {
-    let db = test_db();
+    let db = test_db().await;
     let svc = task_svc(&db);
 
     let from_id = svc
@@ -1664,6 +1719,7 @@ async fn validate_send_message_missing_tmux_window() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let to_id = svc
@@ -1678,6 +1734,7 @@ async fn validate_send_message_missing_tmux_window() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     // Set worktree but not tmux_window
@@ -1689,14 +1746,14 @@ async fn validate_send_message_missing_tmux_window() {
     .await
     .unwrap();
 
-    let err = svc.validate_send_message(from_id, to_id).unwrap_err();
+    let err = svc.validate_send_message(from_id, to_id).await.unwrap_err();
     assert!(matches!(err, ServiceError::Validation(_)));
     assert!(err.to_string().contains("no tmux window"));
 }
 
-#[test]
-fn validate_send_message_target_not_found() {
-    let db = test_db();
+#[tokio::test]
+async fn validate_send_message_target_not_found() {
+    let db = test_db().await;
     let svc = task_svc(&db);
 
     let from_id = svc
@@ -1711,9 +1768,13 @@ fn validate_send_message_target_not_found() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
-    let err = svc.validate_send_message(from_id, TaskId(999)).unwrap_err();
+    let err = svc
+        .validate_send_message(from_id, TaskId(999))
+        .await
+        .unwrap_err();
     assert!(matches!(err, ServiceError::NotFound(_)));
 }
 
@@ -1723,26 +1784,29 @@ fn validate_send_message_target_not_found() {
 
 #[tokio::test]
 async fn create_task_with_explicit_project_id() {
-    let db = Arc::new(Database::open_in_memory().unwrap());
+    let db = Arc::new(Database::open_in_memory().await.unwrap());
     let svc = TaskService::new(db.clone() as Arc<dyn db::TaskAndEpicStore>);
     let default_id = db.get_default_project().await.unwrap().id;
     let other = db.create_project("Other", 1).await.unwrap();
 
-    let result = svc.create_task(CreateTaskParams {
-        title: "T".to_string(),
-        description: String::new(),
-        repo_path: "/r".to_string(),
-        plan_path: None,
-        epic_id: None,
-        sort_order: None,
-        tag: None,
-        base_branch: None,
-        project_id: other.id,
-    });
+    let result = svc
+        .create_task(CreateTaskParams {
+            title: "T".to_string(),
+            description: String::new(),
+            repo_path: "/r".to_string(),
+            plan_path: None,
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            base_branch: None,
+            project_id: other.id,
+        })
+        .await;
     assert!(result.is_ok());
     let task_id = result.unwrap();
     let task = db
         .get_task(crate::models::TaskId(task_id.0))
+        .await
         .unwrap()
         .unwrap();
     assert_eq!(task.project_id, other.id);
@@ -1755,7 +1819,7 @@ async fn create_task_with_explicit_project_id() {
 
 #[tokio::test]
 async fn create_sub_epic_links_parent() {
-    let db = test_db();
+    let db = test_db().await;
     let svc = epic_svc(&db);
 
     let parent = svc
@@ -1794,7 +1858,7 @@ async fn create_sub_epic_links_parent() {
 
 #[tokio::test]
 async fn list_root_epics_service() {
-    let db = test_db();
+    let db = test_db().await;
     let svc = epic_svc(&db);
 
     let parent = svc
@@ -1830,7 +1894,7 @@ async fn list_root_epics_service() {
 
 #[tokio::test]
 async fn list_sub_epics_service() {
-    let db = test_db();
+    let db = test_db().await;
     let svc = epic_svc(&db);
 
     let parent = svc
@@ -1869,7 +1933,7 @@ async fn list_sub_epics_service() {
 
 #[tokio::test]
 async fn update_task_project_id_moves_task() {
-    let db = test_db();
+    let db = test_db().await;
     let svc = task_svc(&db);
     let d: Arc<dyn db::ProjectCrud> = db.clone();
     let other = d.create_project("Dispatch", 1).await.unwrap();
@@ -1886,6 +1950,7 @@ async fn update_task_project_id_moves_task() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     svc.update_task(UpdateTaskParams::for_task(id).project_id(other.id))
@@ -1893,7 +1958,7 @@ async fn update_task_project_id_moves_task() {
         .unwrap();
 
     let db2: Arc<dyn db::TaskCrud> = db.clone();
-    let task = db2.get_task(id).unwrap().unwrap();
+    let task = db2.get_task(id).await.unwrap().unwrap();
     assert_eq!(task.project_id, other.id);
 }
 
@@ -1901,7 +1966,7 @@ async fn update_task_project_id_moves_task() {
 
 #[tokio::test]
 async fn update_epic_project_id_moves_epic() {
-    let db = test_db();
+    let db = test_db().await;
     let svc = epic_svc(&db);
     let d: Arc<dyn db::ProjectCrud> = db.clone();
     let other = d.create_project("Dispatch", 1).await.unwrap();
@@ -1953,7 +2018,7 @@ async fn update_epic_project_id_moves_epic() {
 
 #[tokio::test]
 async fn update_task_toctou_last_write_wins() {
-    let db = test_db();
+    let db = test_db().await;
     let svc_a = task_svc(&db);
     let svc_b = task_svc(&db);
 
@@ -1969,6 +2034,7 @@ async fn update_task_toctou_last_write_wins() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     // svc_a moves the task to Running/Active.
@@ -1993,7 +2059,7 @@ async fn update_task_toctou_last_write_wins() {
         .await
         .unwrap();
 
-    let task = svc_a.get_task(id).unwrap();
+    let task = svc_a.get_task(id).await.unwrap();
     assert_eq!(task.status, TaskStatus::Review);
     assert_eq!(task.sub_status, SubStatus::AwaitingReview);
 }
@@ -2005,7 +2071,7 @@ async fn update_task_sub_status_validated_against_persisted_status() {
     // later sub_status-only update sees the new status — this is the
     // TOCTOU-accepting behaviour: validation uses *current* state, not the
     // state the caller may have observed earlier.
-    let db = test_db();
+    let db = test_db().await;
     let svc_a = task_svc(&db);
     let svc_b = task_svc(&db);
 
@@ -2021,6 +2087,7 @@ async fn update_task_sub_status_validated_against_persisted_status() {
             base_branch: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     svc_a
@@ -2037,7 +2104,10 @@ async fn update_task_sub_status_validated_against_persisted_status() {
         .update_task(UpdateTaskParams::for_task(id).sub_status(SubStatus::Stale))
         .await
         .unwrap();
-    assert_eq!(svc_a.get_task(id).unwrap().sub_status, SubStatus::Stale);
+    assert_eq!(
+        svc_a.get_task(id).await.unwrap().sub_status,
+        SubStatus::Stale
+    );
 
     // Now svc_a moves status to Review without specifying sub_status.
     svc_a

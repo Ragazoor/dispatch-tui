@@ -2,7 +2,7 @@ use super::*;
 use crate::models::ProjectId;
 
 impl TuiRuntime {
-    pub(super) fn exec_insert_task(
+    pub(super) async fn exec_insert_task(
         &self,
         app: &mut App,
         draft: tui::TaskDraft,
@@ -20,7 +20,7 @@ impl TuiRuntime {
             base_branch: Some(draft.base_branch),
             project_id: app.active_project(),
         };
-        if let Some(task) = self.create_task(app, params) {
+        if let Some(task) = self.create_task(app, params).await {
             app.update(Message::Task(crate::tui::messages::TaskMessage::Created {
                 task,
             }));
@@ -39,20 +39,23 @@ impl TuiRuntime {
         // detect_default_branch falls back to "main" when origin/HEAD is
         // unavailable, so dispatch doesn't fail on repos whose default isn't main.
         let base_branch = crate::git::detect_default_branch(&expanded, &*self.runner);
-        let Some(task) = self.create_task(
-            app,
-            CreateTaskParams {
-                title: draft.title,
-                description: draft.description,
-                repo_path: draft.repo_path,
-                plan_path: None,
-                epic_id,
-                sort_order: None,
-                tag: None,
-                base_branch: Some(base_branch),
-                project_id: app.active_project(),
-            },
-        ) else {
+        let Some(task) = self
+            .create_task(
+                app,
+                CreateTaskParams {
+                    title: draft.title,
+                    description: draft.description,
+                    repo_path: draft.repo_path,
+                    plan_path: None,
+                    epic_id,
+                    sort_order: None,
+                    tag: None,
+                    base_branch: Some(base_branch),
+                    project_id: app.active_project(),
+                },
+            )
+            .await
+        else {
             return;
         };
         app.update(Message::Task(crate::tui::messages::TaskMessage::Created {
@@ -61,8 +64,8 @@ impl TuiRuntime {
         app.update(Message::Task(
             crate::tui::messages::TaskMessage::MarkDispatching(task.id),
         ));
-        let _ = self.database.save_repo_path(&expanded);
-        let paths = self.database.list_repo_paths().unwrap_or_default();
+        let _ = self.database.save_repo_path(&expanded).await;
+        let paths = self.database.list_repo_paths().await.unwrap_or_default();
         app.update(Message::RepoPathsUpdated(paths));
         let epic_ctx = dispatch::EpicContext::from_db(&task, &*self.database).await;
         let project_ctx = dispatch::ProjectContext::from_db(&task, &*self.database).await;
@@ -141,8 +144,8 @@ impl TuiRuntime {
         }
     }
 
-    pub(super) fn exec_delete_task(&self, app: &mut App, id: TaskId) {
-        if let Err(e) = self.task_svc.delete_task(id) {
+    pub(super) async fn exec_delete_task(&self, app: &mut App, id: TaskId) {
+        if let Err(e) = self.task_svc.delete_task(id).await {
             app.update(Message::System(crate::tui::messages::SystemMessage::Error(
                 Self::db_error("deleting task", e),
             )));
@@ -220,14 +223,14 @@ impl TuiRuntime {
         });
     }
 
-    pub(super) fn exec_save_repo_path(&self, app: &mut App, path: String) {
+    pub(super) async fn exec_save_repo_path(&self, app: &mut App, path: String) {
         let path = models::expand_tilde(&path);
-        if let Err(e) = self.database.save_repo_path(&path) {
+        if let Err(e) = self.database.save_repo_path(&path).await {
             app.update(Message::System(crate::tui::messages::SystemMessage::Error(
                 Self::db_error("saving repo path", e),
             )));
         }
-        match self.database.list_repo_paths() {
+        match self.database.list_repo_paths().await {
             Ok(paths) => {
                 app.update(Message::RepoPathsUpdated(paths));
             }
@@ -244,7 +247,7 @@ impl TuiRuntime {
     /// the event was in flight); returns silently on DB errors so the runtime
     /// keeps draining notifications.
     pub(super) async fn exec_refresh_task(&self, app: &mut App, task_id: TaskId) -> Vec<Command> {
-        match self.database.get_task(task_id) {
+        match self.database.get_task(task_id).await {
             Ok(Some(task)) => app.update(Message::Task(
                 crate::tui::messages::TaskMessage::Updated(task),
             )),
@@ -301,7 +304,7 @@ impl TuiRuntime {
 
     pub(super) async fn exec_refresh_from_db(&self, app: &mut App) -> Vec<Command> {
         let mut cmds = Vec::new();
-        match self.database.list_all() {
+        match self.database.list_all().await {
             Ok(tasks) => {
                 cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
                     tasks,
@@ -314,19 +317,19 @@ impl TuiRuntime {
             }
         }
         self.exec_refresh_epics_from_db(app).await;
-        self.exec_refresh_usage_from_db(app);
+        self.exec_refresh_usage_from_db(app).await;
         self.exec_refresh_needs_review_count(app).await;
         cmds
     }
 
-    pub(super) fn exec_delete_repo_path(&self, app: &mut App, path: &str) {
-        if let Err(e) = self.database.delete_repo_path(path) {
+    pub(super) async fn exec_delete_repo_path(&self, app: &mut App, path: &str) {
+        if let Err(e) = self.database.delete_repo_path(path).await {
             app.update(Message::System(crate::tui::messages::SystemMessage::Error(
                 Self::db_error("deleting repo path", e),
             )));
             return;
         }
-        match self.database.list_repo_paths() {
+        match self.database.list_repo_paths().await {
             Ok(paths) => {
                 app.update(Message::RepoPathsUpdated(paths));
             }
@@ -337,7 +340,7 @@ impl TuiRuntime {
             }
         }
         // Refresh presets since delete_repo_path cleans them
-        if let Ok(raw) = self.database.list_filter_presets() {
+        if let Ok(raw) = self.database.list_filter_presets().await {
             let known: HashSet<String> = app.repo_paths().iter().cloned().collect();
             let presets = parse_raw_presets(raw, Some(&known));
             app.update(Message::FilterPresetsLoaded(presets));
@@ -354,6 +357,7 @@ impl TuiRuntime {
         let shared = self
             .database
             .has_other_tasks_with_worktree(&worktree, id)
+            .await
             .unwrap_or(false);
 
         if shared {
@@ -404,6 +408,7 @@ impl TuiRuntime {
         let shared = self
             .database
             .has_other_tasks_with_worktree(&worktree, id)
+            .await
             .unwrap_or(false);
 
         if shared {

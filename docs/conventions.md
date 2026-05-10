@@ -76,14 +76,14 @@ The service layer bridges the two patterns before writing a patch: `FieldUpdate:
 
 `Arc<dyn TaskStore>` coerces to any narrower trait object at call sites via Rust's trait-object upcasting (stabilised in 1.86). If you need to split a wide `Arc<dyn TaskStore>` into a narrower one, use a typed `let` binding: `let d: Arc<dyn EpicCrud> = task_store_arc.clone();`.
 
-## DB access — `conn()?` and `db_call`
+## DB access — `db_call`
 
-`Database` (`src/db/mod.rs`) currently holds **two** connection handles to the same SQLite database:
+`Database` (`src/db/mod.rs`) wraps a single [`tokio_rusqlite::Connection`] — a dedicated worker thread owning the underlying `rusqlite::Connection`. There is no sync handle or mutex; every store impl, schema init, and migration runs through that worker.
 
-- `self.conn()?` returns a guarded `MutexGuard<Connection>` — the legacy sync path. Used by every `*Store` impl that has not yet been migrated to async, by `init_schema`, and by sync-only helpers. Locks the mutex and propagates a `Result` error if the lock is poisoned, rather than panicking. Never call `self.conn.lock().unwrap()` directly.
-- `self.db_call(|conn| { … }).await` runs a synchronous closure on a dedicated `tokio_rusqlite::Connection`, lazily opened against the same SQLite database via a shared-cache URI. New async trait impls (WP-2..WP-6 of the DB-async migration; see issue #681) move onto this helper so async MCP/runtime callers stop blocking the Tokio worker thread. The closure must be `Send + 'static` — clone any borrowed `&str`/slice arguments to owned values before moving them in.
+- `Database::open(path).await` / `Database::open_in_memory().await` open the connection and run the migration chain on the worker thread.
+- `self.db_call(|conn| { … }).await` is the single entry point for all SQL. The closure receives a `&mut rusqlite::Connection`, must be `Send + 'static`, and returns `Result<R>`. Errors are routed back through `tokio_rusqlite::Error::Other` and surfaced as `anyhow::Error`. Clone any borrowed `&str`/slice arguments to owned values before moving them into the closure.
 
-Once all `*Store` impls are async (end of WP-6), the sync `Mutex<Connection>` field and `conn()?` helper will be removed.
+Every `*Store` trait method is `async fn` and uses `db_call` internally. Callers `.await` each store call.
 
 ## Inline-mutation boundary
 

@@ -7,7 +7,7 @@ use super::*;
 
 #[tokio::test]
 async fn create_task_with_project_id_assigns_correctly() {
-    let (state, db) = test_state_with_db();
+    let (state, db) = test_state_with_db().await;
     let other = db.create_project("Other", 1).await.unwrap();
 
     let resp = call(
@@ -26,7 +26,7 @@ async fn create_task_with_project_id_assigns_correctly() {
     .await;
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
 
-    let tasks = db.list_all().unwrap();
+    let tasks = db.list_all().await.unwrap();
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].project_id, other.id);
 }
@@ -37,7 +37,7 @@ async fn create_task_with_project_id_assigns_correctly() {
 
 #[tokio::test]
 async fn create_epic_without_project_id_assigns_to_default() {
-    let (state, db) = test_state_with_db();
+    let (state, db) = test_state_with_db().await;
 
     let resp = call(
         &state,
@@ -61,7 +61,7 @@ async fn create_epic_without_project_id_assigns_to_default() {
 
 #[tokio::test]
 async fn create_epic_with_project_id_assigns_correctly() {
-    let (state, db) = test_state_with_db();
+    let (state, db) = test_state_with_db().await;
     let other = db.create_project("Other", 1).await.unwrap();
 
     let resp = call(
@@ -90,7 +90,7 @@ async fn create_epic_with_project_id_assigns_correctly() {
 
 #[tokio::test]
 async fn list_projects_returns_all_projects() {
-    let (state, db) = test_state_with_db();
+    let (state, db) = test_state_with_db().await;
     db.create_project("Dispatch", 1).await.unwrap();
     db.create_project("wizard_game", 2).await.unwrap();
 
@@ -120,12 +120,12 @@ async fn list_projects_returns_all_projects() {
 
 #[tokio::test]
 async fn update_task_project_id_moves_task() {
-    let (state, db) = test_state_with_db();
+    let (state, db) = test_state_with_db().await;
     let other = db.create_project("Dispatch", 1).await.unwrap();
 
-    let task_id = create_task_fixture(&state);
+    let task_id = create_task_fixture(&state).await;
     let default_id = db.get_default_project().await.unwrap().id;
-    let task_before = db.get_task(task_id).unwrap().unwrap();
+    let task_before = db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task_before.project_id, default_id);
 
     let resp = call(
@@ -139,14 +139,14 @@ async fn update_task_project_id_moves_task() {
     .await;
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
 
-    let task_after = db.get_task(task_id).unwrap().unwrap();
+    let task_after = db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task_after.project_id, other.id);
 }
 
 #[tokio::test]
 async fn update_task_invalid_project_id_returns_error() {
-    let state = test_state();
-    let task_id = create_task_fixture(&state);
+    let state = test_state().await;
+    let task_id = create_task_fixture(&state).await;
 
     let resp = call(
         &state,
@@ -167,7 +167,7 @@ async fn update_task_invalid_project_id_returns_error() {
 
 #[tokio::test]
 async fn update_epic_project_id_moves_epic() {
-    let (state, db) = test_state_with_db();
+    let (state, db) = test_state_with_db().await;
     let other = db.create_project("Dispatch", 1).await.unwrap();
 
     let epic = db
@@ -201,7 +201,7 @@ async fn update_epic_project_id_moves_epic() {
 
 #[tokio::test]
 async fn update_epic_invalid_project_id_returns_error() {
-    let (state, db) = test_state_with_db();
+    let (state, db) = test_state_with_db().await;
 
     let epic = db
         .create_epic(

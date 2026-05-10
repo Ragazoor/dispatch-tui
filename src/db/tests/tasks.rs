@@ -1,9 +1,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
 
-#[test]
-fn create_and_get() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn create_and_get() {
+    let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "My Task",
@@ -17,8 +17,9 @@ fn create_and_get() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
-    let task = db.get_task(id).unwrap().expect("task should exist");
+    let task = db.get_task(id).await.unwrap().expect("task should exist");
     assert_eq!(task.id, id);
     assert_eq!(task.title, "My Task");
     assert_eq!(task.description, "A description");
@@ -28,9 +29,9 @@ fn create_and_get() {
     assert!(task.tmux_window.is_none());
 }
 
-#[test]
-fn list_all() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn list_all() {
+    let db = in_memory_db().await;
     db.create_task(CreateTaskRequest {
         title: "Task A",
         description: "desc",
@@ -43,6 +44,7 @@ fn list_all() {
         tag: None,
         project_id: ProjectId(1),
     })
+    .await
     .unwrap();
     db.create_task(CreateTaskRequest {
         title: "Task B",
@@ -56,6 +58,7 @@ fn list_all() {
         tag: None,
         project_id: ProjectId(1),
     })
+    .await
     .unwrap();
     db.create_task(CreateTaskRequest {
         title: "Task C",
@@ -69,17 +72,18 @@ fn list_all() {
         tag: None,
         project_id: ProjectId(1),
     })
+    .await
     .unwrap();
-    let tasks = db.list_all().unwrap();
+    let tasks = db.list_all().await.unwrap();
     assert_eq!(tasks.len(), 3);
     assert_eq!(tasks[0].title, "Task A");
     assert_eq!(tasks[1].title, "Task B");
     assert_eq!(tasks[2].title, "Task C");
 }
 
-#[test]
-fn list_by_status() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn list_by_status() {
+    let db = in_memory_db().await;
     let id1 = db
         .create_task(CreateTaskRequest {
             title: "Task A",
@@ -93,6 +97,7 @@ fn list_by_status() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     let id2 = db
         .create_task(CreateTaskRequest {
@@ -107,6 +112,7 @@ fn list_by_status() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.create_task(CreateTaskRequest {
         title: "Task C",
@@ -120,31 +126,34 @@ fn list_by_status() {
         tag: None,
         project_id: ProjectId(1),
     })
+    .await
     .unwrap();
 
     db.patch_task(id1, &TaskPatch::new().status(TaskStatus::Running))
+        .await
         .unwrap();
     db.patch_task(id2, &TaskPatch::new().status(TaskStatus::Running))
+        .await
         .unwrap();
 
-    let running = db.list_by_status(TaskStatus::Running).unwrap();
+    let running = db.list_by_status(TaskStatus::Running).await.unwrap();
     assert_eq!(running.len(), 2);
 
-    let backlog = db.list_by_status(TaskStatus::Backlog).unwrap();
+    let backlog = db.list_by_status(TaskStatus::Backlog).await.unwrap();
     assert_eq!(backlog.len(), 1);
     assert_eq!(backlog[0].title, "Task C");
 }
 
-#[test]
-fn get_nonexistent() {
-    let db = in_memory_db();
-    let result = db.get_task(TaskId(9999)).unwrap();
+#[tokio::test]
+async fn get_nonexistent() {
+    let db = in_memory_db().await;
+    let result = db.get_task(TaskId(9999)).await.unwrap();
     assert!(result.is_none());
 }
 
-#[test]
-fn create_task_with_plan() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn create_task_with_plan() {
+    let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "Planned Task",
@@ -158,14 +167,15 @@ fn create_task_with_plan() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
-    let task = db.get_task(id).unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
     assert_eq!(task.plan_path.as_deref(), Some("docs/plan.md"));
 }
 
-#[test]
-fn create_task_without_plan() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn create_task_without_plan() {
+    let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "Simple Task",
@@ -179,14 +189,15 @@ fn create_task_without_plan() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
-    let task = db.get_task(id).unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
     assert!(task.plan_path.is_none());
 }
 
-#[test]
-fn find_task_by_plan_returns_match() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn find_task_by_plan_returns_match() {
+    let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "Planned",
@@ -200,16 +211,17 @@ fn find_task_by_plan_returns_match() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
-    let found = db.find_task_by_plan("/plans/my-plan.md").unwrap();
+    let found = db.find_task_by_plan("/plans/my-plan.md").await.unwrap();
     assert!(found.is_some());
     assert_eq!(found.unwrap().id, id);
 }
 
-#[test]
-fn find_task_by_plan_returns_none_when_no_match() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn find_task_by_plan_returns_none_when_no_match() {
+    let db = in_memory_db().await;
     db.create_task(CreateTaskRequest {
         title: "Other",
         description: "desc",
@@ -222,15 +234,16 @@ fn find_task_by_plan_returns_none_when_no_match() {
         tag: None,
         project_id: ProjectId(1),
     })
+    .await
     .unwrap();
 
-    let found = db.find_task_by_plan("/plans/nonexistent.md").unwrap();
+    let found = db.find_task_by_plan("/plans/nonexistent.md").await.unwrap();
     assert!(found.is_none());
 }
 
-#[test]
-fn find_task_by_plan_ignores_tasks_without_plan() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn find_task_by_plan_ignores_tasks_without_plan() {
+    let db = in_memory_db().await;
     db.create_task(CreateTaskRequest {
         title: "No Plan",
         description: "desc",
@@ -243,17 +256,19 @@ fn find_task_by_plan_ignores_tasks_without_plan() {
         tag: None,
         project_id: ProjectId(1),
     })
+    .await
     .unwrap();
 
-    let found = db.find_task_by_plan("/plans/any.md").unwrap();
+    let found = db.find_task_by_plan("/plans/any.md").await.unwrap();
     assert!(found.is_none());
 }
 
-#[test]
-fn create_task_returning_returns_full_task() {
-    let db = in_memory_db();
-    let task =
-        create_task_returning(&db, "Title", "Desc", "/repo", None, TaskStatus::Backlog).unwrap();
+#[tokio::test]
+async fn create_task_returning_returns_full_task() {
+    let db = in_memory_db().await;
+    let task = create_task_returning(&db, "Title", "Desc", "/repo", None, TaskStatus::Backlog)
+        .await
+        .unwrap();
     assert_eq!(task.title, "Title");
     assert_eq!(task.description, "Desc");
     assert_eq!(task.repo_path, "/repo");
@@ -263,18 +278,19 @@ fn create_task_returning_returns_full_task() {
     assert!(task.plan_path.is_none());
 }
 
-#[test]
-fn create_task_returning_with_plan() {
-    let db = in_memory_db();
-    let task =
-        create_task_returning(&db, "T", "D", "/r", Some("plan.md"), TaskStatus::Backlog).unwrap();
+#[tokio::test]
+async fn create_task_returning_with_plan() {
+    let db = in_memory_db().await;
+    let task = create_task_returning(&db, "T", "D", "/r", Some("plan.md"), TaskStatus::Backlog)
+        .await
+        .unwrap();
     assert_eq!(task.plan_path.as_deref(), Some("plan.md"));
     assert_eq!(task.status, TaskStatus::Backlog);
 }
 
-#[test]
-fn patch_task_applies_all_fields() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn patch_task_applies_all_fields() {
+    let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "title",
@@ -288,22 +304,23 @@ fn patch_task_applies_all_fields() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     let patch = TaskPatch::new()
         .status(TaskStatus::Running)
         .plan_path(Some("plan.md"))
         .title("new title");
-    db.patch_task(id, &patch).unwrap();
-    let task = db.get_task(id).unwrap().unwrap();
+    db.patch_task(id, &patch).await.unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Running);
     assert_eq!(task.plan_path.as_deref(), Some("plan.md"));
     assert_eq!(task.title, "new title");
     assert_eq!(task.description, "desc"); // unchanged
 }
 
-#[test]
-fn patch_task_none_fields_unchanged() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn patch_task_none_fields_unchanged() {
+    let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "title",
@@ -317,18 +334,19 @@ fn patch_task_none_fields_unchanged() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     let patch = TaskPatch::new();
-    db.patch_task(id, &patch).unwrap();
-    let task = db.get_task(id).unwrap().unwrap();
+    db.patch_task(id, &patch).await.unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
     assert_eq!(task.title, "title");
     assert_eq!(task.plan_path.as_deref(), Some("plan.md"));
     assert_eq!(task.status, TaskStatus::Running);
 }
 
-#[test]
-fn create_task_defaults_labels_to_empty() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn create_task_defaults_labels_to_empty() {
+    let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "t",
@@ -342,14 +360,15 @@ fn create_task_defaults_labels_to_empty() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
-    let task = db.get_task(id).unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
     assert_eq!(task.labels, Vec::<String>::new());
 }
 
-#[test]
-fn patch_task_sets_labels() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn patch_task_sets_labels() {
+    let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "t",
@@ -363,17 +382,19 @@ fn patch_task_sets_labels() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     let labels = vec!["scala-common".to_string(), "security".to_string()];
     db.patch_task(id, &TaskPatch::new().labels(&labels))
+        .await
         .unwrap();
-    let task = db.get_task(id).unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
     assert_eq!(task.labels, labels);
 }
 
-#[test]
-fn patch_task_clears_labels_to_empty() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn patch_task_clears_labels_to_empty() {
+    let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "t",
@@ -387,30 +408,38 @@ fn patch_task_clears_labels_to_empty() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     let initial = vec!["one".to_string()];
     db.patch_task(id, &TaskPatch::new().labels(&initial))
+        .await
         .unwrap();
     let empty: Vec<String> = Vec::new();
-    db.patch_task(id, &TaskPatch::new().labels(&empty)).unwrap();
-    let task = db.get_task(id).unwrap().unwrap();
+    db.patch_task(id, &TaskPatch::new().labels(&empty))
+        .await
+        .unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
     assert!(task.labels.is_empty());
 
     // Verify the column actually contains '[]', not NULL.
-    let conn = db.conn().unwrap();
-    let raw: String = conn
-        .query_row(
-            "SELECT labels FROM tasks WHERE id = ?1",
-            rusqlite::params![id.0],
-            |r| r.get(0),
-        )
+    let task_id = id.0;
+    let raw: String = db
+        .db_call(move |conn| {
+            conn.query_row(
+                "SELECT labels FROM tasks WHERE id = ?1",
+                rusqlite::params![task_id],
+                |r| r.get(0),
+            )
+            .map_err(anyhow::Error::from)
+        })
+        .await
         .unwrap();
     assert_eq!(raw, "[]");
 }
 
-#[test]
-fn patch_task_none_preserves_labels() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn patch_task_none_preserves_labels() {
+    let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "t",
@@ -424,19 +453,23 @@ fn patch_task_none_preserves_labels() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     let labels = vec!["keep-me".to_string()];
     db.patch_task(id, &TaskPatch::new().labels(&labels))
+        .await
         .unwrap();
     // Patching unrelated field must not touch labels.
-    db.patch_task(id, &TaskPatch::new().title("new")).unwrap();
-    let task = db.get_task(id).unwrap().unwrap();
+    db.patch_task(id, &TaskPatch::new().title("new"))
+        .await
+        .unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
     assert_eq!(task.labels, labels);
 }
 
 #[tokio::test]
 async fn list_all_tolerates_corrupt_labels_json() {
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "t",
@@ -450,25 +483,28 @@ async fn list_all_tolerates_corrupt_labels_json() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     // Inject malformed JSON directly via the connection.
-    {
-        let conn = db.conn().unwrap();
+    let task_id = id.0;
+    db.db_call(move |conn| {
         conn.execute(
             "UPDATE tasks SET labels = ?1 WHERE id = ?2",
-            rusqlite::params!["{not json", id.0],
-        )
-        .unwrap();
-    }
+            rusqlite::params!["{not json", task_id],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
     // list_all must still succeed; the broken row falls back to empty labels.
-    let tasks = db.list_all().unwrap();
+    let tasks = db.list_all().await.unwrap();
     assert_eq!(tasks.len(), 1);
     assert!(tasks[0].labels.is_empty());
 }
 
 #[tokio::test]
 async fn decode_fallback_counter_bumps_on_malformed_labels() {
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "t",
@@ -482,19 +518,22 @@ async fn decode_fallback_counter_bumps_on_malformed_labels() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     // Inject malformed JSON in labels — bypasses CHECK constraints on enum
     // columns and exercises the soft-fail branch in `read_json_string_vec`.
-    {
-        let conn = db.conn().unwrap();
+    let task_id = id.0;
+    db.db_call(move |conn| {
         conn.execute(
             "UPDATE tasks SET labels = ?1 WHERE id = ?2",
-            rusqlite::params!["{not json", id.0],
-        )
-        .unwrap();
-    }
+            rusqlite::params!["{not json", task_id],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
     let before = crate::db::decode_fallback_count();
-    let task = db.get_task(id).unwrap().expect("task exists");
+    let task = db.get_task(id).await.unwrap().expect("task exists");
     assert!(task.labels.is_empty());
     let after = crate::db::decode_fallback_count();
     assert!(
@@ -503,9 +542,9 @@ async fn decode_fallback_counter_bumps_on_malformed_labels() {
     );
 }
 
-#[test]
-fn patch_task_sets_tag() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn patch_task_sets_tag() {
+    let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "title",
@@ -519,16 +558,18 @@ fn patch_task_sets_tag() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.patch_task(id, &TaskPatch::new().tag(Some(TaskTag::Bug)))
+        .await
         .unwrap();
-    let task = db.get_task(id).unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
     assert_eq!(task.tag, Some(TaskTag::Bug));
 }
 
-#[test]
-fn patch_task_clears_tag() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn patch_task_clears_tag() {
+    let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "title",
@@ -542,17 +583,21 @@ fn patch_task_clears_tag() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.patch_task(id, &TaskPatch::new().tag(Some(TaskTag::Feature)))
+        .await
         .unwrap();
-    db.patch_task(id, &TaskPatch::new().tag(None)).unwrap();
-    let task = db.get_task(id).unwrap().unwrap();
+    db.patch_task(id, &TaskPatch::new().tag(None))
+        .await
+        .unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
     assert!(task.tag.is_none());
 }
 
-#[test]
-fn has_other_tasks_with_worktree_returns_false_when_no_others() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn has_other_tasks_with_worktree_returns_false_when_no_others() {
+    let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "Task A",
@@ -566,6 +611,7 @@ fn has_other_tasks_with_worktree_returns_false_when_no_others() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.patch_task(
         id,
@@ -574,16 +620,18 @@ fn has_other_tasks_with_worktree_returns_false_when_no_others() {
             .worktree(Some("/repo/.worktrees/1-task-a"))
             .tmux_window(Some("task-1")),
     )
+    .await
     .unwrap();
 
     assert!(!db
         .has_other_tasks_with_worktree("/repo/.worktrees/1-task-a", id)
+        .await
         .unwrap());
 }
 
-#[test]
-fn has_other_tasks_with_worktree_returns_true_when_shared() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn has_other_tasks_with_worktree_returns_true_when_shared() {
+    let db = in_memory_db().await;
     let id1 = db
         .create_task(CreateTaskRequest {
             title: "Task A",
@@ -597,6 +645,7 @@ fn has_other_tasks_with_worktree_returns_true_when_shared() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     let id2 = db
         .create_task(CreateTaskRequest {
@@ -611,6 +660,7 @@ fn has_other_tasks_with_worktree_returns_true_when_shared() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.patch_task(
         id1,
@@ -619,6 +669,7 @@ fn has_other_tasks_with_worktree_returns_true_when_shared() {
             .worktree(Some("/repo/.worktrees/1-task-a"))
             .tmux_window(Some("task-1")),
     )
+    .await
     .unwrap();
     db.patch_task(
         id2,
@@ -627,19 +678,22 @@ fn has_other_tasks_with_worktree_returns_true_when_shared() {
             .worktree(Some("/repo/.worktrees/1-task-a"))
             .tmux_window(Some("task-1")),
     )
+    .await
     .unwrap();
 
     assert!(db
         .has_other_tasks_with_worktree("/repo/.worktrees/1-task-a", id1)
+        .await
         .unwrap());
     assert!(db
         .has_other_tasks_with_worktree("/repo/.worktrees/1-task-a", id2)
+        .await
         .unwrap());
 }
 
-#[test]
-fn has_other_tasks_with_worktree_ignores_done_tasks() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn has_other_tasks_with_worktree_ignores_done_tasks() {
+    let db = in_memory_db().await;
     let id1 = db
         .create_task(CreateTaskRequest {
             title: "Task A",
@@ -653,6 +707,7 @@ fn has_other_tasks_with_worktree_ignores_done_tasks() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     let id2 = db
         .create_task(CreateTaskRequest {
@@ -667,6 +722,7 @@ fn has_other_tasks_with_worktree_ignores_done_tasks() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.patch_task(
         id1,
@@ -675,6 +731,7 @@ fn has_other_tasks_with_worktree_ignores_done_tasks() {
             .worktree(Some("/repo/.worktrees/1-task-a"))
             .tmux_window(Some("task-1")),
     )
+    .await
     .unwrap();
     db.patch_task(
         id2,
@@ -683,16 +740,18 @@ fn has_other_tasks_with_worktree_ignores_done_tasks() {
             .worktree(Some("/repo/.worktrees/1-task-a"))
             .tmux_window(Some("task-1")),
     )
+    .await
     .unwrap();
 
     assert!(!db
         .has_other_tasks_with_worktree("/repo/.worktrees/1-task-a", id1)
+        .await
         .unwrap());
 }
 
-#[test]
-fn patch_task_clears_plan() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn patch_task_clears_plan() {
+    let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "title",
@@ -706,16 +765,17 @@ fn patch_task_clears_plan() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     let patch = TaskPatch::new().plan_path(None);
-    db.patch_task(id, &patch).unwrap();
-    let task = db.get_task(id).unwrap().unwrap();
+    db.patch_task(id, &patch).await.unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
     assert!(task.plan_path.is_none());
 }
 
-#[test]
-fn patch_task_sets_dispatch_fields() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn patch_task_sets_dispatch_fields() {
+    let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "title",
@@ -729,19 +789,20 @@ fn patch_task_sets_dispatch_fields() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     let patch = TaskPatch::new()
         .worktree(Some("/repo/.worktrees/1-my-task"))
         .tmux_window(Some("session:1-my-task"));
-    db.patch_task(id, &patch).unwrap();
-    let task = db.get_task(id).unwrap().unwrap();
+    db.patch_task(id, &patch).await.unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
     assert_eq!(task.worktree.as_deref(), Some("/repo/.worktrees/1-my-task"));
     assert_eq!(task.tmux_window.as_deref(), Some("session:1-my-task"));
 }
 
-#[test]
-fn patch_task_clears_dispatch_fields() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn patch_task_clears_dispatch_fields() {
+    let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "title",
@@ -755,27 +816,28 @@ fn patch_task_clears_dispatch_fields() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     // Set dispatch fields first
     let patch = TaskPatch::new()
         .worktree(Some("/repo/.worktrees/1-my-task"))
         .tmux_window(Some("session:1-my-task"));
-    db.patch_task(id, &patch).unwrap();
-    let task = db.get_task(id).unwrap().unwrap();
+    db.patch_task(id, &patch).await.unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
     assert!(task.worktree.is_some());
     assert!(task.tmux_window.is_some());
 
     // Clear them
     let patch = TaskPatch::new().worktree(None).tmux_window(None);
-    db.patch_task(id, &patch).unwrap();
-    let task = db.get_task(id).unwrap().unwrap();
+    db.patch_task(id, &patch).await.unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
     assert!(task.worktree.is_none());
     assert!(task.tmux_window.is_none());
 }
 
-#[test]
-fn patch_task_status_and_dispatch_together() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn patch_task_status_and_dispatch_together() {
+    let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "title",
@@ -789,28 +851,29 @@ fn patch_task_status_and_dispatch_together() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     let patch = TaskPatch::new()
         .status(TaskStatus::Running)
         .worktree(Some("/repo/.worktrees/1-my-task"))
         .tmux_window(Some("session:1-my-task"));
-    db.patch_task(id, &patch).unwrap();
-    let task = db.get_task(id).unwrap().unwrap();
+    db.patch_task(id, &patch).await.unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Running);
     assert_eq!(task.worktree.as_deref(), Some("/repo/.worktrees/1-my-task"));
     assert_eq!(task.tmux_window.as_deref(), Some("session:1-my-task"));
 }
 
-#[test]
-fn task_patch_status_does_not_set_sub_status() {
+#[tokio::test]
+async fn task_patch_status_does_not_set_sub_status() {
     // status() no longer auto-sets sub_status; patch_task handles the default
     let patch = TaskPatch::new().status(TaskStatus::Review);
     assert_eq!(patch.status, Some(TaskStatus::Review));
     assert_eq!(patch.sub_status, None);
 }
 
-#[test]
-fn task_patch_status_and_sub_status_independent() {
+#[tokio::test]
+async fn task_patch_status_and_sub_status_independent() {
     // Order of builder calls doesn't matter — both fields are set independently
     let patch_a = TaskPatch::new()
         .status(TaskStatus::Running)
@@ -824,10 +887,10 @@ fn task_patch_status_and_sub_status_independent() {
     assert_eq!(patch_b.sub_status, Some(SubStatus::NeedsInput));
 }
 
-#[test]
-fn patch_task_status_change_resets_sub_status_in_db() {
+#[tokio::test]
+async fn patch_task_status_change_resets_sub_status_in_db() {
     // End-to-end: after a status-only patch, sub_status in DB reflects the new default
-    let db = Database::open_in_memory().unwrap();
+    let db = Database::open_in_memory().await.unwrap();
     let id = db
         .create_task(CreateTaskRequest {
             title: "T",
@@ -841,21 +904,24 @@ fn patch_task_status_change_resets_sub_status_in_db() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.patch_task(id, &TaskPatch::default().sub_status(SubStatus::Stale))
+        .await
         .unwrap();
 
     db.patch_task(id, &TaskPatch::default().status(TaskStatus::Review))
+        .await
         .unwrap();
 
-    let task = db.get_task(id).unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Review);
     assert_eq!(task.sub_status, SubStatus::AwaitingReview);
 }
 
-#[test]
-fn update_status_if_matching() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn update_status_if_matching() {
+    let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "Task",
@@ -869,20 +935,22 @@ fn update_status_if_matching() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let updated = db
         .update_status_if(id, TaskStatus::Review, TaskStatus::Running)
+        .await
         .unwrap();
     assert!(updated, "should update when current status matches");
 
-    let task = db.get_task(id).unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Review);
 }
 
-#[test]
-fn update_status_if_not_matching() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn update_status_if_not_matching() {
+    let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "Task",
@@ -896,32 +964,35 @@ fn update_status_if_not_matching() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let updated = db
         .update_status_if(id, TaskStatus::Review, TaskStatus::Running)
+        .await
         .unwrap();
     assert!(
         !updated,
         "should not update when current status doesn't match"
     );
 
-    let task = db.get_task(id).unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Done, "status should be unchanged");
 }
 
-#[test]
-fn update_status_if_nonexistent() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn update_status_if_nonexistent() {
+    let db = in_memory_db().await;
     let updated = db
         .update_status_if(TaskId(9999), TaskStatus::Review, TaskStatus::Running)
+        .await
         .unwrap();
     assert!(!updated, "should return false for nonexistent task");
 }
 
-#[test]
-fn task_roundtrip_with_pr_fields() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn task_roundtrip_with_pr_fields() {
+    let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "PR task",
@@ -935,24 +1006,26 @@ fn task_roundtrip_with_pr_fields() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     db.patch_task(
         id,
         &TaskPatch::new().pr_url(Some("https://github.com/org/repo/pull/42")),
     )
+    .await
     .unwrap();
 
-    let task = db.get_task(id).unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
     assert_eq!(
         task.pr_url.as_deref(),
         Some("https://github.com/org/repo/pull/42")
     );
 }
 
-#[test]
-fn task_pr_fields_default_to_none() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn task_pr_fields_default_to_none() {
+    let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "No PR",
@@ -966,14 +1039,15 @@ fn task_pr_fields_default_to_none() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
-    let task = db.get_task(id).unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
     assert!(task.pr_url.is_none());
 }
 
-#[test]
-fn patch_task_sets_pr_url() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn patch_task_sets_pr_url() {
+    let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "t",
@@ -987,20 +1061,22 @@ fn patch_task_sets_pr_url() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     db.patch_task(
         id,
         &TaskPatch::new().pr_url(Some("https://example.com/pull/1")),
     )
+    .await
     .unwrap();
-    let task = db.get_task(id).unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
     assert_eq!(task.pr_url.as_deref(), Some("https://example.com/pull/1"));
 }
 
-#[test]
-fn patch_task_sets_sort_order() {
-    let db = Database::open_in_memory().unwrap();
+#[tokio::test]
+async fn patch_task_sets_sort_order() {
+    let db = Database::open_in_memory().await.unwrap();
     let id = db
         .create_task(CreateTaskRequest {
             title: "T",
@@ -1014,16 +1090,18 @@ fn patch_task_sets_sort_order() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.patch_task(id, &TaskPatch::new().sort_order(Some(500)))
+        .await
         .unwrap();
-    let task = db.get_task(id).unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
     assert_eq!(task.sort_order, Some(500));
 }
 
-#[test]
-fn patch_task_clears_sort_order() {
-    let db = Database::open_in_memory().unwrap();
+#[tokio::test]
+async fn patch_task_clears_sort_order() {
+    let db = Database::open_in_memory().await.unwrap();
     let id = db
         .create_task(CreateTaskRequest {
             title: "T",
@@ -1037,18 +1115,21 @@ fn patch_task_clears_sort_order() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.patch_task(id, &TaskPatch::new().sort_order(Some(100)))
+        .await
         .unwrap();
     db.patch_task(id, &TaskPatch::new().sort_order(None))
+        .await
         .unwrap();
-    let task = db.get_task(id).unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
     assert_eq!(task.sort_order, None);
 }
 
-#[test]
-fn report_usage_first_insert() {
-    let db = Database::open_in_memory().unwrap();
+#[tokio::test]
+async fn report_usage_first_insert() {
+    let db = Database::open_in_memory().await.unwrap();
     let id = db
         .create_task(CreateTaskRequest {
             title: "T",
@@ -1062,6 +1143,7 @@ fn report_usage_first_insert() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.report_usage(
         id,
@@ -1072,8 +1154,9 @@ fn report_usage_first_insert() {
             cache_write_tokens: 0,
         },
     )
+    .await
     .unwrap();
-    let all = db.get_all_usage().unwrap();
+    let all = db.get_all_usage().await.unwrap();
     assert_eq!(all.len(), 1);
     assert_eq!(all[0].task_id, id);
     assert_eq!(all[0].input_tokens, 10_000);
@@ -1082,9 +1165,9 @@ fn report_usage_first_insert() {
     assert_eq!(all[0].cache_write_tokens, 0);
 }
 
-#[test]
-fn report_usage_accumulates() {
-    let db = Database::open_in_memory().unwrap();
+#[tokio::test]
+async fn report_usage_accumulates() {
+    let db = Database::open_in_memory().await.unwrap();
     let id = db
         .create_task(CreateTaskRequest {
             title: "T",
@@ -1098,6 +1181,7 @@ fn report_usage_accumulates() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.report_usage(
         id,
@@ -1108,6 +1192,7 @@ fn report_usage_accumulates() {
             cache_write_tokens: 50,
         },
     )
+    .await
     .unwrap();
     db.report_usage(
         id,
@@ -1118,8 +1203,9 @@ fn report_usage_accumulates() {
             cache_write_tokens: 25,
         },
     )
+    .await
     .unwrap();
-    let all = db.get_all_usage().unwrap();
+    let all = db.get_all_usage().await.unwrap();
     assert_eq!(all.len(), 1);
     let u = &all[0];
     assert_eq!(u.input_tokens, 1_500);
@@ -1128,15 +1214,15 @@ fn report_usage_accumulates() {
     assert_eq!(u.cache_write_tokens, 75);
 }
 
-#[test]
-fn get_all_usage_empty() {
-    let db = Database::open_in_memory().unwrap();
-    assert!(db.get_all_usage().unwrap().is_empty());
+#[tokio::test]
+async fn get_all_usage_empty() {
+    let db = Database::open_in_memory().await.unwrap();
+    assert!(db.get_all_usage().await.unwrap().is_empty());
 }
 
-#[test]
-fn task_sub_status_persists() {
-    let db = Database::open_in_memory().unwrap();
+#[tokio::test]
+async fn task_sub_status_persists() {
+    let db = Database::open_in_memory().await.unwrap();
     let id = db
         .create_task(CreateTaskRequest {
             title: "Test",
@@ -1150,16 +1236,18 @@ fn task_sub_status_persists() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.patch_task(id, &TaskPatch::default().sub_status(SubStatus::Stale))
+        .await
         .unwrap();
-    let task = db.get_task(id).unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
     assert_eq!(task.sub_status, SubStatus::Stale);
 }
 
-#[test]
-fn task_sub_status_defaults_to_none() {
-    let db = Database::open_in_memory().unwrap();
+#[tokio::test]
+async fn task_sub_status_defaults_to_none() {
+    let db = Database::open_in_memory().await.unwrap();
     let id = db
         .create_task(CreateTaskRequest {
             title: "Test",
@@ -1173,15 +1261,16 @@ fn task_sub_status_defaults_to_none() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
-    let task = db.get_task(id).unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
     assert_eq!(task.sub_status, SubStatus::None);
 }
 
-#[test]
-fn create_task_sets_default_sub_status_for_running() {
+#[tokio::test]
+async fn create_task_sets_default_sub_status_for_running() {
     // create_task with status=Running must produce sub_status=active, not 'none'
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "T",
@@ -1195,14 +1284,15 @@ fn create_task_sets_default_sub_status_for_running() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
-    let task = db.get_task(id).unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
     assert_eq!(task.sub_status, SubStatus::Active);
 }
 
-#[test]
-fn create_task_sets_default_sub_status_for_backlog() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn create_task_sets_default_sub_status_for_backlog() {
+    let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "T",
@@ -1216,14 +1306,15 @@ fn create_task_sets_default_sub_status_for_backlog() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
-    let task = db.get_task(id).unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
     assert_eq!(task.sub_status, SubStatus::None);
 }
 
 #[tokio::test]
 async fn create_task_with_epic_sort_tag_single_insert() {
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
         .await
@@ -1241,16 +1332,17 @@ async fn create_task_with_epic_sort_tag_single_insert() {
             tag: Some(TaskTag::Bug),
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
-    let task = db.get_task(id).unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
     assert_eq!(task.epic_id, Some(epic.id));
     assert_eq!(task.sort_order, Some(7));
     assert_eq!(task.tag, Some(TaskTag::Bug));
 }
 
-#[test]
-fn update_status_if_resets_sub_status_to_default() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn update_status_if_resets_sub_status_to_default() {
+    let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "T",
@@ -1264,23 +1356,26 @@ fn update_status_if_resets_sub_status_to_default() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.patch_task(id, &TaskPatch::default().sub_status(SubStatus::Stale))
+        .await
         .unwrap();
 
     let updated = db
         .update_status_if(id, TaskStatus::Review, TaskStatus::Running)
+        .await
         .unwrap();
     assert!(updated, "should have updated");
 
-    let task = db.get_task(id).unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Review);
     assert_eq!(task.sub_status, SubStatus::AwaitingReview); // default for review
 }
 
-#[test]
-fn update_status_if_leaves_sub_status_unchanged_when_condition_fails() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn update_status_if_leaves_sub_status_unchanged_when_condition_fails() {
+    let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "T",
@@ -1294,63 +1389,71 @@ fn update_status_if_leaves_sub_status_unchanged_when_condition_fails() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     db.patch_task(id, &TaskPatch::default().sub_status(SubStatus::Active))
+        .await
         .unwrap();
 
     let updated = db
         .update_status_if(id, TaskStatus::Review, TaskStatus::Backlog)
+        .await
         .unwrap();
     assert!(!updated, "condition was wrong, should not have updated");
 
-    let task = db.get_task(id).unwrap().unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
     assert_eq!(task.sub_status, SubStatus::Active); // unchanged
 }
 
-#[test]
-fn check_constraint_rejects_review_with_active_substatus() {
-    let db = Database::open_in_memory().unwrap();
-    let conn = db.conn().unwrap();
-    conn.execute(
-        "INSERT INTO tasks (title, description, repo_path, status, sub_status) \
-         VALUES ('T', 'D', '/r', 'backlog', 'none')",
-        [],
-    )
-    .unwrap();
-    let result = conn.execute(
-        "UPDATE tasks SET status = 'review', sub_status = 'active' WHERE id = 1",
-        [],
-    );
-    assert!(
-        result.is_err(),
-        "CHECK constraint must reject (review, active)"
-    );
+#[tokio::test]
+async fn check_constraint_rejects_review_with_active_substatus() {
+    let db = Database::open_in_memory().await.unwrap();
+    let rejected = db
+        .db_call(|conn| {
+            conn.execute(
+                "INSERT INTO tasks (title, description, repo_path, status, sub_status) \
+                 VALUES ('T', 'D', '/r', 'backlog', 'none')",
+                [],
+            )?;
+            let result = conn.execute(
+                "UPDATE tasks SET status = 'review', sub_status = 'active' WHERE id = 1",
+                [],
+            );
+            Ok(result.is_err())
+        })
+        .await
+        .unwrap();
+    assert!(rejected, "CHECK constraint must reject (review, active)");
 }
 
-#[test]
-fn check_constraint_accepts_review_with_awaiting_review() {
-    let db = Database::open_in_memory().unwrap();
-    let conn = db.conn().unwrap();
-    conn.execute(
-        "INSERT INTO tasks (title, description, repo_path, status, sub_status) \
-         VALUES ('T', 'D', '/r', 'backlog', 'none')",
-        [],
-    )
-    .unwrap();
-    let result = conn.execute(
-        "UPDATE tasks SET status = 'review', sub_status = 'awaiting_review' WHERE id = 1",
-        [],
-    );
-    assert!(result.is_ok(), "valid pair should be accepted");
+#[tokio::test]
+async fn check_constraint_accepts_review_with_awaiting_review() {
+    let db = Database::open_in_memory().await.unwrap();
+    let accepted = db
+        .db_call(|conn| {
+            conn.execute(
+                "INSERT INTO tasks (title, description, repo_path, status, sub_status) \
+                 VALUES ('T', 'D', '/r', 'backlog', 'none')",
+                [],
+            )?;
+            let result = conn.execute(
+                "UPDATE tasks SET status = 'review', sub_status = 'awaiting_review' WHERE id = 1",
+                [],
+            );
+            Ok(result.is_ok())
+        })
+        .await
+        .unwrap();
+    assert!(accepted, "valid pair should be accepted");
 }
 
 // ---------------------------------------------------------------------------
 // Query coverage: delete_task
 // ---------------------------------------------------------------------------
 
-#[test]
-fn delete_task_removes_task() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn delete_task_removes_task() {
+    let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
             title: "Doomed",
@@ -1364,18 +1467,19 @@ fn delete_task_removes_task() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
-    assert!(db.get_task(id).unwrap().is_some());
+    assert!(db.get_task(id).await.unwrap().is_some());
 
-    db.delete_task(id).unwrap();
-    assert!(db.get_task(id).unwrap().is_none());
+    db.delete_task(id).await.unwrap();
+    assert!(db.get_task(id).await.unwrap().is_none());
 }
 
-#[test]
-fn delete_task_nonexistent_errors() {
-    let db = in_memory_db();
+#[tokio::test]
+async fn delete_task_nonexistent_errors() {
+    let db = in_memory_db().await;
     let result = db.delete_task(TaskId(9999));
-    assert!(result.is_err());
+    assert!(result.await.is_err());
 }
 
 // ---------------------------------------------------------------------------
@@ -1403,7 +1507,7 @@ fn main_branches(n: usize) -> Vec<String> {
 
 #[tokio::test]
 async fn upsert_feed_tasks_creates_tasks() {
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
         .await
@@ -1416,6 +1520,7 @@ async fn upsert_feed_tasks_creates_tasks() {
     let branches = main_branches(items.len());
 
     db.upsert_feed_tasks(epic.id, &items, &repo_paths, &branches)
+        .await
         .unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
@@ -1432,7 +1537,7 @@ async fn upsert_feed_tasks_creates_tasks() {
 
 #[tokio::test]
 async fn upsert_feed_tasks_idempotent() {
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
         .await
@@ -1442,8 +1547,10 @@ async fn upsert_feed_tasks_idempotent() {
     let branches = main_branches(items.len());
 
     db.upsert_feed_tasks(epic.id, &items, &repo_paths, &branches)
+        .await
         .unwrap();
     db.upsert_feed_tasks(epic.id, &items, &repo_paths, &branches)
+        .await
         .unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
@@ -1453,7 +1560,7 @@ async fn upsert_feed_tasks_idempotent() {
 
 #[tokio::test]
 async fn upsert_feed_tasks_preserves_status() {
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
         .await
@@ -1461,11 +1568,13 @@ async fn upsert_feed_tasks_preserves_status() {
     let items = vec![make_feed_item("ext-1", "Original Title")];
 
     db.upsert_feed_tasks(epic.id, &items, &["/repo".to_string()], &main_branches(1))
+        .await
         .unwrap();
 
     // Simulate user moving task to Running
     let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
     db.patch_task(tasks[0].id, &TaskPatch::new().status(TaskStatus::Running))
+        .await
         .unwrap();
 
     // Re-run upsert with updated title and different status
@@ -1480,6 +1589,7 @@ async fn upsert_feed_tasks_preserves_status() {
         sort_order: None,
     }];
     db.upsert_feed_tasks(epic.id, &updated, &["/repo".to_string()], &main_branches(1))
+        .await
         .unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
@@ -1498,7 +1608,7 @@ async fn upsert_feed_tasks_preserves_status() {
 
 #[tokio::test]
 async fn upsert_feed_tasks_adds_new_items() {
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
         .await
@@ -1510,6 +1620,7 @@ async fn upsert_feed_tasks_adds_new_items() {
         &["/repo".to_string()],
         &main_branches(1),
     )
+    .await
     .unwrap();
 
     db.upsert_feed_tasks(
@@ -1521,6 +1632,7 @@ async fn upsert_feed_tasks_adds_new_items() {
         &["/repo".to_string(), "/repo".to_string()],
         &main_branches(2),
     )
+    .await
     .unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
@@ -1529,7 +1641,7 @@ async fn upsert_feed_tasks_adds_new_items() {
 
 #[tokio::test]
 async fn upsert_feed_tasks_removes_stale_items() {
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
         .await
@@ -1545,6 +1657,7 @@ async fn upsert_feed_tasks_removes_stale_items() {
         &["/repo".to_string(), "/repo".to_string()],
         &main_branches(2),
     )
+    .await
     .unwrap();
     assert_eq!(db.list_tasks_for_epic(epic.id).await.unwrap().len(), 2);
 
@@ -1555,6 +1668,7 @@ async fn upsert_feed_tasks_removes_stale_items() {
         &["/repo".to_string()],
         &main_branches(1),
     )
+    .await
     .unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
@@ -1564,7 +1678,7 @@ async fn upsert_feed_tasks_removes_stale_items() {
 
 #[tokio::test]
 async fn upsert_feed_tasks_uses_resolved_repo_path() {
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let epic = db
         .create_epic("E", "", "/epic-repo", None, ProjectId(1))
         .await
@@ -1574,6 +1688,7 @@ async fn upsert_feed_tasks_uses_resolved_repo_path() {
     let branches = main_branches(items.len());
 
     db.upsert_feed_tasks(epic.id, &items, &repo_paths, &branches)
+        .await
         .unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
@@ -1582,7 +1697,7 @@ async fn upsert_feed_tasks_uses_resolved_repo_path() {
 
 #[tokio::test]
 async fn upsert_feed_tasks_stores_empty_sentinel_when_unresolved() {
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let epic = db
         .create_epic("E", "", "/epic-repo", None, ProjectId(1))
         .await
@@ -1592,6 +1707,7 @@ async fn upsert_feed_tasks_stores_empty_sentinel_when_unresolved() {
     let branches = main_branches(items.len());
 
     db.upsert_feed_tasks(epic.id, &items, &repo_paths, &branches)
+        .await
         .unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
@@ -1600,7 +1716,7 @@ async fn upsert_feed_tasks_stores_empty_sentinel_when_unresolved() {
 
 #[tokio::test]
 async fn upsert_feed_tasks_on_conflict_does_not_update_repo_path() {
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let epic = db
         .create_epic("E", "", "/epic-repo", None, ProjectId(1))
         .await
@@ -1614,6 +1730,7 @@ async fn upsert_feed_tasks_on_conflict_does_not_update_repo_path() {
         &["/first/path".to_string()],
         &main_branches(1),
     )
+    .await
     .unwrap();
     let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
     assert_eq!(tasks[0].repo_path, "/first/path");
@@ -1635,6 +1752,7 @@ async fn upsert_feed_tasks_on_conflict_does_not_update_repo_path() {
         &["/second/path".to_string()],
         &main_branches(1),
     )
+    .await
     .unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
@@ -1647,7 +1765,7 @@ async fn upsert_feed_tasks_on_conflict_does_not_update_repo_path() {
 
 #[tokio::test]
 async fn upsert_feed_tasks_mixed_batch_resolved_and_unresolved() {
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let epic = db
         .create_epic("E", "", "/epic-repo", None, ProjectId(1))
         .await
@@ -1660,6 +1778,7 @@ async fn upsert_feed_tasks_mixed_batch_resolved_and_unresolved() {
     let branches = main_branches(items.len());
 
     db.upsert_feed_tasks(epic.id, &items, &repo_paths, &branches)
+        .await
         .unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
@@ -1677,7 +1796,7 @@ async fn upsert_feed_tasks_mixed_batch_resolved_and_unresolved() {
 
 #[tokio::test]
 async fn upsert_feed_tasks_stores_per_task_base_branch() {
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
         .await
@@ -1699,6 +1818,7 @@ async fn upsert_feed_tasks_stores_per_task_base_branch() {
     ];
 
     db.upsert_feed_tasks(epic.id, &items, &repo_paths, &base_branches)
+        .await
         .unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
@@ -1715,7 +1835,7 @@ async fn upsert_feed_tasks_stores_per_task_base_branch() {
 
 #[tokio::test]
 async fn upsert_feed_tasks_does_not_remove_manual_tasks() {
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
         .await
@@ -1735,6 +1855,7 @@ async fn upsert_feed_tasks_does_not_remove_manual_tasks() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     // Feed fetch with one item
@@ -1744,10 +1865,11 @@ async fn upsert_feed_tasks_does_not_remove_manual_tasks() {
         &["/repo".to_string()],
         &main_branches(1),
     )
+    .await
     .unwrap();
 
     // Feed fetch returns nothing — only manual task should survive
-    db.upsert_feed_tasks(epic.id, &[], &[], &[]).unwrap();
+    db.upsert_feed_tasks(epic.id, &[], &[], &[]).await.unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
     assert_eq!(
@@ -1760,7 +1882,7 @@ async fn upsert_feed_tasks_does_not_remove_manual_tasks() {
 
 #[tokio::test]
 async fn upsert_feed_tasks_persists_tag() {
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
         .await
@@ -1777,6 +1899,7 @@ async fn upsert_feed_tasks_persists_tag() {
     }];
 
     db.upsert_feed_tasks(epic.id, &items, &["/repo".to_string()], &main_branches(1))
+        .await
         .unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
@@ -1786,7 +1909,7 @@ async fn upsert_feed_tasks_persists_tag() {
 
 #[tokio::test]
 async fn upsert_feed_tasks_updates_tag_on_conflict() {
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
         .await
@@ -1802,6 +1925,7 @@ async fn upsert_feed_tasks_updates_tag_on_conflict() {
         sort_order: None,
     }];
     db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
+        .await
         .unwrap();
 
     // Re-emit the same item with a different tag — feed is the source of truth.
@@ -1816,6 +1940,7 @@ async fn upsert_feed_tasks_updates_tag_on_conflict() {
         sort_order: None,
     }];
     db.upsert_feed_tasks(epic.id, &updated, &["/repo".to_string()], &main_branches(1))
+        .await
         .unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
@@ -1823,8 +1948,8 @@ async fn upsert_feed_tasks_updates_tag_on_conflict() {
     assert_eq!(tasks[0].tag, Some(crate::models::TaskTag::Fix));
 }
 
-#[test]
-fn feed_item_legacy_json_deserializes_with_default_labels_and_sort_order() {
+#[tokio::test]
+async fn feed_item_legacy_json_deserializes_with_default_labels_and_sort_order() {
     // Wire-compat: scripts written before labels/sort_order existed must still
     // parse. Both fields are #[serde(default)].
     let legacy_json = r#"{
@@ -1842,7 +1967,7 @@ fn feed_item_legacy_json_deserializes_with_default_labels_and_sort_order() {
 
 #[tokio::test]
 async fn upsert_feed_tasks_writes_labels_and_sort_order_on_insert() {
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
         .await
@@ -1858,6 +1983,7 @@ async fn upsert_feed_tasks_writes_labels_and_sort_order_on_insert() {
         sort_order: Some(1),
     }];
     db.upsert_feed_tasks(epic.id, &items, &["/repo".to_string()], &main_branches(1))
+        .await
         .unwrap();
 
     let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
@@ -1868,7 +1994,7 @@ async fn upsert_feed_tasks_writes_labels_and_sort_order_on_insert() {
 
 #[tokio::test]
 async fn upsert_feed_tasks_replaces_labels_and_sort_order_on_conflict() {
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
         .await
@@ -1884,6 +2010,7 @@ async fn upsert_feed_tasks_replaces_labels_and_sort_order_on_conflict() {
         sort_order: Some(3),
     }];
     db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
+        .await
         .unwrap();
     // Simulate user moving the task — status & repo_path must be preserved.
     let task_id = db.list_tasks_for_epic(epic.id).await.unwrap()[0].id;
@@ -1893,6 +2020,7 @@ async fn upsert_feed_tasks_replaces_labels_and_sort_order_on_conflict() {
             .status(TaskStatus::Running)
             .repo_path("/manually-fixed"),
     )
+    .await
     .unwrap();
 
     let updated = vec![crate::models::FeedItem {
@@ -1906,9 +2034,10 @@ async fn upsert_feed_tasks_replaces_labels_and_sort_order_on_conflict() {
         sort_order: Some(1),
     }];
     db.upsert_feed_tasks(epic.id, &updated, &["/repo".to_string()], &main_branches(1))
+        .await
         .unwrap();
 
-    let task = db.get_task(task_id).unwrap().unwrap();
+    let task = db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(
         task.labels,
         vec!["repo-a".to_string(), "security".to_string()],
@@ -1928,7 +2057,7 @@ async fn upsert_feed_tasks_replaces_labels_and_sort_order_on_conflict() {
 async fn upsert_feed_tasks_can_purge_task_with_associated_learning() {
     use crate::models::{LearningKind, LearningScope};
 
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
         .await
@@ -1937,6 +2066,7 @@ async fn upsert_feed_tasks_can_purge_task_with_associated_learning() {
     // First feed run: creates a task.
     let initial = vec![make_feed_item("ext-1", "first")];
     db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
+        .await
         .unwrap();
     let task_id = db.list_tasks_for_epic(epic.id).await.unwrap()[0].id;
 
@@ -1958,6 +2088,7 @@ async fn upsert_feed_tasks_can_purge_task_with_associated_learning() {
     // fails with a FK violation.
     let next = vec![make_feed_item("ext-2", "second")];
     db.upsert_feed_tasks(epic.id, &next, &["/repo".to_string()], &main_branches(1))
+        .await
         .expect("stale feed task with associated learning should be purgeable");
 
     let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
@@ -1969,7 +2100,7 @@ async fn upsert_feed_tasks_can_purge_task_with_associated_learning() {
 async fn upsert_feed_tasks_can_purge_task_with_reported_usage() {
     use crate::models::UsageReport;
 
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
         .await
@@ -1977,6 +2108,7 @@ async fn upsert_feed_tasks_can_purge_task_with_reported_usage() {
 
     let initial = vec![make_feed_item("ext-1", "first")];
     db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
+        .await
         .unwrap();
     let task_id = db.list_tasks_for_epic(epic.id).await.unwrap()[0].id;
 
@@ -1989,10 +2121,12 @@ async fn upsert_feed_tasks_can_purge_task_with_reported_usage() {
             cache_write_tokens: 0,
         },
     )
+    .await
     .unwrap();
 
     let next = vec![make_feed_item("ext-2", "second")];
     db.upsert_feed_tasks(epic.id, &next, &["/repo".to_string()], &main_branches(1))
+        .await
         .expect("stale feed task with reported usage should be purgeable");
 }
 
@@ -2000,13 +2134,13 @@ async fn upsert_feed_tasks_can_purge_task_with_reported_usage() {
 // patch_struct! macro correctness — has_changes() and setter coverage
 // ---------------------------------------------------------------------------
 
-#[test]
-fn task_patch_default_has_no_changes() {
+#[tokio::test]
+async fn task_patch_default_has_no_changes() {
     assert!(!TaskPatch::default().has_changes());
 }
 
-#[test]
-fn task_patch_each_setter_marks_has_changes() {
+#[tokio::test]
+async fn task_patch_each_setter_marks_has_changes() {
     assert!(TaskPatch::new().status(TaskStatus::Running).has_changes());
     assert!(TaskPatch::new().plan_path(Some("p")).has_changes());
     assert!(TaskPatch::new().plan_path(None).has_changes());
@@ -2153,48 +2287,53 @@ mod property_tests {
             pr_url      in proptest::option::of(proptest::option::of("https://x/[0-9]{1,4}")),
             external_id in proptest::option::of(proptest::option::of("[a-z]{1,16}")),
         ) {
-            let db = in_memory_db();
-            let id = db
-                .create_task(CreateTaskRequest {
-                    title: "Baseline",
-                    description: "baseline desc",
-                    repo_path: "/baseline",
-                    plan: None,
-                    status: TaskStatus::Backlog,
-                    base_branch: "main",
-                    epic_id: None,
-                    sort_order: None,
-                    tag: None,
-                    project_id: ProjectId(1),
-                })
-                .unwrap();
-            let baseline = db.get_task(id).unwrap().unwrap();
+            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+            rt.block_on(async {
+                let db = in_memory_db().await;
+                let id = db
+                    .create_task(CreateTaskRequest {
+                        title: "Baseline",
+                        description: "baseline desc",
+                        repo_path: "/baseline",
+                        plan: None,
+                        status: TaskStatus::Backlog,
+                        base_branch: "main",
+                        epic_id: None,
+                        sort_order: None,
+                        tag: None,
+                        project_id: ProjectId(1),
+                    })
+                    .await
+                    .unwrap();
+                let baseline = db.get_task(id).await.unwrap().unwrap();
 
-            let mut p = TaskPatch::new();
-            if let Some(t)  = title.as_deref()       { p = p.title(t); }
-            if let Some(d)  = description.as_deref() { p = p.description(d); }
-            if let Some(r)  = repo_path.as_deref()   { p = p.repo_path(r); }
-            if let Some(bb) = base_branch.as_deref() { p = p.base_branch(bb); }
-            if let Some(ref pp) = plan_path   { p = p.plan_path(pp.as_deref()); }
-            if let Some(ref w)  = worktree    { p = p.worktree(w.as_deref()); }
-            if let Some(ref tw) = tmux_window { p = p.tmux_window(tw.as_deref()); }
-            if let Some(ref u)  = pr_url      { p = p.pr_url(u.as_deref()); }
-            if let Some(ref e)  = external_id { p = p.external_id(e.as_deref()); }
+                let mut p = TaskPatch::new();
+                if let Some(t)  = title.as_deref()       { p = p.title(t); }
+                if let Some(d)  = description.as_deref() { p = p.description(d); }
+                if let Some(r)  = repo_path.as_deref()   { p = p.repo_path(r); }
+                if let Some(bb) = base_branch.as_deref() { p = p.base_branch(bb); }
+                if let Some(ref pp) = plan_path   { p = p.plan_path(pp.as_deref()); }
+                if let Some(ref w)  = worktree    { p = p.worktree(w.as_deref()); }
+                if let Some(ref tw) = tmux_window { p = p.tmux_window(tw.as_deref()); }
+                if let Some(ref u)  = pr_url      { p = p.pr_url(u.as_deref()); }
+                if let Some(ref e)  = external_id { p = p.external_id(e.as_deref()); }
 
-            db.patch_task(id, &p).unwrap();
-            let after = db.get_task(id).unwrap().unwrap();
+                db.patch_task(id, &p).await.unwrap();
+                let after = db.get_task(id).await.unwrap().unwrap();
 
-            prop_assert_eq!(&after.title,       &title.unwrap_or(baseline.title));
-            prop_assert_eq!(&after.description, &description.unwrap_or(baseline.description));
-            prop_assert_eq!(&after.repo_path,   &repo_path.unwrap_or(baseline.repo_path));
-            prop_assert_eq!(&after.base_branch, &base_branch.unwrap_or(baseline.base_branch));
-            prop_assert_eq!(&after.plan_path,   &plan_path.unwrap_or(baseline.plan_path));
-            prop_assert_eq!(&after.worktree,    &worktree.unwrap_or(baseline.worktree));
-            prop_assert_eq!(&after.tmux_window, &tmux_window.unwrap_or(baseline.tmux_window));
-            prop_assert_eq!(&after.pr_url,      &pr_url.unwrap_or(baseline.pr_url));
-            prop_assert_eq!(&after.external_id, &external_id.unwrap_or(baseline.external_id));
-            prop_assert_eq!(after.status,     baseline.status);
-            prop_assert_eq!(after.sub_status, baseline.sub_status);
+                prop_assert_eq!(&after.title,       &title.unwrap_or(baseline.title));
+                prop_assert_eq!(&after.description, &description.unwrap_or(baseline.description));
+                prop_assert_eq!(&after.repo_path,   &repo_path.unwrap_or(baseline.repo_path));
+                prop_assert_eq!(&after.base_branch, &base_branch.unwrap_or(baseline.base_branch));
+                prop_assert_eq!(&after.plan_path,   &plan_path.unwrap_or(baseline.plan_path));
+                prop_assert_eq!(&after.worktree,    &worktree.unwrap_or(baseline.worktree));
+                prop_assert_eq!(&after.tmux_window, &tmux_window.unwrap_or(baseline.tmux_window));
+                prop_assert_eq!(&after.pr_url,      &pr_url.unwrap_or(baseline.pr_url));
+                prop_assert_eq!(&after.external_id, &external_id.unwrap_or(baseline.external_id));
+                prop_assert_eq!(after.status,     baseline.status);
+                prop_assert_eq!(after.sub_status, baseline.sub_status);
+                Ok::<(), proptest::test_runner::TestCaseError>(())
+            })?;
         }
 
         /// `sort_order` is `nullable i64` — round-trip both Some(v) and None separately.
@@ -2202,20 +2341,25 @@ mod property_tests {
         fn taskpatch_roundtrip_sort_order(
             sort_order in proptest::option::of(proptest::option::of(any::<i64>())),
         ) {
-            let db = in_memory_db();
-            let id = db
-                .create_task(CreateTaskRequest {
-                    title: "T", description: "d", repo_path: "/r",
-                    plan: None, status: TaskStatus::Backlog, base_branch: "main",
-                    epic_id: None, sort_order: Some(42), tag: None, project_id: ProjectId(1),
-                })
-                .unwrap();
-            let baseline = db.get_task(id).unwrap().unwrap();
-            let mut p = TaskPatch::new();
-            if let Some(so) = sort_order { p = p.sort_order(so); }
-            db.patch_task(id, &p).unwrap();
-            let after = db.get_task(id).unwrap().unwrap();
-            prop_assert_eq!(after.sort_order, sort_order.unwrap_or(baseline.sort_order));
+            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+            rt.block_on(async {
+                let db = in_memory_db().await;
+                let id = db
+                    .create_task(CreateTaskRequest {
+                        title: "T", description: "d", repo_path: "/r",
+                        plan: None, status: TaskStatus::Backlog, base_branch: "main",
+                        epic_id: None, sort_order: Some(42), tag: None, project_id: ProjectId(1),
+                    })
+                    .await
+                    .unwrap();
+                let baseline = db.get_task(id).await.unwrap().unwrap();
+                let mut p = TaskPatch::new();
+                if let Some(so) = sort_order { p = p.sort_order(so); }
+                db.patch_task(id, &p).await.unwrap();
+                let after = db.get_task(id).await.unwrap().unwrap();
+                prop_assert_eq!(after.sort_order, sort_order.unwrap_or(baseline.sort_order));
+                Ok::<(), proptest::test_runner::TestCaseError>(())
+            })?;
         }
 
         /// Applying an `EpicPatch` to a baseline epic and re-reading should yield
@@ -2233,7 +2377,7 @@ mod property_tests {
         ) {
             let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
             rt.block_on(async {
-                let db = in_memory_db();
+                let db = in_memory_db().await;
                 let epic = db
                     .create_epic("Baseline epic", "baseline", "/baseline", None, ProjectId(1)).await
                     .unwrap();

@@ -7,7 +7,7 @@ use super::*;
 
 #[tokio::test]
 async fn create_epic_minimal() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -29,7 +29,7 @@ async fn create_epic_minimal() {
 
 #[tokio::test]
 async fn create_epic_with_all_fields() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -51,7 +51,7 @@ async fn create_epic_with_all_fields() {
 
 #[tokio::test]
 async fn create_epic_missing_title() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -66,7 +66,7 @@ async fn create_epic_missing_title() {
 
 #[tokio::test]
 async fn create_epic_missing_repo_path() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -81,7 +81,7 @@ async fn create_epic_missing_repo_path() {
 
 #[tokio::test]
 async fn get_epic_found() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("Get Me", "desc", "/repo", None, ProjectId(1))
@@ -105,7 +105,7 @@ async fn get_epic_found() {
 
 #[tokio::test]
 async fn get_epic_not_found() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -120,7 +120,7 @@ async fn get_epic_not_found() {
 
 #[tokio::test]
 async fn get_epic_shows_subtask_summary() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("With Tasks", "", "/repo", None, ProjectId(1))
@@ -140,6 +140,7 @@ async fn get_epic_shows_subtask_summary() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     let t2 = state
         .db
@@ -155,6 +156,7 @@ async fn get_epic_shows_subtask_summary() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     state.db.set_task_epic_id(t1, Some(epic.id)).await.unwrap();
     state.db.set_task_epic_id(t2, Some(epic.id)).await.unwrap();
@@ -177,7 +179,7 @@ async fn get_epic_shows_subtask_summary() {
 
 #[tokio::test]
 async fn get_epic_accepts_string_id() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("String ID", "", "/repo", None, ProjectId(1))
@@ -204,7 +206,7 @@ async fn get_epic_accepts_string_id() {
 
 #[tokio::test]
 async fn list_epics_empty() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -217,7 +219,7 @@ async fn list_epics_empty() {
 
 #[tokio::test]
 async fn list_epics_with_items() {
-    let state = test_state();
+    let state = test_state().await;
     state
         .db
         .create_epic("Epic A", "desc a", "/repo", None, ProjectId(1))
@@ -242,7 +244,7 @@ async fn list_epics_with_items() {
 
 #[tokio::test]
 async fn list_epics_shows_subtask_counts() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("Tracked", "", "/repo", None, ProjectId(1))
@@ -262,6 +264,7 @@ async fn list_epics_shows_subtask_counts() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     let t2 = state
         .db
@@ -277,6 +280,7 @@ async fn list_epics_shows_subtask_counts() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     state.db.set_task_epic_id(t1, Some(epic.id)).await.unwrap();
     state.db.set_task_epic_id(t2, Some(epic.id)).await.unwrap();
@@ -296,7 +300,7 @@ async fn list_epics_shows_subtask_counts() {
 
 #[tokio::test]
 async fn list_epics_excludes_archived() {
-    let state = test_state();
+    let state = test_state().await;
     state
         .db
         .create_epic("Active Epic", "desc", "/repo", None, ProjectId(1))
@@ -332,7 +336,7 @@ async fn list_epics_excludes_archived() {
 
 #[tokio::test]
 async fn update_epic_title() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("Old Title", "", "/repo", None, ProjectId(1))
@@ -358,7 +362,7 @@ async fn update_epic_title() {
 
 #[tokio::test]
 async fn update_epic_mark_done() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("To Finish", "", "/repo", None, ProjectId(1))
@@ -386,7 +390,7 @@ async fn update_epic_mark_done() {
 
 #[tokio::test]
 async fn update_epic_multiple_fields() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("Old", "old desc", "/repo", None, ProjectId(1))
@@ -415,7 +419,7 @@ async fn update_epic_multiple_fields() {
 
 #[tokio::test]
 async fn update_epic_accepts_string_id() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("Str Epic", "", "/repo", None, ProjectId(1))
@@ -440,7 +444,7 @@ async fn update_epic_accepts_string_id() {
 
 #[tokio::test]
 async fn update_epic_plan() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("Planned Epic", "", "/repo", None, ProjectId(1))
@@ -471,7 +475,7 @@ async fn update_epic_plan() {
 
 #[tokio::test]
 async fn update_epic_no_fields_errors() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("Test", "", "/repo", None, ProjectId(1))
@@ -492,7 +496,7 @@ async fn update_epic_no_fields_errors() {
 
 #[tokio::test]
 async fn update_epic_feed_command_set() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("Feed Epic", "", "/repo", None, ProjectId(1))
@@ -516,7 +520,7 @@ async fn update_epic_feed_command_set() {
 
 #[tokio::test]
 async fn update_epic_feed_command_clear() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("Feed Epic", "", "/repo", None, ProjectId(1))
@@ -551,7 +555,7 @@ async fn update_epic_feed_command_clear() {
 
 #[tokio::test]
 async fn update_epic_feed_command_absent_preserves_existing() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("Feed Epic", "", "/repo", None, ProjectId(1))
@@ -583,7 +587,7 @@ async fn update_epic_feed_command_absent_preserves_existing() {
 
 #[tokio::test]
 async fn update_epic_feed_interval_secs_set() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("Feed Epic", "", "/repo", None, ProjectId(1))
@@ -607,7 +611,7 @@ async fn update_epic_feed_interval_secs_set() {
 
 #[tokio::test]
 async fn update_epic_feed_interval_secs_clear() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("Feed Epic", "", "/repo", None, ProjectId(1))
@@ -642,7 +646,7 @@ async fn update_epic_feed_interval_secs_clear() {
 
 #[tokio::test]
 async fn get_epic_shows_feed_command() {
-    let state = test_state();
+    let state = test_state().await;
     let epic = state
         .db
         .create_epic("Feed Epic", "", "/repo", None, ProjectId(1))
@@ -685,7 +689,7 @@ async fn get_epic_shows_feed_command() {
 
 #[tokio::test]
 async fn mcp_create_sub_epic() {
-    let state = test_state();
+    let state = test_state().await;
 
     // Create parent epic first
     let parent = state
@@ -731,7 +735,7 @@ async fn mcp_create_sub_epic() {
 
 #[tokio::test]
 async fn create_epic_tool_schema_includes_parent_epic_id() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(&state, "tools/list", None).await;
     let tools = resp.result.as_ref().unwrap()["tools"].as_array().unwrap();
     let create_epic = tools

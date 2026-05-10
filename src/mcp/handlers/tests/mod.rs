@@ -27,8 +27,8 @@ use super::tasks::{
 };
 use super::types::{JsonRpcRequest, JsonRpcResponse};
 
-fn test_state() -> Arc<McpState> {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+async fn test_state() -> Arc<McpState> {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     Arc::new(McpState {
         db,
@@ -37,8 +37,8 @@ fn test_state() -> Arc<McpState> {
     })
 }
 
-fn test_state_with_db() -> (Arc<McpState>, Arc<dyn db::TaskStore>) {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+async fn test_state_with_db() -> (Arc<McpState>, Arc<dyn db::TaskStore>) {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let state = Arc::new(McpState {
         db: db.clone(),
@@ -62,7 +62,7 @@ async fn call(state: &Arc<McpState>, method: &str, params: Option<Value>) -> Jso
 // -- Shared helpers --------------------------------------------------------
 
 /// Create a task with sensible defaults, returning the TaskId.
-fn create_task_fixture(state: &Arc<McpState>) -> crate::models::TaskId {
+async fn create_task_fixture(state: &Arc<McpState>) -> crate::models::TaskId {
     state
         .db
         .create_task(CreateTaskRequest {
@@ -77,11 +77,12 @@ fn create_task_fixture(state: &Arc<McpState>) -> crate::models::TaskId {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap()
 }
 
 /// Create a Running task with worktree and tmux_window set — ready for exit_session.
-fn create_running_task_with_window(state: &Arc<McpState>) -> crate::models::TaskId {
+async fn create_running_task_with_window(state: &Arc<McpState>) -> crate::models::TaskId {
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -96,11 +97,12 @@ fn create_running_task_with_window(state: &Arc<McpState>) -> crate::models::Task
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     let patch = crate::db::TaskPatch::new()
         .worktree(Some("/repo/.worktrees/task-123"))
         .tmux_window(Some("task-123"));
-    state.db.patch_task(task_id, &patch).unwrap();
+    state.db.patch_task(task_id, &patch).await.unwrap();
     task_id
 }
 
@@ -135,7 +137,7 @@ fn extract_response_text(resp: &JsonRpcResponse) -> String {
 
 #[tokio::test]
 async fn initialize_returns_capabilities() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(&state, "initialize", None).await;
     let result = resp.result.unwrap();
     assert_eq!(result["protocolVersion"], "2024-11-05");
@@ -144,7 +146,7 @@ async fn initialize_returns_capabilities() {
 
 #[tokio::test]
 async fn tools_list_returns_tools() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(&state, "tools/list", None).await;
     let result = resp.result.unwrap();
     let tools = result["tools"].as_array().unwrap();
@@ -160,7 +162,7 @@ async fn tools_list_returns_tools() {
 
 #[tokio::test]
 async fn unknown_tool() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(
         &state,
         "tools/call",
@@ -173,7 +175,7 @@ async fn unknown_tool() {
 
 #[tokio::test]
 async fn unknown_method() {
-    let state = test_state();
+    let state = test_state().await;
     let resp = call(&state, "bogus/method", None).await;
     assert!(resp.error.is_some());
     assert!(resp.error.unwrap().message.contains("Method not found"));
@@ -184,8 +186,8 @@ async fn unknown_method() {
 /// (or vice versa). The `expected_props` lists must be kept in sync with struct
 /// fields — if you add a field to a struct, add it here too; the test then fails
 /// if the schema wasn't also updated.
-#[test]
-fn tool_schemas_match_arg_structs() {
+#[tokio::test]
+async fn tool_schemas_match_arg_structs() {
     use std::collections::BTreeSet;
 
     let defs = tool_definitions();

@@ -8,16 +8,16 @@ use crate::process::MockProcessRunner;
 /// Timeout for async receive assertions in tests.
 const TEST_TIMEOUT: Duration = Duration::from_secs(5);
 
-#[test]
-fn db_error_formats_consistently() {
+#[tokio::test]
+async fn db_error_formats_consistently() {
     assert_eq!(
         TuiRuntime::db_error("creating task", "disk full"),
         "DB error creating task: disk full"
     );
 }
 
-#[test]
-fn setup_tmux_for_tui_renames_window_and_binds_key() {
+#[tokio::test]
+async fn setup_tmux_for_tui_renames_window_and_binds_key() {
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // rename_window
         MockProcessRunner::ok(), // bind_key
@@ -36,8 +36,8 @@ fn setup_tmux_for_tui_renames_window_and_binds_key() {
     );
 }
 
-#[test]
-fn teardown_tmux_for_tui_unbinds_and_restores_name() {
+#[tokio::test]
+async fn teardown_tmux_for_tui_unbinds_and_restores_name() {
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // unbind_key
         MockProcessRunner::ok(), // rename_window
@@ -52,8 +52,8 @@ fn teardown_tmux_for_tui_unbinds_and_restores_name() {
     );
 }
 
-#[test]
-fn teardown_tmux_for_tui_skips_rename_when_no_original_name() {
+#[tokio::test]
+async fn teardown_tmux_for_tui_skips_rename_when_no_original_name() {
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // unbind_key
     ]);
@@ -84,18 +84,18 @@ fn make_runtime(
     }
 }
 
-fn test_runtime() -> (TuiRuntime, App) {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+async fn test_runtime() -> (TuiRuntime, App) {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, _rx) = mpsc::unbounded_channel();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let rt = make_runtime(db.clone(), tx, runner);
-    let tasks = db.list_all().unwrap();
+    let tasks = db.list_all().await.unwrap();
     let app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
     (rt, app)
 }
 
 /// Helper: create_task + get_task in one step (replaces removed trait method).
-fn create_task_returning(
+async fn create_task_returning(
     db: &dyn db::TaskStore,
     title: &str,
     description: &str,
@@ -103,25 +103,28 @@ fn create_task_returning(
     plan: Option<&str>,
     status: models::TaskStatus,
 ) -> anyhow::Result<models::Task> {
-    let id = db.create_task(CreateTaskRequest {
-        title,
-        description,
-        repo_path,
-        plan,
-        status,
-        base_branch: "main",
-        epic_id: None,
-        sort_order: None,
-        tag: None,
-        project_id: ProjectId(1),
-    })?;
-    db.get_task(id)?
+    let id = db
+        .create_task(CreateTaskRequest {
+            title,
+            description,
+            repo_path,
+            plan,
+            status,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+        })
+        .await?;
+    db.get_task(id)
+        .await?
         .ok_or_else(|| anyhow::anyhow!("Task {id} vanished after insert"))
 }
 
-#[test]
-fn exec_insert_task_adds_to_db_and_app() {
-    let (rt, mut app) = test_runtime();
+#[tokio::test]
+async fn exec_insert_task_adds_to_db_and_app() {
+    let (rt, mut app) = test_runtime().await;
     rt.exec_insert_task(
         &mut app,
         tui::TaskDraft {
@@ -131,15 +134,16 @@ fn exec_insert_task_adds_to_db_and_app() {
             ..Default::default()
         },
         None,
-    );
+    )
+    .await;
     assert_eq!(app.tasks().len(), 1);
     assert_eq!(app.tasks()[0].title, "Test");
-    assert_eq!(rt.database.list_all().unwrap().len(), 1);
+    assert_eq!(rt.database.list_all().await.unwrap().len(), 1);
 }
 
-#[test]
-fn exec_delete_task_removes_from_db() {
-    let (rt, mut app) = test_runtime();
+#[tokio::test]
+async fn exec_delete_task_removes_from_db() {
+    let (rt, mut app) = test_runtime().await;
     rt.exec_insert_task(
         &mut app,
         tui::TaskDraft {
@@ -149,15 +153,16 @@ fn exec_delete_task_removes_from_db() {
             ..Default::default()
         },
         None,
-    );
+    )
+    .await;
     let id = app.tasks()[0].id;
-    rt.exec_delete_task(&mut app, id);
-    assert!(rt.database.list_all().unwrap().is_empty());
+    rt.exec_delete_task(&mut app, id).await;
+    assert!(rt.database.list_all().await.unwrap().is_empty());
 }
 
 #[tokio::test]
 async fn exec_persist_task_saves_status_to_db() {
-    let (rt, mut app) = test_runtime();
+    let (rt, mut app) = test_runtime().await;
     rt.exec_insert_task(
         &mut app,
         tui::TaskDraft {
@@ -167,20 +172,26 @@ async fn exec_persist_task_saves_status_to_db() {
             ..Default::default()
         },
         None,
-    );
+    )
+    .await;
     let mut task = app.tasks()[0].clone();
     task.status = models::TaskStatus::Running;
     task.sub_status = models::SubStatus::Active;
     task.worktree = Some("/repo/.worktrees/1-test".into());
     rt.exec_persist_task(&mut app, task).await;
-    let db_task = rt.database.get_task(app.tasks()[0].id).unwrap().unwrap();
+    let db_task = rt
+        .database
+        .get_task(app.tasks()[0].id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(db_task.status, models::TaskStatus::Running);
     assert_eq!(db_task.worktree.as_deref(), Some("/repo/.worktrees/1-test"));
 }
 
 #[tokio::test]
 async fn exec_persist_task_preserves_sub_status() {
-    let (rt, mut app) = test_runtime();
+    let (rt, mut app) = test_runtime().await;
     rt.exec_insert_task(
         &mut app,
         tui::TaskDraft {
@@ -190,7 +201,8 @@ async fn exec_persist_task_preserves_sub_status() {
             ..Default::default()
         },
         None,
-    );
+    )
+    .await;
     let id = app.tasks()[0].id;
     // Put task in Review+Approved state in DB, then sync to app
     rt.database
@@ -201,6 +213,7 @@ async fn exec_persist_task_preserves_sub_status() {
                 .sub_status(models::SubStatus::Approved)
                 .pr_url(Some("https://github.com/org/repo/pull/42")),
         )
+        .await
         .unwrap();
     rt.exec_refresh_from_db(&mut app).await;
     assert_eq!(app.tasks()[0].sub_status, models::SubStatus::Approved);
@@ -210,22 +223,22 @@ async fn exec_persist_task_preserves_sub_status() {
     rt.exec_persist_task(&mut app, task).await;
 
     // sub_status must survive the round-trip to DB
-    let db_task = rt.database.get_task(id).unwrap().unwrap();
+    let db_task = rt.database.get_task(id).await.unwrap().unwrap();
     assert_eq!(db_task.sub_status, models::SubStatus::Approved);
 }
 
-#[test]
-fn exec_save_repo_path_updates_app_state() {
-    let (rt, mut app) = test_runtime();
-    rt.exec_save_repo_path(&mut app, "/repo".into());
+#[tokio::test]
+async fn exec_save_repo_path_updates_app_state() {
+    let (rt, mut app) = test_runtime().await;
+    rt.exec_save_repo_path(&mut app, "/repo".into()).await;
     assert!(app.repo_paths().contains(&"/repo".to_string()));
 }
 
-#[test]
-fn exec_save_repo_path_expands_tilde() {
-    let (rt, mut app) = test_runtime();
+#[tokio::test]
+async fn exec_save_repo_path_expands_tilde() {
+    let (rt, mut app) = test_runtime().await;
     let home = std::env::var("HOME").unwrap();
-    rt.exec_save_repo_path(&mut app, "~/myrepo".into());
+    rt.exec_save_repo_path(&mut app, "~/myrepo".into()).await;
     let expected = format!("{home}/myrepo");
     assert!(
         app.repo_paths().contains(&expected),
@@ -233,14 +246,14 @@ fn exec_save_repo_path_expands_tilde() {
         app.repo_paths()
     );
     // Verify the DB also has the expanded path, not the tilde version
-    let db_paths = rt.database.list_repo_paths().unwrap();
+    let db_paths = rt.database.list_repo_paths().await.unwrap();
     assert!(db_paths.contains(&expected));
     assert!(!db_paths.iter().any(|p| p.starts_with("~/")));
 }
 
 #[tokio::test]
 async fn exec_refresh_from_db_syncs_external_changes() {
-    let (rt, mut app) = test_runtime();
+    let (rt, mut app) = test_runtime().await;
     // Insert directly into DB, bypassing app
     rt.database
         .create_task(CreateTaskRequest {
@@ -255,6 +268,7 @@ async fn exec_refresh_from_db_syncs_external_changes() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     assert!(app.tasks().is_empty());
     rt.exec_refresh_from_db(&mut app).await;
@@ -264,7 +278,7 @@ async fn exec_refresh_from_db_syncs_external_changes() {
 
 #[tokio::test]
 async fn exec_refresh_from_db_returns_commands_from_refresh() {
-    let (rt, mut app) = test_runtime();
+    let (rt, mut app) = test_runtime().await;
     // Insert a task directly into DB as Running
     rt.database
         .create_task(CreateTaskRequest {
@@ -279,17 +293,19 @@ async fn exec_refresh_from_db_returns_commands_from_refresh() {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     // Load it into app
     let cmds = rt.exec_refresh_from_db(&mut app).await;
     assert!(cmds.is_empty()); // First load — no transition
 
-    let task = rt.database.list_all().unwrap()[0].clone();
+    let task = rt.database.list_all().await.unwrap()[0].clone();
     rt.database
         .patch_task(
             task.id,
             &db::TaskPatch::new().status(models::TaskStatus::Review),
         )
+        .await
         .unwrap();
 
     app.set_notifications_enabled(true);
@@ -300,22 +316,22 @@ async fn exec_refresh_from_db_returns_commands_from_refresh() {
     )));
 }
 
-#[test]
-fn exec_delete_task_nonexistent_shows_error() {
-    let (rt, mut app) = test_runtime();
-    rt.exec_delete_task(&mut app, TaskId(999));
+#[tokio::test]
+async fn exec_delete_task_nonexistent_shows_error() {
+    let (rt, mut app) = test_runtime().await;
+    rt.exec_delete_task(&mut app, TaskId(999)).await;
     assert!(app.error_popup().is_some());
 }
 
-#[test]
-fn exec_jump_to_tmux_calls_select_window() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+#[tokio::test]
+async fn exec_jump_to_tmux_calls_select_window() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, _rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // for select-window
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone());
-    let tasks = db.list_all().unwrap();
+    let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
 
     rt.exec_jump_to_tmux(&mut app, "my-window".to_string());
@@ -334,7 +350,7 @@ async fn exec_dispatch_sends_dispatched_message() {
     // Create .worktrees/ and fake worktree directory so file writes succeed
     std::fs::create_dir_all(format!("{repo}/.worktrees/1-test-task")).unwrap();
 
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         // No detect_default_branch call — task.base_branch is used directly
@@ -355,6 +371,7 @@ async fn exec_dispatch_sends_dispatched_message() {
         None,
         models::TaskStatus::Backlog,
     )
+    .await
     .unwrap();
     rt.exec_dispatch_agent(task, models::DispatchMode::Dispatch)
         .await;
@@ -374,7 +391,7 @@ async fn exec_dispatch_sends_dispatched_message() {
 
 #[tokio::test]
 async fn exec_dispatch_sends_error_on_failure() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::fail("fatal: not a git repository"), // git worktree add fails
@@ -389,6 +406,7 @@ async fn exec_dispatch_sends_error_on_failure() {
         None,
         models::TaskStatus::Backlog,
     )
+    .await
     .unwrap();
     rt.exec_dispatch_agent(task.clone(), models::DispatchMode::Dispatch)
         .await;
@@ -417,7 +435,7 @@ async fn exec_dispatch_sends_error_on_failure() {
 
 #[tokio::test]
 async fn exec_capture_tmux_sends_output() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         // has_window: list-windows returns the window name
@@ -450,7 +468,7 @@ async fn exec_capture_tmux_sends_output() {
 
 #[tokio::test]
 async fn exec_capture_tmux_window_gone() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         // has_window: list-windows returns other window names (not our window)
@@ -473,15 +491,15 @@ async fn exec_capture_tmux_window_gone() {
     );
 }
 
-#[test]
-fn exec_jump_to_tmux_failure_shows_error() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+#[tokio::test]
+async fn exec_jump_to_tmux_failure_shows_error() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, _rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::fail("no such window"), // simulate tmux failure
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone());
-    let tasks = db.list_all().unwrap();
+    let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
 
     rt.exec_jump_to_tmux(&mut app, "nonexistent-window".to_string());
@@ -491,7 +509,7 @@ fn exec_jump_to_tmux_failure_shows_error() {
 
 #[tokio::test]
 async fn exec_cleanup_detaches_when_shared() {
-    let (rt, mut app) = test_runtime();
+    let (rt, mut app) = test_runtime().await;
 
     // Create two tasks sharing the same worktree
     rt.exec_insert_task(
@@ -503,7 +521,8 @@ async fn exec_cleanup_detaches_when_shared() {
             ..Default::default()
         },
         None,
-    );
+    )
+    .await;
     rt.exec_insert_task(
         &mut app,
         tui::TaskDraft {
@@ -513,7 +532,8 @@ async fn exec_cleanup_detaches_when_shared() {
             ..Default::default()
         },
         None,
-    );
+    )
+    .await;
 
     let id_a = app.tasks()[0].id;
     let id_b = app.tasks()[1].id;
@@ -527,6 +547,7 @@ async fn exec_cleanup_detaches_when_shared() {
                 .worktree(Some(worktree))
                 .tmux_window(Some("task-1")),
         )
+        .await
         .unwrap();
     rt.database
         .patch_task(
@@ -536,13 +557,14 @@ async fn exec_cleanup_detaches_when_shared() {
                 .worktree(Some(worktree))
                 .tmux_window(Some("task-1")),
         )
+        .await
         .unwrap();
 
     // Cleanup task A — should detach only (worktree is shared)
     rt.exec_cleanup(id_a, "/repo".into(), worktree.into(), Some("task-1".into()))
         .await;
 
-    let task_a = rt.database.get_task(id_a).unwrap().unwrap();
+    let task_a = rt.database.get_task(id_a).await.unwrap().unwrap();
     assert!(task_a.worktree.is_none(), "task A should be detached");
     assert!(
         task_a.tmux_window.is_none(),
@@ -550,13 +572,13 @@ async fn exec_cleanup_detaches_when_shared() {
     );
 
     // Task B should still have the worktree
-    let task_b = rt.database.get_task(id_b).unwrap().unwrap();
+    let task_b = rt.database.get_task(id_b).await.unwrap().unwrap();
     assert_eq!(task_b.worktree.as_deref(), Some(worktree));
 }
 
 #[tokio::test]
 async fn exec_finish_happy_path_sends_complete() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"main\n"), // rev-parse HEAD
@@ -575,6 +597,7 @@ async fn exec_finish_happy_path_sends_complete() {
         None,
         models::TaskStatus::Done,
     )
+    .await
     .unwrap();
     let id = task.id;
 
@@ -603,7 +626,7 @@ async fn exec_finish_conflict_sends_failed() {
     use crate::process::exit_fail;
     use std::process::Output;
 
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"main\n"), // rev-parse HEAD
@@ -627,6 +650,7 @@ async fn exec_finish_conflict_sends_failed() {
         None,
         models::TaskStatus::Done,
     )
+    .await
     .unwrap();
     let id = task.id;
 
@@ -658,7 +682,7 @@ async fn exec_finish_conflict_sends_failed() {
 
 #[tokio::test]
 async fn exec_dispatch_epic_creates_planning_subtask() {
-    let (rt, mut app) = test_runtime();
+    let (rt, mut app) = test_runtime().await;
 
     // Create an epic in the DB
     let epic = rt
@@ -682,14 +706,14 @@ async fn exec_dispatch_epic_creates_planning_subtask() {
     assert!(task.description.contains("Rework login"));
 
     // Verify the task is also in the DB
-    let db_tasks = rt.database.list_all().unwrap();
+    let db_tasks = rt.database.list_all().await.unwrap();
     assert_eq!(db_tasks.len(), 1);
     assert_eq!(db_tasks[0].title, "Plan: Auth redesign");
 }
 
 #[tokio::test]
 async fn exec_finish_not_on_main_sends_failed() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"feature-branch\n"), // rev-parse HEAD (not main)
@@ -704,6 +728,7 @@ async fn exec_finish_not_on_main_sends_failed() {
         None,
         models::TaskStatus::Done,
     )
+    .await
     .unwrap();
     let id = task.id;
 
@@ -733,9 +758,9 @@ async fn exec_finish_not_on_main_sends_failed() {
     assert!(!is_conflict, "Expected is_conflict=false for not-on-main");
 }
 
-#[test]
-fn exec_send_notification_calls_notify_send() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+#[tokio::test]
+async fn exec_send_notification_calls_notify_send() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, _rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // notify-send call
@@ -749,9 +774,9 @@ fn exec_send_notification_calls_notify_send() {
     assert!(calls[0].1.contains(&"Ready for review".to_string()));
 }
 
-#[test]
-fn exec_send_notification_urgent_uses_critical() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+#[tokio::test]
+async fn exec_send_notification_urgent_uses_critical() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, _rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::ok()]));
     let rt = make_runtime(db, tx, mock.clone());
@@ -760,9 +785,9 @@ fn exec_send_notification_urgent_uses_critical() {
     assert!(calls[0].1.contains(&"critical".to_string()));
 }
 
-#[test]
-fn exec_send_notification_failure_does_not_panic() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+#[tokio::test]
+async fn exec_send_notification_failure_does_not_panic() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, _rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::fail(
         "command not found",
@@ -772,13 +797,15 @@ fn exec_send_notification_failure_does_not_panic() {
     rt.exec_send_notification("Task #1: Fix bug", "Ready for review", false);
 }
 
-#[test]
-fn exec_persist_setting_writes_to_db() {
-    let (rt, mut app) = test_runtime();
-    rt.exec_persist_setting(&mut app, "notifications_enabled", true);
+#[tokio::test]
+async fn exec_persist_setting_writes_to_db() {
+    let (rt, mut app) = test_runtime().await;
+    rt.exec_persist_setting(&mut app, "notifications_enabled", true)
+        .await;
     assert_eq!(
         rt.database
             .get_setting_bool("notifications_enabled")
+            .await
             .unwrap(),
         Some(true)
     );
@@ -786,7 +813,7 @@ fn exec_persist_setting_writes_to_db() {
 
 #[tokio::test]
 async fn exec_check_pr_status_sends_merged() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"MERGED\n"), // gh pr view (no review decision line)
@@ -807,7 +834,7 @@ async fn exec_check_pr_status_sends_merged() {
 
 #[tokio::test]
 async fn exec_check_pr_status_open_sends_review_state() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"OPEN\nAPPROVED\n"), // gh pr view
@@ -832,12 +859,13 @@ async fn exec_check_pr_status_open_sends_review_state() {
     }
 }
 
-#[test]
-fn exec_persist_string_setting_writes_to_db() {
-    let (rt, mut app) = test_runtime();
-    rt.exec_persist_string_setting(&mut app, "repo_filter", "/repo1\n/repo2");
+#[tokio::test]
+async fn exec_persist_string_setting_writes_to_db() {
+    let (rt, mut app) = test_runtime().await;
+    rt.exec_persist_string_setting(&mut app, "repo_filter", "/repo1\n/repo2")
+        .await;
     assert_eq!(
-        rt.database.get_setting_string("repo_filter").unwrap(),
+        rt.database.get_setting_string("repo_filter").await.unwrap(),
         Some("/repo1\n/repo2".to_string())
     );
 }
@@ -849,7 +877,7 @@ async fn exec_quick_dispatch_creates_task_and_dispatches() {
     // Pre-create worktree directory so provision_worktree skips git worktree add
     std::fs::create_dir_all(format!("{repo}/.worktrees/1-my-task")).unwrap();
 
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         // detect_default_branch (resolved to "main")
@@ -862,7 +890,7 @@ async fn exec_quick_dispatch_creates_task_and_dispatches() {
         MockProcessRunner::ok(), // tmux send-keys Enter
     ]));
     let rt = make_runtime(db.clone(), tx, mock);
-    let tasks = db.list_all().unwrap();
+    let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
 
     rt.exec_quick_dispatch(
@@ -881,7 +909,7 @@ async fn exec_quick_dispatch_creates_task_and_dispatches() {
     // Task was created in app and DB synchronously
     assert_eq!(app.tasks().len(), 1);
     assert_eq!(app.tasks()[0].title, "My Task");
-    assert_eq!(db.list_all().unwrap().len(), 1);
+    assert_eq!(db.list_all().await.unwrap().len(), 1);
 
     // Repo path was saved
     assert!(app.repo_paths().contains(&repo.to_string()));
@@ -909,7 +937,7 @@ async fn exec_quick_dispatch_sets_base_branch_to_repo_default() {
     let repo = dir.path().to_str().unwrap();
     std::fs::create_dir_all(format!("{repo}/.worktrees/1-quick-task")).unwrap();
 
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, _rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         // detect_default_branch resolves to master
@@ -921,7 +949,7 @@ async fn exec_quick_dispatch_sets_base_branch_to_repo_default() {
         MockProcessRunner::ok(), // tmux send-keys Enter
     ]));
     let rt = make_runtime(db.clone(), tx, mock);
-    let tasks = db.list_all().unwrap();
+    let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
 
     rt.exec_quick_dispatch(
@@ -939,7 +967,7 @@ async fn exec_quick_dispatch_sets_base_branch_to_repo_default() {
     )
     .await;
 
-    let stored = db.list_all().unwrap();
+    let stored = db.list_all().await.unwrap();
     assert_eq!(stored.len(), 1);
     assert_eq!(
         stored[0].base_branch, "master",
@@ -953,7 +981,7 @@ async fn exec_quick_dispatch_with_epic_dispatches_successfully() {
     let repo = dir.path().to_str().unwrap();
     std::fs::create_dir_all(format!("{repo}/.worktrees/1-epic-task")).unwrap();
 
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let epic = db
         .create_epic("My Epic", "epic desc", repo, None, ProjectId(1))
         .await
@@ -969,7 +997,7 @@ async fn exec_quick_dispatch_with_epic_dispatches_successfully() {
         MockProcessRunner::ok(), // tmux send-keys Enter
     ]));
     let rt = make_runtime(db.clone(), tx, mock);
-    let tasks = db.list_all().unwrap();
+    let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
 
     rt.exec_quick_dispatch(
@@ -1004,13 +1032,13 @@ async fn exec_quick_dispatch_with_epic_dispatches_successfully() {
 
 #[tokio::test]
 async fn exec_quick_dispatch_sends_error_on_failure() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::fail("not a git repo"), // detect_default_branch
     ]));
     let rt = make_runtime(db.clone(), tx, mock);
-    let tasks = db.list_all().unwrap();
+    let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
 
     // /nonexistent won't have .worktrees dir, so provision_worktree fails
@@ -1043,13 +1071,13 @@ async fn exec_quick_dispatch_sends_error_on_failure() {
 
 #[tokio::test]
 async fn exec_quick_dispatch_failure_sends_dispatch_failed_and_error() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::fail(
         "not a git repo",
     )]));
     let rt = make_runtime(db.clone(), tx, mock);
-    let tasks = db.list_all().unwrap();
+    let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
 
     rt.exec_quick_dispatch(
@@ -1091,7 +1119,7 @@ async fn exec_quick_dispatch_failure_sends_dispatch_failed_and_error() {
 
 #[tokio::test]
 async fn exec_resume_sends_resumed_message() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // tmux new-window
@@ -1110,6 +1138,7 @@ async fn exec_resume_sends_resumed_message() {
         None,
         models::TaskStatus::Running,
     )
+    .await
     .unwrap();
     task.worktree = Some("/repo/.worktrees/1-resume-me".into());
     let id = task.id;
@@ -1133,7 +1162,7 @@ async fn exec_resume_sends_resumed_message() {
 
 #[tokio::test]
 async fn exec_resume_sends_error_on_failure() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::fail("no tmux session"), // tmux new-window fails
@@ -1148,6 +1177,7 @@ async fn exec_resume_sends_error_on_failure() {
         None,
         models::TaskStatus::Running,
     )
+    .await
     .unwrap();
     rt.exec_resume(task);
 
@@ -1166,7 +1196,7 @@ async fn exec_resume_sends_error_on_failure() {
 
 #[tokio::test]
 async fn exec_kill_tmux_window_failure_does_not_send_error() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::fail("no such window"), // tmux kill-window fails
@@ -1184,7 +1214,7 @@ async fn exec_kill_tmux_window_failure_does_not_send_error() {
 
 #[tokio::test]
 async fn exec_patch_sub_status_updates_db() {
-    let (rt, mut app) = test_runtime();
+    let (rt, mut app) = test_runtime().await;
     rt.exec_insert_task(
         &mut app,
         tui::TaskDraft {
@@ -1194,7 +1224,8 @@ async fn exec_patch_sub_status_updates_db() {
             ..Default::default()
         },
         None,
-    );
+    )
+    .await;
     let id = app.tasks()[0].id;
 
     // Move task to Running first
@@ -1203,19 +1234,20 @@ async fn exec_patch_sub_status_updates_db() {
             id,
             &db::TaskPatch::new().status(models::TaskStatus::Running),
         )
+        .await
         .unwrap();
 
     rt.exec_patch_sub_status(&mut app, id, models::SubStatus::NeedsInput)
         .await;
 
-    let db_task = rt.database.get_task(id).unwrap().unwrap();
+    let db_task = rt.database.get_task(id).await.unwrap().unwrap();
     assert_eq!(db_task.sub_status, models::SubStatus::NeedsInput);
     assert!(app.error_popup().is_none());
 }
 
 #[tokio::test]
 async fn exec_patch_sub_status_shows_error_for_missing_task() {
-    let (rt, mut app) = test_runtime();
+    let (rt, mut app) = test_runtime().await;
     rt.exec_patch_sub_status(&mut app, TaskId(999), models::SubStatus::Active)
         .await;
     assert!(app.error_popup().is_some());
@@ -1225,30 +1257,32 @@ async fn exec_patch_sub_status_shows_error_for_missing_task() {
 // Filter preset tests
 // -----------------------------------------------------------------------
 
-#[test]
-fn exec_persist_filter_preset_saves_to_db() {
-    let (rt, mut app) = test_runtime();
+#[tokio::test]
+async fn exec_persist_filter_preset_saves_to_db() {
+    let (rt, mut app) = test_runtime().await;
     rt.exec_persist_filter_preset(
         &mut app,
         "my-preset",
         &["/repo1".into(), "/repo2".into()],
         "include",
-    );
-    let presets = rt.database.list_filter_presets().unwrap();
+    )
+    .await;
+    let presets = rt.database.list_filter_presets().await.unwrap();
     assert_eq!(presets.len(), 1);
     assert_eq!(presets[0].0, "my-preset");
     assert_eq!(presets[0].2, "include");
     assert!(app.error_popup().is_none());
 }
 
-#[test]
-fn exec_delete_filter_preset_removes_from_db() {
-    let (rt, mut app) = test_runtime();
+#[tokio::test]
+async fn exec_delete_filter_preset_removes_from_db() {
+    let (rt, mut app) = test_runtime().await;
     rt.database
         .save_filter_preset("doomed", &["/repo".into()], "include")
+        .await
         .unwrap();
-    rt.exec_delete_filter_preset(&mut app, "doomed");
-    assert!(rt.database.list_filter_presets().unwrap().is_empty());
+    rt.exec_delete_filter_preset(&mut app, "doomed").await;
+    assert!(rt.database.list_filter_presets().await.unwrap().is_empty());
     assert!(app.error_popup().is_none());
 }
 
@@ -1256,8 +1290,8 @@ fn exec_delete_filter_preset_removes_from_db() {
 // parse_raw_presets tests
 // -----------------------------------------------------------------------
 
-#[test]
-fn parse_raw_presets_converts_all_paths() {
+#[tokio::test]
+async fn parse_raw_presets_converts_all_paths() {
     let raw = vec![(
         "backend".to_string(),
         vec!["/a".to_string(), "/b".to_string()],
@@ -1273,8 +1307,8 @@ fn parse_raw_presets_converts_all_paths() {
     assert_eq!(result[0].2, RepoFilterMode::Include);
 }
 
-#[test]
-fn parse_raw_presets_filters_against_known_repos() {
+#[tokio::test]
+async fn parse_raw_presets_filters_against_known_repos() {
     let raw = vec![(
         "backend".to_string(),
         vec!["/a".to_string(), "/b".to_string(), "/gone".to_string()],
@@ -1289,21 +1323,21 @@ fn parse_raw_presets_filters_against_known_repos() {
     assert_eq!(result[0].2, RepoFilterMode::Exclude);
 }
 
-#[test]
-fn parse_raw_presets_defaults_invalid_mode() {
+#[tokio::test]
+async fn parse_raw_presets_defaults_invalid_mode() {
     let raw = vec![("x".to_string(), vec![], "bogus".to_string())];
     let result = parse_raw_presets(raw, None);
     assert_eq!(result[0].2, RepoFilterMode::Include);
 }
 
-#[test]
-fn parse_raw_presets_empty_input() {
+#[tokio::test]
+async fn parse_raw_presets_empty_input() {
     let result = parse_raw_presets(vec![], None);
     assert!(result.is_empty());
 }
 
-#[test]
-fn parse_raw_presets_multiple_presets() {
+#[tokio::test]
+async fn parse_raw_presets_multiple_presets() {
     let raw = vec![
         (
             "a".to_string(),
@@ -1326,14 +1360,14 @@ fn parse_raw_presets_multiple_presets() {
 // Repo path tests
 // -----------------------------------------------------------------------
 
-#[test]
-fn exec_delete_repo_path_removes_and_refreshes() {
-    let (rt, mut app) = test_runtime();
-    rt.exec_save_repo_path(&mut app, "/repo1".into());
-    rt.exec_save_repo_path(&mut app, "/repo2".into());
+#[tokio::test]
+async fn exec_delete_repo_path_removes_and_refreshes() {
+    let (rt, mut app) = test_runtime().await;
+    rt.exec_save_repo_path(&mut app, "/repo1".into()).await;
+    rt.exec_save_repo_path(&mut app, "/repo2".into()).await;
     assert_eq!(app.repo_paths().len(), 2);
 
-    rt.exec_delete_repo_path(&mut app, "/repo1");
+    rt.exec_delete_repo_path(&mut app, "/repo1").await;
     assert_eq!(app.repo_paths().len(), 1);
     assert!(app.repo_paths().contains(&"/repo2".to_string()));
     assert!(app.error_popup().is_none());
@@ -1345,7 +1379,7 @@ fn exec_delete_repo_path_removes_and_refreshes() {
 
 #[tokio::test]
 async fn exec_insert_epic_creates_in_db_and_app() {
-    let (rt, mut app) = test_runtime();
+    let (rt, mut app) = test_runtime().await;
     rt.exec_insert_epic(
         &mut app,
         "My Epic".into(),
@@ -1361,7 +1395,7 @@ async fn exec_insert_epic_creates_in_db_and_app() {
 
 #[tokio::test]
 async fn exec_delete_epic_removes_from_db() {
-    let (rt, mut app) = test_runtime();
+    let (rt, mut app) = test_runtime().await;
     let epic = rt
         .database
         .create_epic("Doomed", "bye", "/repo", None, ProjectId(1))
@@ -1374,7 +1408,7 @@ async fn exec_delete_epic_removes_from_db() {
 
 #[tokio::test]
 async fn exec_persist_epic_updates_status() {
-    let (rt, mut app) = test_runtime();
+    let (rt, mut app) = test_runtime().await;
     let epic = rt
         .database
         .create_epic("Epic", "desc", "/repo", None, ProjectId(1))
@@ -1388,7 +1422,7 @@ async fn exec_persist_epic_updates_status() {
 
 #[tokio::test]
 async fn exec_persist_epic_noop_when_nothing_to_update() {
-    let (rt, mut app) = test_runtime();
+    let (rt, mut app) = test_runtime().await;
     let epic = rt
         .database
         .create_epic("Epic", "desc", "/repo", None, ProjectId(1))
@@ -1401,7 +1435,7 @@ async fn exec_persist_epic_noop_when_nothing_to_update() {
 
 #[tokio::test]
 async fn exec_refresh_epics_from_db_syncs_to_app() {
-    let (rt, mut app) = test_runtime();
+    let (rt, mut app) = test_runtime().await;
     // Insert epic directly into DB, bypassing app
     rt.database
         .create_epic("Direct", "desc", "/repo", None, ProjectId(1))
@@ -1413,11 +1447,11 @@ async fn exec_refresh_epics_from_db_syncs_to_app() {
     assert_eq!(app.epics()[0].title, "Direct");
 }
 
-#[test]
-fn exec_refresh_usage_from_db_syncs_to_app() {
-    let (rt, mut app) = test_runtime();
+#[tokio::test]
+async fn exec_refresh_usage_from_db_syncs_to_app() {
+    let (rt, mut app) = test_runtime().await;
     // Just verify it doesn't error with empty DB
-    rt.exec_refresh_usage_from_db(&mut app);
+    rt.exec_refresh_usage_from_db(&mut app).await;
     assert!(app.error_popup().is_none());
 }
 
@@ -1425,40 +1459,40 @@ fn exec_refresh_usage_from_db_syncs_to_app() {
 // Split mode tests
 // -----------------------------------------------------------------------
 
-#[test]
-fn exec_enter_split_mode_opens_pane() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+#[tokio::test]
+async fn exec_enter_split_mode_opens_pane() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, _rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"%1\n"), // current_pane_id
         MockProcessRunner::ok_with_stdout(b"%2\n"), // split_window_horizontal
     ]));
     let rt = make_runtime(db.clone(), tx, mock);
-    let tasks = db.list_all().unwrap();
+    let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
 
     rt.exec_enter_split_mode(&mut app);
     assert!(app.error_popup().is_none());
 }
 
-#[test]
-fn exec_enter_split_mode_no_tmux_shows_status() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+#[tokio::test]
+async fn exec_enter_split_mode_no_tmux_shows_status() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, _rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::fail("no server"), // current_pane_id fails
     ]));
     let rt = make_runtime(db.clone(), tx, mock);
-    let tasks = db.list_all().unwrap();
+    let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
 
     rt.exec_enter_split_mode(&mut app);
     assert_eq!(app.status_message(), Some("Split mode requires tmux"));
 }
 
-#[test]
-fn exec_enter_split_mode_with_task_joins_pane() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+#[tokio::test]
+async fn exec_enter_split_mode_with_task_joins_pane() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, _rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"%1\n"), // current_pane_id
@@ -1466,7 +1500,7 @@ fn exec_enter_split_mode_with_task_joins_pane() {
         MockProcessRunner::ok(),                    // join_pane: join-pane command
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone());
-    let tasks = db.list_all().unwrap();
+    let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
 
     rt.exec_enter_split_mode_with_task(&mut app, TaskId(1), "task-1");
@@ -1477,15 +1511,15 @@ fn exec_enter_split_mode_with_task_joins_pane() {
     assert_eq!(app.split_pinned_task_id(), Some(TaskId(1)));
 }
 
-#[test]
-fn exec_exit_split_mode_with_restore_breaks_pane() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+#[tokio::test]
+async fn exec_exit_split_mode_with_restore_breaks_pane() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, _rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // break_pane_to_window
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone());
-    let tasks = db.list_all().unwrap();
+    let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
 
     rt.exec_exit_split_mode(&mut app, "%2", Some("task-1"));
@@ -1494,15 +1528,15 @@ fn exec_exit_split_mode_with_restore_breaks_pane() {
     assert!(app.error_popup().is_none());
 }
 
-#[test]
-fn exec_exit_split_mode_without_restore_kills_pane() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+#[tokio::test]
+async fn exec_exit_split_mode_without_restore_kills_pane() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, _rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // kill_pane
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone());
-    let tasks = db.list_all().unwrap();
+    let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
 
     rt.exec_exit_split_mode(&mut app, "%2", None);
@@ -1511,15 +1545,15 @@ fn exec_exit_split_mode_without_restore_kills_pane() {
     assert!(app.error_popup().is_none());
 }
 
-#[test]
-fn exec_check_split_pane_existing_pane_no_message() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+#[tokio::test]
+async fn exec_check_split_pane_existing_pane_no_message() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, _rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // pane_exists → display-message succeeds
     ]));
     let rt = make_runtime(db.clone(), tx, mock);
-    let tasks = db.list_all().unwrap();
+    let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
 
     rt.exec_check_split_pane(&mut app, "%2");
@@ -1527,15 +1561,15 @@ fn exec_check_split_pane_existing_pane_no_message() {
     assert!(app.error_popup().is_none());
 }
 
-#[test]
-fn exec_check_split_pane_gone_sends_closed() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+#[tokio::test]
+async fn exec_check_split_pane_gone_sends_closed() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, _rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::fail("no pane"), // pane_exists → display-message fails
     ]));
     let rt = make_runtime(db.clone(), tx, mock);
-    let tasks = db.list_all().unwrap();
+    let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
 
     rt.exec_check_split_pane(&mut app, "%2");
@@ -1543,9 +1577,9 @@ fn exec_check_split_pane_gone_sends_closed() {
     assert!(app.error_popup().is_none());
 }
 
-#[test]
-fn exec_swap_split_pane_uses_swap_pane() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+#[tokio::test]
+async fn exec_swap_split_pane_uses_swap_pane() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, _rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"%5\n"), // pane_id_for_window (new task)
@@ -1553,7 +1587,7 @@ fn exec_swap_split_pane_uses_swap_pane() {
         MockProcessRunner::ok(),                    // kill-window (old pane had no task)
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone());
-    let tasks = db.list_all().unwrap();
+    let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
 
     rt.exec_swap_split_pane(&mut app, TaskId(1), "task-1", Some("%2"), None);
@@ -1571,9 +1605,9 @@ fn exec_swap_split_pane_uses_swap_pane() {
     assert_eq!(app.split_pinned_task_id(), Some(TaskId(1)));
 }
 
-#[test]
-fn exec_swap_split_pane_renames_old_task_window() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+#[tokio::test]
+async fn exec_swap_split_pane_renames_old_task_window() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, _rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"%5\n"), // pane_id_for_window (new task)
@@ -1581,7 +1615,7 @@ fn exec_swap_split_pane_renames_old_task_window() {
         MockProcessRunner::ok(),                    // rename-window (old task had a window)
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone());
-    let tasks = db.list_all().unwrap();
+    let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
 
     rt.exec_swap_split_pane(
@@ -1608,7 +1642,7 @@ fn exec_swap_split_pane_renames_old_task_window() {
 
 #[tokio::test]
 async fn exec_merge_pr_happy_path() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // gh pr merge --squash
@@ -1632,7 +1666,7 @@ async fn exec_merge_pr_happy_path() {
 
 #[tokio::test]
 async fn exec_merge_pr_failure() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::fail("merge conflict"), // gh pr merge fails
@@ -1660,7 +1694,7 @@ async fn exec_merge_pr_failure() {
 
 #[tokio::test]
 async fn exec_open_in_browser_calls_xdg_open() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, _rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // xdg-open
@@ -1681,7 +1715,7 @@ async fn exec_open_in_browser_calls_xdg_open() {
 
 #[tokio::test]
 async fn exec_kill_tmux_window_calls_kill() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, _rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // tmux kill-window
@@ -1700,7 +1734,7 @@ async fn exec_kill_tmux_window_calls_kill() {
 
 #[tokio::test]
 async fn exec_kill_tmux_window_failure_is_best_effort() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::fail(
         "no such window",
@@ -1723,20 +1757,22 @@ fn make_app() -> App {
     App::new(vec![], ProjectId(1), Duration::from_secs(300))
 }
 
-#[test]
-fn load_notifications_pref_defaults_to_false_when_not_set() {
-    let db = Database::open_in_memory().unwrap();
+#[tokio::test]
+async fn load_notifications_pref_defaults_to_false_when_not_set() {
+    let db = Database::open_in_memory().await.unwrap();
     let mut app = make_app();
-    load_notifications_pref(&db, &mut app);
+    load_notifications_pref(&db, &mut app).await;
     assert!(!app.notifications_enabled());
 }
 
-#[test]
-fn load_notifications_pref_sets_true_when_enabled() {
-    let db = Database::open_in_memory().unwrap();
-    db.set_setting_bool("notifications_enabled", true).unwrap();
+#[tokio::test]
+async fn load_notifications_pref_sets_true_when_enabled() {
+    let db = Database::open_in_memory().await.unwrap();
+    db.set_setting_bool("notifications_enabled", true)
+        .await
+        .unwrap();
     let mut app = make_app();
-    load_notifications_pref(&db, &mut app);
+    load_notifications_pref(&db, &mut app).await;
     assert!(app.notifications_enabled());
 }
 
@@ -1759,50 +1795,54 @@ fn make_app_with_two_projects() -> App {
     app
 }
 
-#[test]
-fn load_per_project_repo_filters_no_op_when_nothing_saved() {
-    let db = Database::open_in_memory().unwrap();
+#[tokio::test]
+async fn load_per_project_repo_filters_no_op_when_nothing_saved() {
+    let db = Database::open_in_memory().await.unwrap();
     let mut app = make_app_with_two_projects();
-    load_per_project_repo_filters(&db, &mut app);
+    load_per_project_repo_filters(&db, &mut app).await;
     assert!(app.repo_filter().is_empty());
     assert_eq!(app.repo_filter_mode(), RepoFilterMode::Include);
 }
 
-#[test]
-fn load_per_project_repo_filters_restores_active_project() {
-    let db = Database::open_in_memory().unwrap();
+#[tokio::test]
+async fn load_per_project_repo_filters_restores_active_project() {
+    let db = Database::open_in_memory().await.unwrap();
     db.set_setting_string(
         "repo_filter:1",
         &serde_json::to_string(&["/repo/a"]).unwrap(),
     )
+    .await
     .unwrap();
     db.set_setting_string("repo_filter_mode:1", "exclude")
+        .await
         .unwrap();
     let mut app = make_app_with_two_projects();
     app.update(Message::RepoPathsUpdated(vec!["/repo/a".into()]));
-    load_per_project_repo_filters(&db, &mut app);
+    load_per_project_repo_filters(&db, &mut app).await;
     // Active project is 1 → its filter is in app.filter
     assert_eq!(app.repo_filter(), &HashSet::from(["/repo/a".to_string()]));
     assert_eq!(app.repo_filter_mode(), RepoFilterMode::Exclude);
 }
 
-#[test]
-fn load_per_project_repo_filters_holds_other_project_filter_in_map() {
-    let db = Database::open_in_memory().unwrap();
+#[tokio::test]
+async fn load_per_project_repo_filters_holds_other_project_filter_in_map() {
+    let db = Database::open_in_memory().await.unwrap();
     // Project 2's filter saved; project 1 has nothing.
     db.set_setting_string(
         "repo_filter:2",
         &serde_json::to_string(&["/repo/b"]).unwrap(),
     )
+    .await
     .unwrap();
     db.set_setting_string("repo_filter_mode:2", "include")
+        .await
         .unwrap();
     let mut app = make_app_with_two_projects();
     app.update(Message::RepoPathsUpdated(vec![
         "/repo/a".into(),
         "/repo/b".into(),
     ]));
-    load_per_project_repo_filters(&db, &mut app);
+    load_per_project_repo_filters(&db, &mut app).await;
     // Active project (1) has empty filter; project 2's slot is staged.
     assert!(app.repo_filter().is_empty());
     assert!(app.has_per_project_filter(ProjectId(2)));
@@ -1812,91 +1852,97 @@ fn load_per_project_repo_filters_holds_other_project_filter_in_map() {
     assert_eq!(app.repo_filter(), &HashSet::from(["/repo/b".to_string()]));
 }
 
-#[test]
-fn load_per_project_repo_filters_prunes_stale_paths() {
-    let db = Database::open_in_memory().unwrap();
+#[tokio::test]
+async fn load_per_project_repo_filters_prunes_stale_paths() {
+    let db = Database::open_in_memory().await.unwrap();
     db.set_setting_string(
         "repo_filter:1",
         &serde_json::to_string(&["/repo/a", "/gone"]).unwrap(),
     )
+    .await
     .unwrap();
     let mut app = make_app_with_two_projects();
     app.update(Message::RepoPathsUpdated(vec!["/repo/a".into()]));
-    load_per_project_repo_filters(&db, &mut app);
+    load_per_project_repo_filters(&db, &mut app).await;
     assert_eq!(app.repo_filter(), &HashSet::from(["/repo/a".to_string()]));
 }
 
-#[test]
-fn load_per_project_repo_filters_migrates_legacy_global_keys() {
-    let db = Database::open_in_memory().unwrap();
+#[tokio::test]
+async fn load_per_project_repo_filters_migrates_legacy_global_keys() {
+    let db = Database::open_in_memory().await.unwrap();
     // Old global keys (pre-555) — should land in default project's slot.
     db.set_setting_string("repo_filter", &serde_json::to_string(&["/repo/a"]).unwrap())
+        .await
         .unwrap();
     db.set_setting_string("repo_filter_mode", "exclude")
+        .await
         .unwrap();
     let mut app = make_app_with_two_projects();
     app.update(Message::RepoPathsUpdated(vec!["/repo/a".into()]));
-    load_per_project_repo_filters(&db, &mut app);
+    load_per_project_repo_filters(&db, &mut app).await;
     // Default project (1) is active → its filter restored from legacy keys.
     assert_eq!(app.repo_filter(), &HashSet::from(["/repo/a".to_string()]));
     assert_eq!(app.repo_filter_mode(), RepoFilterMode::Exclude);
 }
 
-#[test]
-fn load_per_project_repo_filters_prefers_per_project_over_legacy() {
-    let db = Database::open_in_memory().unwrap();
+#[tokio::test]
+async fn load_per_project_repo_filters_prefers_per_project_over_legacy() {
+    let db = Database::open_in_memory().await.unwrap();
     // Both per-project key and legacy key set for default project.
     // Per-project should win (legacy is only fallback for empty slots).
     db.set_setting_string(
         "repo_filter:1",
         &serde_json::to_string(&["/repo/per-project"]).unwrap(),
     )
+    .await
     .unwrap();
     db.set_setting_string(
         "repo_filter",
         &serde_json::to_string(&["/repo/legacy"]).unwrap(),
     )
+    .await
     .unwrap();
     let mut app = make_app_with_two_projects();
     app.update(Message::RepoPathsUpdated(vec![
         "/repo/per-project".into(),
         "/repo/legacy".into(),
     ]));
-    load_per_project_repo_filters(&db, &mut app);
+    load_per_project_repo_filters(&db, &mut app).await;
     assert_eq!(
         app.repo_filter(),
         &HashSet::from(["/repo/per-project".to_string()])
     );
 }
 
-#[test]
-fn load_filter_presets_returns_none_on_success() {
-    let db = Database::open_in_memory().unwrap();
+#[tokio::test]
+async fn load_filter_presets_returns_none_on_success() {
+    let db = Database::open_in_memory().await.unwrap();
     let mut app = make_app();
     let result = load_filter_presets(&db, &mut app);
-    assert!(result.is_none());
+    assert!(result.await.is_none());
 }
 
-#[test]
-fn load_filter_presets_loads_saved_presets() {
-    let db = Database::open_in_memory().unwrap();
+#[tokio::test]
+async fn load_filter_presets_loads_saved_presets() {
+    let db = Database::open_in_memory().await.unwrap();
     db.save_filter_preset("backend", &["/repo/a".into()], "include")
+        .await
         .unwrap();
     let mut app = make_app();
-    load_filter_presets(&db, &mut app);
+    load_filter_presets(&db, &mut app).await;
     assert_eq!(app.filter_presets().len(), 1);
     assert_eq!(app.filter_presets()[0].0, "backend");
 }
 
-#[test]
-fn apply_tmux_focus_warning_returns_none_when_enabled() {
+#[tokio::test]
+async fn apply_tmux_focus_warning_returns_none_when_enabled() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"on\n")]);
     let result = apply_tmux_focus_warning(&mock);
     assert!(result.is_none());
 }
 
-#[test]
-fn apply_tmux_focus_warning_returns_status_info_when_disabled() {
+#[tokio::test]
+async fn apply_tmux_focus_warning_returns_status_info_when_disabled() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"off\n")]);
     let result = apply_tmux_focus_warning(&mock);
     assert!(matches!(
@@ -1920,8 +1966,8 @@ mod resolve_initial_project_tests {
         }
     }
 
-    #[test]
-    fn falls_back_to_default_when_no_saved_setting() {
+    #[tokio::test]
+    async fn falls_back_to_default_when_no_saved_setting() {
         let projects = vec![
             make_project(ProjectId(1), true),
             make_project(ProjectId(2), false),
@@ -1929,8 +1975,8 @@ mod resolve_initial_project_tests {
         assert_eq!(resolve_initial_project(&projects, None), ProjectId(1));
     }
 
-    #[test]
-    fn uses_saved_project_when_it_exists() {
+    #[tokio::test]
+    async fn uses_saved_project_when_it_exists() {
         let projects = vec![
             make_project(ProjectId(1), true),
             make_project(ProjectId(2), false),
@@ -1941,8 +1987,8 @@ mod resolve_initial_project_tests {
         );
     }
 
-    #[test]
-    fn falls_back_to_default_when_saved_project_deleted() {
+    #[tokio::test]
+    async fn falls_back_to_default_when_saved_project_deleted() {
         let projects = vec![
             make_project(ProjectId(1), true),
             make_project(ProjectId(2), false),
@@ -1953,8 +1999,8 @@ mod resolve_initial_project_tests {
         );
     }
 
-    #[test]
-    fn falls_back_to_default_when_saved_value_invalid() {
+    #[tokio::test]
+    async fn falls_back_to_default_when_saved_value_invalid() {
         let projects = vec![
             make_project(ProjectId(1), true),
             make_project(ProjectId(2), false),
@@ -1972,7 +2018,7 @@ mod resolve_initial_project_tests {
 
 #[tokio::test]
 async fn exec_trigger_epic_feed_success() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let epic = db
         .create_epic("Security Vulnerabilities", "", "/repo", None, ProjectId(1))
         .await
@@ -2003,7 +2049,7 @@ async fn exec_trigger_epic_feed_success() {
 
 #[tokio::test]
 async fn exec_trigger_epic_feed_zero_items() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let epic = db
         .create_epic("Empty Feed", "", "/repo", None, ProjectId(1))
         .await
@@ -2029,7 +2075,7 @@ async fn exec_trigger_epic_feed_zero_items() {
 
 #[tokio::test]
 async fn exec_trigger_epic_feed_command_fails() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let epic = db
         .create_epic("Failing Feed", "", "/repo", None, ProjectId(1))
         .await
@@ -2055,7 +2101,7 @@ async fn exec_trigger_epic_feed_command_fails() {
 
 #[tokio::test]
 async fn exec_trigger_epic_feed_malformed_json() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let epic = db
         .create_epic("Bad JSON Feed", "", "/repo", None, ProjectId(1))
         .await
@@ -2085,16 +2131,16 @@ async fn exec_trigger_epic_feed_malformed_json() {
 
 // ── exec_open_main_session ──
 
-#[test]
-fn exec_open_main_session_with_no_dir_shows_error() {
-    let (rt, mut app) = test_runtime();
-    rt.exec_open_main_session(&mut app);
+#[tokio::test]
+async fn exec_open_main_session_with_no_dir_shows_error() {
+    let (rt, mut app) = test_runtime().await;
+    rt.exec_open_main_session(&mut app).await;
     assert!(app.error_popup().is_some());
 }
 
-#[test]
-fn exec_open_main_session_creates_window_when_no_session() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+#[tokio::test]
+async fn exec_open_main_session_creates_window_when_no_session() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, _rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // has_window check (list-windows — window absent)
@@ -2107,16 +2153,16 @@ fn exec_open_main_session_creates_window_when_no_session() {
     let mut app = make_app();
     app.set_main_session_dir(Some("/home/user".to_string()));
 
-    rt.exec_open_main_session(&mut app);
+    rt.exec_open_main_session(&mut app).await;
 
     // Session should be recorded on App.
     assert_eq!(app.main_session(), Some("dispatch-main"));
     assert!(app.error_popup().is_none());
 }
 
-#[test]
-fn exec_open_main_session_attaches_to_existing_alive_session() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+#[tokio::test]
+async fn exec_open_main_session_attaches_to_existing_alive_session() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, _rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"dispatch-main\n"), // has_window → true
@@ -2127,7 +2173,7 @@ fn exec_open_main_session_attaches_to_existing_alive_session() {
     app.set_main_session_dir(Some("/home/user".to_string()));
     app.set_main_session(Some("dispatch-main".to_string()));
 
-    rt.exec_open_main_session(&mut app);
+    rt.exec_open_main_session(&mut app).await;
 
     let calls = mock.recorded_calls();
     // Should NOT have called new-window — only list-windows + select-window.
@@ -2137,10 +2183,11 @@ fn exec_open_main_session_attaches_to_existing_alive_session() {
     assert!(app.error_popup().is_none());
 }
 
-#[test]
-fn exec_open_main_session_creates_fresh_when_stored_window_is_dead() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+#[tokio::test]
+async fn exec_open_main_session_creates_fresh_when_stored_window_is_dead() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     db.set_setting_string("main_session.window", "dispatch-main")
+        .await
         .unwrap();
     let (tx, _rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
@@ -2156,7 +2203,7 @@ fn exec_open_main_session_creates_fresh_when_stored_window_is_dead() {
     app.set_main_session_dir(Some("/home/user".to_string()));
     app.set_main_session(Some("dispatch-main".to_string()));
 
-    rt.exec_open_main_session(&mut app);
+    rt.exec_open_main_session(&mut app).await;
 
     // Should have cleared the stale entry and set a fresh one.
     assert_eq!(app.main_session(), Some("dispatch-main"));
@@ -2165,61 +2212,64 @@ fn exec_open_main_session_creates_fresh_when_stored_window_is_dead() {
 
 // ── load_main_session ──
 
-#[test]
-fn load_main_session_sets_dir_from_db() {
-    let db = Database::open_in_memory().unwrap();
+#[tokio::test]
+async fn load_main_session_sets_dir_from_db() {
+    let db = Database::open_in_memory().await.unwrap();
     db.set_setting_string("main_session.dir", "/home/user/code")
+        .await
         .unwrap();
     let mock = MockProcessRunner::new(vec![]);
     let mut app = make_app();
 
-    load_main_session(&db, &mock, &mut app);
+    load_main_session(&db, &mock, &mut app).await;
 
     assert_eq!(app.main_session_dir(), Some("/home/user/code"));
 }
 
-#[test]
-fn load_main_session_ignores_empty_dir() {
-    let db = Database::open_in_memory().unwrap();
-    db.set_setting_string("main_session.dir", "").unwrap();
+#[tokio::test]
+async fn load_main_session_ignores_empty_dir() {
+    let db = Database::open_in_memory().await.unwrap();
+    db.set_setting_string("main_session.dir", "").await.unwrap();
     let mock = MockProcessRunner::new(vec![]);
     let mut app = make_app();
 
-    load_main_session(&db, &mock, &mut app);
+    load_main_session(&db, &mock, &mut app).await;
 
     assert_eq!(app.main_session_dir(), None);
 }
 
-#[test]
-fn load_main_session_sets_window_when_alive() {
-    let db = Database::open_in_memory().unwrap();
+#[tokio::test]
+async fn load_main_session_sets_window_when_alive() {
+    let db = Database::open_in_memory().await.unwrap();
     db.set_setting_string("main_session.window", "dispatch-main")
+        .await
         .unwrap();
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"dispatch-main\n"), // has_window → true
     ]);
     let mut app = make_app();
 
-    load_main_session(&db, &mock, &mut app);
+    load_main_session(&db, &mock, &mut app).await;
 
     assert_eq!(app.main_session(), Some("dispatch-main"));
 }
 
-#[test]
-fn load_main_session_clears_stale_window() {
-    let db = Database::open_in_memory().unwrap();
+#[tokio::test]
+async fn load_main_session_clears_stale_window() {
+    let db = Database::open_in_memory().await.unwrap();
     db.set_setting_string("main_session.window", "dispatch-main")
+        .await
         .unwrap();
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // has_window → false
     ]);
     let mut app = make_app();
 
-    load_main_session(&db, &mock, &mut app);
+    load_main_session(&db, &mock, &mut app).await;
 
     assert_eq!(app.main_session(), None);
     // DB entry should be cleared.
-    let stored = db.get_setting_string("main_session.window").unwrap();
+    let stored = db.get_setting_string("main_session.window").await.unwrap();
     assert!(stored.as_deref().unwrap_or("").is_empty());
 }
 
@@ -2227,7 +2277,7 @@ fn load_main_session_clears_stale_window() {
 async fn build_learning_injections_partitions_and_records_retrievals() {
     use crate::models::{LearningKind, LearningScope, RetrievalSource};
 
-    let (rt, _app) = test_runtime();
+    let (rt, _app) = test_runtime().await;
     // Seed a task in the default project.
     let task = create_task_returning(
         &*rt.database,
@@ -2237,6 +2287,7 @@ async fn build_learning_injections_partitions_and_records_retrievals() {
         None,
         models::TaskStatus::Backlog,
     )
+    .await
     .unwrap();
 
     // Seed two approved learnings: one repo-scoped non-procedural, one
@@ -2288,8 +2339,8 @@ async fn build_learning_injections_partitions_and_records_retrievals() {
 // parse_filter_setting tests
 // ---------------------------------------------------------------------------
 
-#[test]
-fn parse_filter_setting_accepts_valid_json() {
+#[tokio::test]
+async fn parse_filter_setting_accepts_valid_json() {
     let mut known = HashSet::new();
     known.insert("/a".to_string());
     known.insert("/b".to_string());
@@ -2307,8 +2358,8 @@ fn parse_filter_setting_accepts_valid_json() {
     assert_eq!(mode, RepoFilterMode::Exclude);
 }
 
-#[test]
-fn parse_filter_setting_returns_default_on_invalid_json() {
+#[tokio::test]
+async fn parse_filter_setting_returns_default_on_invalid_json() {
     let known: HashSet<String> = HashSet::new();
     let raw = Some("not json at all".to_string());
 
@@ -2318,8 +2369,8 @@ fn parse_filter_setting_returns_default_on_invalid_json() {
     assert_eq!(mode, RepoFilterMode::default());
 }
 
-#[test]
-fn parse_filter_setting_returns_default_on_invalid_mode() {
+#[tokio::test]
+async fn parse_filter_setting_returns_default_on_invalid_mode() {
     let known: HashSet<String> = HashSet::new();
     let raw_mode = Some("not-a-mode".to_string());
 
@@ -2328,8 +2379,8 @@ fn parse_filter_setting_returns_default_on_invalid_mode() {
     assert_eq!(mode, RepoFilterMode::default());
 }
 
-#[test]
-fn parse_filter_setting_empty_when_no_settings() {
+#[tokio::test]
+async fn parse_filter_setting_empty_when_no_settings() {
     let known: HashSet<String> = HashSet::new();
     let (repos, mode) = parse_filter_setting(None, None, &known);
     assert!(repos.is_empty());

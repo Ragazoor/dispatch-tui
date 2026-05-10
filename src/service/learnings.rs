@@ -250,17 +250,17 @@ mod learning_tests {
     };
     use crate::service::ServiceError;
 
-    fn service() -> LearningService {
-        let db = Arc::new(Database::open_in_memory().unwrap());
+    async fn service() -> LearningService {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
         LearningService::new(db)
     }
 
-    fn service_with_db() -> (LearningService, Arc<dyn TaskStore>) {
-        let db: Arc<dyn TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    async fn service_with_db() -> (LearningService, Arc<dyn TaskStore>) {
+        let db: Arc<dyn TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
         (LearningService::new(db.clone()), db)
     }
 
-    fn seed_task(db: &Arc<dyn TaskStore>) -> TaskId {
+    async fn seed_task(db: &Arc<dyn TaskStore>) -> TaskId {
         db.create_task(CreateTaskRequest {
             title: "test task",
             description: "",
@@ -273,6 +273,7 @@ mod learning_tests {
             tag: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap()
     }
 
@@ -292,7 +293,7 @@ mod learning_tests {
 
     #[tokio::test]
     async fn create_learning_rejects_empty_summary() {
-        let svc = service();
+        let svc = service().await;
         let err = svc
             .create_learning(CreateLearningParams {
                 kind: LearningKind::Convention,
@@ -310,7 +311,7 @@ mod learning_tests {
 
     #[tokio::test]
     async fn create_learning_rejects_user_scope_with_scope_ref() {
-        let svc = service();
+        let svc = service().await;
         let err = svc
             .create_learning(CreateLearningParams {
                 kind: LearningKind::Preference,
@@ -328,7 +329,7 @@ mod learning_tests {
 
     #[tokio::test]
     async fn create_learning_rejects_non_user_scope_without_scope_ref() {
-        let svc = service();
+        let svc = service().await;
         let err = svc
             .create_learning(CreateLearningParams {
                 kind: LearningKind::Convention,
@@ -346,7 +347,7 @@ mod learning_tests {
 
     #[tokio::test]
     async fn create_learning_succeeds_with_valid_params() {
-        let svc = service();
+        let svc = service().await;
         let id = svc
             .create_learning(CreateLearningParams {
                 kind: LearningKind::Convention,
@@ -365,7 +366,7 @@ mod learning_tests {
 
     #[tokio::test]
     async fn reject_learning_from_proposed_succeeds() {
-        let svc = service();
+        let svc = service().await;
         let id = svc
             .create_learning(CreateLearningParams {
                 kind: LearningKind::Pitfall,
@@ -385,7 +386,7 @@ mod learning_tests {
 
     #[tokio::test]
     async fn reject_learning_from_archived_fails() {
-        let svc = service();
+        let svc = service().await;
         let id = svc
             .create_learning(CreateLearningParams {
                 kind: LearningKind::Convention,
@@ -405,7 +406,7 @@ mod learning_tests {
 
     #[tokio::test]
     async fn archive_learning_from_approved_succeeds() {
-        let svc = service();
+        let svc = service().await;
         let id = svc
             .create_learning(CreateLearningParams {
                 kind: LearningKind::Convention,
@@ -426,7 +427,7 @@ mod learning_tests {
     #[tokio::test]
     async fn approve_learning_from_needs_review_sets_status_to_approved() {
         use crate::db::LearningPatch;
-        let (svc, db) = service_with_db();
+        let (svc, db) = service_with_db().await;
         let id = seed_approved_learning(&svc).await;
         db.patch_learning(
             id,
@@ -441,7 +442,7 @@ mod learning_tests {
 
     #[tokio::test]
     async fn approve_learning_from_terminal_status_fails() {
-        let svc = service();
+        let svc = service().await;
         let id = seed_approved_learning(&svc).await;
         svc.reject_learning(id).await.unwrap();
         let err = svc.approve_learning(id).await.unwrap_err();
@@ -451,7 +452,7 @@ mod learning_tests {
     #[tokio::test]
     async fn archive_learning_from_needs_review_succeeds() {
         use crate::db::LearningPatch;
-        let (svc, db) = service_with_db();
+        let (svc, db) = service_with_db().await;
         let id = seed_approved_learning(&svc).await;
         db.patch_learning(
             id,
@@ -466,7 +467,7 @@ mod learning_tests {
 
     #[tokio::test]
     async fn update_learning_on_rejected_fails() {
-        let svc = service();
+        let svc = service().await;
         let id = svc
             .create_learning(CreateLearningParams {
                 kind: LearningKind::Convention,
@@ -495,7 +496,7 @@ mod learning_tests {
 
     #[tokio::test]
     async fn update_learning_rejects_empty_summary() {
-        let svc = service();
+        let svc = service().await;
         let id = svc
             .create_learning(CreateLearningParams {
                 kind: LearningKind::Convention,
@@ -523,7 +524,7 @@ mod learning_tests {
 
     #[tokio::test]
     async fn upvote_learning_on_approved_succeeds() {
-        let svc = service();
+        let svc = service().await;
         let id = svc
             .create_learning(CreateLearningParams {
                 kind: LearningKind::Convention,
@@ -543,15 +544,15 @@ mod learning_tests {
 
     #[tokio::test]
     async fn get_learning_not_found_returns_error() {
-        let svc = service();
+        let svc = service().await;
         let err = svc.get_learning(LearningId(99999)).await.unwrap_err();
         assert!(matches!(err, ServiceError::NotFound(_)));
     }
 
     #[tokio::test]
     async fn apply_verdicts_validation_rejects_unknown_retrieval() {
-        let (svc, db) = service_with_db();
-        let task_id = seed_task(&db);
+        let (svc, db) = service_with_db().await;
+        let task_id = seed_task(&db).await;
         let learning_id = seed_approved_learning(&svc).await;
         let err = svc
             .apply_verdicts(task_id, vec![(learning_id, LearningVerdict::Helped)])
@@ -562,8 +563,8 @@ mod learning_tests {
 
     #[tokio::test]
     async fn apply_verdicts_succeeds_when_retrieval_exists() {
-        let (svc, db) = service_with_db();
-        let task_id = seed_task(&db);
+        let (svc, db) = service_with_db().await;
+        let task_id = seed_task(&db).await;
         let learning_id = seed_approved_learning(&svc).await;
         svc.record_retrieval(task_id, learning_id, RetrievalSource::PromptInjection)
             .await
@@ -577,8 +578,8 @@ mod learning_tests {
 
     #[tokio::test]
     async fn apply_verdicts_empty_is_ok() {
-        let (svc, db) = service_with_db();
-        let task_id = seed_task(&db);
+        let (svc, db) = service_with_db().await;
+        let task_id = seed_task(&db).await;
         svc.apply_verdicts(task_id, vec![]).await.unwrap();
     }
 }

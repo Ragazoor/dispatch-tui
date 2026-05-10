@@ -159,7 +159,7 @@ impl FeedRunner {
                         }
                     };
 
-                let known_paths = match db.list_repo_paths() {
+                let known_paths = match db.list_repo_paths().await {
                     Ok(p) => p,
                     Err(err) => {
                         tracing::warn!(
@@ -172,7 +172,9 @@ impl FeedRunner {
                 let repo_paths = resolve_feed_item_repo_paths(&items, &known_paths);
                 let base_branches = resolve_base_branches(&repo_paths, &*runner);
 
-                if let Err(err) = db.upsert_feed_tasks(epic_id, &items, &repo_paths, &base_branches)
+                if let Err(err) = db
+                    .upsert_feed_tasks(epic_id, &items, &repo_paths, &base_branches)
+                    .await
                 {
                     tracing::warn!(
                         epic_id = epic_id.0,
@@ -222,7 +224,7 @@ mod tests {
 
     #[tokio::test]
     async fn tick_does_not_block_event_loop() {
-        let db = Arc::new(Database::open_in_memory().unwrap());
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic = db
             .create_epic("Slow Epic", "", "/repo", None, ProjectId(1))
             .await
@@ -245,7 +247,7 @@ mod tests {
 
     #[tokio::test]
     async fn tick_background_task_upserts_tasks() {
-        let db = Arc::new(Database::open_in_memory().unwrap());
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic = db
             .create_epic("BG Epic", "", "/repo", None, ProjectId(1))
             .await
@@ -273,7 +275,7 @@ mod tests {
 
     #[tokio::test]
     async fn tick_valid_json_upserts_tasks() {
-        let db = Arc::new(Database::open_in_memory().unwrap());
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic = db
             .create_epic("My Epic", "", "/repo", None, ProjectId(1))
             .await
@@ -303,7 +305,7 @@ mod tests {
     #[tokio::test]
     async fn tick_persists_feed_tag() {
         use crate::models::TaskTag;
-        let db = Arc::new(Database::open_in_memory().unwrap());
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic = db
             .create_epic("Tagged Epic", "", "/repo", None, ProjectId(1))
             .await
@@ -331,7 +333,7 @@ mod tests {
 
     #[tokio::test]
     async fn tick_missing_tag_rejects_item() {
-        let db = Arc::new(Database::open_in_memory().unwrap());
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic = db
             .create_epic("Untagged Epic", "", "/repo", None, ProjectId(1))
             .await
@@ -361,7 +363,7 @@ mod tests {
 
     #[tokio::test]
     async fn tick_nonzero_exit_no_panic() {
-        let db = Arc::new(Database::open_in_memory().unwrap());
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic = db
             .create_epic("Err Epic", "", "/repo", None, ProjectId(1))
             .await
@@ -383,7 +385,7 @@ mod tests {
 
     #[tokio::test]
     async fn tick_malformed_json_no_panic() {
-        let db = Arc::new(Database::open_in_memory().unwrap());
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic = db
             .create_epic("Bad JSON Epic", "", "/repo", None, ProjectId(1))
             .await
@@ -407,7 +409,7 @@ mod tests {
 
     #[tokio::test]
     async fn tick_interval_not_elapsed_skips_command() {
-        let db = Arc::new(Database::open_in_memory().unwrap());
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic = db
             .create_epic("Interval Epic", "", "/repo", None, ProjectId(1))
             .await
@@ -453,7 +455,7 @@ mod tests {
 
     #[tokio::test]
     async fn tick_null_feed_command_skipped() {
-        let db = Arc::new(Database::open_in_memory().unwrap());
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
         // Epic with no feed_command (default)
         let epic = db
             .create_epic("Plain Epic", "", "/repo", None, ProjectId(1))
@@ -476,7 +478,7 @@ mod tests {
 
     #[tokio::test]
     async fn start_returns_immediately_without_blocking() {
-        let db = Arc::new(Database::open_in_memory().unwrap());
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic = db
             .create_epic("Slow Epic", "", "/repo", None, ProjectId(1))
             .await
@@ -503,7 +505,7 @@ mod tests {
 
     #[tokio::test]
     async fn start_background_task_eventually_runs_feed_command() {
-        let db = Arc::new(Database::open_in_memory().unwrap());
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic = db
             .create_epic("BG Feed Epic", "", "/repo", None, ProjectId(1))
             .await
@@ -544,9 +546,9 @@ mod tests {
 
     #[tokio::test]
     async fn tick_github_url_resolves_to_known_repo_path() {
-        let db = Arc::new(Database::open_in_memory().unwrap());
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
         // Register a known repo path matching "myrepo"
-        db.save_repo_path("/home/user/code/myrepo").unwrap();
+        db.save_repo_path("/home/user/code/myrepo").await.unwrap();
         let epic = db
             .create_epic("Feed Epic", "", "/fallback", None, ProjectId(1))
             .await
@@ -572,9 +574,11 @@ mod tests {
 
     #[tokio::test]
     async fn tick_no_matching_repo_stores_empty_sentinel() {
-        let db = Arc::new(Database::open_in_memory().unwrap());
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
         // Known repo is "other-repo", not matching "myrepo"
-        db.save_repo_path("/home/user/code/other-repo").unwrap();
+        db.save_repo_path("/home/user/code/other-repo")
+            .await
+            .unwrap();
         let epic = db
             .create_epic("Feed Epic", "", "/fallback", None, ProjectId(1))
             .await
@@ -599,8 +603,8 @@ mod tests {
 
     #[tokio::test]
     async fn tick_empty_url_stores_empty_sentinel() {
-        let db = Arc::new(Database::open_in_memory().unwrap());
-        db.save_repo_path("/home/user/code/myrepo").unwrap();
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        db.save_repo_path("/home/user/code/myrepo").await.unwrap();
         let epic = db
             .create_epic("Feed Epic", "", "/fallback", None, ProjectId(1))
             .await
@@ -673,9 +677,9 @@ mod tests {
 
     #[tokio::test]
     async fn tick_resolves_default_branch_per_unique_repo() {
-        let db = Arc::new(Database::open_in_memory().unwrap());
-        db.save_repo_path("/home/user/code/repo-a").unwrap();
-        db.save_repo_path("/home/user/code/repo-b").unwrap();
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        db.save_repo_path("/home/user/code/repo-a").await.unwrap();
+        db.save_repo_path("/home/user/code/repo-b").await.unwrap();
         let epic = db
             .create_epic("Feed Epic", "", "/fallback", None, ProjectId(1))
             .await
@@ -724,8 +728,8 @@ mod tests {
 
     #[tokio::test]
     async fn tick_falls_back_to_main_when_origin_head_missing() {
-        let db = Arc::new(Database::open_in_memory().unwrap());
-        db.save_repo_path("/home/user/code/repo-a").unwrap();
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        db.save_repo_path("/home/user/code/repo-a").await.unwrap();
         let epic = db
             .create_epic("Feed Epic", "", "/fallback", None, ProjectId(1))
             .await
@@ -747,7 +751,7 @@ mod tests {
 
     #[tokio::test]
     async fn tick_twice_is_idempotent() {
-        let db = Arc::new(Database::open_in_memory().unwrap());
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic = db
             .create_epic("Idem Epic", "", "/repo", None, ProjectId(1))
             .await
@@ -796,7 +800,7 @@ mod tests {
 
     #[tokio::test]
     async fn tick_empty_array_creates_no_tasks() {
-        let db = Arc::new(Database::open_in_memory().unwrap());
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic = db
             .create_epic("Empty Epic", "", "/repo", None, ProjectId(1))
             .await
@@ -816,8 +820,8 @@ mod tests {
 
     #[tokio::test]
     async fn tick_non_github_url_stores_empty_sentinel() {
-        let db = Arc::new(Database::open_in_memory().unwrap());
-        db.save_repo_path("/home/user/code/myrepo").unwrap();
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        db.save_repo_path("/home/user/code/myrepo").await.unwrap();
         let epic = db
             .create_epic("Feed Epic", "", "/fallback", None, ProjectId(1))
             .await

@@ -35,7 +35,7 @@ fn pr_fixture(repo: &str, number: i64) -> ReviewPr {
 
 #[tokio::test]
 async fn review_agent_full_state_machine() {
-    let db = Database::open_in_memory().unwrap();
+    let db = Database::open_in_memory().await.unwrap();
     let repo = "acme/app";
     let number = 42i64;
 
@@ -125,7 +125,7 @@ async fn review_agent_full_state_machine() {
 
 #[tokio::test]
 async fn update_agent_status_errors_when_no_active_agent() {
-    let db = Database::open_in_memory().unwrap();
+    let db = Database::open_in_memory().await.unwrap();
     db.save_prs(PrKind::Review, &[pr_fixture("acme/app", 7)])
         .await
         .unwrap();

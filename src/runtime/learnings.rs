@@ -203,7 +203,7 @@ mod tests {
 
     #[tokio::test]
     async fn exec_archive_learning_updates_db_and_sends_actioned_message() {
-        let db = Arc::new(Database::open_in_memory().unwrap());
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
         let id = insert_learning(&db).await;
         let rt = make_runtime(db.clone());
         let mut app = App::new(vec![], ProjectId(1), APP_INACTIVITY_TIMEOUT);
@@ -225,7 +225,7 @@ mod tests {
 
     #[tokio::test]
     async fn exec_reject_learning_updates_db_and_sends_actioned_message() {
-        let db = Arc::new(Database::open_in_memory().unwrap());
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
         let id = insert_learning(&db).await;
         let rt = make_runtime(db.clone());
         let mut app = App::new(vec![], ProjectId(1), APP_INACTIVITY_TIMEOUT);
@@ -244,7 +244,7 @@ mod tests {
 
     #[tokio::test]
     async fn exec_load_passes_learnings_to_show_learnings_sorted_by_upvote_count() {
-        let db = Arc::new(Database::open_in_memory().unwrap());
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
 
         // Insert two learnings; bump the second one's upvote_count via patch.
         let id1 = db

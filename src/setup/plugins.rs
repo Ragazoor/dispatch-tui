@@ -182,7 +182,7 @@ mod tests {
 
     #[tokio::test]
     async fn seed_feed_epics_creates_single_example_epic() {
-        let db = Database::open_in_memory().unwrap();
+        let db = Database::open_in_memory().await.unwrap();
         let data_dir = tempfile::tempdir().unwrap();
         seed_feed_epics(&db, data_dir.path()).await.unwrap();
 
@@ -207,7 +207,7 @@ mod tests {
 
     #[tokio::test]
     async fn seed_feed_epics_is_idempotent() {
-        let db = Database::open_in_memory().unwrap();
+        let db = Database::open_in_memory().await.unwrap();
         let data_dir = tempfile::tempdir().unwrap();
         seed_feed_epics(&db, data_dir.path()).await.unwrap();
         seed_feed_epics(&db, data_dir.path()).await.unwrap();

@@ -490,8 +490,8 @@ mod learning_editor_tests {
         }
     }
 
-    #[test]
-    fn initial_content_includes_summary_and_kind() {
+    #[tokio::test]
+    async fn initial_content_includes_summary_and_kind() {
         let l = make_learning(LearningId(1));
         let (prefix, content) = initial_content_for(&EditKind::Learning(l));
         assert!(content.contains("original summary"));
@@ -501,7 +501,7 @@ mod learning_editor_tests {
 
     #[tokio::test]
     async fn saved_valid_content_updates_db_and_sends_learning_edited() {
-        let db = Arc::new(Database::open_in_memory().unwrap());
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
         let id = db
             .create_learning(CreateLearningRow {
                 kind: LearningKind::Convention,
@@ -545,7 +545,7 @@ mod learning_editor_tests {
 
     #[tokio::test]
     async fn saved_empty_summary_preserves_original() {
-        let db = Arc::new(Database::open_in_memory().unwrap());
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
         let id = db
             .create_learning(CreateLearningRow {
                 kind: LearningKind::Convention,
@@ -582,7 +582,7 @@ mod learning_editor_tests {
 
     #[tokio::test]
     async fn cancelled_edit_is_noop() {
-        let db = Arc::new(Database::open_in_memory().unwrap());
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
         let id = db
             .create_learning(CreateLearningRow {
                 kind: LearningKind::Convention,
@@ -614,7 +614,7 @@ mod learning_editor_tests {
     async fn saved_content_for_rejected_learning_shows_status_error() {
         // update_learning rejects learnings with status Rejected — verify the
         // error surfaces as StatusInfo and does not update DB.
-        let db = Arc::new(Database::open_in_memory().unwrap());
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
         let id = db
             .create_learning(CreateLearningRow {
                 kind: LearningKind::Convention,
@@ -661,8 +661,8 @@ mod tests {
     use super::*;
     use std::cell::Cell;
 
-    #[test]
-    fn watch_editor_returns_saved_when_window_gone_and_read_ok() {
+    #[tokio::test]
+    async fn watch_editor_returns_saved_when_window_gone_and_read_ok() {
         let iterations = Cell::new(0);
         let outcome = watch_editor(
             || {
@@ -678,8 +678,8 @@ mod tests {
         assert_eq!(iterations.get(), 4);
     }
 
-    #[test]
-    fn watch_editor_returns_cancelled_when_read_fails() {
+    #[tokio::test]
+    async fn watch_editor_returns_cancelled_when_read_fails() {
         let outcome = watch_editor(
             || false,
             || {},
@@ -688,8 +688,8 @@ mod tests {
         assert!(matches!(outcome, EditorOutcome::Cancelled));
     }
 
-    #[test]
-    fn watch_editor_stops_polling_once_window_gone() {
+    #[tokio::test]
+    async fn watch_editor_stops_polling_once_window_gone() {
         let iterations = Cell::new(0);
         let sleep_calls = Cell::new(0);
         watch_editor(
@@ -705,8 +705,8 @@ mod tests {
         assert_eq!(sleep_calls.get(), 0);
     }
 
-    #[test]
-    fn editor_session_drop_removes_tempfile() {
+    #[tokio::test]
+    async fn editor_session_drop_removes_tempfile() {
         use tempfile::NamedTempFile;
 
         let tmp = NamedTempFile::new().unwrap();
@@ -726,8 +726,8 @@ mod tests {
         assert!(!path.exists(), "tempfile should be removed on drop");
     }
 
-    #[test]
-    fn editor_session_drop_kills_tmux_window_when_runner_set() {
+    #[tokio::test]
+    async fn editor_session_drop_kills_tmux_window_when_runner_set() {
         use crate::process::MockProcessRunner;
 
         let mock = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::ok()]));
@@ -743,21 +743,21 @@ mod tests {
         assert_eq!(calls[0].1, vec!["kill-window", "-t", "edit-window"]);
     }
 
-    #[test]
-    fn saved_text_extracts_from_saved() {
+    #[tokio::test]
+    async fn saved_text_extracts_from_saved() {
         assert_eq!(
             saved_text(EditorOutcome::Saved("x".into())),
             Some("x".into())
         );
     }
 
-    #[test]
-    fn saved_text_returns_none_for_cancelled() {
+    #[tokio::test]
+    async fn saved_text_returns_none_for_cancelled() {
         assert_eq!(saved_text(EditorOutcome::Cancelled), None);
     }
 
-    #[test]
-    fn editor_already_open_msg_is_stable() {
+    #[tokio::test]
+    async fn editor_already_open_msg_is_stable() {
         // Pinned so a future rename is a deliberate act, not an accident.
         assert_eq!(
             EDITOR_ALREADY_OPEN_MSG,
@@ -778,8 +778,8 @@ mod tests {
     use crate::tui::{App, EditKind};
     use tokio::sync::mpsc::unbounded_channel;
 
-    fn runtime_with_runner(runner: Arc<dyn ProcessRunner>) -> (TuiRuntime, App) {
-        let db: Arc<dyn crate::db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    async fn runtime_with_runner(runner: Arc<dyn ProcessRunner>) -> (TuiRuntime, App) {
+        let db: Arc<dyn crate::db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
         let (tx, _rx) = unbounded_channel();
         let (feed_tx, _) = unbounded_channel();
         let rt = TuiRuntime {
@@ -799,10 +799,10 @@ mod tests {
         (rt, app)
     }
 
-    #[test]
-    fn exec_pop_out_editor_is_noop_when_session_occupied() {
+    #[tokio::test]
+    async fn exec_pop_out_editor_is_noop_when_session_occupied() {
         let mock = Arc::new(MockProcessRunner::new(vec![]));
-        let (rt, mut app) = runtime_with_runner(mock.clone());
+        let (rt, mut app) = runtime_with_runner(mock.clone()).await;
 
         // Pre-populate the session slot.
         *rt.editor_session.lock().unwrap() = Some(EditorSession {
@@ -823,7 +823,7 @@ mod tests {
         );
     }
 
-    fn seed_task(db: &dyn crate::db::TaskStore) -> models::Task {
+    async fn seed_task(db: &dyn crate::db::TaskStore) -> models::Task {
         let id = db
             .create_task(CreateTaskRequest {
                 title: "Original title",
@@ -837,15 +837,16 @@ mod tests {
                 tag: None,
                 project_id: ProjectId(1),
             })
+            .await
             .unwrap();
-        db.get_task(id).unwrap().unwrap()
+        db.get_task(id).await.unwrap().unwrap()
     }
 
     #[tokio::test]
     async fn finalize_task_edit_persists_changes() {
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-        let db: Arc<dyn crate::db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
-        let task = seed_task(&*db);
+        let db: Arc<dyn crate::db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+        let task = seed_task(&*db).await;
 
         let (tx, _rx) = unbounded_channel();
         let (feed_tx, _) = unbounded_channel();
@@ -884,7 +885,7 @@ mod tests {
         .await;
 
         // The DB row should reflect the edits.
-        let updated = db.get_task(task.id).unwrap().unwrap();
+        let updated = db.get_task(task.id).await.unwrap().unwrap();
         assert_eq!(updated.title, "New title");
         assert_eq!(updated.description, "New description");
         assert_eq!(updated.repo_path, "/new/repo");
@@ -897,8 +898,8 @@ mod tests {
     #[tokio::test]
     async fn finalize_task_edit_cancelled_does_not_change_db() {
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-        let db: Arc<dyn crate::db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
-        let task = seed_task(&*db);
+        let db: Arc<dyn crate::db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+        let task = seed_task(&*db).await;
 
         let (tx, _rx) = unbounded_channel();
         let (feed_tx, _) = unbounded_channel();
@@ -928,7 +929,7 @@ mod tests {
         )
         .await;
 
-        let still = db.get_task(task.id).unwrap().unwrap();
+        let still = db.get_task(task.id).await.unwrap().unwrap();
         assert_eq!(still.title, task.title);
         assert_eq!(still.description, task.description);
     }
@@ -939,7 +940,7 @@ mod tests {
         // If a FinalizeEditorResult with Description leaks through, it
         // should not crash or produce commands.
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-        let (rt, mut app) = runtime_with_runner(runner);
+        let (rt, mut app) = runtime_with_runner(runner).await;
         let cmds = rt
             .exec_finalize_editor_result(
                 &mut app,

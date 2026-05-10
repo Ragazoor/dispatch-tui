@@ -142,7 +142,9 @@ impl TuiRuntime {
                 tag: None,
                 base_branch: None,
                 project_id: epic.project_id,
-            }) {
+            })
+            .await
+        {
             Ok(task) => task,
             Err(e) => {
                 app.update(Message::System(crate::tui::messages::SystemMessage::Error(
@@ -229,10 +231,13 @@ impl TuiRuntime {
             };
 
             let count = items.len();
-            let known_paths = db.list_repo_paths().unwrap_or_default();
+            let known_paths = db.list_repo_paths().await.unwrap_or_default();
             let repo_paths = dispatch::resolve_feed_item_repo_paths(&items, &known_paths);
             let base_branches = crate::feed::resolve_base_branches(&repo_paths, &*runner);
-            match db.upsert_feed_tasks(epic_id, &items, &repo_paths, &base_branches) {
+            match db
+                .upsert_feed_tasks(epic_id, &items, &repo_paths, &base_branches)
+                .await
+            {
                 Ok(()) => {
                     let _ = tx.send(Message::Feed(
                         crate::tui::messages::FeedMessage::Refreshed { epic_title, count },

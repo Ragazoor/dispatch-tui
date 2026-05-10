@@ -5,7 +5,7 @@ use super::*;
 async fn security_alerts_round_trip() {
     use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
 
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let now = chrono::Utc::now();
 
     let alerts = vec![
@@ -64,7 +64,7 @@ async fn security_alerts_round_trip() {
 async fn get_security_alert_found() {
     use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
 
-    let db = Database::open_in_memory().unwrap();
+    let db = Database::open_in_memory().await.unwrap();
     let alert = SecurityAlert {
         number: 7,
         repo: "acme/api".to_string(),
@@ -98,7 +98,7 @@ async fn get_security_alert_found() {
 async fn get_security_alert_wrong_kind_returns_none() {
     use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
 
-    let db = Database::open_in_memory().unwrap();
+    let db = Database::open_in_memory().await.unwrap();
     let alert = SecurityAlert {
         number: 7,
         repo: "acme/api".to_string(),
@@ -127,7 +127,7 @@ async fn get_security_alert_wrong_kind_returns_none() {
 #[tokio::test]
 async fn get_security_alert_not_found() {
     use crate::models::AlertKind;
-    let db = Database::open_in_memory().unwrap();
+    let db = Database::open_in_memory().await.unwrap();
     let result = db
         .get_security_alert("acme/api", 999, AlertKind::Dependabot)
         .await
@@ -139,7 +139,7 @@ async fn get_security_alert_not_found() {
 async fn security_alerts_save_replaces_previous() {
     use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
 
-    let db = in_memory_db();
+    let db = in_memory_db().await;
     let now = chrono::Utc::now();
 
     let alerts1 = vec![SecurityAlert {
@@ -186,7 +186,7 @@ async fn save_security_alerts_preserves_agent_fields() {
     use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
     use chrono::Utc;
 
-    let db = Database::open_in_memory().unwrap();
+    let db = Database::open_in_memory().await.unwrap();
 
     let alert = SecurityAlert {
         number: 1,
@@ -252,7 +252,7 @@ async fn set_alert_agent_updates_fields() {
     use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
     use chrono::Utc;
 
-    let db = Database::open_in_memory().unwrap();
+    let db = Database::open_in_memory().await.unwrap();
 
     let alert = SecurityAlert {
         number: 1,
@@ -297,7 +297,7 @@ async fn update_agent_status_finds_security_alert() {
     use crate::models::{AlertKind, AlertSeverity, ReviewAgentStatus, SecurityAlert};
     use chrono::Utc;
 
-    let db = Database::open_in_memory().unwrap();
+    let db = Database::open_in_memory().await.unwrap();
     let alert = SecurityAlert {
         number: 1,
         repo: "acme/app".to_string(),
