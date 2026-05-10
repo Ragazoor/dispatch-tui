@@ -287,23 +287,22 @@ async fn fetch_security_subcommand_removed() {
 // hook
 // ---------------------------------------------------------------------------
 
-#[test]
-fn hook_notification_sets_needs_input_sub_status() {
+#[tokio::test]
+async fn hook_notification_sets_needs_input_sub_status() {
     let db = NamedTempFile::new().unwrap();
     let db_path = db.path().to_str().unwrap();
-    let id = seed_task(db.path(), "Hook Test");
+    let id = seed_task(db.path(), "Hook Test").await;
 
-    // Move the task to Running so the hook actually has an effect.
-    {
-        let conn = Database::open(db.path()).unwrap();
-        conn.patch_task(
-            id,
-            &TaskPatch::new()
-                .status(TaskStatus::Running)
-                .sub_status(SubStatus::Active),
-        )
-        .unwrap();
-    }
+    let conn = Database::open(db.path()).await.unwrap();
+    conn.patch_task(
+        id,
+        &TaskPatch::new()
+            .status(TaskStatus::Running)
+            .sub_status(SubStatus::Active),
+    )
+    .await
+    .unwrap();
+    drop(conn);
 
     let out = binary()
         .args(["--db", db_path, "hook", &id.0.to_string(), "notification"])
@@ -315,8 +314,8 @@ fn hook_notification_sets_needs_input_sub_status() {
         String::from_utf8_lossy(&out.stderr)
     );
 
-    let conn = Database::open(db.path()).unwrap();
-    let task = conn.get_task(id).unwrap().unwrap();
+    let conn = Database::open(db.path()).await.unwrap();
+    let task = conn.get_task(id).await.unwrap().unwrap();
     assert_eq!(task.sub_status, SubStatus::NeedsInput);
     assert!(
         task.last_notification_at.is_some(),
@@ -324,10 +323,10 @@ fn hook_notification_sets_needs_input_sub_status() {
     );
 }
 
-#[test]
-fn hook_unknown_kind_fails() {
+#[tokio::test]
+async fn hook_unknown_kind_fails() {
     let db = NamedTempFile::new().unwrap();
-    let id = seed_task(db.path(), "Hook Bad Kind");
+    let id = seed_task(db.path(), "Hook Bad Kind").await;
     let out = binary()
         .args([
             "--db",

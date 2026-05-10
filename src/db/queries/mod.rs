@@ -190,10 +190,7 @@ pub(super) fn format_datetime(dt: DateTime<Utc>) -> String {
 }
 
 /// Read a nullable TEXT timestamp column.
-pub(super) fn read_optional_datetime(
-    row: &rusqlite::Row<'_>,
-    col: &str,
-) -> Option<DateTime<Utc>> {
+pub(super) fn read_optional_datetime(row: &rusqlite::Row<'_>, col: &str) -> Option<DateTime<Utc>> {
     row.get::<_, Option<String>>(col)
         .ok()
         .flatten()
