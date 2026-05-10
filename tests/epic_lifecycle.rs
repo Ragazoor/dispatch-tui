@@ -92,8 +92,8 @@ fn full_epic_lifecycle() {
 /// `patch_epic` / `patch_task` rather than `DELETE FROM tasks`, so the FK
 /// columns are not exercised. Before the fix, `Command::DeleteEpic` ran
 /// `DELETE FROM tasks WHERE epic_id = ?` which failed with FK violations.
-#[test]
-fn soft_archive_epic_does_not_violate_foreign_keys() {
+#[tokio::test]
+async fn soft_archive_epic_does_not_violate_foreign_keys() {
     let db = Database::open_in_memory().unwrap();
 
     let epic = db
@@ -138,6 +138,7 @@ fn soft_archive_epic_does_not_violate_foreign_keys() {
         tags: &[],
         source_task_id: Some(task_id),
     })
+    .await
     .unwrap();
 
     // Soft-archive code path: patch the task and the epic to status=Archived.

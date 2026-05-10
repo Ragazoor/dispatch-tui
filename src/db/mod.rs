@@ -441,24 +441,25 @@ pub struct CreateLearningRow<'a> {
 // LearningStore — narrow sub-trait for the learnings table
 // ---------------------------------------------------------------------------
 
+#[async_trait::async_trait]
 pub trait LearningStore: Send + Sync {
-    fn create_learning(&self, row: CreateLearningRow<'_>) -> Result<LearningId>;
+    async fn create_learning(&self, row: CreateLearningRow<'_>) -> Result<LearningId>;
 
-    fn get_learning(&self, id: LearningId) -> Result<Option<Learning>>;
+    async fn get_learning(&self, id: LearningId) -> Result<Option<Learning>>;
 
-    fn list_learnings(&self, filter: LearningFilter) -> Result<Vec<Learning>>;
+    async fn list_learnings(&self, filter: LearningFilter) -> Result<Vec<Learning>>;
 
-    fn patch_learning(&self, id: LearningId, patch: &LearningPatch<'_>) -> Result<()>;
+    async fn patch_learning(&self, id: LearningId, patch: &LearningPatch<'_>) -> Result<()>;
 
-    fn delete_learning(&self, id: LearningId) -> Result<()>;
+    async fn delete_learning(&self, id: LearningId) -> Result<()>;
 
     /// Atomically increments `confirmed_count` and updates `last_confirmed_at` and `updated_at`.
-    fn upvote_learning(&self, id: LearningId) -> Result<()>;
+    async fn upvote_learning(&self, id: LearningId) -> Result<()>;
 
     /// Returns approved learnings for the given task context, unioning user + project + repo + epic
     /// scopes. Task-scoped learnings are excluded (they surface via explicit query only).
     /// Ordered by scope priority (procedural > epic > repo > project > user), then confirmed_count DESC.
-    fn list_learnings_for_dispatch(
+    async fn list_learnings_for_dispatch(
         &self,
         project_id: Option<ProjectId>,
         repo_path: &str,
@@ -470,10 +471,11 @@ pub trait LearningStore: Send + Sync {
 // LearningRetrievalStore — narrow sub-trait for retrievals + verdicts
 // ---------------------------------------------------------------------------
 
+#[async_trait::async_trait]
 pub trait LearningRetrievalStore: Send + Sync {
     /// Insert a row into `learning_retrievals` recording that `learning_id` was
     /// surfaced to `task_id` via the given source.
-    fn record_retrieval(
+    async fn record_retrieval(
         &self,
         task_id: TaskId,
         learning_id: LearningId,
@@ -481,20 +483,20 @@ pub trait LearningRetrievalStore: Send + Sync {
     ) -> Result<()>;
 
     /// Return all retrievals recorded for `task_id`, ordered by id ascending.
-    fn list_retrievals_for_task(&self, task_id: TaskId) -> Result<Vec<LearningRetrieval>>;
+    async fn list_retrievals_for_task(&self, task_id: TaskId) -> Result<Vec<LearningRetrieval>>;
 
     /// Apply a batch of verdicts atomically. Each verdict is recorded in
     /// `learning_verdicts`; in addition, `Helped` bumps the learning's
     /// `confirmed_count` and `Wrong` flips an approved learning to
     /// `needs_review`. `Unused` only records a row.
-    fn apply_verdicts_tx(
+    async fn apply_verdicts_tx(
         &self,
         task_id: TaskId,
         verdicts: &[(LearningId, LearningVerdict)],
     ) -> Result<()>;
 
     /// Count of learnings currently in the `needs_review` state.
-    fn count_learnings_needs_review(&self) -> Result<i64>;
+    async fn count_learnings_needs_review(&self) -> Result<i64>;
 }
 
 // ---------------------------------------------------------------------------

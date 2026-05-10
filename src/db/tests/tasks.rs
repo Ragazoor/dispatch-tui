@@ -1908,8 +1908,8 @@ fn upsert_feed_tasks_replaces_labels_and_sort_order_on_conflict() {
     assert_eq!(task.repo_path, "/manually-fixed");
 }
 
-#[test]
-fn upsert_feed_tasks_can_purge_task_with_associated_learning() {
+#[tokio::test]
+async fn upsert_feed_tasks_can_purge_task_with_associated_learning() {
     use crate::models::{LearningKind, LearningScope};
 
     let db = in_memory_db();
@@ -1933,6 +1933,7 @@ fn upsert_feed_tasks_can_purge_task_with_associated_learning() {
         tags: &[],
         source_task_id: Some(task_id),
     })
+    .await
     .unwrap();
 
     // Second feed run with a different external_id — the previous task should

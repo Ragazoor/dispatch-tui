@@ -479,13 +479,14 @@ pub struct LearningInjections<'a> {
     pub tiered: Vec<&'a Learning>,
 }
 
-pub fn build_and_record_injections(
+pub async fn build_and_record_injections(
     db: &dyn crate::db::TaskStore,
     task: &crate::models::Task,
 ) -> (Vec<Learning>, Vec<Learning>) {
     use crate::models::RetrievalSource;
     let active = db
         .list_learnings_for_dispatch(Some(task.project_id), &task.repo_path, task.epic_id)
+        .await
         .unwrap_or_default();
     let (procedural, non_procedural): (Vec<_>, Vec<_>) = active
         .into_iter()
@@ -503,7 +504,7 @@ pub fn build_and_record_injections(
                 .map(|l| (l.id, RetrievalSource::PromptInjection)),
         );
     for (lid, source) in pairs {
-        if let Err(e) = db.record_retrieval(task.id, lid, source) {
+        if let Err(e) = db.record_retrieval(task.id, lid, source).await {
             tracing::warn!(
                 task_id = task.id.0,
                 learning_id = lid.0,

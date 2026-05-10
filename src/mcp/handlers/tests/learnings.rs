@@ -28,7 +28,7 @@ async fn create_task_in_repo(state: &Arc<McpState>, repo: &str) -> crate::models
         .unwrap()
 }
 
-fn create_approved_learning(
+async fn create_approved_learning(
     state: &Arc<McpState>,
     summary: &str,
     scope: crate::models::LearningScope,
@@ -47,6 +47,7 @@ fn create_approved_learning(
             tags: &tag_strings,
             source_task_id: None,
         })
+        .await
         .unwrap();
     state
         .db
@@ -54,6 +55,7 @@ fn create_approved_learning(
             id,
             &crate::db::LearningPatch::new().status(crate::models::LearningStatus::Approved),
         )
+        .await
         .unwrap();
     id
 }
@@ -88,7 +90,7 @@ async fn record_learning_creates_proposed_entry() {
         status: Some(crate::models::LearningStatus::Approved),
         ..Default::default()
     };
-    let learnings = state.db.list_learnings(filter).unwrap();
+    let learnings = state.db.list_learnings(filter).await.unwrap();
     assert_eq!(learnings.len(), 1);
     assert_eq!(
         learnings[0].summary,
@@ -123,7 +125,7 @@ async fn record_learning_derives_scope_ref_for_repo() {
         status: Some(crate::models::LearningStatus::Approved),
         ..Default::default()
     };
-    let learnings = state.db.list_learnings(filter).unwrap();
+    let learnings = state.db.list_learnings(filter).await.unwrap();
     assert_eq!(learnings.len(), 1);
     assert_eq!(learnings[0].scope_ref.as_deref(), Some("/repo/bar"));
 }
@@ -169,7 +171,7 @@ async fn record_learning_derives_scope_ref_for_epic() {
         status: Some(crate::models::LearningStatus::Approved),
         ..Default::default()
     };
-    let learnings = state.db.list_learnings(filter).unwrap();
+    let learnings = state.db.list_learnings(filter).await.unwrap();
     assert_eq!(learnings.len(), 1);
     assert_eq!(
         learnings[0].scope_ref.as_deref(),
@@ -224,7 +226,7 @@ async fn record_learning_user_scope_no_scope_ref() {
         status: Some(crate::models::LearningStatus::Approved),
         ..Default::default()
     };
-    let learnings = state.db.list_learnings(filter).unwrap();
+    let learnings = state.db.list_learnings(filter).await.unwrap();
     assert_eq!(learnings.len(), 1);
     assert!(learnings[0].scope_ref.is_none());
 }
@@ -286,7 +288,8 @@ async fn record_learning_echoes_similar_approved_entries() {
         crate::models::LearningScope::Repo,
         Some("/repo/foo"),
         &[],
-    );
+    )
+    .await;
 
     let resp = call(
         &state,
@@ -328,7 +331,8 @@ async fn record_learning_no_echo_when_different_kind() {
         crate::models::LearningScope::Repo,
         Some("/repo/foo"),
         &[],
-    );
+    )
+    .await;
 
     let resp = call(
         &state,
@@ -364,7 +368,8 @@ async fn record_learning_still_creates_when_similar_exists() {
         crate::models::LearningScope::Repo,
         Some("/repo/foo"),
         &[],
-    );
+    )
+    .await;
 
     let resp = call(
         &state,
@@ -385,6 +390,7 @@ async fn record_learning_still_creates_when_similar_exists() {
     let all = state
         .db
         .list_learnings(crate::db::LearningFilter::default())
+        .await
         .unwrap();
     assert_eq!(
         all.len(),
@@ -439,7 +445,8 @@ async fn query_learnings_returns_approved_for_task() {
         crate::models::LearningScope::Repo,
         Some("/repo/myproject"),
         &[],
-    );
+    )
+    .await;
 
     let resp = call(
         &state,
@@ -468,14 +475,16 @@ async fn query_learnings_tag_filter_narrows_results() {
         crate::models::LearningScope::Repo,
         Some("/repo/tagged"),
         &["rust"],
-    );
+    )
+    .await;
     create_approved_learning(
         &state,
         "Testing tips",
         crate::models::LearningScope::Repo,
         Some("/repo/tagged"),
         &["testing"],
-    );
+    )
+    .await;
 
     let resp = call(
         &state,
@@ -506,7 +515,8 @@ async fn query_learnings_respects_limit() {
             crate::models::LearningScope::Repo,
             Some("/repo/limited"),
             &[],
-        );
+        )
+        .await;
     }
 
     let resp = call(
@@ -535,14 +545,16 @@ async fn query_learnings_records_a_retrieval_per_returned_id() {
         crate::models::LearningScope::Repo,
         Some("/repo/retrievals"),
         &[],
-    );
+    )
+    .await;
     create_approved_learning(
         &state,
         "Second entry",
         crate::models::LearningScope::Repo,
         Some("/repo/retrievals"),
         &[],
-    );
+    )
+    .await;
 
     let resp = call(
         &state,
@@ -555,7 +567,7 @@ async fn query_learnings_records_a_retrieval_per_returned_id() {
     .await;
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
 
-    let rows = state.db.list_retrievals_for_task(task_id).unwrap();
+    let rows = state.db.list_retrievals_for_task(task_id).await.unwrap();
     let query_rows: Vec<_> = rows
         .iter()
         .filter(|r| r.source == crate::models::RetrievalSource::QueryLearnings)
@@ -595,7 +607,8 @@ async fn upvote_learning_increments_count() {
         crate::models::LearningScope::User,
         None,
         &[],
-    );
+    )
+    .await;
 
     let resp = call(
         &state,
@@ -608,7 +621,7 @@ async fn upvote_learning_increments_count() {
     .await;
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
 
-    let learning = state.db.get_learning(learning_id).unwrap().unwrap();
+    let learning = state.db.get_learning(learning_id).await.unwrap().unwrap();
     assert_eq!(learning.confirmed_count, 1);
 }
 

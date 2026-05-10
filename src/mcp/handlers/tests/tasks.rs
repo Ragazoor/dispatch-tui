@@ -2515,7 +2515,7 @@ fn create_wrappable_task(db: &Arc<dyn db::TaskStore>) -> crate::models::TaskId {
     task_id
 }
 
-fn create_approved_user_learning(
+async fn create_approved_user_learning(
     db: &Arc<dyn db::TaskStore>,
     summary: &str,
 ) -> crate::models::LearningId {
@@ -2529,16 +2529,18 @@ fn create_approved_user_learning(
             tags: &[],
             source_task_id: None,
         })
+        .await
         .unwrap();
     db.patch_learning(
         id,
         &crate::db::LearningPatch::new().status(crate::models::LearningStatus::Approved),
     )
+    .await
     .unwrap();
     id
 }
 
-fn setup_state_after_dispatch_with_two_retrieved_approved_learnings() -> (
+async fn setup_state_after_dispatch_with_two_retrieved_approved_learnings() -> (
     Arc<McpState>,
     Arc<dyn db::TaskStore>,
     crate::models::TaskId,
@@ -2547,11 +2549,13 @@ fn setup_state_after_dispatch_with_two_retrieved_approved_learnings() -> (
 ) {
     let (state, db) = make_state_with_runner(rebase_ok_runner());
     let task_id = create_wrappable_task(&db);
-    let l1 = create_approved_user_learning(&db, "first learning");
-    let l2 = create_approved_user_learning(&db, "second learning");
+    let l1 = create_approved_user_learning(&db, "first learning").await;
+    let l2 = create_approved_user_learning(&db, "second learning").await;
     db.record_retrieval(task_id, l1, crate::models::RetrievalSource::PromptInjection)
+        .await
         .unwrap();
     db.record_retrieval(task_id, l2, crate::models::RetrievalSource::PromptInjection)
+        .await
         .unwrap();
     (state, db, task_id, l1, l2)
 }
@@ -2559,7 +2563,7 @@ fn setup_state_after_dispatch_with_two_retrieved_approved_learnings() -> (
 #[tokio::test]
 async fn wrap_up_with_verdicts_applies_them() {
     let (state, db, task_id, l1_id, l2_id) =
-        setup_state_after_dispatch_with_two_retrieved_approved_learnings();
+        setup_state_after_dispatch_with_two_retrieved_approved_learnings().await;
     let resp = call(
         &state,
         "tools/call",
@@ -2578,8 +2582,8 @@ async fn wrap_up_with_verdicts_applies_them() {
     .await;
     // Verdicts are applied before the rebase, so they persist regardless of
     // rebase outcome. Assert on DB state.
-    let l1 = db.get_learning(l1_id).unwrap().unwrap();
-    let l2 = db.get_learning(l2_id).unwrap().unwrap();
+    let l1 = db.get_learning(l1_id).await.unwrap().unwrap();
+    let l2 = db.get_learning(l2_id).await.unwrap().unwrap();
     assert_eq!(l1.confirmed_count, 1);
     assert_eq!(l2.status, crate::models::LearningStatus::NeedsReview);
     let _ = resp;
@@ -2610,7 +2614,7 @@ async fn wrap_up_without_verdicts_still_succeeds() {
 #[tokio::test]
 async fn wrap_up_rejects_verdict_for_unretrieved_learning() {
     let (state, _db, task_id, _l1, _l2) =
-        setup_state_after_dispatch_with_two_retrieved_approved_learnings();
+        setup_state_after_dispatch_with_two_retrieved_approved_learnings().await;
     let resp = call(
         &state,
         "tools/call",
@@ -2630,7 +2634,7 @@ async fn wrap_up_rejects_verdict_for_unretrieved_learning() {
 #[tokio::test]
 async fn wrap_up_rejects_unknown_verdict_string() {
     let (state, _db, task_id, l1_id, _l2) =
-        setup_state_after_dispatch_with_two_retrieved_approved_learnings();
+        setup_state_after_dispatch_with_two_retrieved_approved_learnings().await;
     let resp = call(
         &state,
         "tools/call",
@@ -6521,7 +6525,7 @@ async fn create_task_in_repo(state: &Arc<McpState>, repo: &str) -> crate::models
         .unwrap()
 }
 
-fn create_approved_learning(
+async fn create_approved_learning(
     state: &Arc<McpState>,
     summary: &str,
     scope: crate::models::LearningScope,
@@ -6540,6 +6544,7 @@ fn create_approved_learning(
             tags: &tag_strings,
             source_task_id: None,
         })
+        .await
         .unwrap();
     state
         .db
@@ -6547,6 +6552,7 @@ fn create_approved_learning(
             id,
             &crate::db::LearningPatch::new().status(crate::models::LearningStatus::Approved),
         )
+        .await
         .unwrap();
     id
 }
@@ -6581,7 +6587,7 @@ async fn record_learning_creates_proposed_entry() {
         status: Some(crate::models::LearningStatus::Approved),
         ..Default::default()
     };
-    let learnings = state.db.list_learnings(filter).unwrap();
+    let learnings = state.db.list_learnings(filter).await.unwrap();
     assert_eq!(learnings.len(), 1);
     assert_eq!(
         learnings[0].summary,
@@ -6616,7 +6622,7 @@ async fn record_learning_derives_scope_ref_for_repo() {
         status: Some(crate::models::LearningStatus::Approved),
         ..Default::default()
     };
-    let learnings = state.db.list_learnings(filter).unwrap();
+    let learnings = state.db.list_learnings(filter).await.unwrap();
     assert_eq!(learnings.len(), 1);
     assert_eq!(learnings[0].scope_ref.as_deref(), Some("/repo/bar"));
 }
@@ -6662,7 +6668,7 @@ async fn record_learning_derives_scope_ref_for_epic() {
         status: Some(crate::models::LearningStatus::Approved),
         ..Default::default()
     };
-    let learnings = state.db.list_learnings(filter).unwrap();
+    let learnings = state.db.list_learnings(filter).await.unwrap();
     assert_eq!(learnings.len(), 1);
     assert_eq!(
         learnings[0].scope_ref.as_deref(),
@@ -6717,7 +6723,7 @@ async fn record_learning_user_scope_no_scope_ref() {
         status: Some(crate::models::LearningStatus::Approved),
         ..Default::default()
     };
-    let learnings = state.db.list_learnings(filter).unwrap();
+    let learnings = state.db.list_learnings(filter).await.unwrap();
     assert_eq!(learnings.len(), 1);
     assert!(learnings[0].scope_ref.is_none());
 }
@@ -6777,7 +6783,8 @@ async fn query_learnings_returns_approved_for_task() {
         crate::models::LearningScope::Repo,
         Some("/repo/myproject"),
         &[],
-    );
+    )
+    .await;
 
     let resp = call(
         &state,
@@ -6806,14 +6813,16 @@ async fn query_learnings_tag_filter_narrows_results() {
         crate::models::LearningScope::Repo,
         Some("/repo/tagged"),
         &["rust"],
-    );
+    )
+    .await;
     create_approved_learning(
         &state,
         "Testing tips",
         crate::models::LearningScope::Repo,
         Some("/repo/tagged"),
         &["testing"],
-    );
+    )
+    .await;
 
     let resp = call(
         &state,
@@ -6844,7 +6853,8 @@ async fn query_learnings_respects_limit() {
             crate::models::LearningScope::Repo,
             Some("/repo/limited"),
             &[],
-        );
+        )
+        .await;
     }
 
     let resp = call(
@@ -6891,7 +6901,8 @@ async fn upvote_learning_increments_count() {
         crate::models::LearningScope::User,
         None,
         &[],
-    );
+    )
+    .await;
 
     let resp = call(
         &state,
@@ -6904,7 +6915,7 @@ async fn upvote_learning_increments_count() {
     .await;
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
 
-    let learning = state.db.get_learning(learning_id).unwrap().unwrap();
+    let learning = state.db.get_learning(learning_id).await.unwrap().unwrap();
     assert_eq!(learning.confirmed_count, 1);
 }
 

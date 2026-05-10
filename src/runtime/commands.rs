@@ -10,7 +10,7 @@ pub(super) async fn dispatch(
     use super::Command::*;
     match command {
         Task(cmd) => dispatch_task(rt, app, cmd).await,
-        Editor(cmd) => dispatch_editor(rt, app, cmd),
+        Editor(cmd) => dispatch_editor(rt, app, cmd).await,
         Feed(cmd) => {
             dispatch_feed(rt, cmd);
             vec![]
@@ -131,23 +131,23 @@ pub(super) async fn dispatch(
             vec![]
         }
         Learning(cmd) => {
-            dispatch_learning(rt, app, cmd);
+            dispatch_learning(rt, app, cmd).await;
             vec![]
         }
     }
 }
 
-fn dispatch_learning(
+async fn dispatch_learning(
     rt: &super::TuiRuntime,
     app: &mut super::App,
     cmd: crate::tui::commands::LearningCommand,
 ) {
     use crate::tui::commands::LearningCommand::*;
     match cmd {
-        Load => rt.exec_load_learnings(app),
-        Archive(id) => rt.exec_archive_learning(app, id),
-        Reject(id) => rt.exec_reject_learning(app, id),
-        Approve(id) => rt.exec_approve_learning(app, id),
+        Load => rt.exec_load_learnings(app).await,
+        Archive(id) => rt.exec_archive_learning(app, id).await,
+        Reject(id) => rt.exec_reject_learning(app, id).await,
+        Approve(id) => rt.exec_approve_learning(app, id).await,
     }
 }
 
@@ -219,7 +219,7 @@ async fn dispatch_task(
             rt.exec_patch_sub_status(app, id, sub_status);
             vec![]
         }
-        RefreshFromDb => rt.exec_refresh_from_db(app),
+        RefreshFromDb => rt.exec_refresh_from_db(app).await,
     }
 }
 
@@ -291,7 +291,7 @@ fn dispatch_feed(rt: &super::TuiRuntime, cmd: crate::tui::commands::FeedCommand)
 /// `FinalizeResult` re-enters the queue: post-edit `app.update(...)` calls
 /// inside `exec_finalize_editor_result` can produce follow-on commands
 /// (DB persistence, status messages), which the runtime queue then drains.
-fn dispatch_editor(
+async fn dispatch_editor(
     rt: &super::TuiRuntime,
     app: &mut super::App,
     cmd: crate::tui::commands::EditorCommand,
@@ -302,6 +302,8 @@ fn dispatch_editor(
             rt.exec_pop_out_editor(app, kind);
             vec![]
         }
-        FinalizeResult { kind, outcome } => rt.exec_finalize_editor_result(app, kind, outcome),
+        FinalizeResult { kind, outcome } => {
+            rt.exec_finalize_editor_result(app, kind, outcome).await
+        }
     }
 }

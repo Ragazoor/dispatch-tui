@@ -44,7 +44,7 @@ impl LearningService {
         Self { db }
     }
 
-    pub fn create_learning(
+    pub async fn create_learning(
         &self,
         params: CreateLearningParams,
     ) -> Result<LearningId, ServiceError> {
@@ -77,26 +77,32 @@ impl LearningService {
                 tags: &params.tags,
                 source_task_id: params.source_task_id,
             })
+            .await
             .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
     }
 
-    pub fn get_learning(&self, id: LearningId) -> Result<Learning, ServiceError> {
+    pub async fn get_learning(&self, id: LearningId) -> Result<Learning, ServiceError> {
         self.db
             .get_learning(id)
+            .await
             .map_err(|e| ServiceError::Internal(format!("database error: {e}")))?
             .ok_or_else(|| ServiceError::NotFound(format!("learning {id} not found")))
     }
 
-    pub fn list_learnings(&self, filter: LearningFilter) -> Result<Vec<Learning>, ServiceError> {
+    pub async fn list_learnings(
+        &self,
+        filter: LearningFilter,
+    ) -> Result<Vec<Learning>, ServiceError> {
         self.db
             .list_learnings(filter)
+            .await
             .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
     }
 
     /// Approve a learning. Allowed from any non-terminal status, so this also
     /// transitions a `needs_review` learning back to `approved`.
-    pub fn approve_learning(&self, id: LearningId) -> Result<(), ServiceError> {
-        let learning = self.get_learning(id)?;
+    pub async fn approve_learning(&self, id: LearningId) -> Result<(), ServiceError> {
+        let learning = self.get_learning(id).await?;
         if learning.status.is_terminal() {
             return Err(ServiceError::Validation(format!(
                 "cannot approve a {} learning",
@@ -108,11 +114,12 @@ impl LearningService {
         }
         self.db
             .patch_learning(id, &LearningPatch::new().status(LearningStatus::Approved))
+            .await
             .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
     }
 
-    pub fn reject_learning(&self, id: LearningId) -> Result<(), ServiceError> {
-        let learning = self.get_learning(id)?;
+    pub async fn reject_learning(&self, id: LearningId) -> Result<(), ServiceError> {
+        let learning = self.get_learning(id).await?;
         if learning.status.is_terminal() {
             return Err(ServiceError::Validation(format!(
                 "cannot reject a {} learning",
@@ -121,11 +128,12 @@ impl LearningService {
         }
         self.db
             .patch_learning(id, &LearningPatch::new().status(LearningStatus::Rejected))
+            .await
             .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
     }
 
-    pub fn archive_learning(&self, id: LearningId) -> Result<(), ServiceError> {
-        let learning = self.get_learning(id)?;
+    pub async fn archive_learning(&self, id: LearningId) -> Result<(), ServiceError> {
+        let learning = self.get_learning(id).await?;
         if !matches!(
             learning.status,
             LearningStatus::Approved | LearningStatus::NeedsReview
@@ -137,11 +145,12 @@ impl LearningService {
         }
         self.db
             .patch_learning(id, &LearningPatch::new().status(LearningStatus::Archived))
+            .await
             .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
     }
 
-    pub fn update_learning(&self, params: UpdateLearningParams) -> Result<(), ServiceError> {
-        let learning = self.get_learning(params.id)?;
+    pub async fn update_learning(&self, params: UpdateLearningParams) -> Result<(), ServiceError> {
+        let learning = self.get_learning(params.id).await?;
         if learning.status.is_terminal() {
             return Err(ServiceError::Validation(
                 "cannot edit a rejected or archived learning".to_string(),
@@ -170,16 +179,18 @@ impl LearningService {
         }
         self.db
             .patch_learning(params.id, &patch)
+            .await
             .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
     }
 
-    pub fn upvote_learning(&self, id: LearningId) -> Result<(), ServiceError> {
+    pub async fn upvote_learning(&self, id: LearningId) -> Result<(), ServiceError> {
         self.db
             .upvote_learning(id)
+            .await
             .map_err(|e| ServiceError::Validation(format!("cannot upvote: {e}")))
     }
 
-    pub fn record_retrieval(
+    pub async fn record_retrieval(
         &self,
         task_id: TaskId,
         learning_id: LearningId,
@@ -187,10 +198,11 @@ impl LearningService {
     ) -> Result<(), ServiceError> {
         self.db
             .record_retrieval(task_id, learning_id, source)
+            .await
             .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
     }
 
-    pub fn apply_verdicts(
+    pub async fn apply_verdicts(
         &self,
         task_id: TaskId,
         verdicts: Vec<(LearningId, LearningVerdict)>,
@@ -201,6 +213,7 @@ impl LearningService {
         let retrieved: std::collections::HashSet<LearningId> = self
             .db
             .list_retrievals_for_task(task_id)
+            .await
             .map_err(|e| ServiceError::Internal(format!("database error: {e}")))?
             .into_iter()
             .map(|r| r.learning_id)
@@ -215,6 +228,7 @@ impl LearningService {
         }
         self.db
             .apply_verdicts_tx(task_id, &verdicts)
+            .await
             .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
     }
 }
@@ -262,7 +276,7 @@ mod learning_tests {
         .unwrap()
     }
 
-    fn seed_approved_learning(svc: &LearningService) -> LearningId {
+    async fn seed_approved_learning(svc: &LearningService) -> LearningId {
         svc.create_learning(CreateLearningParams {
             kind: LearningKind::Convention,
             summary: "A convention".to_string(),
@@ -272,11 +286,12 @@ mod learning_tests {
             tags: vec![],
             source_task_id: None,
         })
+        .await
         .unwrap()
     }
 
-    #[test]
-    fn create_learning_rejects_empty_summary() {
+    #[tokio::test]
+    async fn create_learning_rejects_empty_summary() {
         let svc = service();
         let err = svc
             .create_learning(CreateLearningParams {
@@ -288,12 +303,13 @@ mod learning_tests {
                 tags: vec![],
                 source_task_id: None,
             })
+            .await
             .unwrap_err();
         assert!(matches!(err, ServiceError::Validation(_)));
     }
 
-    #[test]
-    fn create_learning_rejects_user_scope_with_scope_ref() {
+    #[tokio::test]
+    async fn create_learning_rejects_user_scope_with_scope_ref() {
         let svc = service();
         let err = svc
             .create_learning(CreateLearningParams {
@@ -305,12 +321,13 @@ mod learning_tests {
                 tags: vec![],
                 source_task_id: None,
             })
+            .await
             .unwrap_err();
         assert!(matches!(err, ServiceError::Validation(_)));
     }
 
-    #[test]
-    fn create_learning_rejects_non_user_scope_without_scope_ref() {
+    #[tokio::test]
+    async fn create_learning_rejects_non_user_scope_without_scope_ref() {
         let svc = service();
         let err = svc
             .create_learning(CreateLearningParams {
@@ -322,12 +339,13 @@ mod learning_tests {
                 tags: vec![],
                 source_task_id: None,
             })
+            .await
             .unwrap_err();
         assert!(matches!(err, ServiceError::Validation(_)));
     }
 
-    #[test]
-    fn create_learning_succeeds_with_valid_params() {
+    #[tokio::test]
+    async fn create_learning_succeeds_with_valid_params() {
         let svc = service();
         let id = svc
             .create_learning(CreateLearningParams {
@@ -339,13 +357,14 @@ mod learning_tests {
                 tags: vec![],
                 source_task_id: None,
             })
+            .await
             .unwrap();
-        let learning = svc.get_learning(id).unwrap();
+        let learning = svc.get_learning(id).await.unwrap();
         assert_eq!(learning.status, LearningStatus::Approved);
     }
 
-    #[test]
-    fn reject_learning_from_proposed_succeeds() {
+    #[tokio::test]
+    async fn reject_learning_from_proposed_succeeds() {
         let svc = service();
         let id = svc
             .create_learning(CreateLearningParams {
@@ -357,14 +376,15 @@ mod learning_tests {
                 tags: vec![],
                 source_task_id: None,
             })
+            .await
             .unwrap();
-        svc.reject_learning(id).unwrap();
-        let learning = svc.get_learning(id).unwrap();
+        svc.reject_learning(id).await.unwrap();
+        let learning = svc.get_learning(id).await.unwrap();
         assert_eq!(learning.status, LearningStatus::Rejected);
     }
 
-    #[test]
-    fn reject_learning_from_archived_fails() {
+    #[tokio::test]
+    async fn reject_learning_from_archived_fails() {
         let svc = service();
         let id = svc
             .create_learning(CreateLearningParams {
@@ -376,14 +396,15 @@ mod learning_tests {
                 tags: vec![],
                 source_task_id: None,
             })
+            .await
             .unwrap();
-        svc.archive_learning(id).unwrap();
-        let err = svc.reject_learning(id).unwrap_err();
+        svc.archive_learning(id).await.unwrap();
+        let err = svc.reject_learning(id).await.unwrap_err();
         assert!(matches!(err, ServiceError::Validation(_)));
     }
 
-    #[test]
-    fn archive_learning_from_approved_succeeds() {
+    #[tokio::test]
+    async fn archive_learning_from_approved_succeeds() {
         let svc = service();
         let id = svc
             .create_learning(CreateLearningParams {
@@ -395,54 +416,56 @@ mod learning_tests {
                 tags: vec![],
                 source_task_id: None,
             })
+            .await
             .unwrap();
-        svc.archive_learning(id).unwrap();
-        let learning = svc.get_learning(id).unwrap();
+        svc.archive_learning(id).await.unwrap();
+        let learning = svc.get_learning(id).await.unwrap();
         assert_eq!(learning.status, LearningStatus::Archived);
     }
 
-    #[test]
-    fn approve_learning_from_needs_review_sets_status_to_approved() {
+    #[tokio::test]
+    async fn approve_learning_from_needs_review_sets_status_to_approved() {
         use crate::db::LearningPatch;
         let (svc, db) = service_with_db();
-        let id = seed_approved_learning(&svc);
-        // Move to needs_review (simulating a `wrong` verdict).
+        let id = seed_approved_learning(&svc).await;
         db.patch_learning(
             id,
             &LearningPatch::new().status(LearningStatus::NeedsReview),
         )
+        .await
         .unwrap();
-        svc.approve_learning(id).unwrap();
-        let learning = svc.get_learning(id).unwrap();
+        svc.approve_learning(id).await.unwrap();
+        let learning = svc.get_learning(id).await.unwrap();
         assert_eq!(learning.status, LearningStatus::Approved);
     }
 
-    #[test]
-    fn approve_learning_from_terminal_status_fails() {
+    #[tokio::test]
+    async fn approve_learning_from_terminal_status_fails() {
         let svc = service();
-        let id = seed_approved_learning(&svc);
-        svc.reject_learning(id).unwrap();
-        let err = svc.approve_learning(id).unwrap_err();
+        let id = seed_approved_learning(&svc).await;
+        svc.reject_learning(id).await.unwrap();
+        let err = svc.approve_learning(id).await.unwrap_err();
         assert!(matches!(err, ServiceError::Validation(_)));
     }
 
-    #[test]
-    fn archive_learning_from_needs_review_succeeds() {
+    #[tokio::test]
+    async fn archive_learning_from_needs_review_succeeds() {
         use crate::db::LearningPatch;
         let (svc, db) = service_with_db();
-        let id = seed_approved_learning(&svc);
+        let id = seed_approved_learning(&svc).await;
         db.patch_learning(
             id,
             &LearningPatch::new().status(LearningStatus::NeedsReview),
         )
+        .await
         .unwrap();
-        svc.archive_learning(id).unwrap();
-        let learning = svc.get_learning(id).unwrap();
+        svc.archive_learning(id).await.unwrap();
+        let learning = svc.get_learning(id).await.unwrap();
         assert_eq!(learning.status, LearningStatus::Archived);
     }
 
-    #[test]
-    fn update_learning_on_rejected_fails() {
+    #[tokio::test]
+    async fn update_learning_on_rejected_fails() {
         let svc = service();
         let id = svc
             .create_learning(CreateLearningParams {
@@ -454,8 +477,9 @@ mod learning_tests {
                 tags: vec![],
                 source_task_id: None,
             })
+            .await
             .unwrap();
-        svc.reject_learning(id).unwrap();
+        svc.reject_learning(id).await.unwrap();
         let err = svc
             .update_learning(UpdateLearningParams {
                 id,
@@ -464,12 +488,13 @@ mod learning_tests {
                 kind: None,
                 tags: None,
             })
+            .await
             .unwrap_err();
         assert!(matches!(err, ServiceError::Validation(_)));
     }
 
-    #[test]
-    fn update_learning_rejects_empty_summary() {
+    #[tokio::test]
+    async fn update_learning_rejects_empty_summary() {
         let svc = service();
         let id = svc
             .create_learning(CreateLearningParams {
@@ -481,6 +506,7 @@ mod learning_tests {
                 tags: vec![],
                 source_task_id: None,
             })
+            .await
             .unwrap();
         let err = svc
             .update_learning(UpdateLearningParams {
@@ -490,12 +516,13 @@ mod learning_tests {
                 kind: None,
                 tags: None,
             })
+            .await
             .unwrap_err();
         assert!(matches!(err, ServiceError::Validation(_)));
     }
 
-    #[test]
-    fn upvote_learning_on_approved_succeeds() {
+    #[tokio::test]
+    async fn upvote_learning_on_approved_succeeds() {
         let svc = service();
         let id = svc
             .create_learning(CreateLearningParams {
@@ -507,48 +534,51 @@ mod learning_tests {
                 tags: vec![],
                 source_task_id: None,
             })
+            .await
             .unwrap();
-        svc.upvote_learning(id).unwrap();
-        let learning = svc.get_learning(id).unwrap();
+        svc.upvote_learning(id).await.unwrap();
+        let learning = svc.get_learning(id).await.unwrap();
         assert_eq!(learning.confirmed_count, 1);
     }
 
-    #[test]
-    fn get_learning_not_found_returns_error() {
+    #[tokio::test]
+    async fn get_learning_not_found_returns_error() {
         let svc = service();
-        let err = svc.get_learning(LearningId(99999)).unwrap_err();
+        let err = svc.get_learning(LearningId(99999)).await.unwrap_err();
         assert!(matches!(err, ServiceError::NotFound(_)));
     }
 
-    #[test]
-    fn apply_verdicts_validation_rejects_unknown_retrieval() {
+    #[tokio::test]
+    async fn apply_verdicts_validation_rejects_unknown_retrieval() {
         let (svc, db) = service_with_db();
         let task_id = seed_task(&db);
-        let learning_id = seed_approved_learning(&svc);
-        // No retrieval recorded — apply should fail with Validation.
+        let learning_id = seed_approved_learning(&svc).await;
         let err = svc
             .apply_verdicts(task_id, vec![(learning_id, LearningVerdict::Helped)])
+            .await
             .unwrap_err();
         assert!(matches!(err, ServiceError::Validation(_)));
     }
 
-    #[test]
-    fn apply_verdicts_succeeds_when_retrieval_exists() {
+    #[tokio::test]
+    async fn apply_verdicts_succeeds_when_retrieval_exists() {
         let (svc, db) = service_with_db();
         let task_id = seed_task(&db);
-        let learning_id = seed_approved_learning(&svc);
+        let learning_id = seed_approved_learning(&svc).await;
         svc.record_retrieval(task_id, learning_id, RetrievalSource::PromptInjection)
+            .await
             .unwrap();
         svc.apply_verdicts(task_id, vec![(learning_id, LearningVerdict::Helped)])
+            .await
             .unwrap();
-        let l = svc.get_learning(learning_id).unwrap();
+        let l = svc.get_learning(learning_id).await.unwrap();
         assert_eq!(l.confirmed_count, 1);
     }
 
-    #[test]
-    fn apply_verdicts_empty_is_ok() {
+    #[tokio::test]
+    async fn apply_verdicts_empty_is_ok() {
         let (svc, db) = service_with_db();
         let task_id = seed_task(&db);
-        svc.apply_verdicts(task_id, vec![]).unwrap();
+        svc.apply_verdicts(task_id, vec![]).await.unwrap();
     }
 }

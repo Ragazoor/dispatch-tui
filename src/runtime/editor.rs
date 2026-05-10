@@ -239,7 +239,7 @@ impl TuiRuntime {
     }
 
     /// Apply the editor result for the given [`EditKind`].
-    pub(super) fn exec_finalize_editor_result(
+    pub(super) async fn exec_finalize_editor_result(
         &self,
         app: &mut App,
         kind: EditKind,
@@ -249,20 +249,17 @@ impl TuiRuntime {
             EditKind::TaskEdit(task) => self.finalize_task_edit(app, task, outcome),
             EditKind::EpicEdit(epic) => self.finalize_epic_edit(app, epic, outcome),
             EditKind::Description { .. } => {
-                // Description edits are handled in the App before they reach
-                // this point; seeing one here means a logic bug, but we no-op
-                // to avoid panicking in production.
                 tracing::warn!("FinalizeEditorResult received Description kind; ignoring");
                 vec![]
             }
             EditKind::Learning(learning) => {
-                self.finalize_learning_edit(app, learning, outcome);
+                self.finalize_learning_edit(app, learning, outcome).await;
                 vec![]
             }
         }
     }
 
-    fn finalize_learning_edit(
+    async fn finalize_learning_edit(
         &self,
         app: &mut App,
         learning: models::Learning,
@@ -287,9 +284,9 @@ impl TuiRuntime {
 
         let db: Arc<dyn crate::db::TaskStore> = self.database.clone();
         let svc = crate::service::LearningService::new(db.clone());
-        match svc.update_learning(params) {
+        match svc.update_learning(params).await {
             Ok(()) => {
-                if let Ok(Some(updated)) = db.get_learning(learning.id) {
+                if let Ok(Some(updated)) = db.get_learning(learning.id).await {
                     app.update(Message::Learning(LearningMessage::Edited(updated)));
                 }
             }
@@ -498,8 +495,8 @@ mod learning_editor_tests {
         assert!(prefix.starts_with("learning-1-"));
     }
 
-    #[test]
-    fn saved_valid_content_updates_db_and_sends_learning_edited() {
+    #[tokio::test]
+    async fn saved_valid_content_updates_db_and_sends_learning_edited() {
         let db = Arc::new(Database::open_in_memory().unwrap());
         let id = db
             .create_learning(CreateLearningRow {
@@ -511,6 +508,7 @@ mod learning_editor_tests {
                 tags: &[],
                 source_task_id: None,
             })
+            .await
             .unwrap();
         let learning = make_learning(id);
         let rt = make_runtime(db.clone());
@@ -525,9 +523,10 @@ mod learning_editor_tests {
             &mut app,
             EditKind::Learning(learning),
             EditorOutcome::Saved(updated_content),
-        );
+        )
+        .await;
 
-        let updated = db.get_learning(id).unwrap().unwrap();
+        let updated = db.get_learning(id).await.unwrap().unwrap();
         assert_eq!(updated.summary, "new summary");
         assert_eq!(updated.kind, LearningKind::Pitfall);
 
@@ -540,9 +539,8 @@ mod learning_editor_tests {
         ));
     }
 
-    #[test]
-    fn saved_empty_summary_preserves_original() {
-        // Empty SUMMARY → treat as "no change" (consistent with task editor).
+    #[tokio::test]
+    async fn saved_empty_summary_preserves_original() {
         let db = Arc::new(Database::open_in_memory().unwrap());
         let id = db
             .create_learning(CreateLearningRow {
@@ -554,6 +552,7 @@ mod learning_editor_tests {
                 tags: &[],
                 source_task_id: None,
             })
+            .await
             .unwrap();
         let learning = make_learning(id);
         let rt = make_runtime(db.clone());
@@ -569,16 +568,16 @@ mod learning_editor_tests {
             &mut app,
             EditKind::Learning(learning),
             EditorOutcome::Saved(content_empty_summary),
-        );
+        )
+        .await;
 
-        // Summary unchanged; kind updated
-        let updated = db.get_learning(id).unwrap().unwrap();
+        let updated = db.get_learning(id).await.unwrap().unwrap();
         assert_eq!(updated.summary, "original summary");
         assert_eq!(updated.kind, LearningKind::Pitfall);
     }
 
-    #[test]
-    fn cancelled_edit_is_noop() {
+    #[tokio::test]
+    async fn cancelled_edit_is_noop() {
         let db = Arc::new(Database::open_in_memory().unwrap());
         let id = db
             .create_learning(CreateLearningRow {
@@ -590,6 +589,7 @@ mod learning_editor_tests {
                 tags: &[],
                 source_task_id: None,
             })
+            .await
             .unwrap();
         let learning = make_learning(id);
         let rt = make_runtime(db.clone());
@@ -599,14 +599,15 @@ mod learning_editor_tests {
             &mut app,
             EditKind::Learning(learning),
             EditorOutcome::Cancelled,
-        );
+        )
+        .await;
 
-        let unchanged = db.get_learning(id).unwrap().unwrap();
+        let unchanged = db.get_learning(id).await.unwrap().unwrap();
         assert_eq!(unchanged.summary, "original summary");
     }
 
-    #[test]
-    fn saved_content_for_rejected_learning_shows_status_error() {
+    #[tokio::test]
+    async fn saved_content_for_rejected_learning_shows_status_error() {
         // update_learning rejects learnings with status Rejected — verify the
         // error surfaces as StatusInfo and does not update DB.
         let db = Arc::new(Database::open_in_memory().unwrap());
@@ -620,10 +621,11 @@ mod learning_editor_tests {
                 tags: &[],
                 source_task_id: None,
             })
+            .await
             .unwrap();
-        // Reject it so it's in an un-editable state
         crate::service::LearningService::new(db.clone() as Arc<dyn crate::db::TaskStore>)
             .reject_learning(id)
+            .await
             .unwrap();
         let learning = make_learning(id);
         let rt = make_runtime(db.clone());
@@ -636,16 +638,15 @@ mod learning_editor_tests {
                 "--- SUMMARY ---\nnew summary\n--- KIND ---\nconvention\n--- TAGS ---\n\n--- DETAIL ---\n\n"
                     .to_string(),
             ),
-        );
+        )
+        .await;
 
-        // Status message should contain the error
         let msg = app.status_message().unwrap_or_default();
         assert!(
             msg.contains("Edit failed"),
             "expected 'Edit failed' in status message, got: {msg}"
         );
-        // DB summary unchanged
-        let unchanged = db.get_learning(id).unwrap().unwrap();
+        let unchanged = db.get_learning(id).await.unwrap().unwrap();
         assert_eq!(unchanged.summary, "original summary");
     }
 }
@@ -836,8 +837,8 @@ mod tests {
         db.get_task(id).unwrap().unwrap()
     }
 
-    #[test]
-    fn finalize_task_edit_persists_changes() {
+    #[tokio::test]
+    async fn finalize_task_edit_persists_changes() {
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
         let db: Arc<dyn crate::db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let task = seed_task(&*db);
@@ -875,7 +876,8 @@ mod tests {
             &mut app,
             EditKind::TaskEdit(task.clone()),
             EditorOutcome::Saved(edited_text.into()),
-        );
+        )
+        .await;
 
         // The DB row should reflect the edits.
         let updated = db.get_task(task.id).unwrap().unwrap();
@@ -888,8 +890,8 @@ mod tests {
         assert_eq!(updated.base_branch, "main");
     }
 
-    #[test]
-    fn finalize_task_edit_cancelled_does_not_change_db() {
+    #[tokio::test]
+    async fn finalize_task_edit_cancelled_does_not_change_db() {
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
         let db: Arc<dyn crate::db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let task = seed_task(&*db);
@@ -919,25 +921,28 @@ mod tests {
             &mut app,
             EditKind::TaskEdit(task.clone()),
             EditorOutcome::Cancelled,
-        );
+        )
+        .await;
 
         let still = db.get_task(task.id).unwrap().unwrap();
         assert_eq!(still.title, task.title);
         assert_eq!(still.description, task.description);
     }
 
-    #[test]
-    fn finalize_description_kind_is_noop() {
+    #[tokio::test]
+    async fn finalize_description_kind_is_noop() {
         // Description edits are finalized inside App::update (not here).
         // If a FinalizeEditorResult with Description leaks through, it
         // should not crash or produce commands.
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
         let (rt, mut app) = runtime_with_runner(runner);
-        let cmds = rt.exec_finalize_editor_result(
-            &mut app,
-            EditKind::Description { is_epic: false },
-            EditorOutcome::Saved("ignored".into()),
-        );
+        let cmds = rt
+            .exec_finalize_editor_result(
+                &mut app,
+                EditKind::Description { is_epic: false },
+                EditorOutcome::Saved("ignored".into()),
+            )
+            .await;
         assert!(cmds.is_empty());
     }
 }

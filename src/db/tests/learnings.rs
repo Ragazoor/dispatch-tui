@@ -1,8 +1,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
 
-#[test]
-fn landscape_kind_can_be_recorded() {
+#[tokio::test]
+async fn landscape_kind_can_be_recorded() {
     use crate::models::{LearningKind, LearningScope};
     let db = in_memory_db();
     let id = db
@@ -15,19 +15,20 @@ fn landscape_kind_can_be_recorded() {
             tags: &[],
             source_task_id: None,
         })
+        .await
         .unwrap();
-    let l = db.get_learning(id).unwrap().unwrap();
+    let l = db.get_learning(id).await.unwrap().unwrap();
     assert_eq!(l.kind, LearningKind::Landscape);
 }
 
-#[test]
-fn episodic_kind_does_not_parse() {
+#[tokio::test]
+async fn episodic_kind_does_not_parse() {
     use crate::models::LearningKind;
     assert!(LearningKind::parse("episodic").is_none());
 }
 
-#[test]
-fn test_learning_status_no_proposed() {
+#[tokio::test]
+async fn test_learning_status_no_proposed() {
     // Proposed must no longer be a valid parse target
     assert!(crate::models::LearningStatus::parse("proposed").is_err());
     // Approved parses correctly
@@ -37,8 +38,8 @@ fn test_learning_status_no_proposed() {
     );
 }
 
-#[test]
-fn create_and_get_learning() {
+#[tokio::test]
+async fn create_and_get_learning() {
     use crate::models::{LearningKind, LearningScope, LearningStatus};
     let db = in_memory_db();
     let id = db
@@ -51,8 +52,13 @@ fn create_and_get_learning() {
             tags: &["rust".to_string(), "async".to_string()],
             source_task_id: None,
         })
+        .await
         .unwrap();
-    let learning = db.get_learning(id).unwrap().expect("learning should exist");
+    let learning = db
+        .get_learning(id)
+        .await
+        .unwrap()
+        .expect("learning should exist");
     assert_eq!(learning.id, id);
     assert_eq!(learning.kind, LearningKind::Convention);
     assert_eq!(learning.summary, "Always use Arc for shared DB state");
@@ -69,8 +75,8 @@ fn create_and_get_learning() {
     assert!(learning.source_task_id.is_none());
 }
 
-#[test]
-fn create_learning_user_scope_has_null_scope_ref() {
+#[tokio::test]
+async fn create_learning_user_scope_has_null_scope_ref() {
     use crate::models::{LearningKind, LearningScope};
     let db = in_memory_db();
     let id = db
@@ -83,33 +89,36 @@ fn create_learning_user_scope_has_null_scope_ref() {
             tags: &[],
             source_task_id: None,
         })
+        .await
         .unwrap();
-    let learning = db.get_learning(id).unwrap().unwrap();
+    let learning = db.get_learning(id).await.unwrap().unwrap();
     assert!(learning.scope_ref.is_none());
 }
 
-#[test]
-fn scope_ref_consistency_constraint_is_enforced() {
+#[tokio::test]
+async fn scope_ref_consistency_constraint_is_enforced() {
     use crate::models::{LearningKind, LearningScope};
     let db = in_memory_db();
     // user scope with a non-null scope_ref should violate the CHECK constraint
-    let result = db.create_learning(CreateLearningRow {
-        kind: LearningKind::Preference,
-        summary: "Should fail",
-        detail: None,
-        scope: LearningScope::User,
-        scope_ref: Some("should-not-be-here"),
-        tags: &[],
-        source_task_id: None,
-    });
+    let result = db
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Preference,
+            summary: "Should fail",
+            detail: None,
+            scope: LearningScope::User,
+            scope_ref: Some("should-not-be-here"),
+            tags: &[],
+            source_task_id: None,
+        })
+        .await;
     assert!(
         result.is_err(),
         "user scope with scope_ref must be rejected"
     );
 }
 
-#[test]
-fn list_learnings_filter_by_status() {
+#[tokio::test]
+async fn list_learnings_filter_by_status() {
     use crate::db::LearningFilter;
     use crate::models::{LearningKind, LearningScope, LearningStatus};
     let db = in_memory_db();
@@ -123,6 +132,7 @@ fn list_learnings_filter_by_status() {
             tags: &[],
             source_task_id: None,
         })
+        .await
         .unwrap();
     let id2 = db
         .create_learning(CreateLearningRow {
@@ -134,12 +144,14 @@ fn list_learnings_filter_by_status() {
             tags: &[],
             source_task_id: None,
         })
+        .await
         .unwrap();
     // Both learnings default to Approved. Archive id2 so we can filter by status.
     db.patch_learning(
         id2,
         &crate::db::LearningPatch::new().status(LearningStatus::Archived),
     )
+    .await
     .unwrap();
 
     let archived = db
@@ -147,12 +159,14 @@ fn list_learnings_filter_by_status() {
             status: Some(LearningStatus::Archived),
             ..Default::default()
         })
+        .await
         .unwrap();
     let approved = db
         .list_learnings(LearningFilter {
             status: Some(LearningStatus::Approved),
             ..Default::default()
         })
+        .await
         .unwrap();
 
     assert_eq!(archived.len(), 1);
@@ -161,8 +175,8 @@ fn list_learnings_filter_by_status() {
     assert_eq!(approved[0].id, id1);
 }
 
-#[test]
-fn list_learnings_approved_filter_excludes_rejected_and_archived() {
+#[tokio::test]
+async fn list_learnings_approved_filter_excludes_rejected_and_archived() {
     use crate::db::{LearningFilter, LearningPatch};
     use crate::models::{LearningKind, LearningScope, LearningStatus};
     let db = in_memory_db();
@@ -176,6 +190,7 @@ fn list_learnings_approved_filter_excludes_rejected_and_archived() {
             tags: &[],
             source_task_id: None,
         })
+        .await
         .unwrap();
     let rejected_id = db
         .create_learning(CreateLearningRow {
@@ -187,6 +202,7 @@ fn list_learnings_approved_filter_excludes_rejected_and_archived() {
             tags: &[],
             source_task_id: None,
         })
+        .await
         .unwrap();
     let archived_id = db
         .create_learning(CreateLearningRow {
@@ -198,17 +214,20 @@ fn list_learnings_approved_filter_excludes_rejected_and_archived() {
             tags: &[],
             source_task_id: None,
         })
+        .await
         .unwrap();
     // Transition rejected and archived
     db.patch_learning(
         rejected_id,
         &LearningPatch::new().status(LearningStatus::Rejected),
     )
+    .await
     .unwrap();
     db.patch_learning(
         archived_id,
         &LearningPatch::new().status(LearningStatus::Archived),
     )
+    .await
     .unwrap();
 
     let results = db
@@ -216,14 +235,15 @@ fn list_learnings_approved_filter_excludes_rejected_and_archived() {
             status: Some(LearningStatus::Approved),
             ..Default::default()
         })
+        .await
         .unwrap();
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].id, approved_id);
 }
 
-#[test]
-fn patch_learning_updates_summary_and_updated_at() {
+#[tokio::test]
+async fn patch_learning_updates_summary_and_updated_at() {
     use crate::db::LearningPatch;
     use crate::models::{LearningKind, LearningScope};
     let db = in_memory_db();
@@ -237,17 +257,19 @@ fn patch_learning_updates_summary_and_updated_at() {
             tags: &[],
             source_task_id: None,
         })
+        .await
         .unwrap();
-    let before = db.get_learning(id).unwrap().unwrap();
+    let before = db.get_learning(id).await.unwrap().unwrap();
     db.patch_learning(id, &LearningPatch::new().summary("Updated"))
+        .await
         .unwrap();
-    let after = db.get_learning(id).unwrap().unwrap();
+    let after = db.get_learning(id).await.unwrap().unwrap();
     assert_eq!(after.summary, "Updated");
     assert!(after.updated_at >= before.updated_at);
 }
 
-#[test]
-fn upvote_learning_increments_count_and_timestamps() {
+#[tokio::test]
+async fn upvote_learning_increments_count_and_timestamps() {
     use crate::db::LearningPatch;
     use crate::models::{LearningKind, LearningScope, LearningStatus};
     let db = in_memory_db();
@@ -261,27 +283,29 @@ fn upvote_learning_increments_count_and_timestamps() {
             tags: &[],
             source_task_id: None,
         })
+        .await
         .unwrap();
     // must be approved first
     db.patch_learning(id, &LearningPatch::new().status(LearningStatus::Approved))
+        .await
         .unwrap();
-    let before = db.get_learning(id).unwrap().unwrap();
+    let before = db.get_learning(id).await.unwrap().unwrap();
     assert_eq!(before.confirmed_count, 0);
     assert!(before.last_confirmed_at.is_none());
 
-    db.upvote_learning(id).unwrap();
-    let after = db.get_learning(id).unwrap().unwrap();
+    db.upvote_learning(id).await.unwrap();
+    let after = db.get_learning(id).await.unwrap().unwrap();
     assert_eq!(after.confirmed_count, 1);
     assert!(after.last_confirmed_at.is_some());
     assert!(after.updated_at >= before.updated_at);
 
-    db.upvote_learning(id).unwrap();
-    let after2 = db.get_learning(id).unwrap().unwrap();
+    db.upvote_learning(id).await.unwrap();
+    let after2 = db.get_learning(id).await.unwrap().unwrap();
     assert_eq!(after2.confirmed_count, 2);
 }
 
-#[test]
-fn delete_learning_removes_row() {
+#[tokio::test]
+async fn delete_learning_removes_row() {
     use crate::models::{LearningKind, LearningScope};
     let db = in_memory_db();
     let id = db
@@ -294,14 +318,15 @@ fn delete_learning_removes_row() {
             tags: &[],
             source_task_id: None,
         })
+        .await
         .unwrap();
-    assert!(db.get_learning(id).unwrap().is_some());
-    db.delete_learning(id).unwrap();
-    assert!(db.get_learning(id).unwrap().is_none());
+    assert!(db.get_learning(id).await.unwrap().is_some());
+    db.delete_learning(id).await.unwrap();
+    assert!(db.get_learning(id).await.unwrap().is_none());
 }
 
-#[test]
-fn list_learnings_for_dispatch_unions_scopes() {
+#[tokio::test]
+async fn list_learnings_for_dispatch_unions_scopes() {
     use crate::db::LearningPatch;
     use crate::models::{LearningKind, LearningScope, LearningStatus};
     let db = in_memory_db();
@@ -317,6 +342,7 @@ fn list_learnings_for_dispatch_unions_scopes() {
             tags: &[],
             source_task_id: None,
         })
+        .await
         .unwrap();
     // repo-scoped matching: should appear
     let r = db
@@ -329,6 +355,7 @@ fn list_learnings_for_dispatch_unions_scopes() {
             tags: &[],
             source_task_id: None,
         })
+        .await
         .unwrap();
     // repo-scoped not matching: should NOT appear
     let _r2 = db
@@ -341,6 +368,7 @@ fn list_learnings_for_dispatch_unions_scopes() {
             tags: &[],
             source_task_id: None,
         })
+        .await
         .unwrap();
     // task-scoped: should NOT appear (task scope excluded from auto-dispatch)
     let _t = db
@@ -353,16 +381,19 @@ fn list_learnings_for_dispatch_unions_scopes() {
             tags: &[],
             source_task_id: None,
         })
+        .await
         .unwrap();
 
     // approve all
     for id in [u, r, _r2, _t] {
         db.patch_learning(id, &LearningPatch::new().status(LearningStatus::Approved))
+            .await
             .unwrap();
     }
 
     let results = db
         .list_learnings_for_dispatch(None, "/repo/a", None)
+        .await
         .unwrap();
     let ids: Vec<_> = results.iter().map(|l| l.id).collect();
     assert!(ids.contains(&u), "user-scoped learning should appear");
@@ -374,8 +405,8 @@ fn list_learnings_for_dispatch_unions_scopes() {
     assert!(!ids.contains(&_t), "task-scoped learning should not appear");
 }
 
-#[test]
-fn list_learnings_for_dispatch_procedural_first() {
+#[tokio::test]
+async fn list_learnings_for_dispatch_procedural_first() {
     use crate::db::LearningPatch;
     use crate::models::{LearningKind, LearningScope, LearningStatus};
     let db = in_memory_db();
@@ -390,6 +421,7 @@ fn list_learnings_for_dispatch_procedural_first() {
             tags: &[],
             source_task_id: None,
         })
+        .await
         .unwrap();
     let procedural = db
         .create_learning(CreateLearningRow {
@@ -401,22 +433,27 @@ fn list_learnings_for_dispatch_procedural_first() {
             tags: &[],
             source_task_id: None,
         })
+        .await
         .unwrap();
 
     for id in [convention, procedural] {
         db.patch_learning(id, &LearningPatch::new().status(LearningStatus::Approved))
+            .await
             .unwrap();
     }
 
-    let results = db.list_learnings_for_dispatch(None, "/any", None).unwrap();
+    let results = db
+        .list_learnings_for_dispatch(None, "/any", None)
+        .await
+        .unwrap();
     assert_eq!(
         results[0].id, procedural,
         "procedural learning must be first"
     );
 }
 
-#[test]
-fn list_learnings_for_dispatch_excludes_non_approved() {
+#[tokio::test]
+async fn list_learnings_for_dispatch_excludes_non_approved() {
     use crate::db::LearningPatch;
     use crate::models::{LearningKind, LearningScope, LearningStatus};
     let db = in_memory_db();
@@ -432,11 +469,13 @@ fn list_learnings_for_dispatch_excludes_non_approved() {
             tags: &[],
             source_task_id: None,
         })
+        .await
         .unwrap();
     db.patch_learning(
         rejected,
         &LearningPatch::new().status(LearningStatus::Rejected),
     )
+    .await
     .unwrap();
 
     // Create an approved learning (default).
@@ -450,15 +489,19 @@ fn list_learnings_for_dispatch_excludes_non_approved() {
             tags: &[],
             source_task_id: None,
         })
+        .await
         .unwrap();
 
-    let results = db.list_learnings_for_dispatch(None, "/any", None).unwrap();
+    let results = db
+        .list_learnings_for_dispatch(None, "/any", None)
+        .await
+        .unwrap();
     let ids: Vec<_> = results.iter().map(|l| l.id).collect();
     assert!(!ids.contains(&rejected));
     assert!(ids.contains(&approved));
 }
 
-fn make_db_with_task_and_learning() -> (Database, crate::models::TaskId, LearningId) {
+async fn make_db_with_task_and_learning() -> (Database, crate::models::TaskId, LearningId) {
     use crate::models::{LearningKind, LearningScope};
     let db = in_memory_db();
     let task = create_task_returning(
@@ -480,19 +523,22 @@ fn make_db_with_task_and_learning() -> (Database, crate::models::TaskId, Learnin
             tags: &[],
             source_task_id: None,
         })
+        .await
         .unwrap();
     (db, task.id, learning)
 }
 
-#[test]
-fn record_and_list_retrievals() {
+#[tokio::test]
+async fn record_and_list_retrievals() {
     use crate::models::RetrievalSource;
-    let (db, task_id, learning_id) = make_db_with_task_and_learning();
+    let (db, task_id, learning_id) = make_db_with_task_and_learning().await;
     db.record_retrieval(task_id, learning_id, RetrievalSource::PromptInjection)
+        .await
         .unwrap();
     db.record_retrieval(task_id, learning_id, RetrievalSource::QueryLearnings)
+        .await
         .unwrap();
-    let rows = db.list_retrievals_for_task(task_id).unwrap();
+    let rows = db.list_retrievals_for_task(task_id).await.unwrap();
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0].source, RetrievalSource::PromptInjection);
     assert_eq!(rows[0].task_id, task_id);
@@ -500,42 +546,48 @@ fn record_and_list_retrievals() {
     assert_eq!(rows[1].source, RetrievalSource::QueryLearnings);
 }
 
-#[test]
-fn apply_verdicts_helped_increments_count() {
+#[tokio::test]
+async fn apply_verdicts_helped_increments_count() {
     use crate::models::{LearningStatus, LearningVerdict, RetrievalSource};
-    let (db, task_id, learning_id) = make_db_with_task_and_learning();
+    let (db, task_id, learning_id) = make_db_with_task_and_learning().await;
     db.record_retrieval(task_id, learning_id, RetrievalSource::PromptInjection)
+        .await
         .unwrap();
     db.apply_verdicts_tx(task_id, &[(learning_id, LearningVerdict::Helped)])
+        .await
         .unwrap();
-    let l = db.get_learning(learning_id).unwrap().unwrap();
+    let l = db.get_learning(learning_id).await.unwrap().unwrap();
     assert_eq!(l.confirmed_count, 1);
     assert!(l.last_confirmed_at.is_some());
     assert_eq!(l.status, LearningStatus::Approved);
 }
 
-#[test]
-fn apply_verdicts_wrong_sets_needs_review() {
+#[tokio::test]
+async fn apply_verdicts_wrong_sets_needs_review() {
     use crate::models::{LearningStatus, LearningVerdict, RetrievalSource};
-    let (db, task_id, learning_id) = make_db_with_task_and_learning();
+    let (db, task_id, learning_id) = make_db_with_task_and_learning().await;
     db.record_retrieval(task_id, learning_id, RetrievalSource::PromptInjection)
+        .await
         .unwrap();
     db.apply_verdicts_tx(task_id, &[(learning_id, LearningVerdict::Wrong)])
+        .await
         .unwrap();
-    let l = db.get_learning(learning_id).unwrap().unwrap();
+    let l = db.get_learning(learning_id).await.unwrap().unwrap();
     assert_eq!(l.status, LearningStatus::NeedsReview);
     assert_eq!(l.confirmed_count, 0);
 }
 
-#[test]
-fn apply_verdicts_unused_records_only() {
+#[tokio::test]
+async fn apply_verdicts_unused_records_only() {
     use crate::models::{LearningStatus, LearningVerdict, RetrievalSource};
-    let (db, task_id, learning_id) = make_db_with_task_and_learning();
+    let (db, task_id, learning_id) = make_db_with_task_and_learning().await;
     db.record_retrieval(task_id, learning_id, RetrievalSource::PromptInjection)
+        .await
         .unwrap();
     db.apply_verdicts_tx(task_id, &[(learning_id, LearningVerdict::Unused)])
+        .await
         .unwrap();
-    let l = db.get_learning(learning_id).unwrap().unwrap();
+    let l = db.get_learning(learning_id).await.unwrap().unwrap();
     assert_eq!(l.status, LearningStatus::Approved);
     assert_eq!(l.confirmed_count, 0);
     let conn = db.conn().unwrap();
@@ -549,21 +601,23 @@ fn apply_verdicts_unused_records_only() {
     assert_eq!(n, 1);
 }
 
-#[test]
-fn count_needs_review() {
+#[tokio::test]
+async fn count_needs_review() {
     use crate::models::{LearningVerdict, RetrievalSource};
-    let (db, task_id, learning_id) = make_db_with_task_and_learning();
+    let (db, task_id, learning_id) = make_db_with_task_and_learning().await;
     db.record_retrieval(task_id, learning_id, RetrievalSource::PromptInjection)
+        .await
         .unwrap();
     db.apply_verdicts_tx(task_id, &[(learning_id, LearningVerdict::Wrong)])
+        .await
         .unwrap();
-    assert_eq!(db.count_learnings_needs_review().unwrap(), 1);
+    assert_eq!(db.count_learnings_needs_review().await.unwrap(), 1);
 }
 
-#[test]
-fn list_learnings_for_dispatch_excludes_needs_review() {
+#[tokio::test]
+async fn list_learnings_for_dispatch_excludes_needs_review() {
     use crate::models::{LearningKind, LearningScope, LearningVerdict, RetrievalSource};
-    let (db, task_id, flagged) = make_db_with_task_and_learning();
+    let (db, task_id, flagged) = make_db_with_task_and_learning().await;
     let healthy = db
         .create_learning(CreateLearningRow {
             kind: LearningKind::Convention,
@@ -574,15 +628,19 @@ fn list_learnings_for_dispatch_excludes_needs_review() {
             tags: &[],
             source_task_id: None,
         })
+        .await
         .unwrap();
 
     db.record_retrieval(task_id, flagged, RetrievalSource::PromptInjection)
+        .await
         .unwrap();
     db.apply_verdicts_tx(task_id, &[(flagged, LearningVerdict::Wrong)])
+        .await
         .unwrap();
 
     let results = db
         .list_learnings_for_dispatch(None, "/repo/a", None)
+        .await
         .unwrap();
     let ids: Vec<_> = results.iter().map(|l| l.id).collect();
     assert!(

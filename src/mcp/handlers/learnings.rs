@@ -52,7 +52,7 @@ pub(super) struct UpvoteLearningArgs {
 // Handlers
 // ---------------------------------------------------------------------------
 
-pub(super) fn handle_record_learning(
+pub(super) async fn handle_record_learning(
     state: &McpState,
     id: Option<Value>,
     args: Value,
@@ -91,22 +91,29 @@ pub(super) fn handle_record_learning(
 
     let similar_scope_ref = scope_ref.clone();
     let svc = LearningService::new(state.db.clone());
-    match svc.create_learning(crate::service::CreateLearningParams {
-        kind: parsed.kind,
-        summary: parsed.summary,
-        detail: parsed.detail,
-        scope: parsed.scope,
-        scope_ref,
-        tags: parsed.tags,
-        source_task_id: Some(task_id),
-    }) {
+    match svc
+        .create_learning(crate::service::CreateLearningParams {
+            kind: parsed.kind,
+            summary: parsed.summary,
+            detail: parsed.detail,
+            scope: parsed.scope,
+            scope_ref,
+            tags: parsed.tags,
+            source_task_id: Some(task_id),
+        })
+        .await
+    {
         Ok(learning_id) => {
-            let similar: Vec<_> = match state.db.list_learnings(LearningFilter {
-                status: Some(LearningStatus::Approved),
-                scope: Some(parsed.scope),
-                scope_ref: similar_scope_ref,
-                ..Default::default()
-            }) {
+            let similar: Vec<_> = match state
+                .db
+                .list_learnings(LearningFilter {
+                    status: Some(LearningStatus::Approved),
+                    scope: Some(parsed.scope),
+                    scope_ref: similar_scope_ref,
+                    ..Default::default()
+                })
+                .await
+            {
                 Ok(entries) => entries
                     .into_iter()
                     .filter(|l| l.kind == parsed.kind && l.id != learning_id)
@@ -149,7 +156,7 @@ pub(super) fn handle_record_learning(
     }
 }
 
-pub(super) fn handle_query_learnings(
+pub(super) async fn handle_query_learnings(
     state: &McpState,
     id: Option<Value>,
     args: Value,
@@ -166,11 +173,11 @@ pub(super) fn handle_query_learnings(
         Err(e) => return JsonRpcResponse::err(id, -32603, format!("database error: {e}")),
     };
 
-    let mut learnings = match state.db.list_learnings_for_dispatch(
-        Some(task.project_id),
-        &task.repo_path,
-        task.epic_id,
-    ) {
+    let mut learnings = match state
+        .db
+        .list_learnings_for_dispatch(Some(task.project_id), &task.repo_path, task.epic_id)
+        .await
+    {
         Ok(l) => l,
         Err(e) => return JsonRpcResponse::err(id, -32603, format!("database error: {e}")),
     };
@@ -187,6 +194,7 @@ pub(super) fn handle_query_learnings(
         if let Err(e) = state
             .db
             .record_retrieval(task_id, l.id, RetrievalSource::QueryLearnings)
+            .await
         {
             tracing::warn!(
                 task_id = task_id.0,
@@ -228,7 +236,7 @@ pub(super) fn handle_query_learnings(
     JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
 }
 
-pub(super) fn handle_upvote_learning(
+pub(super) async fn handle_upvote_learning(
     state: &McpState,
     id: Option<Value>,
     args: Value,
@@ -245,7 +253,7 @@ pub(super) fn handle_upvote_learning(
     );
 
     let svc = LearningService::new(state.db.clone());
-    match svc.upvote_learning(LearningId(parsed.learning_id)) {
+    match svc.upvote_learning(LearningId(parsed.learning_id)).await {
         Ok(()) => JsonRpcResponse::ok(
             id,
             json!({

@@ -66,7 +66,8 @@ impl TuiRuntime {
         app.update(Message::RepoPathsUpdated(paths));
         let epic_ctx = dispatch::EpicContext::from_db(&task, &*self.database);
         let project_ctx = dispatch::ProjectContext::from_db(&task, &*self.database).await;
-        let (procedural, tiered) = dispatch::build_and_record_injections(&*self.database, &task);
+        let (procedural, tiered) =
+            dispatch::build_and_record_injections(&*self.database, &task).await;
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
         tokio::task::spawn_blocking(move || {
@@ -150,7 +151,8 @@ impl TuiRuntime {
     pub(super) async fn exec_dispatch_agent(&self, task: models::Task, mode: models::DispatchMode) {
         let epic_ctx = dispatch::EpicContext::from_db(&task, &*self.database);
         let project_ctx = dispatch::ProjectContext::from_db(&task, &*self.database).await;
-        let (procedural, tiered) = dispatch::build_and_record_injections(&*self.database, &task);
+        let (procedural, tiered) =
+            dispatch::build_and_record_injections(&*self.database, &task).await;
         let label = mode.label();
         self.spawn_dispatch(
             task,
@@ -240,12 +242,12 @@ impl TuiRuntime {
     /// Falls back to a full refresh if the task is gone (e.g. deleted while
     /// the event was in flight); returns silently on DB errors so the runtime
     /// keeps draining notifications.
-    pub(super) fn exec_refresh_task(&self, app: &mut App, task_id: TaskId) -> Vec<Command> {
+    pub(super) async fn exec_refresh_task(&self, app: &mut App, task_id: TaskId) -> Vec<Command> {
         match self.database.get_task(task_id) {
             Ok(Some(task)) => app.update(Message::Task(
                 crate::tui::messages::TaskMessage::Updated(task),
             )),
-            Ok(None) => self.exec_refresh_from_db(app),
+            Ok(None) => self.exec_refresh_from_db(app).await,
             Err(e) => {
                 app.update(Message::System(crate::tui::messages::SystemMessage::Error(
                     Self::db_error("refreshing task", e),
@@ -258,11 +260,15 @@ impl TuiRuntime {
     /// Reload a single epic plus its tasks (feed-sync changes appear here as
     /// a batch update) and splice both into the app state. Falls back to a
     /// full refresh if the epic is gone.
-    pub(super) fn exec_refresh_epic(&self, app: &mut App, epic_id: models::EpicId) -> Vec<Command> {
+    pub(super) async fn exec_refresh_epic(
+        &self,
+        app: &mut App,
+        epic_id: models::EpicId,
+    ) -> Vec<Command> {
         let epic_result = self.database.get_epic(epic_id);
         let epic = match epic_result {
             Ok(Some(e)) => e,
-            Ok(None) => return self.exec_refresh_from_db(app),
+            Ok(None) => return self.exec_refresh_from_db(app).await,
             Err(e) => {
                 app.update(Message::System(crate::tui::messages::SystemMessage::Error(
                     Self::db_error("refreshing epic", e),
@@ -292,7 +298,7 @@ impl TuiRuntime {
         cmds
     }
 
-    pub(super) fn exec_refresh_from_db(&self, app: &mut App) -> Vec<Command> {
+    pub(super) async fn exec_refresh_from_db(&self, app: &mut App) -> Vec<Command> {
         let mut cmds = Vec::new();
         match self.database.list_all() {
             Ok(tasks) => {
@@ -308,7 +314,7 @@ impl TuiRuntime {
         }
         self.exec_refresh_epics_from_db(app);
         self.exec_refresh_usage_from_db(app);
-        self.exec_refresh_needs_review_count(app);
+        self.exec_refresh_needs_review_count(app).await;
         cmds
     }
 

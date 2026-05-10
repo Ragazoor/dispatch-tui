@@ -6,19 +6,20 @@ use crate::models::{LearningId, LearningStatus};
 use crate::service::LearningService;
 
 impl TuiRuntime {
-    pub(super) fn exec_load_learnings(&self, app: &mut App) {
+    pub(super) async fn exec_load_learnings(&self, app: &mut App) {
         let db: Arc<dyn db::TaskStore> = self.database.clone();
-        // Load both `approved` and `needs_review` learnings. The overlay groups
-        // them with `needs_review` surfaced at the top so humans can curate
-        // entries demoted by a `wrong` verdict at wrap-up.
-        let approved = db.list_learnings(db::LearningFilter {
-            status: Some(LearningStatus::Approved),
-            ..Default::default()
-        });
-        let needs_review = db.list_learnings(db::LearningFilter {
-            status: Some(LearningStatus::NeedsReview),
-            ..Default::default()
-        });
+        let approved = db
+            .list_learnings(db::LearningFilter {
+                status: Some(LearningStatus::Approved),
+                ..Default::default()
+            })
+            .await;
+        let needs_review = db
+            .list_learnings(db::LearningFilter {
+                status: Some(LearningStatus::NeedsReview),
+                ..Default::default()
+            })
+            .await;
         match (approved, needs_review) {
             (Ok(mut a), Ok(mut nr)) => {
                 let mut all = Vec::with_capacity(a.len() + nr.len());
@@ -40,8 +41,8 @@ impl TuiRuntime {
     /// [`LearningMessage::NeedsReviewCountUpdated`] so the `[KB:N]` status-bar badge
     /// stays current. Best-effort — DB errors are logged but not surfaced to
     /// the status bar (the badge simply won't update on this tick).
-    pub(super) fn exec_refresh_needs_review_count(&self, app: &mut App) {
-        match self.database.count_learnings_needs_review() {
+    pub(super) async fn exec_refresh_needs_review_count(&self, app: &mut App) {
+        match self.database.count_learnings_needs_review().await {
             Ok(n) => {
                 app.update(Message::Learning(LearningMessage::NeedsReviewCountUpdated(
                     n,
@@ -53,23 +54,29 @@ impl TuiRuntime {
         }
     }
 
-    pub(super) fn exec_archive_learning(&self, app: &mut App, id: LearningId) {
-        self.exec_action_learning(app, id, "archive", |svc, id| svc.archive_learning(id));
+    pub(super) async fn exec_archive_learning(&self, app: &mut App, id: LearningId) {
+        let db: Arc<dyn db::TaskStore> = self.database.clone();
+        let svc = LearningService::new(db);
+        let result = svc.archive_learning(id).await;
+        Self::handle_action_result(app, id, "archive", result);
     }
 
-    pub(super) fn exec_reject_learning(&self, app: &mut App, id: LearningId) {
-        self.exec_action_learning(app, id, "reject", |svc, id| svc.reject_learning(id));
+    pub(super) async fn exec_reject_learning(&self, app: &mut App, id: LearningId) {
+        let db: Arc<dyn db::TaskStore> = self.database.clone();
+        let svc = LearningService::new(db);
+        let result = svc.reject_learning(id).await;
+        Self::handle_action_result(app, id, "reject", result);
     }
 
     /// Approve a learning. Unlike archive/reject, the entry stays visible in
     /// the overlay (it transitions to `Approved`). After the patch we re-read
     /// the learning and dispatch `LearningEdited` so the in-memory row picks
     /// up the new status.
-    pub(super) fn exec_approve_learning(&self, app: &mut App, id: LearningId) {
+    pub(super) async fn exec_approve_learning(&self, app: &mut App, id: LearningId) {
         let db: Arc<dyn db::TaskStore> = self.database.clone();
         let svc = LearningService::new(db.clone());
-        match svc.approve_learning(id) {
-            Ok(()) => match db.get_learning(id) {
+        match svc.approve_learning(id).await {
+            Ok(()) => match db.get_learning(id).await {
                 Ok(Some(updated)) => {
                     app.update(Message::Learning(LearningMessage::Edited(updated)));
                     app.update(Message::System(
@@ -103,16 +110,13 @@ impl TuiRuntime {
         }
     }
 
-    fn exec_action_learning(
-        &self,
+    fn handle_action_result(
         app: &mut App,
         id: LearningId,
         verb: &str,
-        action: impl Fn(&LearningService, LearningId) -> Result<(), crate::service::ServiceError>,
+        result: Result<(), crate::service::ServiceError>,
     ) {
-        let db: Arc<dyn db::TaskStore> = self.database.clone();
-        let svc = LearningService::new(db);
-        match action(&svc, id) {
+        match result {
             Ok(()) => {
                 app.update(Message::Learning(LearningMessage::Actioned(id)));
                 app.update(Message::System(
@@ -183,7 +187,7 @@ mod tests {
         }
     }
 
-    fn insert_learning(db: &Arc<Database>) -> LearningId {
+    async fn insert_learning(db: &Arc<Database>) -> LearningId {
         db.create_learning(CreateLearningRow {
             kind: LearningKind::Convention,
             summary: "test learning",
@@ -193,20 +197,21 @@ mod tests {
             tags: &[],
             source_task_id: None,
         })
+        .await
         .unwrap()
     }
 
-    #[test]
-    fn exec_archive_learning_updates_db_and_sends_actioned_message() {
+    #[tokio::test]
+    async fn exec_archive_learning_updates_db_and_sends_actioned_message() {
         let db = Arc::new(Database::open_in_memory().unwrap());
-        let id = insert_learning(&db);
+        let id = insert_learning(&db).await;
         let rt = make_runtime(db.clone());
         let mut app = App::new(vec![], ProjectId(1), APP_INACTIVITY_TIMEOUT);
         // Put the app in Learnings view with the learning
         let learning = make_learning(id);
         app.update(Message::Learning(LearningMessage::Show(vec![learning])));
 
-        rt.exec_archive_learning(&mut app, id);
+        rt.exec_archive_learning(&mut app, id).await;
 
         // Learning should be removed from the overlay list
         assert!(matches!(
@@ -214,31 +219,31 @@ mod tests {
             ViewMode::Learnings { learnings, .. } if learnings.is_empty()
         ));
         // DB should show archived
-        let updated = db.get_learning(id).unwrap().unwrap();
+        let updated = db.get_learning(id).await.unwrap().unwrap();
         assert_eq!(updated.status, LearningStatus::Archived);
     }
 
-    #[test]
-    fn exec_reject_learning_updates_db_and_sends_actioned_message() {
+    #[tokio::test]
+    async fn exec_reject_learning_updates_db_and_sends_actioned_message() {
         let db = Arc::new(Database::open_in_memory().unwrap());
-        let id = insert_learning(&db);
+        let id = insert_learning(&db).await;
         let rt = make_runtime(db.clone());
         let mut app = App::new(vec![], ProjectId(1), APP_INACTIVITY_TIMEOUT);
         let learning = make_learning(id);
         app.update(Message::Learning(LearningMessage::Show(vec![learning])));
 
-        rt.exec_reject_learning(&mut app, id);
+        rt.exec_reject_learning(&mut app, id).await;
 
         assert!(matches!(
             app.view_mode(),
             ViewMode::Learnings { learnings, .. } if learnings.is_empty()
         ));
-        let updated = db.get_learning(id).unwrap().unwrap();
+        let updated = db.get_learning(id).await.unwrap().unwrap();
         assert_eq!(updated.status, LearningStatus::Rejected);
     }
 
-    #[test]
-    fn exec_load_passes_learnings_to_show_learnings_sorted_by_confirmed_count() {
+    #[tokio::test]
+    async fn exec_load_passes_learnings_to_show_learnings_sorted_by_confirmed_count() {
         let db = Arc::new(Database::open_in_memory().unwrap());
 
         // Insert two learnings; bump the second one's confirmed_count via patch.
@@ -252,6 +257,7 @@ mod tests {
                 tags: &[],
                 source_task_id: None,
             })
+            .await
             .unwrap();
         let id2 = db
             .create_learning(CreateLearningRow {
@@ -263,16 +269,16 @@ mod tests {
                 tags: &[],
                 source_task_id: None,
             })
+            .await
             .unwrap();
-        // Bump id2's confirmed_count so it sorts first.
-        db.upvote_learning(id2).unwrap();
-        db.upvote_learning(id2).unwrap();
-        db.upvote_learning(id2).unwrap();
+        db.upvote_learning(id2).await.unwrap();
+        db.upvote_learning(id2).await.unwrap();
+        db.upvote_learning(id2).await.unwrap();
 
         let rt = make_runtime(db.clone());
         let mut app = App::new(vec![], ProjectId(1), APP_INACTIVITY_TIMEOUT);
 
-        rt.exec_load_learnings(&mut app);
+        rt.exec_load_learnings(&mut app).await;
 
         // TUI handler sorts by confirmed_count DESC: id2 (count=3) before id1 (count=0).
         if let ViewMode::Learnings { learnings, .. } = app.view_mode() {

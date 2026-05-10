@@ -603,7 +603,7 @@ pub(super) async fn handle_wrap_up(
             .map(|v| (LearningId(v.learning_id), v.verdict))
             .collect();
         let learning_svc = LearningService::new(state.db.clone());
-        if let Err(e) = learning_svc.apply_verdicts(task.id, parsed_verdicts) {
+        if let Err(e) = learning_svc.apply_verdicts(task.id, parsed_verdicts).await {
             return service_err_to_response(id, e);
         }
     }
@@ -792,9 +792,10 @@ fn do_dispatch(
     db: &dyn crate::db::TaskStore,
     runner: &dyn crate::process::ProcessRunner,
     project_ctx: dispatch::ProjectContext,
+    procedural: &[crate::models::Learning],
+    tiered: &[crate::models::Learning],
 ) -> anyhow::Result<crate::models::DispatchResult> {
     let epic_ctx = dispatch::EpicContext::from_db(task, db);
-    let (procedural, tiered) = dispatch::build_and_record_injections(db, task);
     let injections = dispatch::LearningInjections {
         procedural: procedural.iter().collect(),
         tiered: tiered.iter().collect(),
@@ -874,8 +875,17 @@ pub(super) async fn handle_dispatch_next(
     let runner = state.runner.clone();
     let notify_tx = state.notify_tx.clone();
 
+    let (procedural, tiered) = dispatch::build_and_record_injections(&*db, &next_task).await;
+
     tokio::task::spawn_blocking(move || {
-        let result = do_dispatch(&next_task, &*db, &*runner, project_ctx);
+        let result = do_dispatch(
+            &next_task,
+            &*db,
+            &*runner,
+            project_ctx,
+            &procedural,
+            &tiered,
+        );
 
         match result {
             Ok(dispatch_result) => {
@@ -959,8 +969,11 @@ pub(super) async fn handle_dispatch_task(
     let notify_tx = state.notify_tx.clone();
     let epic_id = task.epic_id;
 
-    let result =
-        tokio::task::spawn_blocking(move || do_dispatch(&task, &*db, &*runner, project_ctx)).await;
+    let (procedural, tiered) = dispatch::build_and_record_injections(&*db, &task).await;
+    let result = tokio::task::spawn_blocking(move || {
+        do_dispatch(&task, &*db, &*runner, project_ctx, &procedural, &tiered)
+    })
+    .await;
 
     match result {
         Ok(Ok(dr)) => {

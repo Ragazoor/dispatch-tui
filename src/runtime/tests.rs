@@ -178,8 +178,8 @@ fn exec_persist_task_saves_status_to_db() {
     assert_eq!(db_task.worktree.as_deref(), Some("/repo/.worktrees/1-test"));
 }
 
-#[test]
-fn exec_persist_task_preserves_sub_status() {
+#[tokio::test]
+async fn exec_persist_task_preserves_sub_status() {
     let (rt, mut app) = test_runtime();
     rt.exec_insert_task(
         &mut app,
@@ -202,7 +202,7 @@ fn exec_persist_task_preserves_sub_status() {
                 .pr_url(Some("https://github.com/org/repo/pull/42")),
         )
         .unwrap();
-    rt.exec_refresh_from_db(&mut app);
+    rt.exec_refresh_from_db(&mut app).await;
     assert_eq!(app.tasks()[0].sub_status, models::SubStatus::Approved);
 
     // Persist the in-memory task (simulates handle_pr_review_state saving after PR approval)
@@ -238,8 +238,8 @@ fn exec_save_repo_path_expands_tilde() {
     assert!(!db_paths.iter().any(|p| p.starts_with("~/")));
 }
 
-#[test]
-fn exec_refresh_from_db_syncs_external_changes() {
+#[tokio::test]
+async fn exec_refresh_from_db_syncs_external_changes() {
     let (rt, mut app) = test_runtime();
     // Insert directly into DB, bypassing app
     rt.database
@@ -257,13 +257,13 @@ fn exec_refresh_from_db_syncs_external_changes() {
         })
         .unwrap();
     assert!(app.tasks().is_empty());
-    rt.exec_refresh_from_db(&mut app);
+    rt.exec_refresh_from_db(&mut app).await;
     assert_eq!(app.tasks().len(), 1);
     assert_eq!(app.tasks()[0].title, "External");
 }
 
-#[test]
-fn exec_refresh_from_db_returns_commands_from_refresh() {
+#[tokio::test]
+async fn exec_refresh_from_db_returns_commands_from_refresh() {
     let (rt, mut app) = test_runtime();
     // Insert a task directly into DB as Running
     rt.database
@@ -281,10 +281,9 @@ fn exec_refresh_from_db_returns_commands_from_refresh() {
         })
         .unwrap();
     // Load it into app
-    let cmds = rt.exec_refresh_from_db(&mut app);
+    let cmds = rt.exec_refresh_from_db(&mut app).await;
     assert!(cmds.is_empty()); // First load — no transition
 
-    // Now update it to Review directly in DB
     let task = rt.database.list_all().unwrap()[0].clone();
     rt.database
         .patch_task(
@@ -294,8 +293,7 @@ fn exec_refresh_from_db_returns_commands_from_refresh() {
         .unwrap();
 
     app.set_notifications_enabled(true);
-    // Refresh should detect the transition and return a SendNotification
-    let cmds = rt.exec_refresh_from_db(&mut app);
+    let cmds = rt.exec_refresh_from_db(&mut app).await;
     assert!(cmds.iter().any(|c| matches!(
         c,
         Command::System(crate::tui::commands::SystemCommand::SendNotification { .. })
@@ -2207,8 +2205,8 @@ fn load_main_session_clears_stale_window() {
     assert!(stored.as_deref().unwrap_or("").is_empty());
 }
 
-#[test]
-fn build_learning_injections_partitions_and_records_retrievals() {
+#[tokio::test]
+async fn build_learning_injections_partitions_and_records_retrievals() {
     use crate::models::{LearningKind, LearningScope, RetrievalSource};
 
     let (rt, _app) = test_runtime();
@@ -2237,6 +2235,7 @@ fn build_learning_injections_partitions_and_records_retrievals() {
             tags: &[],
             source_task_id: None,
         })
+        .await
         .unwrap();
     let repo_id = rt
         .database
@@ -2249,15 +2248,17 @@ fn build_learning_injections_partitions_and_records_retrievals() {
             tags: &[],
             source_task_id: None,
         })
+        .await
         .unwrap();
 
-    let (procedural, tiered) = crate::dispatch::build_and_record_injections(&*rt.database, &task);
+    let (procedural, tiered) =
+        crate::dispatch::build_and_record_injections(&*rt.database, &task).await;
     assert_eq!(procedural.len(), 1);
     assert_eq!(procedural[0].id, proc_id);
     assert_eq!(tiered.len(), 1);
     assert_eq!(tiered[0].id, repo_id);
 
-    let rows = rt.database.list_retrievals_for_task(task.id).unwrap();
+    let rows = rt.database.list_retrievals_for_task(task.id).await.unwrap();
     assert_eq!(rows.len(), 2);
     let proc_row = rows.iter().find(|r| r.learning_id == proc_id).unwrap();
     assert!(matches!(proc_row.source, RetrievalSource::Procedural));

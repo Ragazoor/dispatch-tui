@@ -390,14 +390,14 @@ async fn run_loop(
             // MCP event notification
             Some(event) = mcp_notify_rx.recv() => {
                 match event {
-                    mcp::McpEvent::Refresh => rt.exec_refresh_from_db(app),
-                    mcp::McpEvent::TaskChanged(task_id) => rt.exec_refresh_task(app, task_id),
-                    mcp::McpEvent::EpicChanged(epic_id) => rt.exec_refresh_epic(app, epic_id),
+                    mcp::McpEvent::Refresh => rt.exec_refresh_from_db(app).await,
+                    mcp::McpEvent::TaskChanged(task_id) => rt.exec_refresh_task(app, task_id).await,
+                    mcp::McpEvent::EpicChanged(epic_id) => rt.exec_refresh_epic(app, epic_id).await,
                     mcp::McpEvent::MessageSent { to_task_id } => {
                         app.update(Message::System(
                             crate::tui::messages::SystemMessage::MessageReceived(to_task_id),
                         ));
-                        rt.exec_refresh_task(app, to_task_id)
+                        rt.exec_refresh_task(app, to_task_id).await
                     }
                 }
             }
