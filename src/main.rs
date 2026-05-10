@@ -31,6 +31,15 @@ enum Commands {
         /// Seconds of unchanged tmux output before marking agent stale
         #[arg(long, env = "DISPATCH_INACTIVITY_TIMEOUT", default_value = "180")]
         inactivity_timeout: u64,
+        /// Approximate token budget for the ctags-derived repo map injected
+        /// into dispatch prompts. Output is truncated to fit. See
+        /// `AugmentDispatchPromptWithRepoMap` in `docs/specs/tasks.allium`.
+        #[arg(long, env = "DISPATCH_REPO_MAP_TOKEN_BUDGET", default_value_t = 4000)]
+        repo_map_token_budget: usize,
+        /// Disable repo-map injection. ctags is not invoked at dispatch time
+        /// even if a Universal Ctags binary is detected at startup.
+        #[arg(long)]
+        no_repo_map: bool,
     },
     /// Update a task's status
     Update {
@@ -104,6 +113,8 @@ async fn main() -> Result<()> {
         Commands::Tui {
             port,
             inactivity_timeout,
+            repo_map_token_budget,
+            no_repo_map,
         } => {
             let data_dir = cli.db.parent().unwrap_or(std::path::Path::new("."));
             std::fs::create_dir_all(data_dir)?;
@@ -117,7 +128,12 @@ async fn main() -> Result<()> {
                 .with_ansi(false)
                 .with_env_filter(EnvFilter::from_default_env().add_directive(Level::INFO.into()))
                 .init();
-            runtime::run_tui(&cli.db, port, inactivity_timeout).await?;
+            let repo_map_budget = if no_repo_map {
+                0
+            } else {
+                repo_map_token_budget
+            };
+            runtime::run_tui(&cli.db, port, inactivity_timeout, repo_map_budget).await?;
         }
         Commands::Update {
             id,

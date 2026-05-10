@@ -396,6 +396,19 @@ config {
     -- to propose learnings before finishing. Prompt encouragement only;
     -- agents may wrap up without proposing. (see tasks.allium: WrapUpReflection)
     learning_reflection_enabled: Boolean = true
+
+    -- Repo map (T2 / ctags) — see tasks.allium: AugmentDispatchPromptWithRepoMap.
+    -- Token budget for the structural summary injected into dispatch prompts.
+    -- The renderer proxies token count as `chars / 4` and stops emitting once
+    -- the budget is reached; per-file output is also capped so a single large
+    -- file cannot swallow the budget.
+    -- Overridable via `--repo-map-token-budget` and DISPATCH_REPO_MAP_TOKEN_BUDGET.
+    repo_map_token_budget: Integer = 4000
+
+    -- When false (`--no-repo-map`), no repo-map block is injected into any
+    -- dispatch prompt and ctags is never invoked. The Universal Ctags binary
+    -- is still detected at startup but the result is unused.
+    repo_map_enabled: Boolean = true
 }
 
 ------------------------------------------------------------

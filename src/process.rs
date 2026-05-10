@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use std::collections::VecDeque;
 use std::process::Output;
 use std::sync::Mutex;
+use std::time::Duration;
 
 // ---------------------------------------------------------------------------
 // Trait
@@ -32,11 +33,20 @@ impl ProcessRunner for RealProcessRunner {
 
 pub struct MockProcessRunner {
     calls: Mutex<Vec<(String, Vec<String>)>>,
-    responses: Mutex<VecDeque<Result<Output>>>,
+    responses: Mutex<VecDeque<(Option<Duration>, Result<Output>)>>,
 }
 
 impl MockProcessRunner {
     pub fn new(responses: Vec<Result<Output>>) -> Self {
+        Self {
+            calls: Mutex::new(Vec::new()),
+            responses: Mutex::new(responses.into_iter().map(|r| (None, r)).collect()),
+        }
+    }
+
+    /// Construct a runner whose responses are delivered after a per-response
+    /// delay. Use for testing watchdog/timeout logic.
+    pub fn new_with_delays(responses: Vec<(Option<Duration>, Result<Output>)>) -> Self {
         Self {
             calls: Mutex::new(Vec::new()),
             responses: Mutex::new(VecDeque::from(responses)),
@@ -83,13 +93,18 @@ impl ProcessRunner for MockProcessRunner {
             program.to_string(),
             args.iter().map(|s| s.to_string()).collect(),
         ));
-        self.responses
+        let (delay, response) = self
+            .responses
             .lock()
             .unwrap()
             .pop_front()
             .unwrap_or_else(|| {
                 panic!("MockProcessRunner: no response queued for {program} {args:?}")
-            })
+            });
+        if let Some(d) = delay {
+            std::thread::sleep(d);
+        }
+        response
     }
 }
 

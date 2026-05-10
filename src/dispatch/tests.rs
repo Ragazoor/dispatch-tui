@@ -4,6 +4,7 @@ use super::prompts::{
     build_quick_dispatch_prompt, build_tmux_window_name, epic_preamble, learning_tools_instruction,
     mcp_tools_instruction, plan_and_attach_instruction, rebase_preamble, task_block,
     tdd_instruction, wrap_up_instruction, EpicContext, LearningInjections, ProjectContext,
+    PromptContext,
 };
 use super::worktree::provision_worktree;
 use super::*;
@@ -65,7 +66,7 @@ fn build_prompt_includes_project_context() {
         None,
         None,
         Some(&ctx),
-        &LearningInjections::default(),
+        &PromptContext::default(),
     );
     assert!(prompt.contains("ProjectId: 7"));
     assert!(prompt.contains("Dispatch"));
@@ -82,7 +83,14 @@ fn learning_tools_instruction_includes_lint_checkpoint() {
 
 #[test]
 fn fix_task_prompt_includes_lint_checkpoint() {
-    let prompt = build_fix_task_prompt(TaskId(5), "Fix CVE", "desc", None, None);
+    let prompt = build_fix_task_prompt(
+        TaskId(5),
+        "Fix CVE",
+        "desc",
+        None,
+        None,
+        &PromptContext::default(),
+    );
     assert!(
         prompt.contains("/lint"),
         "build_fix_task_prompt must include /lint (via learning_tools_instruction), got:\n{prompt}"
@@ -241,7 +249,7 @@ fn build_prompt_contains_task_info() {
         None,
         None,
         None,
-        &LearningInjections::default(),
+        &PromptContext::default(),
     );
     assert!(prompt.contains("42"));
     assert!(prompt.contains("Fix bug"));
@@ -258,7 +266,7 @@ fn build_prompt_mentions_tdd() {
         None,
         None,
         None,
-        &LearningInjections::default(),
+        &PromptContext::default(),
     );
     assert!(prompt.contains("TDD"));
     assert!(prompt.contains("behaviour as tests first"));
@@ -273,7 +281,7 @@ fn build_prompt_mentions_wrap_up_skill() {
         Some("docs/plans/p.md"),
         None,
         None,
-        &LearningInjections::default(),
+        &PromptContext::default(),
     );
     assert!(
         prompt.contains("/wrap-up"),
@@ -297,7 +305,7 @@ fn build_prompt_without_plan_includes_wrap_up_universally() {
         None,
         None,
         None,
-        &LearningInjections::default(),
+        &PromptContext::default(),
     );
     assert!(
         prompt.contains("/wrap-up"),
@@ -314,7 +322,7 @@ fn build_prompt_without_plan_includes_planning_instruction() {
         None,
         None,
         None,
-        &LearningInjections::default(),
+        &PromptContext::default(),
     );
     assert!(
         prompt.contains("docs/plans/"),
@@ -339,7 +347,7 @@ fn build_prompt_without_plan_mentions_brainstorm_if_vague() {
         None,
         None,
         None,
-        &LearningInjections::default(),
+        &PromptContext::default(),
     );
     assert!(
         prompt.contains("/brainstorming"),
@@ -360,7 +368,7 @@ fn build_prompt_without_plan_mentions_direct_plan_alternative() {
         None,
         None,
         None,
-        &LearningInjections::default(),
+        &PromptContext::default(),
     );
     assert!(
         prompt.contains("implementation plan directly"),
@@ -377,7 +385,7 @@ fn build_prompt_with_plan_asks_permission_before_implementing() {
         Some("docs/plans/plan.md"),
         None,
         None,
-        &LearningInjections::default(),
+        &PromptContext::default(),
     );
     assert!(prompt.contains("docs/plans/plan.md"));
     assert!(
@@ -401,7 +409,7 @@ fn build_prompt_mentions_mcp_tools() {
         None,
         None,
         None,
-        &LearningInjections::default(),
+        &PromptContext::default(),
     );
     assert!(
         prompt.contains("dispatch MCP tools"),
@@ -483,7 +491,7 @@ fn build_prompt_includes_plan_path() {
         Some("docs/plans/my-plan.md"),
         None,
         None,
-        &LearningInjections::default(),
+        &PromptContext::default(),
     );
     assert!(prompt.contains("Plan: docs/plans/my-plan.md"));
 }
@@ -497,7 +505,7 @@ fn build_prompt_without_plan_omits_plan_section() {
         None,
         None,
         None,
-        &LearningInjections::default(),
+        &PromptContext::default(),
     );
     assert!(!prompt.contains("Plan:"));
 }
@@ -510,7 +518,7 @@ fn build_quick_dispatch_prompt_includes_planning_instruction() {
         "",
         None,
         None,
-        &LearningInjections::default(),
+        &PromptContext::default(),
     );
     assert!(
         prompt.contains("docs/plans/") || prompt.contains("plan"),
@@ -530,7 +538,7 @@ fn build_quick_dispatch_prompt_contains_rename_instruction() {
         "",
         None,
         None,
-        &LearningInjections::default(),
+        &PromptContext::default(),
     );
     assert!(prompt.contains("42"));
     assert!(prompt.contains("Quick task"));
@@ -547,7 +555,7 @@ fn build_quick_dispatch_prompt_mentions_mcp() {
         "",
         None,
         None,
-        &LearningInjections::default(),
+        &PromptContext::default(),
     );
     assert!(prompt.contains("dispatch MCP tools"));
     assert!(prompt.contains("update_task"));
@@ -563,7 +571,7 @@ fn build_quick_dispatch_prompt_differs_from_regular() {
         None,
         None,
         None,
-        &LearningInjections::default(),
+        &PromptContext::default(),
     );
     let quick = build_quick_dispatch_prompt(
         TaskId(1),
@@ -571,7 +579,7 @@ fn build_quick_dispatch_prompt_differs_from_regular() {
         "Desc",
         None,
         None,
-        &LearningInjections::default(),
+        &PromptContext::default(),
     );
     assert!(quick.contains("placeholder"));
     assert!(!regular.contains("placeholder"));
@@ -589,7 +597,7 @@ fn build_quick_dispatch_prompt_includes_epic_context() {
         "",
         Some(&ctx),
         None,
-        &LearningInjections::default(),
+        &PromptContext::default(),
     );
     assert!(prompt.contains("EpicId: 7"), "should include epic ID");
     assert!(prompt.contains("My Epic"), "should include epic title");
@@ -608,7 +616,7 @@ fn rebase_preamble_prepended_to_all_prompts() {
         None,
         None,
         None,
-        &LearningInjections::default(),
+        &PromptContext::default(),
     );
     let full = format!(
         "{}\n\n\
@@ -631,16 +639,10 @@ fn no_plan_prompts_reference_brainstorming_skill() {
         None,
         None,
         None,
-        &LearningInjections::default(),
+        &PromptContext::default(),
     );
-    let quick = build_quick_dispatch_prompt(
-        TaskId(1),
-        "T",
-        "D",
-        None,
-        None,
-        &LearningInjections::default(),
-    );
+    let quick =
+        build_quick_dispatch_prompt(TaskId(1), "T", "D", None, None, &PromptContext::default());
 
     for (name, prompt) in [("standard-no-plan", standard), ("quick", quick)] {
         assert!(
@@ -684,7 +686,7 @@ fn all_aligned_prompts() -> [(&'static str, String); 4] {
                 None,
                 None,
                 None,
-                &LearningInjections::default(),
+                &PromptContext::default(),
             ),
         ),
         (
@@ -696,7 +698,7 @@ fn all_aligned_prompts() -> [(&'static str, String); 4] {
                 Some("docs/plans/p.md"),
                 None,
                 None,
-                &LearningInjections::default(),
+                &PromptContext::default(),
             ),
         ),
         (
@@ -707,7 +709,7 @@ fn all_aligned_prompts() -> [(&'static str, String); 4] {
                 "",
                 None,
                 None,
-                &LearningInjections::default(),
+                &PromptContext::default(),
             ),
         ),
         (
@@ -718,6 +720,7 @@ fn all_aligned_prompts() -> [(&'static str, String); 4] {
                 "Planning subtask for epic",
                 &epic,
                 &project,
+                &PromptContext::default(),
             ),
         ),
     ]
@@ -764,6 +767,7 @@ fn epic_planning_prompt_uses_task_block_not_epic_header() {
         "Planning subtask",
         &epic,
         &project,
+        &PromptContext::default(),
     );
     assert!(
         prompt.starts_with("You are planning an epic."),
@@ -792,7 +796,14 @@ fn epic_planning_prompt_uses_task_block_not_epic_header() {
 fn epic_planning_prompt_includes_work_package_steps_and_no_implement_guard() {
     let project = project_ctx();
     let epic = epic_ctx();
-    let prompt = build_epic_planning_prompt(TaskId(1), "Plan", "Desc", &epic, &project);
+    let prompt = build_epic_planning_prompt(
+        TaskId(1),
+        "Plan",
+        "Desc",
+        &epic,
+        &project,
+        &PromptContext::default(),
+    );
     assert!(prompt.contains("create_task"), "should mention create_task");
     assert!(prompt.contains("update_epic"), "should mention update_epic");
     assert!(prompt.contains("sort_order"), "should mention sort_order");
@@ -811,7 +822,7 @@ fn quick_dispatch_uses_unconditional_plan_and_attach_instruction() {
         "",
         None,
         None,
-        &LearningInjections::default(),
+        &PromptContext::default(),
     );
     assert!(
         prompt.contains(plan_and_attach_instruction()),
@@ -1505,6 +1516,7 @@ fn epic_planning_prompt_contains_epic_context() {
         "Rework the login flow",
         &epic,
         &project,
+        &PromptContext::default(),
     );
     assert!(prompt.contains("EpicId: 42"));
     assert!(prompt.contains("Redesign auth"));

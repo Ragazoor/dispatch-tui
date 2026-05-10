@@ -6,6 +6,7 @@ use crate::process::ProcessRunner;
 mod agents;
 mod finish;
 mod prompts;
+pub mod repo_map;
 mod worktree;
 
 pub use agents::{
