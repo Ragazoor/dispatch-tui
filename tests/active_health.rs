@@ -47,7 +47,8 @@ fn hook_event_flow_drives_sub_status_and_lifecycle() {
     assert_eq!(t.status, TaskStatus::Running);
 
     // 2. PreToolUse → Active + last_pre_tool_use_at set.
-    svc.record_hook_event(id, HookEventKind::PreToolUse).unwrap();
+    svc.record_hook_event(id, HookEventKind::PreToolUse)
+        .unwrap();
     let t = svc.get_task(id).unwrap();
     assert_eq!(t.sub_status, SubStatus::Active);
     assert!(t.last_pre_tool_use_at.is_some());
@@ -67,7 +68,8 @@ fn hook_event_flow_drives_sub_status_and_lifecycle() {
     sleep(Duration::from_millis(1100));
 
     // 4. PreToolUse again → newer event wins, classifier returns Active.
-    svc.record_hook_event(id, HookEventKind::PreToolUse).unwrap();
+    svc.record_hook_event(id, HookEventKind::PreToolUse)
+        .unwrap();
     let t = svc.get_task(id).unwrap();
     assert_eq!(t.sub_status, SubStatus::Active);
     let pre = t.last_pre_tool_use_at.unwrap();
