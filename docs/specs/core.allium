@@ -139,6 +139,8 @@ entity Task {
     labels: Set<String> = {}  -- free-form badges rendered on the card's second line; set by feed scripts via FeedItem.labels or by future TUI editors
     base_branch: String = "main" -- the branch this task rebases onto / targets for PRs
     external_id: String?  -- stable identifier for tasks sourced from a feed epic (see feeds.allium); null for hand-created tasks. Unique per (epic, external_id) when set.
+    last_pre_tool_use_at: Timestamp?  -- wallclock of the most recent PreToolUse hook; null when the agent has never tooled (or after Stop)
+    last_notification_at: Timestamp?  -- wallclock of the most recent Notification hook; null when no notification is pending (or after Stop)
     created_at: Timestamp
     updated_at: Timestamp
 

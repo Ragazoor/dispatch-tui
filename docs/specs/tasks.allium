@@ -1037,28 +1037,27 @@ rule EditTask {
 
 -- == Agent Health ==
 
-rule DetectStaleAgent {
-    -- Fires when a running task's tmux output stops changing beyond
-    -- inactivity_timeout and the task is not already stale or crashed.
-    when: task.status = running
-          and task.tmux_window != null
-          and time_since_last_output(task) > inactivity_timeout
-          and task.sub_status not in {stale, crashed, conflict}
+rule ClassifyAgentActivity {
+    -- Derives sub_status for running tasks from hook event timestamps.
+    -- ACTIVE_THRESHOLD = 2 minutes.
+    when: tick
 
-    ensures: task.sub_status = stale
+    requires: task.status = running
+    requires: task.sub_status not in {crashed, conflict}
+
     ensures:
-        if notifications_enabled:
-            DesktopNotification(
-                task: task,
-                urgency: normal,
-                about: agent_stale
-            )
+        if task.last_notification_at > task.last_pre_tool_use_at:
+            task.sub_status = needs_input
+        else if now - task.last_pre_tool_use_at <= 2.minutes:
+            task.sub_status = active
+        else:
+            task.sub_status = stale
 
     @guidance
-        -- Evaluated on each tick for all running tasks with a tmux window.
-        -- Escalation only: Crashed is not downgraded to Stale.
-        -- When activity resumes (new tmux output arrives), sub_status
-        -- is reset to active by the TmuxOutput handler.
+        -- Crashed and Conflict are orthogonal — set by DetectCrashedAgent
+        -- and conflict detectors respectively, never overridden here.
+        -- The wallclock Staleness enum (Fresh/Aging/Stale at 3d/7d) is
+        -- independent — it decorates card ages.
 }
 
 rule DetectCrashedAgent {
@@ -1087,23 +1086,6 @@ rule DetectCrashedAgent {
         -- silently clears task.tmux_window = null without changing
         -- sub_status or sending notifications. This is the normal exit
         -- path for review agents and detached sessions.
-}
-
-rule RecoverFromStale {
-    -- When tmux output arrives for a running task with stale or crashed
-    -- sub_status, the agent is alive again. Reset sub_status to active.
-    when: TmuxOutput(task)
-
-    requires: task.status = running
-    requires: task.sub_status in {stale, crashed}
-
-    ensures: task.sub_status = active
-
-    @guidance
-        -- Evaluated when new tmux output is detected and the output
-        -- content has changed since the last capture. This is the
-        -- counterpart to DetectStaleAgent and DetectCrashedAgent:
-        -- activity evidence reverses the health degradation.
 }
 
 -- == Notifications ==
@@ -1547,6 +1529,7 @@ rule HookPreToolUse {
 
     ensures: task.status = running
     ensures: task.sub_status = core/SubStatus.default_for(running)
+    ensures: task.last_pre_tool_use_at = now
 
     @guidance
         -- Fires on every non-dispatch tool use. The unconditional
@@ -1565,6 +1548,8 @@ rule HookStop {
 
     ensures: task.status = review
     ensures: task.sub_status = core/SubStatus.default_for(review)
+    ensures: task.last_pre_tool_use_at = null
+    ensures: task.last_notification_at = null
 }
 
 rule HookNotification {
@@ -1572,6 +1557,7 @@ rule HookNotification {
     requires: task.status = running
 
     ensures: task.sub_status = needs_input
+    ensures: task.last_notification_at = now
 
     @guidance
         -- HookNotification fires when the agent raises a notification
