@@ -139,28 +139,32 @@ pub fn install_example_script(data_dir: &Path) -> Result<PathBuf> {
 
 /// Seed exactly one example feed epic ("Dependabot") wired to the installed
 /// example script. Idempotent: re-running does not duplicate the epic.
-pub fn seed_feed_epics(db: &Database, data_dir: &Path) -> Result<()> {
+pub async fn seed_feed_epics(db: &Database, data_dir: &Path) -> Result<()> {
     let script_path = install_example_script(data_dir)?;
     let cmd = script_path
         .to_str()
         .context("example script path is not valid UTF-8")?;
 
     let already_seeded = db
-        .list_epics()?
+        .list_epics()
+        .await?
         .iter()
         .any(|e| e.feed_command.as_deref() == Some(cmd));
     if already_seeded {
         return Ok(());
     }
 
-    let epic = db.create_epic("Dependabot", "", "", None, ProjectId(1))?;
+    let epic = db
+        .create_epic("Dependabot", "", "", None, ProjectId(1))
+        .await?;
     db.patch_epic(
         epic.id,
         &EpicPatch::new()
             .feed_command(Some(cmd))
             .feed_interval_secs(Some(300))
             .sort_order(Some(0)),
-    )?;
+    )
+    .await?;
     Ok(())
 }
 
@@ -176,13 +180,13 @@ mod tests {
 
     // -- seed_feed_epics --
 
-    #[test]
-    fn seed_feed_epics_creates_single_example_epic() {
+    #[tokio::test]
+    async fn seed_feed_epics_creates_single_example_epic() {
         let db = Database::open_in_memory().unwrap();
         let data_dir = tempfile::tempdir().unwrap();
-        seed_feed_epics(&db, data_dir.path()).unwrap();
+        seed_feed_epics(&db, data_dir.path()).await.unwrap();
 
-        let epics = db.list_epics().unwrap();
+        let epics = db.list_epics().await.unwrap();
         assert_eq!(
             epics.len(),
             1,
@@ -201,14 +205,14 @@ mod tests {
         );
     }
 
-    #[test]
-    fn seed_feed_epics_is_idempotent() {
+    #[tokio::test]
+    async fn seed_feed_epics_is_idempotent() {
         let db = Database::open_in_memory().unwrap();
         let data_dir = tempfile::tempdir().unwrap();
-        seed_feed_epics(&db, data_dir.path()).unwrap();
-        seed_feed_epics(&db, data_dir.path()).unwrap();
+        seed_feed_epics(&db, data_dir.path()).await.unwrap();
+        seed_feed_epics(&db, data_dir.path()).await.unwrap();
 
-        let epics = db.list_epics().unwrap();
+        let epics = db.list_epics().await.unwrap();
         assert_eq!(epics.len(), 1, "Dependabot epic must not be duplicated");
     }
 

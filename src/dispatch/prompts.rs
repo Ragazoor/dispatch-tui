@@ -13,9 +13,9 @@ pub struct EpicContext {
 
 impl EpicContext {
     /// Build epic context from the database for a task that belongs to an epic.
-    pub fn from_db(task: &Task, db: &dyn db::TaskStore) -> Option<Self> {
+    pub async fn from_db(task: &Task, db: &dyn db::TaskStore) -> Option<Self> {
         let epic_id = task.epic_id?;
-        let epic = db.get_epic(epic_id).ok()??;
+        let epic = db.get_epic(epic_id).await.ok()??;
         Some(EpicContext {
             epic_id,
             epic_title: epic.title,

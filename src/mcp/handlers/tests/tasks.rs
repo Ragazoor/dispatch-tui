@@ -1217,7 +1217,7 @@ async fn create_epic_minimal() {
     assert!(text.contains("Epic"));
     assert!(text.contains("created"));
 
-    let epics = state.db.list_epics().unwrap();
+    let epics = state.db.list_epics().await.unwrap();
     assert_eq!(epics.len(), 1);
     assert_eq!(epics[0].title, "My Epic");
     assert_eq!(epics[0].repo_path, "/repo");
@@ -1241,7 +1241,7 @@ async fn create_epic_with_all_fields() {
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
 
-    let epics = state.db.list_epics().unwrap();
+    let epics = state.db.list_epics().await.unwrap();
     assert_eq!(epics[0].description, "Epic desc");
 }
 
@@ -1281,6 +1281,7 @@ async fn get_epic_found() {
     let epic = state
         .db
         .create_epic("Get Me", "desc", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
 
     let resp = call(
@@ -1319,6 +1320,7 @@ async fn get_epic_shows_subtask_summary() {
     let epic = state
         .db
         .create_epic("With Tasks", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
     let t1 = state
         .db
@@ -1350,8 +1352,8 @@ async fn get_epic_shows_subtask_summary() {
             project_id: ProjectId(1),
         })
         .unwrap();
-    state.db.set_task_epic_id(t1, Some(epic.id)).unwrap();
-    state.db.set_task_epic_id(t2, Some(epic.id)).unwrap();
+    state.db.set_task_epic_id(t1, Some(epic.id)).await.unwrap();
+    state.db.set_task_epic_id(t2, Some(epic.id)).await.unwrap();
 
     let resp = call(
         &state,
@@ -1375,6 +1377,7 @@ async fn get_epic_accepts_string_id() {
     let epic = state
         .db
         .create_epic("String ID", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
 
     let resp = call(
@@ -1414,10 +1417,12 @@ async fn list_epics_with_items() {
     state
         .db
         .create_epic("Epic A", "desc a", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
     state
         .db
         .create_epic("Epic B", "desc b", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
 
     let resp = call(
@@ -1437,6 +1442,7 @@ async fn list_epics_shows_subtask_counts() {
     let epic = state
         .db
         .create_epic("Tracked", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
     let t1 = state
         .db
@@ -1468,8 +1474,8 @@ async fn list_epics_shows_subtask_counts() {
             project_id: ProjectId(1),
         })
         .unwrap();
-    state.db.set_task_epic_id(t1, Some(epic.id)).unwrap();
-    state.db.set_task_epic_id(t2, Some(epic.id)).unwrap();
+    state.db.set_task_epic_id(t1, Some(epic.id)).await.unwrap();
+    state.db.set_task_epic_id(t2, Some(epic.id)).await.unwrap();
 
     let resp = call(
         &state,
@@ -1490,6 +1496,7 @@ async fn update_epic_title() {
     let epic = state
         .db
         .create_epic("Old Title", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
 
     let resp = call(
@@ -1505,7 +1512,7 @@ async fn update_epic_title() {
     assert!(text.contains("updated"));
     assert!(text.contains("title"));
 
-    let updated = state.db.get_epic(epic.id).unwrap().unwrap();
+    let updated = state.db.get_epic(epic.id).await.unwrap().unwrap();
     assert_eq!(updated.title, "New Title");
 }
 
@@ -1515,6 +1522,7 @@ async fn update_epic_mark_done() {
     let epic = state
         .db
         .create_epic("To Finish", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
 
     let resp = call(
@@ -1532,7 +1540,7 @@ async fn update_epic_mark_done() {
         "response should mention status field: {text}"
     );
 
-    let updated = state.db.get_epic(epic.id).unwrap().unwrap();
+    let updated = state.db.get_epic(epic.id).await.unwrap().unwrap();
     assert_eq!(updated.status, crate::models::TaskStatus::Done);
 }
 
@@ -1542,6 +1550,7 @@ async fn update_epic_multiple_fields() {
     let epic = state
         .db
         .create_epic("Old", "old desc", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
 
     let resp = call(
@@ -1559,7 +1568,7 @@ async fn update_epic_multiple_fields() {
     .await;
     assert!(resp.error.is_none());
 
-    let updated = state.db.get_epic(epic.id).unwrap().unwrap();
+    let updated = state.db.get_epic(epic.id).await.unwrap().unwrap();
     assert_eq!(updated.title, "New");
     assert_eq!(updated.description, "new desc");
 }
@@ -1570,6 +1579,7 @@ async fn update_epic_accepts_string_id() {
     let epic = state
         .db
         .create_epic("Str Epic", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
 
     let resp = call(
@@ -1594,6 +1604,7 @@ async fn update_epic_plan() {
     let epic = state
         .db
         .create_epic("Planned Epic", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
 
     let resp = call(
@@ -1611,7 +1622,7 @@ async fn update_epic_plan() {
         "response should mention plan: {text}"
     );
 
-    let updated = state.db.get_epic(epic.id).unwrap().unwrap();
+    let updated = state.db.get_epic(epic.id).await.unwrap().unwrap();
     assert_eq!(
         updated.plan_path.as_deref(),
         Some("docs/plans/epic-plan.md")
@@ -1776,6 +1787,7 @@ async fn create_task_with_epic_id() {
     let epic = state
         .db
         .create_epic("Parent Epic", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
 
     let resp = call(
@@ -1794,7 +1806,7 @@ async fn create_task_with_epic_id() {
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
 
-    let subtasks = state.db.list_tasks_for_epic(epic.id).unwrap();
+    let subtasks = state.db.list_tasks_for_epic(epic.id).await.unwrap();
     assert_eq!(subtasks.len(), 1);
     assert_eq!(subtasks[0].title, "Epic Child");
 }
@@ -1806,6 +1818,7 @@ async fn create_task_with_string_epic_id() {
     let epic = state
         .db
         .create_epic("Parent", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
 
     let resp = call(
@@ -1828,7 +1841,7 @@ async fn create_task_with_string_epic_id() {
         resp.error
     );
 
-    let subtasks = state.db.list_tasks_for_epic(epic.id).unwrap();
+    let subtasks = state.db.list_tasks_for_epic(epic.id).await.unwrap();
     assert_eq!(subtasks.len(), 1);
 }
 
@@ -1838,6 +1851,7 @@ async fn update_epic_no_fields_errors() {
     let epic = state
         .db
         .create_epic("Test", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
 
     let resp = call(
@@ -1858,6 +1872,7 @@ async fn update_epic_feed_command_set() {
     let epic = state
         .db
         .create_epic("Feed Epic", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
 
     let resp = call(
@@ -1871,7 +1886,7 @@ async fn update_epic_feed_command_set() {
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
 
-    let updated = state.db.get_epic(epic.id).unwrap().unwrap();
+    let updated = state.db.get_epic(epic.id).await.unwrap().unwrap();
     assert_eq!(updated.feed_command.as_deref(), Some("echo []"));
 }
 
@@ -1881,6 +1896,7 @@ async fn update_epic_feed_command_clear() {
     let epic = state
         .db
         .create_epic("Feed Epic", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
     state
         .db
@@ -1888,6 +1904,7 @@ async fn update_epic_feed_command_clear() {
             epic.id,
             &crate::db::EpicPatch::default().feed_command(Some("old cmd")),
         )
+        .await
         .unwrap();
 
     let resp = call(
@@ -1901,7 +1918,7 @@ async fn update_epic_feed_command_clear() {
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
 
-    let updated = state.db.get_epic(epic.id).unwrap().unwrap();
+    let updated = state.db.get_epic(epic.id).await.unwrap().unwrap();
     assert!(
         updated.feed_command.is_none(),
         "feed_command should be cleared"
@@ -1914,6 +1931,7 @@ async fn update_epic_feed_command_absent_preserves_existing() {
     let epic = state
         .db
         .create_epic("Feed Epic", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
     state
         .db
@@ -1921,6 +1939,7 @@ async fn update_epic_feed_command_absent_preserves_existing() {
             epic.id,
             &crate::db::EpicPatch::default().feed_command(Some("keep me")),
         )
+        .await
         .unwrap();
 
     let resp = call(
@@ -1934,7 +1953,7 @@ async fn update_epic_feed_command_absent_preserves_existing() {
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
 
-    let updated = state.db.get_epic(epic.id).unwrap().unwrap();
+    let updated = state.db.get_epic(epic.id).await.unwrap().unwrap();
     assert_eq!(updated.feed_command.as_deref(), Some("keep me"));
 }
 
@@ -1944,6 +1963,7 @@ async fn update_epic_feed_interval_secs_set() {
     let epic = state
         .db
         .create_epic("Feed Epic", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
 
     let resp = call(
@@ -1957,7 +1977,7 @@ async fn update_epic_feed_interval_secs_set() {
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
 
-    let updated = state.db.get_epic(epic.id).unwrap().unwrap();
+    let updated = state.db.get_epic(epic.id).await.unwrap().unwrap();
     assert_eq!(updated.feed_interval_secs, Some(60));
 }
 
@@ -1967,6 +1987,7 @@ async fn update_epic_feed_interval_secs_clear() {
     let epic = state
         .db
         .create_epic("Feed Epic", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
     state
         .db
@@ -1974,6 +1995,7 @@ async fn update_epic_feed_interval_secs_clear() {
             epic.id,
             &crate::db::EpicPatch::default().feed_interval_secs(Some(120)),
         )
+        .await
         .unwrap();
 
     let resp = call(
@@ -1987,7 +2009,7 @@ async fn update_epic_feed_interval_secs_clear() {
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
 
-    let updated = state.db.get_epic(epic.id).unwrap().unwrap();
+    let updated = state.db.get_epic(epic.id).await.unwrap().unwrap();
     assert!(
         updated.feed_interval_secs.is_none(),
         "feed_interval_secs should be cleared"
@@ -2000,6 +2022,7 @@ async fn get_epic_shows_feed_command() {
     let epic = state
         .db
         .create_epic("Feed Epic", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
     state
         .db
@@ -2009,6 +2032,7 @@ async fn get_epic_shows_feed_command() {
                 .feed_command(Some("./scripts/feed.sh"))
                 .feed_interval_secs(Some(300)),
         )
+        .await
         .unwrap();
 
     let resp = call(
@@ -3055,6 +3079,7 @@ async fn update_task_status_recalculates_epic_status() {
     let epic = state
         .db
         .create_epic("E", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
     let task_id = state
         .db
@@ -3071,7 +3096,11 @@ async fn update_task_status_recalculates_epic_status() {
             project_id: ProjectId(1),
         })
         .unwrap();
-    state.db.set_task_epic_id(task_id, Some(epic.id)).unwrap();
+    state
+        .db
+        .set_task_epic_id(task_id, Some(epic.id))
+        .await
+        .unwrap();
 
     // Move subtask to Running
     let resp = call(
@@ -3090,7 +3119,7 @@ async fn update_task_status_recalculates_epic_status() {
     );
 
     // Epic should auto-advance to Running
-    let epic = state.db.get_epic(epic.id).unwrap().unwrap();
+    let epic = state.db.get_epic(epic.id).await.unwrap().unwrap();
     assert_eq!(epic.status, TaskStatus::Running);
 }
 
@@ -3584,6 +3613,7 @@ async fn update_task_sets_epic_id() {
     let epic = state
         .db
         .create_epic("Parent", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
     let task_id = create_task_fixture(&state);
 
@@ -3712,6 +3742,7 @@ async fn list_tasks_filters_by_epic_id() {
     let epic = state
         .db
         .create_epic("My Epic", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
     let t1 = state
         .db
@@ -3743,7 +3774,7 @@ async fn list_tasks_filters_by_epic_id() {
             project_id: ProjectId(1),
         })
         .unwrap();
-    state.db.set_task_epic_id(t1, Some(epic.id)).unwrap();
+    state.db.set_task_epic_id(t1, Some(epic.id)).await.unwrap();
 
     let resp = call(
         &state,
@@ -3769,6 +3800,7 @@ async fn list_tasks_filters_by_status_and_epic_id() {
     let epic = state
         .db
         .create_epic("Combined Filter", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
     let t1 = state
         .db
@@ -3800,8 +3832,8 @@ async fn list_tasks_filters_by_status_and_epic_id() {
             project_id: ProjectId(1),
         })
         .unwrap();
-    state.db.set_task_epic_id(t1, Some(epic.id)).unwrap();
-    state.db.set_task_epic_id(t2, Some(epic.id)).unwrap();
+    state.db.set_task_epic_id(t1, Some(epic.id)).await.unwrap();
+    state.db.set_task_epic_id(t2, Some(epic.id)).await.unwrap();
 
     let resp = call(
         &state,
@@ -3976,6 +4008,7 @@ async fn wrap_up_rebase_does_not_recalculate_epic_status() {
 
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
     let task_id = db
         .create_task(CreateTaskRequest {
@@ -3991,14 +4024,14 @@ async fn wrap_up_rebase_does_not_recalculate_epic_status() {
             project_id: ProjectId(1),
         })
         .unwrap();
-    db.set_task_epic_id(task_id, Some(epic.id)).unwrap();
+    db.set_task_epic_id(task_id, Some(epic.id)).await.unwrap();
     db.patch_task(
         task_id,
         &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-only-task")),
     )
     .unwrap();
-    db.recalculate_epic_status(epic.id).unwrap();
-    let epic_status_before = db.get_epic(epic.id).unwrap().unwrap().status;
+    db.recalculate_epic_status(epic.id).await.unwrap();
+    let epic_status_before = db.get_epic(epic.id).await.unwrap().unwrap().status;
 
     let resp = call(
         &state,
@@ -4011,7 +4044,7 @@ async fn wrap_up_rebase_does_not_recalculate_epic_status() {
     .await;
     assert!(resp.error.is_none(), "{:?}", resp.error);
 
-    let epic_after = db.get_epic(epic.id).unwrap().unwrap();
+    let epic_after = db.get_epic(epic.id).await.unwrap().unwrap();
     assert_eq!(
         epic_after.status, epic_status_before,
         "wrap_up must not recalculate epic status — that runs at exit_session"
@@ -4079,6 +4112,7 @@ async fn get_task_shows_all_fields() {
     let epic = state
         .db
         .create_epic("Parent Epic", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
     let task_id = state
         .db
@@ -4095,7 +4129,11 @@ async fn get_task_shows_all_fields() {
             project_id: ProjectId(1),
         })
         .unwrap();
-    state.db.set_task_epic_id(task_id, Some(epic.id)).unwrap();
+    state
+        .db
+        .set_task_epic_id(task_id, Some(epic.id))
+        .await
+        .unwrap();
     state
         .db
         .patch_task(
@@ -4221,6 +4259,7 @@ async fn list_tasks_shows_epic_indicator() {
     let epic = state
         .db
         .create_epic("Sprint 1", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
     let task_id = state
         .db
@@ -4237,7 +4276,11 @@ async fn list_tasks_shows_epic_indicator() {
             project_id: ProjectId(1),
         })
         .unwrap();
-    state.db.set_task_epic_id(task_id, Some(epic.id)).unwrap();
+    state
+        .db
+        .set_task_epic_id(task_id, Some(epic.id))
+        .await
+        .unwrap();
 
     let resp = call(
         &state,
@@ -4344,10 +4387,12 @@ async fn list_epics_excludes_archived() {
     state
         .db
         .create_epic("Active Epic", "desc", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
     let archived_epic = state
         .db
         .create_epic("Archived Epic", "desc", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
     state
         .db
@@ -4355,6 +4400,7 @@ async fn list_epics_excludes_archived() {
             archived_epic.id,
             &db::EpicPatch::new().status(TaskStatus::Archived),
         )
+        .await
         .unwrap();
 
     let resp = call(
@@ -4394,6 +4440,7 @@ async fn dispatch_next_no_backlog_returns_success_noop() {
     let epic = state
         .db
         .create_epic("Test Epic", "desc", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
 
     // Add a task that's already Running (not Backlog)
@@ -4412,7 +4459,11 @@ async fn dispatch_next_no_backlog_returns_success_noop() {
             project_id: ProjectId(1),
         })
         .unwrap();
-    state.db.set_task_epic_id(task_id, Some(epic.id)).unwrap();
+    state
+        .db
+        .set_task_epic_id(task_id, Some(epic.id))
+        .await
+        .unwrap();
 
     let resp = call(
         &state,
@@ -4453,6 +4504,7 @@ async fn dispatch_next_picks_first_backlog_subtask() {
 
     let epic = db
         .create_epic("Test Epic", "desc", &repo_path, None, ProjectId(1))
+        .await
         .unwrap();
     let task1_id = db
         .create_task(CreateTaskRequest {
@@ -4482,8 +4534,8 @@ async fn dispatch_next_picks_first_backlog_subtask() {
             project_id: ProjectId(1),
         })
         .unwrap();
-    db.set_task_epic_id(task1_id, Some(epic.id)).unwrap();
-    db.set_task_epic_id(task2_id, Some(epic.id)).unwrap();
+    db.set_task_epic_id(task1_id, Some(epic.id)).await.unwrap();
+    db.set_task_epic_id(task2_id, Some(epic.id)).await.unwrap();
 
     // Pre-create the worktree directory (mocked git won't create it)
     std::fs::create_dir_all(
@@ -4545,6 +4597,7 @@ async fn dispatch_next_respects_sort_order() {
 
     let epic = db
         .create_epic("Test Epic", "desc", &repo_path, None, ProjectId(1))
+        .await
         .unwrap();
 
     // task1 has higher ID but lower sort_order — should be picked second
@@ -4576,8 +4629,8 @@ async fn dispatch_next_respects_sort_order() {
             project_id: ProjectId(1),
         })
         .unwrap();
-    db.set_task_epic_id(task1_id, Some(epic.id)).unwrap();
-    db.set_task_epic_id(task2_id, Some(epic.id)).unwrap();
+    db.set_task_epic_id(task1_id, Some(epic.id)).await.unwrap();
+    db.set_task_epic_id(task2_id, Some(epic.id)).await.unwrap();
 
     // Give task2 a lower sort_order so it should be picked first
     db.patch_task(task2_id, &db::TaskPatch::new().sort_order(Some(1)))
@@ -4632,6 +4685,7 @@ async fn dispatch_next_respects_tag_routing() {
 
     let epic = db
         .create_epic("Test Epic", "desc", &repo_path, None, ProjectId(1))
+        .await
         .unwrap();
 
     // Create a feature-tagged task with no plan — should use Plan mode
@@ -4649,7 +4703,7 @@ async fn dispatch_next_respects_tag_routing() {
             project_id: ProjectId(1),
         })
         .unwrap();
-    db.set_task_epic_id(task_id, Some(epic.id)).unwrap();
+    db.set_task_epic_id(task_id, Some(epic.id)).await.unwrap();
     db.patch_task(
         task_id,
         &db::TaskPatch::new().tag(Some(crate::models::TaskTag::Feature)),
@@ -5229,10 +5283,12 @@ async fn dispatch_next_returns_disabled_when_auto_dispatch_off() {
     let epic = state
         .db
         .create_epic("E", "desc", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
     state
         .db
         .patch_epic(epic.id, &db::EpicPatch::new().auto_dispatch(false))
+        .await
         .unwrap();
 
     // Create a backlog subtask linked to the epic
@@ -5251,7 +5307,11 @@ async fn dispatch_next_returns_disabled_when_auto_dispatch_off() {
             project_id: ProjectId(1),
         })
         .unwrap();
-    state.db.set_task_epic_id(task_id, Some(epic.id)).unwrap();
+    state
+        .db
+        .set_task_epic_id(task_id, Some(epic.id))
+        .await
+        .unwrap();
 
     let resp = call(
         &state,
@@ -5287,6 +5347,7 @@ async fn mcp_create_sub_epic() {
     let parent = state
         .db
         .create_epic("Parent Epic", "desc", "/tmp", None, ProjectId(1))
+        .await
         .unwrap();
 
     // Create sub-epic via MCP with parent_epic_id
@@ -5312,7 +5373,7 @@ async fn mcp_create_sub_epic() {
     );
 
     // Verify the sub-epic has the correct parent
-    let epics = state.db.list_epics().unwrap();
+    let epics = state.db.list_epics().await.unwrap();
     let sub = epics
         .iter()
         .find(|e| e.title == "Sub Epic")
@@ -6324,7 +6385,7 @@ async fn create_epic_without_project_id_assigns_to_default() {
     .await;
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
 
-    let epics = db.list_epics().unwrap();
+    let epics = db.list_epics().await.unwrap();
     assert_eq!(epics.len(), 1);
     let default_id = db.get_default_project().await.unwrap().id;
     assert_eq!(epics[0].project_id, default_id);
@@ -6356,7 +6417,7 @@ async fn create_epic_with_project_id_assigns_correctly() {
     .await;
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
 
-    let epics = db.list_epics().unwrap();
+    let epics = db.list_epics().await.unwrap();
     assert_eq!(epics.len(), 1);
     assert_eq!(epics[0].project_id, other.id);
 }
@@ -6473,6 +6534,7 @@ async fn update_epic_project_id_moves_epic() {
             None,
             db.get_default_project().await.unwrap().id,
         )
+        .await
         .unwrap();
     let default_id = db.get_default_project().await.unwrap().id;
     assert_eq!(epic.project_id, default_id);
@@ -6488,7 +6550,7 @@ async fn update_epic_project_id_moves_epic() {
     .await;
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
 
-    let epics = db.list_epics().unwrap();
+    let epics = db.list_epics().await.unwrap();
     let updated = epics.iter().find(|e| e.id == epic.id).unwrap();
     assert_eq!(updated.project_id, other.id);
 }
@@ -6511,6 +6573,7 @@ async fn update_epic_invalid_project_id_returns_error() {
             None,
             db.get_default_project().await.unwrap().id,
         )
+        .await
         .unwrap();
 
     let resp = call(
@@ -6659,7 +6722,11 @@ async fn record_learning_derives_scope_ref_for_repo() {
 async fn record_learning_derives_scope_ref_for_epic() {
     let state = test_state();
     let pid = default_project_id(&state).await;
-    let epic = state.db.create_epic("E", "", "/r", None, pid).unwrap();
+    let epic = state
+        .db
+        .create_epic("E", "", "/r", None, pid)
+        .await
+        .unwrap();
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -6974,10 +7041,12 @@ async fn list_tasks_caller_task_id_scopes_to_epic() {
     let epic = state
         .db
         .create_epic("My Epic", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
     let epic2 = state
         .db
         .create_epic("Other Epic", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
 
     // Task A (caller) in epic
@@ -7135,6 +7204,7 @@ async fn list_tasks_explicit_scope_overrides_caller_derived_scope() {
     let epic = state
         .db
         .create_epic("Epic", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
 
     // Caller is in the epic
@@ -8108,11 +8178,16 @@ async fn exit_session_recalculates_epic_status() {
     let epic = state
         .db
         .create_epic("E", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
     let task_id = create_running_task_with_window(&state);
-    state.db.set_task_epic_id(task_id, Some(epic.id)).unwrap();
-    state.db.recalculate_epic_status(epic.id).unwrap();
-    let epic_before = state.db.get_epic(epic.id).unwrap().unwrap();
+    state
+        .db
+        .set_task_epic_id(task_id, Some(epic.id))
+        .await
+        .unwrap();
+    state.db.recalculate_epic_status(epic.id).await.unwrap();
+    let epic_before = state.db.get_epic(epic.id).await.unwrap().unwrap();
     assert_ne!(
         epic_before.status,
         TaskStatus::Done,
@@ -8129,7 +8204,7 @@ async fn exit_session_recalculates_epic_status() {
     )
     .await;
 
-    let epic_after = state.db.get_epic(epic.id).unwrap().unwrap();
+    let epic_after = state.db.get_epic(epic.id).await.unwrap().unwrap();
     assert_eq!(
         epic_after.status,
         TaskStatus::Done,
@@ -8232,6 +8307,7 @@ async fn wrap_up_then_exit_session_end_to_end() {
 
     let epic = db
         .create_epic("E2E Epic", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
     let task_id = db
         .create_task(CreateTaskRequest {
@@ -8247,7 +8323,7 @@ async fn wrap_up_then_exit_session_end_to_end() {
             project_id: ProjectId(1),
         })
         .unwrap();
-    db.set_task_epic_id(task_id, Some(epic.id)).unwrap();
+    db.set_task_epic_id(task_id, Some(epic.id)).await.unwrap();
     db.patch_task(
         task_id,
         &crate::db::TaskPatch::new()
@@ -8255,8 +8331,8 @@ async fn wrap_up_then_exit_session_end_to_end() {
             .tmux_window(Some("e2e-window")),
     )
     .unwrap();
-    db.recalculate_epic_status(epic.id).unwrap();
-    let epic_before = db.get_epic(epic.id).unwrap().unwrap();
+    db.recalculate_epic_status(epic.id).await.unwrap();
+    let epic_before = db.get_epic(epic.id).await.unwrap().unwrap();
     assert_ne!(epic_before.status, TaskStatus::Done);
 
     let resp = call(
@@ -8280,7 +8356,7 @@ async fn wrap_up_then_exit_session_end_to_end() {
         after_wrap_up.tmux_window.is_some(),
         "after wrap_up: tmux_window must be preserved"
     );
-    let epic_after_wrap_up = db.get_epic(epic.id).unwrap().unwrap();
+    let epic_after_wrap_up = db.get_epic(epic.id).await.unwrap().unwrap();
     assert_eq!(
         epic_after_wrap_up.status, epic_before.status,
         "after wrap_up: epic status must not change"
@@ -8305,7 +8381,7 @@ async fn wrap_up_then_exit_session_end_to_end() {
     );
     assert!(final_task.tmux_window.is_none());
 
-    let final_epic = db.get_epic(epic.id).unwrap().unwrap();
+    let final_epic = db.get_epic(epic.id).await.unwrap().unwrap();
     assert_eq!(
         final_epic.status,
         TaskStatus::Done,

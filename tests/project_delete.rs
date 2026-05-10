@@ -32,13 +32,19 @@ async fn delete_project_moves_tasks_and_epics_to_default() {
             .unwrap()
         })
         .collect();
-    let epic = db.create_epic("Epic", "", "/repo", None, p.id).unwrap();
+    let epic = db
+        .create_epic("Epic", "", "/repo", None, p.id)
+        .await
+        .unwrap();
 
     // Sanity: items belong to P.
     for id in &task_ids {
         assert_eq!(db.get_task(*id).unwrap().unwrap().project_id, p.id);
     }
-    assert_eq!(db.get_epic(epic.id).unwrap().unwrap().project_id, p.id);
+    assert_eq!(
+        db.get_epic(epic.id).await.unwrap().unwrap().project_id,
+        p.id
+    );
 
     // Delete P → all items move to Default in a single transaction.
     db.delete_project_and_move_items(p.id, default.id)
@@ -53,7 +59,7 @@ async fn delete_project_moves_tasks_and_epics_to_default() {
         );
     }
     assert_eq!(
-        db.get_epic(epic.id).unwrap().unwrap().project_id,
+        db.get_epic(epic.id).await.unwrap().unwrap().project_id,
         default.id,
         "epic should be reassigned to default"
     );

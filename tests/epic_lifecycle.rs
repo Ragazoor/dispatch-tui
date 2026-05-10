@@ -5,8 +5,8 @@ use dispatch_tui::db::{
 };
 use dispatch_tui::models::*;
 
-#[test]
-fn full_epic_lifecycle() {
+#[tokio::test]
+async fn full_epic_lifecycle() {
     let db = Database::open_in_memory().unwrap();
 
     // 1. Create an epic
@@ -18,6 +18,7 @@ fn full_epic_lifecycle() {
             None,
             ProjectId(1),
         )
+        .await
         .unwrap();
 
     // 2. Create subtasks linked to epic
@@ -49,17 +50,18 @@ fn full_epic_lifecycle() {
             project_id: ProjectId(1),
         })
         .unwrap();
-    db.set_task_epic_id(sub1, Some(epic.id)).unwrap();
-    db.set_task_epic_id(sub2, Some(epic.id)).unwrap();
+    db.set_task_epic_id(sub1, Some(epic.id)).await.unwrap();
+    db.set_task_epic_id(sub2, Some(epic.id)).await.unwrap();
 
     // 3. Verify epic status is Backlog (new epics start as Backlog)
-    let epic = db.get_epic(epic.id).unwrap().unwrap();
+    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
     assert_eq!(epic.status, TaskStatus::Backlog);
 
     // 4. Move epic status to Running
     db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Running))
+        .await
         .unwrap();
-    let epic = db.get_epic(epic.id).unwrap().unwrap();
+    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
     assert_eq!(epic.status, TaskStatus::Running);
 
     // 5. Move all subtasks to Done, advance epic to Review
@@ -68,19 +70,21 @@ fn full_epic_lifecycle() {
     db.patch_task(sub2, &TaskPatch::new().status(TaskStatus::Done))
         .unwrap();
     db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Review))
+        .await
         .unwrap();
-    let epic = db.get_epic(epic.id).unwrap().unwrap();
+    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
     assert_eq!(epic.status, TaskStatus::Review);
 
     // 6. Mark epic as done
     db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Done))
+        .await
         .unwrap();
-    let epic = db.get_epic(epic.id).unwrap().unwrap();
+    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
     assert_eq!(epic.status, TaskStatus::Done);
 
     // 7. Delete epic cascades
-    db.delete_epic(epic.id).unwrap();
-    assert!(db.get_epic(epic.id).unwrap().is_none());
+    db.delete_epic(epic.id).await.unwrap();
+    assert!(db.get_epic(epic.id).await.unwrap().is_none());
     assert!(db.get_task(sub1).unwrap().is_none());
     assert!(db.get_task(sub2).unwrap().is_none());
 }
@@ -98,6 +102,7 @@ async fn soft_archive_epic_does_not_violate_foreign_keys() {
 
     let epic = db
         .create_epic("Auth Rewrite", "desc", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
 
     let task_id = db
@@ -114,7 +119,7 @@ async fn soft_archive_epic_does_not_violate_foreign_keys() {
             project_id: ProjectId(1),
         })
         .unwrap();
-    db.set_task_epic_id(task_id, Some(epic.id)).unwrap();
+    db.set_task_epic_id(task_id, Some(epic.id)).await.unwrap();
 
     // Insert a task_usage row — every dispatched task gets one.
     db.report_usage(
@@ -147,12 +152,13 @@ async fn soft_archive_epic_does_not_violate_foreign_keys() {
     db.patch_task(task_id, &TaskPatch::new().status(TaskStatus::Archived))
         .unwrap();
     db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Archived))
+        .await
         .unwrap();
 
     // Both rows survive and are now archived; FK rows are untouched.
     let archived_task = db.get_task(task_id).unwrap().unwrap();
     assert_eq!(archived_task.status, TaskStatus::Archived);
-    let archived_epic = db.get_epic(epic.id).unwrap().unwrap();
+    let archived_epic = db.get_epic(epic.id).await.unwrap().unwrap();
     assert_eq!(archived_epic.status, TaskStatus::Archived);
 
     // Usage row still references the (still-existing) task.

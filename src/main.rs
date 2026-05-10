@@ -144,7 +144,10 @@ async fn main() -> Result<()> {
 
             let only_if_status = only_if.as_deref().map(parse_status).transpose()?;
             let svc = service::TaskService::new(std::sync::Arc::new(db));
-            match svc.cli_update_task(task_id, new_status, only_if_status, resolved_sub_status) {
+            match svc
+                .cli_update_task(task_id, new_status, only_if_status, resolved_sub_status)
+                .await
+            {
                 Ok(true) => println!("Task {} updated to {}", id, status),
                 Ok(false) => println!(
                     "Task {} not updated (status is not {})",
@@ -183,7 +186,7 @@ async fn main() -> Result<()> {
             }
         }
         Commands::Setup { port, yes } => {
-            dispatch_tui::setup::run_setup(port, yes, &cli.db)?;
+            dispatch_tui::setup::run_setup(port, yes, &cli.db).await?;
         }
         Commands::Uninstall { yes, purge } => {
             dispatch_tui::setup::run_uninstall(yes, purge)?;

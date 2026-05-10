@@ -1,7 +1,7 @@
 use super::*;
 
 impl TuiRuntime {
-    pub(super) fn exec_insert_epic(
+    pub(super) async fn exec_insert_epic(
         &self,
         app: &mut App,
         title: String,
@@ -9,16 +9,20 @@ impl TuiRuntime {
         repo_path: String,
         parent_epic_id: Option<crate::models::EpicId>,
     ) {
-        match self.epic_svc.create_epic(crate::service::CreateEpicParams {
-            title,
-            description,
-            repo_path,
-            sort_order: None,
-            parent_epic_id,
-            feed_command: None,
-            feed_interval_secs: None,
-            project_id: app.active_project(),
-        }) {
+        match self
+            .epic_svc
+            .create_epic(crate::service::CreateEpicParams {
+                title,
+                description,
+                repo_path,
+                sort_order: None,
+                parent_epic_id,
+                feed_command: None,
+                feed_interval_secs: None,
+                project_id: app.active_project(),
+            })
+            .await
+        {
             Ok(epic) => {
                 app.update(Message::Epic(crate::tui::messages::EpicMessage::Created(
                     epic,
@@ -32,15 +36,15 @@ impl TuiRuntime {
         }
     }
 
-    pub(super) fn exec_delete_epic(&self, app: &mut App, id: models::EpicId) {
-        if let Err(e) = self.epic_svc.delete_epic(id) {
+    pub(super) async fn exec_delete_epic(&self, app: &mut App, id: models::EpicId) {
+        if let Err(e) = self.epic_svc.delete_epic(id).await {
             app.update(Message::System(crate::tui::messages::SystemMessage::Error(
                 Self::db_error("deleting epic", e),
             )));
         }
     }
 
-    pub(super) fn exec_persist_epic(
+    pub(super) async fn exec_persist_epic(
         &self,
         app: &mut App,
         id: models::EpicId,
@@ -51,52 +55,60 @@ impl TuiRuntime {
         if status.is_none() && sort_order.is_none() {
             return;
         }
-        if let Err(e) = self.epic_svc.update_epic(crate::service::UpdateEpicParams {
-            epic_id: id,
-            title: None,
-            description: None,
-            status,
-            plan_path: None,
-            sort_order,
-            repo_path: None,
-            auto_dispatch: None,
-            feed_command: None,
-            feed_interval_secs: None,
-            project_id: None,
-        }) {
+        if let Err(e) = self
+            .epic_svc
+            .update_epic(crate::service::UpdateEpicParams {
+                epic_id: id,
+                title: None,
+                description: None,
+                status,
+                plan_path: None,
+                sort_order,
+                repo_path: None,
+                auto_dispatch: None,
+                feed_command: None,
+                feed_interval_secs: None,
+                project_id: None,
+            })
+            .await
+        {
             app.update(Message::System(crate::tui::messages::SystemMessage::Error(
                 Self::db_error("updating epic", e),
             )));
         }
     }
 
-    pub(super) fn exec_toggle_epic_auto_dispatch(
+    pub(super) async fn exec_toggle_epic_auto_dispatch(
         &self,
         app: &mut App,
         id: models::EpicId,
         auto_dispatch: bool,
     ) {
-        if let Err(e) = self.epic_svc.update_epic(crate::service::UpdateEpicParams {
-            epic_id: id,
-            title: None,
-            description: None,
-            status: None,
-            plan_path: None,
-            sort_order: None,
-            repo_path: None,
-            auto_dispatch: Some(auto_dispatch),
-            feed_command: None,
-            feed_interval_secs: None,
-            project_id: None,
-        }) {
+        if let Err(e) = self
+            .epic_svc
+            .update_epic(crate::service::UpdateEpicParams {
+                epic_id: id,
+                title: None,
+                description: None,
+                status: None,
+                plan_path: None,
+                sort_order: None,
+                repo_path: None,
+                auto_dispatch: Some(auto_dispatch),
+                feed_command: None,
+                feed_interval_secs: None,
+                project_id: None,
+            })
+            .await
+        {
             app.update(Message::System(crate::tui::messages::SystemMessage::Error(
                 Self::db_error("toggling auto dispatch", e),
             )));
         }
     }
 
-    pub(super) fn exec_refresh_epics_from_db(&self, app: &mut App) {
-        match self.database.list_epics() {
+    pub(super) async fn exec_refresh_epics_from_db(&self, app: &mut App) {
+        match self.database.list_epics().await {
             Ok(epics) => {
                 app.update(Message::Epic(crate::tui::messages::EpicMessage::Refresh(
                     epics,

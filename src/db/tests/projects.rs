@@ -67,7 +67,7 @@ async fn delete_project_and_move_items_removes_row_and_reassigns() {
     let task = create_task_returning(&db, "T", "", "/r", None, TaskStatus::Backlog).unwrap();
     db.patch_task(task.id, &TaskPatch::new().project_id(src.id))
         .unwrap();
-    let epic = db.create_epic("E", "", "/r", None, src.id).unwrap();
+    let epic = db.create_epic("E", "", "/r", None, src.id).await.unwrap();
 
     db.delete_project_and_move_items(src.id, default.id)
         .await
@@ -81,7 +81,7 @@ async fn delete_project_and_move_items_removes_row_and_reassigns() {
         default.id
     );
     assert_eq!(
-        db.get_epic(epic.id).unwrap().unwrap().project_id,
+        db.get_epic(epic.id).await.unwrap().unwrap().project_id,
         default.id
     );
 }

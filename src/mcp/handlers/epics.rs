@@ -80,16 +80,19 @@ pub(super) async fn handle_create_epic(
     };
 
     let svc = EpicService::new(state.db.clone());
-    match svc.create_epic(CreateEpicParams {
-        title: parsed.title,
-        description: parsed.description,
-        repo_path: parsed.repo_path,
-        sort_order: parsed.sort_order,
-        parent_epic_id: parsed.parent_epic_id.map(EpicId),
-        feed_command: None,
-        feed_interval_secs: None,
-        project_id,
-    }) {
+    match svc
+        .create_epic(CreateEpicParams {
+            title: parsed.title,
+            description: parsed.description,
+            repo_path: parsed.repo_path,
+            sort_order: parsed.sort_order,
+            parent_epic_id: parsed.parent_epic_id.map(EpicId),
+            feed_command: None,
+            feed_interval_secs: None,
+            project_id,
+        })
+        .await
+    {
         Ok(epic) => {
             state.notify_epic_changed(epic.id);
             JsonRpcResponse::ok(
@@ -101,7 +104,11 @@ pub(super) async fn handle_create_epic(
     }
 }
 
-pub(super) fn handle_get_epic(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {
+pub(super) async fn handle_get_epic(
+    state: &McpState,
+    id: Option<Value>,
+    args: Value,
+) -> JsonRpcResponse {
     let parsed = match parse_args::<GetEpicArgs>(&id, args) {
         Ok(a) => a,
         Err(resp) => return resp,
@@ -109,7 +116,7 @@ pub(super) fn handle_get_epic(state: &McpState, id: Option<Value>, args: Value) 
     tracing::info!(epic_id = parsed.epic_id, "MCP get_epic");
 
     let svc = EpicService::new(state.db.clone());
-    match svc.get_epic_with_subtasks(EpicId(parsed.epic_id)) {
+    match svc.get_epic_with_subtasks(EpicId(parsed.epic_id)).await {
         Ok((epic, subtasks)) => {
             let done_count = subtasks
                 .iter()
@@ -151,7 +158,7 @@ pub(super) fn handle_get_epic(state: &McpState, id: Option<Value>, args: Value) 
     }
 }
 
-pub(super) fn handle_list_epics(
+pub(super) async fn handle_list_epics(
     state: &McpState,
     id: Option<Value>,
     _args: Value,
@@ -159,7 +166,7 @@ pub(super) fn handle_list_epics(
     tracing::info!("MCP list_epics");
 
     let svc = EpicService::new(state.db.clone());
-    match svc.list_epics_with_progress() {
+    match svc.list_epics_with_progress().await {
         Ok(epics) => {
             if epics.is_empty() {
                 return JsonRpcResponse::ok(
@@ -251,7 +258,7 @@ pub(super) async fn handle_update_epic(
         .collect();
 
     let svc = EpicService::new(state.db.clone());
-    match svc.update_epic(params) {
+    match svc.update_epic(params).await {
         Ok(epic_id) => {
             state.notify_epic_changed(epic_id);
             JsonRpcResponse::ok(

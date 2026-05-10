@@ -94,8 +94,8 @@ fn create_task_with_sort_order() {
     assert_eq!(task.sort_order, Some(42));
 }
 
-#[test]
-fn update_task_status() {
+#[tokio::test]
+async fn update_task_status() {
     let db = test_db();
     let svc = task_svc(&db);
 
@@ -114,6 +114,7 @@ fn update_task_status() {
         .unwrap();
 
     svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Running))
+        .await
         .unwrap();
 
     let task = svc.get_task(id).unwrap();
@@ -123,8 +124,8 @@ fn update_task_status() {
 // Note: Done/Archived restriction moved to MCP handler layer.
 // The service now allows any status transition (TUI needs it).
 
-#[test]
-fn update_task_no_fields_returns_error() {
+#[tokio::test]
+async fn update_task_no_fields_returns_error() {
     let db = test_db();
     let svc = task_svc(&db);
 
@@ -142,12 +143,15 @@ fn update_task_no_fields_returns_error() {
         })
         .unwrap();
 
-    let err = svc.update_task(UpdateTaskParams::for_task(id)).unwrap_err();
+    let err = svc
+        .update_task(UpdateTaskParams::for_task(id))
+        .await
+        .unwrap_err();
     assert!(matches!(err, ServiceError::Validation(_)));
 }
 
-#[test]
-fn update_task_params_builder_compiles() {
+#[tokio::test]
+async fn update_task_params_builder_compiles() {
     let db = test_db();
     let svc = task_svc(&db);
 
@@ -166,14 +170,15 @@ fn update_task_params_builder_compiles() {
         .unwrap();
 
     svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Running))
+        .await
         .unwrap();
 
     let task = svc.get_task(id).unwrap();
     assert_eq!(task.status, TaskStatus::Running);
 }
 
-#[test]
-fn update_task_invalid_substatus_for_status() {
+#[tokio::test]
+async fn update_task_invalid_substatus_for_status() {
     let db = test_db();
     let svc = task_svc(&db);
 
@@ -194,6 +199,7 @@ fn update_task_invalid_substatus_for_status() {
     // active is not valid for backlog
     let err = svc
         .update_task(UpdateTaskParams::for_task(id).sub_status(SubStatus::Active))
+        .await
         .unwrap_err();
     assert!(matches!(err, ServiceError::Validation(_)));
 }
@@ -261,8 +267,8 @@ fn claim_task_wrong_repo() {
     assert!(matches!(err, ServiceError::Validation(_)));
 }
 
-#[test]
-fn claim_task_not_backlog() {
+#[tokio::test]
+async fn claim_task_not_backlog() {
     let db = test_db();
     let svc = task_svc(&db);
 
@@ -282,6 +288,7 @@ fn claim_task_not_backlog() {
 
     // Move to running first
     svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Running))
+        .await
         .unwrap();
 
     let err = svc
@@ -355,8 +362,8 @@ fn report_usage_for_nonexistent_task() {
     assert!(matches!(err, ServiceError::NotFound(_)));
 }
 
-#[test]
-fn update_task_with_epic_linkage() {
+#[tokio::test]
+async fn update_task_with_epic_linkage() {
     let db = test_db();
     let task_svc = task_svc(&db);
     let epic_svc = epic_svc(&db);
@@ -372,6 +379,7 @@ fn update_task_with_epic_linkage() {
             feed_interval_secs: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let id = task_svc
@@ -390,14 +398,15 @@ fn update_task_with_epic_linkage() {
 
     task_svc
         .update_task(UpdateTaskParams::for_task(id).epic_id(epic.id))
+        .await
         .unwrap();
 
     let task = task_svc.get_task(id).unwrap();
     assert_eq!(task.epic_id, Some(epic.id));
 }
 
-#[test]
-fn update_task_status_recalculates_parent_epic() {
+#[tokio::test]
+async fn update_task_status_recalculates_parent_epic() {
     // Status-change branch of recalculate_epic_for_task: an epic that
     // contains a single task should follow the task's status.
     let db = test_db();
@@ -415,6 +424,7 @@ fn update_task_status_recalculates_parent_epic() {
             feed_interval_secs: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let id = task_svc
@@ -433,14 +443,15 @@ fn update_task_status_recalculates_parent_epic() {
 
     task_svc
         .update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Running))
+        .await
         .unwrap();
 
-    let refreshed = epic_svc.get_epic(epic.id).unwrap();
+    let refreshed = epic_svc.get_epic(epic.id).await.unwrap();
     assert_eq!(refreshed.status, TaskStatus::Running);
 }
 
-#[test]
-fn update_task_relink_recalculates_old_and_new_epic() {
+#[tokio::test]
+async fn update_task_relink_recalculates_old_and_new_epic() {
     // Linkage-change branch of recalculate_epic_for_task: moving a Running
     // task between two epics should leave the old epic empty (Backlog) and
     // the new epic Running.
@@ -459,6 +470,7 @@ fn update_task_relink_recalculates_old_and_new_epic() {
             feed_interval_secs: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     let epic_b = epic_svc
         .create_epic(CreateEpicParams {
@@ -471,6 +483,7 @@ fn update_task_relink_recalculates_old_and_new_epic() {
             feed_interval_secs: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let id = task_svc
@@ -488,32 +501,34 @@ fn update_task_relink_recalculates_old_and_new_epic() {
         .unwrap();
     task_svc
         .update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Running))
+        .await
         .unwrap();
 
     // Sanity: epic A is now Running.
     assert_eq!(
-        epic_svc.get_epic(epic_a.id).unwrap().status,
+        epic_svc.get_epic(epic_a.id).await.unwrap().status,
         TaskStatus::Running
     );
 
     task_svc
         .update_task(UpdateTaskParams::for_task(id).epic_id(epic_b.id))
+        .await
         .unwrap();
 
     assert_eq!(
-        epic_svc.get_epic(epic_a.id).unwrap().status,
+        epic_svc.get_epic(epic_a.id).await.unwrap().status,
         TaskStatus::Backlog
     );
     assert_eq!(
-        epic_svc.get_epic(epic_b.id).unwrap().status,
+        epic_svc.get_epic(epic_b.id).await.unwrap().status,
         TaskStatus::Running
     );
 }
 
 // -- EpicService ----------------------------------------------------------
 
-#[test]
-fn create_and_get_epic() {
+#[tokio::test]
+async fn create_and_get_epic() {
     let db = test_db();
     let svc = epic_svc(&db);
 
@@ -528,22 +543,23 @@ fn create_and_get_epic() {
             feed_interval_secs: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
-    let fetched = svc.get_epic(epic.id).unwrap();
+    let fetched = svc.get_epic(epic.id).await.unwrap();
     assert_eq!(fetched.title, "Epic 1");
 }
 
-#[test]
-fn get_epic_not_found() {
+#[tokio::test]
+async fn get_epic_not_found() {
     let db = test_db();
     let svc = epic_svc(&db);
-    let err = svc.get_epic(EpicId(999)).unwrap_err();
+    let err = svc.get_epic(EpicId(999)).await.unwrap_err();
     assert!(matches!(err, ServiceError::NotFound(_)));
 }
 
-#[test]
-fn update_epic_status() {
+#[tokio::test]
+async fn update_epic_status() {
     let db = test_db();
     let svc = epic_svc(&db);
 
@@ -558,6 +574,7 @@ fn update_epic_status() {
             feed_interval_secs: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     svc.update_epic(UpdateEpicParams {
@@ -573,14 +590,15 @@ fn update_epic_status() {
         feed_interval_secs: None,
         project_id: None,
     })
+    .await
     .unwrap();
 
-    let updated = svc.get_epic(epic.id).unwrap();
+    let updated = svc.get_epic(epic.id).await.unwrap();
     assert_eq!(updated.status, TaskStatus::Running);
 }
 
-#[test]
-fn update_epic_no_fields_returns_error() {
+#[tokio::test]
+async fn update_epic_no_fields_returns_error() {
     let db = test_db();
     let svc = epic_svc(&db);
 
@@ -595,6 +613,7 @@ fn update_epic_no_fields_returns_error() {
             feed_interval_secs: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let err = svc
@@ -611,12 +630,13 @@ fn update_epic_no_fields_returns_error() {
             feed_interval_secs: None,
             project_id: None,
         })
+        .await
         .unwrap_err();
     assert!(matches!(err, ServiceError::Validation(_)));
 }
 
-#[test]
-fn update_epic_auto_dispatch_persists() {
+#[tokio::test]
+async fn update_epic_auto_dispatch_persists() {
     let db = test_db();
     let svc = epic_svc(&db);
 
@@ -631,9 +651,10 @@ fn update_epic_auto_dispatch_persists() {
             feed_interval_secs: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
-    assert!(db.get_epic(epic.id).unwrap().unwrap().auto_dispatch);
+    assert!(db.get_epic(epic.id).await.unwrap().unwrap().auto_dispatch);
 
     svc.update_epic(UpdateEpicParams {
         epic_id: epic.id,
@@ -648,13 +669,14 @@ fn update_epic_auto_dispatch_persists() {
         feed_interval_secs: None,
         project_id: None,
     })
+    .await
     .unwrap();
 
-    assert!(!db.get_epic(epic.id).unwrap().unwrap().auto_dispatch);
+    assert!(!db.get_epic(epic.id).await.unwrap().unwrap().auto_dispatch);
 }
 
-#[test]
-fn list_epics_with_progress() {
+#[tokio::test]
+async fn list_epics_with_progress() {
     let db = test_db();
     let task_svc = task_svc(&db);
     let epic_svc = epic_svc(&db);
@@ -670,6 +692,7 @@ fn list_epics_with_progress() {
             feed_interval_secs: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     task_svc
@@ -686,15 +709,15 @@ fn list_epics_with_progress() {
         })
         .unwrap();
 
-    let list = epic_svc.list_epics_with_progress().unwrap();
+    let list = epic_svc.list_epics_with_progress().await.unwrap();
     assert_eq!(list.len(), 1);
     let (_, done, total) = &list[0];
     assert_eq!(*done, 0);
     assert_eq!(*total, 1);
 }
 
-#[test]
-fn list_epics_with_progress_multiple_epics() {
+#[tokio::test]
+async fn list_epics_with_progress_multiple_epics() {
     let db = test_db();
     let task_svc = task_svc(&db);
     let epic_svc = epic_svc(&db);
@@ -710,6 +733,7 @@ fn list_epics_with_progress_multiple_epics() {
             feed_interval_secs: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     let e2 = epic_svc
         .create_epic(CreateEpicParams {
@@ -722,6 +746,7 @@ fn list_epics_with_progress_multiple_epics() {
             feed_interval_secs: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     // 2 tasks in E1
@@ -769,9 +794,10 @@ fn list_epics_with_progress_multiple_epics() {
     // Mark T1 as done
     task_svc
         .update_task(UpdateTaskParams::for_task(t1).status(TaskStatus::Done))
+        .await
         .unwrap();
 
-    let list = epic_svc.list_epics_with_progress().unwrap();
+    let list = epic_svc.list_epics_with_progress().await.unwrap();
     assert_eq!(list.len(), 2);
     let e1_progress = list.iter().find(|(e, _, _)| e.id == e1.id).unwrap();
     assert_eq!(e1_progress.1, 1); // 1 done
@@ -781,8 +807,8 @@ fn list_epics_with_progress_multiple_epics() {
     assert_eq!(e2_progress.2, 1);
 }
 
-#[test]
-fn update_task_status_recalculates_epic() {
+#[tokio::test]
+async fn update_task_status_recalculates_epic() {
     let db = test_db();
     let task_svc = task_svc(&db);
     let epic_svc = epic_svc(&db);
@@ -798,6 +824,7 @@ fn update_task_status_recalculates_epic() {
             feed_interval_secs: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let task_id = task_svc
@@ -816,14 +843,15 @@ fn update_task_status_recalculates_epic() {
 
     task_svc
         .update_task(UpdateTaskParams::for_task(task_id).status(TaskStatus::Done))
+        .await
         .unwrap();
 
-    let updated_epic = epic_svc.get_epic(epic.id).unwrap();
+    let updated_epic = epic_svc.get_epic(epic.id).await.unwrap();
     assert_eq!(updated_epic.status, TaskStatus::Done);
 }
 
-#[test]
-fn get_epic_with_subtasks() {
+#[tokio::test]
+async fn get_epic_with_subtasks() {
     let db = test_db();
     let task_svc = task_svc(&db);
     let epic_svc = epic_svc(&db);
@@ -839,6 +867,7 @@ fn get_epic_with_subtasks() {
             feed_interval_secs: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     task_svc
@@ -855,15 +884,15 @@ fn get_epic_with_subtasks() {
         })
         .unwrap();
 
-    let (e, subtasks) = epic_svc.get_epic_with_subtasks(epic.id).unwrap();
+    let (e, subtasks) = epic_svc.get_epic_with_subtasks(epic.id).await.unwrap();
     assert_eq!(e.title, "E");
     assert_eq!(subtasks.len(), 1);
 }
 
 // -- next_backlog_task -----------------------------------------------------
 
-#[test]
-fn next_backlog_task_returns_first_by_sort_order() {
+#[tokio::test]
+async fn next_backlog_task_returns_first_by_sort_order() {
     let db = test_db();
     let task_svc = task_svc(&db);
     let epic_svc = epic_svc(&db);
@@ -879,6 +908,7 @@ fn next_backlog_task_returns_first_by_sort_order() {
             feed_interval_secs: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     task_svc
@@ -909,12 +939,12 @@ fn next_backlog_task_returns_first_by_sort_order() {
         })
         .unwrap();
 
-    let next = task_svc.next_backlog_task(epic.id).unwrap();
+    let next = task_svc.next_backlog_task(epic.id).await.unwrap();
     assert_eq!(next.unwrap().title, "First");
 }
 
-#[test]
-fn next_backlog_task_skips_non_backlog() {
+#[tokio::test]
+async fn next_backlog_task_skips_non_backlog() {
     let db = test_db();
     let task_svc = task_svc(&db);
     let epic_svc = epic_svc(&db);
@@ -930,6 +960,7 @@ fn next_backlog_task_skips_non_backlog() {
             feed_interval_secs: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let id = task_svc
@@ -949,17 +980,18 @@ fn next_backlog_task_skips_non_backlog() {
     // Move to running
     task_svc
         .update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Running))
+        .await
         .unwrap();
 
-    let next = task_svc.next_backlog_task(epic.id).unwrap();
+    let next = task_svc.next_backlog_task(epic.id).await.unwrap();
     assert!(next.is_none());
 }
 
-#[test]
-fn next_backlog_task_epic_not_found() {
+#[tokio::test]
+async fn next_backlog_task_epic_not_found() {
     let db = test_db();
     let svc = task_svc(&db);
-    let err = svc.next_backlog_task(EpicId(999)).unwrap_err();
+    let err = svc.next_backlog_task(EpicId(999)).await.unwrap_err();
     assert!(matches!(err, ServiceError::NotFound(_)));
 }
 
@@ -990,8 +1022,8 @@ fn create_task_returning_gives_full_task() {
     assert_eq!(task.status, TaskStatus::Backlog);
 }
 
-#[test]
-fn create_task_returning_with_epic() {
+#[tokio::test]
+async fn create_task_returning_with_epic() {
     let db = test_db();
     let tsvc = task_svc(&db);
     let esvc = epic_svc(&db);
@@ -1007,6 +1039,7 @@ fn create_task_returning_with_epic() {
             feed_interval_secs: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let task = tsvc
@@ -1026,8 +1059,8 @@ fn create_task_returning_with_epic() {
     assert_eq!(task.epic_id, Some(epic.id));
 }
 
-#[test]
-fn create_task_returning_sets_all_optional_fields_atomically() {
+#[tokio::test]
+async fn create_task_returning_sets_all_optional_fields_atomically() {
     let db = test_db();
     let tsvc = task_svc(&db);
     let esvc = epic_svc(&db);
@@ -1043,6 +1076,7 @@ fn create_task_returning_sets_all_optional_fields_atomically() {
             feed_interval_secs: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let task = tsvc
@@ -1101,8 +1135,8 @@ fn delete_task_not_found() {
 
 // -- update_task with worktree/tmux_window -----------------------------------
 
-#[test]
-fn update_task_sets_worktree_and_tmux_window() {
+#[tokio::test]
+async fn update_task_sets_worktree_and_tmux_window() {
     let db = test_db();
     let svc = task_svc(&db);
 
@@ -1126,6 +1160,7 @@ fn update_task_sets_worktree_and_tmux_window() {
             .worktree(FieldUpdate::Set("/repo/.worktrees/feat".into()))
             .tmux_window(FieldUpdate::Set("task-1".into())),
     )
+    .await
     .unwrap();
 
     let task = svc.get_task(id).unwrap();
@@ -1133,8 +1168,8 @@ fn update_task_sets_worktree_and_tmux_window() {
     assert_eq!(task.tmux_window.as_deref(), Some("task-1"));
 }
 
-#[test]
-fn update_task_clears_worktree() {
+#[tokio::test]
+async fn update_task_clears_worktree() {
     let db = test_db();
     let svc = task_svc(&db);
 
@@ -1159,6 +1194,7 @@ fn update_task_clears_worktree() {
             .worktree(FieldUpdate::Set("/repo/.worktrees/feat".into()))
             .tmux_window(FieldUpdate::Set("task-1".into())),
     )
+    .await
     .unwrap();
 
     // Clear worktree via FieldUpdate::Clear
@@ -1168,6 +1204,7 @@ fn update_task_clears_worktree() {
             .worktree(FieldUpdate::Clear)
             .tmux_window(FieldUpdate::Clear),
     )
+    .await
     .unwrap();
 
     let task = svc.get_task(id).unwrap();
@@ -1177,8 +1214,8 @@ fn update_task_clears_worktree() {
 
 // -- update_task allows done/archived (MCP restriction moved to handler) -----
 
-#[test]
-fn update_task_allows_done_status() {
+#[tokio::test]
+async fn update_task_allows_done_status() {
     let db = test_db();
     let svc = task_svc(&db);
 
@@ -1197,6 +1234,7 @@ fn update_task_allows_done_status() {
         .unwrap();
 
     svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Done))
+        .await
         .unwrap();
 
     let task = svc.get_task(id).unwrap();
@@ -1205,8 +1243,8 @@ fn update_task_allows_done_status() {
 
 // -- delete_epic -------------------------------------------------------------
 
-#[test]
-fn delete_epic_removes_it() {
+#[tokio::test]
+async fn delete_epic_removes_it() {
     let db = test_db();
     let svc = epic_svc(&db);
 
@@ -1221,19 +1259,20 @@ fn delete_epic_removes_it() {
             feed_interval_secs: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
-    svc.delete_epic(epic.id).unwrap();
+    svc.delete_epic(epic.id).await.unwrap();
 
-    let err = svc.get_epic(epic.id).unwrap_err();
+    let err = svc.get_epic(epic.id).await.unwrap_err();
     assert!(matches!(err, ServiceError::NotFound(_)));
 }
 
-#[test]
-fn delete_epic_not_found() {
+#[tokio::test]
+async fn delete_epic_not_found() {
     let db = test_db();
     let svc = epic_svc(&db);
-    let err = svc.delete_epic(EpicId(999)).unwrap_err();
+    let err = svc.delete_epic(EpicId(999)).await.unwrap_err();
     assert!(matches!(err, ServiceError::NotFound(_)));
 }
 
@@ -1251,8 +1290,8 @@ fn field_update_clear_is_clear() {
     assert!(matches!(fu, FieldUpdate::Clear));
 }
 
-#[test]
-fn update_task_worktree_set_persists() {
+#[tokio::test]
+async fn update_task_worktree_set_persists() {
     let db = test_db();
     let svc = task_svc(&db);
     let id = svc
@@ -1274,14 +1313,15 @@ fn update_task_worktree_set_persists() {
             .worktree(FieldUpdate::Set("/wt".to_string()))
             .tmux_window(FieldUpdate::Set("win".to_string())),
     )
+    .await
     .unwrap();
     let task = db.get_task(TaskId(id.0)).unwrap().unwrap();
     assert_eq!(task.worktree.as_deref(), Some("/wt"));
     assert_eq!(task.tmux_window.as_deref(), Some("win"));
 }
 
-#[test]
-fn update_task_worktree_clear_sets_null() {
+#[tokio::test]
+async fn update_task_worktree_clear_sets_null() {
     let db = test_db();
     let svc = task_svc(&db);
     let id = svc
@@ -1304,6 +1344,7 @@ fn update_task_worktree_clear_sets_null() {
             .worktree(FieldUpdate::Set("/wt".to_string()))
             .tmux_window(FieldUpdate::Set("win".to_string())),
     )
+    .await
     .unwrap();
     // Then clear it
     svc.update_task(
@@ -1311,14 +1352,15 @@ fn update_task_worktree_clear_sets_null() {
             .worktree(FieldUpdate::Clear)
             .tmux_window(FieldUpdate::Clear),
     )
+    .await
     .unwrap();
     let task = db.get_task(TaskId(id.0)).unwrap().unwrap();
     assert_eq!(task.worktree, None);
     assert_eq!(task.tmux_window, None);
 }
 
-#[test]
-fn update_task_pr_url_set_and_clear() {
+#[tokio::test]
+async fn update_task_pr_url_set_and_clear() {
     let db = test_db();
     let svc = task_svc(&db);
     let id = svc
@@ -1338,6 +1380,7 @@ fn update_task_pr_url_set_and_clear() {
     svc.update_task(UpdateTaskParams::for_task(id).pr_url(FieldUpdate::Set(
         "https://github.com/org/repo/pull/1".to_string(),
     )))
+    .await
     .unwrap();
     let task = db.get_task(TaskId(id.0)).unwrap().unwrap();
     assert_eq!(
@@ -1346,13 +1389,14 @@ fn update_task_pr_url_set_and_clear() {
     );
     // Clear PR URL
     svc.update_task(UpdateTaskParams::for_task(id).pr_url(FieldUpdate::Clear))
+        .await
         .unwrap();
     let task = db.get_task(TaskId(id.0)).unwrap().unwrap();
     assert_eq!(task.pr_url, None);
 }
 
-#[test]
-fn list_tasks_filters_by_epic_id() {
+#[tokio::test]
+async fn list_tasks_filters_by_epic_id() {
     let db = test_db();
     let svc = task_svc(&db);
     let esvc = epic_svc(&db);
@@ -1368,6 +1412,7 @@ fn list_tasks_filters_by_epic_id() {
             feed_interval_secs: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let id1 = svc
@@ -1408,8 +1453,8 @@ fn list_tasks_filters_by_epic_id() {
     assert_eq!(tasks[0].id, id1);
 }
 
-#[test]
-fn list_tasks_excludes_archived_by_default() {
+#[tokio::test]
+async fn list_tasks_excludes_archived_by_default() {
     let db = test_db();
     let svc = task_svc(&db);
 
@@ -1428,6 +1473,7 @@ fn list_tasks_excludes_archived_by_default() {
         .unwrap();
 
     svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Archived))
+        .await
         .unwrap();
 
     let tasks = svc
@@ -1601,8 +1647,8 @@ fn validate_send_message_missing_worktree() {
     assert!(err.to_string().contains("no worktree"));
 }
 
-#[test]
-fn validate_send_message_missing_tmux_window() {
+#[tokio::test]
+async fn validate_send_message_missing_tmux_window() {
     let db = test_db();
     let svc = task_svc(&db);
 
@@ -1640,6 +1686,7 @@ fn validate_send_message_missing_tmux_window() {
             .status(TaskStatus::Running)
             .worktree(FieldUpdate::Set("/repo/.worktrees/feat".into())),
     )
+    .await
     .unwrap();
 
     let err = svc.validate_send_message(from_id, to_id).unwrap_err();
@@ -1706,8 +1753,8 @@ async fn create_task_with_explicit_project_id() {
 // Epic-in-epic service tests
 // -------------------------------------------------------------------------
 
-#[test]
-fn create_sub_epic_links_parent() {
+#[tokio::test]
+async fn create_sub_epic_links_parent() {
     let db = test_db();
     let svc = epic_svc(&db);
 
@@ -1722,6 +1769,7 @@ fn create_sub_epic_links_parent() {
             feed_interval_secs: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     let child = svc
@@ -1735,16 +1783,17 @@ fn create_sub_epic_links_parent() {
             feed_interval_secs: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     assert_eq!(child.parent_epic_id, Some(parent.id));
 
-    let fetched = svc.get_epic(child.id).unwrap();
+    let fetched = svc.get_epic(child.id).await.unwrap();
     assert_eq!(fetched.parent_epic_id, Some(parent.id));
 }
 
-#[test]
-fn list_root_epics_service() {
+#[tokio::test]
+async fn list_root_epics_service() {
     let db = test_db();
     let svc = epic_svc(&db);
 
@@ -1759,6 +1808,7 @@ fn list_root_epics_service() {
             feed_interval_secs: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     svc.create_epic(CreateEpicParams {
         title: "Sub".into(),
@@ -1770,15 +1820,16 @@ fn list_root_epics_service() {
         feed_interval_secs: None,
         project_id: ProjectId(1),
     })
+    .await
     .unwrap();
 
-    let roots = svc.list_root_epics().unwrap();
+    let roots = svc.list_root_epics().await.unwrap();
     assert_eq!(roots.len(), 1);
     assert_eq!(roots[0].id, parent.id);
 }
 
-#[test]
-fn list_sub_epics_service() {
+#[tokio::test]
+async fn list_sub_epics_service() {
     let db = test_db();
     let svc = epic_svc(&db);
 
@@ -1793,6 +1844,7 @@ fn list_sub_epics_service() {
             feed_interval_secs: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
     let child = svc
         .create_epic(CreateEpicParams {
@@ -1805,9 +1857,10 @@ fn list_sub_epics_service() {
             feed_interval_secs: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
-    let subs = svc.list_sub_epics(parent.id).unwrap();
+    let subs = svc.list_sub_epics(parent.id).await.unwrap();
     assert_eq!(subs.len(), 1);
     assert_eq!(subs[0].id, child.id);
 }
@@ -1836,6 +1889,7 @@ async fn update_task_project_id_moves_task() {
         .unwrap();
 
     svc.update_task(UpdateTaskParams::for_task(id).project_id(other.id))
+        .await
         .unwrap();
 
     let db2: Arc<dyn db::TaskCrud> = db.clone();
@@ -1863,6 +1917,7 @@ async fn update_epic_project_id_moves_epic() {
             feed_interval_secs: None,
             project_id: ProjectId(1),
         })
+        .await
         .unwrap();
 
     svc.update_epic(UpdateEpicParams {
@@ -1878,10 +1933,11 @@ async fn update_epic_project_id_moves_epic() {
         feed_interval_secs: None,
         project_id: Some(other.id),
     })
+    .await
     .unwrap();
 
     let d2: Arc<dyn db::EpicCrud> = db.clone();
-    let epics = d2.list_epics().unwrap();
+    let epics = d2.list_epics().await.unwrap();
     let updated = epics.iter().find(|e| e.id == epic.id).unwrap();
     assert_eq!(updated.project_id, other.id);
 }
@@ -1895,8 +1951,8 @@ async fn update_epic_project_id_moves_epic() {
 // same task are user error, and the result is last-write-wins. These
 // tests pin that behaviour so the policy can't drift silently.
 
-#[test]
-fn update_task_toctou_last_write_wins() {
+#[tokio::test]
+async fn update_task_toctou_last_write_wins() {
     let db = test_db();
     let svc_a = task_svc(&db);
     let svc_b = task_svc(&db);
@@ -1922,6 +1978,7 @@ fn update_task_toctou_last_write_wins() {
                 .status(TaskStatus::Running)
                 .sub_status(SubStatus::Active),
         )
+        .await
         .unwrap();
 
     // svc_b moves it on to Review/AwaitingReview. The sub_status is valid
@@ -1933,6 +1990,7 @@ fn update_task_toctou_last_write_wins() {
                 .status(TaskStatus::Review)
                 .sub_status(SubStatus::AwaitingReview),
         )
+        .await
         .unwrap();
 
     let task = svc_a.get_task(id).unwrap();
@@ -1940,8 +1998,8 @@ fn update_task_toctou_last_write_wins() {
     assert_eq!(task.sub_status, SubStatus::AwaitingReview);
 }
 
-#[test]
-fn update_task_sub_status_validated_against_persisted_status() {
+#[tokio::test]
+async fn update_task_sub_status_validated_against_persisted_status() {
     // A sub-status update without a status change is validated against the
     // currently-persisted status. If a previous writer changed status, the
     // later sub_status-only update sees the new status — this is the
@@ -1971,17 +2029,20 @@ fn update_task_sub_status_validated_against_persisted_status() {
                 .status(TaskStatus::Running)
                 .sub_status(SubStatus::Active),
         )
+        .await
         .unwrap();
 
     // svc_b sees Running (sub_status Stale is valid for Running).
     svc_b
         .update_task(UpdateTaskParams::for_task(id).sub_status(SubStatus::Stale))
+        .await
         .unwrap();
     assert_eq!(svc_a.get_task(id).unwrap().sub_status, SubStatus::Stale);
 
     // Now svc_a moves status to Review without specifying sub_status.
     svc_a
         .update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Review))
+        .await
         .unwrap();
 
     // svc_b attempts a sub_status-only update with `Active`, which is
@@ -1990,6 +2051,7 @@ fn update_task_sub_status_validated_against_persisted_status() {
     // Validation error.
     let err = svc_b
         .update_task(UpdateTaskParams::for_task(id).sub_status(SubStatus::Active))
+        .await
         .unwrap_err();
     assert!(matches!(err, ServiceError::Validation(_)), "got {err:?}");
 }

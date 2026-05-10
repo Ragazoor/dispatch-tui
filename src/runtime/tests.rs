@@ -155,8 +155,8 @@ fn exec_delete_task_removes_from_db() {
     assert!(rt.database.list_all().unwrap().is_empty());
 }
 
-#[test]
-fn exec_persist_task_saves_status_to_db() {
+#[tokio::test]
+async fn exec_persist_task_saves_status_to_db() {
     let (rt, mut app) = test_runtime();
     rt.exec_insert_task(
         &mut app,
@@ -172,7 +172,7 @@ fn exec_persist_task_saves_status_to_db() {
     task.status = models::TaskStatus::Running;
     task.sub_status = models::SubStatus::Active;
     task.worktree = Some("/repo/.worktrees/1-test".into());
-    rt.exec_persist_task(&mut app, task);
+    rt.exec_persist_task(&mut app, task).await;
     let db_task = rt.database.get_task(app.tasks()[0].id).unwrap().unwrap();
     assert_eq!(db_task.status, models::TaskStatus::Running);
     assert_eq!(db_task.worktree.as_deref(), Some("/repo/.worktrees/1-test"));
@@ -207,7 +207,7 @@ async fn exec_persist_task_preserves_sub_status() {
 
     // Persist the in-memory task (simulates handle_pr_review_state saving after PR approval)
     let task = app.tasks()[0].clone();
-    rt.exec_persist_task(&mut app, task);
+    rt.exec_persist_task(&mut app, task).await;
 
     // sub_status must survive the round-trip to DB
     let db_task = rt.database.get_task(id).unwrap().unwrap();
@@ -489,8 +489,8 @@ fn exec_jump_to_tmux_failure_shows_error() {
     assert!(app.error_popup().is_some());
 }
 
-#[test]
-fn exec_cleanup_detaches_when_shared() {
+#[tokio::test]
+async fn exec_cleanup_detaches_when_shared() {
     let (rt, mut app) = test_runtime();
 
     // Create two tasks sharing the same worktree
@@ -539,7 +539,8 @@ fn exec_cleanup_detaches_when_shared() {
         .unwrap();
 
     // Cleanup task A — should detach only (worktree is shared)
-    rt.exec_cleanup(id_a, "/repo".into(), worktree.into(), Some("task-1".into()));
+    rt.exec_cleanup(id_a, "/repo".into(), worktree.into(), Some("task-1".into()))
+        .await;
 
     let task_a = rt.database.get_task(id_a).unwrap().unwrap();
     assert!(task_a.worktree.is_none(), "task A should be detached");
@@ -584,7 +585,8 @@ async fn exec_finish_happy_path_sends_complete() {
         "main".into(),
         "/repo/.worktrees/1-test".into(),
         None,
-    );
+    )
+    .await;
 
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
@@ -635,7 +637,8 @@ async fn exec_finish_conflict_sends_failed() {
         "main".into(),
         "/repo/.worktrees/1-test".into(),
         None,
-    );
+    )
+    .await;
 
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
@@ -661,6 +664,7 @@ async fn exec_dispatch_epic_creates_planning_subtask() {
     let epic = rt
         .database
         .create_epic("Auth redesign", "Rework login", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
 
     rt.exec_dispatch_epic(&mut app, epic.clone()).await;
@@ -710,7 +714,8 @@ async fn exec_finish_not_on_main_sends_failed() {
         "main".into(),
         "/repo/.worktrees/1-test".into(),
         None,
-    );
+    )
+    .await;
 
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
@@ -951,6 +956,7 @@ async fn exec_quick_dispatch_with_epic_dispatches_successfully() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let epic = db
         .create_epic("My Epic", "epic desc", repo, None, ProjectId(1))
+        .await
         .unwrap();
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
@@ -1176,8 +1182,8 @@ async fn exec_kill_tmux_window_failure_does_not_send_error() {
     assert!(rx.try_recv().is_err(), "Expected no message, but got one");
 }
 
-#[test]
-fn exec_patch_sub_status_updates_db() {
+#[tokio::test]
+async fn exec_patch_sub_status_updates_db() {
     let (rt, mut app) = test_runtime();
     rt.exec_insert_task(
         &mut app,
@@ -1199,17 +1205,19 @@ fn exec_patch_sub_status_updates_db() {
         )
         .unwrap();
 
-    rt.exec_patch_sub_status(&mut app, id, models::SubStatus::NeedsInput);
+    rt.exec_patch_sub_status(&mut app, id, models::SubStatus::NeedsInput)
+        .await;
 
     let db_task = rt.database.get_task(id).unwrap().unwrap();
     assert_eq!(db_task.sub_status, models::SubStatus::NeedsInput);
     assert!(app.error_popup().is_none());
 }
 
-#[test]
-fn exec_patch_sub_status_shows_error_for_missing_task() {
+#[tokio::test]
+async fn exec_patch_sub_status_shows_error_for_missing_task() {
     let (rt, mut app) = test_runtime();
-    rt.exec_patch_sub_status(&mut app, TaskId(999), models::SubStatus::Active);
+    rt.exec_patch_sub_status(&mut app, TaskId(999), models::SubStatus::Active)
+        .await;
     assert!(app.error_popup().is_some());
 }
 
@@ -1335,8 +1343,8 @@ fn exec_delete_repo_path_removes_and_refreshes() {
 // Epic tests
 // -----------------------------------------------------------------------
 
-#[test]
-fn exec_insert_epic_creates_in_db_and_app() {
+#[tokio::test]
+async fn exec_insert_epic_creates_in_db_and_app() {
     let (rt, mut app) = test_runtime();
     rt.exec_insert_epic(
         &mut app,
@@ -1344,57 +1352,63 @@ fn exec_insert_epic_creates_in_db_and_app() {
         "description".into(),
         "/repo".into(),
         None,
-    );
+    )
+    .await;
     assert_eq!(app.epics().len(), 1);
     assert_eq!(app.epics()[0].title, "My Epic");
-    assert_eq!(rt.database.list_epics().unwrap().len(), 1);
+    assert_eq!(rt.database.list_epics().await.unwrap().len(), 1);
 }
 
-#[test]
-fn exec_delete_epic_removes_from_db() {
+#[tokio::test]
+async fn exec_delete_epic_removes_from_db() {
     let (rt, mut app) = test_runtime();
     let epic = rt
         .database
         .create_epic("Doomed", "bye", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
-    rt.exec_delete_epic(&mut app, epic.id);
-    assert!(rt.database.list_epics().unwrap().is_empty());
+    rt.exec_delete_epic(&mut app, epic.id).await;
+    assert!(rt.database.list_epics().await.unwrap().is_empty());
     assert!(app.error_popup().is_none());
 }
 
-#[test]
-fn exec_persist_epic_updates_status() {
+#[tokio::test]
+async fn exec_persist_epic_updates_status() {
     let (rt, mut app) = test_runtime();
     let epic = rt
         .database
         .create_epic("Epic", "desc", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
-    rt.exec_persist_epic(&mut app, epic.id, Some(models::TaskStatus::Running), None);
-    let updated = rt.database.get_epic(epic.id).unwrap().unwrap();
+    rt.exec_persist_epic(&mut app, epic.id, Some(models::TaskStatus::Running), None)
+        .await;
+    let updated = rt.database.get_epic(epic.id).await.unwrap().unwrap();
     assert_eq!(updated.status, models::TaskStatus::Running);
 }
 
-#[test]
-fn exec_persist_epic_noop_when_nothing_to_update() {
+#[tokio::test]
+async fn exec_persist_epic_noop_when_nothing_to_update() {
     let (rt, mut app) = test_runtime();
     let epic = rt
         .database
         .create_epic("Epic", "desc", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
     // Should return early without error
-    rt.exec_persist_epic(&mut app, epic.id, None, None);
+    rt.exec_persist_epic(&mut app, epic.id, None, None).await;
     assert!(app.error_popup().is_none());
 }
 
-#[test]
-fn exec_refresh_epics_from_db_syncs_to_app() {
+#[tokio::test]
+async fn exec_refresh_epics_from_db_syncs_to_app() {
     let (rt, mut app) = test_runtime();
     // Insert epic directly into DB, bypassing app
     rt.database
         .create_epic("Direct", "desc", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
     assert!(app.epics().is_empty());
-    rt.exec_refresh_epics_from_db(&mut app);
+    rt.exec_refresh_epics_from_db(&mut app).await;
     assert_eq!(app.epics().len(), 1);
     assert_eq!(app.epics()[0].title, "Direct");
 }
@@ -1961,6 +1975,7 @@ async fn exec_trigger_epic_feed_success() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let epic = db
         .create_epic("Security Vulnerabilities", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
 
     let (tx, mut rx) = mpsc::unbounded_channel();
@@ -1991,6 +2006,7 @@ async fn exec_trigger_epic_feed_zero_items() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let epic = db
         .create_epic("Empty Feed", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
 
     let (tx, mut rx) = mpsc::unbounded_channel();
@@ -2016,6 +2032,7 @@ async fn exec_trigger_epic_feed_command_fails() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let epic = db
         .create_epic("Failing Feed", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
 
     let (tx, mut rx) = mpsc::unbounded_channel();
@@ -2041,6 +2058,7 @@ async fn exec_trigger_epic_feed_malformed_json() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let epic = db
         .create_epic("Bad JSON Feed", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
 
     let (tx, mut rx) = mpsc::unbounded_channel();

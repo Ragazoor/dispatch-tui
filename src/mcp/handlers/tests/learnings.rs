@@ -134,7 +134,11 @@ async fn record_learning_derives_scope_ref_for_repo() {
 async fn record_learning_derives_scope_ref_for_epic() {
     let state = test_state();
     let pid = default_project_id(&state).await;
-    let epic = state.db.create_epic("E", "", "/r", None, pid).unwrap();
+    let epic = state
+        .db
+        .create_epic("E", "", "/r", None, pid)
+        .await
+        .unwrap();
     let task_id = state
         .db
         .create_task(CreateTaskRequest {

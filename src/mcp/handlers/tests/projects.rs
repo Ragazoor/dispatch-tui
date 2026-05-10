@@ -53,7 +53,7 @@ async fn create_epic_without_project_id_assigns_to_default() {
     .await;
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
 
-    let epics = db.list_epics().unwrap();
+    let epics = db.list_epics().await.unwrap();
     assert_eq!(epics.len(), 1);
     let default_id = db.get_default_project().await.unwrap().id;
     assert_eq!(epics[0].project_id, default_id);
@@ -79,7 +79,7 @@ async fn create_epic_with_project_id_assigns_correctly() {
     .await;
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
 
-    let epics = db.list_epics().unwrap();
+    let epics = db.list_epics().await.unwrap();
     assert_eq!(epics.len(), 1);
     assert_eq!(epics[0].project_id, other.id);
 }
@@ -178,6 +178,7 @@ async fn update_epic_project_id_moves_epic() {
             None,
             db.get_default_project().await.unwrap().id,
         )
+        .await
         .unwrap();
     let default_id = db.get_default_project().await.unwrap().id;
     assert_eq!(epic.project_id, default_id);
@@ -193,7 +194,7 @@ async fn update_epic_project_id_moves_epic() {
     .await;
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
 
-    let epics = db.list_epics().unwrap();
+    let epics = db.list_epics().await.unwrap();
     let updated = epics.iter().find(|e| e.id == epic.id).unwrap();
     assert_eq!(updated.project_id, other.id);
 }
@@ -210,6 +211,7 @@ async fn update_epic_invalid_project_id_returns_error() {
             None,
             db.get_default_project().await.unwrap().id,
         )
+        .await
         .unwrap();
 
     let resp = call(

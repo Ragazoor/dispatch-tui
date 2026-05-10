@@ -79,7 +79,7 @@ impl FeedRunner {
     }
 
     pub async fn tick(&mut self) {
-        let epics = match self.db.list_epics() {
+        let epics = match self.db.list_epics().await {
             Ok(e) => e,
             Err(err) => {
                 tracing::warn!("FeedRunner: failed to list epics: {err:#}");
@@ -225,8 +225,10 @@ mod tests {
         let db = Arc::new(Database::open_in_memory().unwrap());
         let epic = db
             .create_epic("Slow Epic", "", "/repo", None, ProjectId(1))
+            .await
             .unwrap();
         db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some("sleep 5")))
+            .await
             .unwrap();
 
         let (mut runner, _rx) = make_runner(db.clone());
@@ -246,13 +248,14 @@ mod tests {
         let db = Arc::new(Database::open_in_memory().unwrap());
         let epic = db
             .create_epic("BG Epic", "", "/repo", None, ProjectId(1))
+            .await
             .unwrap();
         db.patch_epic(
             epic.id,
             &EpicPatch::new().feed_command(Some(
                 r#"echo '[{"external_id":"bg1","title":"BG","description":"","status":"backlog","tag":"bug"}]'"#,
             )),
-        )
+        ).await
         .unwrap();
 
         let (mut runner, mut rx) = make_runner(db.clone());
@@ -263,7 +266,7 @@ mod tests {
             .expect("timed out waiting for McpEvent::Refresh")
             .expect("channel closed");
 
-        let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+        let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].title, "BG");
     }
@@ -273,13 +276,14 @@ mod tests {
         let db = Arc::new(Database::open_in_memory().unwrap());
         let epic = db
             .create_epic("My Epic", "", "/repo", None, ProjectId(1))
+            .await
             .unwrap();
         db.patch_epic(
             epic.id,
             &EpicPatch::new().feed_command(Some(
                 r#"echo '[{"external_id":"1","title":"T","description":"D","status":"backlog","tag":"bug"}]'"#,
             )),
-        )
+        ).await
         .unwrap();
 
         let (mut runner, mut rx) = make_runner(db.clone());
@@ -290,7 +294,7 @@ mod tests {
             .expect("timed out waiting for McpEvent::Refresh")
             .expect("channel closed");
 
-        let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+        let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].title, "T");
         assert_eq!(tasks[0].external_id.as_deref(), Some("1"));
@@ -302,13 +306,14 @@ mod tests {
         let db = Arc::new(Database::open_in_memory().unwrap());
         let epic = db
             .create_epic("Tagged Epic", "", "/repo", None, ProjectId(1))
+            .await
             .unwrap();
         db.patch_epic(
             epic.id,
             &EpicPatch::new().feed_command(Some(
                 r#"echo '[{"external_id":"1","title":"T","description":"","status":"backlog","tag":"pr-review"}]'"#,
             )),
-        )
+        ).await
         .unwrap();
 
         let (mut runner, mut rx) = make_runner(db.clone());
@@ -319,7 +324,7 @@ mod tests {
             .expect("timed out waiting for McpEvent::Refresh")
             .expect("channel closed");
 
-        let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+        let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].tag, Some(TaskTag::PrReview));
     }
@@ -329,6 +334,7 @@ mod tests {
         let db = Arc::new(Database::open_in_memory().unwrap());
         let epic = db
             .create_epic("Untagged Epic", "", "/repo", None, ProjectId(1))
+            .await
             .unwrap();
         db.patch_epic(
             epic.id,
@@ -336,6 +342,7 @@ mod tests {
                 r#"echo '[{"external_id":"1","title":"T","description":"","status":"backlog"}]'"#,
             )),
         )
+        .await
         .unwrap();
 
         let (mut runner, mut rx) = make_runner(db.clone());
@@ -348,7 +355,7 @@ mod tests {
             "expected no notification when tag is missing"
         );
 
-        let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+        let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
         assert!(tasks.is_empty(), "no task should be inserted on parse fail");
     }
 
@@ -357,8 +364,10 @@ mod tests {
         let db = Arc::new(Database::open_in_memory().unwrap());
         let epic = db
             .create_epic("Err Epic", "", "/repo", None, ProjectId(1))
+            .await
             .unwrap();
         db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some("exit 1")))
+            .await
             .unwrap();
 
         let (mut runner, mut rx) = make_runner(db.clone());
@@ -368,7 +377,7 @@ mod tests {
         let result = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
         assert!(result.is_err(), "expected timeout but got a notification");
 
-        let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+        let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
         assert!(tasks.is_empty());
     }
 
@@ -377,11 +386,13 @@ mod tests {
         let db = Arc::new(Database::open_in_memory().unwrap());
         let epic = db
             .create_epic("Bad JSON Epic", "", "/repo", None, ProjectId(1))
+            .await
             .unwrap();
         db.patch_epic(
             epic.id,
             &EpicPatch::new().feed_command(Some("echo 'not-json'")),
         )
+        .await
         .unwrap();
 
         let (mut runner, mut rx) = make_runner(db.clone());
@@ -390,7 +401,7 @@ mod tests {
         let result = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
         assert!(result.is_err(), "expected timeout but got a notification");
 
-        let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+        let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
         assert!(tasks.is_empty());
     }
 
@@ -399,6 +410,7 @@ mod tests {
         let db = Arc::new(Database::open_in_memory().unwrap());
         let epic = db
             .create_epic("Interval Epic", "", "/repo", None, ProjectId(1))
+            .await
             .unwrap();
 
         // Write a counter to a temp file so we can count how many times the command ran.
@@ -413,6 +425,7 @@ mod tests {
                 .feed_command(Some(&cmd))
                 .feed_interval_secs(Some(10000)),
         )
+        .await
         .unwrap();
 
         let (mut runner, mut rx) = make_runner(db.clone());
@@ -444,6 +457,7 @@ mod tests {
         // Epic with no feed_command (default)
         let epic = db
             .create_epic("Plain Epic", "", "/repo", None, ProjectId(1))
+            .await
             .unwrap();
 
         let (mut runner, mut rx) = make_runner(db.clone());
@@ -456,7 +470,7 @@ mod tests {
             "expected empty channel but got notification"
         );
 
-        let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+        let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
         assert!(tasks.is_empty());
     }
 
@@ -465,9 +479,11 @@ mod tests {
         let db = Arc::new(Database::open_in_memory().unwrap());
         let epic = db
             .create_epic("Slow Epic", "", "/repo", None, ProjectId(1))
+            .await
             .unwrap();
         // A command that would block for 5 seconds if awaited inline.
         db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some("sleep 5")))
+            .await
             .unwrap();
 
         let (tx, _rx) = mpsc::unbounded_channel();
@@ -490,13 +506,14 @@ mod tests {
         let db = Arc::new(Database::open_in_memory().unwrap());
         let epic = db
             .create_epic("BG Feed Epic", "", "/repo", None, ProjectId(1))
+            .await
             .unwrap();
         db.patch_epic(
             epic.id,
             &EpicPatch::new().feed_command(Some(
                 r#"echo '[{"external_id":"bg1","title":"BG Task","description":"","status":"backlog","tag":"bug"}]'"#,
             )),
-        )
+        ).await
         .unwrap();
 
         let (tx, _rx) = mpsc::unbounded_channel();
@@ -513,7 +530,7 @@ mod tests {
         // Give the background task 500 ms to complete.
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-        let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+        let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
         assert_eq!(
             tasks.len(),
             1,
@@ -532,9 +549,11 @@ mod tests {
         db.save_repo_path("/home/user/code/myrepo").unwrap();
         let epic = db
             .create_epic("Feed Epic", "", "/fallback", None, ProjectId(1))
+            .await
             .unwrap();
         let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","url":"https://github.com/org/myrepo/pull/42","status":"backlog","tag":"bug"}]'"#;
         db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some(cmd)))
+            .await
             .unwrap();
 
         let (mut runner, _rx) = make_runner(db.clone());
@@ -543,7 +562,7 @@ mod tests {
         // Wait briefly for the spawned task to complete
         tokio::time::sleep(Duration::from_millis(200)).await;
 
-        let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+        let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(
             tasks[0].repo_path, "/home/user/code/myrepo",
@@ -558,9 +577,11 @@ mod tests {
         db.save_repo_path("/home/user/code/other-repo").unwrap();
         let epic = db
             .create_epic("Feed Epic", "", "/fallback", None, ProjectId(1))
+            .await
             .unwrap();
         let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","url":"https://github.com/org/myrepo/pull/42","status":"backlog","tag":"bug"}]'"#;
         db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some(cmd)))
+            .await
             .unwrap();
 
         let (mut runner, _rx) = make_runner(db.clone());
@@ -568,7 +589,7 @@ mod tests {
 
         tokio::time::sleep(Duration::from_millis(200)).await;
 
-        let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+        let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(
             tasks[0].repo_path, "",
@@ -582,9 +603,11 @@ mod tests {
         db.save_repo_path("/home/user/code/myrepo").unwrap();
         let epic = db
             .create_epic("Feed Epic", "", "/fallback", None, ProjectId(1))
+            .await
             .unwrap();
         let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","status":"backlog","tag":"bug"}]'"#;
         db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some(cmd)))
+            .await
             .unwrap();
 
         let (mut runner, _rx) = make_runner(db.clone());
@@ -592,7 +615,7 @@ mod tests {
 
         tokio::time::sleep(Duration::from_millis(200)).await;
 
-        let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+        let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(
             tasks[0].repo_path, "",
@@ -655,6 +678,7 @@ mod tests {
         db.save_repo_path("/home/user/code/repo-b").unwrap();
         let epic = db
             .create_epic("Feed Epic", "", "/fallback", None, ProjectId(1))
+            .await
             .unwrap();
         // Three items: two for repo-a (master), one for repo-b (develop).
         let cmd = r#"echo '[
@@ -663,6 +687,7 @@ mod tests {
             {"external_id":"3","title":"B1","description":"","url":"https://github.com/org/repo-b/pull/1","status":"backlog","tag":"bug"}
         ]'"#;
         db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some(cmd)))
+            .await
             .unwrap();
 
         let proc_runner = Arc::new(PerRepoBranchRunner::new(&[
@@ -675,7 +700,7 @@ mod tests {
         // Wait for the spawned task to finish writing tasks.
         tokio::time::sleep(Duration::from_millis(300)).await;
 
-        let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+        let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
         assert_eq!(tasks.len(), 3);
 
         let by_ext = |ext: &str| {
@@ -703,9 +728,11 @@ mod tests {
         db.save_repo_path("/home/user/code/repo-a").unwrap();
         let epic = db
             .create_epic("Feed Epic", "", "/fallback", None, ProjectId(1))
+            .await
             .unwrap();
         let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","url":"https://github.com/org/repo-a/pull/1","status":"backlog","tag":"bug"}]'"#;
         db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some(cmd)))
+            .await
             .unwrap();
 
         // AlwaysFailRunner → detect_default_branch returns "main".
@@ -713,7 +740,7 @@ mod tests {
         runner.tick().await;
         tokio::time::sleep(Duration::from_millis(200)).await;
 
-        let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+        let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].base_branch, "main");
     }
@@ -723,6 +750,7 @@ mod tests {
         let db = Arc::new(Database::open_in_memory().unwrap());
         let epic = db
             .create_epic("Idem Epic", "", "/repo", None, ProjectId(1))
+            .await
             .unwrap();
         db.patch_epic(
             epic.id,
@@ -732,7 +760,7 @@ mod tests {
                 ))
                 // 0-second interval so the second tick re-runs the command.
                 .feed_interval_secs(Some(0)),
-        )
+        ).await
         .unwrap();
 
         let (mut runner, mut rx) = make_runner(db.clone());
@@ -743,7 +771,7 @@ mod tests {
             .expect("first tick: timed out waiting for refresh")
             .expect("channel closed");
 
-        let first = db.list_tasks_for_epic(epic.id).unwrap();
+        let first = db.list_tasks_for_epic(epic.id).await.unwrap();
         assert_eq!(first.len(), 1);
         let first_id = first[0].id;
 
@@ -753,7 +781,7 @@ mod tests {
             .expect("second tick: timed out waiting for refresh")
             .expect("channel closed");
 
-        let second = db.list_tasks_for_epic(epic.id).unwrap();
+        let second = db.list_tasks_for_epic(epic.id).await.unwrap();
         assert_eq!(
             second.len(),
             1,
@@ -771,8 +799,10 @@ mod tests {
         let db = Arc::new(Database::open_in_memory().unwrap());
         let epic = db
             .create_epic("Empty Epic", "", "/repo", None, ProjectId(1))
+            .await
             .unwrap();
         db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some("echo '[]'")))
+            .await
             .unwrap();
 
         let (mut runner, mut rx) = make_runner(db.clone());
@@ -780,7 +810,7 @@ mod tests {
 
         let _ = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
 
-        let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+        let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
         assert!(tasks.is_empty(), "empty feed array must not create tasks");
     }
 
@@ -790,9 +820,11 @@ mod tests {
         db.save_repo_path("/home/user/code/myrepo").unwrap();
         let epic = db
             .create_epic("Feed Epic", "", "/fallback", None, ProjectId(1))
+            .await
             .unwrap();
         let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","url":"https://jira.company.com/PROJ-123","status":"backlog","tag":"bug"}]'"#;
         db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some(cmd)))
+            .await
             .unwrap();
 
         let (mut runner, _rx) = make_runner(db.clone());
@@ -800,7 +832,7 @@ mod tests {
 
         tokio::time::sleep(Duration::from_millis(200)).await;
 
-        let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+        let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(
             tasks[0].repo_path, "",

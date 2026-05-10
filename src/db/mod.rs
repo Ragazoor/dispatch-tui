@@ -203,13 +203,14 @@ pub trait TaskCrud: Send + Sync {
 }
 
 /// Epic CRUD, list, patch, recalculate status.
+#[async_trait::async_trait]
 pub trait EpicCrud: Send + Sync {
     /// Create a new epic. `parent_epic_id` is set once here and never changed
     /// via [`EpicPatch`] (reparenting is unsupported). The DB enforces
     /// `CHECK (parent_epic_id != id)` (migration v35) to prevent self-loops,
     /// and `recalculate_epic_status` uses a visited set to guard against any
     /// cycle that might exist in older data.
-    fn create_epic(
+    async fn create_epic(
         &self,
         title: &str,
         description: &str,
@@ -217,22 +218,22 @@ pub trait EpicCrud: Send + Sync {
         parent_epic_id: Option<EpicId>,
         project_id: ProjectId,
     ) -> Result<Epic>;
-    fn get_epic(&self, id: EpicId) -> Result<Option<Epic>>;
-    fn list_epics(&self) -> Result<Vec<Epic>>;
+    async fn get_epic(&self, id: EpicId) -> Result<Option<Epic>>;
+    async fn list_epics(&self) -> Result<Vec<Epic>>;
     /// List only root epics (no parent). Used for the main board view.
-    fn list_root_epics(&self) -> Result<Vec<Epic>>;
+    async fn list_root_epics(&self) -> Result<Vec<Epic>>;
     /// List direct children of the given epic.
-    fn list_sub_epics(&self, parent_id: EpicId) -> Result<Vec<Epic>>;
-    fn patch_epic(&self, id: EpicId, patch: &EpicPatch<'_>) -> Result<()>;
-    fn delete_epic(&self, id: EpicId) -> Result<()>;
-    fn set_task_epic_id(&self, task_id: TaskId, epic_id: Option<EpicId>) -> Result<()>;
-    fn list_tasks_for_epic(&self, epic_id: EpicId) -> Result<Vec<Task>>;
+    async fn list_sub_epics(&self, parent_id: EpicId) -> Result<Vec<Epic>>;
+    async fn patch_epic(&self, id: EpicId, patch: &EpicPatch<'_>) -> Result<()>;
+    async fn delete_epic(&self, id: EpicId) -> Result<()>;
+    async fn set_task_epic_id(&self, task_id: TaskId, epic_id: Option<EpicId>) -> Result<()>;
+    async fn list_tasks_for_epic(&self, epic_id: EpicId) -> Result<Vec<Task>>;
     /// Fetch all tasks that have a non-null epic_id in a single query.
     /// Use instead of looping over epics and calling list_tasks_for_epic() per epic.
-    fn list_all_tasks_with_epic_id(&self) -> Result<Vec<Task>>;
+    async fn list_all_tasks_with_epic_id(&self) -> Result<Vec<Task>>;
     /// Recalculate an epic's status from its active children (tasks + sub-epics).
     /// Propagates upward to the parent epic if one exists.
-    fn recalculate_epic_status(&self, epic_id: EpicId) -> Result<()>;
+    async fn recalculate_epic_status(&self, epic_id: EpicId) -> Result<()>;
 }
 
 /// Save/load PRs (all kinds) and agent tracking on PRs.

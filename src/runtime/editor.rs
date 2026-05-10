@@ -246,8 +246,8 @@ impl TuiRuntime {
         outcome: EditorOutcome,
     ) -> Vec<Command> {
         match kind {
-            EditKind::TaskEdit(task) => self.finalize_task_edit(app, task, outcome),
-            EditKind::EpicEdit(epic) => self.finalize_epic_edit(app, epic, outcome),
+            EditKind::TaskEdit(task) => self.finalize_task_edit(app, task, outcome).await,
+            EditKind::EpicEdit(epic) => self.finalize_epic_edit(app, epic, outcome).await,
             EditKind::Description { .. } => {
                 tracing::warn!("FinalizeEditorResult received Description kind; ignoring");
                 vec![]
@@ -298,7 +298,7 @@ impl TuiRuntime {
         }
     }
 
-    fn finalize_task_edit(
+    async fn finalize_task_edit(
         &self,
         app: &mut App,
         task: models::Task,
@@ -323,7 +323,7 @@ impl TuiRuntime {
             .tag(applied.tag)
             .base_branch(applied.base_branch.clone());
 
-        if let Err(e) = self.task_svc.update_task(params) {
+        if let Err(e) = self.task_svc.update_task(params).await {
             app.update(Message::System(crate::tui::messages::SystemMessage::Error(
                 Self::db_error("updating task", e),
             )));
@@ -342,7 +342,7 @@ impl TuiRuntime {
         )))
     }
 
-    fn finalize_epic_edit(
+    async fn finalize_epic_edit(
         &self,
         app: &mut App,
         epic: models::Epic,
@@ -357,19 +357,23 @@ impl TuiRuntime {
         emit_parse_errors(app, &parse_errors);
 
         let epic_id = epic.id;
-        if let Err(e) = self.epic_svc.update_epic(UpdateEpicParams {
-            epic_id,
-            title: Some(applied.title.clone()),
-            description: Some(applied.description.clone()),
-            status: None,
-            plan_path: None,
-            sort_order: None,
-            repo_path: Some(applied.repo_path.clone()),
-            auto_dispatch: None,
-            feed_command: Some(applied.feed_command.clone()),
-            feed_interval_secs: Some(applied.feed_interval_secs),
-            project_id: None,
-        }) {
+        if let Err(e) = self
+            .epic_svc
+            .update_epic(UpdateEpicParams {
+                epic_id,
+                title: Some(applied.title.clone()),
+                description: Some(applied.description.clone()),
+                status: None,
+                plan_path: None,
+                sort_order: None,
+                repo_path: Some(applied.repo_path.clone()),
+                auto_dispatch: None,
+                feed_command: Some(applied.feed_command.clone()),
+                feed_interval_secs: Some(applied.feed_interval_secs),
+                project_id: None,
+            })
+            .await
+        {
             app.update(Message::System(crate::tui::messages::SystemMessage::Error(
                 Self::db_error("updating epic", e),
             )));

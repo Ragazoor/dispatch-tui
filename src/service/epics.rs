@@ -92,7 +92,7 @@ impl EpicService {
         Self { db }
     }
 
-    pub fn create_epic(&self, params: CreateEpicParams) -> Result<Epic, ServiceError> {
+    pub async fn create_epic(&self, params: CreateEpicParams) -> Result<Epic, ServiceError> {
         let repo_path = crate::models::expand_tilde(&params.repo_path);
         let epic = self
             .db
@@ -103,6 +103,7 @@ impl EpicService {
                 params.parent_epic_id,
                 params.project_id,
             )
+            .await
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
 
         let mut patch = EpicPatch::new();
@@ -120,14 +121,14 @@ impl EpicService {
             has_extra = true;
         }
         if has_extra {
-            let _ = self.db.patch_epic(epic.id, &patch);
+            let _ = self.db.patch_epic(epic.id, &patch).await;
         }
 
         Ok(epic)
     }
 
-    pub fn get_epic(&self, epic_id: EpicId) -> Result<Epic, ServiceError> {
-        match self.db.get_epic(epic_id) {
+    pub async fn get_epic(&self, epic_id: EpicId) -> Result<Epic, ServiceError> {
+        match self.db.get_epic(epic_id).await {
             Ok(Some(epic)) => Ok(epic),
             Ok(None) => Err(ServiceError::NotFound(format!(
                 "Epic {} not found",
@@ -137,39 +138,48 @@ impl EpicService {
         }
     }
 
-    pub fn get_epic_with_subtasks(
+    pub async fn get_epic_with_subtasks(
         &self,
         epic_id: EpicId,
     ) -> Result<(Epic, Vec<Task>), ServiceError> {
-        let epic = self.get_epic(epic_id)?;
-        let subtasks = self.db.list_tasks_for_epic(epic.id).unwrap_or_default();
+        let epic = self.get_epic(epic_id).await?;
+        let subtasks = self
+            .db
+            .list_tasks_for_epic(epic.id)
+            .await
+            .unwrap_or_default();
         Ok((epic, subtasks))
     }
 
-    pub fn list_epics(&self) -> Result<Vec<Epic>, ServiceError> {
+    pub async fn list_epics(&self) -> Result<Vec<Epic>, ServiceError> {
         self.db
             .list_epics()
+            .await
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))
     }
 
-    pub fn list_root_epics(&self) -> Result<Vec<Epic>, ServiceError> {
+    pub async fn list_root_epics(&self) -> Result<Vec<Epic>, ServiceError> {
         self.db
             .list_root_epics()
+            .await
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))
     }
 
-    pub fn list_sub_epics(&self, parent_id: EpicId) -> Result<Vec<Epic>, ServiceError> {
+    pub async fn list_sub_epics(&self, parent_id: EpicId) -> Result<Vec<Epic>, ServiceError> {
         self.db
             .list_sub_epics(parent_id)
+            .await
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))
     }
 
-    pub fn list_epics_with_progress(&self) -> Result<Vec<(Epic, usize, usize)>, ServiceError> {
-        let epics = self.list_epics()?;
-        let all_subtasks = self
-            .db
-            .list_all_tasks_with_epic_id()
-            .map_err(|e| ServiceError::Internal(format!("Failed to list tasks with epic: {e}")))?;
+    pub async fn list_epics_with_progress(
+        &self,
+    ) -> Result<Vec<(Epic, usize, usize)>, ServiceError> {
+        let epics = self.list_epics().await?;
+        let all_subtasks =
+            self.db.list_all_tasks_with_epic_id().await.map_err(|e| {
+                ServiceError::Internal(format!("Failed to list tasks with epic: {e}"))
+            })?;
 
         // Group tasks by epic_id in Rust — avoids N+1 queries
         let mut tasks_by_epic: std::collections::HashMap<i64, Vec<&Task>> =
@@ -199,7 +209,7 @@ impl EpicService {
         Ok(result)
     }
 
-    pub fn update_epic(&self, params: UpdateEpicParams) -> Result<EpicId, ServiceError> {
+    pub async fn update_epic(&self, params: UpdateEpicParams) -> Result<EpicId, ServiceError> {
         if !params.has_any_field() {
             return Err(ServiceError::Validation(
                 "At least one field must be provided".into(),
@@ -245,17 +255,19 @@ impl EpicService {
         let epic_id = params.epic_id;
         self.db
             .patch_epic(epic_id, &patch)
+            .await
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
 
         Ok(epic_id)
     }
 
-    pub fn delete_epic(&self, epic_id: EpicId) -> Result<(), ServiceError> {
+    pub async fn delete_epic(&self, epic_id: EpicId) -> Result<(), ServiceError> {
         // Verify epic exists
-        self.get_epic(epic_id)?;
+        self.get_epic(epic_id).await?;
 
         self.db
             .delete_epic(epic_id)
+            .await
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))
     }
 }

@@ -434,8 +434,8 @@ fn patch_task_none_preserves_labels() {
     assert_eq!(task.labels, labels);
 }
 
-#[test]
-fn list_all_tolerates_corrupt_labels_json() {
+#[tokio::test]
+async fn list_all_tolerates_corrupt_labels_json() {
     let db = in_memory_db();
     let id = db
         .create_task(CreateTaskRequest {
@@ -466,8 +466,8 @@ fn list_all_tolerates_corrupt_labels_json() {
     assert!(tasks[0].labels.is_empty());
 }
 
-#[test]
-fn decode_fallback_counter_bumps_on_malformed_labels() {
+#[tokio::test]
+async fn decode_fallback_counter_bumps_on_malformed_labels() {
     let db = in_memory_db();
     let id = db
         .create_task(CreateTaskRequest {
@@ -1221,11 +1221,12 @@ fn create_task_sets_default_sub_status_for_backlog() {
     assert_eq!(task.sub_status, SubStatus::None);
 }
 
-#[test]
-fn create_task_with_epic_sort_tag_single_insert() {
+#[tokio::test]
+async fn create_task_with_epic_sort_tag_single_insert() {
     let db = in_memory_db();
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
     let id = db
         .create_task(CreateTaskRequest {
@@ -1400,11 +1401,12 @@ fn main_branches(n: usize) -> Vec<String> {
     vec!["main".to_string(); n]
 }
 
-#[test]
-fn upsert_feed_tasks_creates_tasks() {
+#[tokio::test]
+async fn upsert_feed_tasks_creates_tasks() {
     let db = in_memory_db();
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
     let items = vec![
         make_feed_item("ext-1", "Task One"),
@@ -1416,7 +1418,7 @@ fn upsert_feed_tasks_creates_tasks() {
     db.upsert_feed_tasks(epic.id, &items, &repo_paths, &branches)
         .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
     assert_eq!(tasks.len(), 2);
     let mut titles: Vec<&str> = tasks.iter().map(|t| t.title.as_str()).collect();
     titles.sort();
@@ -1428,11 +1430,12 @@ fn upsert_feed_tasks_creates_tasks() {
             || t.external_id.as_deref() == Some("ext-2")));
 }
 
-#[test]
-fn upsert_feed_tasks_idempotent() {
+#[tokio::test]
+async fn upsert_feed_tasks_idempotent() {
     let db = in_memory_db();
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
     let items = vec![make_feed_item("ext-1", "Task One")];
     let repo_paths = vec!["/repo".to_string()];
@@ -1443,16 +1446,17 @@ fn upsert_feed_tasks_idempotent() {
     db.upsert_feed_tasks(epic.id, &items, &repo_paths, &branches)
         .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
     assert_eq!(tasks.len(), 1, "second call should not create duplicate");
     assert_eq!(tasks[0].title, "Task One");
 }
 
-#[test]
-fn upsert_feed_tasks_preserves_status() {
+#[tokio::test]
+async fn upsert_feed_tasks_preserves_status() {
     let db = in_memory_db();
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
     let items = vec![make_feed_item("ext-1", "Original Title")];
 
@@ -1460,7 +1464,7 @@ fn upsert_feed_tasks_preserves_status() {
         .unwrap();
 
     // Simulate user moving task to Running
-    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
     db.patch_task(tasks[0].id, &TaskPatch::new().status(TaskStatus::Running))
         .unwrap();
 
@@ -1478,7 +1482,7 @@ fn upsert_feed_tasks_preserves_status() {
     db.upsert_feed_tasks(epic.id, &updated, &["/repo".to_string()], &main_branches(1))
         .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].title, "Updated Title", "title should be updated");
     assert_eq!(
@@ -1492,11 +1496,12 @@ fn upsert_feed_tasks_preserves_status() {
     );
 }
 
-#[test]
-fn upsert_feed_tasks_adds_new_items() {
+#[tokio::test]
+async fn upsert_feed_tasks_adds_new_items() {
     let db = in_memory_db();
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
 
     db.upsert_feed_tasks(
@@ -1518,15 +1523,16 @@ fn upsert_feed_tasks_adds_new_items() {
     )
     .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
     assert_eq!(tasks.len(), 2, "new item should be created on second call");
 }
 
-#[test]
-fn upsert_feed_tasks_removes_stale_items() {
+#[tokio::test]
+async fn upsert_feed_tasks_removes_stale_items() {
     let db = in_memory_db();
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
 
     // First fetch: two items
@@ -1540,7 +1546,7 @@ fn upsert_feed_tasks_removes_stale_items() {
         &main_branches(2),
     )
     .unwrap();
-    assert_eq!(db.list_tasks_for_epic(epic.id).unwrap().len(), 2);
+    assert_eq!(db.list_tasks_for_epic(epic.id).await.unwrap().len(), 2);
 
     // Second fetch: only ext-1 remains in the feed
     db.upsert_feed_tasks(
@@ -1551,16 +1557,17 @@ fn upsert_feed_tasks_removes_stale_items() {
     )
     .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
     assert_eq!(tasks.len(), 1, "stale feed task should be removed");
     assert_eq!(tasks[0].external_id.as_deref(), Some("ext-1"));
 }
 
-#[test]
-fn upsert_feed_tasks_uses_resolved_repo_path() {
+#[tokio::test]
+async fn upsert_feed_tasks_uses_resolved_repo_path() {
     let db = in_memory_db();
     let epic = db
         .create_epic("E", "", "/epic-repo", None, ProjectId(1))
+        .await
         .unwrap();
     let items = vec![make_feed_item("ext-1", "Task One")];
     let repo_paths = vec!["/resolved/local/repo".to_string()];
@@ -1569,15 +1576,16 @@ fn upsert_feed_tasks_uses_resolved_repo_path() {
     db.upsert_feed_tasks(epic.id, &items, &repo_paths, &branches)
         .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
     assert_eq!(tasks[0].repo_path, "/resolved/local/repo");
 }
 
-#[test]
-fn upsert_feed_tasks_stores_empty_sentinel_when_unresolved() {
+#[tokio::test]
+async fn upsert_feed_tasks_stores_empty_sentinel_when_unresolved() {
     let db = in_memory_db();
     let epic = db
         .create_epic("E", "", "/epic-repo", None, ProjectId(1))
+        .await
         .unwrap();
     let items = vec![make_feed_item("ext-1", "Task One")];
     let repo_paths = vec!["".to_string()];
@@ -1586,15 +1594,16 @@ fn upsert_feed_tasks_stores_empty_sentinel_when_unresolved() {
     db.upsert_feed_tasks(epic.id, &items, &repo_paths, &branches)
         .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
     assert_eq!(tasks[0].repo_path, "");
 }
 
-#[test]
-fn upsert_feed_tasks_on_conflict_does_not_update_repo_path() {
+#[tokio::test]
+async fn upsert_feed_tasks_on_conflict_does_not_update_repo_path() {
     let db = in_memory_db();
     let epic = db
         .create_epic("E", "", "/epic-repo", None, ProjectId(1))
+        .await
         .unwrap();
     let items = vec![make_feed_item("ext-1", "Original")];
 
@@ -1606,7 +1615,7 @@ fn upsert_feed_tasks_on_conflict_does_not_update_repo_path() {
         &main_branches(1),
     )
     .unwrap();
-    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
     assert_eq!(tasks[0].repo_path, "/first/path");
 
     // Second upsert: different path provided — ON CONFLICT should NOT update repo_path
@@ -1628,7 +1637,7 @@ fn upsert_feed_tasks_on_conflict_does_not_update_repo_path() {
     )
     .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
     assert_eq!(tasks[0].title, "Updated Title");
     assert_eq!(
         tasks[0].repo_path, "/first/path",
@@ -1636,11 +1645,12 @@ fn upsert_feed_tasks_on_conflict_does_not_update_repo_path() {
     );
 }
 
-#[test]
-fn upsert_feed_tasks_mixed_batch_resolved_and_unresolved() {
+#[tokio::test]
+async fn upsert_feed_tasks_mixed_batch_resolved_and_unresolved() {
     let db = in_memory_db();
     let epic = db
         .create_epic("E", "", "/epic-repo", None, ProjectId(1))
+        .await
         .unwrap();
     let items = vec![
         make_feed_item("ext-1", "Resolved Task"),
@@ -1652,7 +1662,7 @@ fn upsert_feed_tasks_mixed_batch_resolved_and_unresolved() {
     db.upsert_feed_tasks(epic.id, &items, &repo_paths, &branches)
         .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
     let resolved = tasks
         .iter()
         .find(|t| t.external_id.as_deref() == Some("ext-1"))
@@ -1665,11 +1675,12 @@ fn upsert_feed_tasks_mixed_batch_resolved_and_unresolved() {
     assert_eq!(unresolved.repo_path, "");
 }
 
-#[test]
-fn upsert_feed_tasks_stores_per_task_base_branch() {
+#[tokio::test]
+async fn upsert_feed_tasks_stores_per_task_base_branch() {
     let db = in_memory_db();
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
     let items = vec![
         make_feed_item("ext-1", "Master Task"),
@@ -1690,7 +1701,7 @@ fn upsert_feed_tasks_stores_per_task_base_branch() {
     db.upsert_feed_tasks(epic.id, &items, &repo_paths, &base_branches)
         .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
     let by_ext = |ext: &str| {
         tasks
             .iter()
@@ -1702,11 +1713,12 @@ fn upsert_feed_tasks_stores_per_task_base_branch() {
     assert_eq!(by_ext("ext-3").base_branch, "main");
 }
 
-#[test]
-fn upsert_feed_tasks_does_not_remove_manual_tasks() {
+#[tokio::test]
+async fn upsert_feed_tasks_does_not_remove_manual_tasks() {
     let db = in_memory_db();
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
 
     // Manually created task linked to the epic (no external_id)
@@ -1737,7 +1749,7 @@ fn upsert_feed_tasks_does_not_remove_manual_tasks() {
     // Feed fetch returns nothing — only manual task should survive
     db.upsert_feed_tasks(epic.id, &[], &[], &[]).unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
     assert_eq!(
         tasks.len(),
         1,
@@ -1746,11 +1758,12 @@ fn upsert_feed_tasks_does_not_remove_manual_tasks() {
     assert_eq!(tasks[0].id, manual_task_id);
 }
 
-#[test]
-fn upsert_feed_tasks_persists_tag() {
+#[tokio::test]
+async fn upsert_feed_tasks_persists_tag() {
     let db = in_memory_db();
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
     let items = vec![crate::models::FeedItem {
         external_id: "ext-1".to_string(),
@@ -1766,16 +1779,17 @@ fn upsert_feed_tasks_persists_tag() {
     db.upsert_feed_tasks(epic.id, &items, &["/repo".to_string()], &main_branches(1))
         .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].tag, Some(crate::models::TaskTag::PrReview));
 }
 
-#[test]
-fn upsert_feed_tasks_updates_tag_on_conflict() {
+#[tokio::test]
+async fn upsert_feed_tasks_updates_tag_on_conflict() {
     let db = in_memory_db();
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
     let initial = vec![crate::models::FeedItem {
         external_id: "ext-1".to_string(),
@@ -1804,7 +1818,7 @@ fn upsert_feed_tasks_updates_tag_on_conflict() {
     db.upsert_feed_tasks(epic.id, &updated, &["/repo".to_string()], &main_branches(1))
         .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].tag, Some(crate::models::TaskTag::Fix));
 }
@@ -1826,11 +1840,12 @@ fn feed_item_legacy_json_deserializes_with_default_labels_and_sort_order() {
     assert_eq!(item.sort_order, None);
 }
 
-#[test]
-fn upsert_feed_tasks_writes_labels_and_sort_order_on_insert() {
+#[tokio::test]
+async fn upsert_feed_tasks_writes_labels_and_sort_order_on_insert() {
     let db = in_memory_db();
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
     let items = vec![crate::models::FeedItem {
         external_id: "ext-1".to_string(),
@@ -1845,17 +1860,18 @@ fn upsert_feed_tasks_writes_labels_and_sort_order_on_insert() {
     db.upsert_feed_tasks(epic.id, &items, &["/repo".to_string()], &main_branches(1))
         .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].labels, vec!["scala-common".to_string()]);
     assert_eq!(tasks[0].sort_order, Some(1));
 }
 
-#[test]
-fn upsert_feed_tasks_replaces_labels_and_sort_order_on_conflict() {
+#[tokio::test]
+async fn upsert_feed_tasks_replaces_labels_and_sort_order_on_conflict() {
     let db = in_memory_db();
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
     let initial = vec![crate::models::FeedItem {
         external_id: "ext-1".to_string(),
@@ -1870,7 +1886,7 @@ fn upsert_feed_tasks_replaces_labels_and_sort_order_on_conflict() {
     db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
         .unwrap();
     // Simulate user moving the task — status & repo_path must be preserved.
-    let task_id = db.list_tasks_for_epic(epic.id).unwrap()[0].id;
+    let task_id = db.list_tasks_for_epic(epic.id).await.unwrap()[0].id;
     db.patch_task(
         task_id,
         &TaskPatch::new()
@@ -1915,13 +1931,14 @@ async fn upsert_feed_tasks_can_purge_task_with_associated_learning() {
     let db = in_memory_db();
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
 
     // First feed run: creates a task.
     let initial = vec![make_feed_item("ext-1", "first")];
     db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
         .unwrap();
-    let task_id = db.list_tasks_for_epic(epic.id).unwrap()[0].id;
+    let task_id = db.list_tasks_for_epic(epic.id).await.unwrap()[0].id;
 
     // The dispatched agent records a learning referencing the task as its source.
     db.create_learning(CreateLearningRow {
@@ -1943,24 +1960,25 @@ async fn upsert_feed_tasks_can_purge_task_with_associated_learning() {
     db.upsert_feed_tasks(epic.id, &next, &["/repo".to_string()], &main_branches(1))
         .expect("stale feed task with associated learning should be purgeable");
 
-    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].external_id.as_deref(), Some("ext-2"));
 }
 
-#[test]
-fn upsert_feed_tasks_can_purge_task_with_reported_usage() {
+#[tokio::test]
+async fn upsert_feed_tasks_can_purge_task_with_reported_usage() {
     use crate::models::UsageReport;
 
     let db = in_memory_db();
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
+        .await
         .unwrap();
 
     let initial = vec![make_feed_item("ext-1", "first")];
     db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
         .unwrap();
-    let task_id = db.list_tasks_for_epic(epic.id).unwrap()[0].id;
+    let task_id = db.list_tasks_for_epic(epic.id).await.unwrap()[0].id;
 
     db.report_usage(
         task_id,
@@ -2213,33 +2231,37 @@ mod property_tests {
             feed_command  in proptest::option::of(proptest::option::of("[a-z]{1,16}")),
             feed_interval in proptest::option::of(proptest::option::of(1i64..86_400)),
         ) {
-            let db = in_memory_db();
-            let epic = db
-                .create_epic("Baseline epic", "baseline", "/baseline", None, ProjectId(1))
-                .unwrap();
-            let baseline = db.get_epic(epic.id).unwrap().unwrap();
+            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+            rt.block_on(async {
+                let db = in_memory_db();
+                let epic = db
+                    .create_epic("Baseline epic", "baseline", "/baseline", None, ProjectId(1)).await
+                    .unwrap();
+                let baseline = db.get_epic(epic.id).await.unwrap().unwrap();
 
-            let mut p = EpicPatch::new();
-            if let Some(t)  = title.as_deref()       { p = p.title(t); }
-            if let Some(d)  = description.as_deref() { p = p.description(d); }
-            if let Some(r)  = repo_path.as_deref()   { p = p.repo_path(r); }
-            if let Some(ref pp) = plan_path { p = p.plan_path(pp.as_deref()); }
-            if let Some(so) = sort_order    { p = p.sort_order(so); }
-            if let Some(ad) = auto_dispatch { p = p.auto_dispatch(ad); }
-            if let Some(ref fc) = feed_command  { p = p.feed_command(fc.as_deref()); }
-            if let Some(fi) = feed_interval     { p = p.feed_interval_secs(fi); }
+                let mut p = EpicPatch::new();
+                if let Some(t)  = title.as_deref()       { p = p.title(t); }
+                if let Some(d)  = description.as_deref() { p = p.description(d); }
+                if let Some(r)  = repo_path.as_deref()   { p = p.repo_path(r); }
+                if let Some(ref pp) = plan_path { p = p.plan_path(pp.as_deref()); }
+                if let Some(so) = sort_order    { p = p.sort_order(so); }
+                if let Some(ad) = auto_dispatch { p = p.auto_dispatch(ad); }
+                if let Some(ref fc) = feed_command  { p = p.feed_command(fc.as_deref()); }
+                if let Some(fi) = feed_interval     { p = p.feed_interval_secs(fi); }
 
-            db.patch_epic(epic.id, &p).unwrap();
-            let after = db.get_epic(epic.id).unwrap().unwrap();
+                db.patch_epic(epic.id, &p).await.unwrap();
+                let after = db.get_epic(epic.id).await.unwrap().unwrap();
 
-            prop_assert_eq!(&after.title,         &title.unwrap_or(baseline.title));
-            prop_assert_eq!(&after.description,   &description.unwrap_or(baseline.description));
-            prop_assert_eq!(&after.repo_path,     &repo_path.unwrap_or(baseline.repo_path));
-            prop_assert_eq!(&after.plan_path,     &plan_path.unwrap_or(baseline.plan_path));
-            prop_assert_eq!(after.sort_order,     sort_order.unwrap_or(baseline.sort_order));
-            prop_assert_eq!(after.auto_dispatch,  auto_dispatch.unwrap_or(baseline.auto_dispatch));
-            prop_assert_eq!(&after.feed_command,  &feed_command.unwrap_or(baseline.feed_command));
-            prop_assert_eq!(after.feed_interval_secs, feed_interval.unwrap_or(baseline.feed_interval_secs));
+                prop_assert_eq!(&after.title,         &title.unwrap_or(baseline.title));
+                prop_assert_eq!(&after.description,   &description.unwrap_or(baseline.description));
+                prop_assert_eq!(&after.repo_path,     &repo_path.unwrap_or(baseline.repo_path));
+                prop_assert_eq!(&after.plan_path,     &plan_path.unwrap_or(baseline.plan_path));
+                prop_assert_eq!(after.sort_order,     sort_order.unwrap_or(baseline.sort_order));
+                prop_assert_eq!(after.auto_dispatch,  auto_dispatch.unwrap_or(baseline.auto_dispatch));
+                prop_assert_eq!(&after.feed_command,  &feed_command.unwrap_or(baseline.feed_command));
+                prop_assert_eq!(after.feed_interval_secs, feed_interval.unwrap_or(baseline.feed_interval_secs));
+                Ok::<(), proptest::test_runner::TestCaseError>(())
+            })?;
         }
     }
 }

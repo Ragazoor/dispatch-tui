@@ -105,12 +105,12 @@ pub fn remove_database(db_path: &std::path::Path) -> Result<bool> {
 // run_setup — top-level orchestrator
 // ---------------------------------------------------------------------------
 
-pub fn run_setup(port: u16, yes: bool, db_path: &Path) -> Result<()> {
+pub async fn run_setup(port: u16, yes: bool, db_path: &Path) -> Result<()> {
     let db = Database::open(db_path)?;
     let data_dir = db_path
         .parent()
         .context("database path has no parent directory")?;
-    seed_feed_epics(&db, data_dir)?;
+    seed_feed_epics(&db, data_dir).await?;
     let claude_dir = claude_dir()?;
     fs::create_dir_all(&claude_dir)
         .with_context(|| format!("Failed to create {}", claude_dir.display()))?;

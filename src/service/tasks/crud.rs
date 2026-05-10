@@ -47,7 +47,10 @@ impl TaskService {
     ///
     /// Use [`cli_update_task`](Self::cli_update_task) instead when writing CLI
     /// subcommands that need to complete or archive tasks.
-    pub fn update_task(&self, params: UpdateTaskParams) -> Result<UpdateTaskResult, ServiceError> {
+    pub async fn update_task(
+        &self,
+        params: UpdateTaskParams,
+    ) -> Result<UpdateTaskResult, ServiceError> {
         if !params.has_any_field() {
             return Err(ServiceError::Validation(
                 "At least one field must be provided".into(),
@@ -90,15 +93,16 @@ impl TaskService {
             let old_epic_id = prior.as_ref().and_then(|t| t.epic_id);
             self.db
                 .set_task_epic_id(task_id, Some(new_epic_id))
+                .await
                 .map_err(|e| ServiceError::Internal(format!("Failed to link task to epic: {e}")))?;
             if let Some(old) = old_epic_id {
-                self.recalculate_epic(old);
+                self.recalculate_epic(old).await;
             }
-            self.recalculate_epic(new_epic_id);
+            self.recalculate_epic(new_epic_id).await;
         }
 
         if params.status.is_some() {
-            self.recalculate_epic_for_task(task_id);
+            self.recalculate_epic_for_task(task_id).await;
         }
 
         Ok(UpdateTaskResult {
@@ -140,8 +144,8 @@ impl TaskService {
     }
 
     /// Recalculate the given epic, logging any database error.
-    fn recalculate_epic(&self, epic_id: EpicId) {
-        if let Err(err) = self.db.recalculate_epic_status(epic_id) {
+    async fn recalculate_epic(&self, epic_id: EpicId) {
+        if let Err(err) = self.db.recalculate_epic_status(epic_id).await {
             tracing::warn!(
                 "failed to recalculate epic status for epic {}: {err}",
                 epic_id.0
@@ -150,10 +154,10 @@ impl TaskService {
     }
 
     /// Recalculate the parent epic of the given task, if it has one.
-    fn recalculate_epic_for_task(&self, task_id: TaskId) {
+    async fn recalculate_epic_for_task(&self, task_id: TaskId) {
         if let Ok(Some(task)) = self.db.get_task(task_id) {
             if let Some(epic_id) = task.epic_id {
-                self.recalculate_epic(epic_id);
+                self.recalculate_epic(epic_id).await;
             }
         }
     }
@@ -169,7 +173,7 @@ impl TaskService {
     /// - Accepts only status + sub_status — not the full field builder.
     ///
     /// Use `update_task` for agent/MCP call sites that must not complete tasks.
-    pub fn cli_update_task(
+    pub async fn cli_update_task(
         &self,
         task_id: TaskId,
         new_status: TaskStatus,
@@ -201,7 +205,7 @@ impl TaskService {
         };
 
         if updated {
-            self.recalculate_epic_for_task(task_id);
+            self.recalculate_epic_for_task(task_id).await;
         }
 
         Ok(updated)
@@ -408,9 +412,9 @@ impl TaskService {
 
     /// Find the next backlog task for an epic, sorted by sort_order then id.
     /// Returns `Ok(None)` if no backlog tasks remain.
-    pub fn next_backlog_task(&self, epic_id: EpicId) -> Result<Option<Task>, ServiceError> {
+    pub async fn next_backlog_task(&self, epic_id: EpicId) -> Result<Option<Task>, ServiceError> {
         // Verify the epic exists
-        match self.db.get_epic(epic_id) {
+        match self.db.get_epic(epic_id).await {
             Ok(Some(_)) => {}
             Ok(None) => {
                 return Err(ServiceError::NotFound(format!(
@@ -424,6 +428,7 @@ impl TaskService {
         let tasks = self
             .db
             .list_tasks_for_epic(epic_id)
+            .await
             .map_err(|e| ServiceError::Internal(format!("failed to list epic tasks: {e}")))?;
 
         let mut backlog: Vec<Task> = tasks

@@ -160,7 +160,7 @@ async fn dispatch_task(
     use crate::tui::commands::TaskCommand::*;
     match cmd {
         Persist(task) => {
-            rt.exec_persist_task(app, task);
+            rt.exec_persist_task(app, task).await;
             vec![]
         }
         Insert { draft, epic_id } => {
@@ -181,7 +181,7 @@ async fn dispatch_task(
             worktree,
             tmux_window,
         } => {
-            rt.exec_cleanup(id, repo_path, worktree, tmux_window);
+            rt.exec_cleanup(id, repo_path, worktree, tmux_window).await;
             vec![]
         }
         Finish {
@@ -192,7 +192,8 @@ async fn dispatch_task(
             worktree,
             tmux_window,
         } => {
-            rt.exec_finish(id, repo_path, branch, base_branch, worktree, tmux_window);
+            rt.exec_finish(id, repo_path, branch, base_branch, worktree, tmux_window)
+                .await;
             vec![]
         }
         CaptureTmux { id, window } => {
@@ -216,7 +217,7 @@ async fn dispatch_task(
             vec![]
         }
         PatchSubStatus { id, sub_status } => {
-            rt.exec_patch_sub_status(app, id, sub_status);
+            rt.exec_patch_sub_status(app, id, sub_status).await;
             vec![]
         }
         RefreshFromDb => rt.exec_refresh_from_db(app).await,
@@ -232,23 +233,27 @@ async fn dispatch_epic(
     use crate::tui::commands::EpicCommand::*;
     match cmd {
         Dispatch { epic } => rt.exec_dispatch_epic(app, epic).await,
-        Insert(draft) => rt.exec_insert_epic(
-            app,
-            draft.title,
-            draft.description,
-            draft.repo_path,
-            draft.parent_epic_id,
-        ),
-        Delete(id) => rt.exec_delete_epic(app, id),
+        Insert(draft) => {
+            rt.exec_insert_epic(
+                app,
+                draft.title,
+                draft.description,
+                draft.repo_path,
+                draft.parent_epic_id,
+            )
+            .await
+        }
+        Delete(id) => rt.exec_delete_epic(app, id).await,
         Persist {
             id,
             status,
             sort_order,
-        } => rt.exec_persist_epic(app, id, status, sort_order),
+        } => rt.exec_persist_epic(app, id, status, sort_order).await,
         ToggleAutoDispatch { id, auto_dispatch } => {
             rt.exec_toggle_epic_auto_dispatch(app, id, auto_dispatch)
+                .await
         }
-        RefreshFromDb => rt.exec_refresh_epics_from_db(app),
+        RefreshFromDb => rt.exec_refresh_epics_from_db(app).await,
     }
 }
 

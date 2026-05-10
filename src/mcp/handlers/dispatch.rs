@@ -135,7 +135,7 @@ mcp_tools! {
             "required": ["task_id"]
         };
 
-    sync "get_task" => tasks::handle_get_task,
+    async "get_task" => tasks::handle_get_task,
         "Get details about a task",
         {
             "type": "object",
@@ -194,7 +194,7 @@ mcp_tools! {
             "required": ["title", "repo_path", "project_id"]
         };
 
-    sync "list_tasks" => tasks::handle_list_tasks,
+    async "list_tasks" => tasks::handle_list_tasks,
         "List tasks on the kanban board. Filters are ANDed. Pass caller_task_id to auto-scope to your epic (or project if you have no epic) and exclude yourself from results — the fastest way to survey sibling task outcomes. Output includes PR URL and plan goal when available.",
         {
             "type": "object",
@@ -262,7 +262,7 @@ mcp_tools! {
             "required": ["title", "repo_path"]
         };
 
-    sync "get_epic" => epics::handle_get_epic,
+    async "get_epic" => epics::handle_get_epic,
         "Get details about an epic including its subtask summary.",
         {
             "type": "object",
@@ -272,7 +272,7 @@ mcp_tools! {
             "required": ["epic_id"]
         };
 
-    sync "list_epics" => epics::handle_list_epics,
+    async "list_epics" => epics::handle_list_epics,
         "List all epics on the kanban board.",
         { "type": "object", "properties": {} };
 
@@ -606,7 +606,7 @@ mcp_tools! {
             "required": ["learning_id", "task_id"]
         };
 
-    sync "exit_session" => tasks::handle_exit_session,
+    async "exit_session" => tasks::handle_exit_session,
         "Close your agent session. Three-phase: first call asks if you found pitfalls/conventions/tool tips; \
 if yes (has_learnings=true) a second call prompts for record_learning details; \
 the final call closes the session.",

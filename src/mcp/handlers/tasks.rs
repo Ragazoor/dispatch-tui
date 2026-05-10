@@ -168,10 +168,11 @@ pub(super) struct DispatchTaskArgs {
 // Response formatting (presentation layer)
 // ---------------------------------------------------------------------------
 
-fn build_epic_titles(state: &McpState) -> HashMap<EpicId, String> {
+async fn build_epic_titles(state: &McpState) -> HashMap<EpicId, String> {
     state
         .db
         .list_epics()
+        .await
         .unwrap_or_default()
         .into_iter()
         .map(|e| (e.id, e.title))
@@ -364,7 +365,7 @@ pub(super) async fn handle_update_task(
     let fields_display = params.updated_field_names().join(", ");
 
     let svc = TaskService::new(state.db.clone());
-    match svc.update_task(params) {
+    match svc.update_task(params).await {
         Ok(result) => {
             state.notify_task_changed(TaskId(parsed.task_id));
             let nudge = if result.was_pr_finalisation {
@@ -424,7 +425,11 @@ pub(super) async fn handle_create_task(
     }
 }
 
-pub(super) fn handle_get_task(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {
+pub(super) async fn handle_get_task(
+    state: &McpState,
+    id: Option<Value>,
+    args: Value,
+) -> JsonRpcResponse {
     let parsed = match parse_args::<GetTaskArgs>(&id, args) {
         Ok(a) => a,
         Err(resp) => return resp,
@@ -434,7 +439,7 @@ pub(super) fn handle_get_task(state: &McpState, id: Option<Value>, args: Value) 
     let svc = TaskService::new(state.db.clone());
     match svc.get_task(TaskId(parsed.task_id)) {
         Ok(task) => {
-            let epic_titles = build_epic_titles(state);
+            let epic_titles = build_epic_titles(state).await;
             let text = format_task_detail(&task, &epic_titles);
             JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
         }
@@ -442,7 +447,7 @@ pub(super) fn handle_get_task(state: &McpState, id: Option<Value>, args: Value) 
     }
 }
 
-pub(super) fn handle_list_tasks(
+pub(super) async fn handle_list_tasks(
     state: &McpState,
     id: Option<Value>,
     args: Value,
@@ -503,7 +508,7 @@ pub(super) fn handle_list_tasks(
                     json!({"content": [{"type": "text", "text": "No tasks found"}]}),
                 );
             }
-            let epic_titles = build_epic_titles(state);
+            let epic_titles = build_epic_titles(state).await;
             // Read each unique plan file once to avoid repeated blocking I/O per task.
             let plan_goals: HashMap<String, String> = {
                 let mut cache = HashMap::new();
@@ -694,7 +699,7 @@ pub(super) async fn handle_wrap_up(
     }
 }
 
-pub(super) fn handle_exit_session(
+pub(super) async fn handle_exit_session(
     state: &McpState,
     id: Option<Value>,
     args: Value,
@@ -761,7 +766,7 @@ Call exit_session(has_learnings=false) when done to close the session."}]}),
                 );
             }
             if let Some(epic_id) = task.epic_id {
-                if let Err(err) = state.db.recalculate_epic_status(epic_id) {
+                if let Err(err) = state.db.recalculate_epic_status(epic_id).await {
                     tracing::warn!(
                         "failed to recalculate epic status for epic {}: {err}",
                         epic_id.0
@@ -789,13 +794,12 @@ Call exit_session(has_learnings=false) when done to close the session."}]}),
 
 fn do_dispatch(
     task: &crate::models::Task,
-    db: &dyn crate::db::TaskStore,
     runner: &dyn crate::process::ProcessRunner,
     project_ctx: dispatch::ProjectContext,
+    epic_ctx: Option<dispatch::EpicContext>,
     procedural: &[crate::models::Learning],
     tiered: &[crate::models::Learning],
 ) -> anyhow::Result<crate::models::DispatchResult> {
-    let epic_ctx = dispatch::EpicContext::from_db(task, db);
     let injections = dispatch::LearningInjections {
         procedural: procedural.iter().collect(),
         tiered: tiered.iter().collect(),
@@ -832,7 +836,11 @@ pub(super) async fn handle_dispatch_next(
     tracing::info!(epic_id = parsed.epic_id, "MCP dispatch_next");
 
     // Check auto_dispatch flag before doing any work
-    match state.db.get_epic(crate::models::EpicId(parsed.epic_id)) {
+    match state
+        .db
+        .get_epic(crate::models::EpicId(parsed.epic_id))
+        .await
+    {
         Ok(Some(epic)) if !epic.auto_dispatch => {
             return JsonRpcResponse::ok(
                 id,
@@ -856,7 +864,7 @@ pub(super) async fn handle_dispatch_next(
     }
 
     let svc = TaskService::new(state.db.clone());
-    let next_task = match svc.next_backlog_task(EpicId(parsed.epic_id)) {
+    let next_task = match svc.next_backlog_task(EpicId(parsed.epic_id)).await {
         Ok(Some(task)) => task,
         Ok(None) => {
             return JsonRpcResponse::ok(
@@ -874,24 +882,29 @@ pub(super) async fn handle_dispatch_next(
     let next_title = next_task.title.clone();
     let next_epic_id = next_task.epic_id;
     let project_ctx = dispatch::ProjectContext::from_db(&next_task, &*state.db).await;
+    let epic_ctx = dispatch::EpicContext::from_db(&next_task, &*state.db).await;
     let db = state.db.clone();
     let runner = state.runner.clone();
     let notify_tx = state.notify_tx.clone();
 
     let (procedural, tiered) = dispatch::build_and_record_injections(&*db, &next_task).await;
 
-    tokio::task::spawn_blocking(move || {
-        let result = do_dispatch(
-            &next_task,
-            &*db,
-            &*runner,
-            project_ctx,
-            &procedural,
-            &tiered,
-        );
+    tokio::spawn(async move {
+        let next_task_for_blocking = next_task.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            do_dispatch(
+                &next_task_for_blocking,
+                &*runner,
+                project_ctx,
+                epic_ctx,
+                &procedural,
+                &tiered,
+            )
+        })
+        .await;
 
         match result {
-            Ok(dispatch_result) => {
+            Ok(Ok(dispatch_result)) => {
                 let patch = db::TaskPatch::new()
                     .status(TaskStatus::Running)
                     .worktree(Some(&dispatch_result.worktree_path))
@@ -903,7 +916,7 @@ pub(super) async fn handle_dispatch_next(
                     );
                 }
                 if let Some(epic_id) = next_epic_id {
-                    if let Err(err) = db.recalculate_epic_status(epic_id) {
+                    if let Err(err) = db.recalculate_epic_status(epic_id).await {
                         tracing::warn!(
                             "failed to recalculate epic status for epic {}: {err}",
                             epic_id.0
@@ -911,8 +924,14 @@ pub(super) async fn handle_dispatch_next(
                     }
                 }
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 tracing::warn!(task_id = next_id.0, "dispatch_next: dispatch failed: {e:#}");
+            }
+            Err(e) => {
+                tracing::warn!(
+                    task_id = next_id.0,
+                    "dispatch_next: blocking task panicked: {e}"
+                );
             }
         }
 
@@ -967,6 +986,7 @@ pub(super) async fn handle_dispatch_task(
     }
 
     let project_ctx = dispatch::ProjectContext::from_db(&task, &*state.db).await;
+    let epic_ctx = dispatch::EpicContext::from_db(&task, &*state.db).await;
     let db = state.db.clone();
     let runner = state.runner.clone();
     let notify_tx = state.notify_tx.clone();
@@ -974,7 +994,7 @@ pub(super) async fn handle_dispatch_task(
 
     let (procedural, tiered) = dispatch::build_and_record_injections(&*db, &task).await;
     let result = tokio::task::spawn_blocking(move || {
-        do_dispatch(&task, &*db, &*runner, project_ctx, &procedural, &tiered)
+        do_dispatch(&task, &*runner, project_ctx, epic_ctx, &procedural, &tiered)
     })
     .await;
 
@@ -986,7 +1006,7 @@ pub(super) async fn handle_dispatch_task(
                 .tmux_window(Some(&dr.tmux_window));
             let _ = state.db.patch_task(task_id, &patch);
             if let Some(eid) = epic_id {
-                let _ = state.db.recalculate_epic_status(eid);
+                let _ = state.db.recalculate_epic_status(eid).await;
             }
             if let Some(tx) = notify_tx {
                 let _ = tx.send(crate::mcp::McpEvent::TaskChanged(task_id));

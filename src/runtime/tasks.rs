@@ -64,7 +64,7 @@ impl TuiRuntime {
         let _ = self.database.save_repo_path(&expanded);
         let paths = self.database.list_repo_paths().unwrap_or_default();
         app.update(Message::RepoPathsUpdated(paths));
-        let epic_ctx = dispatch::EpicContext::from_db(&task, &*self.database);
+        let epic_ctx = dispatch::EpicContext::from_db(&task, &*self.database).await;
         let project_ctx = dispatch::ProjectContext::from_db(&task, &*self.database).await;
         let (procedural, tiered) =
             dispatch::build_and_record_injections(&*self.database, &task).await;
@@ -105,7 +105,7 @@ impl TuiRuntime {
         });
     }
 
-    pub(super) fn exec_persist_task(&self, app: &mut App, task: models::Task) {
+    pub(super) async fn exec_persist_task(&self, app: &mut App, task: models::Task) {
         use crate::service::UpdateTaskParams;
         let mut p = UpdateTaskParams::for_task(task.id)
             .status(task.status)
@@ -116,14 +116,14 @@ impl TuiRuntime {
         if let Some(so) = task.sort_order {
             p = p.sort_order(so);
         }
-        if let Err(e) = self.task_svc.update_task(p) {
+        if let Err(e) = self.task_svc.update_task(p).await {
             app.update(Message::System(crate::tui::messages::SystemMessage::Error(
                 Self::db_error("persisting task", e),
             )));
         }
     }
 
-    pub(super) fn exec_patch_sub_status(
+    pub(super) async fn exec_patch_sub_status(
         &self,
         app: &mut App,
         id: models::TaskId,
@@ -133,6 +133,7 @@ impl TuiRuntime {
         if let Err(e) = self
             .task_svc
             .update_task(UpdateTaskParams::for_task(id).sub_status(sub_status))
+            .await
         {
             app.update(Message::System(crate::tui::messages::SystemMessage::Error(
                 Self::db_error("patching sub_status", e),
@@ -149,7 +150,7 @@ impl TuiRuntime {
     }
 
     pub(super) async fn exec_dispatch_agent(&self, task: models::Task, mode: models::DispatchMode) {
-        let epic_ctx = dispatch::EpicContext::from_db(&task, &*self.database);
+        let epic_ctx = dispatch::EpicContext::from_db(&task, &*self.database).await;
         let project_ctx = dispatch::ProjectContext::from_db(&task, &*self.database).await;
         let (procedural, tiered) =
             dispatch::build_and_record_injections(&*self.database, &task).await;
@@ -265,7 +266,7 @@ impl TuiRuntime {
         app: &mut App,
         epic_id: models::EpicId,
     ) -> Vec<Command> {
-        let epic_result = self.database.get_epic(epic_id);
+        let epic_result = self.database.get_epic(epic_id).await;
         let epic = match epic_result {
             Ok(Some(e)) => e,
             Ok(None) => return self.exec_refresh_from_db(app).await,
@@ -281,7 +282,7 @@ impl TuiRuntime {
         )));
         // Feed-sync upserts whole batches under the epic — reload the
         // epic's tasks so card lists reflect the new rows in one shot.
-        match self.database.list_tasks_for_epic(epic_id) {
+        match self.database.list_tasks_for_epic(epic_id).await {
             Ok(tasks) => {
                 for task in tasks {
                     cmds.extend(app.update(Message::Task(
@@ -312,7 +313,7 @@ impl TuiRuntime {
                 )));
             }
         }
-        self.exec_refresh_epics_from_db(app);
+        self.exec_refresh_epics_from_db(app).await;
         self.exec_refresh_usage_from_db(app);
         self.exec_refresh_needs_review_count(app).await;
         cmds
@@ -343,7 +344,7 @@ impl TuiRuntime {
         }
     }
 
-    pub(super) fn exec_cleanup(
+    pub(super) async fn exec_cleanup(
         &self,
         id: TaskId,
         repo_path: String,
@@ -358,11 +359,15 @@ impl TuiRuntime {
         if shared {
             // Other active tasks share this worktree — just detach this task
             tracing::info!(task_id = id.0, "worktree shared, detaching only");
-            if let Err(e) = self.task_svc.update_task(
-                crate::service::UpdateTaskParams::for_task(id)
-                    .worktree(FieldUpdate::Clear)
-                    .tmux_window(FieldUpdate::Clear),
-            ) {
+            if let Err(e) = self
+                .task_svc
+                .update_task(
+                    crate::service::UpdateTaskParams::for_task(id)
+                        .worktree(FieldUpdate::Clear)
+                        .tmux_window(FieldUpdate::Clear),
+                )
+                .await
+            {
                 let _ =
                     self.msg_tx
                         .send(Message::System(crate::tui::messages::SystemMessage::Error(
@@ -387,7 +392,7 @@ impl TuiRuntime {
         });
     }
 
-    pub(super) fn exec_finish(
+    pub(super) async fn exec_finish(
         &self,
         id: TaskId,
         repo_path: String,
@@ -406,11 +411,15 @@ impl TuiRuntime {
                 task_id = id.0,
                 "worktree shared, detaching only (no rebase)"
             );
-            if let Err(e) = self.task_svc.update_task(
-                crate::service::UpdateTaskParams::for_task(id)
-                    .worktree(FieldUpdate::Clear)
-                    .tmux_window(FieldUpdate::Clear),
-            ) {
+            if let Err(e) = self
+                .task_svc
+                .update_task(
+                    crate::service::UpdateTaskParams::for_task(id)
+                        .worktree(FieldUpdate::Clear)
+                        .tmux_window(FieldUpdate::Clear),
+                )
+                .await
+            {
                 let _ =
                     self.msg_tx
                         .send(Message::System(crate::tui::messages::SystemMessage::Error(

@@ -8,8 +8,9 @@ use crate::models::{EpicId, TaskId, TaskStatus};
 use super::super::{Database, EpicPatch};
 use super::{row_to_epic, row_to_task, TASK_COLUMNS};
 
+#[async_trait::async_trait]
 impl super::super::EpicCrud for Database {
-    fn create_epic(
+    async fn create_epic(
         &self,
         title: &str,
         description: &str,
@@ -17,92 +18,99 @@ impl super::super::EpicCrud for Database {
         parent_epic_id: Option<EpicId>,
         project_id: crate::models::ProjectId,
     ) -> Result<crate::models::Epic> {
-        let id =
-            {
-                let conn = self.conn()?;
-                conn.execute(
+        let title = title.to_string();
+        let description = description.to_string();
+        let repo_path = repo_path.to_string();
+        self.db_call(move |conn| {
+            conn.execute(
                 "INSERT INTO epics (title, description, repo_path, parent_epic_id, project_id) \
                  VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![title, description, repo_path, parent_epic_id.map(|e| e.0), project_id.0],
+                params![
+                    title,
+                    description,
+                    repo_path,
+                    parent_epic_id.map(|e| e.0),
+                    project_id.0
+                ],
             )
             .context("Failed to insert epic")?;
-                EpicId(conn.last_insert_rowid())
-            }; // MutexGuard dropped here — avoids deadlock when get_epic() re-locks
-        self.get_epic(id)?
-            .ok_or_else(|| anyhow::anyhow!("Epic {id} vanished after insert"))
+            let id = EpicId(conn.last_insert_rowid());
+            get_epic_row(conn, id)?
+                .ok_or_else(|| anyhow::anyhow!("Epic {id} vanished after insert"))
+        })
+        .await
     }
 
-    fn get_epic(&self, id: EpicId) -> Result<Option<crate::models::Epic>> {
-        let conn = self.conn()?;
-        conn.query_row(
-            "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, \
-             parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, project_id \
-             FROM epics WHERE id = ?1",
-            params![id.0],
-            row_to_epic,
-        )
-        .optional()
-        .context("Failed to get epic")
+    async fn get_epic(&self, id: EpicId) -> Result<Option<crate::models::Epic>> {
+        self.db_call(move |conn| get_epic_row(conn, id)).await
     }
 
-    fn list_epics(&self) -> Result<Vec<crate::models::Epic>> {
-        let conn = self.conn()?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, \
-                 parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, project_id \
-                 FROM epics ORDER BY COALESCE(sort_order, id) ASC, id ASC",
-            )
-            .context("Failed to prepare list_epics")?;
-        let epics = stmt
-            .query_map([], row_to_epic)
-            .context("Failed to query epics")?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .context("Failed to collect epics")?;
-        Ok(epics)
+    async fn list_epics(&self) -> Result<Vec<crate::models::Epic>> {
+        self.db_call(move |conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, \
+                     parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, project_id \
+                     FROM epics ORDER BY COALESCE(sort_order, id) ASC, id ASC",
+                )
+                .context("Failed to prepare list_epics")?;
+            let epics = stmt
+                .query_map([], row_to_epic)
+                .context("Failed to query epics")?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .context("Failed to collect epics")?;
+            Ok(epics)
+        })
+        .await
     }
 
-    fn list_root_epics(&self) -> Result<Vec<crate::models::Epic>> {
-        let conn = self.conn()?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, \
-                 parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, project_id \
-                 FROM epics WHERE parent_epic_id IS NULL ORDER BY COALESCE(sort_order, id) ASC, id ASC",
-            )
-            .context("Failed to prepare list_root_epics")?;
-        let epics = stmt
-            .query_map([], row_to_epic)
-            .context("Failed to query root epics")?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .context("Failed to collect root epics")?;
-        Ok(epics)
+    async fn list_root_epics(&self) -> Result<Vec<crate::models::Epic>> {
+        self.db_call(move |conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, \
+                     parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, project_id \
+                     FROM epics WHERE parent_epic_id IS NULL ORDER BY COALESCE(sort_order, id) ASC, id ASC",
+                )
+                .context("Failed to prepare list_root_epics")?;
+            let epics = stmt
+                .query_map([], row_to_epic)
+                .context("Failed to query root epics")?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .context("Failed to collect root epics")?;
+            Ok(epics)
+        })
+        .await
     }
 
-    fn list_sub_epics(&self, parent_id: EpicId) -> Result<Vec<crate::models::Epic>> {
-        let conn = self.conn()?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, \
-                 parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, project_id \
-                 FROM epics WHERE parent_epic_id = ?1 ORDER BY COALESCE(sort_order, id) ASC, id ASC",
-            )
-            .context("Failed to prepare list_sub_epics")?;
-        let epics = stmt
-            .query_map(params![parent_id.0], row_to_epic)
-            .context("Failed to query sub-epics")?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .context("Failed to collect sub-epics")?;
-        Ok(epics)
+    async fn list_sub_epics(&self, parent_id: EpicId) -> Result<Vec<crate::models::Epic>> {
+        self.db_call(move |conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, \
+                     parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, project_id \
+                     FROM epics WHERE parent_epic_id = ?1 ORDER BY COALESCE(sort_order, id) ASC, id ASC",
+                )
+                .context("Failed to prepare list_sub_epics")?;
+            let epics = stmt
+                .query_map(params![parent_id.0], row_to_epic)
+                .context("Failed to query sub-epics")?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .context("Failed to collect sub-epics")?;
+            Ok(epics)
+        })
+        .await
     }
 
-    fn patch_epic(&self, id: EpicId, patch: &EpicPatch<'_>) -> Result<()> {
+    async fn patch_epic(&self, id: EpicId, patch: &EpicPatch<'_>) -> Result<()> {
         if !patch.has_changes() {
             return Ok(());
         }
-        let conn = self.conn()?;
-        let mut sets: Vec<&str> = Vec::new();
-        let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        // Materialise the patch into owned (sets, values) before crossing the
+        // db_call boundary — `&EpicPatch<'_>` cannot be moved into a 'static
+        // closure.
+        let mut sets: Vec<&'static str> = Vec::new();
+        let mut values: Vec<Box<dyn rusqlite::types::ToSql + Send>> = Vec::new();
 
         if let Some(t) = patch.title {
             sets.push("title = ?");
@@ -149,90 +157,123 @@ impl super::super::EpicCrud for Database {
         values.push(Box::new(id.0));
 
         let sql = format!("UPDATE epics SET {} WHERE id = ?", sets.join(", "));
-        let refs: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|v| v.as_ref()).collect();
-        let rows = conn
-            .execute(&sql, refs.as_slice())
-            .context("Failed to patch epic")?;
-        if rows == 0 {
-            anyhow::bail!("Epic {id} not found");
-        }
-        Ok(())
+
+        self.db_call(move |conn| {
+            let refs: Vec<&dyn rusqlite::types::ToSql> = values
+                .iter()
+                .map(|v| v.as_ref() as &dyn rusqlite::types::ToSql)
+                .collect();
+            let rows = conn
+                .execute(&sql, refs.as_slice())
+                .context("Failed to patch epic")?;
+            if rows == 0 {
+                anyhow::bail!("Epic {id} not found");
+            }
+            Ok(())
+        })
+        .await
     }
 
-    fn delete_epic(&self, id: EpicId) -> Result<()> {
-        let conn = self.conn()?;
-        conn.execute_batch("BEGIN IMMEDIATE")
-            .context("Failed to begin transaction")?;
-        let result = delete_epic_recursive(&conn, id);
-        match result {
-            Ok(rows) => {
-                conn.execute_batch("COMMIT")
-                    .context("Failed to commit delete_epic transaction")?;
-                if rows == 0 {
-                    anyhow::bail!("Epic {} not found", id);
+    async fn delete_epic(&self, id: EpicId) -> Result<()> {
+        self.db_call(move |conn| {
+            conn.execute_batch("BEGIN IMMEDIATE")
+                .context("Failed to begin transaction")?;
+            let result = delete_epic_recursive(conn, id);
+            match result {
+                Ok(rows) => {
+                    conn.execute_batch("COMMIT")
+                        .context("Failed to commit delete_epic transaction")?;
+                    if rows == 0 {
+                        anyhow::bail!("Epic {} not found", id);
+                    }
+                    Ok(())
                 }
-                Ok(())
+                Err(e) => {
+                    let _ = conn.execute_batch("ROLLBACK");
+                    Err(e)
+                }
             }
-            Err(e) => {
-                let _ = conn.execute_batch("ROLLBACK");
-                Err(e)
+        })
+        .await
+    }
+
+    async fn set_task_epic_id(&self, task_id: TaskId, epic_id: Option<EpicId>) -> Result<()> {
+        self.db_call(move |conn| {
+            let rows = conn
+                .execute(
+                    "UPDATE tasks SET epic_id = ?1, updated_at = datetime('now') WHERE id = ?2",
+                    params![epic_id.map(|e| e.0), task_id.0],
+                )
+                .context("Failed to set task epic_id")?;
+            if rows == 0 {
+                anyhow::bail!("Task {} not found", task_id);
             }
-        }
+            Ok(())
+        })
+        .await
     }
 
-    fn set_task_epic_id(&self, task_id: TaskId, epic_id: Option<EpicId>) -> Result<()> {
-        let conn = self.conn()?;
-        let rows = conn
-            .execute(
-                "UPDATE tasks SET epic_id = ?1, updated_at = datetime('now') WHERE id = ?2",
-                params![epic_id.map(|e| e.0), task_id.0],
-            )
-            .context("Failed to set task epic_id")?;
-        if rows == 0 {
-            anyhow::bail!("Task {} not found", task_id);
-        }
-        Ok(())
+    async fn list_tasks_for_epic(&self, epic_id: EpicId) -> Result<Vec<crate::models::Task>> {
+        self.db_call(move |conn| {
+            let mut stmt = conn
+                .prepare(
+                    &format!("SELECT {TASK_COLUMNS} FROM tasks WHERE epic_id = ?1 ORDER BY COALESCE(sort_order, id) ASC, id ASC"),
+                )
+                .context("Failed to prepare list_tasks_for_epic")?;
+            let tasks = stmt
+                .query_map(params![epic_id.0], row_to_task)
+                .context("Failed to query tasks for epic")?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .context("Failed to collect tasks for epic")?;
+            Ok(tasks)
+        })
+        .await
     }
 
-    fn list_tasks_for_epic(&self, epic_id: EpicId) -> Result<Vec<crate::models::Task>> {
-        let conn = self.conn()?;
-        let mut stmt = conn
-            .prepare(
-                &format!("SELECT {TASK_COLUMNS} FROM tasks WHERE epic_id = ?1 ORDER BY COALESCE(sort_order, id) ASC, id ASC"),
-            )
-            .context("Failed to prepare list_tasks_for_epic")?;
-        let tasks = stmt
-            .query_map(params![epic_id.0], row_to_task)
-            .context("Failed to query tasks for epic")?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .context("Failed to collect tasks for epic")?;
-        Ok(tasks)
+    async fn list_all_tasks_with_epic_id(&self) -> Result<Vec<crate::models::Task>> {
+        self.db_call(move |conn| {
+            let mut stmt = conn
+                .prepare(&format!(
+                    "SELECT {TASK_COLUMNS} FROM tasks WHERE epic_id IS NOT NULL ORDER BY epic_id ASC, COALESCE(sort_order, id) ASC, id ASC"
+                ))
+                .context("Failed to prepare list_all_tasks_with_epic_id")?;
+            let tasks = stmt
+                .query_map([], row_to_task)
+                .context("Failed to query tasks with epic_id")?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .context("Failed to collect tasks with epic_id")?;
+            Ok(tasks)
+        })
+        .await
     }
 
-    fn list_all_tasks_with_epic_id(&self) -> Result<Vec<crate::models::Task>> {
-        let conn = self.conn()?;
-        let mut stmt = conn
-            .prepare(&format!(
-                "SELECT {TASK_COLUMNS} FROM tasks WHERE epic_id IS NOT NULL ORDER BY epic_id ASC, COALESCE(sort_order, id) ASC, id ASC"
-            ))
-            .context("Failed to prepare list_all_tasks_with_epic_id")?;
-        let tasks = stmt
-            .query_map([], row_to_task)
-            .context("Failed to query tasks with epic_id")?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .context("Failed to collect tasks with epic_id")?;
-        Ok(tasks)
-    }
-
-    fn recalculate_epic_status(&self, epic_id: EpicId) -> Result<()> {
-        let mut visited = HashSet::new();
-        recalculate_epic_status_inner(self, epic_id, &mut visited)
+    async fn recalculate_epic_status(&self, epic_id: EpicId) -> Result<()> {
+        // Run the entire recursive walk inside a single db_call closure so the
+        // recursion stays sync on the dedicated tokio_rusqlite thread. This
+        // avoids the need for Box<dyn Future> to recurse through async fn.
+        self.db_call(move |conn| {
+            let mut visited = HashSet::new();
+            recalculate_epic_status_inner(conn, epic_id, &mut visited)
+        })
+        .await
     }
 }
 
 // ---------------------------------------------------------------------------
-// recalculate_epic_status helper
+// shared sync helpers (run inside db_call closures or hold the sync mutex)
 // ---------------------------------------------------------------------------
+
+fn get_epic_row(conn: &rusqlite::Connection, id: EpicId) -> Result<Option<crate::models::Epic>> {
+    conn.query_row(
+        "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, \
+         parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, project_id \
+         FROM epics WHERE id = ?1",
+        params![id.0],
+        row_to_epic,
+    )
+    .optional()
+    .context("Failed to get epic")
+}
 
 /// Recursively deletes sub-epics and their tasks, then deletes the epic row.
 /// Returns the number of rows deleted for the root epic (0 = not found).
@@ -258,41 +299,61 @@ fn delete_epic_recursive(conn: &rusqlite::Connection, id: EpicId) -> Result<usiz
         .context("Failed to delete epic")
 }
 
-/// Inner recursive helper for `EpicCrud::recalculate_epic_status`.
+/// Inner recursive helper for `EpicCrud::recalculate_epic_status`. Runs sync
+/// against a single `&rusqlite::Connection` (the dedicated tokio_rusqlite
+/// thread) so we can use plain recursion instead of async recursion.
+///
 /// Threads a visited set to detect and break parent cycles, preventing
 /// infinite recursion when `parent_epic_id` forms a cycle in the DB.
 fn recalculate_epic_status_inner(
-    db: &Database,
+    conn: &rusqlite::Connection,
     epic_id: EpicId,
     visited: &mut HashSet<EpicId>,
 ) -> Result<()> {
-    use super::super::EpicCrud;
-
     if !visited.insert(epic_id) {
-        // Already processed this epic in the current chain — cycle detected.
         return Ok(());
     }
 
-    let epic = match db.get_epic(epic_id)? {
+    let epic = match get_epic_row(conn, epic_id)? {
         Some(e) => e,
         None => return Ok(()),
     };
 
-    // Collect statuses from active tasks
-    let task_statuses: Vec<TaskStatus> = db
-        .list_tasks_for_epic(epic_id)?
+    // Active task statuses for this epic
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {TASK_COLUMNS} FROM tasks WHERE epic_id = ?1 ORDER BY COALESCE(sort_order, id) ASC, id ASC"
+        ))
+        .context("Failed to prepare list_tasks_for_epic (recalc)")?;
+    let task_statuses: Vec<TaskStatus> = stmt
+        .query_map(params![epic_id.0], row_to_task)
+        .context("Failed to query tasks for epic (recalc)")?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .context("Failed to collect tasks for epic (recalc)")?
         .into_iter()
         .filter(|t| t.status != TaskStatus::Archived)
         .map(|t| t.status)
         .collect();
+    drop(stmt);
 
-    // Collect statuses from active sub-epics
-    let sub_epic_statuses: Vec<TaskStatus> = db
-        .list_sub_epics(epic_id)?
+    // Active sub-epic statuses
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, \
+             parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, project_id \
+             FROM epics WHERE parent_epic_id = ?1 ORDER BY COALESCE(sort_order, id) ASC, id ASC",
+        )
+        .context("Failed to prepare list_sub_epics (recalc)")?;
+    let sub_epic_statuses: Vec<TaskStatus> = stmt
+        .query_map(params![epic_id.0], row_to_epic)
+        .context("Failed to query sub-epics (recalc)")?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .context("Failed to collect sub-epics (recalc)")?
         .into_iter()
         .filter(|e| e.status != TaskStatus::Archived)
         .map(|e| e.status)
         .collect();
+    drop(stmt);
 
     let all_statuses: Vec<TaskStatus> =
         task_statuses.into_iter().chain(sub_epic_statuses).collect();
@@ -310,12 +371,19 @@ fn recalculate_epic_status_inner(
     };
 
     if derived != epic.status {
-        db.patch_epic(epic_id, &EpicPatch::new().status(derived))?;
+        let rows = conn
+            .execute(
+                "UPDATE epics SET status = ?1, updated_at = datetime('now') WHERE id = ?2",
+                params![derived.as_str(), epic_id.0],
+            )
+            .context("Failed to update epic status (recalc)")?;
+        if rows == 0 {
+            anyhow::bail!("Epic {epic_id} not found");
+        }
     }
 
-    // Propagate upward to the parent epic if one exists
     if let Some(parent_id) = epic.parent_epic_id {
-        recalculate_epic_status_inner(db, parent_id, visited)?;
+        recalculate_epic_status_inner(conn, parent_id, visited)?;
     }
 
     Ok(())
