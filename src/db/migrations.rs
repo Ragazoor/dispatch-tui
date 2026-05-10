@@ -72,6 +72,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (47, migrate_v47_task_usage_restore_cascade),
     (48, migrate_v48_learning_validation),
     (49, migrate_v49_rename_confirmed_to_upvote),
+    (50, migrate_v50_add_hook_timestamps),
 ];
 
 fn migrate_v1_add_plan_column(conn: &Connection) -> Result<()> {
@@ -1117,4 +1118,22 @@ pub(super) fn migrate_v49_rename_confirmed_to_upvote(conn: &Connection) -> Resul
          ALTER TABLE learnings RENAME COLUMN last_confirmed_at TO last_upvoted_at;",
     )
     .context("Failed to rename confirmed_* columns to upvote_* on learnings (migration v49)")
+}
+
+fn migrate_v50_add_hook_timestamps(conn: &Connection) -> Result<()> {
+    if !column_exists(conn, "tasks", "last_pre_tool_use_at") {
+        conn.execute(
+            "ALTER TABLE tasks ADD COLUMN last_pre_tool_use_at TEXT",
+            [],
+        )
+        .context("migration v50: add last_pre_tool_use_at")?;
+    }
+    if !column_exists(conn, "tasks", "last_notification_at") {
+        conn.execute(
+            "ALTER TABLE tasks ADD COLUMN last_notification_at TEXT",
+            [],
+        )
+        .context("migration v50: add last_notification_at")?;
+    }
+    Ok(())
 }
