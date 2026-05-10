@@ -1,10 +1,3 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EditorSection {
-    Title,
-    Description,
-    Plan,
-}
-
 /// A parse failure surfaced by [`parse_editor_content`] /
 /// [`parse_epic_editor_output`]. The runtime turns these into a status message
 /// so the user knows their input was rejected rather than silently dropped.
