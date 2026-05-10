@@ -367,15 +367,13 @@ pub(super) async fn handle_dispatch_review_agent(
     // and re-dispatching is allowed (e.g. to do a fresh review pass).
     let mut has_active_agent = false;
     for table in &["review_prs", "my_prs", "bot_prs"] {
-        if state
+        let status = state
             .db
             .pr_agent_status(table, &parsed.repo, parsed.number)
             .await
             .ok()
-            .flatten()
-            .map(|s| s == ReviewAgentStatus::Reviewing)
-            .unwrap_or(false)
-        {
+            .flatten();
+        if status == Some(ReviewAgentStatus::Reviewing) {
             has_active_agent = true;
             break;
         }

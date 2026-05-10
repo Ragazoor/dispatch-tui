@@ -192,35 +192,13 @@ impl super::super::PrWorkflowStore for Database {
                  FROM pr_workflow_states
                  WHERE repo = ?1 AND number = ?2 AND kind = ?3",
             )?;
-            let row = stmt
-                .query_row(params![repo, number, kind.as_db_str()], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, i64>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, Option<String>>(4)?,
-                        row.get::<_, String>(5)?,
-                    ))
-                })
-                .optional()?;
-
-            let Some((repo, number, kind_str, state, sub_state, updated_str)) = row else {
-                return Ok(None);
-            };
-            let kind = crate::models::WorkflowItemKind::from_db_str(&kind_str)
-                .ok_or_else(|| anyhow::anyhow!("unknown workflow kind: {kind_str}"))?;
-            let updated_at = updated_str
-                .parse::<chrono::DateTime<chrono::Utc>>()
-                .map_err(|e| anyhow::anyhow!("bad updated_at timestamp: {e}"))?;
-            Ok(Some(super::super::PrWorkflowRow {
-                repo,
-                number,
-                kind,
-                state,
-                sub_state,
-                updated_at,
-            }))
+            stmt.query_row(
+                params![repo, number, kind.as_db_str()],
+                parse_pr_workflow_row,
+            )
+            .optional()
+            .map_err(anyhow::Error::from)?
+            .transpose()
         })
         .await
     }
@@ -232,33 +210,9 @@ impl super::super::PrWorkflowStore for Database {
                  FROM pr_workflow_states",
             )?;
             let rows = stmt
-                .query_map([], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, i64>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, Option<String>>(4)?,
-                        row.get::<_, String>(5)?,
-                    ))
-                })?
-                .map(|r| {
-                    let (repo, number, kind_str, state, sub_state, updated_str) = r?;
-                    let kind = crate::models::WorkflowItemKind::from_db_str(&kind_str)
-                        .ok_or_else(|| rusqlite::Error::InvalidQuery)?;
-                    let updated_at = updated_str
-                        .parse::<chrono::DateTime<chrono::Utc>>()
-                        .map_err(|_| rusqlite::Error::InvalidQuery)?;
-                    Ok(super::super::PrWorkflowRow {
-                        repo,
-                        number,
-                        kind,
-                        state,
-                        sub_state,
-                        updated_at,
-                    })
-                })
-                .collect::<Result<Vec<_>, rusqlite::Error>>()?;
+                .query_map([], parse_pr_workflow_row)?
+                .map(|r| r?)
+                .collect::<anyhow::Result<Vec<_>>>()?;
             Ok(rows)
         })
         .await
@@ -388,6 +342,32 @@ fn save_prs_to_table(conn: &rusqlite::Connection, table: &str, prs: &[ReviewPr])
 
     tx.commit()?;
     Ok(())
+}
+
+fn parse_pr_workflow_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<anyhow::Result<super::super::PrWorkflowRow>> {
+    let repo: String = row.get(0)?;
+    let number: i64 = row.get(1)?;
+    let kind_str: String = row.get(2)?;
+    let state: String = row.get(3)?;
+    let sub_state: Option<String> = row.get(4)?;
+    let updated_str: String = row.get(5)?;
+    Ok((|| {
+        let kind = crate::models::WorkflowItemKind::from_db_str(&kind_str)
+            .ok_or_else(|| anyhow::anyhow!("unknown workflow kind: {kind_str}"))?;
+        let updated_at = updated_str
+            .parse::<chrono::DateTime<chrono::Utc>>()
+            .map_err(|e| anyhow::anyhow!("bad updated_at timestamp: {e}"))?;
+        Ok(super::super::PrWorkflowRow {
+            repo,
+            number,
+            kind,
+            state,
+            sub_state,
+            updated_at,
+        })
+    })())
 }
 
 fn parse_review_pr_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReviewPr> {
