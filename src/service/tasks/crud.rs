@@ -436,65 +436,45 @@ impl TaskService {
 
     /// Record a Claude Code hook event for a task.
     ///
-    /// Behaviour by event kind (only applied when the task is `Running`):
-    /// - `PreToolUse`: stamp `last_pre_tool_use_at = now`, then reclassify with
-    ///   [`classify_agent_activity`] and set the resulting sub_status.
-    /// - `Notification`: stamp `last_notification_at = now`, set sub_status to
-    ///   `NeedsInput`.
-    /// - `Stop`: transition to `Review` with the default Review sub_status and
-    ///   clear both timestamps.
-    ///
-    /// For non-Running tasks this is a no-op (returns `Ok(())`). Returns an
-    /// error containing "not found" when the task id does not exist.
-    pub fn record_hook_event(&self, id: TaskId, kind: HookEventKind) -> Result<(), ServiceError> {
-        let task = match self.db.get_task(id) {
-            Ok(Some(t)) => t,
-            Ok(None) => {
-                return Err(ServiceError::NotFound(format!("Task {} not found", id.0)));
-            }
-            Err(e) => {
-                return Err(ServiceError::Internal(format!("Database error: {e}")));
-            }
-        };
+    /// `Stop` transitions Running → Review and clears both timestamps.
+    /// `PreToolUse`/`Notification` stamp their timestamp and reclassify
+    /// `sub_status`. Non-Running tasks are no-ops.
+    pub async fn record_hook_event(
+        &self,
+        id: TaskId,
+        kind: HookEventKind,
+    ) -> Result<(), ServiceError> {
+        let task = self
+            .db
+            .get_task(id)
+            .await
+            .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?
+            .ok_or_else(|| ServiceError::NotFound(format!("Task {} not found", id.0)))?;
+        if task.status != TaskStatus::Running {
+            return Ok(());
+        }
         let now = chrono::Utc::now();
-
-        match kind {
+        let patch = match kind {
             HookEventKind::PreToolUse => {
-                if task.status != TaskStatus::Running {
-                    return Ok(());
-                }
                 let activity = classify_agent_activity(Some(now), task.last_notification_at, now);
-                let patch = TaskPatch::new()
+                TaskPatch::new()
                     .last_pre_tool_use_at(Some(now))
-                    .sub_status(activity.to_sub_status());
-                self.db
-                    .patch_task(id, &patch)
-                    .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
+                    .sub_status(activity.to_sub_status())
             }
-            HookEventKind::Notification => {
-                if task.status != TaskStatus::Running {
-                    return Ok(());
-                }
-                let patch = TaskPatch::new()
-                    .last_notification_at(Some(now))
-                    .sub_status(SubStatus::NeedsInput);
-                self.db
-                    .patch_task(id, &patch)
-                    .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
-            }
-            HookEventKind::Stop => {
-                if task.status == TaskStatus::Running {
-                    let patch = TaskPatch::new()
-                        .status(TaskStatus::Review)
-                        .sub_status(SubStatus::default_for(TaskStatus::Review))
-                        .last_pre_tool_use_at(None)
-                        .last_notification_at(None);
-                    self.db
-                        .patch_task(id, &patch)
-                        .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
-                    self.recalculate_epic_for_task(id);
-                }
-            }
+            HookEventKind::Notification => TaskPatch::new()
+                .last_notification_at(Some(now))
+                .sub_status(SubStatus::NeedsInput),
+            HookEventKind::Stop => TaskPatch::new()
+                .status(TaskStatus::Review)
+                .last_pre_tool_use_at(None)
+                .last_notification_at(None),
+        };
+        self.db
+            .patch_task(id, &patch)
+            .await
+            .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
+        if matches!(kind, HookEventKind::Stop) {
+            self.recalculate_epic_for_task(id).await;
         }
         Ok(())
     }

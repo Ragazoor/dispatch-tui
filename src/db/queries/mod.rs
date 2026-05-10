@@ -75,16 +75,8 @@ pub(super) fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         labels: read_json_string_vec(row, "labels"),
         created_at: parse_datetime(&created_str),
         updated_at: parse_datetime(&updated_str),
-        last_pre_tool_use_at: row
-            .get::<_, Option<String>>("last_pre_tool_use_at")
-            .ok()
-            .flatten()
-            .map(|s| parse_datetime(&s)),
-        last_notification_at: row
-            .get::<_, Option<String>>("last_notification_at")
-            .ok()
-            .flatten()
-            .map(|s| parse_datetime(&s)),
+        last_pre_tool_use_at: read_optional_datetime(row, "last_pre_tool_use_at"),
+        last_notification_at: read_optional_datetime(row, "last_notification_at"),
     })
 }
 
@@ -189,6 +181,23 @@ pub(super) fn parse_datetime(s: &str) -> DateTime<Utc> {
         .ok()
         .map(|ndt| Utc.from_utc_datetime(&ndt))
         .unwrap_or_else(Utc::now)
+}
+
+/// Format a `DateTime<Utc>` for storage in TEXT timestamp columns.
+/// Pairs with [`parse_datetime`] — both use "YYYY-MM-DD HH:MM:SS".
+pub(super) fn format_datetime(dt: DateTime<Utc>) -> String {
+    dt.format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
+/// Read a nullable TEXT timestamp column.
+pub(super) fn read_optional_datetime(
+    row: &rusqlite::Row<'_>,
+    col: &str,
+) -> Option<DateTime<Utc>> {
+    row.get::<_, Option<String>>(col)
+        .ok()
+        .flatten()
+        .map(|s| parse_datetime(&s))
 }
 
 pub(super) fn get_tips_state(

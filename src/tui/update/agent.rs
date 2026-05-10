@@ -230,7 +230,6 @@ impl App {
             })
             .collect();
 
-        // Reclassify running-agent activity from hook event timestamps.
         let now = chrono::Utc::now();
         let updates: Vec<(TaskId, SubStatus)> = self
             .board
@@ -250,12 +249,13 @@ impl App {
             .collect();
 
         for (id, target) in updates {
-            if let Some(task) = self.find_task_mut(id) {
-                task.sub_status = target;
-            }
-            if let Some(task) = self.find_task(id) {
+            let cloned = self.find_task_mut(id).map(|t| {
+                t.sub_status = target;
+                t.clone()
+            });
+            if let Some(task) = cloned {
                 cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
-                    task.clone(),
+                    task,
                 )));
             }
         }

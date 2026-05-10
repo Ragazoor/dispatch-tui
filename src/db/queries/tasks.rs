@@ -322,15 +322,11 @@ impl super::super::TaskCrud for Database {
             }
             if let Some(t) = patch.last_pre_tool_use_at {
                 sets.push("last_pre_tool_use_at = ?");
-                values.push(Box::new(
-                    t.map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string()),
-                ));
+                values.push(Box::new(t.map(super::format_datetime)));
             }
             if let Some(t) = patch.last_notification_at {
                 sets.push("last_notification_at = ?");
-                values.push(Box::new(
-                    t.map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string()),
-                ));
+                values.push(Box::new(t.map(super::format_datetime)));
             }
 
             sets.push("updated_at = datetime('now')");

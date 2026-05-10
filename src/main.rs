@@ -191,11 +191,11 @@ async fn main() -> Result<()> {
                     "Invalid hook kind: {kind}. Valid: pre_tool_use, notification, stop"
                 )
             })?;
-            let db = db::Database::open(&cli.db)?;
+            let db = db::Database::open(&cli.db).await?;
             let svc = service::TaskService::new(std::sync::Arc::new(db));
-            match svc.record_hook_event(models::TaskId(id), parsed) {
+            match svc.record_hook_event(models::TaskId(id), parsed).await {
                 Ok(()) => {}
-                Err(e) if e.to_string().contains("not found") => {
+                Err(service::ServiceError::NotFound(_)) => {
                     eprintln!("Task {} not found, skipping", id);
                 }
                 Err(e) => return Err(e.into()),

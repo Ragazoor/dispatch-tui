@@ -700,11 +700,6 @@ impl AgentActivity {
 }
 
 /// Classify a running agent's activity from its hook event timestamps.
-///
-/// Rules (in order):
-/// 1. Notification newer than PreToolUse (or no PreToolUse) → Waiting.
-/// 2. PreToolUse within ACTIVE_THRESHOLD → Active.
-/// 3. Otherwise → Stale (includes the no-events-yet case).
 pub fn classify_agent_activity(
     last_pre_tool_use_at: Option<chrono::DateTime<chrono::Utc>>,
     last_notification_at: Option<chrono::DateTime<chrono::Utc>>,
