@@ -88,6 +88,13 @@ enum Commands {
         #[arg(long)]
         purge: bool,
     },
+    /// Record a Claude Code hook event for a task
+    Hook {
+        /// Task ID
+        id: i64,
+        /// Hook event kind: pre_tool_use | notification | stop
+        kind: String,
+    },
     /// Run a feed command and validate its output as FeedItem JSON
     VerifyFeed {
         /// Shell command to run (executed via sh -c)
@@ -173,6 +180,22 @@ async fn main() -> Result<()> {
                 Err(e) if e.to_string().contains("not found") => {
                     // Task doesn't exist — treat as no-op (e.g. hook firing for a
                     // worktree whose task was removed from the database).
+                    eprintln!("Task {} not found, skipping", id);
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Commands::Hook { id, kind } => {
+            let parsed = models::HookEventKind::parse(&kind).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Invalid hook kind: {kind}. Valid: pre_tool_use, notification, stop"
+                )
+            })?;
+            let db = db::Database::open(&cli.db)?;
+            let svc = service::TaskService::new(std::sync::Arc::new(db));
+            match svc.record_hook_event(models::TaskId(id), parsed) {
+                Ok(()) => {}
+                Err(e) if e.to_string().contains("not found") => {
                     eprintln!("Task {} not found, skipping", id);
                 }
                 Err(e) => return Err(e.into()),

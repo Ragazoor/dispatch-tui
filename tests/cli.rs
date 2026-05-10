@@ -10,8 +10,8 @@ use std::path::Path;
 use std::process::Command;
 use tempfile::NamedTempFile;
 
-use dispatch_tui::db::{CreateTaskRequest, Database, ProjectCrud, TaskCrud};
-use dispatch_tui::models::{TaskId, TaskStatus};
+use dispatch_tui::db::{CreateTaskRequest, Database, ProjectCrud, TaskCrud, TaskPatch};
+use dispatch_tui::models::{SubStatus, TaskId, TaskStatus};
 
 fn binary() -> Command {
     Command::new(env!("CARGO_BIN_EXE_dispatch"))
@@ -280,6 +280,89 @@ async fn fetch_security_subcommand_removed() {
     assert!(
         stderr.contains("unrecognized subcommand") || stderr.contains("invalid value"),
         "expected clap rejection, got stderr: {stderr}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// hook
+// ---------------------------------------------------------------------------
+
+#[test]
+fn hook_notification_sets_needs_input_sub_status() {
+    let db = NamedTempFile::new().unwrap();
+    let db_path = db.path().to_str().unwrap();
+    let id = seed_task(db.path(), "Hook Test");
+
+    // Move the task to Running so the hook actually has an effect.
+    {
+        let conn = Database::open(db.path()).unwrap();
+        conn.patch_task(
+            id,
+            &TaskPatch::new()
+                .status(TaskStatus::Running)
+                .sub_status(SubStatus::Active),
+        )
+        .unwrap();
+    }
+
+    let out = binary()
+        .args(["--db", db_path, "hook", &id.0.to_string(), "notification"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let conn = Database::open(db.path()).unwrap();
+    let task = conn.get_task(id).unwrap().unwrap();
+    assert_eq!(task.sub_status, SubStatus::NeedsInput);
+    assert!(
+        task.last_notification_at.is_some(),
+        "expected last_notification_at to be stamped"
+    );
+}
+
+#[test]
+fn hook_unknown_kind_fails() {
+    let db = NamedTempFile::new().unwrap();
+    let id = seed_task(db.path(), "Hook Bad Kind");
+    let out = binary()
+        .args([
+            "--db",
+            db.path().to_str().unwrap(),
+            "hook",
+            &id.0.to_string(),
+            "bogus",
+        ])
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "expected failure for invalid kind");
+}
+
+#[test]
+fn hook_unknown_task_skips() {
+    let db = NamedTempFile::new().unwrap();
+    let out = binary()
+        .args([
+            "--db",
+            db.path().to_str().unwrap(),
+            "hook",
+            "99999",
+            "notification",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "expected success (skip) for unknown task, stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("not found"),
+        "expected 'not found' message, got stderr: {stderr}"
     );
 }
 

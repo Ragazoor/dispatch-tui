@@ -8,7 +8,8 @@ use std::sync::Arc;
 
 use crate::db::{self, CreateTaskRequest, TaskPatch};
 use crate::models::{
-    EpicId, SubStatus, Task, TaskId, TaskStatus, UsageReport, DEFAULT_BASE_BRANCH,
+    classify_agent_activity, EpicId, HookEventKind, SubStatus, Task, TaskId, TaskStatus,
+    UsageReport, DEFAULT_BASE_BRANCH,
 };
 use crate::service::ServiceError;
 
@@ -431,6 +432,71 @@ impl TaskService {
         }
 
         Ok((from_task, to_task))
+    }
+
+    /// Record a Claude Code hook event for a task.
+    ///
+    /// Behaviour by event kind (only applied when the task is `Running`):
+    /// - `PreToolUse`: stamp `last_pre_tool_use_at = now`, then reclassify with
+    ///   [`classify_agent_activity`] and set the resulting sub_status.
+    /// - `Notification`: stamp `last_notification_at = now`, set sub_status to
+    ///   `NeedsInput`.
+    /// - `Stop`: transition to `Review` with the default Review sub_status and
+    ///   clear both timestamps.
+    ///
+    /// For non-Running tasks this is a no-op (returns `Ok(())`). Returns an
+    /// error containing "not found" when the task id does not exist.
+    pub fn record_hook_event(&self, id: TaskId, kind: HookEventKind) -> Result<(), ServiceError> {
+        let task = match self.db.get_task(id) {
+            Ok(Some(t)) => t,
+            Ok(None) => {
+                return Err(ServiceError::NotFound(format!("Task {} not found", id.0)));
+            }
+            Err(e) => {
+                return Err(ServiceError::Internal(format!("Database error: {e}")));
+            }
+        };
+        let now = chrono::Utc::now();
+
+        match kind {
+            HookEventKind::PreToolUse => {
+                if task.status != TaskStatus::Running {
+                    return Ok(());
+                }
+                let activity = classify_agent_activity(Some(now), task.last_notification_at, now);
+                let patch = TaskPatch::new()
+                    .last_pre_tool_use_at(Some(now))
+                    .sub_status(activity.to_sub_status());
+                self.db
+                    .patch_task(id, &patch)
+                    .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
+            }
+            HookEventKind::Notification => {
+                if task.status != TaskStatus::Running {
+                    return Ok(());
+                }
+                let patch = TaskPatch::new()
+                    .last_notification_at(Some(now))
+                    .sub_status(SubStatus::NeedsInput);
+                self.db
+                    .patch_task(id, &patch)
+                    .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
+            }
+            HookEventKind::Stop => {
+                if task.status == TaskStatus::Running {
+                    let patch = TaskPatch::new()
+                        .status(TaskStatus::Review)
+                        .sub_status(SubStatus::default_for(TaskStatus::Review))
+                        .last_pre_tool_use_at(None)
+                        .last_notification_at(None);
+                    self.db
+                        .patch_task(id, &patch)
+                        .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
+                    self.recalculate_epic_for_task(id);
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Find the next backlog task for an epic, sorted by sort_order then id.

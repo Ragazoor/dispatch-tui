@@ -3,7 +3,9 @@ use std::sync::Arc;
 
 use super::{ClaimTaskParams, CreateTaskParams, ListTasksFilter, TaskService, UpdateTaskParams};
 use crate::db::{self, Database, ProjectCrud, TaskCrud};
-use crate::models::{EpicId, ProjectId, SubStatus, TaskId, TaskStatus, TaskTag, UsageReport};
+use crate::models::{
+    EpicId, HookEventKind, ProjectId, SubStatus, TaskId, TaskStatus, TaskTag, UsageReport,
+};
 use crate::service::epics::{CreateEpicParams, EpicService, UpdateEpicParams};
 use crate::service::{FieldUpdate, ServiceError};
 
@@ -2124,6 +2126,136 @@ async fn update_task_sub_status_validated_against_persisted_status() {
         .await
         .unwrap_err();
     assert!(matches!(err, ServiceError::Validation(_)), "got {err:?}");
+}
+
+// -- record_hook_event ---------------------------------------------------
+
+/// Move a freshly created backlog task into the Running state with a custom
+/// sub_status. Used by the hook-event tests to set up scenarios where a
+/// hook arrives at a Running task already in NeedsInput / Active.
+fn create_running_task(svc: &TaskService, sub_status: SubStatus) -> TaskId {
+    let id = svc
+        .create_task(CreateTaskParams {
+            title: "T".into(),
+            description: "".into(),
+            repo_path: "/repo".into(),
+            plan_path: None,
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            base_branch: None,
+            project_id: ProjectId(1),
+        })
+        .unwrap();
+    svc.update_task(
+        UpdateTaskParams::for_task(id)
+            .status(TaskStatus::Running)
+            .sub_status(sub_status),
+    )
+    .unwrap();
+    id
+}
+
+#[test]
+fn record_hook_event_pre_tool_use_stamps_and_clears_needs_input() {
+    let db = test_db();
+    let svc = task_svc(&db);
+    let id = create_running_task(&svc, SubStatus::NeedsInput);
+    // Seed last_notification_at via DB patch (it would have been set by an
+    // earlier Notification hook). Use a timestamp safely before "now".
+    let earlier = chrono::Utc::now() - chrono::Duration::seconds(30);
+    db.patch_task(
+        id,
+        &crate::db::TaskPatch::new().last_notification_at(Some(earlier)),
+    )
+    .unwrap();
+
+    svc.record_hook_event(id, HookEventKind::PreToolUse)
+        .unwrap();
+
+    let task = svc.get_task(id).unwrap();
+    assert_eq!(task.status, TaskStatus::Running);
+    // PreToolUse newer than the seeded notification → Active.
+    assert_eq!(task.sub_status, SubStatus::Active);
+    assert!(task.last_pre_tool_use_at.is_some());
+}
+
+#[test]
+fn record_hook_event_notification_sets_needs_input_and_stamps() {
+    let db = test_db();
+    let svc = task_svc(&db);
+    let id = create_running_task(&svc, SubStatus::Active);
+
+    svc.record_hook_event(id, HookEventKind::Notification)
+        .unwrap();
+
+    let task = svc.get_task(id).unwrap();
+    assert_eq!(task.status, TaskStatus::Running);
+    assert_eq!(task.sub_status, SubStatus::NeedsInput);
+    assert!(task.last_notification_at.is_some());
+}
+
+#[test]
+fn record_hook_event_stop_transitions_to_review_and_clears_stamps() {
+    let db = test_db();
+    let svc = task_svc(&db);
+    let id = create_running_task(&svc, SubStatus::Active);
+    let now = chrono::Utc::now();
+    db.patch_task(
+        id,
+        &crate::db::TaskPatch::new()
+            .last_pre_tool_use_at(Some(now))
+            .last_notification_at(Some(now)),
+    )
+    .unwrap();
+
+    svc.record_hook_event(id, HookEventKind::Stop).unwrap();
+
+    let task = svc.get_task(id).unwrap();
+    assert_eq!(task.status, TaskStatus::Review);
+    assert_eq!(task.sub_status, SubStatus::AwaitingReview);
+    assert!(task.last_pre_tool_use_at.is_none());
+    assert!(task.last_notification_at.is_none());
+}
+
+#[test]
+fn record_hook_event_noop_for_non_running_task() {
+    let db = test_db();
+    let svc = task_svc(&db);
+    let id = svc
+        .create_task(CreateTaskParams {
+            title: "T".into(),
+            description: "".into(),
+            repo_path: "/repo".into(),
+            plan_path: None,
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            base_branch: None,
+            project_id: ProjectId(1),
+        })
+        .unwrap();
+
+    svc.record_hook_event(id, HookEventKind::PreToolUse)
+        .unwrap();
+    svc.record_hook_event(id, HookEventKind::Notification)
+        .unwrap();
+    svc.record_hook_event(id, HookEventKind::Stop).unwrap();
+
+    let task = svc.get_task(id).unwrap();
+    assert_eq!(task.status, TaskStatus::Backlog);
+    assert!(task.last_pre_tool_use_at.is_none());
+    assert!(task.last_notification_at.is_none());
+}
+
+#[test]
+fn record_hook_event_unknown_task_returns_not_found() {
+    let db = test_db();
+    let svc = task_svc(&db);
+    let err = svc
+        .record_hook_event(TaskId(99_999), HookEventKind::PreToolUse)
+        .unwrap_err();
+    assert!(matches!(err, ServiceError::NotFound(_)), "got {err:?}");
 }
 
 mod property_tests {

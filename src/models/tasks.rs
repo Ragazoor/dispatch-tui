@@ -645,6 +645,36 @@ pub fn format_detail_age(updated_at: DateTime<Utc>, now: DateTime<Utc>) -> Strin
     }
 }
 
+/// A Claude Code hook event kind reported via the `dispatch hook` CLI.
+///
+/// Each event kind drives a different side effect on a Running task; non-Running
+/// tasks ignore hook events.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HookEventKind {
+    PreToolUse,
+    Notification,
+    Stop,
+}
+
+impl HookEventKind {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "pre_tool_use" => Some(Self::PreToolUse),
+            "notification" => Some(Self::Notification),
+            "stop" => Some(Self::Stop),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::PreToolUse => "pre_tool_use",
+            Self::Notification => "notification",
+            Self::Stop => "stop",
+        }
+    }
+}
+
 /// Time without a PreToolUse event before a running agent is considered Stale.
 pub const ACTIVE_THRESHOLD: chrono::Duration = chrono::Duration::minutes(2);
 
@@ -704,7 +734,10 @@ mod activity_tests {
     #[test]
     fn no_events_classifies_stale() {
         let now = Utc::now();
-        assert_eq!(classify_agent_activity(None, None, now), AgentActivity::Stale);
+        assert_eq!(
+            classify_agent_activity(None, None, now),
+            AgentActivity::Stale
+        );
     }
 
     #[test]
