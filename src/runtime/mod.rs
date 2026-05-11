@@ -27,7 +27,7 @@ const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// Name used for the TUI's tmux window (visible in tmux status bar).
 const TUI_WINDOW_NAME: &str = "TUI";
 
-use crate::db::{PrWorkflowStore, ProjectCrud, SettingsStore, TaskCrud};
+use crate::db::{ProjectCrud, SettingsStore, TaskCrud};
 use crate::models::TaskId;
 use crate::process::{ProcessRunner, RealProcessRunner};
 use crate::service::FieldUpdate;
@@ -136,14 +136,6 @@ pub async fn run_tui(db_path: &Path, port: u16, repo_map_token_budget: usize) ->
     .flatten()
     {
         app.update(msg);
-    }
-
-    // Prune stale "done" workflow rows on startup (best-effort)
-    if let Err(e) = database
-        .prune_done_pr_workflows(chrono::Duration::days(7))
-        .await
-    {
-        tracing::warn!("Failed to prune done pr workflows on startup: {e}");
     }
 
     // Load tips and show popup if appropriate

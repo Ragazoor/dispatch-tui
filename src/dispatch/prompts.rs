@@ -425,7 +425,7 @@ effect, surface it in the wrap-up message.\n\
    - Write ONE direct question to the user that includes: the bump kind, \
 the dep-only verdict, CI status summary, changelog summary or its absence, \
 and the specific reason you are not auto-merging.\n\
-   - Stop and wait for the user's reply. Do NOT call the `update_review_status` MCP tool — that pipeline is legacy.\n\
+   - Stop and wait for the user's reply.\n\
 \n\
 {mcp}",
         tid = task_id.0,
@@ -929,16 +929,10 @@ mod tests {
 
         // Escalation
         assert!(text.contains("ask the user") || text.contains("Ask the user"));
-        // The prompt MUST name the legacy tool the agent should avoid.
+        // The legacy update_review_status pipeline is gone — the prompt must not mention it.
         assert!(
-            text.contains("update_review_status"),
-            "prompt must explicitly name the update_review_status tool it is forbidding"
-        );
-        // And it must instruct the agent not to call it.
-        let lower = text.to_lowercase();
-        assert!(
-            lower.contains("do not call") && text.contains("update_review_status"),
-            "prompt must say 'Do not call' near update_review_status"
+            !text.contains("update_review_status"),
+            "prompt must not reference the removed update_review_status tool"
         );
 
         // Termination

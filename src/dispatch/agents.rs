@@ -451,25 +451,12 @@ pub fn dispatch_review_agent(
     req: &ReviewAgentRequest,
     runner: &dyn ProcessRunner,
 ) -> Result<DispatchResult> {
-    let prompt = if req.is_dependabot {
-        format!(
-            "Review dependency update PR #{} in {}.\n\n\
-             Run the built in claude command`/review {}` to review.\n\n\
-             After the review completes, call the `update_review_status` MCP tool:\n\
-             update_review_status(repo=\"{}\", number={}, status=\"findings_ready\")\n\n\
-             Wait for the user.",
-            req.number, req.github_repo, req.number, req.github_repo, req.number
-        )
-    } else {
-        format!(
-            "Review PR #{} in {}.\n\n\
-             Run `/anthropic-review-pr:review-pr {}` to perform a comprehensive code review.\n\n\
-             After the review completes, call the `update_review_status` MCP tool:\n\
-             update_review_status(repo=\"{}\", number={}, status=\"findings_ready\")\n\n\
-             Wait for the user.",
-            req.number, req.github_repo, req.number, req.github_repo, req.number
-        )
-    };
+    let prompt = format!(
+        "Review PR #{} in {}.\n\n\
+         Run `/anthropic-review-pr:review-pr {}` to perform a comprehensive code review.\n\n\
+         Wait for the user.",
+        req.number, req.github_repo, req.number
+    );
 
     provision_and_dispatch(
         AgentDispatchConfig {
@@ -510,8 +497,6 @@ pub fn build_fix_prompt(req: &FixAgentRequest) -> String {
                  3. Commit with a descriptive message referencing the alert\n\
                  4. Create a PR with `gh pr create`\n\n\
                  Focus on the minimal change needed to resolve the vulnerability.\n\n\
-                 When done, call the `update_review_status` MCP tool:\n\
-                 update_review_status(repo=\"{repo}\", number={number}, status=\"findings_ready\")\n\n\
                  Wait for the user.",
                 req.title
             )
@@ -528,8 +513,6 @@ pub fn build_fix_prompt(req: &FixAgentRequest) -> String {
                  3. Run tests to verify the fix doesn't break anything\n\
                  4. Commit and create a PR with `gh pr create`\n\n\
                  Focus on the minimal change needed to resolve the vulnerability.\n\n\
-                 When done, call the `update_review_status` MCP tool:\n\
-                 update_review_status(repo=\"{repo}\", number={number}, status=\"findings_ready\")\n\n\
                  Wait for the user.",
                 req.title, req.description
             )

@@ -351,12 +351,6 @@ async fn tool_schemas_match_arg_structs() {
             json!({"task_id": 1}),
         ),
         (
-            "update_review_status",
-            BTreeSet::from(["repo", "number", "status"]),
-            BTreeSet::from(["repo", "number", "status"]),
-            json!({"repo": "acme/app", "number": 42, "status": "findings_ready"}),
-        ),
-        (
             "list_review_prs",
             BTreeSet::from(["mode", "repo"]),
             BTreeSet::new(),
@@ -483,10 +477,6 @@ async fn tool_schemas_match_arg_structs() {
             }
             "dispatch_next" => {
                 serde_json::from_value::<DispatchNextArgs>(payload.clone()).unwrap();
-            }
-            "update_review_status" => {
-                serde_json::from_value::<super::tasks::UpdateReviewStatusArgs>(payload.clone())
-                    .unwrap();
             }
             "list_review_prs" => {
                 serde_json::from_value::<ListReviewPrsArgs>(payload.clone()).unwrap();

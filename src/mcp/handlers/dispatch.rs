@@ -365,28 +365,6 @@ mcp_tools! {
             "required": ["task_id", "input_tokens", "output_tokens"]
         };
 
-    async "update_review_status" => tasks::handle_update_review_status,
-        "Update the agent status for a dispatched review or fix agent.",
-        {
-            "type": "object",
-            "properties": {
-                "repo": {
-                    "type": "string",
-                    "description": "GitHub owner/repo (e.g. acme/app)"
-                },
-                "number": {
-                    "type": "integer",
-                    "description": "PR or alert number"
-                },
-                "status": {
-                    "type": "string",
-                    "description": "New agent status",
-                    "enum": ["reviewing", "findings_ready", "idle"]
-                }
-            },
-            "required": ["repo", "number", "status"]
-        };
-
     async "send_message" => tasks::handle_send_message,
         "Send a message/prompt to another running agent. The message is written to a file in the target's worktree and a notification is injected into their tmux window. Fire-and-forget — no response tracking.",
         {

@@ -1955,18 +1955,12 @@ fn dispatch_agent_uses_task_base_branch_in_prompt() {
 
 // --- dispatch_review_agent tests ---
 
-fn review_req(
-    repo_path: &str,
-    number: i64,
-    head_ref: &str,
-    is_dependabot: bool,
-) -> crate::tui::ReviewAgentRequest {
+fn review_req(repo_path: &str, number: i64, head_ref: &str) -> crate::tui::ReviewAgentRequest {
     crate::tui::ReviewAgentRequest {
         repo: repo_path.to_string(),
         github_repo: "acme/app".to_string(),
         number,
         head_ref: head_ref.to_string(),
-        is_dependabot,
     }
 }
 
@@ -1982,7 +1976,7 @@ fn review_agent_returns_early_when_window_exists() {
     ]);
 
     let result =
-        dispatch_review_agent(&review_req(&repo_path, 99, "feature-branch", false), &mock).unwrap();
+        dispatch_review_agent(&review_req(&repo_path, 99, "feature-branch"), &mock).unwrap();
 
     let calls = mock.recorded_calls();
     assert_eq!(calls.len(), 1, "only list-windows should be called");
@@ -2009,7 +2003,7 @@ fn review_agent_skips_worktree_add_when_dir_exists() {
     ]);
 
     let result =
-        dispatch_review_agent(&review_req(&repo_path, 99, "feature-branch", false), &mock).unwrap();
+        dispatch_review_agent(&review_req(&repo_path, 99, "feature-branch"), &mock).unwrap();
 
     let calls = mock.recorded_calls();
     assert!(
@@ -2042,7 +2036,7 @@ fn review_agent_happy_path_writes_prompt_and_launches_claude() {
     ]);
 
     let result =
-        dispatch_review_agent(&review_req(&repo_path, 99, "feature-branch", false), &mock).unwrap();
+        dispatch_review_agent(&review_req(&repo_path, 99, "feature-branch"), &mock).unwrap();
 
     let calls = mock.recorded_calls();
     // Verify git fetch
@@ -2070,8 +2064,8 @@ fn review_agent_happy_path_writes_prompt_and_launches_claude() {
         "prompt should invoke fully qualified /anthropic-review-pr:review-pr skill"
     );
     assert!(
-        prompt.contains("update_review_status"),
-        "prompt should reference MCP tool"
+        !prompt.contains("update_review_status"),
+        "prompt must not reference the removed update_review_status MCP tool"
     );
 
     let repo_short = dir.path().file_name().unwrap().to_str().unwrap();
@@ -2094,7 +2088,7 @@ fn review_agent_calls_worktree_add_when_dir_missing() {
     ]);
 
     // The function will error at fs::write since mock doesn't create the dir
-    let result = dispatch_review_agent(&review_req(&repo_path, 99, "feature-branch", false), &mock);
+    let result = dispatch_review_agent(&review_req(&repo_path, 99, "feature-branch"), &mock);
     assert!(result.is_err());
 
     let calls = mock.recorded_calls();
@@ -2120,7 +2114,7 @@ fn review_agent_fails_when_git_fetch_fails() {
         MockProcessRunner::fail("fatal: couldn't find remote ref"), // git fetch fails
     ]);
 
-    let result = dispatch_review_agent(&review_req(&repo_path, 99, "nonexistent", false), &mock);
+    let result = dispatch_review_agent(&review_req(&repo_path, 99, "nonexistent"), &mock);
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("git fetch failed"));
 }
@@ -2139,7 +2133,7 @@ fn review_agent_uses_accept_edits_mode() {
         MockProcessRunner::ok(), // tmux send-keys Enter
     ]);
 
-    dispatch_review_agent(&review_req(&repo_path, 99, "feature-branch", false), &mock).unwrap();
+    dispatch_review_agent(&review_req(&repo_path, 99, "feature-branch"), &mock).unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, 4, "claude");
@@ -2218,7 +2212,7 @@ fn review_agent_includes_plugin_dir() {
         MockProcessRunner::ok(),                  // tmux send-keys Enter
     ]);
 
-    dispatch_review_agent(&review_req(&repo_path, 99, "feature-branch", false), &mock).unwrap();
+    dispatch_review_agent(&review_req(&repo_path, 99, "feature-branch"), &mock).unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, 4, "claude");
@@ -2352,7 +2346,7 @@ fn provision_and_dispatch_worktree_add_fails() {
         MockProcessRunner::fail("fatal: '/path' already exists"), // git worktree add — fails
     ]);
 
-    let result = dispatch_review_agent(&review_req(&repo_path, 5, "feature-x", false), &mock);
+    let result = dispatch_review_agent(&review_req(&repo_path, 5, "feature-x"), &mock);
 
     assert!(
         result.is_err(),
@@ -2683,8 +2677,8 @@ fn build_fix_prompt_dependabot_with_fixed_version() {
         "should mention alert title"
     );
     assert!(
-        prompt.contains("update_review_status"),
-        "should reference MCP tool"
+        !prompt.contains("update_review_status"),
+        "fix prompt must not reference the removed update_review_status MCP tool"
     );
 }
 
@@ -2739,40 +2733,6 @@ fn build_fix_prompt_code_scanning() {
     assert!(
         !prompt.contains("Package:"),
         "code scanning prompt should not include Dependabot Package field"
-    );
-}
-
-// ---------------------------------------------------------------------------
-// dispatch_review_agent — Dependabot variant uses /review (built-in)
-// ---------------------------------------------------------------------------
-
-#[test]
-fn review_agent_dependabot_uses_builtin_review_command() {
-    let (_dir, repo_path, worktree_dir) = make_test_repo_with_worktree("review-77");
-
-    let mock = MockProcessRunner::new(vec![
-        MockProcessRunner::ok_with_stdout(b"\n"), // has_window: no match
-        MockProcessRunner::ok(),                  // git worktree prune
-        MockProcessRunner::ok(),                  // git fetch
-        MockProcessRunner::ok(),                  // tmux new-window
-        MockProcessRunner::ok(),                  // tmux send-keys -l
-        MockProcessRunner::ok(),                  // tmux send-keys Enter
-    ]);
-
-    dispatch_review_agent(
-        &review_req(&repo_path, 77, "dependabot/cargo/foo", true),
-        &mock,
-    )
-    .unwrap();
-
-    let prompt = std::fs::read_to_string(worktree_dir.join(".claude-prompt")).unwrap();
-    assert!(
-        prompt.contains("/review 77"),
-        "dependabot review prompt should use the built-in /review command, got: {prompt}"
-    );
-    assert!(
-        !prompt.contains("/anthropic-review-pr:review-pr"),
-        "dependabot review prompt must not invoke the anthropic skill, got: {prompt}"
     );
 }
 

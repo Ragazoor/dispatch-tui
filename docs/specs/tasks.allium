@@ -279,8 +279,7 @@ rule DispatchDependabotTask {
         -- kind? CI green? changelog?) and either auto-approves and enables
         -- auto-merge for low-risk bumps, or asks the user a specific
         -- question via chat for anything uncertain. Escalation is a chat
-        -- question, NOT update_review_status (the pr_workflow_states
-        -- pipeline is legacy and unread by the active UI).
+        -- question.
         --
         -- Auto-merge policy (build_dependabot_review_prompt):
         --   * patch + CI green + dep-only -> auto-merge
@@ -1264,8 +1263,7 @@ rule RetryFresh {
 -- == MCP Task Tools ==
 --
 -- Note: this section is not exhaustive. Review and security tooling
--- (e.g., the update_review_status MCP tool) is specified in
--- docs/specs/review.allium.
+-- is specified in docs/specs/review.allium.
 
 rule UpdateTaskViaMcp {
     when: McpUpdateTask(task, status?, sub_status?, plan?, title?, description?,

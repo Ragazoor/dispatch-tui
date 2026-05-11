@@ -336,64 +336,6 @@ pub trait TaskAndEpicStore: TaskCrud + EpicCrud {}
 impl<T: TaskCrud + EpicCrud> TaskAndEpicStore for T {}
 
 // ---------------------------------------------------------------------------
-// PrWorkflowRow — a row from the pr_workflow_states table
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-pub struct PrWorkflowRow {
-    pub repo: String,
-    pub number: i64,
-    pub kind: crate::models::WorkflowItemKind,
-    pub state: String,
-    pub sub_state: Option<String>,
-    pub updated_at: chrono::DateTime<chrono::Utc>,
-}
-
-// ---------------------------------------------------------------------------
-// PrWorkflowStore — CRUD for the pr_workflow_states table
-// ---------------------------------------------------------------------------
-
-#[async_trait::async_trait]
-pub trait PrWorkflowStore: Send + Sync {
-    /// INSERT OR IGNORE — never overwrites an existing row (preserves workflow state).
-    async fn insert_pr_workflow_if_absent(
-        &self,
-        repo: &str,
-        number: i64,
-        kind: crate::models::WorkflowItemKind,
-    ) -> anyhow::Result<()>;
-
-    /// INSERT OR REPLACE — always sets state and sub_state.
-    async fn upsert_pr_workflow(
-        &self,
-        repo: &str,
-        number: i64,
-        kind: crate::models::WorkflowItemKind,
-        state: &str,
-        sub_state: Option<&str>,
-    ) -> anyhow::Result<()>;
-
-    async fn get_pr_workflow(
-        &self,
-        repo: &str,
-        number: i64,
-        kind: crate::models::WorkflowItemKind,
-    ) -> anyhow::Result<Option<PrWorkflowRow>>;
-
-    async fn list_pr_workflows(&self) -> anyhow::Result<Vec<PrWorkflowRow>>;
-
-    /// Return the kind of the first workflow row for (repo, number), or None if absent.
-    async fn find_pr_workflow_kind(
-        &self,
-        repo: &str,
-        number: i64,
-    ) -> anyhow::Result<Option<crate::models::WorkflowItemKind>>;
-
-    /// Delete rows where state = 'done' AND updated_at < (now - older_than).
-    async fn prune_done_pr_workflows(&self, older_than: chrono::Duration) -> anyhow::Result<()>;
-}
-
-// ---------------------------------------------------------------------------
 // ProjectCrud — CRUD for the projects table
 // ---------------------------------------------------------------------------
 
@@ -527,7 +469,6 @@ pub trait TaskStore:
     + PrStore
     + AlertStore
     + SettingsStore
-    + PrWorkflowStore
     + ProjectCrud
     + LearningStore
     + LearningRetrievalStore
@@ -539,7 +480,6 @@ impl<
             + PrStore
             + AlertStore
             + SettingsStore
-            + PrWorkflowStore
             + ProjectCrud
             + LearningStore
             + LearningRetrievalStore,

@@ -394,7 +394,6 @@ pub(super) async fn handle_dispatch_review_agent(
         github_repo: parsed.repo.clone(),
         number: parsed.number,
         head_ref: pr.head_ref.clone(),
-        is_dependabot: false,
     };
 
     let runner = state.runner.clone();
