@@ -1908,7 +1908,7 @@ async fn migration_v38_feed_epic_columns() {
 }
 
 #[tokio::test]
-async fn fresh_db_schema_version_is_40() {
+async fn fresh_db_schema_version_is_51() {
     let db = in_memory_db().await;
     let version: i64 = db
         .db_call(|conn| {

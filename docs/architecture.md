@@ -26,9 +26,9 @@ Review agents (dispatched for PRs) and fix agents (dispatched for security alert
 | Status | DB value | Card badge | Meaning |
 |--------|----------|------------|---------|
 | `Reviewing` | `"reviewing"` | `[reviewing]` yellow | Agent session is active; agent is analyzing |
-| `FindingsReady` | `"findings_ready"` | `[ready]` green (flashes) | Agent completed analysis; user should review |
-| `Idle` | `"idle"` | `[idle]` dim | Agent is alive but waiting for user input |
 | *(none)* | `NULL` | *(no badge)* | No agent dispatched |
+
+`FindingsReady` and `Idle` variants still exist on the enum so legacy DB rows parse, but no current code path writes them.
 
 State transitions:
 
