@@ -1522,6 +1522,43 @@ mod tests {
         );
     }
 
+    #[test]
+    fn task_tag_dependabot_serde_roundtrip() {
+        let tag = TaskTag::Dependabot;
+        let s = serde_json::to_string(&tag).unwrap();
+        assert_eq!(s, "\"dependabot\"");
+        let back: TaskTag = serde_json::from_str(&s).unwrap();
+        assert_eq!(back, TaskTag::Dependabot);
+    }
+
+    #[test]
+    fn task_tag_dependabot_parse_and_labels() {
+        assert_eq!(TaskTag::parse("dependabot"), Some(TaskTag::Dependabot));
+        assert_eq!(TaskTag::Dependabot.as_str(), "dependabot");
+        assert_eq!(TaskTag::Dependabot.short_label(), "dep");
+    }
+
+    #[test]
+    fn dispatch_mode_for_task_routes_dependabot() {
+        assert_eq!(
+            DispatchMode::for_task(&make_task_with(None, Some(TaskTag::Dependabot))),
+            DispatchMode::Dependabot
+        );
+    }
+
+    #[test]
+    fn dispatch_mode_for_task_dependabot_with_plan_routes_dispatch() {
+        assert_eq!(
+            DispatchMode::for_task(&make_task_with(Some("plan.md"), Some(TaskTag::Dependabot))),
+            DispatchMode::Dispatch
+        );
+    }
+
+    #[test]
+    fn dispatch_mode_label_dependabot() {
+        assert_eq!(DispatchMode::Dependabot.label(), "Dependabot");
+    }
+
     mod property_tests {
         use super::*;
 

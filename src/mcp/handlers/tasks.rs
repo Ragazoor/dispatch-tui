@@ -831,6 +831,7 @@ fn do_dispatch(
         DispatchMode::Fix => {
             dispatch::fix_task_agent(task, runner, epic_ctx.as_ref(), Some(&project_ctx))
         }
+        DispatchMode::Dependabot => unimplemented!("wired in Task 5"),
     }
 }
 

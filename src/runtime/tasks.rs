@@ -209,6 +209,9 @@ impl TuiRuntime {
                     models::DispatchMode::Fix => {
                         dispatch::fix_task_agent(t, r, epic_ctx.as_ref(), Some(&project_ctx))
                     }
+                    models::DispatchMode::Dependabot => {
+                        dispatch::pr_review_agent(t, r, epic_ctx.as_ref(), Some(&project_ctx))
+                    }
                 }
             },
             label,

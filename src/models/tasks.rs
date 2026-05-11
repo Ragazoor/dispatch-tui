@@ -387,6 +387,7 @@ pub enum DispatchMode {
     PrReview,
     Research,
     Fix,
+    Dependabot,
 }
 
 impl DispatchMode {
@@ -396,6 +397,7 @@ impl DispatchMode {
             DispatchMode::PrReview => "PR Review",
             DispatchMode::Research => "Research",
             DispatchMode::Fix => "Fix",
+            DispatchMode::Dependabot => "Dependabot",
         }
     }
 
@@ -411,6 +413,7 @@ impl DispatchMode {
                 Some(TaskTag::PrReview) => DispatchMode::PrReview,
                 Some(TaskTag::Research) => DispatchMode::Research,
                 Some(TaskTag::Fix) => DispatchMode::Fix,
+                Some(TaskTag::Dependabot) => DispatchMode::Dependabot,
                 _ => DispatchMode::Dispatch,
             }
         }
@@ -431,6 +434,7 @@ pub enum TaskTag {
     PrReview,
     Research,
     Fix,
+    Dependabot,
 }
 
 impl TaskTag {
@@ -442,6 +446,7 @@ impl TaskTag {
             TaskTag::PrReview => "pr-review",
             TaskTag::Research => "research",
             TaskTag::Fix => "fix",
+            TaskTag::Dependabot => "dependabot",
         }
     }
 
@@ -453,6 +458,7 @@ impl TaskTag {
             "pr-review" => Some(TaskTag::PrReview),
             "research" => Some(TaskTag::Research),
             "fix" => Some(TaskTag::Fix),
+            "dependabot" => Some(TaskTag::Dependabot),
             _ => None,
         }
     }
@@ -465,6 +471,7 @@ impl TaskTag {
             TaskTag::PrReview => "pr-rev",
             TaskTag::Research => "research",
             TaskTag::Fix => "fix",
+            TaskTag::Dependabot => "dep",
         }
     }
 }
