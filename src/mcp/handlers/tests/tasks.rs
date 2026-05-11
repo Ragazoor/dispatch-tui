@@ -6392,6 +6392,79 @@ async fn dispatch_task_respects_tag_routing() {
 }
 
 #[tokio::test]
+async fn dispatch_task_dependabot_tag_routes_to_dependabot_agent() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    std::fs::create_dir_all(dir.path().join(".worktrees")).unwrap();
+
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(), // tmux set-hook
+        MockProcessRunner::ok(), // tmux send-keys -l (writes prompt file)
+        MockProcessRunner::ok(), // tmux send-keys Enter
+    ]));
+    let state = Arc::new(McpState {
+        db: db.clone(),
+        notify_tx: None,
+        runner,
+    });
+
+    let task_id = db
+        .create_task(CreateTaskRequest {
+            title: "Bump foo from 1.0.0 to 1.0.1",
+            description: "https://github.com/example/repo/pull/7",
+            repo_path: &repo_path,
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+        })
+        .await
+        .unwrap();
+    db.patch_task(
+        task_id,
+        &db::TaskPatch::new().tag(Some(crate::models::TaskTag::Dependabot)),
+    )
+    .await
+    .unwrap();
+
+    let slug = crate::models::slugify("Bump foo from 1.0.0 to 1.0.1");
+    let worktree_dir = dir
+        .path()
+        .join(".worktrees")
+        .join(format!("{}-{}", task_id.0, slug));
+    std::fs::create_dir_all(&worktree_dir).unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "dispatch_task",
+            "arguments": { "task_id": task_id.0 }
+        })),
+    )
+    .await;
+
+    let text = extract_response_text(&resp);
+    assert!(
+        text.contains("dispatched"),
+        "Expected dispatch confirmation, got: {text}"
+    );
+
+    let prompt = std::fs::read_to_string(worktree_dir.join(".claude-prompt"))
+        .expect("dependabot agent should have written a prompt file");
+    assert!(
+        prompt.contains("Dependabot triage agent"),
+        "task with tag=dependabot did not route to dependabot agent; prompt was:\n{prompt}"
+    );
+}
+
+#[tokio::test]
 async fn dispatch_task_returns_error_when_dispatch_fails() {
     let dir = tempfile::TempDir::new().unwrap();
     let repo_path = dir.path().to_str().unwrap().to_string();
