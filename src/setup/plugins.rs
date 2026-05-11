@@ -216,6 +216,19 @@ mod tests {
         assert_eq!(epics.len(), 1, "Dependabot epic must not be duplicated");
     }
 
+    #[test]
+    fn shipped_fetch_dependabot_script_emits_dependabot_tag() {
+        let body = EXAMPLE_FEED_SCRIPT;
+        assert!(
+            body.contains("tag: \"dependabot\""),
+            "fetch-dependabot.sh must emit tag \"dependabot\""
+        );
+        assert!(
+            !body.contains("tag: \"pr-review\""),
+            "fetch-dependabot.sh must no longer emit tag \"pr-review\""
+        );
+    }
+
     // -- install_example_script --
 
     #[test]

@@ -51,7 +51,7 @@ for repo in $REPOS; do
       description: ((.body // "") | .[0:500]),
       url: .url,
       status: "backlog",
-      tag: "pr-review",
+      tag: "dependabot",
       labels: [($repo | split("/") | last)]
     }]') || {
     echo "fetch-dependabot: $repo — jq failed on output: $raw" >&2
