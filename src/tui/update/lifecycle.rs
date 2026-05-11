@@ -154,7 +154,6 @@ impl App {
             let seed_at = chrono::Utc::now();
             task.last_pre_tool_use_at = Some(seed_at);
             let task_clone = task.clone();
-            self.agents.mark_active(id);
             self.sync_board_selection();
             let mut cmds = vec![
                 Command::Task(crate::tui::commands::TaskCommand::Persist(task_clone)),

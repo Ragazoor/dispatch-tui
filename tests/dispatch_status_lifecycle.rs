@@ -5,8 +5,6 @@
 //! breaks the user-facing feedback contract is caught even if the
 //! TUI-internal helpers are refactored.
 
-use std::time::Duration;
-
 use dispatch_tui::models::{ProjectId, SubStatus, Task, TaskId, TaskStatus};
 use dispatch_tui::tui::{App, Message};
 
@@ -38,7 +36,7 @@ fn make_task(id: i64, title: &str) -> Task {
 }
 
 fn make_app(task: Task) -> App {
-    App::new(vec![task], ProjectId(1), Duration::from_secs(300))
+    App::new(vec![task], ProjectId(1))
 }
 
 #[tokio::test]
@@ -110,7 +108,6 @@ async fn multiple_dispatches_show_pluralized_status() {
     let mut app = App::new(
         vec![make_task(1, "Task A"), make_task(2, "Task B")],
         ProjectId(1),
-        Duration::from_secs(300),
     );
 
     app.update(Message::Task(

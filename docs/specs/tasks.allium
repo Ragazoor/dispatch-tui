@@ -343,7 +343,7 @@ rule MoveTaskForward {
 
     @guidance
         -- Manual movement (forward or backward) clears agent health
-        -- tracking state (tmux output, staleness timer, crash detection,
+        -- tracking state (tmux output, crash detection,
         -- notification flags) for the task.
         -- sub_status is always reset to the default for the new status.
         -- Supports batch operation on multi-selected tasks. Batch forward
@@ -368,7 +368,7 @@ rule MoveTaskBackward {
 
     @guidance
         -- Manual movement (forward or backward) clears agent health
-        -- tracking state (tmux output, staleness timer, crash detection,
+        -- tracking state (tmux output, crash detection,
         -- notification flags) for the task.
         -- sub_status is always reset to the default for the new status.
         -- The worktree is preserved so the task can be resumed later
@@ -477,7 +477,7 @@ rule DetachTmux {
         -- Kills the tmux window for a task while preserving the
         -- worktree. The agent is gone but the branch remains for
         -- PR review or later resume. Clears agent health tracking
-        -- (staleness timer, crash detection). Only Stale/Crashed
+        -- (captured tmux output, crash detection). Only Stale/Crashed
         -- sub_statuses are reset to the default for the task's
         -- current status; all other sub_statuses are preserved.
         -- Allowed for any task with a tmux window: Running tasks
@@ -1066,8 +1066,10 @@ rule ClassifyAgentActivity {
         -- DispatchTask (and friends) stamp last_pre_tool_use_at = now on
         -- the transition into running so this classifier returns Active
         -- through the ACTIVE_THRESHOLD window before the agent's first
-        -- real PreToolUse hook fires; without that seed the freshly
-        -- dispatched task flickers into stale on every tick.
+        -- real PreToolUse hook fires. Recovery from Stale → Active is
+        -- driven entirely by fresh PreToolUse hook timestamps (and
+        -- Notification timestamps for needs_input); there is no separate
+        -- in-memory activity timer.
         -- Ownership invariant: only hook events (PreToolUse / Stop) and the
         -- Backlog→Running seed write last_pre_tool_use_at. Generic in-memory
         -- persists from the TUI (sort_order swaps, tick sub_status updates,
@@ -1096,8 +1098,11 @@ rule DetectCrashedAgent {
         -- runtime detects that the task's tmux window no longer exists.
         -- The tmux_window field is NOT cleared for crashed tasks, so that
         -- the window name remains available for the ConfirmRetry prompt.
-        -- When activity resumes (TmuxOutput or RetryResume), sub_status
-        -- is reset to active.
+        -- Recovery from Crashed happens via RetryResume, which kills the
+        -- old window, dispatches a fresh agent, and resets sub_status to
+        -- active. ClassifyAgentActivity intentionally skips Crashed and
+        -- Conflict so the human-actionable state is not silently masked
+        -- by stale hook timestamps.
         -- For non-running tasks (e.g. review tasks), window closure
         -- silently clears task.tmux_window = null without changing
         -- sub_status or sending notifications. This is the normal exit

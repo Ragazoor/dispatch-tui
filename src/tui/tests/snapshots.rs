@@ -2,7 +2,7 @@
 use ratatui::buffer::Buffer;
 
 use super::super::App;
-use super::{make_app, make_key, make_task, render_to_buffer, TEST_TIMEOUT};
+use super::{make_app, make_key, make_task, render_to_buffer};
 use crate::models::{ProjectId, TaskStatus};
 use crossterm::event::KeyCode;
 
@@ -26,7 +26,7 @@ fn render_to_string(app: &mut App, width: u16, height: u16) -> String {
 
 #[test]
 fn snapshot_empty_kanban_board() {
-    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1));
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);
 }
@@ -173,7 +173,7 @@ fn snapshot_card_badges_baseline() {
     t.pr_url = Some("https://github.com/o/r/pull/45".to_string());
     tasks.push(t);
 
-    let mut app = App::new(tasks, ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(tasks, ProjectId(1));
     app.spinner_tick = 0;
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);
@@ -197,7 +197,7 @@ fn snapshot_card_with_labels() {
     t2.labels = vec!["app-frontend".to_string()];
     t2.pr_url = Some("https://github.com/o/r/pull/77".to_string());
 
-    let mut app = App::new(vec![t1, t2], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(vec![t1, t2], ProjectId(1));
     app.spinner_tick = 0;
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);
@@ -252,7 +252,7 @@ fn make_feed_epic(id: i64, title: &str, sort_order: i64) -> crate::models::Epic 
 
 #[test]
 fn snapshot_tab_bar_with_feed_epics_board_active() {
-    let mut app = App::new(vec![], ProjectId(1), super::TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1));
     app.board.epics = vec![
         make_feed_epic(1, "My Feed", -2),
         make_feed_epic(2, "Another Feed", -1),
@@ -264,7 +264,7 @@ fn snapshot_tab_bar_with_feed_epics_board_active() {
 #[test]
 fn snapshot_tab_bar_with_feed_epics_feed_active() {
     use super::super::types::Message;
-    let mut app = App::new(vec![], ProjectId(1), super::TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1));
     app.board.epics = vec![
         make_feed_epic(1, "My Feed", -2),
         make_feed_epic(2, "Another Feed", -1),
@@ -322,7 +322,7 @@ fn snapshot_kanban_with_archive_focused() {
 #[test]
 fn snapshot_task_detail_overlay_peek() {
     use crate::tui::Message;
-    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1));
     let mut task = make_task(1, TaskStatus::Backlog);
     task.description = "First line of description.\nSecond line.\nThird line.".to_string();
     task.repo_path = "/repo/my-project".to_string();
@@ -338,7 +338,7 @@ fn snapshot_task_detail_overlay_peek() {
 #[test]
 fn snapshot_task_detail_overlay_zoomed() {
     use crate::tui::{Message, ViewMode};
-    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1));
     let mut task = make_task(1, TaskStatus::Backlog);
     task.description = "First line of description.\nSecond line.\nThird line.".to_string();
     task.repo_path = "/repo/my-project".to_string();
@@ -356,7 +356,7 @@ fn snapshot_task_detail_overlay_zoomed() {
 #[test]
 fn snapshot_task_detail_overlay_empty_optional_fields() {
     use crate::tui::Message;
-    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1));
     let mut task = make_task(1, TaskStatus::Backlog);
     task.description = "Just a description.".to_string();
     task.repo_path = "/repo/path".to_string();
@@ -576,7 +576,7 @@ fn flat_view_epic_headers() {
     use crate::models::EpicId;
     use crate::tui::tests::make_epic_with_title;
 
-    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1));
     let epic = make_epic_with_title(10, "My Feature");
     app.board.epics = vec![epic];
     let mut t1 = make_task(1, TaskStatus::Backlog);
@@ -598,7 +598,7 @@ fn flat_view_substatus_indicators_above_epic_headers() {
     use crate::models::{EpicId, SubStatus};
     use crate::tui::tests::make_epic_with_title;
 
-    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1));
 
     let epic_a = make_epic_with_title(10, "Epic Alpha");
     let epic_b = make_epic_with_title(20, "Epic Beta");

@@ -24,10 +24,6 @@ use crate::{models, tmux};
 /// Interval between `has_window` polls while waiting for the editor to exit.
 const POLL_INTERVAL: Duration = Duration::from_millis(300);
 
-/// Inactivity timeout used when constructing `App` in tests.
-#[cfg(test)]
-const EDITOR_TEST_INACTIVITY_TIMEOUT: Duration = Duration::from_secs(300);
-
 /// Message shown when a second editor is requested while one is already open.
 pub const EDITOR_ALREADY_OPEN_MSG: &str = "Editor already open — close it first";
 
@@ -517,7 +513,7 @@ mod learning_editor_tests {
         let learning = make_learning(id);
         let rt = make_runtime(db.clone());
         // Put app into Learnings view
-        let mut app = App::new(vec![], ProjectId(1), EDITOR_TEST_INACTIVITY_TIMEOUT);
+        let mut app = App::new(vec![], ProjectId(1));
         app.update(Message::Learning(LearningMessage::Show(vec![
             learning.clone()
         ])));
@@ -560,7 +556,7 @@ mod learning_editor_tests {
             .unwrap();
         let learning = make_learning(id);
         let rt = make_runtime(db.clone());
-        let mut app = App::new(vec![], ProjectId(1), EDITOR_TEST_INACTIVITY_TIMEOUT);
+        let mut app = App::new(vec![], ProjectId(1));
         app.update(Message::Learning(LearningMessage::Show(vec![
             learning.clone()
         ])));
@@ -597,7 +593,7 @@ mod learning_editor_tests {
             .unwrap();
         let learning = make_learning(id);
         let rt = make_runtime(db.clone());
-        let mut app = App::new(vec![], ProjectId(1), EDITOR_TEST_INACTIVITY_TIMEOUT);
+        let mut app = App::new(vec![], ProjectId(1));
 
         rt.exec_finalize_editor_result(
             &mut app,
@@ -633,7 +629,7 @@ mod learning_editor_tests {
             .unwrap();
         let learning = make_learning(id);
         let rt = make_runtime(db.clone());
-        let mut app = App::new(vec![], ProjectId(1), EDITOR_TEST_INACTIVITY_TIMEOUT);
+        let mut app = App::new(vec![], ProjectId(1));
 
         rt.exec_finalize_editor_result(
             &mut app,
@@ -795,7 +791,7 @@ mod tests {
             runner,
             editor_session: Arc::new(Mutex::new(None)),
         };
-        let app = App::new(vec![], ProjectId(1), EDITOR_TEST_INACTIVITY_TIMEOUT);
+        let app = App::new(vec![], ProjectId(1));
         (rt, app)
     }
 
@@ -863,11 +859,7 @@ mod tests {
             runner,
             editor_session: Arc::new(Mutex::new(None)),
         };
-        let mut app = App::new(
-            vec![task.clone()],
-            ProjectId(1),
-            EDITOR_TEST_INACTIVITY_TIMEOUT,
-        );
+        let mut app = App::new(vec![task.clone()], ProjectId(1));
 
         let edited_text = "--- TITLE ---\nNew title\n\
             --- DESCRIPTION ---\nNew description\n\
@@ -916,11 +908,7 @@ mod tests {
             runner,
             editor_session: Arc::new(Mutex::new(None)),
         };
-        let mut app = App::new(
-            vec![task.clone()],
-            ProjectId(1),
-            EDITOR_TEST_INACTIVITY_TIMEOUT,
-        );
+        let mut app = App::new(vec![task.clone()], ProjectId(1));
 
         rt.exec_finalize_editor_result(
             &mut app,

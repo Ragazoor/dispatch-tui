@@ -4,7 +4,7 @@ use crossterm::event::KeyCode;
 use super::*;
 
 fn make_app() -> App {
-    App::new(vec![], crate::models::ProjectId(1), TEST_TIMEOUT)
+    App::new(vec![], crate::models::ProjectId(1))
 }
 
 // ── keybinding ──

@@ -591,7 +591,6 @@ mod tests {
     use crate::models::{LearningId, LearningStatus};
     use crate::tui::App;
     use chrono::Utc;
-    use std::time::Duration;
 
     fn make_learning(id: i64, scope: LearningScope, scope_ref: Option<&str>) -> Learning {
         Learning {
@@ -612,7 +611,7 @@ mod tests {
     }
 
     fn make_app() -> App {
-        App::new(vec![], ProjectId(1), Duration::from_secs(300))
+        App::new(vec![], ProjectId(1))
     }
 
     #[test]

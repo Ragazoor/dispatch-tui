@@ -15,34 +15,10 @@ impl App {
         &mut self,
         id: TaskId,
         output: String,
-        activity_ts: u64,
+        _activity_ts: u64,
     ) -> Vec<Command> {
-        let mut cmds = Vec::new();
-        let activity_changed = self
-            .agents
-            .prev_tmux_activity
-            .get(&id)
-            .is_none_or(|&prev| prev != activity_ts);
-        if activity_changed {
-            self.agents.mark_active(id);
-            // Recovery: reset stale/crashed sub_status when activity resumes
-            let needs_recovery = self
-                .find_task(id)
-                .is_some_and(|t| matches!(t.sub_status, SubStatus::Stale | SubStatus::Crashed));
-            if needs_recovery {
-                if let Some(task) = self.find_task_mut(id) {
-                    task.sub_status = SubStatus::Active;
-                }
-                if let Some(task) = self.find_task(id) {
-                    cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
-                        task.clone(),
-                    )));
-                }
-            }
-            self.agents.prev_tmux_activity.insert(id, activity_ts);
-        }
         self.agents.tmux_outputs.insert(id, output);
-        cmds
+        Vec::new()
     }
 
     pub(in crate::tui) fn handle_window_gone(&mut self, id: TaskId) -> Vec<Command> {
@@ -98,24 +74,13 @@ impl App {
     }
 
     /// Per-task transition logic shared between full and targeted refresh:
-    /// fires notifications on NeedsInput / Review entry, resets stale timers
-    /// on recovery, and clears notified state when the task leaves the
-    /// triggering state.
+    /// fires notifications on NeedsInput / Review entry, and clears notified
+    /// state when the task leaves the triggering state.
     fn detect_task_transition_notifications(&mut self, new_task: &Task) -> Vec<Command> {
         let mut cmds = Vec::new();
         let old_task = self.find_task(new_task.id);
         let was_needs_input = old_task.is_some_and(|t| t.sub_status == SubStatus::NeedsInput);
         let was_review = old_task.is_some_and(|t| t.status == TaskStatus::Review);
-
-        let was_stale_or_crashed =
-            old_task.is_some_and(|t| matches!(t.sub_status, SubStatus::Stale | SubStatus::Crashed));
-        let is_recovered = !matches!(
-            new_task.sub_status,
-            SubStatus::Stale | SubStatus::Crashed | SubStatus::Conflict
-        );
-        if was_stale_or_crashed && is_recovered {
-            self.agents.mark_active(new_task.id);
-        }
 
         if self.notifications_enabled {
             if new_task.sub_status == SubStatus::NeedsInput
@@ -375,7 +340,6 @@ impl App {
             let seed_at = chrono::Utc::now();
             task.last_pre_tool_use_at = Some(seed_at);
             let task_clone = task.clone();
-            self.agents.mark_active(id);
             self.agents.last_error.remove(&id);
             self.sync_board_selection();
             self.set_status(format!("Task {id} resumed"));

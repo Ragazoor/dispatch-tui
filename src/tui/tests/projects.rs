@@ -6,7 +6,6 @@ use crate::tui::{App, Message};
 
 use super::helpers::{
     buffer_contains, make_app, make_app_with_archived_task, make_key, make_task, render_to_buffer,
-    TEST_TIMEOUT,
 };
 
 fn make_task_with_project(id: i64, status: TaskStatus, project_id: ProjectId) -> Task {
@@ -21,7 +20,7 @@ fn project_matches_hides_tasks_from_other_project() {
     let t1 = make_task_with_project(1, TaskStatus::Backlog, ProjectId(1));
     let t2 = make_task_with_project(2, TaskStatus::Backlog, ProjectId(2));
 
-    let app = App::new(vec![t1, t2], ProjectId(1), TEST_TIMEOUT);
+    let app = App::new(vec![t1, t2], ProjectId(1));
     // active_project = 1 → only t1 should appear in Backlog
     let visible = app.column_items_for_status(TaskStatus::Backlog);
     assert_eq!(
@@ -46,7 +45,7 @@ fn project_matches_hides_tasks_from_other_project() {
 #[test]
 fn archived_tasks_filtered_by_active_project() {
     let t = make_task_with_project(1, TaskStatus::Archived, ProjectId(2));
-    let app = App::new(vec![t], ProjectId(1), TEST_TIMEOUT);
+    let app = App::new(vec![t], ProjectId(1));
     // active_project = 1, task is in project 2 → archived_tasks returns empty
     assert_eq!(app.archived_tasks().len(), 0);
 }
@@ -62,7 +61,7 @@ fn select_project_clamps_cursor() {
         make_task_with_project(3, TaskStatus::Backlog, ProjectId(1)),
         make_task_with_project(4, TaskStatus::Backlog, ProjectId(2)),
     ];
-    let mut app = App::new(tasks, ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(tasks, ProjectId(1));
     // Move cursor to row 2 in column 1 (Backlog)
     app.selection_mut().set_row(1, 2);
     app.update_anchor_from_current();
@@ -81,11 +80,7 @@ fn select_project_clamps_cursor() {
 // ---------------------------------------------------------------------------
 
 fn two_project_app() -> App {
-    let mut app = App::new(
-        vec![make_task(1, TaskStatus::Backlog)],
-        ProjectId(1),
-        TEST_TIMEOUT,
-    );
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1));
     app.update(Message::ProjectsUpdated(vec![
         Project {
             id: ProjectId(1),
@@ -550,7 +545,7 @@ fn g_closes_projects_panel() {
 
 #[test]
 fn g_in_empty_projects_panel_closes_panel() {
-    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1));
     app.update(Message::ProjectsUpdated(vec![]));
     app.update(Message::NavigateColumn(-1));
     assert!(app.projects_panel_visible(), "precondition: panel open");
@@ -752,7 +747,7 @@ fn q_from_projects_panel_triggers_quit_prompt() {
 fn app_with_default_and_custom_projects() -> App {
     let t1 = make_task_with_project(1, TaskStatus::Backlog, ProjectId(1)); // Default
     let t2 = make_task_with_project(2, TaskStatus::Backlog, ProjectId(2)); // Custom
-    let mut app = App::new(vec![t1, t2], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(vec![t1, t2], ProjectId(1));
     app.update(Message::ProjectsUpdated(vec![
         Project {
             id: ProjectId(1),

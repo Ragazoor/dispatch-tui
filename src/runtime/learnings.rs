@@ -146,8 +146,6 @@ mod tests {
     use chrono::Utc;
     use std::sync::Arc;
 
-    const APP_INACTIVITY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
-
     fn make_runtime(db: Arc<Database>) -> TuiRuntime {
         let (tx, _rx) = mpsc::unbounded_channel();
         let (feed_tx, _) = mpsc::unbounded_channel();
@@ -206,7 +204,7 @@ mod tests {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let id = insert_learning(&db).await;
         let rt = make_runtime(db.clone());
-        let mut app = App::new(vec![], ProjectId(1), APP_INACTIVITY_TIMEOUT);
+        let mut app = App::new(vec![], ProjectId(1));
         // Put the app in Learnings view with the learning
         let learning = make_learning(id);
         app.update(Message::Learning(LearningMessage::Show(vec![learning])));
@@ -228,7 +226,7 @@ mod tests {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let id = insert_learning(&db).await;
         let rt = make_runtime(db.clone());
-        let mut app = App::new(vec![], ProjectId(1), APP_INACTIVITY_TIMEOUT);
+        let mut app = App::new(vec![], ProjectId(1));
         let learning = make_learning(id);
         app.update(Message::Learning(LearningMessage::Show(vec![learning])));
 
@@ -276,7 +274,7 @@ mod tests {
         db.upvote_learning(id2).await.unwrap();
 
         let rt = make_runtime(db.clone());
-        let mut app = App::new(vec![], ProjectId(1), APP_INACTIVITY_TIMEOUT);
+        let mut app = App::new(vec![], ProjectId(1));
 
         rt.exec_load_learnings(&mut app).await;
 

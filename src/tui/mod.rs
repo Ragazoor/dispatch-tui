@@ -120,11 +120,7 @@ pub(in crate::tui) fn filtered_repos(paths: &[String], query: &str) -> Vec<Strin
 }
 
 impl App {
-    pub fn new(
-        tasks: Vec<Task>,
-        default_project_id: ProjectId,
-        inactivity_timeout: Duration,
-    ) -> Self {
+    pub fn new(tasks: Vec<Task>, default_project_id: ProjectId) -> Self {
         let mut app = App {
             board: BoardState {
                 tasks,
@@ -140,7 +136,7 @@ impl App {
             should_quit: false,
             notifications_enabled: false,
             input: InputState::default(),
-            agents: AgentTracking::new(inactivity_timeout),
+            agents: AgentTracking::new(),
             archive: ArchiveState::default(),
             projects_panel: ProjectsPanelState::default(),
             active_project: default_project_id,
@@ -243,9 +239,6 @@ impl App {
     pub fn is_crashed(&self, id: TaskId) -> bool {
         self.find_task(id)
             .is_some_and(|t| t.sub_status == SubStatus::Crashed)
-    }
-    pub fn inactivity_timeout(&self) -> Duration {
-        self.agents.inactivity_timeout
     }
     pub fn show_archived(&self) -> bool {
         self.selection().column() == TaskStatus::COLUMN_COUNT + 1

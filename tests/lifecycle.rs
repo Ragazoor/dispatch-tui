@@ -1,19 +1,13 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 //! Integration test: full task lifecycle through App::update() with a real (in-memory) DB.
 
-use std::time::Duration;
-
 use dispatch_tui::db::{self, CreateTaskRequest, Database, TaskCrud};
 use dispatch_tui::models::{DispatchMode, ProjectId, Task, TaskId, TaskStatus};
 use dispatch_tui::tui::{App, Command, Message, MoveDirection};
 
 async fn make_app() -> (App, Database) {
     let db = Database::open_in_memory().await.unwrap();
-    let app = App::new(
-        vec![],
-        dispatch_tui::models::ProjectId(1),
-        Duration::from_secs(300),
-    );
+    let app = App::new(vec![], dispatch_tui::models::ProjectId(1));
     (app, db)
 }
 

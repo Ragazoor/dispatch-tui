@@ -53,7 +53,7 @@ fn close_repo_filter_returns_to_normal() {
 
 #[test]
 fn flattened_board_respects_repo_filter() {
-    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1));
     app.board.epics = vec![make_epic(10)];
     let mut in_repo = make_task(1, TaskStatus::Backlog);
     in_repo.epic_id = Some(EpicId(10));
@@ -81,7 +81,7 @@ fn repo_filter_empty_shows_all_tasks() {
 
 #[test]
 fn repo_filter_hides_non_matching_tasks() {
-    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1));
     let mut t1 = make_task(1, TaskStatus::Backlog);
     t1.repo_path = "/repo-a".to_string();
     let mut t2 = make_task(2, TaskStatus::Backlog);
@@ -96,7 +96,7 @@ fn repo_filter_hides_non_matching_tasks() {
 
 #[test]
 fn repo_filter_applies_to_epics_in_column_items() {
-    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1));
     let now = chrono::Utc::now();
     app.board.epics = vec![
         Epic {
@@ -200,7 +200,7 @@ fn repo_filter_out_of_range_number_ignored() {
 
 #[test]
 fn repo_filter_exclude_hides_matching_tasks() {
-    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1));
     let mut t1 = make_task(1, TaskStatus::Backlog);
     t1.repo_path = "/repo-a".to_string();
     let mut t2 = make_task(2, TaskStatus::Backlog);
@@ -216,7 +216,7 @@ fn repo_filter_exclude_hides_matching_tasks() {
 
 #[test]
 fn repo_filter_exclude_empty_shows_all() {
-    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1));
     let mut t1 = make_task(1, TaskStatus::Backlog);
     t1.repo_path = "/repo-a".to_string();
     let mut t2 = make_task(2, TaskStatus::Backlog);
@@ -230,7 +230,7 @@ fn repo_filter_exclude_empty_shows_all() {
 
 #[test]
 fn repo_filter_exclude_applies_to_epics() {
-    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1));
     let now = chrono::Utc::now();
     app.board.epics = vec![
         Epic {
@@ -297,7 +297,7 @@ fn close_repo_filter_persists_mode() {
 fn repo_filter_does_not_bleed_across_projects() {
     // Default project (1) and Project B (2). Set a filter while Default is active.
     // Switching to Project B should clear the active repo filter.
-    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1));
     app.update(Message::ProjectsUpdated(vec![
         Project {
             id: ProjectId(1),
@@ -335,7 +335,7 @@ fn repo_filter_does_not_bleed_across_projects() {
 
 #[test]
 fn setting_filter_in_project_b_does_not_affect_default() {
-    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1));
     app.update(Message::ProjectsUpdated(vec![
         Project {
             id: ProjectId(1),
@@ -365,7 +365,7 @@ fn setting_filter_in_project_b_does_not_affect_default() {
 
 #[test]
 fn filter_state_round_trips_across_project_switches() {
-    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1));
     app.update(Message::ProjectsUpdated(vec![
         Project {
             id: ProjectId(1),
@@ -406,7 +406,7 @@ fn filter_state_round_trips_across_project_switches() {
 #[test]
 fn close_repo_filter_persists_per_project_keys() {
     // The active project's id should appear in the persisted setting keys.
-    let mut app = App::new(vec![], ProjectId(7), TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(7));
     app.input.mode = InputMode::RepoFilter;
     let cmds = app.update(Message::CloseRepoFilter);
     let want_filter = "repo_filter:7".to_string();
@@ -430,7 +430,7 @@ fn close_repo_filter_persists_per_project_keys() {
 
 #[test]
 fn repo_filter_overlay_shows_mode_in_title() {
-    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1));
     app.board.repo_paths = vec!["/repo-a".to_string()];
     app.filter.mode = RepoFilterMode::Exclude;
     app.input.mode = InputMode::RepoFilter;
@@ -499,7 +499,7 @@ fn repo_filter_shift_a_loads_first_preset() {
 
 #[test]
 fn repo_filter_overlay_shows_presets() {
-    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1));
     app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
     let repos: HashSet<String> = ["/repo-a".to_string()].into_iter().collect();
     app.filter.presets = vec![("frontend".to_string(), repos, RepoFilterMode::Include)];
@@ -515,7 +515,7 @@ fn repo_filter_overlay_shows_presets() {
 
 #[test]
 fn repo_filter_overlay_shows_name_input() {
-    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1));
     app.board.repo_paths = vec!["/repo-a".to_string()];
     app.input.mode = InputMode::InputPresetName;
     app.input.buffer = "myfilter".to_string();
@@ -527,7 +527,7 @@ fn repo_filter_overlay_shows_name_input() {
 
 #[test]
 fn repo_filter_overlay_shows_delete_help() {
-    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1));
     app.board.repo_paths = vec!["/repo-a".to_string()];
     let repos: HashSet<String> = ["/repo-a".to_string()].into_iter().collect();
     app.filter.presets = vec![("test".to_string(), repos, RepoFilterMode::Include)];
@@ -611,7 +611,7 @@ fn render_status_bar_repo_filter() {
 
 #[test]
 fn render_repo_filter_overlay_shows_title() {
-    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1));
     app.board.repo_paths = vec!["/repo/a".to_string(), "/repo/b".to_string()];
     app.input.mode = InputMode::RepoFilter;
     let buf = render_to_buffer(&mut app, 100, 30);
@@ -623,7 +623,7 @@ fn render_repo_filter_overlay_shows_title() {
 
 #[test]
 fn render_repo_filter_overlay_shows_repos() {
-    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1));
     app.board.repo_paths = vec!["/repo/alpha".to_string(), "/repo/beta".to_string()];
     app.input.mode = InputMode::RepoFilter;
     let buf = render_to_buffer(&mut app, 100, 30);
@@ -639,7 +639,7 @@ fn render_repo_filter_overlay_shows_repos() {
 
 #[test]
 fn render_repo_filter_overlay_shows_include_mode() {
-    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1));
     app.board.repo_paths = vec!["/repo/a".to_string()];
     app.input.mode = InputMode::RepoFilter;
     let buf = render_to_buffer(&mut app, 100, 30);
@@ -651,7 +651,7 @@ fn render_repo_filter_overlay_shows_include_mode() {
 
 #[test]
 fn render_repo_filter_overlay_shows_navigate_hint() {
-    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1));
     app.input.mode = InputMode::RepoFilter;
     let buf = render_to_buffer(&mut app, 100, 30);
     assert!(
@@ -662,7 +662,7 @@ fn render_repo_filter_overlay_shows_navigate_hint() {
 
 #[test]
 fn render_repo_filter_input_preset_name() {
-    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1));
     app.board.repo_paths = vec!["/repo/a".to_string()];
     app.input.mode = InputMode::InputPresetName;
     app.input.buffer = "my-preset".to_string();
@@ -679,7 +679,7 @@ fn render_repo_filter_input_preset_name() {
 
 #[test]
 fn render_repo_filter_confirm_delete_preset() {
-    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1));
     app.board.repo_paths = vec!["/repo/a".to_string()];
     app.input.mode = InputMode::ConfirmDeletePreset;
     let buf = render_to_buffer(&mut app, 100, 30);
@@ -940,7 +940,7 @@ fn tab_key_toggles_repo_filter_mode() {
 
 #[test]
 fn repo_filter_overlay_shows_tab_hint() {
-    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1));
     app.board.repo_paths = vec!["/repo/a".to_string()];
     app.input.mode = InputMode::RepoFilter;
     let buf = render_to_buffer(&mut app, 100, 30);
@@ -1013,7 +1013,7 @@ fn buffered_editor_keystrokes_do_not_leak_into_repo_picker() {}
 
 #[test]
 fn enter_sub_epic_from_epic_view_nests_parent() {
-    let mut app = App::new(vec![], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(vec![], ProjectId(1));
     app.board.epics = vec![make_epic(1), make_epic(2)];
     // Start in Epic view for epic 1
     app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(

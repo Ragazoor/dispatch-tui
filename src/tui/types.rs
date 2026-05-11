@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use ratatui::widgets::ListState;
 
@@ -454,21 +454,15 @@ pub struct StatusState {
 // AgentTracking — tmux output and health state for dispatched agents
 // ---------------------------------------------------------------------------
 
-/// Per-agent tmux output and health tracking for dispatched agents.
-///
-/// `last_active_at` records the wall-clock [`Instant`] when each agent was last
-/// known to be active (dispatched, resumed, or produced tmux output). Used for
-/// stale detection — if the elapsed time exceeds `inactivity_timeout`, the task
-/// is marked stale.
-///
-/// `prev_tmux_activity` caches the most recent tmux `window_activity` timestamp
-/// so we can detect genuine new activity vs. a re-poll returning the same value.
-#[derive(Debug)]
+/// Per-agent tmux output and health tracking for dispatched agents. Stale
+/// detection is now derived from `task.last_pre_tool_use_at` by
+/// `ClassifyAgentActivity` on each tick; this struct only retains state that
+/// the classifier cannot reconstruct from the database — captured tmux output,
+/// notification de-duplication, PR poll cadence, message-flash decay, and
+/// last-error context.
+#[derive(Debug, Default)]
 pub struct AgentTracking {
     pub tmux_outputs: HashMap<TaskId, String>,
-    pub last_active_at: HashMap<TaskId, Instant>,
-    pub prev_tmux_activity: HashMap<TaskId, u64>,
-    pub inactivity_timeout: Duration,
     pub notified_review: HashSet<TaskId>,
     pub notified_needs_input: HashSet<TaskId>,
     pub last_pr_poll: HashMap<TaskId, Instant>,
@@ -477,34 +471,12 @@ pub struct AgentTracking {
 }
 
 impl AgentTracking {
-    pub fn new(inactivity_timeout: Duration) -> Self {
-        Self {
-            tmux_outputs: HashMap::new(),
-            last_active_at: HashMap::new(),
-            prev_tmux_activity: HashMap::new(),
-            inactivity_timeout,
-            notified_review: HashSet::new(),
-            notified_needs_input: HashSet::new(),
-            last_pr_poll: HashMap::new(),
-            message_flash: HashMap::new(),
-            last_error: HashMap::new(),
-        }
-    }
-
-    /// Record that the agent for `id` is active right now.
-    pub fn mark_active(&mut self, id: TaskId) {
-        self.last_active_at.insert(id, Instant::now());
-    }
-
-    /// How long since the agent for `id` was last active, if known.
-    pub fn inactive_duration(&self, id: TaskId) -> Option<Duration> {
-        self.last_active_at.get(&id).map(|t| t.elapsed())
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Remove all tracking state for a task.
     pub fn clear(&mut self, id: TaskId) {
-        self.last_active_at.remove(&id);
-        self.prev_tmux_activity.remove(&id);
         self.tmux_outputs.remove(&id);
         self.notified_review.remove(&id);
         self.notified_needs_input.remove(&id);

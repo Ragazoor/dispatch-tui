@@ -89,10 +89,16 @@ fn classify_card_indicator(
         return CardIndicator::Crashed;
     }
     if task.sub_status == SubStatus::Stale {
-        let inactive_mins = app
-            .agents
-            .inactive_duration(task.id)
-            .map(|d| d.as_secs() / 60)
+        // Derive from the hook timestamp so the label matches
+        // ClassifyAgentActivity's source of truth and survives TUI restart.
+        let inactive_mins = task
+            .last_pre_tool_use_at
+            .map(|ts| {
+                now.signed_duration_since(ts)
+                    .num_minutes()
+                    .max(0)
+                    .unsigned_abs()
+            })
             .unwrap_or(0);
         return CardIndicator::Stale { inactive_mins };
     }

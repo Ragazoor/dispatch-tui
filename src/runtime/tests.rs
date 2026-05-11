@@ -90,7 +90,7 @@ async fn test_runtime() -> (TuiRuntime, App) {
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let rt = make_runtime(db.clone(), tx, runner);
     let tasks = db.list_all().await.unwrap();
-    let app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
+    let app = App::new(tasks, ProjectId(1));
     (rt, app)
 }
 
@@ -422,7 +422,7 @@ async fn exec_jump_to_tmux_calls_select_window() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone());
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
+    let mut app = App::new(tasks, ProjectId(1));
 
     rt.exec_jump_to_tmux(&mut app, "my-window".to_string());
 
@@ -590,7 +590,7 @@ async fn exec_jump_to_tmux_failure_shows_error() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone());
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
+    let mut app = App::new(tasks, ProjectId(1));
 
     rt.exec_jump_to_tmux(&mut app, "nonexistent-window".to_string());
 
@@ -981,7 +981,7 @@ async fn exec_quick_dispatch_creates_task_and_dispatches() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock);
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
+    let mut app = App::new(tasks, ProjectId(1));
 
     rt.exec_quick_dispatch(
         &mut app,
@@ -1040,7 +1040,7 @@ async fn exec_quick_dispatch_sets_base_branch_to_repo_default() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock);
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
+    let mut app = App::new(tasks, ProjectId(1));
 
     rt.exec_quick_dispatch(
         &mut app,
@@ -1088,7 +1088,7 @@ async fn exec_quick_dispatch_with_epic_dispatches_successfully() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock);
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
+    let mut app = App::new(tasks, ProjectId(1));
 
     rt.exec_quick_dispatch(
         &mut app,
@@ -1129,7 +1129,7 @@ async fn exec_quick_dispatch_sends_error_on_failure() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock);
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
+    let mut app = App::new(tasks, ProjectId(1));
 
     // /nonexistent won't have .worktrees dir, so provision_worktree fails
     rt.exec_quick_dispatch(
@@ -1168,7 +1168,7 @@ async fn exec_quick_dispatch_failure_sends_dispatch_failed_and_error() {
     )]));
     let rt = make_runtime(db.clone(), tx, mock);
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
+    let mut app = App::new(tasks, ProjectId(1));
 
     rt.exec_quick_dispatch(
         &mut app,
@@ -1559,7 +1559,7 @@ async fn exec_enter_split_mode_opens_pane() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock);
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
+    let mut app = App::new(tasks, ProjectId(1));
 
     rt.exec_enter_split_mode(&mut app);
     assert!(app.error_popup().is_none());
@@ -1574,7 +1574,7 @@ async fn exec_enter_split_mode_no_tmux_shows_status() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock);
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
+    let mut app = App::new(tasks, ProjectId(1));
 
     rt.exec_enter_split_mode(&mut app);
     assert_eq!(app.status_message(), Some("Split mode requires tmux"));
@@ -1591,7 +1591,7 @@ async fn exec_enter_split_mode_with_task_joins_pane() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone());
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
+    let mut app = App::new(tasks, ProjectId(1));
 
     rt.exec_enter_split_mode_with_task(&mut app, TaskId(1), "task-1");
     let calls = mock.recorded_calls();
@@ -1610,7 +1610,7 @@ async fn exec_exit_split_mode_with_restore_breaks_pane() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone());
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
+    let mut app = App::new(tasks, ProjectId(1));
 
     rt.exec_exit_split_mode(&mut app, "%2", Some("task-1"));
     let calls = mock.recorded_calls();
@@ -1627,7 +1627,7 @@ async fn exec_exit_split_mode_without_restore_kills_pane() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone());
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
+    let mut app = App::new(tasks, ProjectId(1));
 
     rt.exec_exit_split_mode(&mut app, "%2", None);
     let calls = mock.recorded_calls();
@@ -1644,7 +1644,7 @@ async fn exec_check_split_pane_existing_pane_no_message() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock);
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
+    let mut app = App::new(tasks, ProjectId(1));
 
     rt.exec_check_split_pane(&mut app, "%2");
     // No error, no SplitPaneClosed
@@ -1660,7 +1660,7 @@ async fn exec_check_split_pane_gone_sends_closed() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock);
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
+    let mut app = App::new(tasks, ProjectId(1));
 
     rt.exec_check_split_pane(&mut app, "%2");
     // SplitPaneClosed was sent via app.update
@@ -1678,7 +1678,7 @@ async fn exec_swap_split_pane_uses_swap_pane() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone());
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
+    let mut app = App::new(tasks, ProjectId(1));
 
     rt.exec_swap_split_pane(&mut app, TaskId(1), "task-1", Some("%2"), None);
     let calls = mock.recorded_calls();
@@ -1706,7 +1706,7 @@ async fn exec_swap_split_pane_renames_old_task_window() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone());
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1), Duration::from_secs(300));
+    let mut app = App::new(tasks, ProjectId(1));
 
     rt.exec_swap_split_pane(
         &mut app,
@@ -1844,7 +1844,7 @@ async fn exec_kill_tmux_window_failure_is_best_effort() {
 // -----------------------------------------------------------------------
 
 fn make_app() -> App {
-    App::new(vec![], ProjectId(1), Duration::from_secs(300))
+    App::new(vec![], ProjectId(1))
 }
 
 #[tokio::test]
@@ -1867,7 +1867,7 @@ async fn load_notifications_pref_sets_true_when_enabled() {
 }
 
 fn make_app_with_two_projects() -> App {
-    let mut app = App::new(vec![], ProjectId(1), Duration::from_secs(300));
+    let mut app = App::new(vec![], ProjectId(1));
     app.update(Message::ProjectsUpdated(vec![
         crate::models::Project {
             id: ProjectId(1),

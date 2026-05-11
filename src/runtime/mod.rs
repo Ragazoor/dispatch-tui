@@ -61,12 +61,7 @@ fn teardown_tmux_for_tui(original_name: Option<&str>, runner: &dyn ProcessRunner
 // run_tui — entry point for the TUI mode
 // ---------------------------------------------------------------------------
 
-pub async fn run_tui(
-    db_path: &Path,
-    port: u16,
-    inactivity_timeout: u64,
-    repo_map_token_budget: usize,
-) -> Result<()> {
+pub async fn run_tui(db_path: &Path, port: u16, repo_map_token_budget: usize) -> Result<()> {
     if std::env::var("TMUX").is_err() {
         anyhow::bail!("dispatch tui must be run inside a tmux session (TMUX is not set)");
     }
@@ -114,11 +109,7 @@ pub async fn run_tui(
         .ok()
         .flatten();
     let initial_project_id = resolve_initial_project(&projects, saved_project);
-    let mut app = App::new(
-        tasks,
-        initial_project_id,
-        Duration::from_secs(inactivity_timeout),
-    );
+    let mut app = App::new(tasks, initial_project_id);
     app.update(Message::ProjectsUpdated(projects));
     let paths = database.list_repo_paths().await.unwrap_or_default();
     app.update(Message::RepoPathsUpdated(paths));

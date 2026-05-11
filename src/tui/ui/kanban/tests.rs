@@ -5,10 +5,9 @@ use crate::models::{ProjectId, TaskTag};
 use crate::tui::types::TaskDraft;
 use ratatui::buffer::Buffer;
 use ratatui::widgets::ListItem;
-use std::time::Duration;
 
 fn make_test_app() -> App {
-    App::new(vec![], ProjectId(1), Duration::from_secs(300))
+    App::new(vec![], ProjectId(1))
 }
 
 fn dummy_style() -> Style {

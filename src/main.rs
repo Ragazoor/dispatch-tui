@@ -28,9 +28,6 @@ enum Commands {
         /// MCP server port
         #[arg(long, env = "DISPATCH_PORT", default_value_t = dispatch_tui::DEFAULT_PORT)]
         port: u16,
-        /// Seconds of unchanged tmux output before marking agent stale
-        #[arg(long, env = "DISPATCH_INACTIVITY_TIMEOUT", default_value = "180")]
-        inactivity_timeout: u64,
         /// Approximate token budget for the ctags-derived repo map injected
         /// into dispatch prompts. Output is truncated to fit. See
         /// `AugmentDispatchPromptWithRepoMap` in `docs/specs/tasks.allium`.
@@ -119,7 +116,6 @@ async fn main() -> Result<()> {
     match cli.command {
         Commands::Tui {
             port,
-            inactivity_timeout,
             repo_map_token_budget,
             no_repo_map,
         } => {
@@ -140,7 +136,7 @@ async fn main() -> Result<()> {
             } else {
                 repo_map_token_budget
             };
-            runtime::run_tui(&cli.db, port, inactivity_timeout, repo_map_budget).await?;
+            runtime::run_tui(&cli.db, port, repo_map_budget).await?;
         }
         Commands::Update {
             id,
