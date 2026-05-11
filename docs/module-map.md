@@ -14,7 +14,7 @@
 | `src/tui/input.rs` | Key event entry point, inline-mutation convention for UI-only state |
 | `src/tui/input/` | Per-mode key handlers: `normal.rs`, `confirm.rs`, `projects.rs`, `repo_filter.rs` |
 | `src/tui/ui/mod.rs` | Rendering entry point — re-exports `render()`, thin dispatcher |
-| `src/tui/ui/kanban.rs` | Kanban board rendering: task/epic cards, columns, overlays, action hints |
+| `src/tui/ui/kanban/` | Kanban board rendering: `mod.rs` entry, `cards.rs`, `columns.rs`, `status_bar.rs`, `projects_panel.rs`, `popups/` overlays |
 | `src/tui/ui/shared.rs` | Cross-board helpers: `render_tab_bar`, `refresh_status`, `truncate`, `push_hint_spans` |
 | `src/tui/ui/palette.rs` | Tokyo Night color palette constants |
 | `src/tui/ui/{input_form,learnings}.rs` | Overlay renderers (input forms, knowledge base panel) |
