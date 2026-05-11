@@ -929,11 +929,7 @@ mod tests {
             runner,
             editor_session: Arc::new(Mutex::new(None)),
         };
-        let mut app = App::new(
-            vec![task.clone()],
-            ProjectId(1),
-            EDITOR_TEST_INACTIVITY_TIMEOUT,
-        );
+        let mut app = App::new(vec![task.clone()], ProjectId(1));
 
         let edited_text = "--- TITLE ---\n\n\
             --- DESCRIPTION ---\n\n\
@@ -981,11 +977,7 @@ mod tests {
             runner,
             editor_session: Arc::new(Mutex::new(None)),
         };
-        let mut app = App::new(
-            vec![task.clone()],
-            ProjectId(1),
-            EDITOR_TEST_INACTIVITY_TIMEOUT,
-        );
+        let mut app = App::new(vec![task.clone()], ProjectId(1));
 
         // Title change only — REPO_PATH section is empty so the editor
         // applier preserves the prior /orig/repo value.

@@ -1350,13 +1350,25 @@ rule UpdateTaskViaMcp {
 }
 
 rule CreateTaskViaMcp {
-    when: McpCreateTask(title, repo_path, project_id, description?, plan?,
-                        epic_id?, sort_order?, tag?, base_branch?)
+    when: McpCreateTask(title, repo_path, description?, plan?,
+                        project_id?, epic_id?, sort_order?, tag?, base_branch?,
+                        caller_task_id?)
 
-    -- project_id is mandatory and must refer to an existing project
-    requires: core/Project.exists(project_id)
+    -- At least one of project_id or caller_task_id must be provided so that
+    -- a project can be derived. Explicit project_id wins; otherwise the
+    -- caller_task_id's project is inherited.
+    requires: project_id != null or caller_task_id != null
 
-    -- epic_id, when given, must refer to an existing epic
+    -- caller_task_id, when given, must refer to an existing task
+    requires:
+        if caller_task_id != null: core/Task.exists(caller_task_id)
+
+    -- Explicit project_id, when given, must refer to an existing project
+    requires:
+        if project_id != null: core/Project.exists(project_id)
+
+    -- Explicit epic_id, when given as a non-null value, must refer to an
+    -- existing epic
     requires:
         if epic_id != null: core/Epic.exists(epic_id)
 
@@ -1367,21 +1379,40 @@ rule CreateTaskViaMcp {
         status: backlog,
         sub_status: core/SubStatus.default_for(backlog),
         plan_path: plan,
-        epic: if epic_id != null then core/Epic.find(epic_id) else null,
+        epic: effective_epic,
         tag: tag,
         sort_order: sort_order,
         base_branch: base_branch ?? config.default_branch,
-        project_id: project_id,
+        project_id: effective_project_id,
         created_at: now,
         updated_at: now
     )
 
+    -- NOTE: allium parser does not support `let` bindings or nested
+    -- if/then/else expressions inside this rule, so the effective-value
+    -- derivation is documented here in pseudo-code rather than declared
+    -- as machine-checked rules. The behaviour is enforced by the
+    -- handler in src/mcp/handlers/tasks.rs (handle_create_task):
+    --   effective_project_id = project_id ?? Task.find(caller_task_id).project_id
+    --   effective_epic       =
+    --       if epic_id is set then Epic.find(epic_id) (or null when epic_id = null)
+    --       else if caller_task_id != null then Task.find(caller_task_id).epic
+    --       else null
+
     @guidance
-        -- project_id is required. The dispatched agent reads its own
-        -- task's project from the dispatch prompt (ProjectId: <id>) and
-        -- passes it on every create_task call so sub-tasks land in the
-        -- same project as their parent task.
-        -- An unknown project_id returns a -32602 validation error.
+        -- A dispatched agent should pass caller_task_id = its own task ID
+        -- on every create_task call. project_id and epic_id then inherit
+        -- from that task, so sub-tasks land in the same project (and
+        -- same epic, if any) as the parent without the agent needing to
+        -- read the ProjectId / EpicId lines out of its prompt.
+        -- Explicit project_id and explicit epic_id always win over the
+        -- caller-derived values. Passing epic_id: null explicitly (as
+        -- opposed to omitting it) means "no epic" even when the caller
+        -- has one.
+        -- When neither project_id nor caller_task_id is provided, the
+        -- handler returns -32602 ("must provide project_id or
+        -- caller_task_id"). An unknown project_id, epic_id, or
+        -- caller_task_id likewise returns -32602.
         -- Unlike the TUI CreateTask rule, this rule does not fire
         -- RecordRepoPath — MCP task creation skips repo path persistence.
         -- repo_path is expanded through expand_tilde before being

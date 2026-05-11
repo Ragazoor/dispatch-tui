@@ -48,8 +48,9 @@ fn task_block_includes_project_section_when_present() {
     assert!(block.contains("ProjectId: 42"), "block was: {block}");
     assert!(block.contains("My Project"), "block was: {block}");
     assert!(
-        block.contains("project_id=42"),
-        "should tell agent to pass project_id=42"
+        block.contains("caller_task_id=1"),
+        "should tell agent to pass caller_task_id=<this task id> so sub-tasks \
+         inherit project/epic; block was: {block}"
     );
 }
 

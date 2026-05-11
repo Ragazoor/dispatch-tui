@@ -16,8 +16,8 @@ use crate::service::{
 };
 
 use super::types::{
-    deserialize_flexible_i64, deserialize_optional_flexible_i64, parse_args,
-    service_err_to_response, JsonRpcResponse, StatusFilter,
+    deserialize_flexible_i64, deserialize_nullable_flexible_i64, deserialize_optional_flexible_i64,
+    parse_args, service_err_to_response, JsonRpcResponse, StatusFilter,
 };
 
 // ---------------------------------------------------------------------------
@@ -98,19 +98,27 @@ pub(super) struct ReportUsageArgs {
 pub(super) struct CreateTaskWithEpicArgs {
     pub(super) title: String,
     pub(super) repo_path: String,
-    #[serde(deserialize_with = "deserialize_flexible_i64")]
-    pub(super) project_id: i64,
+    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
+    pub(super) project_id: Option<i64>,
     #[serde(default)]
     pub(super) description: String,
     pub(super) plan_path: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
-    pub(super) epic_id: Option<i64>,
+    /// Double-Option distinguishes "absent" (→ outer None: inherit from
+    /// caller_task_id if any) from "explicit null" (→ Some(None): clear /
+    /// no epic).
+    #[serde(default, deserialize_with = "deserialize_nullable_flexible_i64")]
+    pub(super) epic_id: Option<Option<i64>>,
     #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
     pub(super) sort_order: Option<i64>,
     #[serde(default)]
     pub(super) tag: Option<TaskTag>,
     #[serde(default)]
     pub(super) base_branch: Option<String>,
+    /// Task ID of the dispatched agent calling this tool. When set, a
+    /// missing project_id inherits from this task; an absent epic_id
+    /// inherits from this task's epic (if any).
+    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
+    pub(super) caller_task_id: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -284,6 +292,29 @@ fn format_task_line(t: &Task, epic_titles: &HashMap<EpicId, String>, goal: &str)
 // Task tool handlers (thin wrappers over TaskService)
 // ---------------------------------------------------------------------------
 
+/// Look up a `caller_task_id` and map "not found" / DB errors to the
+/// JSON-RPC errors agents see (-32602 / -32603). Shared by create_task and
+/// list_tasks so the two handlers stay in sync.
+async fn lookup_caller_task(
+    state: &McpState,
+    id: &Option<Value>,
+    caller_id: i64,
+) -> Result<Task, JsonRpcResponse> {
+    match state.db.get_task(TaskId(caller_id)).await {
+        Ok(Some(t)) => Ok(t),
+        Ok(None) => Err(JsonRpcResponse::err(
+            id.clone(),
+            -32602,
+            format!("Unknown caller_task_id: {caller_id}"),
+        )),
+        Err(e) => Err(JsonRpcResponse::err(
+            id.clone(),
+            -32603,
+            format!("Database error: {e}"),
+        )),
+    }
+}
+
 async fn validate_project_id(
     state: &McpState,
     id: &Option<Value>,
@@ -394,13 +425,45 @@ pub(super) async fn handle_create_task(
     tracing::info!(
         title = %parsed.title,
         epic_id = ?parsed.epic_id,
-        project_id = parsed.project_id,
+        project_id = ?parsed.project_id,
+        caller_task_id = ?parsed.caller_task_id,
         "MCP create_task"
     );
 
-    if let Err(resp) = validate_project_id(state, &id, parsed.project_id).await {
+    if parsed.project_id.is_none() && parsed.caller_task_id.is_none() {
+        return JsonRpcResponse::err(
+            id,
+            -32602,
+            "must provide project_id or caller_task_id".to_string(),
+        );
+    }
+
+    // Look up the caller task once, if provided, so we can inherit fields.
+    let caller = if let Some(caller_id) = parsed.caller_task_id {
+        match lookup_caller_task(state, &id, caller_id).await {
+            Ok(t) => Some(t),
+            Err(resp) => return resp,
+        }
+    } else {
+        None
+    };
+
+    // Effective project: explicit > caller's. The earlier guard ensures at
+    // least one source is available, so the chain below cannot yield None.
+    let effective_project_id = parsed
+        .project_id
+        .or_else(|| caller.as_ref().map(|c| c.project_id.0))
+        .unwrap_or_else(|| unreachable!("guard above ensures project_id or caller_task_id is set"));
+
+    if let Err(resp) = validate_project_id(state, &id, effective_project_id).await {
         return resp;
     }
+
+    // Effective epic: explicit (incl. JSON null) > caller's epic > None.
+    let effective_epic_id: Option<EpicId> = match parsed.epic_id {
+        Some(inner) => inner.map(EpicId),
+        None => caller.as_ref().and_then(|c| c.epic_id),
+    };
 
     let svc = TaskService::new(state.db.clone());
     match svc
@@ -409,11 +472,11 @@ pub(super) async fn handle_create_task(
             description: parsed.description,
             repo_path: parsed.repo_path,
             plan_path: parsed.plan_path,
-            epic_id: parsed.epic_id.map(EpicId),
+            epic_id: effective_epic_id,
             sort_order: parsed.sort_order,
             tag: parsed.tag,
             base_branch: parsed.base_branch,
-            project_id: ProjectId(parsed.project_id),
+            project_id: ProjectId(effective_project_id),
         })
         .await
     {
@@ -466,18 +529,9 @@ pub(super) async fn handle_list_tasks(
     let (derived_epic_id, derived_project_id, exclude_task_id) = if let Some(caller_id) =
         parsed.caller_task_id
     {
-        let caller = match state.db.get_task(TaskId(caller_id)).await {
-            Ok(Some(t)) => t,
-            Ok(None) => {
-                return JsonRpcResponse::err(
-                    id,
-                    -32602,
-                    format!("Unknown caller_task_id: {caller_id}"),
-                );
-            }
-            Err(e) => {
-                return JsonRpcResponse::err(id, -32603, format!("Database error: {e}"));
-            }
+        let caller = match lookup_caller_task(state, &id, caller_id).await {
+            Ok(t) => t,
+            Err(resp) => return resp,
         };
         let has_explicit_scope =
             parsed.epic_id.is_some() || parsed.project_id.is_some() || parsed.repo_paths.is_some();

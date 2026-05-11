@@ -149,7 +149,7 @@ mcp_tools! {
         };
 
     async "create_task" => tasks::handle_create_task,
-        "Create a new task on the kanban board. Tasks always start in 'backlog' status.",
+        "Create a new task on the kanban board. Tasks always start in 'backlog' status. Pass caller_task_id with your own task ID so the new task inherits project_id (and epic_id, when not explicitly given) from your task — this is the simplest way to ensure sub-tasks land in the same project/epic as their parent.",
         {
             "type": "object",
             "properties": {
@@ -170,8 +170,8 @@ mcp_tools! {
                     "description": "Absolute file path to the implementation plan (optional)."
                 },
                 "epic_id": {
-                    "type": "integer",
-                    "description": "Optional epic ID to link this task to"
+                    "type": ["integer", "null"],
+                    "description": "Epic to link this task to. Omit to inherit from caller_task_id's epic (when caller_task_id is set). Pass null explicitly to create a task with no epic even when caller_task_id has one."
                 },
                 "sort_order": {
                     "type": "integer",
@@ -188,10 +188,14 @@ mcp_tools! {
                 },
                 "project_id": {
                     "type": "integer",
-                    "description": "Project the task belongs to. Read from the dispatch prompt's `ProjectId:` line so sub-tasks land in the same project as the parent task."
+                    "description": "Project the task belongs to. Omit to inherit from caller_task_id's project. Required when caller_task_id is not provided."
+                },
+                "caller_task_id": {
+                    "type": "integer",
+                    "description": "Your own task ID. When set, project_id (and epic_id, when not given) inherit from this task — so sub-tasks land in the same project and epic as the parent without you needing to read them from the prompt. Explicit project_id / epic_id always wins."
                 }
             },
-            "required": ["title", "repo_path", "project_id"]
+            "required": ["title", "repo_path"]
         };
 
     async "list_tasks" => tasks::handle_list_tasks,

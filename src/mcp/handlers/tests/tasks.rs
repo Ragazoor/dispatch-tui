@@ -8368,3 +8368,285 @@ async fn wrap_up_then_exit_session_end_to_end() {
         "epic auto-advances once its only subtask completes via exit_session"
     );
 }
+
+// ---------------------------------------------------------------------------
+// create_task caller_task_id derivation tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_task_caller_task_id_inherits_project() {
+    let (state, db) = test_state_with_db().await;
+    let other = db.create_project("Other", 1).await.unwrap();
+
+    let caller_id = db
+        .create_task(CreateTaskRequest {
+            title: "Caller",
+            description: "",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: other.id,
+        })
+        .await
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "create_task",
+            "arguments": {
+                "title": "Child",
+                "repo_path": "/repo",
+                "caller_task_id": caller_id.0,
+            }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
+
+    let tasks = db.list_all().await.unwrap();
+    let child = tasks.iter().find(|t| t.title == "Child").unwrap();
+    assert_eq!(child.project_id, other.id);
+    assert!(child.epic_id.is_none());
+}
+
+#[tokio::test]
+async fn create_task_caller_task_id_inherits_epic_and_project() {
+    let (state, db) = test_state_with_db().await;
+    let other = db.create_project("Other", 1).await.unwrap();
+    let epic = db
+        .create_epic("Epic", "", "/repo", None, other.id)
+        .await
+        .unwrap();
+
+    let caller_id = db
+        .create_task(CreateTaskRequest {
+            title: "Caller",
+            description: "",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: Some(epic.id),
+            sort_order: None,
+            tag: None,
+            project_id: other.id,
+        })
+        .await
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "create_task",
+            "arguments": {
+                "title": "Child",
+                "repo_path": "/repo",
+                "caller_task_id": caller_id.0,
+            }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
+
+    let tasks = db.list_all().await.unwrap();
+    let child = tasks.iter().find(|t| t.title == "Child").unwrap();
+    assert_eq!(child.project_id, other.id);
+    assert_eq!(child.epic_id, Some(epic.id));
+}
+
+#[tokio::test]
+async fn create_task_explicit_project_id_overrides_caller() {
+    let (state, db) = test_state_with_db().await;
+    let other = db.create_project("Other", 1).await.unwrap();
+    let default_id = db.get_default_project().await.unwrap().id;
+
+    let caller_id = db
+        .create_task(CreateTaskRequest {
+            title: "Caller",
+            description: "",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: other.id,
+        })
+        .await
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "create_task",
+            "arguments": {
+                "title": "Child",
+                "repo_path": "/repo",
+                "caller_task_id": caller_id.0,
+                "project_id": default_id.0,
+            }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
+
+    let tasks = db.list_all().await.unwrap();
+    let child = tasks.iter().find(|t| t.title == "Child").unwrap();
+    assert_eq!(child.project_id, default_id);
+}
+
+#[tokio::test]
+async fn create_task_explicit_epic_id_overrides_caller() {
+    let (state, db) = test_state_with_db().await;
+    let default_id = db.get_default_project().await.unwrap().id;
+    let epic_a = db
+        .create_epic("Epic A", "", "/repo", None, default_id)
+        .await
+        .unwrap();
+    let epic_b = db
+        .create_epic("Epic B", "", "/repo", None, default_id)
+        .await
+        .unwrap();
+
+    let caller_id = db
+        .create_task(CreateTaskRequest {
+            title: "Caller",
+            description: "",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: Some(epic_a.id),
+            sort_order: None,
+            tag: None,
+            project_id: default_id,
+        })
+        .await
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "create_task",
+            "arguments": {
+                "title": "Child",
+                "repo_path": "/repo",
+                "caller_task_id": caller_id.0,
+                "epic_id": epic_b.id.0,
+            }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
+
+    let tasks = db.list_all().await.unwrap();
+    let child = tasks.iter().find(|t| t.title == "Child").unwrap();
+    assert_eq!(child.epic_id, Some(epic_b.id));
+}
+
+#[tokio::test]
+async fn create_task_explicit_null_epic_id_overrides_caller() {
+    let (state, db) = test_state_with_db().await;
+    let default_id = db.get_default_project().await.unwrap().id;
+    let epic = db
+        .create_epic("Epic", "", "/repo", None, default_id)
+        .await
+        .unwrap();
+
+    let caller_id = db
+        .create_task(CreateTaskRequest {
+            title: "Caller",
+            description: "",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: Some(epic.id),
+            sort_order: None,
+            tag: None,
+            project_id: default_id,
+        })
+        .await
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "create_task",
+            "arguments": {
+                "title": "Child",
+                "repo_path": "/repo",
+                "caller_task_id": caller_id.0,
+                "epic_id": Value::Null,
+            }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
+
+    let tasks = db.list_all().await.unwrap();
+    let child = tasks.iter().find(|t| t.title == "Child").unwrap();
+    assert!(
+        child.epic_id.is_none(),
+        "explicit epic_id: null should clear epic; got: {:?}",
+        child.epic_id
+    );
+}
+
+#[tokio::test]
+async fn create_task_unknown_caller_task_id_returns_error() {
+    let state = test_state().await;
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "create_task",
+            "arguments": {
+                "title": "Child",
+                "repo_path": "/repo",
+                "caller_task_id": 9999,
+            }
+        })),
+    )
+    .await;
+    assert_error(&resp, "Unknown caller_task_id");
+    assert_eq!(resp.error.as_ref().unwrap().code, -32602);
+
+    let tasks = state.db.list_all().await.unwrap();
+    assert!(tasks.is_empty());
+}
+
+#[tokio::test]
+async fn create_task_missing_project_and_caller_errors() {
+    let state = test_state().await;
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "create_task",
+            "arguments": {
+                "title": "Orphan",
+                "repo_path": "/repo",
+            }
+        })),
+    )
+    .await;
+    assert_error(&resp, "project_id or caller_task_id");
+    assert_eq!(resp.error.as_ref().unwrap().code, -32602);
+
+    let tasks = state.db.list_all().await.unwrap();
+    assert!(tasks.is_empty());
+}

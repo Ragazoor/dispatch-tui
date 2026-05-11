@@ -62,12 +62,14 @@ impl ProjectContext {
         }
     }
 
-    pub(super) fn prompt_section(&self) -> String {
+    pub(super) fn prompt_section(&self, task_id: TaskId) -> String {
         format!(
             "\n\nThis task is in project #{}: {}.\n\
-            When creating sub-tasks via the create_task MCP tool, pass project_id={} \
-            so the new task lands in the same project as this one.",
-            self.project_id, self.project_name, self.project_id
+            When creating sub-tasks via the create_task MCP tool, pass \
+            caller_task_id={} — the new task will inherit project_id \
+            (and epic_id, when not given) from this task so it lands in \
+            the same project and epic.",
+            self.project_id, self.project_name, task_id,
         )
     }
 }
@@ -93,11 +95,14 @@ pub(super) fn epic_preamble(epic: Option<&EpicContext>) -> (String, String) {
 }
 
 /// Returns `(project_id_line, project_section)` for embedding in agent prompts.
-pub(super) fn project_preamble(project: Option<&ProjectContext>) -> (String, String) {
+pub(super) fn project_preamble(
+    project: Option<&ProjectContext>,
+    task_id: TaskId,
+) -> (String, String) {
     let id_line = project.map_or(String::new(), |p| {
         format!("\n  ProjectId: {}", p.project_id)
     });
-    let section = project.map_or(String::new(), |p| p.prompt_section());
+    let section = project.map_or(String::new(), |p| p.prompt_section(task_id));
     (id_line, section)
 }
 
@@ -110,7 +115,7 @@ pub(super) fn task_block(
     project: Option<&ProjectContext>,
 ) -> String {
     let (epic_id_line, epic_section) = epic_preamble(epic);
-    let (project_id_line, project_section) = project_preamble(project);
+    let (project_id_line, project_section) = project_preamble(project, task_id);
     format!(
         "Task:\n  ID: {task_id}\n  Title: {title}\n  Description: {description}\
          {project_id_line}{epic_id_line}{epic_section}{project_section}"

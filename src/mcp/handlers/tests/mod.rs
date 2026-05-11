@@ -254,8 +254,9 @@ async fn tool_schemas_match_arg_structs() {
                 "tag",
                 "base_branch",
                 "project_id",
+                "caller_task_id",
             ]),
-            BTreeSet::from(["title", "repo_path", "project_id"]),
+            BTreeSet::from(["title", "repo_path"]),
             json!({"title": "t", "repo_path": "/r", "project_id": 1, "description": "d", "plan_path": "/p.md", "sort_order": 10, "tag": "feature"}),
         ),
         (
