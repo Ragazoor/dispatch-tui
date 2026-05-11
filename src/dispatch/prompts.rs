@@ -363,6 +363,78 @@ Do NOT make code changes. Your job is to review, not to implement.\n\
     )
 }
 
+pub(super) fn build_dependabot_review_prompt(
+    task_id: TaskId,
+    title: &str,
+    description: &str,
+    epic: Option<&EpicContext>,
+    project: Option<&ProjectContext>,
+    ctx: &PromptContext<'_>,
+) -> String {
+    let block = task_block(task_id, title, description, epic, project);
+    let repo_map = render_repo_map(ctx.repo_map.as_deref());
+
+    format!(
+        "You are a Dependabot triage agent.\n\
+\n\
+{block}\n\
+\n\
+{repo_map}Your job: vet this dependency-bump PR and either auto-merge it (if \
+clearly safe) or ask the user a specific question (if not). Do NOT call \
+the legacy review-status pipeline — that pipeline is legacy.\n\
+\n\
+1. Extract the PR URL and number from the task description.\n\
+2. If the task's pr_url is empty, call update_task(task_id={tid}, pr_url=<URL>).\n\
+3. Verify the PR is dependency-bump-only:\n\
+   - Run: gh pr view <number> --repo <owner/repo> --json author,commits,files\n\
+   - Every commit author login must be `app/dependabot` or `dependabot[bot]`.\n\
+   - Every changed file path must match one of: Cargo.toml, Cargo.lock, \
+package.json, package-lock.json, pnpm-lock.yaml, yarn.lock, requirements*.txt, \
+pyproject.toml, uv.lock, go.mod, go.sum, Gemfile, Gemfile.lock, composer.json, \
+composer.lock, .github/workflows/*.\n\
+   - If either check fails, jump to step 8 and ASK the user.\n\
+4. Parse the bump from the PR title (format: `Bump <pkg> from <X.Y.Z> to <A.B.C>`). \
+Classify as patch / minor / major using semver.\n\
+   - 0.x.y bumps: treat `0.X.y -> 0.X.(y+1)` as patch and `0.X.* -> 0.(X+1).*` \
+as major (0.x is unstable; minor in 0.x can break).\n\
+5. Check CI: gh pr checks <number> --repo <owner/repo>.\n\
+   - All checks passing -> continue to step 6.\n\
+   - Any check pending -> jump to step 8 and ASK whether to wait.\n\
+   - Any check failing -> jump to step 8 and ASK with the failure summary.\n\
+6. Decide by bump kind:\n\
+   - patch: auto-merge (step 7).\n\
+   - minor: try to find the changelog, in order:\n\
+       a. gh release view v<A.B.C> --repo <pkg-owner/pkg-repo> (and any \
+intermediate tags between <X.Y.Z> and <A.B.C>).\n\
+       b. The package repo's CHANGELOG.md between the two versions.\n\
+       c. The GitHub compare view if neither exists.\n\
+     Scan release notes for tokens (case-insensitive): BREAKING, breaking \
+change, removed, deprecat, incompatible, migration, major rewrite.\n\
+     - Changelog found AND no tokens matched -> auto-merge (step 7).\n\
+     - No changelog found OR any token matched -> jump to step 8.\n\
+   - major: jump to step 8 (always ASK).\n\
+7. Auto-merge:\n\
+   - gh pr review <number> --repo <owner/repo> --approve --body \"Auto-approved \
+by dispatch dependabot agent: <patch|minor> bump, CI green, dep-only, \
+changelog OK.\"\n\
+   - gh pr merge <number> --repo <owner/repo> --squash --auto\n\
+   - Note: --auto requires the repo to have branch protection with required \
+checks; without it, the PR merges immediately. If you see a warning to that \
+effect, surface it in the wrap-up message.\n\
+   - Then call wrap_up to finish this task.\n\
+8. Ask the user:\n\
+   - Write ONE direct question to the user that includes: the bump kind, \
+the dep-only verdict, CI status summary, changelog summary or its absence, \
+and the specific reason you are not auto-merging.\n\
+   - Stop and wait for the user's reply. Do NOT call the legacy review-status pipeline.\n\
+\n\
+{mcp}",
+        tid = task_id.0,
+        block = block,
+        mcp = mcp_tools_instruction(),
+    )
+}
+
 pub(super) fn build_research_prompt(
     task_id: TaskId,
     title: &str,
@@ -805,6 +877,59 @@ mod tests {
                 || text.contains("no code changes"),
             "pr_review prompt should prohibit code changes"
         );
+    }
+
+    #[test]
+    fn build_dependabot_review_prompt_contains_runbook() {
+        let ctx = PromptContext::default();
+        let text = build_dependabot_review_prompt(
+            TaskId(42),
+            "#7 Bump serde from 1.0.0 to 1.0.1",
+            "https://github.com/example/repo/pull/7",
+            None,
+            None,
+            &ctx,
+        );
+
+        // Role
+        assert!(text.contains("Dependabot triage agent"), "missing role");
+
+        // Vetting steps
+        assert!(text.contains("dependency-bump-only"), "missing dep-only check");
+        assert!(text.contains("app/dependabot"), "missing dependabot author check");
+        assert!(text.contains("Cargo.lock"), "missing manifest allow-list");
+        assert!(text.contains("package-lock.json"));
+        assert!(text.contains("uv.lock"));
+
+        // Bump classification
+        assert!(text.contains("patch"));
+        assert!(text.contains("minor"));
+        assert!(text.contains("major"));
+
+        // CI check
+        assert!(text.contains("gh pr checks"));
+
+        // Changelog scan
+        assert!(text.contains("CHANGELOG"));
+        assert!(text.contains("BREAKING"));
+
+        // Auto-merge actions
+        assert!(text.contains("gh pr review"));
+        assert!(text.contains("--approve"));
+        assert!(text.contains("gh pr merge"));
+        assert!(text.contains("--squash --auto"));
+
+        // pr_url maintenance
+        assert!(text.contains("update_task"));
+        assert!(text.contains("pr_url"));
+
+        // Escalation
+        assert!(text.contains("ask the user") || text.contains("Ask the user"));
+        assert!(!text.contains("update_review_status"),
+            "must NOT call update_review_status — that pipeline is legacy");
+
+        // Termination
+        assert!(text.contains("wrap_up"));
     }
 
     #[test]
