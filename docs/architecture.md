@@ -33,20 +33,15 @@ Review agents (dispatched for PRs) and fix agents (dispatched for security alert
 State transitions:
 
 ```
-dispatch (d) → Reviewing → findings_ready (agent MCP call) → idle (agent MCP call)
-                                                                  ↓
-                                          re-review (r) → Reviewing → ...
-
-detach (T) or PR merge → NULL (agent_status cleared)
+dispatch (d) → Reviewing → detach (T) or PR merge → NULL (agent_status cleared)
 ```
 
 Key bindings on a PR/alert card:
-- `d` — dispatch agent (blocked when `Reviewing`; allowed from `FindingsReady` and `Idle` for a fresh pass)
+- `d` — dispatch agent (blocked when `Reviewing`)
 - `g` — jump to the active tmux session
-- `r` — re-review (only when `Idle`; sends `/review-pr {number}` to the live session)
 - `T` — detach: kills the tmux window and clears `tmux_window`, `worktree`, and `agent_status` atomically
 
-The agent calls `update_review_status` (MCP tool) to advance its own status. When status becomes `findings_ready`, the runtime also upserts `pr_workflow_states` to `ActionRequired/FindingsReady` and flashes the card. See `docs/specs/review.allium` for the full specification.
+`set_pr_agent` / `set_alert_agent` write `ReviewAgentStatus = Reviewing` atomically with `tmux_window` and `worktree`; detach and PR-merge detection clear all three. See `docs/specs/review.allium` for the full specification.
 
 ## Error Handling
 
