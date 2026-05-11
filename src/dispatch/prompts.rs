@@ -380,8 +380,7 @@ pub(super) fn build_dependabot_review_prompt(
 {block}\n\
 \n\
 {repo_map}Your job: vet this dependency-bump PR and either auto-merge it (if \
-clearly safe) or ask the user a specific question (if not). Do NOT call \
-the `update_review_status` MCP tool — that pipeline is legacy.\n\
+clearly safe) or ask the user a specific question (if not).\n\
 \n\
 1. Extract the PR URL and number from the task description.\n\
 2. If the task's pr_url is empty, call update_task(task_id={tid}, pr_url=<URL>).\n\
@@ -430,7 +429,6 @@ and the specific reason you are not auto-merging.\n\
 \n\
 {mcp}",
         tid = task_id.0,
-        block = block,
         mcp = mcp_tools_instruction(),
     )
 }
