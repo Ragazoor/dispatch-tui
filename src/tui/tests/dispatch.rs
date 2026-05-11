@@ -815,7 +815,7 @@ fn resumed_seeds_last_pre_tool_use_at() {
     // matching DispatchTask behaviour.
     let mut t = make_task(1, TaskStatus::Running);
     t.worktree = Some("/repo/.worktrees/1-t".to_string());
-    let mut app = App::new(vec![t], ProjectId(1), TEST_TIMEOUT);
+    let mut app = App::new(vec![t], ProjectId(1));
     let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Resumed {
         id: TaskId(1),
         tmux_window: "task-1".to_string(),
