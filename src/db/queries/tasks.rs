@@ -474,11 +474,17 @@ impl super::super::TaskCrud for Database {
                 .zip(labels_jsons.iter())
             {
                 let sub_status = SubStatus::default_for(item.status).as_str().to_string();
+                // pr_review items describe an existing PR (e.g. open Dependabot
+                // PRs), so the inserted Task surfaces the PR URL immediately.
+                // Preserved on conflict — see feeds.allium::UpsertFeedTasks.
+                let pr_url = (matches!(item.tag, crate::models::TaskTag::PrReview)
+                    && !item.url.is_empty())
+                .then_some(item.url.as_str());
                 tx.execute(
                     "INSERT INTO tasks
                          (title, description, repo_path, status, sub_status, base_branch,
-                          epic_id, external_id, project_id, tag, labels, sort_order)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                          epic_id, external_id, project_id, tag, labels, sort_order, pr_url)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
                      ON CONFLICT(epic_id, external_id) WHERE external_id IS NOT NULL
                      DO UPDATE SET
                          title       = excluded.title,
@@ -500,6 +506,7 @@ impl super::super::TaskCrud for Database {
                         item.tag.as_str(),
                         labels_json,
                         item.sort_order,
+                        pr_url,
                     ],
                 )
                 .with_context(|| format!("Failed to upsert feed task '{}'", item.external_id))?;

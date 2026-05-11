@@ -225,17 +225,24 @@ rule UpsertFeedTasks {
     --     item.external_id, base_branch = the resolved default branch
     --     of resolved_path[item] (read from `origin/HEAD`, falling
     --     back to "main" when resolved_path is empty or the ref is
-    --     missing), epic = epic.
+    --     missing), epic = epic. Additionally, when item.tag = pr_review
+    --     and item.url is non-empty, the inserted Task's pr_url is set
+    --     to item.url — pr_review feed items (e.g. open Dependabot PRs)
+    --     describe an existing PR, so the card surfaces the PR URL
+    --     immediately. For non-pr_review tags, pr_url remains null on
+    --     insert regardless of item.url.
     --
     --   - Match: title, description, tag, labels, and sort_order on the
     --     existing Task are updated to the new values; status, sub_status,
-    --     AND repo_path are NOT touched. updated_at is bumped. labels and
-    --     sort_order are feed-controlled (never user-editable in this
-    --     iteration), so they are always replaced. This means a user who
-    --     manually fixes the repo_path on a feed task (via 'e') keeps
-    --     that correction across subsequent feed refreshes, while the
-    --     feed-owned tag, labels, and sort_order stay in sync with the
-    --     script output.
+    --     repo_path, AND pr_url are NOT touched. updated_at is bumped.
+    --     labels and sort_order are feed-controlled (never user-editable
+    --     in this iteration), so they are always replaced. This means a
+    --     user who manually fixes the repo_path on a feed task (via 'e')
+    --     keeps that correction across subsequent feed refreshes, while
+    --     the feed-owned tag, labels, and sort_order stay in sync with
+    --     the script output. pr_url is preserved on conflict so that a
+    --     PR URL set by an agent (or carried from the original insert)
+    --     is not overwritten by a later refresh.
     --
     -- Tasks present locally that are NOT in the latest emission are
     -- removed. The dispatch runtime treats the feed as the source of
@@ -265,7 +272,11 @@ rule UpsertFeedTasks {
                     sub_status: core/SubStatus.default_for(item.status),
                     external_id: item.external_id,
                     epic: epic,
-                    base_branch: detect_default_branch(resolved)
+                    base_branch: detect_default_branch(resolved),
+                    -- pr_url copied from item.url when tag = pr_review and
+                    -- item.url is non-empty; null otherwise. See the prose
+                    -- above for rationale.
+                    pr_url: (item.tag = core/TaskTag.pr_review and item.url != "") ? item.url : null
                 )
             else:
                 existing.title = item.title
