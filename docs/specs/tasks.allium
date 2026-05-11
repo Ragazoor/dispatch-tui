@@ -282,7 +282,9 @@ rule DispatchDependabotTask {
         --   * minor + CI green + dep-only + clean changelog -> auto-merge
         --   * everything else -> ask user
         --
-        -- Uses --permission-mode plan (same as other task dispatches).
+        -- Uses Claude's default permission mode (no --permission-mode flag) —
+        -- the agent needs to run gh pr review/merge, so the read-only plan
+        -- mode would be wrong here.
         -- Prompt note: build_dependabot_review_prompt emits a stripped-down
         -- trailing block — only {mcp_tools_instruction}, no tdd, allium,
         -- learning_tools, or wrap_up. The bespoke prompt body still

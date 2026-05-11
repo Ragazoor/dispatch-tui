@@ -10,7 +10,7 @@
 #      Example: /home/you/scripts/fetch-dependabot.sh
 #
 # Output format (FeedItem):
-#   [{"external_id":"dep:owner/repo#42","title":"#42 Bump foo","description":"...","url":"...","status":"backlog","tag":"pr-review"}]
+#   [{"external_id":"dep:owner/repo#42","title":"#42 Bump foo","description":"...","url":"...","status":"backlog","tag":"dependabot"}]
 
 # ---------------------------------------------------------------------------
 # Configure your repositories here (space-separated "owner/repo" slugs).

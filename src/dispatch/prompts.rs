@@ -381,7 +381,7 @@ pub(super) fn build_dependabot_review_prompt(
 \n\
 {repo_map}Your job: vet this dependency-bump PR and either auto-merge it (if \
 clearly safe) or ask the user a specific question (if not). Do NOT call \
-the legacy review-status pipeline — that pipeline is legacy.\n\
+the `update_review_status` MCP tool — that pipeline is legacy.\n\
 \n\
 1. Extract the PR URL and number from the task description.\n\
 2. If the task's pr_url is empty, call update_task(task_id={tid}, pr_url=<URL>).\n\
@@ -426,7 +426,7 @@ effect, surface it in the wrap-up message.\n\
    - Write ONE direct question to the user that includes: the bump kind, \
 the dep-only verdict, CI status summary, changelog summary or its absence, \
 and the specific reason you are not auto-merging.\n\
-   - Stop and wait for the user's reply. Do NOT call the legacy review-status pipeline.\n\
+   - Stop and wait for the user's reply. Do NOT call the `update_review_status` MCP tool — that pipeline is legacy.\n\
 \n\
 {mcp}",
         tid = task_id.0,
@@ -895,8 +895,14 @@ mod tests {
         assert!(text.contains("Dependabot triage agent"), "missing role");
 
         // Vetting steps
-        assert!(text.contains("dependency-bump-only"), "missing dep-only check");
-        assert!(text.contains("app/dependabot"), "missing dependabot author check");
+        assert!(
+            text.contains("dependency-bump-only"),
+            "missing dep-only check"
+        );
+        assert!(
+            text.contains("app/dependabot"),
+            "missing dependabot author check"
+        );
         assert!(text.contains("Cargo.lock"), "missing manifest allow-list");
         assert!(text.contains("package-lock.json"));
         assert!(text.contains("uv.lock"));
@@ -925,8 +931,17 @@ mod tests {
 
         // Escalation
         assert!(text.contains("ask the user") || text.contains("Ask the user"));
-        assert!(!text.contains("update_review_status"),
-            "must NOT call update_review_status — that pipeline is legacy");
+        // The prompt MUST name the legacy tool the agent should avoid.
+        assert!(
+            text.contains("update_review_status"),
+            "prompt must explicitly name the update_review_status tool it is forbidding"
+        );
+        // And it must instruct the agent not to call it.
+        let lower = text.to_lowercase();
+        assert!(
+            lower.contains("do not call") && text.contains("update_review_status"),
+            "prompt must say 'Do not call' near update_review_status"
+        );
 
         // Termination
         assert!(text.contains("wrap_up"));

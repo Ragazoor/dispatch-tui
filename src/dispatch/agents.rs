@@ -451,6 +451,7 @@ pub fn dispatch_review_agent(
     req: &ReviewAgentRequest,
     runner: &dyn ProcessRunner,
 ) -> Result<DispatchResult> {
+    // TODO(#711): remove this dead branch and the is_dependabot flag (legacy review pipeline).
     let prompt = if req.is_dependabot {
         format!(
             "Review dependency update PR #{} in {}.\n\n\
