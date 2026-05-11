@@ -82,6 +82,108 @@ mod tests {
     }
 
     #[test]
+    fn hook_script_extracts_task_id_from_git_branch() {
+        // Agents commonly cd into subdirectories of the worktree. The hook
+        // must still resolve the task ID — `task-usage-hook` already does
+        // this via `git branch --show-current`; `task-status-hook` must
+        // do the same so PreToolUse/Stop/Notification keep firing when
+        // the agent's cwd is below the worktree root.
+        let s = hook_script();
+        assert!(
+            s.contains("git") && s.contains("branch"),
+            "task-status-hook must derive the task ID from the git branch \
+             so it works from subdirectories of the worktree"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hook_resolves_task_id_from_worktree_subdirectory() {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+        use std::process::{Command, Stdio};
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        // Create a git worktree-shaped checkout: branch starts with the task ID.
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        run(&["git", "init", "-q", "-b", "567-foo"], &repo);
+        run(&["git", "config", "user.email", "t@e.st"], &repo);
+        run(&["git", "config", "user.name", "T"], &repo);
+        std::fs::write(repo.join("README"), "x").unwrap();
+        run(&["git", "add", "."], &repo);
+        run(&["git", "commit", "-q", "-m", "init"], &repo);
+        let sub = repo.join("sub").join("deep");
+        std::fs::create_dir_all(&sub).unwrap();
+
+        // Drop the embedded script to a real file so bash can execute it.
+        let script_path = tmp.path().join("task-status-hook");
+        std::fs::write(&script_path, hook_script()).unwrap();
+        let mut perm = std::fs::metadata(&script_path).unwrap().permissions();
+        perm.set_mode(0o755);
+        std::fs::set_permissions(&script_path, perm).unwrap();
+
+        // Shim `dispatch` on PATH so we can observe the call without invoking
+        // the real binary or touching the live database.
+        let bin = tmp.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let observed = tmp.path().join("dispatch.log");
+        let shim = format!(
+            "#!/usr/bin/env bash\necho \"$@\" >> {}\n",
+            observed.display()
+        );
+        let dispatch_shim = bin.join("dispatch");
+        std::fs::write(&dispatch_shim, shim).unwrap();
+        let mut p = std::fs::metadata(&dispatch_shim).unwrap().permissions();
+        p.set_mode(0o755);
+        std::fs::set_permissions(&dispatch_shim, p).unwrap();
+
+        let path = format!(
+            "{}:{}",
+            bin.display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+        let payload = format!(
+            r#"{{"cwd":"{}","hook_event_name":"PreToolUse","tool_name":"Read"}}"#,
+            sub.display()
+        );
+        let mut child = Command::new("bash")
+            .arg(&script_path)
+            .env("PATH", &path)
+            .current_dir(&sub)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn hook");
+        child
+            .stdin
+            .as_mut()
+            .unwrap()
+            .write_all(payload.as_bytes())
+            .unwrap();
+        let status = child.wait().expect("wait");
+        assert!(status.success(), "hook script exited non-zero");
+
+        let log = std::fs::read_to_string(&observed).unwrap_or_default();
+        assert!(
+            log.contains("hook 567 pre_tool_use"),
+            "expected `dispatch hook 567 pre_tool_use` to be invoked from a \
+             subdirectory of the worktree; got: {log:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    fn run(args: &[&str], cwd: &std::path::Path) {
+        let status = std::process::Command::new(args[0])
+            .args(&args[1..])
+            .current_dir(cwd)
+            .status()
+            .expect("spawn");
+        assert!(status.success(), "command failed: {args:?}");
+    }
+
+    #[test]
     fn hooks_json_is_valid() {
         let content = PLUGIN_DIR
             .get_file("hooks/hooks.json")

@@ -13,8 +13,24 @@ INPUT=$(cat)
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
 EVENT=$(echo "$INPUT" | jq -r '.hook_event_name // empty')
 
-# Extract task ID from worktree directory name: {id}-{slug}
-ID=$(basename "${CWD:-}" | grep -oP '^\d+' || true)
+# Extract task ID from the git branch name ({id}-{slug}). Branch lookup is
+# more reliable than basename($CWD) because agents commonly cd into
+# subdirectories of the worktree, which makes basename return something
+# like "models" instead of "567-foo" and silently skips every hook.
+ID=$(git -C "${CWD:-.}" branch --show-current 2>/dev/null | grep -oP '^\d+' || true)
+if [ -z "$ID" ]; then
+    # Fallback: walk up the cwd looking for a path segment that starts
+    # with "<digits>-" (the standard dispatch worktree directory naming).
+    path="${CWD:-}"
+    while [ -n "$path" ] && [ "$path" != "/" ]; do
+        name=$(basename "$path")
+        if [[ "$name" =~ ^[0-9]+- ]]; then
+            ID="${name%%-*}"
+            break
+        fi
+        path=$(dirname "$path")
+    done
+fi
 [ -z "$ID" ] && exit 0
 
 case "$EVENT" in
