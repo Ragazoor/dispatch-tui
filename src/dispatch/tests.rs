@@ -1002,6 +1002,38 @@ fn pr_review_agent_uses_default_permission_mode() {
 }
 
 #[test]
+fn dependabot_review_agent_uses_dependabot_prompt() {
+    let (_dir, repo_path, worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(), // tmux set-hook
+        MockProcessRunner::ok(), // tmux send-keys -l
+        MockProcessRunner::ok(), // tmux send-keys Enter
+    ]);
+
+    let mut task = make_task(&repo_path);
+    task.tag = Some(crate::models::TaskTag::Dependabot);
+    task.description = "https://github.com/example/repo/pull/7".into();
+
+    dependabot_review_agent(&task, &mock, None, None).expect("dispatch should succeed");
+
+    let prompt_file = worktree_dir.join(".claude-prompt");
+    let prompt = std::fs::read_to_string(prompt_file).unwrap();
+    assert!(
+        prompt.contains("Dependabot triage agent"),
+        "expected dependabot prompt, got:\n{prompt}"
+    );
+    assert!(
+        !prompt.contains("You are a PR reviewer"),
+        "must not use the generic pr_review prompt"
+    );
+    assert!(prompt.contains("gh pr merge"));
+    assert!(prompt.contains("--squash --auto"));
+}
+
+#[test]
 fn research_agent_uses_plan_permission_mode() {
     let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
 

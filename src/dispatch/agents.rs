@@ -10,9 +10,10 @@ use crate::tmux;
 use crate::tui::{FixAgentRequest, ReviewAgentRequest};
 
 use super::prompts::{
-    build_epic_planning_prompt, build_fix_task_prompt, build_pr_review_prompt, build_prompt,
-    build_quick_dispatch_prompt, build_research_prompt, build_tmux_window_name, rebase_preamble,
-    EpicContext, LearningInjections, ProjectContext, PromptContext, DISPATCH_PLUGIN_DIR,
+    build_dependabot_review_prompt, build_epic_planning_prompt, build_fix_task_prompt,
+    build_pr_review_prompt, build_prompt, build_quick_dispatch_prompt, build_research_prompt,
+    build_tmux_window_name, rebase_preamble, EpicContext, LearningInjections, ProjectContext,
+    PromptContext, DISPATCH_PLUGIN_DIR,
 };
 use super::repo_map::{self, SystemCtagsExec};
 use super::stderr_str;
@@ -140,6 +141,31 @@ pub fn pr_review_agent(
         |repo_map| {
             let ctx = PromptContext::with_map(LearningInjections::default(), repo_map);
             build_pr_review_prompt(task.id, &task.title, &task.description, epic, project, &ctx)
+        },
+        runner,
+        Some(&task.base_branch),
+        None,
+    )
+}
+
+pub fn dependabot_review_agent(
+    task: &Task,
+    runner: &dyn ProcessRunner,
+    epic: Option<&EpicContext>,
+    project: Option<&ProjectContext>,
+) -> Result<DispatchResult> {
+    dispatch_with_prompt(
+        task,
+        |repo_map| {
+            let ctx = PromptContext::with_map(LearningInjections::default(), repo_map);
+            build_dependabot_review_prompt(
+                task.id,
+                &task.title,
+                &task.description,
+                epic,
+                project,
+                &ctx,
+            )
         },
         runner,
         Some(&task.base_branch),
