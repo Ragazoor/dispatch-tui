@@ -324,6 +324,15 @@ impl TuiRuntime {
                 Self::db_error("updating task", e),
             )));
         }
+
+        // Persist non-empty edited repo_path to the known list so sibling
+        // feed items (e.g. other Dependabot PRs in the same repo) can be
+        // resolved on the next feed sync.
+        if !applied.repo_path.is_empty() && applied.repo_path != task.repo_path {
+            self.exec_save_repo_path(app, applied.repo_path.clone())
+                .await;
+        }
+
         app.update(Message::Task(crate::tui::messages::TaskMessage::Edited(
             crate::tui::TaskEdit {
                 id: task_id,
@@ -885,6 +894,123 @@ mod tests {
         // Empty BASE_BRANCH → preserved prior value at the runtime layer
         // (service treats None as "don't touch" rather than "clear").
         assert_eq!(updated.base_branch, "main");
+    }
+
+    #[tokio::test]
+    async fn finalize_task_edit_persists_new_repo_path_to_known_list() {
+        // Edits that change repo_path must also add the new path to the
+        // saved repo_paths list, so sibling feed items (e.g. other
+        // Dependabot PRs in the same repo) can be auto-resolved.
+        let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+        let db: Arc<dyn crate::db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+        let task = seed_task(&*db).await;
+        // Precondition: known repo_paths does not contain the new path.
+        assert!(
+            !db.list_repo_paths()
+                .await
+                .unwrap()
+                .iter()
+                .any(|p| p == "/new/repo"),
+            "precondition: /new/repo should not be in known list yet"
+        );
+
+        let (tx, _rx) = unbounded_channel();
+        let (feed_tx, _) = unbounded_channel();
+        let rt = TuiRuntime {
+            task_svc: crate::service::TaskService::new(db.clone()),
+            epic_svc: crate::service::EpicService::new(db.clone()),
+            feed_runner: Some(crate::feed::FeedRunner::new(
+                db.clone(),
+                feed_tx,
+                runner.clone(),
+            )),
+            database: db.clone(),
+            msg_tx: tx,
+            runner,
+            editor_session: Arc::new(Mutex::new(None)),
+        };
+        let mut app = App::new(
+            vec![task.clone()],
+            ProjectId(1),
+            EDITOR_TEST_INACTIVITY_TIMEOUT,
+        );
+
+        let edited_text = "--- TITLE ---\n\n\
+            --- DESCRIPTION ---\n\n\
+            --- REPO_PATH ---\n/new/repo\n\
+            --- STATUS ---\n\n\
+            --- PLAN ---\n\n\
+            --- TAG ---\n\n\
+            --- BASE_BRANCH ---\n\n";
+
+        rt.exec_finalize_editor_result(
+            &mut app,
+            EditKind::TaskEdit(task.clone()),
+            EditorOutcome::Saved(edited_text.into()),
+        )
+        .await;
+
+        let paths = db.list_repo_paths().await.unwrap();
+        assert!(
+            paths.iter().any(|p| p == "/new/repo"),
+            "expected /new/repo in known repo_paths, got {paths:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn finalize_task_edit_unchanged_repo_path_does_not_save() {
+        // When repo_path is unchanged (empty section preserves the prior
+        // value), we must not re-save it. Avoids spurious writes when
+        // editing unrelated fields.
+        let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+        let db: Arc<dyn crate::db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+        let task = seed_task(&*db).await;
+
+        let (tx, _rx) = unbounded_channel();
+        let (feed_tx, _) = unbounded_channel();
+        let rt = TuiRuntime {
+            task_svc: crate::service::TaskService::new(db.clone()),
+            epic_svc: crate::service::EpicService::new(db.clone()),
+            feed_runner: Some(crate::feed::FeedRunner::new(
+                db.clone(),
+                feed_tx,
+                runner.clone(),
+            )),
+            database: db.clone(),
+            msg_tx: tx,
+            runner,
+            editor_session: Arc::new(Mutex::new(None)),
+        };
+        let mut app = App::new(
+            vec![task.clone()],
+            ProjectId(1),
+            EDITOR_TEST_INACTIVITY_TIMEOUT,
+        );
+
+        // Title change only — REPO_PATH section is empty so the editor
+        // applier preserves the prior /orig/repo value.
+        let edited_text = "--- TITLE ---\nNew title\n\
+            --- DESCRIPTION ---\n\n\
+            --- REPO_PATH ---\n\n\
+            --- STATUS ---\n\n\
+            --- PLAN ---\n\n\
+            --- TAG ---\n\n\
+            --- BASE_BRANCH ---\n\n";
+
+        rt.exec_finalize_editor_result(
+            &mut app,
+            EditKind::TaskEdit(task.clone()),
+            EditorOutcome::Saved(edited_text.into()),
+        )
+        .await;
+
+        // /orig/repo was never in the known list, and a no-op edit must
+        // not add it.
+        let paths = db.list_repo_paths().await.unwrap();
+        assert!(
+            !paths.iter().any(|p| p == "/orig/repo"),
+            "unchanged repo_path must not be added to known list, got {paths:?}"
+        );
     }
 
     #[tokio::test]

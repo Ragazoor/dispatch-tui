@@ -93,6 +93,10 @@ rule RecordRepoPath {
         --   - TUI task creation (after InputBaseBranch submission)
         --   - TUI quick-dispatch (Shift+D)
         --   - TUI epic creation
+        --   - TUI task edit (EditTask) when repo_path changes to a
+        --     non-empty value, so sibling feed items (e.g. other
+        --     Dependabot PRs in the same repo) can be auto-resolved
+        --     by resolve_feed_item_repo_paths on subsequent feed syncs
         -- The path is first expand_tilde'd. If a SavedRepoPath with
         -- the same path already exists, last_used is bumped to now;
         -- otherwise a new record is created.
