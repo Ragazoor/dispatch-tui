@@ -6,3 +6,4 @@ docs/plans/**
 .claude-prompt
 .claude-messages/
 scripts/local/
+.dispatch/

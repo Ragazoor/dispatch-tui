@@ -59,24 +59,28 @@ for repo in "${REPOS[@]}"; do
     echo '[]'
     continue
   fi
-  echo "$result" | jq --arg repo "$repo" '[.[] | {
+  echo "$result" | jq --arg repo "$repo" '[.[] |
+    ($repo | split("/") | last) as $repo_name |
+    (.security_advisory.severity // "low") as $severity |
+    (.security_advisory.cve_id
+       // .security_advisory.ghsa_id
+       // ("#" + (.number | tostring))) as $advisory_id |
+    {
       external_id: ("cve:\($repo)#" + (.number | tostring)),
-      title: (
-        (if .security_advisory.cve_id != null
-         then .security_advisory.cve_id + ": "
+      title: "[\($severity | ascii_upcase)] \($repo_name): \($advisory_id)",
+      description: (
+        (.security_advisory.summary // "") +
+        (if (.security_advisory.description // "") != ""
+         then "\n\n" + .security_advisory.description
          else ""
-         end) +
-        .security_advisory.summary
+         end)
       ),
-      description: (.security_advisory.description // ""),
       url: .html_url,
       status: "backlog",
       tag: "fix",
-      labels: [($repo | split("/") | last)],
+      labels: [$repo_name],
       sort_order: (
-        {critical: 1, high: 2, medium: 3, low: 4}[
-          .security_advisory.severity // "low"
-        ] // 4
+        {critical: 1, high: 2, medium: 3, low: 4}[$severity] // 4
       )
     }]'
 done | jq -s '[.[][]]'

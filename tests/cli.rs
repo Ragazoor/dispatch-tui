@@ -370,7 +370,10 @@ fn hook_unknown_task_skips() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn verify_feed_valid_empty_array_succeeds() {
+async fn verify_feed_empty_array_fails() {
+    // An empty feed almost always means the command is misconfigured
+    // (e.g. fetch-cve.sh with no repos). Treat it as a failure so the
+    // operator notices, rather than silently passing.
     let db = NamedTempFile::new().unwrap();
     let out = binary()
         .args([
@@ -382,9 +385,13 @@ async fn verify_feed_valid_empty_array_succeeds() {
         .output()
         .unwrap();
     assert!(
-        out.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
+        !out.status.success(),
+        "Expected failure when feed command returns an empty array"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("0 items") || stderr.contains("empty"),
+        "Expected empty-feed error message, got stderr: {stderr}"
     );
 }
 

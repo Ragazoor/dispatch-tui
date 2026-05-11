@@ -246,21 +246,26 @@ async fn main() -> Result<()> {
             let stdout = String::from_utf8_lossy(&output.stdout);
             match serde_json::from_str::<Vec<models::FeedItem>>(stdout.trim()) {
                 Ok(items) => {
-                    if !items.is_empty() {
-                        println!("{:<52} {:<55} {:<10} STATUS", "EXTERNAL_ID", "TITLE", "TAG");
-                        for item in &items {
-                            let id = truncate(&item.external_id, 50);
-                            let title = truncate(&item.title, 53);
-                            println!(
-                                "{:<52} {:<55} {:<10} {}",
-                                id,
-                                title,
-                                item.tag.as_str(),
-                                item.status.as_str()
-                            );
-                        }
-                        println!();
+                    if items.is_empty() {
+                        eprintln!(
+                            "verify-feed: command produced 0 items \
+                             (empty feed — likely a misconfigured feed command)"
+                        );
+                        std::process::exit(1);
                     }
+                    println!("{:<52} {:<55} {:<10} STATUS", "EXTERNAL_ID", "TITLE", "TAG");
+                    for item in &items {
+                        let id = truncate(&item.external_id, 50);
+                        let title = truncate(&item.title, 53);
+                        println!(
+                            "{:<52} {:<55} {:<10} {}",
+                            id,
+                            title,
+                            item.tag.as_str(),
+                            item.status.as_str()
+                        );
+                    }
+                    println!();
                     let s = if items.len() == 1 { "" } else { "s" };
                     println!("✓ {} valid item{s}", items.len());
                 }
