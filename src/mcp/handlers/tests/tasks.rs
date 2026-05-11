@@ -4666,6 +4666,10 @@ async fn dispatch_next_picks_first_backlog_subtask() {
     assert_eq!(task1.status, TaskStatus::Running);
     assert!(task1.worktree.is_some());
     assert!(task1.tmux_window.is_some());
+    assert!(
+        task1.last_pre_tool_use_at.is_some(),
+        "last_pre_tool_use_at should be seeded so the tick classifier does not flicker the task to Stale"
+    );
 
     // task2 should still be Backlog
     let task2 = db.get_task(task2_id).await.unwrap().unwrap();
@@ -6257,6 +6261,10 @@ async fn dispatch_task_dispatches_backlog_task() {
     assert!(
         task.tmux_window.is_some(),
         "tmux_window should be set after dispatch"
+    );
+    assert!(
+        task.last_pre_tool_use_at.is_some(),
+        "last_pre_tool_use_at should be seeded so the tick classifier does not flicker the task to Stale"
     );
 }
 

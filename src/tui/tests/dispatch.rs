@@ -959,6 +959,34 @@ fn quick_dispatch_non_digit_is_noop() {
 }
 
 #[test]
+fn resumed_seeds_last_pre_tool_use_at() {
+    // ResumeTask spec ensures last_pre_tool_use_at = now so the resumed
+    // task is classified Active until the agent's first PreToolUse hook,
+    // matching DispatchTask behaviour.
+    let mut t = make_task(1, TaskStatus::Running);
+    t.worktree = Some("/repo/.worktrees/1-t".to_string());
+    let mut app = App::new(vec![t], ProjectId(1), TEST_TIMEOUT);
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Resumed {
+        id: TaskId(1),
+        tmux_window: "task-1".to_string(),
+    }));
+    let task = app.find_task(TaskId(1)).unwrap();
+    let stamp = task
+        .last_pre_tool_use_at
+        .expect("resume should seed last_pre_tool_use_at");
+    assert!(
+        chrono::Utc::now()
+            .signed_duration_since(stamp)
+            .num_seconds()
+            < 5
+    );
+    let Command::Task(crate::tui::commands::TaskCommand::Persist(persisted)) = &cmds[0] else {
+        panic!("expected Persist command, got {:?}", cmds[0]);
+    };
+    assert!(persisted.last_pre_tool_use_at.is_some());
+}
+
+#[test]
 fn conflict_flag_clears_on_dispatch() {
     let mut app = App::new(
         vec![{

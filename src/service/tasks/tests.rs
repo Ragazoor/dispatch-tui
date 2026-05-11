@@ -250,6 +250,45 @@ async fn claim_task_success() {
 }
 
 #[tokio::test]
+async fn claim_task_seeds_last_pre_tool_use_at() {
+    // Without seeding the timestamp, ClassifyAgentActivity would flip the
+    // freshly running task to Stale on the next TUI tick.
+    let db = test_db().await;
+    let svc = task_svc(&db);
+
+    let id = svc
+        .create_task(CreateTaskParams {
+            title: "T".into(),
+            description: "".into(),
+            repo_path: "/repo".into(),
+            plan_path: None,
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            base_branch: None,
+            project_id: ProjectId(1),
+        })
+        .await
+        .unwrap();
+
+    let before = chrono::Utc::now();
+    svc.claim_task(ClaimTaskParams {
+        task_id: id,
+        worktree: "/repo/.worktrees/feature".into(),
+        tmux_window: "win1".into(),
+    })
+    .await
+    .unwrap();
+
+    let task = svc.get_task(id).await.unwrap();
+    let stamp = task
+        .last_pre_tool_use_at
+        .expect("claim_task should seed last_pre_tool_use_at");
+    assert!(stamp >= before - chrono::Duration::seconds(1));
+    assert!(stamp <= chrono::Utc::now() + chrono::Duration::seconds(1));
+}
+
+#[tokio::test]
 async fn claim_task_wrong_repo() {
     let db = test_db().await;
     let svc = task_svc(&db);

@@ -341,13 +341,17 @@ impl TaskService {
             )));
         }
 
+        // Seed last_pre_tool_use_at so ClassifyAgentActivity treats the
+        // freshly running task as Active until the agent's first PreToolUse
+        // hook fires — otherwise it flickers into Stale on the next tick.
         self.db
             .patch_task(
                 params.task_id,
                 &TaskPatch::new()
                     .status(TaskStatus::Running)
                     .worktree(Some(&params.worktree))
-                    .tmux_window(Some(&params.tmux_window)),
+                    .tmux_window(Some(&params.tmux_window))
+                    .last_pre_tool_use_at(Some(chrono::Utc::now())),
             )
             .await
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;

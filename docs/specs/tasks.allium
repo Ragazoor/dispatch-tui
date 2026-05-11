@@ -1380,6 +1380,7 @@ rule ClaimTaskViaMcp {
 
     ensures: task.status = running
     ensures: task.sub_status = core/SubStatus.default_for(running)
+    ensures: task.last_pre_tool_use_at = now
     ensures: task.worktree = worktree
     ensures: task.tmux_window = tmux_window
     ensures: task.updated_at = now
@@ -1390,6 +1391,10 @@ rule ClaimTaskViaMcp {
         -- full path is returned (so a user's repo root is accepted as-is).
         -- On mismatch, the service returns a Validation error naming
         -- the task's repo_path and the caller's derived repo root.
+        -- last_pre_tool_use_at is seeded so ClassifyAgentActivity sees a
+        -- recent activity stamp through the ACTIVE_THRESHOLD window before
+        -- the agent's first PreToolUse hook fires — without that, the
+        -- freshly running task flickers into Stale on the next tick.
 }
 
 rule ReportUsageViaMcp {

@@ -367,6 +367,10 @@ impl App {
             task.tmux_window = Some(tmux_window);
             task.status = TaskStatus::Running;
             task.sub_status = SubStatus::Active;
+            // Match DispatchTask: seed last_pre_tool_use_at so the tick
+            // classifier does not flip the freshly resumed task into Stale
+            // before the agent emits its first PreToolUse hook.
+            task.last_pre_tool_use_at = Some(chrono::Utc::now());
             let task_clone = task.clone();
             self.agents.mark_active(id);
             self.agents.last_error.remove(&id);

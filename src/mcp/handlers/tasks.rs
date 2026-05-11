@@ -915,10 +915,15 @@ pub(super) async fn handle_dispatch_next(
 
         match result {
             Ok(Ok(dispatch_result)) => {
+                // Seed last_pre_tool_use_at so ClassifyAgentActivity treats
+                // the freshly running task as Active until the agent's first
+                // PreToolUse hook fires — otherwise the TUI tick flickers it
+                // into Stale.
                 let patch = db::TaskPatch::new()
                     .status(TaskStatus::Running)
                     .worktree(Some(&dispatch_result.worktree_path))
-                    .tmux_window(Some(&dispatch_result.tmux_window));
+                    .tmux_window(Some(&dispatch_result.tmux_window))
+                    .last_pre_tool_use_at(Some(chrono::Utc::now()));
                 if let Err(e) = db.patch_task(next_id, &patch).await {
                     tracing::warn!(
                         task_id = next_id.0,
@@ -1010,10 +1015,14 @@ pub(super) async fn handle_dispatch_task(
 
     match result {
         Ok(Ok(dr)) => {
+            // Seed last_pre_tool_use_at so ClassifyAgentActivity treats the
+            // freshly running task as Active until the agent's first
+            // PreToolUse hook fires.
             let patch = db::TaskPatch::new()
                 .status(TaskStatus::Running)
                 .worktree(Some(&dr.worktree_path))
-                .tmux_window(Some(&dr.tmux_window));
+                .tmux_window(Some(&dr.tmux_window))
+                .last_pre_tool_use_at(Some(chrono::Utc::now()));
             let _ = state.db.patch_task(task_id, &patch).await;
             if let Some(eid) = epic_id {
                 let _ = state.db.recalculate_epic_status(eid).await;
