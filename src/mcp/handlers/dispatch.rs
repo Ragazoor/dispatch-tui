@@ -111,8 +111,8 @@ mcp_tools! {
                 },
                 "tag": {
                     "type": "string",
-                    "description": "Task tag: bug, feature, chore, pr-review, research, or fix. Controls dispatch behavior.",
-                    "enum": ["bug", "feature", "chore", "pr-review", "research", "fix"]
+                    "description": "Task tag: bug, feature, chore, pr-review, research, fix, or dependabot. Controls dispatch behavior. The dependabot tag is intended for feed scripts only — TUI users cannot select it from the tag picker.",
+                    "enum": ["bug", "feature", "chore", "pr-review", "research", "fix", "dependabot"]
                 },
                 "sub_status": {
                     "type": "string",
@@ -179,8 +179,8 @@ mcp_tools! {
                 },
                 "tag": {
                     "type": "string",
-                    "description": "Task tag: bug, feature, chore, pr-review, research, or fix. Controls dispatch behavior.",
-                    "enum": ["bug", "feature", "chore", "pr-review", "research", "fix"]
+                    "description": "Task tag: bug, feature, chore, pr-review, research, fix, or dependabot. Controls dispatch behavior. The dependabot tag is intended for feed scripts only — TUI users cannot select it from the tag picker.",
+                    "enum": ["bug", "feature", "chore", "pr-review", "research", "fix", "dependabot"]
                 },
                 "base_branch": {
                     "type": "string",
