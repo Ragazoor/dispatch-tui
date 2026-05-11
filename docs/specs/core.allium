@@ -29,7 +29,7 @@ external entity TmuxPane {
 -- Enumerations
 ------------------------------------------------------------
 
-enum TaskTag { bug | feature | chore | pr_review | research | fix }
+enum TaskTag { bug | feature | chore | pr_review | research | fix | dependabot }
 
 enum TipsShowMode { always | new_only | never }
 

@@ -111,9 +111,9 @@ rule DispatchTask {
     requires: task.status = backlog
     -- Tasks with a plan always dispatch. Tasks without a plan dispatch
     -- unless they carry a tag that routes to a dedicated agent
-    -- (pr_review, research, fix).
+    -- (pr_review, research, fix, dependabot).
     requires: task.has_plan = true
-              or task.tag not in {pr_review, research, fix}
+              or task.tag not in {pr_review, research, fix, dependabot}
 
     ensures: task.status = running
     ensures: task.sub_status = core/SubStatus.default_for(running)
@@ -250,6 +250,44 @@ rule DispatchPrReviewTask {
         -- "When the review is complete, call wrap_up to finish this task."
         -- so the agent has an explicit termination signal
         -- (src/dispatch/prompts.rs).
+}
+
+rule DispatchDependabotTask {
+    when: DispatchDependabotTask(task)
+
+    requires: task.status = backlog
+    requires: task.has_plan = false
+    requires: task.tag = dependabot
+
+    ensures: task.status = running
+    ensures: task.sub_status = core/SubStatus.default_for(running)
+    ensures: task.last_pre_tool_use_at = now
+    ensures: task.worktree = core/Worktree.created(
+        path: task.repo_path + "/.worktrees/" + task.id + "-" + slugify(task.title),
+        branch: task.id + "-" + slugify(task.title)
+    )
+    ensures: task.tmux_window = core/TmuxWindow.created(name: "task-" + task.id)
+    ensures: AgentLaunched(task: task, mode: dependabot)
+
+    @guidance
+        -- Dependabot mode: the agent vets a Dependabot PR (dep-only? bump
+        -- kind? CI green? changelog?) and either auto-approves and enables
+        -- auto-merge for low-risk bumps, or asks the user a specific
+        -- question via chat for anything uncertain. Escalation is a chat
+        -- question, NOT update_review_status (the pr_workflow_states
+        -- pipeline is legacy and unread by the active UI).
+        --
+        -- Auto-merge policy (build_dependabot_review_prompt):
+        --   * patch + CI green + dep-only -> auto-merge
+        --   * minor + CI green + dep-only + clean changelog -> auto-merge
+        --   * everything else -> ask user
+        --
+        -- Uses --permission-mode plan (same as other task dispatches).
+        -- Prompt note: build_dependabot_review_prompt emits a stripped-down
+        -- trailing block — only {mcp_tools_instruction}, no tdd, allium,
+        -- learning_tools, or wrap_up. The bespoke prompt body still
+        -- includes "call wrap_up to finish this task" so the agent has an
+        -- explicit termination signal.
 }
 
 rule DispatchResearchTask {
@@ -1678,7 +1716,7 @@ rule AugmentDispatchPromptWithLearnings {
 rule AugmentDispatchPromptWithRepoMap {
     when: AgentLaunched(task, mode)
 
-    requires: mode in {standard, resume, quick, epic_planning, pr_review, research, fix}
+    requires: mode in {standard, resume, quick, epic_planning, pr_review, research, fix, dependabot}
     requires: config.repo_map_enabled = true
 
     let binary = CtagsBinary.detected_at_startup()
