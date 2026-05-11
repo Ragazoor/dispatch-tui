@@ -55,5 +55,14 @@ pub enum TaskCommand {
         id: TaskId,
         sub_status: SubStatus,
     },
+    /// Seed `last_pre_tool_use_at` on a Backlog→Running transition.
+    ///
+    /// Kept separate from [`Self::Persist`] so a generic in-memory persist
+    /// (sort_order swaps, tick reclassification, etc.) cannot clobber a
+    /// freshly hook-written timestamp with a stale in-memory value.
+    SeedActivity {
+        id: TaskId,
+        at: chrono::DateTime<chrono::Utc>,
+    },
     RefreshFromDb,
 }

@@ -149,14 +149,17 @@ impl App {
             // Seed last_pre_tool_use_at so ClassifyAgentActivity treats the
             // freshly dispatched task as Active until the agent's first real
             // PreToolUse hook fires — otherwise it flickers into Stale on the
-            // next tick.
-            task.last_pre_tool_use_at = Some(chrono::Utc::now());
+            // next tick. The DB write goes through SeedActivity (not Persist)
+            // so a later generic Persist cannot clobber a hook-written stamp.
+            let seed_at = chrono::Utc::now();
+            task.last_pre_tool_use_at = Some(seed_at);
             let task_clone = task.clone();
             self.agents.mark_active(id);
             self.sync_board_selection();
-            let mut cmds = vec![Command::Task(crate::tui::commands::TaskCommand::Persist(
-                task_clone,
-            ))];
+            let mut cmds = vec![
+                Command::Task(crate::tui::commands::TaskCommand::Persist(task_clone)),
+                Command::Task(crate::tui::commands::TaskCommand::SeedActivity { id, at: seed_at }),
+            ];
             if switch_focus {
                 cmds.push(Command::Task(
                     crate::tui::commands::TaskCommand::JumpToTmux {

@@ -37,6 +37,11 @@ impl App {
                 return vec![];
             }
             task.sub_status = SubStatus::Active;
+            // Seed in-memory so a tick that fires between this handler and the
+            // arriving Resumed message does not reclassify the task back to
+            // Stale from an old timestamp. The DB row is updated by the
+            // subsequent Resumed → handle_resumed path.
+            task.last_pre_tool_use_at = Some(chrono::Utc::now());
             let old_window = task.tmux_window.take();
             let task_clone = task.clone();
 

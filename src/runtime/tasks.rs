@@ -110,19 +110,45 @@ impl TuiRuntime {
 
     pub(super) async fn exec_persist_task(&self, app: &mut App, task: models::Task) {
         use crate::service::UpdateTaskParams;
+        // `last_pre_tool_use_at` is intentionally omitted: hooks own that
+        // column. Writing it here would let a stale in-memory snapshot
+        // (e.g. from a tick reclassification or sort_order swap) overwrite
+        // a fresher hook write, flipping the task to Stale on the next tick.
+        // Backlog→Running seeds go through `SeedActivity` instead.
         let mut p = UpdateTaskParams::for_task(task.id)
             .status(task.status)
             .sub_status(task.sub_status)
             .pr_url(option_to_field_update(task.pr_url.clone()))
             .worktree(option_to_field_update(task.worktree.clone()))
-            .tmux_window(option_to_field_update(task.tmux_window.clone()))
-            .last_pre_tool_use_at(task.last_pre_tool_use_at);
+            .tmux_window(option_to_field_update(task.tmux_window.clone()));
         if let Some(so) = task.sort_order {
             p = p.sort_order(so);
         }
         if let Err(e) = self.task_svc.update_task(p).await {
             app.update(Message::System(crate::tui::messages::SystemMessage::Error(
                 Self::db_error("persisting task", e),
+            )));
+        }
+    }
+
+    /// Write `last_pre_tool_use_at` for a freshly running task. Used after
+    /// Backlog→Running transitions so the tick classifier sees a recent
+    /// activity stamp through the ACTIVE_THRESHOLD window before the agent's
+    /// first PreToolUse hook fires.
+    pub(super) async fn exec_seed_activity(
+        &self,
+        app: &mut App,
+        id: models::TaskId,
+        at: chrono::DateTime<chrono::Utc>,
+    ) {
+        use crate::service::UpdateTaskParams;
+        if let Err(e) = self
+            .task_svc
+            .update_task(UpdateTaskParams::for_task(id).last_pre_tool_use_at(Some(at)))
+            .await
+        {
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                Self::db_error("seeding activity timestamp", e),
             )));
         }
     }

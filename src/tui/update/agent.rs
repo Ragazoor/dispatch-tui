@@ -369,16 +369,20 @@ impl App {
             task.sub_status = SubStatus::Active;
             // Match DispatchTask: seed last_pre_tool_use_at so the tick
             // classifier does not flip the freshly resumed task into Stale
-            // before the agent emits its first PreToolUse hook.
-            task.last_pre_tool_use_at = Some(chrono::Utc::now());
+            // before the agent emits its first PreToolUse hook. The DB write
+            // is split off into SeedActivity so a later generic Persist
+            // cannot clobber a hook-written stamp.
+            let seed_at = chrono::Utc::now();
+            task.last_pre_tool_use_at = Some(seed_at);
             let task_clone = task.clone();
             self.agents.mark_active(id);
             self.agents.last_error.remove(&id);
             self.sync_board_selection();
             self.set_status(format!("Task {id} resumed"));
-            vec![Command::Task(crate::tui::commands::TaskCommand::Persist(
-                task_clone,
-            ))]
+            vec![
+                Command::Task(crate::tui::commands::TaskCommand::Persist(task_clone)),
+                Command::Task(crate::tui::commands::TaskCommand::SeedActivity { id, at: seed_at }),
+            ]
         } else {
             vec![]
         }

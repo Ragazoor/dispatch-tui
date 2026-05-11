@@ -227,6 +227,96 @@ async fn exec_persist_task_preserves_sub_status() {
     assert_eq!(db_task.sub_status, models::SubStatus::Approved);
 }
 
+/// Persist must not clobber `last_pre_tool_use_at`. Hooks own that column —
+/// if the TUI's in-memory snapshot races against a fresh hook write and wins,
+/// the task flickers Active → Stale on the next tick.
+#[tokio::test]
+async fn exec_persist_task_does_not_overwrite_last_pre_tool_use_at() {
+    let (rt, mut app) = test_runtime().await;
+    rt.exec_insert_task(
+        &mut app,
+        tui::TaskDraft {
+            title: "Hook race".into(),
+            description: "Desc".into(),
+            repo_path: "/repo".into(),
+            ..Default::default()
+        },
+        None,
+    )
+    .await;
+    let id = app.tasks()[0].id;
+
+    // Simulate the hook CLI writing a fresh PreToolUse timestamp directly.
+    let hook_ts = chrono::Utc::now();
+    rt.database
+        .patch_task(
+            id,
+            &db::TaskPatch::new()
+                .status(models::TaskStatus::Running)
+                .sub_status(models::SubStatus::Active)
+                .last_pre_tool_use_at(Some(hook_ts)),
+        )
+        .await
+        .unwrap();
+
+    // In-memory still holds the pre-hook (NULL) snapshot. Persist it.
+    let mut stale = app.tasks()[0].clone();
+    stale.status = models::TaskStatus::Running;
+    stale.sub_status = models::SubStatus::Active;
+    stale.last_pre_tool_use_at = None;
+    rt.exec_persist_task(&mut app, stale).await;
+
+    // The hook's timestamp must survive — Persist owns status/sub_status,
+    // not the activity stamp.
+    let db_task = rt.database.get_task(id).await.unwrap().unwrap();
+    assert_eq!(
+        db_task.last_pre_tool_use_at.map(|t| t.timestamp()),
+        Some(hook_ts.timestamp()),
+        "Persist clobbered hook-written last_pre_tool_use_at"
+    );
+}
+
+/// SeedActivity writes only `last_pre_tool_use_at`, leaving every other
+/// column untouched.
+#[tokio::test]
+async fn exec_seed_activity_writes_only_timestamp() {
+    let (rt, mut app) = test_runtime().await;
+    rt.exec_insert_task(
+        &mut app,
+        tui::TaskDraft {
+            title: "Seed".into(),
+            description: "Desc".into(),
+            repo_path: "/repo".into(),
+            ..Default::default()
+        },
+        None,
+    )
+    .await;
+    let id = app.tasks()[0].id;
+    rt.database
+        .patch_task(
+            id,
+            &db::TaskPatch::new()
+                .status(models::TaskStatus::Running)
+                .sub_status(models::SubStatus::NeedsInput),
+        )
+        .await
+        .unwrap();
+
+    let seed_at = chrono::Utc::now();
+    rt.exec_seed_activity(&mut app, id, seed_at).await;
+
+    let db_task = rt.database.get_task(id).await.unwrap().unwrap();
+    assert_eq!(
+        db_task.last_pre_tool_use_at.map(|t| t.timestamp()),
+        Some(seed_at.timestamp())
+    );
+    // SeedActivity must not touch status/sub_status — those are owned by
+    // the dispatch lifecycle, not the activity stamp.
+    assert_eq!(db_task.status, models::TaskStatus::Running);
+    assert_eq!(db_task.sub_status, models::SubStatus::NeedsInput);
+}
+
 #[tokio::test]
 async fn exec_save_repo_path_updates_app_state() {
     let (rt, mut app) = test_runtime().await;

@@ -519,11 +519,15 @@ fn dispatched_sets_fields_and_transitions_to_running() {
             .num_seconds()
             < 5
     );
-    assert_eq!(cmds.len(), 1);
+    assert_eq!(cmds.len(), 2);
     let Command::Task(crate::tui::commands::TaskCommand::Persist(persisted)) = &cmds[0] else {
         panic!("expected Persist command, got {:?}", cmds[0]);
     };
     assert!(persisted.last_pre_tool_use_at.is_some());
+    assert!(matches!(
+        &cmds[1],
+        Command::Task(crate::tui::commands::TaskCommand::SeedActivity { id, .. }) if *id == TaskId(3)
+    ));
 }
 
 #[test]
@@ -539,13 +543,17 @@ fn dispatched_with_switch_focus_emits_jump() {
             switch_focus: true,
         },
     ));
-    assert_eq!(cmds.len(), 2);
+    assert_eq!(cmds.len(), 3);
     assert!(matches!(
         &cmds[0],
         Command::Task(crate::tui::commands::TaskCommand::Persist(_))
     ));
+    assert!(matches!(
+        &cmds[1],
+        Command::Task(crate::tui::commands::TaskCommand::SeedActivity { .. })
+    ));
     assert!(
-        matches!(&cmds[1], Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "win")
+        matches!(&cmds[2], Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "win")
     );
 }
 
@@ -699,6 +707,12 @@ fn retry_resume_emits_kill_and_resume() {
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
     app.board.tasks[0].worktree = Some("/repo/.worktrees/4-task-4".to_string());
     app.board.tasks[0].sub_status = SubStatus::Stale;
+    // Pretend this stale task's last activity was 5 minutes ago — well past
+    // ACTIVE_THRESHOLD. Without the seed in handle_retry_resume, a tick that
+    // fires before the Resumed message arrives would flip the task back to
+    // Stale on the basis of this old timestamp.
+    app.board.tasks[0].last_pre_tool_use_at =
+        Some(chrono::Utc::now() - chrono::Duration::minutes(5));
     app.input.mode = InputMode::ConfirmRetry(TaskId(4));
 
     let cmds = app.update(Message::Task(
@@ -708,6 +722,18 @@ fn retry_resume_emits_kill_and_resume() {
     // After retry resume, sub_status is no longer stale/crashed
     assert!(!app.is_stale(TaskId(4)));
     assert!(!app.is_crashed(TaskId(4)));
+    // last_pre_tool_use_at must be seeded so the tick classifier sees a
+    // fresh activity stamp through the ACTIVE_THRESHOLD window.
+    let stamped = app.board.tasks[0]
+        .last_pre_tool_use_at
+        .expect("last_pre_tool_use_at seeded on retry resume");
+    assert!(
+        chrono::Utc::now()
+            .signed_duration_since(stamped)
+            .num_seconds()
+            < 5,
+        "expected fresh seed, got {stamped}"
+    );
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(cmds.iter().any(|c| matches!(
         c,

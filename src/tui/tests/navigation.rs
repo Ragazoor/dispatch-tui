@@ -323,10 +323,14 @@ fn resumed_sets_tmux_window() {
         tmux_window: "win-4".to_string(),
     }));
     assert_eq!(app.board.tasks[0].tmux_window.as_deref(), Some("win-4"));
-    assert_eq!(cmds.len(), 1);
+    assert_eq!(cmds.len(), 2);
     assert!(matches!(
         &cmds[0],
         Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+    ));
+    assert!(matches!(
+        &cmds[1],
+        Command::Task(crate::tui::commands::TaskCommand::SeedActivity { id, .. }) if *id == TaskId(4)
     ));
 }
 
@@ -359,10 +363,14 @@ fn resumed_sets_status_to_running() {
     let task = app.board.tasks.iter().find(|t| t.id == TaskId(4)).unwrap();
     assert_eq!(task.status, TaskStatus::Running);
     assert_eq!(task.tmux_window.as_deref(), Some("task-4"));
-    assert_eq!(cmds.len(), 1);
+    assert_eq!(cmds.len(), 2);
     assert!(
         matches!(&cmds[0], Command::Task(crate::tui::commands::TaskCommand::Persist(t)) if t.status == TaskStatus::Running)
     );
+    assert!(matches!(
+        &cmds[1],
+        Command::Task(crate::tui::commands::TaskCommand::SeedActivity { .. })
+    ));
 }
 
 #[test]
