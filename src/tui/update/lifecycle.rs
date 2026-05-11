@@ -146,6 +146,11 @@ impl App {
             task.tmux_window = Some(tmux_window.clone());
             task.status = TaskStatus::Running;
             task.sub_status = SubStatus::default_for(TaskStatus::Running);
+            // Seed last_pre_tool_use_at so ClassifyAgentActivity treats the
+            // freshly dispatched task as Active until the agent's first real
+            // PreToolUse hook fires — otherwise it flickers into Stale on the
+            // next tick.
+            task.last_pre_tool_use_at = Some(chrono::Utc::now());
             let task_clone = task.clone();
             self.agents.mark_active(id);
             self.sync_board_selection();

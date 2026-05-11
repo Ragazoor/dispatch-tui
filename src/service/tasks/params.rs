@@ -27,6 +27,9 @@ pub struct UpdateTaskParams {
     pub tmux_window: Option<FieldUpdate>,
     pub base_branch: Option<String>,
     pub project_id: Option<ProjectId>,
+    /// Outer `Some` means "write this column", inner value is the value to write
+    /// (with `None` meaning clear-to-NULL).
+    pub last_pre_tool_use_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
 }
 
 impl UpdateTaskParams {
@@ -78,6 +81,9 @@ impl UpdateTaskParams {
         if self.project_id.is_some() {
             names.push("project_id");
         }
+        if self.last_pre_tool_use_at.is_some() {
+            names.push("last_pre_tool_use_at");
+        }
         names
     }
 
@@ -99,6 +105,7 @@ impl UpdateTaskParams {
             tmux_window: None,
             base_branch: None,
             project_id: None,
+            last_pre_tool_use_at: None,
         }
     }
 
@@ -169,6 +176,11 @@ impl UpdateTaskParams {
 
     pub fn project_id(mut self, project_id: ProjectId) -> Self {
         self.project_id = Some(project_id);
+        self
+    }
+
+    pub fn last_pre_tool_use_at(mut self, value: Option<chrono::DateTime<chrono::Utc>>) -> Self {
+        self.last_pre_tool_use_at = Some(value);
         self
     }
 }
@@ -276,6 +288,7 @@ mod tests {
             UpdateTaskParams::for_task(TaskId(1)).tmux_window(FieldUpdate::Set("tw".to_string())),
             UpdateTaskParams::for_task(TaskId(1)).base_branch(Some("main".to_string())),
             UpdateTaskParams::for_task(TaskId(1)).project_id(ProjectId(1)),
+            UpdateTaskParams::for_task(TaskId(1)).last_pre_tool_use_at(Some(chrono::Utc::now())),
         ];
         for params in &cases {
             assert!(

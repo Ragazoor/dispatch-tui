@@ -117,6 +117,7 @@ rule DispatchTask {
 
     ensures: task.status = running
     ensures: task.sub_status = core/SubStatus.default_for(running)
+    ensures: task.last_pre_tool_use_at = now
     ensures: task.worktree = core/Worktree.created(
         path: task.repo_path + "/.worktrees/" + task.id + "-" + slugify(task.title),
         branch: task.id + "-" + slugify(task.title)
@@ -225,6 +226,7 @@ rule DispatchPrReviewTask {
 
     ensures: task.status = running
     ensures: task.sub_status = core/SubStatus.default_for(running)
+    ensures: task.last_pre_tool_use_at = now
     ensures: task.worktree = core/Worktree.created(
         path: task.repo_path + "/.worktrees/" + task.id + "-" + slugify(task.title),
         branch: task.id + "-" + slugify(task.title)
@@ -259,6 +261,7 @@ rule DispatchResearchTask {
 
     ensures: task.status = running
     ensures: task.sub_status = core/SubStatus.default_for(running)
+    ensures: task.last_pre_tool_use_at = now
     ensures: task.worktree = core/Worktree.created(
         path: task.repo_path + "/.worktrees/" + task.id + "-" + slugify(task.title),
         branch: task.id + "-" + slugify(task.title)
@@ -288,6 +291,7 @@ rule DispatchFixTask {
 
     ensures: task.status = running
     ensures: task.sub_status = core/SubStatus.default_for(running)
+    ensures: task.last_pre_tool_use_at = now
     ensures: task.worktree = core/Worktree.created(
         path: task.repo_path + "/.worktrees/" + task.id + "-" + slugify(task.title),
         branch: task.id + "-" + slugify(task.title)
@@ -316,6 +320,7 @@ rule ResumeTask {
     ensures: task.tmux_window = core/TmuxWindow.created(name: "task-" + task.id)
     ensures: task.status = running
     ensures: task.sub_status = core/SubStatus.default_for(running)
+    ensures: task.last_pre_tool_use_at = now
     ensures: AgentLaunched(task: task, mode: resume)
 }
 
@@ -1058,6 +1063,11 @@ rule ClassifyAgentActivity {
         -- and conflict detectors respectively, never overridden here.
         -- The wallclock Staleness enum (Fresh/Aging/Stale at 3d/7d) is
         -- independent — it decorates card ages.
+        -- DispatchTask (and friends) stamp last_pre_tool_use_at = now on
+        -- the transition into running so this classifier returns Active
+        -- through the ACTIVE_THRESHOLD window before the agent's first
+        -- real PreToolUse hook fires; without that seed the freshly
+        -- dispatched task flickers into stale on every tick.
 }
 
 rule DetectCrashedAgent {
@@ -1163,6 +1173,7 @@ rule RetryResume {
         if task.tmux_window != null:
             OldTmuxWindow.killed(window: task.tmux_window)
     ensures: task.sub_status = active
+    ensures: task.last_pre_tool_use_at = now
     ensures: task.tmux_window = core/TmuxWindow.created(name: "task-" + task.id)
     ensures: AgentLaunched(task: task, mode: resume)
 

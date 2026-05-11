@@ -510,11 +510,20 @@ fn dispatched_sets_fields_and_transitions_to_running() {
     assert_eq!(task.status, TaskStatus::Running);
     assert_eq!(task.worktree.as_deref(), Some("/wt"));
     assert_eq!(task.tmux_window.as_deref(), Some("win"));
+    // Stamped so ClassifyAgentActivity sees a recent PreToolUse and
+    // does not flicker the freshly dispatched task into Stale.
+    let stamped = task.last_pre_tool_use_at.expect("last_pre_tool_use_at set");
+    assert!(
+        chrono::Utc::now()
+            .signed_duration_since(stamped)
+            .num_seconds()
+            < 5
+    );
     assert_eq!(cmds.len(), 1);
-    assert!(matches!(
-        &cmds[0],
-        Command::Task(crate::tui::commands::TaskCommand::Persist(_))
-    ));
+    let Command::Task(crate::tui::commands::TaskCommand::Persist(persisted)) = &cmds[0] else {
+        panic!("expected Persist command, got {:?}", cmds[0]);
+    };
+    assert!(persisted.last_pre_tool_use_at.is_some());
 }
 
 #[test]
