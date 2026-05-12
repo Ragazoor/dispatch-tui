@@ -2,6 +2,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::db::LearningFilter;
+use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
 use crate::models::{LearningId, LearningKind, LearningScope, LearningStatus, RetrievalSource};
 use crate::service::LearningService;
@@ -55,6 +56,7 @@ pub(super) struct UpvoteLearningArgs {
 pub(super) async fn handle_record_learning(
     state: &McpState,
     id: Option<Value>,
+    _identity: &CallerIdentity,
     args: Value,
 ) -> JsonRpcResponse {
     let parsed = match parse_args::<RecordLearningArgs>(&id, args) {
@@ -159,6 +161,7 @@ pub(super) async fn handle_record_learning(
 pub(super) async fn handle_query_learnings(
     state: &McpState,
     id: Option<Value>,
+    _identity: &CallerIdentity,
     args: Value,
 ) -> JsonRpcResponse {
     let parsed = match parse_args::<QueryLearningsArgs>(&id, args) {
@@ -239,6 +242,7 @@ pub(super) async fn handle_query_learnings(
 pub(super) async fn handle_upvote_learning(
     state: &McpState,
     id: Option<Value>,
+    _identity: &CallerIdentity,
     args: Value,
 ) -> JsonRpcResponse {
     let parsed = match parse_args::<UpvoteLearningArgs>(&id, args) {

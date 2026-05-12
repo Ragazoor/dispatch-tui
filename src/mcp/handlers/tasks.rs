@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 
 use crate::db;
 use crate::dispatch;
+use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
 use crate::models::{
     DispatchMode, EpicId, LearningId, LearningVerdict, ProjectId, SubStatus, Task, TaskId,
@@ -339,6 +340,7 @@ async fn validate_project_id(
 pub(super) async fn handle_update_task(
     state: &McpState,
     id: Option<Value>,
+    _identity: &CallerIdentity,
     args: Value,
 ) -> JsonRpcResponse {
     let parsed = match parse_args::<UpdateTaskArgs>(&id, args) {
@@ -416,6 +418,7 @@ pub(super) async fn handle_update_task(
 pub(super) async fn handle_create_task(
     state: &McpState,
     id: Option<Value>,
+    _identity: &CallerIdentity,
     args: Value,
 ) -> JsonRpcResponse {
     let parsed = match parse_args::<CreateTaskWithEpicArgs>(&id, args) {
@@ -494,6 +497,7 @@ pub(super) async fn handle_create_task(
 pub(super) async fn handle_get_task(
     state: &McpState,
     id: Option<Value>,
+    _identity: &CallerIdentity,
     args: Value,
 ) -> JsonRpcResponse {
     let parsed = match parse_args::<GetTaskArgs>(&id, args) {
@@ -516,6 +520,7 @@ pub(super) async fn handle_get_task(
 pub(super) async fn handle_list_tasks(
     state: &McpState,
     id: Option<Value>,
+    _identity: &CallerIdentity,
     args: Value,
 ) -> JsonRpcResponse {
     let parsed = match parse_args::<ListTasksArgs>(&id, args) {
@@ -603,6 +608,7 @@ pub(super) async fn handle_list_tasks(
 pub(super) async fn handle_claim_task(
     state: &McpState,
     id: Option<Value>,
+    _identity: &CallerIdentity,
     args: Value,
 ) -> JsonRpcResponse {
     let parsed = match parse_args::<ClaimTaskArgs>(&id, args) {
@@ -648,6 +654,7 @@ this repo or task? If so, call record_learning with a brief summary."
 pub(super) async fn handle_wrap_up(
     state: &McpState,
     id: Option<Value>,
+    _identity: &CallerIdentity,
     args: Value,
 ) -> JsonRpcResponse {
     let parsed = match parse_args::<WrapUpArgs>(&id, args) {
@@ -766,6 +773,7 @@ pub(super) async fn handle_wrap_up(
 pub(super) async fn handle_exit_session(
     state: &McpState,
     id: Option<Value>,
+    _identity: &CallerIdentity,
     args: Value,
 ) -> JsonRpcResponse {
     let parsed = match parse_args::<ExitSessionArgs>(&id, args) {
@@ -885,6 +893,7 @@ fn do_dispatch(
 pub(super) async fn handle_dispatch_next(
     state: &McpState,
     id: Option<Value>,
+    _identity: &CallerIdentity,
     args: Value,
 ) -> JsonRpcResponse {
     let parsed = match parse_args::<DispatchNextArgs>(&id, args) {
@@ -1018,6 +1027,7 @@ pub(super) async fn handle_dispatch_next(
 pub(super) async fn handle_dispatch_task(
     state: &McpState,
     id: Option<Value>,
+    _identity: &CallerIdentity,
     args: Value,
 ) -> JsonRpcResponse {
     let parsed = match parse_args::<DispatchTaskArgs>(&id, args) {
@@ -1097,6 +1107,7 @@ pub(super) async fn handle_dispatch_task(
 pub(super) async fn handle_send_message(
     state: &McpState,
     id: Option<Value>,
+    _identity: &CallerIdentity,
     args: Value,
 ) -> JsonRpcResponse {
     let parsed: SendMessageArgs = match parse_args(&id, args) {
@@ -1178,6 +1189,7 @@ pub(super) async fn handle_send_message(
 pub(super) async fn handle_report_usage(
     state: &McpState,
     id: Option<Value>,
+    _identity: &CallerIdentity,
     args: Value,
 ) -> JsonRpcResponse {
     let parsed = match parse_args::<ReportUsageArgs>(&id, args) {

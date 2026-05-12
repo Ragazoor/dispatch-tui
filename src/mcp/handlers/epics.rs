@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
 use crate::models::{EpicId, ProjectId, TaskStatus};
 use crate::service::{CreateEpicParams, EpicService, ServiceError, UpdateEpicParams};
@@ -66,6 +67,7 @@ pub(super) struct UpdateEpicArgs {
 pub(super) async fn handle_create_epic(
     state: &McpState,
     id: Option<Value>,
+    _identity: &CallerIdentity,
     args: Value,
 ) -> JsonRpcResponse {
     let parsed = match parse_args::<CreateEpicArgs>(&id, args) {
@@ -107,6 +109,7 @@ pub(super) async fn handle_create_epic(
 pub(super) async fn handle_get_epic(
     state: &McpState,
     id: Option<Value>,
+    _identity: &CallerIdentity,
     args: Value,
 ) -> JsonRpcResponse {
     let parsed = match parse_args::<GetEpicArgs>(&id, args) {
@@ -161,6 +164,7 @@ pub(super) async fn handle_get_epic(
 pub(super) async fn handle_list_epics(
     state: &McpState,
     id: Option<Value>,
+    _identity: &CallerIdentity,
     _args: Value,
 ) -> JsonRpcResponse {
     tracing::info!("MCP list_epics");
@@ -201,6 +205,7 @@ pub(super) async fn handle_list_epics(
 pub(super) async fn handle_update_epic(
     state: &McpState,
     id: Option<Value>,
+    _identity: &CallerIdentity,
     args: Value,
 ) -> JsonRpcResponse {
     let parsed = match parse_args::<UpdateEpicArgs>(&id, args) {

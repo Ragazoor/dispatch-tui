@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
-use axum::{extract::State, http::StatusCode, Json};
+use axum::{extract::State, http::StatusCode, Extension, Json};
 use serde_json::{json, Value};
 
+use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
 
 use super::epics;
@@ -43,12 +44,13 @@ macro_rules! mcp_tools {
         pub(super) async fn dispatch_tool(
             state: &McpState,
             id: Option<Value>,
+            identity: &CallerIdentity,
             tool_name: &str,
             args: Value,
         ) -> JsonRpcResponse {
             match tool_name {
                 $(
-                    $name => mcp_tools!(@call $kind, $handler, state, id, args),
+                    $name => mcp_tools!(@call $kind, $handler, state, id, identity, args),
                 )+
                 other => JsonRpcResponse::err(id, -32602, format!("Unknown tool: {other}")),
             }
@@ -57,11 +59,11 @@ macro_rules! mcp_tools {
         pub const TOOL_NAMES: &[&str] = &[$($name),+];
     };
 
-    (@call sync, $handler:path, $state:expr, $id:expr, $args:expr) => {
-        $handler($state, $id, $args)
+    (@call sync, $handler:path, $state:expr, $id:expr, $identity:expr, $args:expr) => {
+        $handler($state, $id, $identity, $args)
     };
-    (@call async, $handler:path, $state:expr, $id:expr, $args:expr) => {
-        $handler($state, $id, $args).await
+    (@call async, $handler:path, $state:expr, $id:expr, $identity:expr, $args:expr) => {
+        $handler($state, $id, $identity, $args).await
     };
 }
 
@@ -489,6 +491,7 @@ the final call closes the session.",
 async fn handle_list_projects(
     state: &McpState,
     id: Option<Value>,
+    _identity: &CallerIdentity,
     _args: Value,
 ) -> JsonRpcResponse {
     match state.db.list_projects().await {
@@ -516,6 +519,7 @@ async fn handle_list_projects(
 
 pub async fn handle_mcp(
     State(state): State<Arc<McpState>>,
+    Extension(identity): Extension<CallerIdentity>,
     Json(req): Json<JsonRpcRequest>,
 ) -> (StatusCode, Json<JsonRpcResponse>) {
     let id = req.id;
@@ -541,7 +545,7 @@ pub async fn handle_mcp(
             let tool_name = params.get("name").and_then(Value::as_str).unwrap_or("");
             let args = params.get("arguments").cloned().unwrap_or(Value::Null);
 
-            dispatch_tool(&state, id, tool_name, args).await
+            dispatch_tool(&state, id, &identity, tool_name, args).await
         }
 
         other => JsonRpcResponse::err(id, -32601, format!("Method not found: {other}")),

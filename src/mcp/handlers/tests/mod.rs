@@ -6,10 +6,11 @@ mod tasks;
 
 use std::sync::Arc;
 
-use axum::{extract::State, Json};
+use axum::{extract::State, Extension, Json};
 use serde_json::{json, Value};
 
 use crate::db::{self, CreateLearningRow, CreateTaskRequest, Database};
+use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
 use crate::models::{ProjectId, SubStatus, TaskStatus};
 use crate::process::{MockProcessRunner, ProcessRunner};
@@ -44,13 +45,23 @@ async fn test_state_with_db() -> (Arc<McpState>, Arc<dyn db::TaskStore>) {
 }
 
 async fn call(state: &Arc<McpState>, method: &str, params: Option<Value>) -> JsonRpcResponse {
+    call_as(state, method, params, CallerIdentity::Session).await
+}
+
+async fn call_as(
+    state: &Arc<McpState>,
+    method: &str,
+    params: Option<Value>,
+    identity: CallerIdentity,
+) -> JsonRpcResponse {
     let req = JsonRpcRequest {
         jsonrpc: "2.0".to_string(),
         id: Some(json!(1)),
         method: method.to_string(),
         params,
     };
-    let (_, Json(response)) = handle_mcp(State(state.clone()), Json(req)).await;
+    let (_, Json(response)) =
+        handle_mcp(State(state.clone()), Extension(identity), Json(req)).await;
     response
 }
 

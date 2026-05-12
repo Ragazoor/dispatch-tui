@@ -77,6 +77,9 @@ pub fn router(
     });
     Router::new()
         .route("/mcp", post(handlers::handle_mcp))
+        .layer(axum::middleware::from_fn(
+            middleware::extract_caller_identity,
+        ))
         .with_state(state)
 }
 
