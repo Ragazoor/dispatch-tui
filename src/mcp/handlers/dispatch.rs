@@ -150,7 +150,7 @@ mcp_tools! {
         };
 
     async "create_task" => tasks::handle_create_task,
-        "Create a new task on the kanban board. Tasks always start in 'backlog' status. Pass caller_task_id with your own task ID so the new task inherits project_id (and epic_id, when not explicitly given) from your task — this is the simplest way to ensure sub-tasks land in the same project/epic as their parent.",
+        "Create a new task on the kanban board. Tasks always start in 'backlog' status. Caller identity is provided by the dispatch HTTP transport (X-Caller-Task-Id for dispatched agents, X-Caller-Kind: session for non-dispatched sessions) — you do NOT pass a caller_task_id argument. Dispatched agents: the new task inherits project_id and epic_id from your task; pass project_id or epic_id explicitly to override (epic_id: null clears epic). Non-dispatched sessions: project_id is required.",
         {
             "type": "object",
             "properties": {
@@ -172,7 +172,7 @@ mcp_tools! {
                 },
                 "epic_id": {
                     "type": ["integer", "null"],
-                    "description": "Epic to link this task to. Omit to inherit from caller_task_id's epic (when caller_task_id is set). Pass null explicitly to create a task with no epic even when caller_task_id has one."
+                    "description": "Override the inherited epic. Omit to inherit from the caller's task (when the caller is a dispatched agent). Pass null explicitly to create a task with no epic even when the caller has one."
                 },
                 "sort_order": {
                     "type": "integer",
@@ -189,18 +189,14 @@ mcp_tools! {
                 },
                 "project_id": {
                     "type": "integer",
-                    "description": "Project the task belongs to. Omit to inherit from caller_task_id's project. Required when caller_task_id is not provided."
-                },
-                "caller_task_id": {
-                    "type": "integer",
-                    "description": "Your own task ID. When set, project_id (and epic_id, when not given) inherit from this task — so sub-tasks land in the same project and epic as the parent without you needing to read them from the prompt. Explicit project_id / epic_id always wins."
+                    "description": "Override the inherited project. Omit to inherit from the caller's task (when the caller is a dispatched agent). Required when the caller is a non-dispatched session."
                 }
             },
             "required": ["title", "repo_path"]
         };
 
     async "list_tasks" => tasks::handle_list_tasks,
-        "List tasks on the kanban board. Filters are ANDed. Pass caller_task_id to auto-scope to your epic (or project if you have no epic) and exclude yourself from results — the fastest way to survey sibling task outcomes. Output includes PR URL and plan goal when available.",
+        "List tasks on the kanban board. Filters are ANDed. When called by a dispatched agent, results auto-scope to the agent's epic (or project if it has no epic) and exclude the agent's own task; passing explicit epic_id/project_id/repo_paths disables auto-scoping. When called from a non-dispatched session, no auto-scoping. Output includes PR URL and plan goal when available.",
         {
             "type": "object",
             "properties": {
@@ -223,10 +219,6 @@ mcp_tools! {
                     "type": "array",
                     "items": { "type": "string" },
                     "description": "Filter to tasks whose repo_path is in this list."
-                },
-                "caller_task_id": {
-                    "type": "integer",
-                    "description": "Your own task ID. When provided and no explicit epic_id/project_id/repo_paths are given, auto-scopes to your epic (if you have one) or your project, and excludes you from results."
                 }
             }
         };
