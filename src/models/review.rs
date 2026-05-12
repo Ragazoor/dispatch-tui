@@ -83,38 +83,6 @@ impl ReviewDecision {
 }
 
 // ---------------------------------------------------------------------------
-// CiStatus — CI check status for a PR
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CiStatus {
-    Pending,
-    Success,
-    Failure,
-    None,
-}
-
-impl CiStatus {
-    pub fn as_db_str(&self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Success => "success",
-            Self::Failure => "failure",
-            Self::None => "none",
-        }
-    }
-
-    pub fn from_db_str(s: &str) -> Self {
-        match s {
-            "pending" => Self::Pending,
-            "success" => Self::Success,
-            "failure" => Self::Failure,
-            _ => Self::None,
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
 // PR URL helpers
 // ---------------------------------------------------------------------------
 
@@ -168,14 +136,3 @@ pub fn url_label(url: &str) -> String {
     "Link".to_string()
 }
 
-/// Extract the GitHub repo slug (e.g. "org/repo") from a PR URL.
-/// Handles query parameters and fragment identifiers.
-/// Returns None for non-GitHub URLs or malformed input.
-pub fn github_repo_from_pr_url(url: &str) -> Option<String> {
-    url.split(['?', '#'])
-        .next()
-        .and_then(|u| u.strip_prefix("https://github.com/"))
-        .and_then(|rest| rest.split("/pull/").next())
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-}

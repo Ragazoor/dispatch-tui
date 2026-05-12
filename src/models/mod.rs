@@ -1020,53 +1020,6 @@ mod tests {
         assert_eq!(url_label(""), "Link");
     }
 
-    // --- github_repo_from_pr_url ---
-
-    #[test]
-    fn github_repo_from_standard_url() {
-        assert_eq!(
-            github_repo_from_pr_url("https://github.com/org/repo/pull/42"),
-            Some("org/repo".to_string())
-        );
-    }
-
-    #[test]
-    fn github_repo_from_url_with_query_params() {
-        assert_eq!(
-            github_repo_from_pr_url("https://github.com/org/repo/pull/42?diff=split"),
-            Some("org/repo".to_string())
-        );
-    }
-
-    #[test]
-    fn github_repo_from_url_with_fragment() {
-        assert_eq!(
-            github_repo_from_pr_url("https://github.com/org/repo/pull/42#issuecomment-123"),
-            Some("org/repo".to_string())
-        );
-    }
-
-    #[test]
-    fn github_repo_from_non_github_url() {
-        assert_eq!(
-            github_repo_from_pr_url("https://gitlab.com/org/repo/pull/42"),
-            None
-        );
-    }
-
-    #[test]
-    fn github_repo_from_empty_url() {
-        assert_eq!(github_repo_from_pr_url(""), None);
-    }
-
-    #[test]
-    fn github_repo_from_url_with_trailing_slash() {
-        assert_eq!(
-            github_repo_from_pr_url("https://github.com/org/repo/pull/42/"),
-            Some("org/repo".to_string())
-        );
-    }
-
     #[test]
     fn review_decision_db_roundtrip() {
         for decision in ReviewDecision::ALL {
@@ -1074,19 +1027,6 @@ mod tests {
             let parsed = ReviewDecision::from_db_str(s)
                 .unwrap_or_else(|| panic!("failed to parse db str: {s}"));
             assert_eq!(parsed, decision);
-        }
-    }
-
-    #[test]
-    fn ci_status_db_roundtrip() {
-        for status in [
-            CiStatus::Pending,
-            CiStatus::Success,
-            CiStatus::Failure,
-            CiStatus::None,
-        ] {
-            let s = status.as_db_str();
-            assert_eq!(CiStatus::from_db_str(s), status, "roundtrip failed for {s}");
         }
     }
 
