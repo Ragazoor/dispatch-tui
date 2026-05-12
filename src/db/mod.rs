@@ -384,11 +384,7 @@ pub trait TaskStore:
 }
 
 impl<
-        T: TaskAndEpicStore
-            + SettingsStore
-            + ProjectCrud
-            + LearningStore
-            + LearningRetrievalStore,
+        T: TaskAndEpicStore + SettingsStore + ProjectCrud + LearningStore + LearningRetrievalStore,
     > TaskStore for T
 {
 }

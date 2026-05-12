@@ -2142,7 +2142,6 @@ fn branch_from_worktree_returns_none_for_root() {
     assert_eq!(branch_from_worktree("/"), None);
 }
 
-
 // ---------------------------------------------------------------------------
 // resume_agent — failure path
 // ---------------------------------------------------------------------------
