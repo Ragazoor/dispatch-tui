@@ -105,7 +105,7 @@ pub(super) struct CreateTaskWithEpicArgs {
     pub(super) description: String,
     pub(super) plan_path: Option<String>,
     /// Double-Option distinguishes "absent" (→ outer None: inherit from
-    /// caller_task_id if any) from "explicit null" (→ Some(None): clear /
+    /// CallerIdentity if Task) from "explicit null" (→ Some(None): clear /
     /// no epic).
     #[serde(default, deserialize_with = "deserialize_nullable_flexible_i64")]
     pub(super) epic_id: Option<Option<i64>>,
@@ -115,11 +115,6 @@ pub(super) struct CreateTaskWithEpicArgs {
     pub(super) tag: Option<TaskTag>,
     #[serde(default)]
     pub(super) base_branch: Option<String>,
-    /// Task ID of the dispatched agent calling this tool. When set, a
-    /// missing project_id inherits from this task; an absent epic_id
-    /// inherits from this task's epic (if any).
-    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
-    pub(super) caller_task_id: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -418,7 +413,7 @@ pub(super) async fn handle_update_task(
 pub(super) async fn handle_create_task(
     state: &McpState,
     id: Option<Value>,
-    _identity: &CallerIdentity,
+    identity: &CallerIdentity,
     args: Value,
 ) -> JsonRpcResponse {
     let parsed = match parse_args::<CreateTaskWithEpicArgs>(&id, args) {
@@ -429,44 +424,46 @@ pub(super) async fn handle_create_task(
         title = %parsed.title,
         epic_id = ?parsed.epic_id,
         project_id = ?parsed.project_id,
-        caller_task_id = ?parsed.caller_task_id,
+        identity = ?identity,
         "MCP create_task"
     );
 
-    if parsed.project_id.is_none() && parsed.caller_task_id.is_none() {
-        return JsonRpcResponse::err(
-            id,
-            -32602,
-            "must provide project_id or caller_task_id".to_string(),
-        );
-    }
-
-    // Look up the caller task once, if provided, so we can inherit fields.
-    let caller = if let Some(caller_id) = parsed.caller_task_id {
-        match lookup_caller_task(state, &id, caller_id).await {
-            Ok(t) => Some(t),
-            Err(resp) => return resp,
+    let (effective_project_id, effective_epic_id) = match identity {
+        CallerIdentity::Task(caller_id) => {
+            let caller = match state.db.get_task(*caller_id).await {
+                Ok(Some(t)) => t,
+                Ok(None) => {
+                    return JsonRpcResponse::err(
+                        id,
+                        -32602,
+                        format!("Unknown caller task {}", caller_id.0),
+                    )
+                }
+                Err(e) => return JsonRpcResponse::err(id, -32603, format!("Database error: {e}")),
+            };
+            let pid = parsed.project_id.unwrap_or(caller.project_id.0);
+            let eid = match parsed.epic_id {
+                Some(inner) => inner.map(EpicId),
+                None => caller.epic_id,
+            };
+            (pid, eid)
         }
-    } else {
-        None
+        CallerIdentity::Session => {
+            let Some(pid) = parsed.project_id else {
+                return JsonRpcResponse::err(
+                    id,
+                    -32602,
+                    "project_id is required when calling from a non-dispatched session".to_string(),
+                );
+            };
+            let eid = parsed.epic_id.and_then(|inner| inner.map(EpicId));
+            (pid, eid)
+        }
     };
-
-    // Effective project: explicit > caller's. The earlier guard ensures at
-    // least one source is available, so the chain below cannot yield None.
-    let effective_project_id = parsed
-        .project_id
-        .or_else(|| caller.as_ref().map(|c| c.project_id.0))
-        .unwrap_or_else(|| unreachable!("guard above ensures project_id or caller_task_id is set"));
 
     if let Err(resp) = validate_project_id(state, &id, effective_project_id).await {
         return resp;
     }
-
-    // Effective epic: explicit (incl. JSON null) > caller's epic > None.
-    let effective_epic_id: Option<EpicId> = match parsed.epic_id {
-        Some(inner) => inner.map(EpicId),
-        None => caller.as_ref().and_then(|c| c.epic_id),
-    };
 
     let svc = TaskService::new(state.db.clone());
     match svc
