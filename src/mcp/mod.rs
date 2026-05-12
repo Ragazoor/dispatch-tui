@@ -1,5 +1,6 @@
 pub mod handlers;
 pub mod identity;
+pub mod middleware;
 
 use std::sync::Arc;
 
