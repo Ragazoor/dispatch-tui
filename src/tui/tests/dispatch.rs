@@ -1586,34 +1586,6 @@ fn retry_fresh_clears_last_error() {
     assert!(!app.agents.last_error.contains_key(&TaskId(4)));
 }
 
-#[test]
-fn workflow_column_round_trips_column_index() {
-    use crate::models::SecurityWorkflowColumn;
-    for col in [
-        SecurityWorkflowColumn::Backlog,
-        SecurityWorkflowColumn::InProgress,
-        SecurityWorkflowColumn::Review,
-    ] {
-        assert_eq!(
-            SecurityWorkflowColumn::from_column_index(col.column_index()),
-            Some(col)
-        );
-    }
-}
-
-#[test]
-fn workflow_column_labels() {
-    use crate::models::SecurityWorkflowColumn;
-    assert_eq!(SecurityWorkflowColumn::Backlog.label(), "Backlog");
-    assert_eq!(SecurityWorkflowColumn::InProgress.label(), "In Progress");
-    assert_eq!(SecurityWorkflowColumn::Review.label(), "Review");
-}
-
-#[test]
-fn workflow_column_count_is_three() {
-    assert_eq!(crate::models::SecurityWorkflowColumn::COLUMN_COUNT, 3);
-}
-
 // ---------------------------------------------------------------------------
 // Sticky dispatching status — handler-level coverage (Task #500)
 // ---------------------------------------------------------------------------

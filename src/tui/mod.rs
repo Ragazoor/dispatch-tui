@@ -290,15 +290,6 @@ impl App {
         &self.filter.presets
     }
 
-    /// Set of PR URLs from dispatch tasks (for matching against ReviewPr entries).
-    pub fn dispatch_pr_urls(&self) -> HashSet<String> {
-        self.board
-            .tasks
-            .iter()
-            .filter_map(|t| t.pr_url.clone())
-            .collect()
-    }
-
     /// Bootstrap-only carve-out: set during runtime startup from the saved
     /// `notifications_enabled` setting before the message loop begins. After
     /// bootstrap completes, this state is mutated only via Messages. See the

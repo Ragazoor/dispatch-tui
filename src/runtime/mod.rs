@@ -116,15 +116,6 @@ pub async fn run_tui(db_path: &Path, port: u16, repo_map_token_budget: usize) ->
     let usage = database.get_all_usage().await.unwrap_or_default();
     app.update(Message::RefreshUsage(usage));
 
-    // Seed default GitHub query strings (no-op if already set)
-    if let Err(e) = database.seed_github_query_defaults().await {
-        app.update(Message::System(
-            crate::tui::messages::SystemMessage::StatusInfo(format!(
-                "Failed to seed GitHub query defaults: {e}"
-            )),
-        ));
-    }
-
     load_notifications_pref(&*database, &mut app).await;
     load_main_session(&*database, &*runner, &mut app).await;
     load_per_project_repo_filters(&*database, &mut app).await;

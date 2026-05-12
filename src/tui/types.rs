@@ -4,8 +4,8 @@ use std::time::Instant;
 use ratatui::widgets::ListState;
 
 use crate::models::{
-    AlertKind, Epic, EpicId, EpicSubstatus, Project, ProjectId, Task, TaskId, TaskStatus, TaskTag,
-    TaskUsage, TipsShowMode, DEFAULT_BASE_BRANCH,
+    Epic, EpicId, EpicSubstatus, Project, ProjectId, Task, TaskId, TaskStatus, TaskTag, TaskUsage,
+    TipsShowMode, DEFAULT_BASE_BRANCH,
 };
 
 // ---------------------------------------------------------------------------
@@ -42,34 +42,6 @@ impl TipsOverlayState {
 pub enum MoveDirection {
     Forward,
     Backward,
-}
-
-// ---------------------------------------------------------------------------
-// ReviewAgentRequest
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-pub struct ReviewAgentRequest {
-    pub repo: String,
-    pub github_repo: String,
-    pub number: i64,
-    pub head_ref: String,
-}
-
-// ---------------------------------------------------------------------------
-// FixAgentRequest
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-pub struct FixAgentRequest {
-    pub repo: String,
-    pub github_repo: String,
-    pub number: i64,
-    pub kind: AlertKind,
-    pub title: String,
-    pub description: String,
-    pub package: Option<String>,
-    pub fixed_version: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

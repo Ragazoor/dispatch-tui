@@ -155,52 +155,6 @@ async fn filter_presets_overwrite_and_delete() {
 }
 
 #[tokio::test]
-async fn seed_github_query_defaults_sets_my_prs() {
-    let db = in_memory_db().await;
-    db.seed_github_query_defaults().await.unwrap();
-
-    let my_prs = db
-        .get_setting_string("github_queries_my_prs")
-        .await
-        .unwrap()
-        .expect("my_prs queries should be set");
-    assert!(my_prs.contains("author:@me"));
-
-    for key in [
-        "github_queries_review",
-        "github_queries_security",
-        "github_queries_bot",
-        "dependabot_config",
-    ] {
-        assert!(
-            db.get_setting_string(key).await.unwrap().is_none(),
-            "{key} must not be seeded after the fetch-* CLI removal",
-        );
-    }
-}
-
-#[tokio::test]
-async fn seed_github_query_defaults_does_not_overwrite_user_edits() {
-    let db = in_memory_db().await;
-    db.seed_github_query_defaults().await.unwrap();
-
-    // User edits the surviving setting.
-    db.set_setting_string("github_queries_my_prs", "my custom query")
-        .await
-        .unwrap();
-
-    // Re-seed should not overwrite.
-    db.seed_github_query_defaults().await.unwrap();
-
-    let my_prs = db
-        .get_setting_string("github_queries_my_prs")
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(my_prs, "my custom query");
-}
-
-#[tokio::test]
 async fn delete_repo_path_removes_entry() {
     let db = in_memory_db().await;
     db.save_repo_path("/home/user/project").await.unwrap();

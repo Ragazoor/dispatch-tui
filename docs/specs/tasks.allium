@@ -114,10 +114,10 @@ rule DispatchTask {
 
     requires: task.status = backlog
     -- Tasks with a plan always dispatch. Tasks without a plan dispatch
-    -- unless they carry a tag that routes to a dedicated agent
-    -- (pr_review, research, fix, dependabot).
+    -- unless they carry the research tag (the only remaining tag that
+    -- routes to a dedicated agent).
     requires: task.has_plan = true
-              or task.tag not in {pr_review, research, fix, dependabot}
+              or task.tag != research
 
     ensures: task.status = running
     ensures: task.sub_status = core/SubStatus.default_for(running)
@@ -149,9 +149,7 @@ rule DispatchTask {
         -- files without per-edit approval. The Research agent is the
         -- sole exception: it launches with --permission-mode plan so
         -- investigation stays read-only. The prompt content — not the
-        -- permission flag — differentiates the other modes. (Review and
-        -- fix agents dispatched via MCP tools use --permission-mode
-        -- acceptEdits instead.)
+        -- permission flag — differentiates the other modes.
 
         -- == Unified prompt skeleton ==
         -- Every task-agent prompt produced by build_prompt /
@@ -215,89 +213,12 @@ rule DispatchTask {
         -- whole task lifecycle terminates the same way regardless of
         -- mode (the wording covers plan-attach, work-package-creation,
         -- and implementation completion).
-        -- DispatchPrReviewTask and DispatchResearchTask are exceptions
-        -- to the unified trailing block: their prompts include only
-        -- {mcp_tools_instruction} and omit tdd, allium, learning_tools,
-        -- and wrap_up. DispatchFixTask uses the full trailing block.
-}
-
-rule DispatchPrReviewTask {
-    when: DispatchPrReviewTask(task)
-
-    requires: task.status = backlog
-    requires: task.has_plan = false
-    requires: task.tag = pr_review
-
-    ensures: task.status = running
-    ensures: task.sub_status = core/SubStatus.default_for(running)
-    ensures: task.last_pre_tool_use_at = now
-    ensures: task.worktree = core/Worktree.created(
-        path: task.repo_path + "/.worktrees/" + task.id + "-" + slugify(task.title),
-        branch: task.id + "-" + slugify(task.title)
-    )
-    ensures: task.tmux_window = core/TmuxWindow.created(name: "task-" + task.id)
-    ensures: AgentLaunched(task: task, mode: pr_review)
-
-    @guidance
-        -- PR review mode: the agent extracts the PR URL from the task
-        -- description, uses gh pr diff to assess the diff size, then
-        -- runs /anthropic-review-pr:review-pr which orchestrates
-        -- sub-reviewers (security, code-quality, test-coverage, performance,
-        -- documentation). The agent makes no code changes.
-        -- Uses --permission-mode plan (same as other task dispatches).
-        -- Prompt note: build_pr_review_prompt emits a stripped-down
-        -- trailing block — only {mcp_tools_instruction}, no tdd,
-        -- allium, learning_tools, or wrap_up. The PR review flow is
-        -- self-contained and terminates without the standard wrap-up.
-        -- Although the shared {wrap_up_instruction} is omitted, the
-        -- bespoke prompt body still includes the literal cue
-        -- "When the review is complete, call wrap_up to finish this task."
-        -- so the agent has an explicit termination signal
-        -- (src/dispatch/prompts.rs).
-}
-
-rule DispatchDependabotTask {
-    when: DispatchDependabotTask(task)
-
-    requires: task.status = backlog
-    requires: task.has_plan = false
-    requires: task.tag = dependabot
-
-    ensures: task.status = running
-    ensures: task.sub_status = core/SubStatus.default_for(running)
-    ensures: task.last_pre_tool_use_at = now
-    ensures: task.worktree = core/Worktree.created(
-        path: task.repo_path + "/.worktrees/" + task.id + "-" + slugify(task.title),
-        branch: task.id + "-" + slugify(task.title)
-    )
-    ensures: task.tmux_window = core/TmuxWindow.created(name: "task-" + task.id)
-    ensures: AgentLaunched(task: task, mode: dependabot)
-
-    @guidance
-        -- Source: feed scripts only. The TUI tag picker (src/tui/input.rs)
-        -- intentionally does NOT bind a key to the Dependabot tag; tasks
-        -- with this tag are created exclusively by feed scripts that emit
-        -- tag: "dependabot" (e.g. scripts/fetch-dependabot.sh).
-        --
-        -- Dependabot mode: the agent vets a Dependabot PR (dep-only? bump
-        -- kind? CI green? changelog?) and either auto-approves and enables
-        -- auto-merge for low-risk bumps, or asks the user a specific
-        -- question via chat for anything uncertain. Escalation is a chat
-        -- question.
-        --
-        -- Auto-merge policy (build_dependabot_review_prompt):
-        --   * patch + CI green + dep-only -> auto-merge
-        --   * minor + CI green + dep-only + clean changelog -> auto-merge
-        --   * everything else -> ask user
-        --
-        -- Uses Claude's default permission mode (no --permission-mode flag) —
-        -- the agent needs to run gh pr review/merge, so the read-only plan
-        -- mode would be wrong here.
-        -- Prompt note: build_dependabot_review_prompt emits a stripped-down
-        -- trailing block — only {mcp_tools_instruction}, no tdd, allium,
-        -- learning_tools, or wrap_up. The bespoke prompt body still
-        -- includes "call wrap_up to finish this task" so the agent has an
-        -- explicit termination signal.
+        -- DispatchResearchTask is an exception to the unified trailing
+        -- block: its prompt includes only {mcp_tools_instruction} and
+        -- omits tdd, allium, learning_tools, and wrap_up. All other
+        -- tag values (including pr_review, fix, dependabot) fall
+        -- through to this rule and use the full trailing block — the
+        -- tag is purely a kanban-board label, not a routing key.
 }
 
 rule DispatchResearchTask {
@@ -328,34 +249,6 @@ rule DispatchResearchTask {
         -- allium, learning_tools, or wrap_up. The research agent
         -- presents findings interactively and does not terminate via
         -- the standard wrap-up flow.
-}
-
-rule DispatchFixTask {
-    when: DispatchFixTask(task)
-
-    requires: task.status = backlog
-    requires: task.has_plan = false
-    requires: task.tag = fix
-
-    ensures: task.status = running
-    ensures: task.sub_status = core/SubStatus.default_for(running)
-    ensures: task.last_pre_tool_use_at = now
-    ensures: task.worktree = core/Worktree.created(
-        path: task.repo_path + "/.worktrees/" + task.id + "-" + slugify(task.title),
-        branch: task.id + "-" + slugify(task.title)
-    )
-    ensures: task.tmux_window = core/TmuxWindow.created(name: "task-" + task.id)
-    ensures: AgentLaunched(task: task, mode: fix)
-
-    @guidance
-        -- Fix mode: the agent researches the CVE/vulnerability in the task
-        -- description and applies a minimal targeted fix. Uses TDD where
-        -- possible: write a failing test first, then fix, then verify.
-        -- Creates a PR via gh pr create on completion.
-        -- Uses --permission-mode plan (same as other task dispatches).
-        -- Prompt note: build_fix_task_prompt emits the full unified
-        -- trailing block (tdd + allium + mcp_tools + learning_tools +
-        -- wrap_up), unlike PR-review and research dispatches.
 }
 
 rule ResumeTask {
@@ -1265,9 +1158,6 @@ rule RetryFresh {
 }
 
 -- == MCP Task Tools ==
---
--- Note: this section is not exhaustive. Review and security tooling
--- is specified in docs/specs/review.allium.
 
 rule UpdateTaskViaMcp {
     when: McpUpdateTask(task, status?, sub_status?, plan?, title?, description?,
@@ -1756,7 +1646,7 @@ rule AugmentDispatchPromptWithLearnings {
 rule AugmentDispatchPromptWithRepoMap {
     when: AgentLaunched(task, mode)
 
-    requires: mode in {standard, resume, quick, epic_planning, pr_review, research, fix, dependabot}
+    requires: mode in {standard, resume, quick, epic_planning, research}
     requires: config.repo_map_enabled = true
 
     let binary = CtagsBinary.detected_at_startup()

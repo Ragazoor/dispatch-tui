@@ -337,107 +337,6 @@ Then write a focused plan before making any changes:\n\
     )
 }
 
-pub(super) fn build_pr_review_prompt(
-    task_id: TaskId,
-    title: &str,
-    description: &str,
-    epic: Option<&EpicContext>,
-    project: Option<&ProjectContext>,
-    ctx: &PromptContext<'_>,
-) -> String {
-    let block = task_block(task_id, title, description, epic, project);
-    let repo_map = render_repo_map(ctx.repo_map.as_deref());
-
-    format!(
-        "You are a PR reviewer.\n\
-\n\
-{block}\n\
-\n\
-{repo_map}1. Extract the PR URL or number from the task description.\n\
-2. Run `gh pr diff <number> | wc -l` to assess the diff size.\n\
-3. Run `/anthropic-review-pr:review-pr <number>` to perform a comprehensive review. \
-This skill orchestrates security, code-quality, test-coverage, performance, and documentation \
-sub-reviewers. The number of sub-reviewers launched scales with the diff size.\n\
-4. When the review is complete, call wrap_up to finish this task.\n\
-\n\
-Do NOT make code changes. Your job is to review, not to implement.\n\
-\n\
-{mcp}",
-        block = block,
-        mcp = mcp_tools_instruction(),
-    )
-}
-
-pub(super) fn build_dependabot_review_prompt(
-    task_id: TaskId,
-    title: &str,
-    description: &str,
-    epic: Option<&EpicContext>,
-    project: Option<&ProjectContext>,
-    ctx: &PromptContext<'_>,
-) -> String {
-    let block = task_block(task_id, title, description, epic, project);
-    let repo_map = render_repo_map(ctx.repo_map.as_deref());
-
-    format!(
-        "You are a Dependabot triage agent.\n\
-\n\
-{block}\n\
-\n\
-{repo_map}Your job: vet this dependency-bump PR and either auto-merge it (if \
-clearly safe) or ask the user a specific question (if not).\n\
-\n\
-1. Extract the PR URL and number from the task description.\n\
-2. If the task's pr_url is empty, call update_task(task_id={tid}, pr_url=<URL>).\n\
-3. Verify the PR is dependency-bump-only:\n\
-   - Run: gh pr view <number> --repo <owner/repo> --json author,commits,files\n\
-   - Every commit author login must be `app/dependabot` or `dependabot[bot]`.\n\
-   - Every changed file path must match one of: Cargo.toml, Cargo.lock, \
-package.json, package-lock.json, pnpm-lock.yaml, yarn.lock, requirements*.txt, \
-pyproject.toml, uv.lock, go.mod, go.sum, Gemfile, Gemfile.lock, composer.json, \
-composer.lock, .github/workflows/*.\n\
-   - If either check fails, jump to step 8 and ASK the user.\n\
-4. Parse the bump from the PR title (format: `Bump <pkg> from <X.Y.Z> to <A.B.C>`). \
-Classify as patch / minor / major using semver.\n\
-   - 0.x.y bumps: treat `0.X.y -> 0.X.(y+1)` as patch and `0.X.* -> 0.(X+1).*` \
-as major (0.x is unstable; minor in 0.x can break).\n\
-5. Check CI: gh pr checks <number> --repo <owner/repo>.\n\
-   - All checks passing -> continue to step 6.\n\
-   - Any check pending -> jump to step 8 and ASK whether to wait.\n\
-   - Any check failing -> jump to step 8 and ASK with the failure summary.\n\
-6. Decide by bump kind:\n\
-   - patch: auto-merge (step 7).\n\
-   - minor: try to find the changelog, in order:\n\
-       a. gh release view v<A.B.C> --repo <pkg-owner/pkg-repo> (and any \
-intermediate tags between <X.Y.Z> and <A.B.C>).\n\
-       b. The package repo's CHANGELOG.md between the two versions.\n\
-       c. The GitHub compare view if neither exists.\n\
-     Scan release notes for tokens (case-insensitive): BREAKING, breaking \
-change, removed, deprecat, incompatible, migration, major rewrite.\n\
-     - Changelog found AND no tokens matched -> auto-merge (step 7).\n\
-     - No changelog found OR any token matched -> jump to step 8.\n\
-   - major: jump to step 8 (always ASK).\n\
-7. Auto-merge:\n\
-   - gh pr review <number> --repo <owner/repo> --approve --body \"Auto-approved \
-by dispatch dependabot agent: <patch|minor> bump, CI green, dep-only, \
-changelog OK.\"\n\
-   - gh pr merge <number> --repo <owner/repo> --squash --auto\n\
-   - Note: --auto requires the repo to have branch protection with required \
-checks; without it, the PR merges immediately. If you see a warning to that \
-effect, surface it in the wrap-up message.\n\
-   - Then call wrap_up to finish this task.\n\
-8. Ask the user:\n\
-   - Write ONE direct question to the user that includes: the bump kind, \
-the dep-only verdict, CI status summary, changelog summary or its absence, \
-and the specific reason you are not auto-merging.\n\
-   - Stop and wait for the user's reply.\n\
-\n\
-{mcp}",
-        tid = task_id.0,
-        mcp = mcp_tools_instruction(),
-    )
-}
-
 pub(super) fn build_research_prompt(
     task_id: TaskId,
     title: &str,
@@ -466,50 +365,6 @@ Do NOT make code changes.\n\
 {mcp}",
         block = block,
         mcp = mcp_tools_instruction(),
-    )
-}
-
-pub(super) fn build_fix_task_prompt(
-    task_id: TaskId,
-    title: &str,
-    description: &str,
-    epic: Option<&EpicContext>,
-    project: Option<&ProjectContext>,
-    ctx: &PromptContext<'_>,
-) -> String {
-    let block = task_block(task_id, title, description, epic, project);
-    let repo_map = render_repo_map(ctx.repo_map.as_deref());
-
-    format!(
-        "You are a security fix agent.\n\
-\n\
-{block}\n\
-\n\
-{repo_map}Research the CVE or vulnerability described above, then apply a minimal targeted fix.\n\
-\n\
-TDD approach:\n\
-  1. Write a failing test that reproduces the vulnerability (if feasible)\n\
-  2. Apply the minimal fix to make the test pass\n\
-  3. Run the full test suite to verify nothing else breaks\n\
-  4. Commit and open a PR: gh pr create\n\
-\n\
-Focus on the smallest safe change. Avoid broad refactors.\n\
-\n\
-{tdd}\n\
-\n\
-{allium}\n\
-\n\
-{learning}\n\
-\n\
-{mcp}\n\
-\n\
-{wrap_up}",
-        block = block,
-        tdd = tdd_instruction(),
-        allium = allium_instruction(),
-        learning = learning_tools_instruction(),
-        mcp = mcp_tools_instruction(),
-        wrap_up = wrap_up_instruction(),
     )
 }
 
@@ -853,98 +708,6 @@ mod tests {
     }
 
     #[test]
-    fn pr_review_prompt_content() {
-        let text = build_pr_review_prompt(
-            TaskId(42),
-            "Review my PR",
-            "https://github.com/foo/bar/pull/99",
-            None,
-            None,
-            &PromptContext::default(),
-        );
-        assert!(
-            text.contains("PR reviewer"),
-            "pr_review prompt should identify the agent role"
-        );
-        assert!(
-            text.contains("review-pr"),
-            "pr_review prompt should reference the review-pr skill"
-        );
-        assert!(
-            text.contains("wrap-up") || text.contains("wrap_up"),
-            "pr_review prompt should instruct wrap up"
-        );
-        assert!(
-            text.contains("Do NOT make code changes")
-                || text.contains("do not make code changes")
-                || text.contains("no code changes"),
-            "pr_review prompt should prohibit code changes"
-        );
-    }
-
-    #[test]
-    fn build_dependabot_review_prompt_contains_runbook() {
-        let ctx = PromptContext::default();
-        let text = build_dependabot_review_prompt(
-            TaskId(42),
-            "#7 Bump serde from 1.0.0 to 1.0.1",
-            "https://github.com/example/repo/pull/7",
-            None,
-            None,
-            &ctx,
-        );
-
-        // Role
-        assert!(text.contains("Dependabot triage agent"), "missing role");
-
-        // Vetting steps
-        assert!(
-            text.contains("dependency-bump-only"),
-            "missing dep-only check"
-        );
-        assert!(
-            text.contains("app/dependabot"),
-            "missing dependabot author check"
-        );
-        assert!(text.contains("Cargo.lock"), "missing manifest allow-list");
-        assert!(text.contains("package-lock.json"));
-        assert!(text.contains("uv.lock"));
-
-        // Bump classification
-        assert!(text.contains("patch"));
-        assert!(text.contains("minor"));
-        assert!(text.contains("major"));
-
-        // CI check
-        assert!(text.contains("gh pr checks"));
-
-        // Changelog scan
-        assert!(text.contains("CHANGELOG"));
-        assert!(text.contains("BREAKING"));
-
-        // Auto-merge actions
-        assert!(text.contains("gh pr review"));
-        assert!(text.contains("--approve"));
-        assert!(text.contains("gh pr merge"));
-        assert!(text.contains("--squash --auto"));
-
-        // pr_url maintenance
-        assert!(text.contains("update_task"));
-        assert!(text.contains("pr_url"));
-
-        // Escalation
-        assert!(text.contains("ask the user") || text.contains("Ask the user"));
-        // The legacy update_review_status pipeline is gone — the prompt must not mention it.
-        assert!(
-            !text.contains("update_review_status"),
-            "prompt must not reference the removed update_review_status tool"
-        );
-
-        // Termination
-        assert!(text.contains("wrap_up"));
-    }
-
-    #[test]
     fn research_prompt_content() {
         let text = build_research_prompt(
             TaskId(7),
@@ -967,50 +730,6 @@ mod tests {
                 || text.contains("do not make code changes")
                 || text.contains("no code changes"),
             "research prompt should prohibit code changes"
-        );
-    }
-
-    #[test]
-    fn fix_task_prompt_content() {
-        let text = build_fix_task_prompt(
-            TaskId(5),
-            "Fix CVE-2024-1234",
-            "Heap overflow in serde",
-            None,
-            None,
-            &PromptContext::default(),
-        );
-        assert!(
-            text.contains("security fix") || text.contains("fix agent"),
-            "fix_task prompt should identify the agent role"
-        );
-        assert!(
-            text.contains("minimal"),
-            "fix_task prompt should emphasise minimal fix"
-        );
-        assert!(
-            text.contains("gh pr create"),
-            "fix_task prompt should instruct creating a PR"
-        );
-        assert!(
-            text.contains("wrap-up") || text.contains("wrap_up"),
-            "fix_task prompt should instruct wrap up"
-        );
-    }
-
-    #[test]
-    fn fix_task_prompt_has_learning_tools() {
-        let text = build_fix_task_prompt(
-            TaskId(5),
-            "Fix CVE",
-            "desc",
-            None,
-            None,
-            &PromptContext::default(),
-        );
-        assert!(
-            text.contains("/learnings"),
-            "fix_task prompt should reference /learnings skill"
         );
     }
 
@@ -1194,23 +913,9 @@ mod tests {
     }
 
     #[test]
-    fn build_pr_review_prompt_includes_repo_map_when_provided() {
-        let ctx = ctx_with_map(SAMPLE_MAP);
-        let text = build_pr_review_prompt(TaskId(1), "t", "d", None, None, &ctx);
-        assert!(text.contains(REPO_MAP_MARKER));
-    }
-
-    #[test]
     fn build_research_prompt_includes_repo_map_when_provided() {
         let ctx = ctx_with_map(SAMPLE_MAP);
         let text = build_research_prompt(TaskId(1), "t", "d", None, None, &ctx);
-        assert!(text.contains(REPO_MAP_MARKER));
-    }
-
-    #[test]
-    fn build_fix_task_prompt_includes_repo_map_when_provided() {
-        let ctx = ctx_with_map(SAMPLE_MAP);
-        let text = build_fix_task_prompt(TaskId(1), "t", "d", None, None, &ctx);
         assert!(text.contains(REPO_MAP_MARKER));
     }
 

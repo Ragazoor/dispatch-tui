@@ -130,23 +130,6 @@ impl super::super::SettingsStore for Database {
         .await
     }
 
-    async fn seed_github_query_defaults(&self) -> Result<()> {
-        self.db_call(move |conn| {
-            let defaults: &[(&str, &str)] = &[(
-                "github_queries_my_prs",
-                "is:pr is:open author:@me -is:draft archived:false",
-            )];
-            for (key, value) in defaults {
-                conn.execute(
-                    "INSERT OR IGNORE INTO settings (key, value) VALUES (?1, ?2)",
-                    params![key, value],
-                )?;
-            }
-            Ok(())
-        })
-        .await
-    }
-
     async fn save_filter_preset(
         &self,
         name: &str,

@@ -138,27 +138,6 @@ patch_struct! {
 }
 
 // ---------------------------------------------------------------------------
-// PrKind — selects which PR table to operate on
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PrKind {
-    Review,
-    My,
-    Bot,
-}
-
-impl PrKind {
-    pub fn table_name(self) -> &'static str {
-        match self {
-            PrKind::Review => "review_prs",
-            PrKind::My => "my_prs",
-            PrKind::Bot => "bot_prs",
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Sub-traits — focused slices of the database API
 // ---------------------------------------------------------------------------
 
@@ -240,69 +219,6 @@ pub trait EpicCrud: Send + Sync {
     async fn recalculate_epic_status(&self, epic_id: EpicId) -> Result<()>;
 }
 
-/// Save/load PRs (all kinds) and agent tracking on PRs.
-#[async_trait::async_trait]
-pub trait PrStore: Send + Sync {
-    async fn save_prs(&self, kind: PrKind, prs: &[crate::models::ReviewPr]) -> Result<()>;
-    async fn load_prs(&self, kind: PrKind) -> Result<Vec<crate::models::ReviewPr>>;
-    async fn set_pr_agent(
-        &self,
-        kind: PrKind,
-        repo: &str,
-        number: i64,
-        tmux_window: &str,
-        worktree: &str,
-    ) -> Result<bool>; // true = row updated
-    async fn update_agent_status(
-        &self,
-        repo: &str,
-        number: i64,
-        status: Option<&str>,
-    ) -> Result<String>;
-    /// Look up a single PR by (repo, number) — checks review_prs then my_prs.
-    async fn get_review_pr(
-        &self,
-        repo: &str,
-        number: i64,
-    ) -> Result<Option<crate::models::ReviewPr>>;
-    /// Returns the agent status for a single PR if an agent is active, without loading all rows.
-    async fn pr_agent_status(
-        &self,
-        table: &str,
-        repo: &str,
-        number: i64,
-    ) -> Result<Option<crate::models::ReviewAgentStatus>>;
-}
-
-/// Save/load security alerts and agent tracking on alerts.
-#[async_trait::async_trait]
-pub trait AlertStore: Send + Sync {
-    async fn save_security_alerts(&self, alerts: &[crate::models::SecurityAlert]) -> Result<()>;
-    async fn load_security_alerts(&self) -> Result<Vec<crate::models::SecurityAlert>>;
-    async fn set_alert_agent(
-        &self,
-        repo: &str,
-        number: i64,
-        kind: crate::models::AlertKind,
-        tmux_window: &str,
-        worktree: &str,
-    ) -> Result<bool>; // true = row updated
-    /// Look up a single security alert by (repo, number, kind).
-    async fn get_security_alert(
-        &self,
-        repo: &str,
-        number: i64,
-        kind: crate::models::AlertKind,
-    ) -> Result<Option<crate::models::SecurityAlert>>;
-    /// Returns the agent status for a single alert if an agent is active, without loading all rows.
-    async fn alert_agent_status(
-        &self,
-        repo: &str,
-        number: i64,
-        kind: crate::models::AlertKind,
-    ) -> Result<Option<crate::models::ReviewAgentStatus>>;
-}
-
 /// Settings, filter presets, repo paths, and usage tracking.
 #[async_trait::async_trait]
 pub trait SettingsStore: Send + Sync {
@@ -313,8 +229,6 @@ pub trait SettingsStore: Send + Sync {
     async fn set_setting_bool(&self, key: &str, value: bool) -> Result<()>;
     async fn get_setting_string(&self, key: &str) -> Result<Option<String>>;
     async fn set_setting_string(&self, key: &str, value: &str) -> Result<()>;
-    /// Seed default GitHub query strings if not already set.
-    async fn seed_github_query_defaults(&self) -> Result<()>;
     async fn save_filter_preset(&self, name: &str, repo_paths: &[String], mode: &str)
         -> Result<()>;
     async fn delete_filter_preset(&self, name: &str) -> Result<()>;
@@ -465,20 +379,12 @@ pub trait LearningRetrievalStore: Send + Sync {
 // ---------------------------------------------------------------------------
 
 pub trait TaskStore:
-    TaskAndEpicStore
-    + PrStore
-    + AlertStore
-    + SettingsStore
-    + ProjectCrud
-    + LearningStore
-    + LearningRetrievalStore
+    TaskAndEpicStore + SettingsStore + ProjectCrud + LearningStore + LearningRetrievalStore
 {
 }
 
 impl<
         T: TaskAndEpicStore
-            + PrStore
-            + AlertStore
             + SettingsStore
             + ProjectCrud
             + LearningStore

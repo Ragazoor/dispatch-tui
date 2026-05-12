@@ -2,21 +2,16 @@ use anyhow::{Context, Result};
 use std::fs;
 
 use crate::git::detect_default_branch;
-use crate::models::{
-    expand_tilde, AlertKind, DispatchResult, EpicId, ResumeResult, Task, TaskId, TaskStatus,
-};
+use crate::models::{expand_tilde, DispatchResult, EpicId, ResumeResult, Task, TaskId, TaskStatus};
 use crate::process::ProcessRunner;
 use crate::tmux;
-use crate::tui::{FixAgentRequest, ReviewAgentRequest};
 
 use super::prompts::{
-    build_dependabot_review_prompt, build_epic_planning_prompt, build_fix_task_prompt,
-    build_pr_review_prompt, build_prompt, build_quick_dispatch_prompt, build_research_prompt,
+    build_epic_planning_prompt, build_prompt, build_quick_dispatch_prompt, build_research_prompt,
     build_tmux_window_name, rebase_preamble, EpicContext, LearningInjections, ProjectContext,
     PromptContext, DISPATCH_PLUGIN_DIR,
 };
 use super::repo_map::{self, SystemCtagsExec};
-use super::stderr_str;
 use super::worktree::provision_worktree;
 
 /// Provision worktree, generate the repo map, build the prompt, write the
@@ -30,8 +25,7 @@ use super::worktree::provision_worktree;
 /// `permission_mode` controls Claude's `--permission-mode` flag:
 /// `None` launches in Claude's default (auto) mode, used by every task
 /// agent except research. `Some("plan")` is used by the research agent so
-/// investigation stays read-only. Review and fix agents use a separate
-/// path (`provision_and_dispatch`) and pass `acceptEdits`.
+/// investigation stays read-only.
 fn dispatch_with_prompt(
     task: &Task,
     make_prompt: impl FnOnce(Option<String>) -> String,
@@ -130,49 +124,6 @@ pub fn dispatch_agent(
     )
 }
 
-pub fn pr_review_agent(
-    task: &Task,
-    runner: &dyn ProcessRunner,
-    epic: Option<&EpicContext>,
-    project: Option<&ProjectContext>,
-) -> Result<DispatchResult> {
-    dispatch_with_prompt(
-        task,
-        |repo_map| {
-            let ctx = PromptContext::with_map(LearningInjections::default(), repo_map);
-            build_pr_review_prompt(task.id, &task.title, &task.description, epic, project, &ctx)
-        },
-        runner,
-        Some(&task.base_branch),
-        None,
-    )
-}
-
-pub fn dependabot_review_agent(
-    task: &Task,
-    runner: &dyn ProcessRunner,
-    epic: Option<&EpicContext>,
-    project: Option<&ProjectContext>,
-) -> Result<DispatchResult> {
-    dispatch_with_prompt(
-        task,
-        |repo_map| {
-            let ctx = PromptContext::with_map(LearningInjections::default(), repo_map);
-            build_dependabot_review_prompt(
-                task.id,
-                &task.title,
-                &task.description,
-                epic,
-                project,
-                &ctx,
-            )
-        },
-        runner,
-        Some(&task.base_branch),
-        None,
-    )
-}
-
 pub fn research_agent(
     task: &Task,
     runner: &dyn ProcessRunner,
@@ -188,24 +139,6 @@ pub fn research_agent(
         runner,
         Some(&task.base_branch),
         Some("plan"),
-    )
-}
-
-pub fn fix_task_agent(
-    task: &Task,
-    runner: &dyn ProcessRunner,
-    epic: Option<&EpicContext>,
-    project: Option<&ProjectContext>,
-) -> Result<DispatchResult> {
-    dispatch_with_prompt(
-        task,
-        |repo_map| {
-            let ctx = PromptContext::with_map(LearningInjections::default(), repo_map);
-            build_fix_task_prompt(task.id, &task.title, &task.description, epic, project, &ctx)
-        },
-        runner,
-        Some(&task.base_branch),
-        None,
     )
 }
 
@@ -310,237 +243,6 @@ pub fn resume_agent(
     tracing::info!(task_id = task_id.0, %tmux_window, "agent resumed");
 
     Ok(ResumeResult { tmux_window })
-}
-
-/// How to set up the git worktree for a dispatched agent.
-enum WorktreeStrategy<'a> {
-    /// Check out an existing remote branch (e.g. for PR reviews).
-    CheckoutRemote { head_ref: &'a str },
-    /// Create a new branch from the repo's default branch (e.g. for fixes).
-    NewBranch { branch_name: String },
-}
-
-/// Configuration for dispatching an agent into an isolated worktree.
-struct AgentDispatchConfig<'a> {
-    repo_path: String,
-    worktree_name: String,
-    tmux_prefix: &'a str,
-    number: i64,
-    git_strategy: WorktreeStrategy<'a>,
-    prompt: String,
-}
-
-/// Shared worktree provisioning + agent launch used by both review and fix dispatch.
-fn provision_and_dispatch(
-    config: AgentDispatchConfig,
-    runner: &dyn ProcessRunner,
-) -> Result<DispatchResult> {
-    let repo_short = config
-        .repo_path
-        .split('/')
-        .next_back()
-        .unwrap_or(&config.repo_path);
-    let worktree_path = format!("{}/.worktrees/{}", config.repo_path, config.worktree_name);
-    let tmux_window = format!("{}-{}-{}", config.tmux_prefix, repo_short, config.number);
-
-    // Check if tmux window already exists — focus it instead
-    if tmux::has_window(&tmux_window, runner).unwrap_or(false) {
-        return Ok(DispatchResult {
-            worktree_path,
-            tmux_window,
-        });
-    }
-
-    std::fs::create_dir_all(format!("{}/.worktrees", config.repo_path))
-        .context("failed to create .worktrees directory")?;
-
-    // Prune stale worktree entries (directories deleted without `git worktree remove`)
-    let _ = runner.run("git", &["-C", &config.repo_path, "worktree", "prune"]);
-
-    // Set up the worktree according to the chosen strategy
-    match &config.git_strategy {
-        WorktreeStrategy::CheckoutRemote { head_ref } => {
-            let fetch_output = runner
-                .run(
-                    "git",
-                    &["-C", &config.repo_path, "fetch", "origin", head_ref],
-                )
-                .context("failed to fetch PR branch")?;
-            anyhow::ensure!(
-                fetch_output.status.success(),
-                "git fetch failed: {}",
-                stderr_str(&fetch_output)
-            );
-
-            if !std::path::Path::new(&worktree_path).exists() {
-                let output = runner
-                    .run(
-                        "git",
-                        &[
-                            "-C",
-                            &config.repo_path,
-                            "worktree",
-                            "add",
-                            &worktree_path,
-                            &format!("origin/{head_ref}"),
-                        ],
-                    )
-                    .context("failed to create review worktree")?;
-                anyhow::ensure!(
-                    output.status.success(),
-                    "git worktree add failed: {}",
-                    stderr_str(&output)
-                );
-            }
-        }
-        WorktreeStrategy::NewBranch { branch_name } => {
-            let default_branch = detect_default_branch(&config.repo_path, runner);
-
-            let _ = runner.run(
-                "git",
-                &["-C", &config.repo_path, "fetch", "origin", &default_branch],
-            );
-
-            if !std::path::Path::new(&worktree_path).exists() {
-                let output = runner
-                    .run(
-                        "git",
-                        &[
-                            "-C",
-                            &config.repo_path,
-                            "worktree",
-                            "add",
-                            "-b",
-                            branch_name,
-                            &worktree_path,
-                            &format!("origin/{default_branch}"),
-                        ],
-                    )
-                    .context("failed to create fix worktree")?;
-                anyhow::ensure!(
-                    output.status.success(),
-                    "git worktree add failed: {}",
-                    stderr_str(&output)
-                );
-            }
-        }
-    }
-
-    tmux::new_window(&tmux_window, &worktree_path, runner)
-        .context("failed to create tmux window")?;
-
-    // Write prompt and launch Claude.
-    // Uses `--permission-mode acceptEdits`: review and fix agents make direct code
-    // changes and don't need interactive approval for every edit. Task agents use
-    // `plan` mode instead (see dispatch_with_prompt).
-    let prompt_file = format!("{worktree_path}/.claude-prompt");
-    fs::write(&prompt_file, &config.prompt)
-        .with_context(|| format!("failed to write {prompt_file}"))?;
-    let claude_cmd = &format!("bash -c 'prompt=$(cat .claude-prompt) && rm -f .claude-prompt && claude {DISPATCH_PLUGIN_DIR} --permission-mode acceptEdits \"$prompt\"'");
-    tmux::send_keys(&tmux_window, claude_cmd, runner)
-        .context("failed to send keys to tmux window")?;
-
-    Ok(DispatchResult {
-        worktree_path,
-        tmux_window,
-    })
-}
-
-/// Dispatch a Claude agent to review a PR in an isolated worktree.
-pub fn dispatch_review_agent(
-    req: &ReviewAgentRequest,
-    runner: &dyn ProcessRunner,
-) -> Result<DispatchResult> {
-    let prompt = format!(
-        "Review PR #{} in {}.\n\n\
-         Run `/anthropic-review-pr:review-pr {}` to perform a comprehensive code review.\n\n\
-         Wait for the user.",
-        req.number, req.github_repo, req.number
-    );
-
-    provision_and_dispatch(
-        AgentDispatchConfig {
-            repo_path: expand_tilde(&req.repo),
-            worktree_name: format!("review-{}", req.number),
-            tmux_prefix: "review",
-            number: req.number,
-            git_strategy: WorktreeStrategy::CheckoutRemote {
-                head_ref: &req.head_ref,
-            },
-            prompt,
-        },
-        runner,
-    )
-}
-
-/// Build the prompt for a fix agent based on the alert kind.
-pub fn build_fix_prompt(req: &FixAgentRequest) -> String {
-    let repo = &req.github_repo;
-    let number = req.number;
-    match req.kind {
-        AlertKind::Dependabot => {
-            let pkg = req.package.as_deref().unwrap_or("unknown");
-            let fix = req
-                .fixed_version
-                .as_deref()
-                .map(|v| format!("A fix is available: upgrade to version {v}"))
-                .unwrap_or_else(|| "No fixed version is available yet.".to_string());
-            format!(
-                "You are fixing security alert #{number} in `{repo}`.\n\n\
-                 ## Vulnerability\n\n\
-                 **{}**\n\
-                 Package: `{pkg}`\n\
-                 {fix}\n\n\
-                 ## Instructions\n\n\
-                 1. Find and update the dependency `{pkg}` to the fixed version\n\
-                 2. Run the project's tests to verify nothing breaks\n\
-                 3. Commit with a descriptive message referencing the alert\n\
-                 4. Create a PR with `gh pr create`\n\n\
-                 Focus on the minimal change needed to resolve the vulnerability.\n\n\
-                 Wait for the user.",
-                req.title
-            )
-        }
-        AlertKind::CodeScanning => {
-            format!(
-                "You are fixing a code scanning alert #{number} in `{repo}`.\n\n\
-                 ## Alert\n\n\
-                 **{}**\n\
-                 Location: `{}`\n\n\
-                 ## Instructions\n\n\
-                 1. Read the flagged code at the reported location\n\
-                 2. Understand the vulnerability and apply the appropriate fix\n\
-                 3. Run tests to verify the fix doesn't break anything\n\
-                 4. Commit and create a PR with `gh pr create`\n\n\
-                 Focus on the minimal change needed to resolve the vulnerability.\n\n\
-                 Wait for the user.",
-                req.title, req.description
-            )
-        }
-    }
-}
-
-/// Dispatch a Claude agent to fix a security vulnerability in an isolated worktree.
-pub fn dispatch_fix_agent(
-    req: FixAgentRequest,
-    runner: &dyn ProcessRunner,
-) -> Result<DispatchResult> {
-    let prompt = build_fix_prompt(&req);
-    let number = req.number;
-
-    provision_and_dispatch(
-        AgentDispatchConfig {
-            repo_path: expand_tilde(&req.repo),
-            worktree_name: format!("fix-vuln-{number}"),
-            tmux_prefix: "fix",
-            number,
-            git_strategy: WorktreeStrategy::NewBranch {
-                branch_name: format!("fix/vuln-{number}"),
-            },
-            prompt,
-        },
-        runner,
-    )
 }
 
 /// A task can be wrapped up if it has a worktree and is either Running or Review.

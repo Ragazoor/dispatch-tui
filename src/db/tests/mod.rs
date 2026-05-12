@@ -1,13 +1,11 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
 
-mod alerts;
 mod async_handle;
 mod epics;
 mod learnings;
 mod migrations;
 mod projects;
-mod prs;
 mod settings;
 mod tasks;
 

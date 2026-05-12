@@ -876,17 +876,8 @@ fn do_dispatch(
             Some(&project_ctx),
             &injections,
         ),
-        DispatchMode::PrReview => {
-            dispatch::pr_review_agent(task, runner, epic_ctx.as_ref(), Some(&project_ctx))
-        }
         DispatchMode::Research => {
             dispatch::research_agent(task, runner, epic_ctx.as_ref(), Some(&project_ctx))
-        }
-        DispatchMode::Fix => {
-            dispatch::fix_task_agent(task, runner, epic_ctx.as_ref(), Some(&project_ctx))
-        }
-        DispatchMode::Dependabot => {
-            dispatch::dependabot_review_agent(task, runner, epic_ctx.as_ref(), Some(&project_ctx))
         }
     }
 }

@@ -379,41 +379,33 @@ pub struct FeedItem {
 
 /// Determines how a backlog task should be dispatched. Most tasks route to
 /// `Dispatch`, which produces the unified prompt skeleton (with-plan or
-/// no-plan variant). The `pr_review`, `research`, and `fix` tags route to
-/// dedicated agents whose prompts are intentionally different.
+/// no-plan variant). The `research` tag is the only one with a dedicated
+/// agent — its prompt keeps the agent in read-only mode while it presents
+/// findings to the user. Other tags (`pr_review`, `fix`, `dependabot`) are
+/// kanban labels and route through the unified `Dispatch` path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DispatchMode {
     Dispatch,
-    PrReview,
     Research,
-    Fix,
-    Dependabot,
 }
 
 impl DispatchMode {
     pub fn label(self) -> &'static str {
         match self {
             DispatchMode::Dispatch => "Dispatch",
-            DispatchMode::PrReview => "PR Review",
             DispatchMode::Research => "Research",
-            DispatchMode::Fix => "Fix",
-            DispatchMode::Dependabot => "Dependabot",
         }
     }
 
     /// Select the dispatch mode for a task: tasks with a plan always go
-    /// through the unified `Dispatch` path; otherwise the tag drives whether
-    /// the task uses the unified path or a dedicated agent (pr_review /
-    /// research / fix).
+    /// through the unified `Dispatch` path; otherwise only the `research`
+    /// tag routes to its dedicated agent.
     pub fn for_task(task: &Task) -> Self {
         if task.plan_path.is_some() {
             DispatchMode::Dispatch
         } else {
             match task.tag {
-                Some(TaskTag::PrReview) => DispatchMode::PrReview,
                 Some(TaskTag::Research) => DispatchMode::Research,
-                Some(TaskTag::Fix) => DispatchMode::Fix,
-                Some(TaskTag::Dependabot) => DispatchMode::Dependabot,
                 _ => DispatchMode::Dispatch,
             }
         }

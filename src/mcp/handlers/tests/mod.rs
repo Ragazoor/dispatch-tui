@@ -2,7 +2,6 @@
 mod epics;
 mod learnings;
 mod projects;
-mod review;
 mod tasks;
 
 use std::sync::Arc;
@@ -17,10 +16,6 @@ use crate::process::{MockProcessRunner, ProcessRunner};
 
 use super::dispatch::{handle_mcp, tool_definitions};
 use super::epics::{CreateEpicArgs, GetEpicArgs, UpdateEpicArgs};
-use super::review::{
-    DispatchFixAgentArgs, DispatchReviewAgentArgs, GetReviewPrArgs, GetSecurityAlertArgs,
-    ListReviewPrsArgs, ListSecurityAlertsArgs,
-};
 use super::tasks::{
     ClaimTaskArgs, CreateTaskWithEpicArgs, DispatchNextArgs, ExitSessionArgs, GetTaskArgs,
     ListTasksArgs, ReportUsageArgs, SendMessageArgs, UpdateTaskArgs, WrapUpArgs,
@@ -351,42 +346,6 @@ async fn tool_schemas_match_arg_structs() {
             BTreeSet::from(["task_id"]),
             json!({"task_id": 1}),
         ),
-        (
-            "list_review_prs",
-            BTreeSet::from(["mode", "repo"]),
-            BTreeSet::new(),
-            json!({"mode": "reviewer"}),
-        ),
-        (
-            "get_review_pr",
-            BTreeSet::from(["repo", "number"]),
-            BTreeSet::from(["repo", "number"]),
-            json!({"repo": "acme/app", "number": 42}),
-        ),
-        (
-            "dispatch_review_agent",
-            BTreeSet::from(["repo", "number", "local_repo"]),
-            BTreeSet::from(["repo", "number", "local_repo"]),
-            json!({"repo": "acme/app", "number": 42, "local_repo": "/tmp/repo"}),
-        ),
-        (
-            "list_security_alerts",
-            BTreeSet::from(["repo", "severity", "kind"]),
-            BTreeSet::new(),
-            json!({"kind": "dependabot"}),
-        ),
-        (
-            "get_security_alert",
-            BTreeSet::from(["repo", "number", "kind"]),
-            BTreeSet::from(["repo", "number", "kind"]),
-            json!({"repo": "acme/api", "number": 7, "kind": "dependabot"}),
-        ),
-        (
-            "dispatch_fix_agent",
-            BTreeSet::from(["repo", "number", "kind", "local_repo"]),
-            BTreeSet::from(["repo", "number", "kind", "local_repo"]),
-            json!({"repo": "acme/api", "number": 7, "kind": "dependabot", "local_repo": "/tmp/repo"}),
-        ),
         ("list_projects", BTreeSet::new(), BTreeSet::new(), json!({})),
         (
             "record_learning",
@@ -478,24 +437,6 @@ async fn tool_schemas_match_arg_structs() {
             }
             "dispatch_next" => {
                 serde_json::from_value::<DispatchNextArgs>(payload.clone()).unwrap();
-            }
-            "list_review_prs" => {
-                serde_json::from_value::<ListReviewPrsArgs>(payload.clone()).unwrap();
-            }
-            "get_review_pr" => {
-                serde_json::from_value::<GetReviewPrArgs>(payload.clone()).unwrap();
-            }
-            "dispatch_review_agent" => {
-                serde_json::from_value::<DispatchReviewAgentArgs>(payload.clone()).unwrap();
-            }
-            "list_security_alerts" => {
-                serde_json::from_value::<ListSecurityAlertsArgs>(payload.clone()).unwrap();
-            }
-            "get_security_alert" => {
-                serde_json::from_value::<GetSecurityAlertArgs>(payload.clone()).unwrap();
-            }
-            "dispatch_fix_agent" => {
-                serde_json::from_value::<DispatchFixAgentArgs>(payload.clone()).unwrap();
             }
             "dispatch_task" => {
                 serde_json::from_value::<super::tasks::DispatchTaskArgs>(payload.clone()).unwrap();

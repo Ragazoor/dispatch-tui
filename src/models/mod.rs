@@ -94,14 +94,14 @@ pub use projects::*;
 pub mod learnings;
 pub use learnings::*;
 
+pub mod review;
+pub use review::*;
 pub mod tasks;
 pub use tasks::*;
 
 pub mod epics;
 pub use epics::*;
 
-pub mod review;
-pub use review::*;
 
 // ---------------------------------------------------------------------------
 // VisualColumn — the 8 visual columns for the kanban board
@@ -1495,12 +1495,15 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_mode_without_plan_routes_only_dedicated_tags() {
+    fn dispatch_mode_without_plan_routes_only_research() {
         for tag in [
             None,
             Some(TaskTag::Feature),
             Some(TaskTag::Bug),
             Some(TaskTag::Chore),
+            Some(TaskTag::PrReview),
+            Some(TaskTag::Fix),
+            Some(TaskTag::Dependabot),
         ] {
             assert_eq!(
                 DispatchMode::for_task(&make_task_with(None, tag)),
@@ -1509,16 +1512,8 @@ mod tests {
             );
         }
         assert_eq!(
-            DispatchMode::for_task(&make_task_with(None, Some(TaskTag::PrReview))),
-            DispatchMode::PrReview
-        );
-        assert_eq!(
             DispatchMode::for_task(&make_task_with(None, Some(TaskTag::Research))),
             DispatchMode::Research
-        );
-        assert_eq!(
-            DispatchMode::for_task(&make_task_with(None, Some(TaskTag::Fix))),
-            DispatchMode::Fix
         );
     }
 
@@ -1536,27 +1531,6 @@ mod tests {
         assert_eq!(TaskTag::parse("dependabot"), Some(TaskTag::Dependabot));
         assert_eq!(TaskTag::Dependabot.as_str(), "dependabot");
         assert_eq!(TaskTag::Dependabot.short_label(), "dep");
-    }
-
-    #[test]
-    fn dispatch_mode_for_task_routes_dependabot() {
-        assert_eq!(
-            DispatchMode::for_task(&make_task_with(None, Some(TaskTag::Dependabot))),
-            DispatchMode::Dependabot
-        );
-    }
-
-    #[test]
-    fn dispatch_mode_for_task_dependabot_with_plan_routes_dispatch() {
-        assert_eq!(
-            DispatchMode::for_task(&make_task_with(Some("plan.md"), Some(TaskTag::Dependabot))),
-            DispatchMode::Dispatch
-        );
-    }
-
-    #[test]
-    fn dispatch_mode_label_dependabot() {
-        assert_eq!(DispatchMode::Dependabot.label(), "Dependabot");
     }
 
     mod property_tests {

@@ -200,21 +200,9 @@ impl TuiRuntime {
                         Some(&project_ctx),
                         &injections,
                     ),
-                    models::DispatchMode::PrReview => {
-                        dispatch::pr_review_agent(t, r, epic_ctx.as_ref(), Some(&project_ctx))
-                    }
                     models::DispatchMode::Research => {
                         dispatch::research_agent(t, r, epic_ctx.as_ref(), Some(&project_ctx))
                     }
-                    models::DispatchMode::Fix => {
-                        dispatch::fix_task_agent(t, r, epic_ctx.as_ref(), Some(&project_ctx))
-                    }
-                    models::DispatchMode::Dependabot => dispatch::dependabot_review_agent(
-                        t,
-                        r,
-                        epic_ctx.as_ref(),
-                        Some(&project_ctx),
-                    ),
                 }
             },
             label,
