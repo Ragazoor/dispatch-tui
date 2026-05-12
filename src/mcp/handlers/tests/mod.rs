@@ -275,7 +275,7 @@ async fn tool_schemas_match_arg_structs() {
                 "caller_task_id",
             ]),
             BTreeSet::new(),
-            json!({"status": "backlog", "epic_id": 1, "project_id": 1, "repo_paths": ["/r"], "caller_task_id": 1}),
+            json!({"status": "backlog", "epic_id": 1, "project_id": 1, "repo_paths": ["/r"]}),
         ),
         (
             "claim_task",

@@ -6315,263 +6315,229 @@ async fn upvote_learning_unknown_learning_fails() {
     assert_error(&resp, "9999");
 }
 
-// -- list_tasks caller_task_id / scope derivation tests ---------------------
+// -- list_tasks: header-based caller identity ---------------------------------
 
 #[tokio::test]
-async fn list_tasks_caller_task_id_scopes_to_epic() {
-    let state = test_state().await;
-
-    // Create epics directly via DB
-    let epic = state
-        .db
-        .create_epic("My Epic", "", "/repo", None, ProjectId(1))
-        .await
-        .unwrap();
-    let epic2 = state
-        .db
-        .create_epic("Other Epic", "", "/repo", None, ProjectId(1))
-        .await
-        .unwrap();
-
-    // Task A (caller) in epic
-    let id_a = state
-        .db
+async fn list_tasks_task_identity_scopes_to_epic_and_excludes_self() {
+    let (state, db) = test_state_with_db().await;
+    let pid = ProjectId(1);
+    let eid = db.create_epic("e", "", "/r", None, pid).await.unwrap().id;
+    let me = db
         .create_task(CreateTaskRequest {
-            title: "Task A",
+            title: "me",
             description: "",
-            repo_path: "/repo",
+            repo_path: "/r",
+            plan: None,
+            status: TaskStatus::Running,
+            base_branch: "main",
+            epic_id: Some(eid),
+            sort_order: None,
+            tag: None,
+            project_id: pid,
+        })
+        .await
+        .unwrap();
+    let sibling = db
+        .create_task(CreateTaskRequest {
+            title: "sibling",
+            description: "",
+            repo_path: "/r",
             plan: None,
             status: TaskStatus::Backlog,
             base_branch: "main",
-            epic_id: Some(epic.id),
+            epic_id: Some(eid),
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
+            project_id: pid,
+        })
+        .await
+        .unwrap();
+    let _unrelated = db
+        .create_task(CreateTaskRequest {
+            title: "unrelated",
+            description: "",
+            repo_path: "/r",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: pid,
         })
         .await
         .unwrap();
 
-    // Task B (sibling) in the same epic
-    state
-        .db
-        .create_task(CreateTaskRequest {
-            title: "Task B",
-            description: "",
-            repo_path: "/repo",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: Some(epic.id),
-            sort_order: None,
-            tag: None,
-            project_id: ProjectId(1),
-        })
-        .await
-        .unwrap();
-
-    // Task C in a different epic (should NOT appear)
-    state
-        .db
-        .create_task(CreateTaskRequest {
-            title: "Task C",
-            description: "",
-            repo_path: "/repo",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: Some(epic2.id),
-            sort_order: None,
-            tag: None,
-            project_id: ProjectId(1),
-        })
-        .await
-        .unwrap();
-
-    let resp = call(
+    let resp = call_as(
         &state,
         "tools/call",
-        Some(json!({
-            "name": "list_tasks",
-            "arguments": { "caller_task_id": id_a.0 }
-        })),
+        Some(json!({ "name": "list_tasks", "arguments": {} })),
+        CallerIdentity::Task(me),
     )
     .await;
 
     let text = extract_response_text(&resp);
-    assert!(text.contains("Task B"), "should include sibling Task B");
-    assert!(!text.contains("Task A"), "should exclude the caller Task A");
+    // sibling is in scope (same epic); me is excluded (self); unrelated is out of scope.
     assert!(
-        !text.contains("Task C"),
-        "should exclude Task C from other epic"
+        text.contains(&format!("[{}]", sibling.0)),
+        "expected sibling in:\n{text}"
+    );
+    assert!(
+        !text.contains(&format!("[{}]", me.0)),
+        "self should be excluded:\n{text}"
     );
 }
 
 #[tokio::test]
-async fn list_tasks_caller_task_id_scopes_to_project_when_no_epic() {
-    let state = test_state().await;
-
-    // Task A (caller) in project 1, no epic
-    let id_a = state
-        .db
+async fn list_tasks_task_identity_scopes_to_project_when_no_epic() {
+    let (state, db) = test_state_with_db().await;
+    let pid = ProjectId(1);
+    let me = db
         .create_task(CreateTaskRequest {
-            title: "Task A",
+            title: "me",
             description: "",
-            repo_path: "/repo",
+            repo_path: "/r",
+            plan: None,
+            status: TaskStatus::Running,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: pid,
+        })
+        .await
+        .unwrap();
+    let sibling = db
+        .create_task(CreateTaskRequest {
+            title: "sib",
+            description: "",
+            repo_path: "/r",
             plan: None,
             status: TaskStatus::Backlog,
             base_branch: "main",
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
+            project_id: pid,
         })
         .await
         .unwrap();
 
-    // Task B sibling in project 1
-    state
-        .db
-        .create_task(CreateTaskRequest {
-            title: "Task B",
-            description: "",
-            repo_path: "/repo",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            project_id: ProjectId(1),
-        })
-        .await
-        .unwrap();
-
-    // Task C in project 2 (should NOT appear)
-    state
-        .db
-        .create_task(CreateTaskRequest {
-            title: "Task C",
-            description: "",
-            repo_path: "/repo",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            project_id: ProjectId(2),
-        })
-        .await
-        .unwrap();
-
-    let resp = call(
+    let resp = call_as(
         &state,
         "tools/call",
-        Some(json!({
-            "name": "list_tasks",
-            "arguments": { "caller_task_id": id_a.0 }
-        })),
+        Some(json!({ "name": "list_tasks", "arguments": {} })),
+        CallerIdentity::Task(me),
     )
     .await;
-
     let text = extract_response_text(&resp);
     assert!(
-        text.contains("Task B"),
-        "should include project sibling Task B"
+        text.contains(&format!("[{}]", sibling.0)),
+        "expected sibling:\n{text}"
     );
-    assert!(!text.contains("Task A"), "should exclude caller Task A");
     assert!(
-        !text.contains("Task C"),
-        "should exclude Task C from project 2"
+        !text.contains(&format!("[{}]", me.0)),
+        "self excluded:\n{text}"
     );
 }
 
 #[tokio::test]
-async fn list_tasks_explicit_scope_overrides_caller_derived_scope() {
-    let state = test_state().await;
-
-    // Create epic directly via DB
-    let epic = state
-        .db
-        .create_epic("Epic", "", "/repo", None, ProjectId(1))
-        .await
-        .unwrap();
-
-    // Caller is in the epic
-    let id_a = state
-        .db
+async fn list_tasks_task_identity_explicit_scope_disables_auto_derivation() {
+    let (state, db) = test_state_with_db().await;
+    let p1 = ProjectId(1);
+    let p2 = db.create_project("p2", 2).await.unwrap().id;
+    let me = db
         .create_task(CreateTaskRequest {
-            title: "Task A",
+            title: "me",
             description: "",
-            repo_path: "/repo",
+            repo_path: "/r",
             plan: None,
-            status: TaskStatus::Backlog,
+            status: TaskStatus::Running,
             base_branch: "main",
-            epic_id: Some(epic.id),
+            epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
+            project_id: p1,
         })
         .await
         .unwrap();
-
-    // Task B also in the epic
-    state
-        .db
+    let _other_p2 = db
         .create_task(CreateTaskRequest {
-            title: "Task B",
+            title: "other",
             description: "",
-            repo_path: "/repo",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: Some(epic.id),
-            sort_order: None,
-            tag: None,
-            project_id: ProjectId(1),
-        })
-        .await
-        .unwrap();
-
-    // Task C in project 2, no epic — explicit project_id=2 should match this
-    state
-        .db
-        .create_task(CreateTaskRequest {
-            title: "Task C",
-            description: "",
-            repo_path: "/repo",
+            repo_path: "/r",
             plan: None,
             status: TaskStatus::Backlog,
             base_branch: "main",
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(2),
+            project_id: p2,
         })
         .await
         .unwrap();
 
-    // Pass caller_task_id (which has epic) BUT also explicit project_id=2 → project wins
-    let resp = call(
+    let resp = call_as(
         &state,
         "tools/call",
         Some(json!({
             "name": "list_tasks",
-            "arguments": { "caller_task_id": id_a.0, "project_id": 2 }
+            "arguments": { "project_id": p2.0 }
         })),
+        CallerIdentity::Task(me),
     )
     .await;
-
     let text = extract_response_text(&resp);
-    assert!(
-        text.contains("Task C"),
-        "explicit project_id=2 should show Task C"
-    );
-    assert!(
-        !text.contains("Task B"),
-        "Task B is in epic/project1, should not appear"
-    );
-    assert!(!text.contains("Task A"), "caller excluded");
+    // Caller is in p1; explicit project_id=p2 should win over auto-scoping.
+    assert!(text.contains("other"), "expected other:\n{text}");
+}
+
+#[tokio::test]
+async fn list_tasks_session_identity_no_scope_no_exclude() {
+    let (state, db) = test_state_with_db().await;
+    let p1 = ProjectId(1);
+    let p2 = db.create_project("p2", 2).await.unwrap().id;
+    let _t1 = db
+        .create_task(CreateTaskRequest {
+            title: "t1",
+            description: "",
+            repo_path: "/r",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: p1,
+        })
+        .await
+        .unwrap();
+    let _t2 = db
+        .create_task(CreateTaskRequest {
+            title: "t2",
+            description: "",
+            repo_path: "/r",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: p2,
+        })
+        .await
+        .unwrap();
+
+    let resp = call_as(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "list_tasks", "arguments": {} })),
+        CallerIdentity::Session,
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert!(text.contains("t1"), "got:\n{text}");
+    assert!(text.contains("t2"), "got:\n{text}");
 }
 
 #[tokio::test]
@@ -6624,23 +6590,6 @@ async fn list_tasks_repo_paths_filter() {
     let text = extract_response_text(&resp);
     assert!(text.contains("Repo A task"));
     assert!(!text.contains("Repo B task"));
-}
-
-#[tokio::test]
-async fn list_tasks_unknown_caller_task_id_returns_error() {
-    let state = test_state().await;
-
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "list_tasks",
-            "arguments": { "caller_task_id": 9999 }
-        })),
-    )
-    .await;
-
-    assert_error(&resp, "Unknown caller_task_id");
 }
 
 #[tokio::test]

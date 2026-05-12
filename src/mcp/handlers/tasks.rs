@@ -68,8 +68,6 @@ pub(super) struct ListTasksArgs {
     #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
     pub(super) epic_id: Option<i64>,
     #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
-    pub(super) caller_task_id: Option<i64>,
-    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
     pub(super) project_id: Option<i64>,
     #[serde(default)]
     pub(super) repo_paths: Option<Vec<String>>,
@@ -288,29 +286,6 @@ fn format_task_line(t: &Task, epic_titles: &HashMap<EpicId, String>, goal: &str)
 // Task tool handlers (thin wrappers over TaskService)
 // ---------------------------------------------------------------------------
 
-/// Look up a `caller_task_id` and map "not found" / DB errors to the
-/// JSON-RPC errors agents see (-32602 / -32603). Shared by create_task and
-/// list_tasks so the two handlers stay in sync.
-async fn lookup_caller_task(
-    state: &McpState,
-    id: &Option<Value>,
-    caller_id: i64,
-) -> Result<Task, JsonRpcResponse> {
-    match state.db.get_task(TaskId(caller_id)).await {
-        Ok(Some(t)) => Ok(t),
-        Ok(None) => Err(JsonRpcResponse::err(
-            id.clone(),
-            -32602,
-            format!("Unknown caller_task_id: {caller_id}"),
-        )),
-        Err(e) => Err(JsonRpcResponse::err(
-            id.clone(),
-            -32603,
-            format!("Database error: {e}"),
-        )),
-    }
-}
-
 async fn validate_project_id(
     state: &McpState,
     id: &Option<Value>,
@@ -517,36 +492,43 @@ pub(super) async fn handle_get_task(
 pub(super) async fn handle_list_tasks(
     state: &McpState,
     id: Option<Value>,
-    _identity: &CallerIdentity,
+    identity: &CallerIdentity,
     args: Value,
 ) -> JsonRpcResponse {
     let parsed = match parse_args::<ListTasksArgs>(&id, args) {
         Ok(a) => a,
         Err(resp) => return resp,
     };
-    tracing::info!(status = ?parsed.status, "MCP list_tasks");
+    tracing::info!(status = ?parsed.status, identity = ?identity, "MCP list_tasks");
 
     let status_filter: Option<Vec<TaskStatus>> = parsed.status.map(StatusFilter::into_vec);
 
-    let (derived_epic_id, derived_project_id, exclude_task_id) = if let Some(caller_id) =
-        parsed.caller_task_id
-    {
-        let caller = match lookup_caller_task(state, &id, caller_id).await {
-            Ok(t) => t,
-            Err(resp) => return resp,
-        };
-        let has_explicit_scope =
-            parsed.epic_id.is_some() || parsed.project_id.is_some() || parsed.repo_paths.is_some();
-        let (epic, proj) = if has_explicit_scope {
-            (None, None)
-        } else if let Some(eid) = caller.epic_id {
-            (Some(eid), None)
-        } else {
-            (None, Some(caller.project_id))
-        };
-        (epic, proj, Some(caller.id))
-    } else {
-        (None, None, None)
+    let (derived_epic_id, derived_project_id, exclude_task_id) = match identity {
+        CallerIdentity::Task(caller_id) => {
+            let caller = match state.db.get_task(*caller_id).await {
+                Ok(Some(t)) => t,
+                Ok(None) => {
+                    return JsonRpcResponse::err(
+                        id,
+                        -32602,
+                        format!("Unknown caller task {}", caller_id.0),
+                    )
+                }
+                Err(e) => return JsonRpcResponse::err(id, -32603, format!("Database error: {e}")),
+            };
+            let has_explicit_scope = parsed.epic_id.is_some()
+                || parsed.project_id.is_some()
+                || parsed.repo_paths.is_some();
+            let (epic, proj) = if has_explicit_scope {
+                (None, None)
+            } else if let Some(eid) = caller.epic_id {
+                (Some(eid), None)
+            } else {
+                (None, Some(caller.project_id))
+            };
+            (epic, proj, Some(caller.id))
+        }
+        CallerIdentity::Session => (None, None, None),
     };
 
     let epic_id = parsed.epic_id.map(EpicId).or(derived_epic_id);
