@@ -2101,48 +2101,87 @@ async fn upsert_feed_tasks_replaces_labels_and_sort_order_on_conflict() {
 }
 
 #[tokio::test]
-async fn upsert_feed_tasks_sets_pr_url_for_pr_review_items_on_insert() {
+async fn upsert_feed_tasks_sets_pr_url_from_item_url_on_insert() {
     let db = in_memory_db().await;
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
         .await
         .unwrap();
-    let items = vec![crate::models::FeedItem {
-        external_id: "dep:org/repo#42".to_string(),
-        title: "#42 Bump foo".to_string(),
-        description: "".to_string(),
-        url: "https://github.com/org/repo/pull/42".to_string(),
-        status: TaskStatus::Backlog,
-        tag: crate::models::TaskTag::PrReview,
-        labels: vec![],
-        sort_order: None,
-    }];
-    db.upsert_feed_tasks(epic.id, &items, &["/repo".to_string()], &main_branches(1))
-        .await
-        .unwrap();
+    let items = vec![
+        crate::models::FeedItem {
+            external_id: "dep:org/repo#42".to_string(),
+            title: "#42 Bump foo".to_string(),
+            description: "".to_string(),
+            url: "https://github.com/org/repo/pull/42".to_string(),
+            status: TaskStatus::Backlog,
+            tag: crate::models::TaskTag::PrReview,
+            labels: vec![],
+            sort_order: None,
+        },
+        crate::models::FeedItem {
+            external_id: "dep:org/repo#43".to_string(),
+            title: "#43 Bump bar".to_string(),
+            description: "".to_string(),
+            url: "https://github.com/org/repo/pull/43".to_string(),
+            status: TaskStatus::Backlog,
+            tag: crate::models::TaskTag::Dependabot,
+            labels: vec![],
+            sort_order: None,
+        },
+        crate::models::FeedItem {
+            external_id: "cve:GHSA-xxxx".to_string(),
+            title: "CRITICAL CVE-1234".to_string(),
+            description: "".to_string(),
+            url: "https://github.com/org/repo/security/advisories/GHSA-xxxx".to_string(),
+            status: TaskStatus::Backlog,
+            tag: crate::models::TaskTag::Fix,
+            labels: vec![],
+            sort_order: None,
+        },
+    ];
+    db.upsert_feed_tasks(
+        epic.id,
+        &items,
+        &vec!["/repo".to_string(); 3],
+        &main_branches(3),
+    )
+    .await
+    .unwrap();
 
-    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
-    assert_eq!(tasks.len(), 1);
+    let mut tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    tasks.sort_by(|a, b| a.external_id.cmp(&b.external_id));
+    assert_eq!(tasks.len(), 3);
     assert_eq!(
         tasks[0].pr_url.as_deref(),
-        Some("https://github.com/org/repo/pull/42")
+        Some("https://github.com/org/repo/security/advisories/GHSA-xxxx"),
+        "non-empty url copied to pr_url regardless of tag (Fix)"
+    );
+    assert_eq!(
+        tasks[1].pr_url.as_deref(),
+        Some("https://github.com/org/repo/pull/42"),
+        "PrReview items keep pr_url-on-insert"
+    );
+    assert_eq!(
+        tasks[2].pr_url.as_deref(),
+        Some("https://github.com/org/repo/pull/43"),
+        "Dependabot items get pr_url-on-insert"
     );
 }
 
 #[tokio::test]
-async fn upsert_feed_tasks_leaves_pr_url_null_for_non_pr_review_items() {
+async fn upsert_feed_tasks_leaves_pr_url_null_when_item_url_empty() {
     let db = in_memory_db().await;
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
         .await
         .unwrap();
     let items = vec![crate::models::FeedItem {
-        external_id: "cve:GHSA-xxxx".to_string(),
-        title: "CRITICAL CVE-1234".to_string(),
+        external_id: "ext-no-url".to_string(),
+        title: "no url".to_string(),
         description: "".to_string(),
-        url: "https://github.com/org/repo/security/advisories/GHSA-xxxx".to_string(),
+        url: "".to_string(),
         status: TaskStatus::Backlog,
-        tag: crate::models::TaskTag::Fix,
+        tag: crate::models::TaskTag::Dependabot,
         labels: vec![],
         sort_order: None,
     }];
@@ -2153,6 +2192,60 @@ async fn upsert_feed_tasks_leaves_pr_url_null_for_non_pr_review_items() {
     let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
     assert_eq!(tasks.len(), 1);
     assert!(tasks[0].pr_url.is_none());
+}
+
+#[tokio::test]
+async fn upsert_feed_tasks_backfills_null_pr_url_on_conflict() {
+    let db = in_memory_db().await;
+    let epic = db
+        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .await
+        .unwrap();
+    // First emission: no URL — task created with pr_url = NULL.
+    let initial = vec![crate::models::FeedItem {
+        external_id: "dep:org/repo#42".to_string(),
+        title: "#42 Bump foo".to_string(),
+        description: "".to_string(),
+        url: "".to_string(),
+        status: TaskStatus::Backlog,
+        tag: crate::models::TaskTag::Dependabot,
+        labels: vec![],
+        sort_order: None,
+    }];
+    db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
+        .await
+        .unwrap();
+    let task_id = db.list_tasks_for_epic(epic.id).await.unwrap()[0].id;
+    assert!(
+        db.get_task(task_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .pr_url
+            .is_none(),
+        "precondition: pr_url is null after first upsert"
+    );
+
+    // Second emission: same external_id but now with a URL.
+    let refreshed = vec![crate::models::FeedItem {
+        url: "https://github.com/org/repo/pull/42".to_string(),
+        ..initial[0].clone()
+    }];
+    db.upsert_feed_tasks(
+        epic.id,
+        &refreshed,
+        &["/repo".to_string()],
+        &main_branches(1),
+    )
+    .await
+    .unwrap();
+
+    let task = db.get_task(task_id).await.unwrap().unwrap();
+    assert_eq!(
+        task.pr_url.as_deref(),
+        Some("https://github.com/org/repo/pull/42"),
+        "null pr_url is backfilled from item.url on conflict"
+    );
 }
 
 #[tokio::test]

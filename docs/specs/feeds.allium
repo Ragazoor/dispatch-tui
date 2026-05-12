@@ -225,24 +225,28 @@ rule UpsertFeedTasks {
     --     item.external_id, base_branch = the resolved default branch
     --     of resolved_path[item] (read from `origin/HEAD`, falling
     --     back to "main" when resolved_path is empty or the ref is
-    --     missing), epic = epic. Additionally, when item.tag = pr_review
-    --     and item.url is non-empty, the inserted Task's pr_url is set
-    --     to item.url — pr_review feed items (e.g. open Dependabot PRs)
-    --     describe an existing PR, so the card surfaces the PR URL
-    --     immediately. For non-pr_review tags, pr_url remains null on
-    --     insert regardless of item.url.
+    --     missing), epic = epic. Additionally, when item.url is non-empty,
+    --     the inserted Task's pr_url is set to item.url — a feed script
+    --     that supplies a URL is asserting that the item points to a
+    --     known artifact (typically a PR), so the card surfaces it
+    --     immediately. When item.url is empty, pr_url is null on insert.
     --
     --   - Match: title, description, tag, labels, and sort_order on the
     --     existing Task are updated to the new values; status, sub_status,
-    --     repo_path, AND pr_url are NOT touched. updated_at is bumped.
-    --     labels and sort_order are feed-controlled (never user-editable
-    --     in this iteration), so they are always replaced. This means a
-    --     user who manually fixes the repo_path on a feed task (via 'e')
-    --     keeps that correction across subsequent feed refreshes, while
-    --     the feed-owned tag, labels, and sort_order stay in sync with
-    --     the script output. pr_url is preserved on conflict so that a
-    --     PR URL set by an agent (or carried from the original insert)
-    --     is not overwritten by a later refresh.
+    --     and repo_path are NOT touched. pr_url is backfilled from
+    --     item.url when the existing Task's pr_url is null (COALESCE
+    --     semantics), so feed tasks that pre-date the URL-on-insert
+    --     behavior, or were inserted from a script revision that did not
+    --     emit a URL, get their pr_url populated on the next refresh
+    --     once a URL is available. An existing non-null pr_url is never
+    --     overwritten — a PR URL set by an agent or carried from the
+    --     original insert wins over feed-supplied values. updated_at is
+    --     bumped. labels and sort_order are feed-controlled (never
+    --     user-editable in this iteration), so they are always replaced.
+    --     This means a user who manually fixes the repo_path on a feed
+    --     task (via 'e') keeps that correction across subsequent feed
+    --     refreshes, while the feed-owned tag, labels, and sort_order
+    --     stay in sync with the script output.
     --
     -- Tasks present locally that are NOT in the latest emission are
     -- removed. The dispatch runtime treats the feed as the source of
@@ -273,10 +277,9 @@ rule UpsertFeedTasks {
                     external_id: item.external_id,
                     epic: epic,
                     base_branch: detect_default_branch(resolved),
-                    -- pr_url copied from item.url when tag = pr_review and
-                    -- item.url is non-empty; null otherwise. See the prose
-                    -- above for rationale.
-                    pr_url: (item.tag = core/TaskTag.pr_review and item.url != "") ? item.url : null
+                    -- pr_url copied from item.url whenever non-empty;
+                    -- null otherwise. See the prose above for rationale.
+                    pr_url: (item.url != "") ? item.url : null
                 )
             else:
                 existing.title = item.title
@@ -284,6 +287,10 @@ rule UpsertFeedTasks {
                 existing.tag = item.tag
                 existing.labels = item.labels
                 existing.sort_order = item.sort_order
+                -- pr_url backfilled from item.url when existing.pr_url is null;
+                -- existing non-null pr_url is preserved.
+                if existing.pr_url = null and item.url != "":
+                    existing.pr_url = item.url
                 -- existing.status, existing.sub_status, existing.repo_path preserved
 
         for task in Tasks where epic = epic and external_id != null:

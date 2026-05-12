@@ -474,12 +474,13 @@ impl super::super::TaskCrud for Database {
                 .zip(labels_jsons.iter())
             {
                 let sub_status = SubStatus::default_for(item.status).as_str().to_string();
-                // pr_review items describe an existing PR (e.g. open Dependabot
-                // PRs), so the inserted Task surfaces the PR URL immediately.
-                // Preserved on conflict — see feeds.allium::UpsertFeedTasks.
-                let pr_url = (matches!(item.tag, crate::models::TaskTag::PrReview)
-                    && !item.url.is_empty())
-                .then_some(item.url.as_str());
+                // Any non-empty item.url is copied into pr_url so the card
+                // surfaces the URL immediately. On conflict the existing
+                // pr_url wins via COALESCE — a value set by the user or an
+                // agent is never clobbered — but a NULL pr_url is backfilled
+                // from a later emission that carries a URL. See
+                // feeds.allium::UpsertFeedTasks.
+                let pr_url = (!item.url.is_empty()).then_some(item.url.as_str());
                 tx.execute(
                     "INSERT INTO tasks
                          (title, description, repo_path, status, sub_status, base_branch,
@@ -492,6 +493,7 @@ impl super::super::TaskCrud for Database {
                          tag         = excluded.tag,
                          labels      = excluded.labels,
                          sort_order  = excluded.sort_order,
+                         pr_url      = COALESCE(tasks.pr_url, excluded.pr_url),
                          updated_at  = datetime('now')",
                     params![
                         item.title,
