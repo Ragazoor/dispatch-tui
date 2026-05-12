@@ -11,8 +11,13 @@ pub enum CallerIdentity {
 }
 
 impl CallerIdentity {
-    /// Parse from raw header values. Both inputs are `Option<&str>` because
-    /// either header may be absent.
+    /// Parse caller identity from the two optional header values.
+    ///
+    /// Exactly one of the two headers must be set:
+    /// - `Some(task_id_str)` + `None` → `Task(TaskId)`, or `InvalidTaskId` on bad parse.
+    /// - `None` + `Some("session")` → `Session`; any other value → `UnknownKind`.
+    /// - Both present → `Conflict`.
+    /// - Neither present → `Missing`.
     pub fn from_headers(
         task_id_header: Option<&str>,
         kind_header: Option<&str>,
@@ -87,6 +92,31 @@ mod tests {
         assert!(matches!(
             CallerIdentity::from_headers(None, Some("bogus")),
             Err(IdentityError::UnknownKind(_))
+        ));
+    }
+
+    #[test]
+    fn empty_task_id_header_rejected() {
+        assert!(matches!(
+            CallerIdentity::from_headers(Some(""), None),
+            Err(IdentityError::InvalidTaskId(s)) if s.is_empty()
+        ));
+    }
+
+    #[test]
+    fn empty_kind_header_rejected() {
+        assert!(matches!(
+            CallerIdentity::from_headers(None, Some("")),
+            Err(IdentityError::UnknownKind(s)) if s.is_empty()
+        ));
+    }
+
+    #[test]
+    fn whitespace_padded_task_id_is_rejected() {
+        // Rust's i64::parse rejects leading/trailing whitespace.
+        assert!(matches!(
+            CallerIdentity::from_headers(Some(" 42 "), None),
+            Err(IdentityError::InvalidTaskId(_))
         ));
     }
 }
