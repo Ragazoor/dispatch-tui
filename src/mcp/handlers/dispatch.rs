@@ -1,6 +1,11 @@
 use std::sync::Arc;
 
-use axum::{extract::State, http::StatusCode, Extension, Json};
+use axum::{
+    extract::State,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    Extension, Json,
+};
 use serde_json::{json, Value};
 
 use crate::mcp::identity::CallerIdentity;
@@ -513,7 +518,17 @@ pub async fn handle_mcp(
     State(state): State<Arc<McpState>>,
     Extension(identity): Extension<CallerIdentity>,
     Json(req): Json<JsonRpcRequest>,
-) -> (StatusCode, Json<JsonRpcResponse>) {
+) -> Response {
+    // JSON-RPC 2.0 §4.1: a Notification (no `id`) must never receive a reply.
+    // MCP streamable-HTTP maps this to HTTP 202 Accepted with no body. Replying
+    // to `notifications/initialized` (which Claude Code always sends after
+    // `initialize`) with `id: null` breaks the client's response schema and
+    // aborts the session.
+    if req.id.is_none() {
+        tracing::debug!(method = %req.method, "received MCP notification (no reply)");
+        return StatusCode::ACCEPTED.into_response();
+    }
+
     let id = req.id;
     let response = match req.method.as_str() {
         "initialize" => JsonRpcResponse::ok(
@@ -543,5 +558,5 @@ pub async fn handle_mcp(
         other => JsonRpcResponse::err(id, -32601, format!("Method not found: {other}")),
     };
 
-    (StatusCode::OK, Json(response))
+    (StatusCode::OK, Json(response)).into_response()
 }

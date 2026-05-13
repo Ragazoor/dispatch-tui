@@ -16,6 +16,7 @@ pub struct JsonRpcRequest {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(Deserialize))]
 pub struct JsonRpcResponse {
     pub jsonrpc: String,
     pub id: Option<Value>,
@@ -26,6 +27,7 @@ pub struct JsonRpcResponse {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(Deserialize))]
 pub struct JsonRpcError {
     pub code: i32,
     pub message: String,

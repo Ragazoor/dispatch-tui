@@ -6,7 +6,13 @@ mod tasks;
 
 use std::sync::Arc;
 
-use axum::{extract::State, Extension, Json};
+use axum::{
+    body::to_bytes,
+    extract::State,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    Extension, Json,
+};
 use serde_json::{json, Value};
 
 use crate::db::{self, CreateLearningRow, CreateTaskRequest, Database};
@@ -60,9 +66,36 @@ async fn call_as(
         method: method.to_string(),
         params,
     };
-    let (_, Json(response)) =
-        handle_mcp(State(state.clone()), Extension(identity), Json(req)).await;
-    response
+    let response: Response = handle_mcp(State(state.clone()), Extension(identity), Json(req))
+        .await
+        .into_response();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+/// Send a JSON-RPC notification (no `id`) and return the raw (status, body) for inspection.
+async fn call_notification(
+    state: &Arc<McpState>,
+    method: &str,
+    params: Option<Value>,
+) -> (StatusCode, Vec<u8>) {
+    let req = JsonRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: None,
+        method: method.to_string(),
+        params,
+    };
+    let response: Response = handle_mcp(
+        State(state.clone()),
+        Extension(CallerIdentity::Session),
+        Json(req),
+    )
+    .await
+    .into_response();
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    (status, bytes.to_vec())
 }
 
 // -- Shared helpers --------------------------------------------------------
@@ -185,6 +218,33 @@ async fn unknown_method() {
     let resp = call(&state, "bogus/method", None).await;
     assert!(resp.error.is_some());
     assert!(resp.error.unwrap().message.contains("Method not found"));
+}
+
+/// JSON-RPC 2.0 §4.1: the server MUST NOT reply to a notification. The MCP
+/// streamable-HTTP transport spec maps that to HTTP 202 Accepted with an empty
+/// body. Claude Code's strict response schema rejects `id: null`, so any body
+/// here aborts the session.
+#[tokio::test]
+async fn notification_initialized_returns_202_with_no_body() {
+    let state = test_state().await;
+    let (status, body) =
+        call_notification(&state, "notifications/initialized", Some(json!({}))).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert!(
+        body.is_empty(),
+        "expected empty body for notification, got: {:?}",
+        String::from_utf8_lossy(&body)
+    );
+}
+
+/// Even unknown notifications must be silently accepted — JSON-RPC forbids any
+/// response (errors included) to messages without an `id`.
+#[tokio::test]
+async fn unknown_notification_returns_202_with_no_body() {
+    let state = test_state().await;
+    let (status, body) = call_notification(&state, "notifications/something_new", None).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert!(body.is_empty());
 }
 
 /// Validates that JSON schemas in `tool_definitions()` match the argument structs.

@@ -51,6 +51,10 @@ MCP handlers in `src/mcp/handlers/` return JSON-RPC error objects using two code
 
 Use `JsonRpcResponse::err(id, -32602, msg)` for anything the caller can fix; use `-32603` for anything they can't.
 
+## Notifications
+
+JSON-RPC 2.0 §4.1 forbids replying to a Notification (a request with no `id`). The MCP streamable-HTTP transport maps this to `HTTP 202 Accepted` with an empty body. `handle_mcp` short-circuits any request where `id.is_none()` to a 202 — including unknown methods. Claude Code sends `notifications/initialized` after every `initialize`; replying to it (even with an error) makes its strict response schema reject `id: null` and aborts the MCP session.
+
 ## Debugging MCP handlers
 
 The MCP server listens on port 3142 by default (override with `DISPATCH_PORT`). When a handler misbehaves you can reproduce it without going through Claude Code:

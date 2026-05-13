@@ -135,4 +135,3 @@ pub fn url_label(url: &str) -> String {
 
     "Link".to_string()
 }
-
