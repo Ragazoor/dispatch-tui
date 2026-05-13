@@ -118,8 +118,9 @@ pub fn remove_database(db_path: &std::path::Path) -> Result<bool> {
 /// Returns `true` if either file changed.
 ///
 /// When `prompt_yes` is false the user is prompted before writing `target`;
-/// the legacy cleanup is unconditional (always safe — only removes the
-/// dispatch entry).
+/// the legacy cleanup is unconditional and cannot be suppressed by callers
+/// (it only ever removes the `dispatch` entry from a file Claude Code does
+/// not read, so it is always safe).
 pub(super) fn apply_mcp_setup(
     target: &Path,
     legacy: &Path,
@@ -315,6 +316,10 @@ pub fn run_uninstall(yes: bool, purge: bool) -> Result<()> {
     eprintln!(
         "  MCP config:  mcpServers.dispatch from {}",
         mcp_path.display()
+    );
+    eprintln!(
+        "  Legacy MCP:  mcpServers.dispatch from {} (if present)",
+        legacy_mcp_path.display()
     );
     eprintln!(
         "  Permissions: mcp__dispatch__* from {}",

@@ -52,8 +52,7 @@ Press `d` on a Backlog task:
 
 1. Creates a git worktree at `<repo>/.worktrees/<id>-<slug>`
 2. Opens a new tmux window in your current session
-3. Writes `.mcp.json` so Claude discovers the MCP server
-4. Launches `claude` with the task description and completion instructions
+3. Launches `claude` with the task description and completion instructions (the MCP server is already wired up via `~/.claude.json` from `dispatch setup`)
 
 The agent reports progress via the MCP server running on `localhost:3142`. When it finishes, it moves the task to Review. Closing a tmux window does **not** delete the worktree — press `d` again on a Running task to resume.
 
