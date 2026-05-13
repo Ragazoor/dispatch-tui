@@ -97,6 +97,12 @@ enum Commands {
         /// Shell command to run (executed via sh -c)
         command: String,
     },
+    /// Emit a JSON object of HTTP headers identifying the current caller.
+    ///
+    /// Used as a headersHelper in Claude Code's .mcp.json — invoked on every
+    /// MCP session start and reconnect. Pure path parser; reads only $PWD,
+    /// no DB access.
+    CallerHeaders,
 }
 
 fn parse_status(s: &str) -> anyhow::Result<models::TaskStatus> {
@@ -272,6 +278,16 @@ async fn main() -> Result<()> {
                     std::process::exit(1);
                 }
             }
+        }
+        Commands::CallerHeaders => {
+            let cwd = std::env::current_dir()?;
+            let (stdout, code) = dispatch_tui::cli::caller_headers::resolve_headers_for_path(&cwd);
+            if code == 0 {
+                println!("{stdout}");
+            } else {
+                eprintln!("{stdout}");
+            }
+            std::process::exit(code);
         }
         Commands::Plan { id, path } => {
             if !path.exists() {
