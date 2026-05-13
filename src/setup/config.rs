@@ -14,10 +14,24 @@ pub struct MergeResult {
     pub changed: bool,
 }
 
+/// Resolve the `headersHelper` command for the dispatch MCP entry.
+///
+/// Uses the absolute path of the currently-running dispatch binary so
+/// the helper invocation is unambiguous regardless of `$PATH`. Falls
+/// back to the bare command name if `current_exe()` is unavailable.
+fn caller_headers_helper() -> String {
+    let exe = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.to_str().map(|s| s.to_owned()))
+        .unwrap_or_else(|| "dispatch".to_string());
+    format!("{exe} caller-headers")
+}
+
 pub fn merge_mcp_config(existing: Option<Value>, port: u16) -> MergeResult {
     let server_entry = json!({
         "type": "http",
-        "url": format!("http://localhost:{port}/mcp")
+        "url": format!("http://localhost:{port}/mcp"),
+        "headersHelper": caller_headers_helper(),
     });
 
     let mut root = match existing {
@@ -166,18 +180,27 @@ mod tests {
 
     #[test]
     fn merge_mcp_config_into_empty() {
-        let existing = None;
-        let result = merge_mcp_config(existing, DEFAULT_PORT);
-        let expected = json!({
-            "mcpServers": {
-                "dispatch": {
-                    "type": "http",
-                    "url": format!("http://localhost:{DEFAULT_PORT}/mcp")
-                }
-            }
-        });
-        assert_eq!(result.value, expected);
+        let result = merge_mcp_config(None, DEFAULT_PORT);
+        let dispatch = &result.value["mcpServers"]["dispatch"];
+        assert_eq!(dispatch["type"], "http");
+        assert_eq!(
+            dispatch["url"],
+            format!("http://localhost:{DEFAULT_PORT}/mcp")
+        );
+        assert!(dispatch["headersHelper"].is_string());
         assert!(result.changed);
+    }
+
+    #[test]
+    fn merge_mcp_config_emits_headers_helper_pointing_at_caller_headers() {
+        let result = merge_mcp_config(None, DEFAULT_PORT);
+        let helper = result.value["mcpServers"]["dispatch"]["headersHelper"]
+            .as_str()
+            .unwrap();
+        assert!(
+            helper.ends_with("caller-headers"),
+            "expected helper to end with 'caller-headers', got {helper}"
+        );
     }
 
     #[test]
@@ -197,10 +220,22 @@ mod tests {
             result.value["mcpServers"]["dispatch"]["url"],
             format!("http://localhost:{DEFAULT_PORT}/mcp")
         );
+        assert!(result.value["mcpServers"]["dispatch"]["headersHelper"].is_string());
     }
 
     #[test]
     fn merge_mcp_config_already_configured() {
+        // Pre-seed the existing entry with the same shape merge_mcp_config would write,
+        // so the idempotency short-circuit fires.
+        let first = merge_mcp_config(None, DEFAULT_PORT);
+        let result = merge_mcp_config(Some(first.value.clone()), DEFAULT_PORT);
+        assert!(!result.changed, "second merge with identical input must be a no-op");
+    }
+
+    #[test]
+    fn merge_mcp_config_rewrites_when_helper_missing() {
+        // A user upgrading from a pre-headersHelper install: dispatch entry exists
+        // with URL only. Merging must rewrite it to include the helper.
         let existing = Some(json!({
             "mcpServers": {
                 "dispatch": {
@@ -210,7 +245,8 @@ mod tests {
             }
         }));
         let result = merge_mcp_config(existing, DEFAULT_PORT);
-        assert!(!result.changed);
+        assert!(result.changed);
+        assert!(result.value["mcpServers"]["dispatch"]["headersHelper"].is_string());
     }
 
     #[test]
