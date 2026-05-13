@@ -1,5 +1,7 @@
 use crate::db;
-use crate::models::{EpicId, Learning, LearningKind, LearningScope, ProjectId, Task, TaskId};
+use crate::models::{
+    EpicId, Learning, LearningKind, LearningScope, ProjectId, Task, TaskId, TaskTag,
+};
 
 /// Plugin dir flag added to all Claude agent invocations so dispatched agents
 /// discover the dispatch plugin's skills and commands (e.g. /wrap-up).
@@ -275,9 +277,11 @@ pub(super) fn build_prompt(
     ctx: &PromptContext<'_>,
 ) -> String {
     let block = task_block(task_id, title, description, epic, project);
-    let addendum = match plan {
-        None => plan_or_brainstorm_instruction().to_string(),
-        Some(path) => format!(
+    let is_dependabot = matches!(ctx.tag, Some(TaskTag::Dependabot));
+    let addendum = match (is_dependabot, plan) {
+        (true, _) => dependabot_review_addendum(task_id),
+        (false, None) => plan_or_brainstorm_instruction().to_string(),
+        (false, Some(path)) => format!(
             "Plan: {path}\n\
 Read this file for the full implementation plan.\n\
 \n\
@@ -289,6 +293,17 @@ making any changes."
     let proc_prefix = render_procedural_prefix(&ctx.learnings.procedural);
     let knowledge = render_validated_knowledge_block(&ctx.learnings.tiered);
     let repo_map = render_repo_map(ctx.repo_map.as_deref());
+    let trailing = if is_dependabot {
+        format!(
+            "{mcp}\n\
+\n\
+{learning}",
+            mcp = mcp_tools_instruction(),
+            learning = learning_tools_instruction(),
+        )
+    } else {
+        trailing_block()
+    };
 
     format!(
         "{proc_prefix}Your task is:\n\
@@ -297,7 +312,69 @@ making any changes."
 {knowledge}{repo_map}{addendum}\n\
 \n\
 {trailing}",
-        trailing = trailing_block(),
+    )
+}
+
+/// Dependabot PR review guidance, inlined into the unified dispatch prompt
+/// when `task.tag == Dependabot`. The agent vets a dependency-bump PR and
+/// auto-approves/merges if clearly safe, otherwise asks the user. It does
+/// NOT call /wrap-up — the task is auto-cleaned when the PR merges.
+fn dependabot_review_addendum(task_id: TaskId) -> String {
+    format!(
+        "This is a Dependabot PR review, not a code-edit task. Do NOT edit \
+files, write a plan, or call /wrap-up — the task is auto-cleaned when the \
+PR merges (or the user takes over).\n\
+\n\
+1. Extract the PR URL and number from the task description.\n\
+2. If the task's pr_url is empty, call update_task(task_id={tid}, pr_url=<URL>).\n\
+3. Verify the PR is dependency-bump-only:\n\
+   - Run: gh pr view <number> --repo <owner/repo> --json author,commits,files\n\
+   - Run: gh pr diff <number> --repo <owner/repo>\n\
+   - Every commit author login (under `.commits[].authors[].login` in the \
+JSON above) must be `app/dependabot` or `dependabot[bot]`.\n\
+   - Every changed file path must match one of: Cargo.toml, Cargo.lock, \
+package.json, package-lock.json, pnpm-lock.yaml, yarn.lock, requirements*.txt, \
+pyproject.toml, uv.lock, go.mod, go.sum, Gemfile, Gemfile.lock, composer.json, \
+composer.lock, .github/workflows/*.\n\
+   - If either check fails, jump to step 7 and ASK the user.\n\
+4. Parse the bump from the PR title (format: `Bump <pkg> from <X.Y.Z> to <A.B.C>`). \
+Classify as patch / minor / major using semver.\n\
+   - 0.x.y bumps: treat `0.X.y -> 0.X.(y+1)` as patch and `0.X.* -> 0.(X+1).*` \
+as major (0.x is unstable; minor in 0.x can break).\n\
+5. Check CI: gh pr checks <number> --repo <owner/repo>.\n\
+   - All checks passing -> continue to step 6.\n\
+   - Any check pending -> jump to step 7 and ASK whether to wait.\n\
+   - Any check failing -> jump to step 7 and ASK with the failure summary.\n\
+6. Decide by bump kind:\n\
+   - patch: auto-approve + merge (step 6a).\n\
+   - minor: try to find the changelog, in order:\n\
+       a. gh release view v<A.B.C> --repo <pkg-owner/pkg-repo> (and any \
+intermediate tags between <X.Y.Z> and <A.B.C>).\n\
+       b. The package repo's CHANGELOG.md between the two versions.\n\
+       c. The GitHub compare view if neither exists.\n\
+     Scan release notes for tokens (case-insensitive): BREAKING, breaking \
+change, removed, deprecat, incompatible, migration, major rewrite.\n\
+     - Changelog found AND no tokens matched -> auto-approve + merge (step 6a).\n\
+     - No changelog found OR any token matched -> jump to step 7.\n\
+   - major: read the changes carefully, post a PR comment summarising \
+breaking changes via `gh pr comment <number> --repo <owner/repo> --body \
+\"<summary>\"`, then jump to step 7 (always ASK).\n\
+6a. Auto-approve + merge:\n\
+   - gh pr review <number> --repo <owner/repo> --approve --body \"Auto-approved \
+by dispatch dependabot agent: <patch|minor> bump, CI green, dep-only, \
+changelog OK.\"\n\
+   - gh pr merge <number> --repo <owner/repo> --squash --auto\n\
+   - Note: --auto requires the repo to have branch protection with required \
+checks; without it, the PR merges immediately.\n\
+   - Done. Do NOT call /wrap-up — the task is auto-cleaned on merge.\n\
+7. Ask the user:\n\
+   - Write ONE direct question that includes: the bump kind, the dep-only \
+verdict, CI status summary, changelog summary or its absence, and the \
+specific reason you are not auto-merging.\n\
+   - Call update_task(task_id={tid}, sub_status=\"needs_input\") to flag the \
+task on the kanban board.\n\
+   - Stop and wait for the user's reply. Do NOT call /wrap-up.",
+        tid = task_id.0,
     )
 }
 
@@ -448,6 +525,7 @@ pub struct LearningInjections<'a> {
 pub struct PromptContext<'a> {
     pub learnings: LearningInjections<'a>,
     pub repo_map: Option<String>,
+    pub tag: Option<TaskTag>,
 }
 
 impl<'a> PromptContext<'a> {
@@ -455,6 +533,7 @@ impl<'a> PromptContext<'a> {
         Self {
             learnings,
             repo_map,
+            tag: None,
         }
     }
 }
@@ -815,6 +894,7 @@ mod tests {
         let ctx = PromptContext {
             learnings: injections,
             repo_map: None,
+            tag: None,
         };
         let text = build_prompt(TaskId(1), "title", "desc", None, None, None, &ctx);
         assert!(text.starts_with("Always run tests before committing."));
@@ -842,6 +922,7 @@ mod tests {
         PromptContext {
             learnings: LearningInjections::default(),
             repo_map: Some(map.to_string()),
+            tag: None,
         }
     }
 
@@ -885,6 +966,7 @@ mod tests {
                 tiered: vec![&tier_l],
             },
             repo_map: Some(SAMPLE_MAP.to_string()),
+            tag: None,
         };
         let text = build_prompt(TaskId(1), "t", "d", Some("/p/plan.md"), None, None, &ctx);
         let knowledge_at = text
@@ -931,6 +1013,74 @@ mod tests {
         let ctx = ctx_with_map(SAMPLE_MAP);
         let text = build_epic_planning_prompt(TaskId(1), "t", "d", &epic, &project, &ctx);
         assert!(text.contains(REPO_MAP_MARKER));
+    }
+
+    #[test]
+    fn build_prompt_with_dependabot_tag_includes_review_section() {
+        let ctx = PromptContext {
+            tag: Some(TaskTag::Dependabot),
+            ..PromptContext::default()
+        };
+        let text = build_prompt(
+            TaskId(42),
+            "Bump serde from 1.0.0 to 1.0.1",
+            "https://github.com/example/repo/pull/7",
+            None,
+            None,
+            None,
+            &ctx,
+        );
+
+        assert!(text.contains("Dependabot PR review"), "missing role line");
+        assert!(text.contains("gh pr view"));
+        assert!(text.contains("gh pr diff"));
+        assert!(text.contains("gh pr checks"));
+        assert!(text.contains("gh pr review"));
+        assert!(text.contains("--approve"));
+        assert!(text.contains("gh pr merge"));
+        assert!(text.contains("--squash --auto"));
+        assert!(text.contains("patch"));
+        assert!(text.contains("minor"));
+        assert!(text.contains("major"));
+        assert!(text.contains("CHANGELOG"));
+        assert!(text.contains("BREAKING"));
+        assert!(text.contains("update_task(task_id=42, pr_url"));
+        assert!(text.contains("needs_input"));
+        // Must NOT call /wrap-up — task auto-cleans on PR merge.
+        assert!(
+            text.contains("Do NOT call /wrap-up"),
+            "dependabot prompt must explicitly forbid /wrap-up"
+        );
+        // The standard trailing wrap-up instruction must not be present.
+        assert!(
+            !text.contains("use the /wrap-up skill"),
+            "dependabot prompt must omit the standard wrap-up instruction"
+        );
+        // No TDD / allium — this agent doesn't edit code.
+        assert!(
+            !text.contains("Always use TDD"),
+            "dependabot prompt must omit the TDD instruction"
+        );
+        // The standard plan-or-brainstorm addendum must be replaced.
+        assert!(
+            !text.contains("/brainstorming"),
+            "dependabot prompt must omit the brainstorming addendum"
+        );
+    }
+
+    #[test]
+    fn build_prompt_without_dependabot_tag_omits_review_section() {
+        let text = build_prompt(
+            TaskId(1),
+            "title",
+            "desc",
+            None,
+            None,
+            None,
+            &PromptContext::default(),
+        );
+        assert!(!text.contains("Dependabot PR review"));
+        assert!(!text.contains("gh pr merge"));
     }
 
     #[test]

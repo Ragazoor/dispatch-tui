@@ -107,7 +107,8 @@ pub fn dispatch_agent(
     dispatch_with_prompt(
         task,
         |repo_map| {
-            let ctx = ctx_with_map(injections, repo_map);
+            let mut ctx = ctx_with_map(injections, repo_map);
+            ctx.tag = task.tag;
             build_prompt(
                 task.id,
                 &task.title,

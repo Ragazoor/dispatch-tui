@@ -5536,7 +5536,8 @@ async fn dispatch_task_dependabot_tag_routes_through_dispatch_agent() {
         "Expected dispatch confirmation, got: {text}"
     );
 
-    // Should have written the unified prompt — not the deleted Dependabot prompt.
+    // Should have written the unified prompt with a Dependabot-specific
+    // section gated on the tag — not the deleted Dependabot triage agent.
     let prompt = std::fs::read_to_string(worktree_dir.join(".claude-prompt"))
         .expect("dispatch agent should have written a prompt file");
     assert!(
@@ -5546,6 +5547,18 @@ async fn dispatch_task_dependabot_tag_routes_through_dispatch_agent() {
     assert!(
         !prompt.contains("Dependabot triage agent"),
         "Dependabot tag must no longer route to a specialised agent"
+    );
+    assert!(
+        prompt.contains("Dependabot PR review"),
+        "Dependabot tag must inject the dependabot review section, got:\n{prompt}"
+    );
+    assert!(
+        prompt.contains("gh pr view") && prompt.contains("gh pr merge"),
+        "Dependabot section must include gh PR commands, got:\n{prompt}"
+    );
+    assert!(
+        prompt.contains("Do NOT") && prompt.contains("/wrap-up"),
+        "Dependabot section must instruct the agent not to call /wrap-up, got:\n{prompt}"
     );
 }
 

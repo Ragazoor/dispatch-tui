@@ -215,10 +215,21 @@ rule DispatchTask {
         -- and implementation completion).
         -- DispatchResearchTask is an exception to the unified trailing
         -- block: its prompt includes only {mcp_tools_instruction} and
-        -- omits tdd, allium, learning_tools, and wrap_up. All other
-        -- tag values (including pr_review, fix, dependabot) fall
-        -- through to this rule and use the full trailing block — the
-        -- tag is purely a kanban-board label, not a routing key.
+        -- omits tdd, allium, learning_tools, and wrap_up.
+        -- Dependabot exception: when task.tag = dependabot, build_prompt
+        -- replaces the plan_or_brainstorm addendum with a dependabot
+        -- review runbook (vet the PR, classify the bump as patch/minor/
+        -- major via semver, check CI, scan the changelog, auto-approve
+        -- + merge if safe via `gh pr review --approve` and `gh pr merge
+        -- --squash --auto`, else ask the user and set sub_status =
+        -- needs_input). The trailing block is also reduced to just
+        -- {mcp_tools_instruction} + {learning_tools_instruction} — no
+        -- tdd, no allium, and explicitly NO wrap_up_instruction, because
+        -- the dependabot task is auto-cleaned when its PR merges (or
+        -- the user takes over). All other tag values (including
+        -- pr_review, fix) fall through to this rule and use the full
+        -- trailing block — those tags are purely kanban-board labels,
+        -- not routing keys.
 }
 
 rule DispatchResearchTask {
