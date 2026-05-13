@@ -50,7 +50,6 @@
 | `src/mcp/handlers/tasks.rs` | Task tool handlers (thin wrappers): parse JSON-RPC args → call `TaskService` → format response |
 | `src/mcp/handlers/epics.rs` | Epic tool handlers (thin wrappers): parse JSON-RPC args → call `EpicService` → format response |
 | `src/mcp/handlers/learnings.rs` | Knowledge base tool handlers |
-| `src/mcp/handlers/review.rs` | Review/security agent status handlers |
 | `src/mcp/handlers/types.rs` | JSON-RPC request/response types, flexible integer deserializer |
 | `src/mcp/handlers/tests/mod.rs` | MCP handler integration tests entry point |
-| `src/mcp/handlers/tests/{tasks,epics,learnings,projects,review}.rs` | MCP handler tests per domain |
+| `src/mcp/handlers/tests/{tasks,epics,learnings,projects}.rs` | MCP handler tests per domain |
