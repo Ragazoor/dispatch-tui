@@ -229,7 +229,10 @@ mod tests {
         // so the idempotency short-circuit fires.
         let first = merge_mcp_config(None, DEFAULT_PORT);
         let result = merge_mcp_config(Some(first.value.clone()), DEFAULT_PORT);
-        assert!(!result.changed, "second merge with identical input must be a no-op");
+        assert!(
+            !result.changed,
+            "second merge with identical input must be a no-op"
+        );
     }
 
     #[test]

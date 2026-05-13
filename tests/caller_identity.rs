@@ -42,11 +42,7 @@ async fn create_parent_task(db: &Arc<dyn db::TaskStore>, project_id: ProjectId) 
     .unwrap()
 }
 
-async fn post_mcp(
-    router: axum::Router,
-    headers: &[(&str, &str)],
-    body: Value,
-) -> Value {
+async fn post_mcp(router: axum::Router, headers: &[(&str, &str)], body: Value) -> Value {
     let mut builder = Request::post("/mcp").header("content-type", "application/json");
     for (k, v) in headers {
         builder = builder.header(*k, *v);
