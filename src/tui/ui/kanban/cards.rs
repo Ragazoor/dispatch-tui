@@ -29,6 +29,8 @@ fn format_task_title(task: &Task, max_title: usize) -> String {
 /// done-merged > idle. The `Dispatching` variant is reachable only for
 /// pre-dispatch (Backlog) tasks and is removed automatically when the
 /// dispatch worker reports success or failure.
+#[derive(Debug)]
+#[cfg_attr(test, derive(PartialEq))]
 enum CardIndicator {
     Dispatching {
         spinner_frame: u8,
@@ -40,7 +42,11 @@ enum CardIndicator {
     Detached,
     Crashed,
     Stale {
-        inactive_mins: u64,
+        /// `None` when the task has no recorded PreToolUse timestamp (e.g.
+        /// pre-v50 rows, or transient state right after a manual transition
+        /// into Running before the SeedActivity write commits). The card
+        /// omits "· Xm" in that case rather than rendering a misleading "0m".
+        inactive_mins: Option<u64>,
     },
     Blocked,
     Running,
@@ -89,17 +95,14 @@ fn classify_card_indicator(
         return CardIndicator::Crashed;
     }
     if task.sub_status == SubStatus::Stale {
-        // Derive from the hook timestamp so the label matches
-        // ClassifyAgentActivity's source of truth and survives TUI restart.
-        let inactive_mins = task
-            .last_pre_tool_use_at
-            .map(|ts| {
-                now.signed_duration_since(ts)
-                    .num_minutes()
-                    .max(0)
-                    .unsigned_abs()
-            })
-            .unwrap_or(0);
+        // Source of truth matches ClassifyAgentActivity so the label survives
+        // TUI restart. None handling lives on the `inactive_mins` field doc.
+        let inactive_mins = task.last_pre_tool_use_at.map(|ts| {
+            now.signed_duration_since(ts)
+                .num_minutes()
+                .max(0)
+                .unsigned_abs()
+        });
         return CardIndicator::Stale { inactive_mins };
     }
     if status == TaskStatus::Running && task.sub_status == SubStatus::NeedsInput {
@@ -163,10 +166,13 @@ fn render_card_indicator(indicator: CardIndicator, labels: &[String]) -> Line<'s
         CardIndicator::DetachedReview { pr_label } => (format!("\u{25cb} {pr_label}"), Color::Cyan),
         CardIndicator::Detached => ("\u{25cb} detached".to_string(), MUTED),
         CardIndicator::Crashed => ("\u{26a0} crashed".to_string(), Color::Red),
-        CardIndicator::Stale { inactive_mins } => (
-            format!("\u{25c9} stale \u{00b7} {}m", inactive_mins),
-            Color::Yellow,
-        ),
+        CardIndicator::Stale { inactive_mins } => {
+            let label = match inactive_mins {
+                Some(m) => format!("\u{25c9} stale \u{00b7} {m}m"),
+                None => "\u{25c9} stale".to_string(),
+            };
+            (label, Color::Yellow)
+        }
         CardIndicator::Blocked => ("\u{25c9} blocked".to_string(), Color::Yellow),
         CardIndicator::Running => (
             format!("{} running", status_icon(TaskStatus::Running)),
@@ -397,4 +403,57 @@ pub(super) fn render_epic_item(
     }
 
     item
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{ProjectId, SubStatus};
+    use crate::tui::tests::make_task;
+
+    fn stale_task(last_pre_tool_use_at: Option<DateTime<Utc>>) -> crate::models::Task {
+        let mut t = make_task(1, TaskStatus::Running);
+        t.sub_status = SubStatus::Stale;
+        t.worktree = Some("/repo/.worktrees/1-t".to_string());
+        t.tmux_window = Some("task-1".to_string());
+        t.last_pre_tool_use_at = last_pre_tool_use_at;
+        t
+    }
+
+    fn line_text(line: &Line<'_>) -> String {
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    #[test]
+    fn stale_card_with_known_timestamp_shows_minutes() {
+        let now = Utc::now();
+        let task = stale_task(Some(now - chrono::Duration::minutes(7)));
+        let app = App::new(vec![], ProjectId(1));
+        let indicator = classify_card_indicator(&task, task.status, &app, now);
+        assert_eq!(
+            indicator,
+            CardIndicator::Stale {
+                inactive_mins: Some(7)
+            },
+        );
+        let text = line_text(&render_card_indicator(indicator, &[]));
+        assert!(text.contains("stale · 7m"), "got {text:?}");
+    }
+
+    #[test]
+    fn stale_card_without_timestamp_omits_minutes() {
+        let now = Utc::now();
+        let task = stale_task(None);
+        let app = App::new(vec![], ProjectId(1));
+        let indicator = classify_card_indicator(&task, task.status, &app, now);
+        assert_eq!(
+            indicator,
+            CardIndicator::Stale {
+                inactive_mins: None
+            },
+        );
+        let text = line_text(&render_card_indicator(indicator, &[]));
+        assert!(text.contains("stale"), "got {text:?}");
+        assert!(!text.contains('m'), "got {text:?}");
+    }
 }

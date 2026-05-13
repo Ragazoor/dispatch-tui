@@ -1004,19 +1004,29 @@ rule ClassifyAgentActivity {
         -- and conflict detectors respectively, never overridden here.
         -- The wallclock Staleness enum (Fresh/Aging/Stale at 3d/7d) is
         -- independent — it decorates card ages.
-        -- DispatchTask (and friends) stamp last_pre_tool_use_at = now on
-        -- the transition into running so this classifier returns Active
-        -- through the ACTIVE_THRESHOLD window before the agent's first
-        -- real PreToolUse hook fires. Recovery from Stale → Active is
+        -- Every transition into running stamps last_pre_tool_use_at = now
+        -- (DispatchTask on Backlog→Running, ResumeTask on resume, and the
+        -- manual move handler on Review→Running) so this classifier returns
+        -- Active through the ACTIVE_THRESHOLD window before the agent's first
+        -- real PreToolUse hook fires. Without seeding on the manual Review→
+        -- Running path, a task whose Stop hook cleared the timestamp would
+        -- be classified Stale on the very next tick — and because the card
+        -- derives its minute label from the same timestamp, it would render
+        -- the meaningless "stale · 0m". Recovery from Stale → Active is
         -- driven entirely by fresh PreToolUse hook timestamps (and
         -- Notification timestamps for needs_input); there is no separate
         -- in-memory activity timer.
         -- Ownership invariant: only hook events (PreToolUse / Stop) and the
-        -- Backlog→Running seed write last_pre_tool_use_at. Generic in-memory
-        -- persists from the TUI (sort_order swaps, tick sub_status updates,
-        -- editor saves) MUST NOT include this column — a stale in-memory
-        -- snapshot would otherwise overwrite a fresher hook write and
-        -- flick the task into Stale on the next tick.
+        -- "transition into Running" seeds write last_pre_tool_use_at. Generic
+        -- in-memory persists from the TUI (sort_order swaps, tick sub_status
+        -- updates, editor saves) MUST NOT include this column — a stale
+        -- in-memory snapshot would otherwise overwrite a fresher hook write
+        -- and flick the task into Stale on the next tick.
+        -- Card label: when sub_status = stale, the card renders the idle
+        -- time as "stale · Xm" where X = now - last_pre_tool_use_at. If
+        -- last_pre_tool_use_at is null (legacy pre-v50 rows, or a transient
+        -- window before the seed write commits), the card renders just
+        -- "stale" with no minute suffix rather than "stale · 0m".
 }
 
 rule DetectCrashedAgent {

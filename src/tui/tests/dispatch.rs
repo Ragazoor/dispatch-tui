@@ -1802,3 +1802,28 @@ fn quick_dispatch_status_uses_freshly_created_title() {
     assert!(msg.contains("Quick task"), "got: {msg}");
     assert!(app.is_dispatching(TaskId(42)));
 }
+
+#[test]
+fn manual_move_review_to_running_seeds_last_pre_tool_use_at() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.last_pre_tool_use_at = None;
+    task.last_notification_at = None;
+    task.sub_status = SubStatus::AwaitingReview;
+    let mut app = App::new(vec![task], ProjectId(1));
+
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Move {
+        id: TaskId(1),
+        direction: MoveDirection::Backward,
+    }));
+
+    let t = app.find_task(TaskId(1)).expect("task");
+    assert_eq!(t.status, TaskStatus::Running);
+    assert!(t.last_pre_tool_use_at.is_some(), "seed missing");
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::SeedActivity { id: TaskId(1), .. })
+        )),
+        "no SeedActivity in {cmds:?}",
+    );
+}

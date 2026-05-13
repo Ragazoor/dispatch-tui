@@ -143,6 +143,8 @@ fn snapshot_card_badges_baseline() {
     t.sub_status = SubStatus::Stale;
     t.worktree = Some("/wt".to_string());
     t.tmux_window = Some("w".to_string());
+    // Pin the known-timestamp branch of the stale card renderer.
+    t.last_pre_tool_use_at = Some(chrono::Utc::now() - chrono::Duration::minutes(12));
     tasks.push(t);
     let mut t = mk(7, TaskStatus::Running, "needs input");
     t.sub_status = SubStatus::NeedsInput;

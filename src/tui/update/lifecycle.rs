@@ -37,6 +37,18 @@ impl App {
 
             task.status = new_status;
             task.sub_status = SubStatus::default_for(new_status);
+
+            // Seed last_pre_tool_use_at on any transition into Running so the
+            // next ClassifyAgentActivity tick does not render "stale · 0m"
+            // before the first PreToolUse hook fires. SeedActivity bypasses
+            // the generic Persist so a later hook write is not clobbered by
+            // an in-memory snapshot.
+            let seed_at = (new_status == TaskStatus::Running).then(|| {
+                let at = chrono::Utc::now();
+                task.last_pre_tool_use_at = Some(at);
+                at
+            });
+
             let task_clone = task.clone();
             self.clear_agent_tracking(id);
             self.sync_board_selection();
@@ -48,6 +60,11 @@ impl App {
             cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
                 task_clone,
             )));
+            if let Some(at) = seed_at {
+                cmds.push(Command::Task(
+                    crate::tui::commands::TaskCommand::SeedActivity { id, at },
+                ));
+            }
             cmds
         } else {
             vec![]

@@ -13,7 +13,7 @@ expression: rendered
    ◦ <1h [feat]               │  ── stale                 │  ── awaiting review          │
 ──────────────────────────────│───────────────────────────│──────────────────────────────│
   ▎ #3 chore task             │  ▎ #6 stale               │  ▎ #9 awaiting review        │
-   ◦ <1h [chore]              │   ◉ stale · 0m            │   ● PR #42                   │
+   ◦ <1h [chore]              │   ◉ stale · 12m           │   ● PR #42                   │
 ──────────────────────────────│                           │                              │
   ▎ #4 fix task               │  ── needs input           │  ── approved                 │
    ◦ <1h [fix]                │───────────────────────────│──────────────────────────────│
