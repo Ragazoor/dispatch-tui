@@ -158,7 +158,6 @@ async fn update_task_invalid_project_id_returns_error() {
     )
     .await;
     assert_error(&resp, "project");
-    assert_eq!(resp.error.as_ref().unwrap().code, -32602);
 }
 
 // ---------------------------------------------------------------------------
@@ -224,5 +223,4 @@ async fn update_epic_invalid_project_id_returns_error() {
     )
     .await;
     assert_error(&resp, "project");
-    assert_eq!(resp.error.as_ref().unwrap().code, -32602);
 }

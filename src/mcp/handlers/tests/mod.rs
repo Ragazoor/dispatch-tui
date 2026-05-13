@@ -145,18 +145,43 @@ async fn create_running_task_with_window(state: &Arc<McpState>) -> crate::models
     task_id
 }
 
+/// Returns `true` if the response is either a JSON-RPC protocol error or an
+/// MCP tool-execution error result (`result.isError == true`).
+fn is_error(resp: &JsonRpcResponse) -> bool {
+    if resp.error.is_some() {
+        return true;
+    }
+    resp.result
+        .as_ref()
+        .and_then(|r| r.get("isError"))
+        .and_then(Value::as_bool)
+        == Some(true)
+}
+
+/// Extract the error message from a response — works for protocol errors and
+/// for MCP tool-execution error results (`isError: true` with a text content
+/// block).
+fn error_message(resp: &JsonRpcResponse) -> String {
+    if let Some(err) = resp.error.as_ref() {
+        return err.message.clone();
+    }
+    if let Some(result) = resp.result.as_ref() {
+        if result.get("isError").and_then(Value::as_bool) == Some(true) {
+            return result["content"][0]["text"]
+                .as_str()
+                .unwrap_or("")
+                .to_string();
+        }
+    }
+    panic!("expected error, got success: {:?}", resp.result);
+}
+
 /// Assert response is an error whose message contains `substr`.
 fn assert_error(resp: &JsonRpcResponse, substr: &str) {
-    let err = resp.error.as_ref().unwrap_or_else(|| {
-        panic!(
-            "expected error containing {substr:?}, got success: {:?}",
-            resp.result
-        )
-    });
+    let message = error_message(resp);
     assert!(
-        err.message.contains(substr),
-        "expected error containing {substr:?}, got: {:?}",
-        err.message,
+        message.contains(substr),
+        "expected error containing {substr:?}, got: {message:?}",
     );
 }
 
@@ -179,8 +204,52 @@ async fn initialize_returns_capabilities() {
     let state = test_state().await;
     let resp = call(&state, "initialize", None).await;
     let result = resp.result.unwrap();
-    assert_eq!(result["protocolVersion"], "2024-11-05");
+    assert_eq!(result["protocolVersion"], "2025-06-18");
     assert!(result["capabilities"]["tools"].is_object());
+}
+
+/// When the client offers a supported older protocol version, the server
+/// echoes it back so the session downgrades gracefully.
+#[tokio::test]
+async fn initialize_echoes_supported_client_version() {
+    let state = test_state().await;
+    let resp = call(
+        &state,
+        "initialize",
+        Some(json!({"protocolVersion": "2024-11-05"})),
+    )
+    .await;
+    let result = resp.result.unwrap();
+    assert_eq!(result["protocolVersion"], "2024-11-05");
+}
+
+/// When the client offers an unknown version, the server replies with its
+/// latest supported version (the client may then decide to abort).
+#[tokio::test]
+async fn initialize_falls_back_to_server_version_for_unknown_client_version() {
+    let state = test_state().await;
+    let resp = call(
+        &state,
+        "initialize",
+        Some(json!({"protocolVersion": "1999-01-01"})),
+    )
+    .await;
+    let result = resp.result.unwrap();
+    assert_eq!(result["protocolVersion"], "2025-06-18");
+}
+
+/// MCP defines `ping` for liveness probes. It must return an empty result —
+/// not a `-32601 Method not found` protocol error.
+#[tokio::test]
+async fn ping_returns_empty_result() {
+    let state = test_state().await;
+    let resp = call(&state, "ping", None).await;
+    assert!(
+        resp.error.is_none(),
+        "ping should not error: {:?}",
+        resp.error
+    );
+    assert_eq!(resp.result.unwrap(), json!({}));
 }
 
 #[tokio::test]
@@ -199,8 +268,11 @@ async fn tools_list_returns_tools() {
     assert_eq!(names.len(), super::dispatch::TOOL_NAMES.len());
 }
 
+/// Per MCP spec, tool-execution failures (including "tool not found" inside
+/// `tools/call`) must surface as `result.isError == true`, not as a JSON-RPC
+/// protocol error. Strict clients reject the wrong shape and abort the session.
 #[tokio::test]
-async fn unknown_tool() {
+async fn tools_call_unknown_tool_returns_is_error_result() {
     let state = test_state().await;
     let resp = call(
         &state,
@@ -208,8 +280,27 @@ async fn unknown_tool() {
         Some(json!({ "name": "bogus_tool", "arguments": {} })),
     )
     .await;
-    assert!(resp.error.is_some());
-    assert!(resp.error.unwrap().message.contains("Unknown tool"));
+    assert!(resp.error.is_none(), "should not be a protocol error");
+    let result = resp.result.expect("expected isError result");
+    assert_eq!(result["isError"], json!(true));
+    let text = result["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("Unknown tool"), "got: {text}");
+}
+
+/// Tool handler failures (e.g. NotFound from the service layer) likewise
+/// surface as `result.isError == true` rather than a JSON-RPC protocol error.
+#[tokio::test]
+async fn tools_call_handler_error_returns_is_error_result() {
+    let state = test_state().await;
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "get_task", "arguments": { "task_id": 999_999 } })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "should not be a protocol error");
+    let result = resp.result.expect("expected isError result");
+    assert_eq!(result["isError"], json!(true));
 }
 
 #[tokio::test]

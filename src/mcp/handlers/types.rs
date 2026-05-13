@@ -57,6 +57,26 @@ impl JsonRpcResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Tool-error result helper
+// ---------------------------------------------------------------------------
+
+/// Build an MCP tool-execution error result.
+///
+/// Per the MCP spec, tool failures are reported as `result` with
+/// `isError: true` and a text content block — *not* as a JSON-RPC protocol
+/// `error`. Protocol errors are reserved for malformed-request failures
+/// (parse errors, unknown method, invalid request shape).
+pub(super) fn tool_error(id: Option<Value>, message: impl Into<String>) -> JsonRpcResponse {
+    JsonRpcResponse::ok(
+        id,
+        serde_json::json!({
+            "isError": true,
+            "content": [{"type": "text", "text": message.into()}]
+        }),
+    )
+}
+
+// ---------------------------------------------------------------------------
 // Flexible i64 deserializer (accepts both 4 and "4")
 // ---------------------------------------------------------------------------
 

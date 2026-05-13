@@ -93,7 +93,7 @@ async fn create_task_via_task_header_inherits_project() {
 }
 
 #[tokio::test]
-async fn create_task_via_session_without_project_id_returns_32602() {
+async fn create_task_via_session_without_project_id_returns_is_error_result() {
     let (router, _db) = test_router().await;
     let resp = post_mcp(
         router,
@@ -108,12 +108,15 @@ async fn create_task_via_session_without_project_id_returns_32602() {
         }),
     )
     .await;
-    // tools/call returns the error inside the result envelope as JSON-RPC,
-    // not at the top level — match either shape that the handler may emit.
-    let err_code = resp["error"]["code"]
-        .as_i64()
-        .or_else(|| resp["result"]["error"]["code"].as_i64());
-    assert_eq!(err_code, Some(-32602), "got: {resp}");
+    // Per MCP spec, tool failures surface as `result.isError == true` with
+    // a text content block — not as a JSON-RPC protocol error.
+    assert!(
+        resp.get("error").is_none(),
+        "expected no protocol error, got: {resp}"
+    );
+    assert_eq!(resp["result"]["isError"], json!(true), "got: {resp}");
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert!(text.contains("project_id"), "got: {text}");
 }
 
 #[tokio::test]

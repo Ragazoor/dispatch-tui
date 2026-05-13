@@ -106,7 +106,7 @@ async fn update_task_missing_args() {
         Some(json!({ "name": "update_task", "arguments": {} })),
     )
     .await;
-    assert!(resp.error.is_some());
+    assert!(is_error(&resp));
 }
 
 #[tokio::test]
@@ -155,29 +155,8 @@ async fn get_task_not_found() {
         })),
     )
     .await;
-    assert!(resp.error.is_some());
-    assert!(resp.error.unwrap().message.contains("not found"));
-}
-
-#[tokio::test]
-async fn unknown_tool() {
-    let state = test_state().await;
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({ "name": "bogus_tool", "arguments": {} })),
-    )
-    .await;
-    assert!(resp.error.is_some());
-    assert!(resp.error.unwrap().message.contains("Unknown tool"));
-}
-
-#[tokio::test]
-async fn unknown_method() {
-    let state = test_state().await;
-    let resp = call(&state, "bogus/method", None).await;
-    assert!(resp.error.is_some());
-    assert!(resp.error.unwrap().message.contains("Method not found"));
+    assert!(is_error(&resp));
+    assert!(error_message(&resp).contains("not found"));
 }
 
 #[tokio::test]
@@ -285,7 +264,7 @@ async fn create_task_missing_title() {
         })),
     )
     .await;
-    assert!(resp.error.is_some());
+    assert!(is_error(&resp));
 }
 
 #[tokio::test]
@@ -301,7 +280,6 @@ async fn create_task_missing_project_id_is_invalid_params() {
     )
     .await;
     assert_error(&resp, "project_id");
-    assert_eq!(resp.error.as_ref().unwrap().code, -32602);
     let tasks = state.db.list_all().await.unwrap();
     assert!(tasks.is_empty(), "no task should be created");
 }
@@ -323,7 +301,6 @@ async fn create_task_with_unknown_project_id_is_invalid_params() {
     )
     .await;
     assert_error(&resp, "project");
-    assert_eq!(resp.error.as_ref().unwrap().code, -32602);
     let tasks = state.db.list_all().await.unwrap();
     assert!(tasks.is_empty(), "no task should be created");
 }
@@ -648,10 +625,7 @@ async fn update_task_no_fields_errors() {
         })),
     )
     .await;
-    assert!(
-        resp.error.is_some(),
-        "should error with no fields to update"
-    );
+    assert!(is_error(&resp), "should error with no fields to update");
 }
 
 #[tokio::test]
@@ -1043,8 +1017,8 @@ async fn claim_task_rejects_running_task() {
         })),
     )
     .await;
-    assert!(resp.error.is_some());
-    assert!(resp.error.unwrap().message.contains("already"));
+    assert!(is_error(&resp));
+    assert!(error_message(&resp).contains("already"));
 }
 
 #[tokio::test]
@@ -1080,8 +1054,8 @@ async fn claim_task_rejects_different_repo() {
         })),
     )
     .await;
-    assert!(resp.error.is_some());
-    assert!(resp.error.unwrap().message.contains("repo"));
+    assert!(is_error(&resp));
+    assert!(error_message(&resp).contains("repo"));
 }
 
 #[tokio::test]
@@ -1101,8 +1075,8 @@ async fn claim_task_not_found() {
         })),
     )
     .await;
-    assert!(resp.error.is_some());
-    assert!(resp.error.unwrap().message.contains("not found"));
+    assert!(is_error(&resp));
+    assert!(error_message(&resp).contains("not found"));
 }
 
 #[tokio::test]
@@ -2700,7 +2674,7 @@ async fn wrap_up_rejects_verdict_for_unretrieved_learning() {
         })),
     )
     .await;
-    assert_eq!(resp.error.expect("expected error").code, -32602);
+    assert!(is_error(&resp));
 }
 
 #[tokio::test]
@@ -2720,7 +2694,7 @@ async fn wrap_up_rejects_unknown_verdict_string() {
         })),
     )
     .await;
-    assert_eq!(resp.error.expect("expected error").code, -32602);
+    assert!(is_error(&resp));
 }
 
 // ---------------------------------------------------------------------------
@@ -3327,15 +3301,11 @@ async fn send_message_target_not_found() {
     )
     .await;
 
+    assert!(is_error(&resp), "Should return error for missing target");
+    let msg = error_message(&resp);
     assert!(
-        resp.error.is_some(),
-        "Should return error for missing target"
-    );
-    let err = resp.error.unwrap();
-    assert!(
-        err.message.contains("not found"),
-        "Error should mention not found: {}",
-        err.message
+        msg.contains("not found"),
+        "Error should mention not found: {msg}"
     );
 }
 
@@ -3391,14 +3361,13 @@ async fn send_message_target_no_worktree() {
     .await;
 
     assert!(
-        resp.error.is_some(),
+        is_error(&resp),
         "Should return error for target without worktree"
     );
-    let err = resp.error.unwrap();
+    let msg = error_message(&resp);
     assert!(
-        err.message.contains("no worktree"),
-        "Error should mention no worktree: {}",
-        err.message
+        msg.contains("no worktree"),
+        "Error should mention no worktree: {msg}"
     );
 }
 
@@ -3462,14 +3431,13 @@ async fn send_message_target_no_tmux_window() {
     .await;
 
     assert!(
-        resp.error.is_some(),
+        is_error(&resp),
         "Should return error for target without tmux window"
     );
-    let err = resp.error.unwrap();
+    let msg = error_message(&resp);
     assert!(
-        err.message.contains("no tmux window"),
-        "Error should mention no tmux window: {}",
-        err.message
+        msg.contains("no tmux window"),
+        "Error should mention no tmux window: {msg}"
     );
 }
 
@@ -3588,7 +3556,7 @@ async fn failed_update_does_not_send_notification() {
         })),
     )
     .await;
-    assert!(resp.error.is_some());
+    assert!(is_error(&resp));
 
     assert!(
         rx.try_recv().is_err(),
@@ -3674,7 +3642,7 @@ async fn update_task_rejects_epic_tag() {
     )
     .await;
     assert!(
-        resp.error.is_some(),
+        is_error(&resp),
         "tag=epic should be rejected; the variant was removed"
     );
 }
@@ -3801,7 +3769,7 @@ async fn create_task_with_nonexistent_epic() {
     )
     .await;
     // Should fail because the epic FK doesn't exist
-    assert!(resp.error.is_some(), "should error with invalid epic_id");
+    assert!(is_error(&resp), "should error with invalid epic_id");
 }
 
 // =======================================================================
@@ -5605,7 +5573,7 @@ async fn dispatch_task_returns_error_when_dispatch_fails() {
     )
     .await;
 
-    assert!(resp.error.is_some(), "expected error when dispatch fails");
+    assert!(is_error(&resp), "expected error when dispatch fails");
 
     // Task status must remain Backlog — dispatch failure must not leave it as Running
     let task = db.get_task(task_id).await.unwrap().unwrap();
@@ -5803,7 +5771,6 @@ async fn update_task_invalid_project_id_returns_error() {
     )
     .await;
     assert_error(&resp, "project");
-    assert_eq!(resp.error.as_ref().unwrap().code, -32602);
 }
 
 // ---------------------------------------------------------------------------
@@ -5881,7 +5848,6 @@ async fn update_epic_invalid_project_id_returns_error() {
     )
     .await;
     assert_error(&resp, "project");
-    assert_eq!(resp.error.as_ref().unwrap().code, -32602);
 }
 
 // ---------------------------------------------------------------------------
@@ -7737,13 +7703,9 @@ async fn create_task_session_identity_requires_project_id() {
         CallerIdentity::Session,
     )
     .await;
-    let err = resp.error.as_ref().expect("expected error response");
-    assert_eq!(err.code, -32602);
-    assert!(
-        err.message.contains("project_id is required"),
-        "got {}",
-        err.message
-    );
+    assert!(is_error(&resp));
+    let msg = error_message(&resp);
+    assert!(msg.contains("project_id is required"), "got {msg}");
 }
 
 #[tokio::test]
@@ -7859,10 +7821,7 @@ async fn create_task_unknown_caller_identity_returns_error() {
         CallerIdentity::Task(crate::models::TaskId(99999)),
     )
     .await;
-    let err = resp.error.as_ref().expect("expected error response");
-    assert!(
-        err.message.to_lowercase().contains("caller"),
-        "got {}",
-        err.message
-    );
+    assert!(is_error(&resp));
+    let msg = error_message(&resp);
+    assert!(msg.to_lowercase().contains("caller"), "got {msg}");
 }

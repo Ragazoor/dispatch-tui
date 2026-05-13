@@ -14,7 +14,15 @@ use crate::mcp::McpState;
 use super::epics;
 use super::learnings;
 use super::tasks;
-use super::types::{JsonRpcRequest, JsonRpcResponse};
+use super::types::{tool_error, JsonRpcRequest, JsonRpcResponse};
+
+/// MCP protocol version this server speaks natively.
+const SERVER_PROTOCOL_VERSION: &str = "2025-06-18";
+
+/// Older protocol versions we still understand. If a client offers one of these
+/// during `initialize`, we echo it back so the session uses that version
+/// (graceful downgrade per spec §Initialization).
+const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2025-06-18", "2024-11-05"];
 
 // ---------------------------------------------------------------------------
 // Tool registry macro
@@ -531,19 +539,35 @@ pub async fn handle_mcp(
 
     let id = req.id;
     let response = match req.method.as_str() {
-        "initialize" => JsonRpcResponse::ok(
-            id,
-            json!({
-                "protocolVersion": "2024-11-05",
-                "capabilities": {
-                    "tools": {}
-                },
-                "serverInfo": {
-                    "name": "dispatch",
-                    "version": "0.1.0"
-                }
-            }),
-        ),
+        "initialize" => {
+            // Per spec: if the client offers a version we support, echo it
+            // back to use that version for the session; otherwise reply with
+            // our latest supported version (the client may then abort).
+            let client_version = req
+                .params
+                .as_ref()
+                .and_then(|p| p.get("protocolVersion"))
+                .and_then(Value::as_str);
+            let negotiated = match client_version {
+                Some(v) if SUPPORTED_PROTOCOL_VERSIONS.contains(&v) => v,
+                _ => SERVER_PROTOCOL_VERSION,
+            };
+            JsonRpcResponse::ok(
+                id,
+                json!({
+                    "protocolVersion": negotiated,
+                    "capabilities": {
+                        "tools": {}
+                    },
+                    "serverInfo": {
+                        "name": "dispatch",
+                        "version": "0.1.0"
+                    }
+                }),
+            )
+        }
+
+        "ping" => JsonRpcResponse::ok(id, json!({})),
 
         "tools/list" => JsonRpcResponse::ok(id, tool_definitions()),
 
@@ -552,7 +576,14 @@ pub async fn handle_mcp(
             let tool_name = params.get("name").and_then(Value::as_str).unwrap_or("");
             let args = params.get("arguments").cloned().unwrap_or(Value::Null);
 
-            dispatch_tool(&state, id, &identity, tool_name, args).await
+            // Per MCP spec, tool-execution failures belong in `result` with
+            // `isError: true` — not as a JSON-RPC protocol error. Re-wrap any
+            // error returned by the tool dispatch path.
+            let resp = dispatch_tool(&state, id, &identity, tool_name, args).await;
+            match resp.error {
+                Some(err) => tool_error(resp.id, err.message),
+                None => resp,
+            }
         }
 
         other => JsonRpcResponse::err(id, -32601, format!("Method not found: {other}")),
