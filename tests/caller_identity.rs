@@ -15,6 +15,7 @@ use serde_json::{json, Value};
 use tower::ServiceExt;
 
 use dispatch_tui::db::{self, CreateTaskRequest, Database};
+use dispatch_tui::mcp::identity::{HEADER_KIND, HEADER_TASK_ID};
 use dispatch_tui::models::{ProjectId, TaskId, TaskStatus};
 use dispatch_tui::process::{MockProcessRunner, ProcessRunner};
 
@@ -74,7 +75,7 @@ async fn create_task_via_task_header_inherits_project() {
 
     let resp = post_mcp(
         router,
-        &[("X-Caller-Task-Id", &parent.0.to_string())],
+        &[(HEADER_TASK_ID, &parent.0.to_string())],
         json!({
             "jsonrpc": "2.0", "id": 1,
             "method": "tools/call",
@@ -96,7 +97,7 @@ async fn create_task_via_session_without_project_id_returns_32602() {
     let (router, _db) = test_router().await;
     let resp = post_mcp(
         router,
-        &[("X-Caller-Kind", "session")],
+        &[(HEADER_KIND, "session")],
         json!({
             "jsonrpc": "2.0", "id": 1,
             "method": "tools/call",
@@ -120,7 +121,7 @@ async fn create_task_via_session_with_project_id_succeeds() {
     let (router, db) = test_router().await;
     let resp = post_mcp(
         router,
-        &[("X-Caller-Kind", "session")],
+        &[(HEADER_KIND, "session")],
         json!({
             "jsonrpc": "2.0", "id": 1,
             "method": "tools/call",

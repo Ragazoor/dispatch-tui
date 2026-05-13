@@ -68,7 +68,7 @@ mod tests {
         let resp = app()
             .oneshot(
                 Request::post("/mcp")
-                    .header("X-Caller-Task-Id", "7")
+                    .header(HEADER_TASK_ID, "7")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -85,7 +85,7 @@ mod tests {
         let resp = app()
             .oneshot(
                 Request::post("/mcp")
-                    .header("X-Caller-Kind", "session")
+                    .header(HEADER_KIND, "session")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -117,8 +117,8 @@ mod tests {
         let resp = app()
             .oneshot(
                 Request::post("/mcp")
-                    .header("X-Caller-Task-Id", "1")
-                    .header("X-Caller-Kind", "session")
+                    .header(HEADER_TASK_ID, "1")
+                    .header(HEADER_KIND, "session")
                     .body(Body::empty())
                     .unwrap(),
             )
