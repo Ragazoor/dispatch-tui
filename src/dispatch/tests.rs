@@ -1,9 +1,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::prompts::{
     allium_instruction, build_epic_planning_prompt, build_prompt, build_quick_dispatch_prompt,
-    build_tmux_window_name, epic_preamble, learning_tools_instruction, mcp_tools_instruction,
-    plan_and_attach_instruction, rebase_preamble, task_block, tdd_instruction, wrap_up_instruction,
-    EpicContext, LearningInjections, ProjectContext, PromptContext,
+    build_tmux_window_name, epic_preamble, mcp_tools_instruction, plan_and_attach_instruction,
+    rebase_preamble, task_block, tdd_instruction, wrap_up_instruction, EpicContext,
+    LearningInjections, ProjectContext, PromptContext,
 };
 use super::worktree::provision_worktree;
 use super::*;
@@ -69,15 +69,6 @@ fn build_prompt_includes_project_context() {
     );
     assert!(prompt.contains("ProjectId: 7"));
     assert!(prompt.contains("Dispatch"));
-}
-
-#[test]
-fn learning_tools_instruction_includes_lint_checkpoint() {
-    let instr = learning_tools_instruction();
-    assert!(
-        instr.contains("/lint"),
-        "learning_tools_instruction must include the /lint checkpoint, got:\n{instr}"
-    );
 }
 
 #[test]

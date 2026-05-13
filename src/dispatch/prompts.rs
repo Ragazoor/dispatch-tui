@@ -133,19 +133,15 @@ pub(super) fn mcp_tools_instruction() -> &'static str {
     "The dispatch MCP tools are available — use them to query and update this task (get_task, update_task)."
 }
 
-/// Knowledge base skill checkpoints for dispatched agents.
+/// One-line knowledge-base nudge for dispatched agents. The earlier
+/// seven-skill checkpoint list saw <2 invocations each across hundreds
+/// of dispatches — replaced with a direct prompt to query the KB
+/// whenever the agent is uncertain.
 pub(super) fn learning_tools_instruction() -> &'static str {
-    "Knowledge base: Invoke domain-specific skills at action checkpoints — \
-not just at task start:\n\
-- Exploring unfamiliar code → `/codebase-knowledge`\n\
-- Before writing code → `/code-conventions`\n\
-- Before writing tests → `/test-conventions`\n\
-- Before creating/updating a PR → `/pr-workflow`\n\
-- When using dispatch MCP tools → `/dispatch-workflow`\n\
-- When hitting a build or test failure → `/troubleshoot`\n\
-- When noticing an improvement opportunity (and before wrapping up) → `/improvement`\n\
-- Before wrapping up → `/lint`\n\
-Use `/learnings` to record new entries or upvote entries that proved useful."
+    "Knowledge base: when uncertain about conventions, tests, repo patterns, \
+or how to debug, call `query_learnings` to check the knowledge base before \
+guessing or asking. Use `/learnings` to record useful findings or upvote \
+entries that helped."
 }
 
 /// Instructions for writing a plan and attaching it to the task via MCP.
@@ -714,12 +710,35 @@ mod tests {
     }
 
     #[test]
-    fn learning_instruction_mentions_checkpoints() {
+    fn learning_instruction_nudges_query_before_guessing() {
         let text = learning_tools_instruction();
         assert!(
-            text.contains("checkpoint") || text.contains("action"),
-            "learning instruction should describe action checkpoints, got: {text}"
+            text.contains("query_learnings"),
+            "learning instruction should point at the query_learnings tool, got: {text}"
         );
+        assert!(
+            text.contains("before guessing or asking"),
+            "learning instruction should nudge agents to check the KB before guessing or asking, got: {text}"
+        );
+    }
+
+    #[test]
+    fn learning_instruction_omits_deleted_action_skills() {
+        let text = learning_tools_instruction();
+        for skill in [
+            "/codebase-knowledge",
+            "/code-conventions",
+            "/test-conventions",
+            "/pr-workflow",
+            "/dispatch-workflow",
+            "/troubleshoot",
+            "/improvement",
+        ] {
+            assert!(
+                !text.contains(skill),
+                "learning instruction should no longer reference deleted skill {skill}, got: {text}"
+            );
+        }
     }
 
     #[test]
@@ -773,16 +792,16 @@ mod tests {
     }
 
     #[test]
-    fn knowledge_base_checkpoints_include_all_skills() {
+    fn trailing_block_includes_knowledge_base_nudge() {
         let text = trailing_block();
-        for skill in [
-            "/pr-workflow",
-            "/troubleshoot",
-            "/improvement",
-            "/codebase-knowledge",
-        ] {
-            assert!(text.contains(skill), "trailing block missing {skill}");
-        }
+        assert!(
+            text.contains("query_learnings"),
+            "trailing block should reference query_learnings tool, got: {text}"
+        );
+        assert!(
+            text.contains("before guessing or asking"),
+            "trailing block should include the 'before guessing or asking' nudge, got: {text}"
+        );
     }
 
     #[test]

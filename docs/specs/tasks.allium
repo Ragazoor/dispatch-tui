@@ -182,15 +182,11 @@ rule DispatchTask {
         --   {tdd_instruction}              (shared verbatim)
         --   {allium_instruction}           (shared verbatim)
         --   {mcp_tools_instruction}        (shared verbatim)
-        --   {learning_tools_instruction}   (shared verbatim — points the
-        --                                    agent at the action-checkpoint
-        --                                    skills: /codebase-knowledge,
-        --                                    /code-conventions,
-        --                                    /test-conventions,
-        --                                    /pr-workflow,
-        --                                    /dispatch-workflow,
-        --                                    /troubleshoot, /improvement,
-        --                                    /lint, /learnings)
+        --   {learning_tools_instruction}   (shared verbatim — one-line
+        --                                    nudge to call query_learnings
+        --                                    when uncertain, and use the
+        --                                    /learnings skill to record or
+        --                                    upvote entries)
         --   {wrap_up_instruction}          (shared verbatim, universal)
         --
         -- DispatchTask emits one of two variants of build_prompt:

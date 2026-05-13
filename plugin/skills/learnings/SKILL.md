@@ -7,9 +7,7 @@ description: Manage the knowledge base lifecycle — query, upvote, and record e
 
 Use this skill to interact with the shared knowledge base — recording new entries and upvoting entries that proved useful.
 
-For action-specific knowledge base queries at the right moment, use the domain skills:
-`/codebase-knowledge`, `/code-conventions`, `/test-conventions`, `/pr-workflow`,
-`/dispatch-workflow`, `/troubleshoot`, `/improvement`.
+To *query* the knowledge base mid-task, call `query_learnings` directly (with `task_id` and an optional `tag_filter` matching a single tag). Do that whenever you are uncertain about conventions, tests, repo patterns, or how to debug — before guessing or asking.
 
 **Announce at start:** "I'm using the learnings skill to interact with the knowledge base."
 
