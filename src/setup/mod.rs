@@ -34,6 +34,15 @@ pub(super) fn claude_dir() -> Result<PathBuf> {
     Ok(PathBuf::from(home).join(".claude"))
 }
 
+/// Path to Claude Code's user-global config file (`~/.claude.json`).
+///
+/// This is where Claude Code reads user-level MCP servers from — *not*
+/// `~/.claude/.mcp.json`, which Claude Code does not consume.
+pub(super) fn user_global_config_path() -> Result<PathBuf> {
+    let home = std::env::var("HOME").context("$HOME is not set")?;
+    Ok(PathBuf::from(home).join(".claude.json"))
+}
+
 pub(super) fn read_json_file(path: &std::path::Path) -> Result<Option<Value>> {
     match fs::read_to_string(path) {
         Ok(content) => {
@@ -101,6 +110,72 @@ pub fn remove_database(db_path: &std::path::Path) -> Result<bool> {
     Ok(true)
 }
 
+/// Apply the dispatch MCP entry to `target` (Claude Code's user-global config,
+/// `~/.claude.json`) and remove any stale entry from `legacy` (the old wrong
+/// path, `~/.claude/.mcp.json`, that earlier dispatch versions wrote to and
+/// that Claude Code never read).
+///
+/// Returns `true` if either file changed.
+///
+/// When `prompt_yes` is false the user is prompted before writing `target`;
+/// the legacy cleanup is unconditional (always safe — only removes the
+/// dispatch entry).
+pub(super) fn apply_mcp_setup(
+    target: &Path,
+    legacy: &Path,
+    port: u16,
+    prompt_yes: bool,
+) -> Result<bool> {
+    let mut changed = false;
+
+    let existing = read_json_file(target)?;
+    let merged = merge_mcp_config(existing, port);
+    if merged.changed {
+        let display = display_for(target);
+        if prompt_yes
+            || confirm(&format!(
+                "Add dispatch MCP server (localhost:{port}) to {display}?"
+            ))?
+        {
+            write_json_file(target, &merged.value)?;
+            println!("MCP config: added dispatch to {display} (port {port})");
+            changed = true;
+        } else {
+            println!("MCP config: skipped");
+        }
+    } else {
+        println!(
+            "MCP config: dispatch already configured in {}",
+            display_for(target)
+        );
+    }
+
+    match remove_mcp_config(legacy) {
+        Ok(true) => {
+            println!(
+                "MCP config: removed stale dispatch entry from {} (Claude Code did not read this file)",
+                legacy.display()
+            );
+            changed = true;
+        }
+        Ok(false) => {}
+        Err(e) => eprintln!("Warning: failed to clean up legacy MCP config: {e}"),
+    }
+
+    Ok(changed)
+}
+
+/// Best-effort tilde-shortened display for paths under `$HOME`.
+fn display_for(path: &Path) -> String {
+    if let Ok(home) = std::env::var("HOME") {
+        let home_path = std::path::Path::new(&home);
+        if let Ok(stripped) = path.strip_prefix(home_path) {
+            return format!("~/{}", stripped.display());
+        }
+    }
+    path.display().to_string()
+}
+
 // ---------------------------------------------------------------------------
 // run_setup — top-level orchestrator
 // ---------------------------------------------------------------------------
@@ -117,24 +192,13 @@ pub async fn run_setup(port: u16, yes: bool, db_path: &Path) -> Result<()> {
 
     let mut any_changes = false;
 
-    // 1. MCP config
-    let mcp_path = claude_dir.join(".mcp.json");
-    let existing_mcp = read_json_file(&mcp_path)?;
-    let mcp_result = merge_mcp_config(existing_mcp, port);
-    if mcp_result.changed {
-        if yes
-            || confirm(&format!(
-                "Add dispatch MCP server (localhost:{port}) to ~/.claude/.mcp.json?"
-            ))?
-        {
-            write_json_file(&mcp_path, &mcp_result.value)?;
-            println!("MCP config: added dispatch to ~/.claude/.mcp.json (port {port})");
-            any_changes = true;
-        } else {
-            println!("MCP config: skipped");
-        }
-    } else {
-        println!("MCP config: dispatch already configured in ~/.claude/.mcp.json");
+    // 1. MCP config — Claude Code reads user-level MCP servers from
+    // `~/.claude.json`, NOT `~/.claude/.mcp.json`. Older dispatch setups
+    // wrote to the latter; clean that up.
+    let mcp_path = user_global_config_path()?;
+    let legacy_mcp_path = claude_dir.join(".mcp.json");
+    if apply_mcp_setup(&mcp_path, &legacy_mcp_path, port, yes)? {
+        any_changes = true;
     }
 
     // 2. Permissions
@@ -239,7 +303,8 @@ pub async fn run_setup(port: u16, yes: bool, db_path: &Path) -> Result<()> {
 
 pub fn run_uninstall(yes: bool, purge: bool) -> Result<()> {
     let claude_dir = claude_dir()?;
-    let mcp_path = claude_dir.join(".mcp.json");
+    let mcp_path = user_global_config_path()?;
+    let legacy_mcp_path = claude_dir.join(".mcp.json");
     let settings_path = claude_dir.join("settings.json");
     let plugin_path = plugins::plugin_dir()?;
     let db_path = crate::default_db_path();
@@ -282,6 +347,20 @@ pub fn run_uninstall(yes: bool, purge: bool) -> Result<()> {
         }
         Ok(false) => println!("No dispatch entry in MCP config, skipping"),
         Err(e) => eprintln!("Warning: failed to update MCP config: {e}"),
+    }
+
+    // Legacy cleanup: remove any stale entry from ~/.claude/.mcp.json that
+    // earlier dispatch versions mistakenly wrote there.
+    match remove_mcp_config(&legacy_mcp_path) {
+        Ok(true) => {
+            println!(
+                "Removed stale dispatch entry from {}",
+                legacy_mcp_path.display()
+            );
+            any_removed = true;
+        }
+        Ok(false) => {}
+        Err(e) => eprintln!("Warning: failed to clean up legacy MCP config: {e}"),
     }
 
     match remove_permissions(&settings_path) {
@@ -399,6 +478,104 @@ mod tests {
         assert!(!data_dir.join("tasks.db").exists());
         assert!(data_dir.exists());
         assert!(data_dir.join("other.txt").exists());
+    }
+
+    // -- MCP setup application --
+
+    #[test]
+    fn apply_mcp_setup_writes_to_target_not_legacy() {
+        // Guard against regression: dispatch must write to the user-global
+        // file (~/.claude.json), not ~/.claude/.mcp.json which Claude Code
+        // does not read.
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join(".claude.json");
+        let legacy = dir.path().join(".claude").join(".mcp.json");
+
+        let changed = apply_mcp_setup(&target, &legacy, 3142, true).unwrap();
+        assert!(changed);
+        assert!(target.exists(), "target ~/.claude.json must be created");
+        assert!(!legacy.exists(), "legacy file must not be created");
+
+        let written = read_json_file(&target).unwrap().unwrap();
+        assert_eq!(
+            written["mcpServers"]["dispatch"]["url"],
+            "http://localhost:3142/mcp"
+        );
+        assert!(written["mcpServers"]["dispatch"]["headersHelper"].is_string());
+    }
+
+    #[test]
+    fn apply_mcp_setup_preserves_existing_target_fields() {
+        // ~/.claude.json contains many fields (themes, tips, etc.). Setup
+        // must merge into it, not overwrite it.
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join(".claude.json");
+        let legacy = dir.path().join(".claude").join(".mcp.json");
+        write_json_file(
+            &target,
+            &json!({
+                "theme": "dark",
+                "mcpServers": {
+                    "github": {"type": "http", "url": "http://localhost:9999/mcp"}
+                }
+            }),
+        )
+        .unwrap();
+
+        apply_mcp_setup(&target, &legacy, 3142, true).unwrap();
+
+        let written = read_json_file(&target).unwrap().unwrap();
+        assert_eq!(written["theme"], "dark");
+        assert!(written["mcpServers"]["github"].is_object());
+        assert!(written["mcpServers"]["dispatch"].is_object());
+    }
+
+    #[test]
+    fn apply_mcp_setup_migrates_legacy_dispatch_entry() {
+        // Upgrade path: dispatch entry sits in the wrong legacy file.
+        // After running setup it must be installed in the target and
+        // removed from the legacy file.
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join(".claude.json");
+        let legacy_dir = dir.path().join(".claude");
+        fs::create_dir_all(&legacy_dir).unwrap();
+        let legacy = legacy_dir.join(".mcp.json");
+        write_json_file(
+            &legacy,
+            &json!({
+                "mcpServers": {
+                    "dispatch": {"type": "http", "url": "http://localhost:3142/mcp"},
+                    "github": {"type": "http", "url": "http://localhost:9999/mcp"}
+                }
+            }),
+        )
+        .unwrap();
+
+        let changed = apply_mcp_setup(&target, &legacy, 3142, true).unwrap();
+        assert!(changed);
+
+        // Target got the dispatch entry (with headersHelper).
+        let written = read_json_file(&target).unwrap().unwrap();
+        assert!(written["mcpServers"]["dispatch"]["headersHelper"].is_string());
+
+        // Legacy lost the dispatch entry but kept the other server.
+        let legacy_after = read_json_file(&legacy).unwrap().unwrap();
+        assert!(legacy_after["mcpServers"].get("dispatch").is_none());
+        assert!(legacy_after["mcpServers"]["github"].is_object());
+    }
+
+    #[test]
+    fn apply_mcp_setup_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join(".claude.json");
+        let legacy = dir.path().join(".claude").join(".mcp.json");
+
+        apply_mcp_setup(&target, &legacy, 3142, true).unwrap();
+        let changed = apply_mcp_setup(&target, &legacy, 3142, true).unwrap();
+        assert!(
+            !changed,
+            "second apply with no changes must report unchanged"
+        );
     }
 
     #[test]

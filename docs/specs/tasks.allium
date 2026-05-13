@@ -1268,7 +1268,7 @@ rule CreateTaskViaMcp {
     --
     -- The X-Caller-Task-Id and X-Caller-Kind HTTP headers are produced
     -- by the `dispatch caller-headers` headersHelper installed in
-    -- Claude Code's .mcp.json by `dispatch setup`.
+    -- Claude Code's user-global config (~/.claude.json) by `dispatch setup`.
 
     -- A Task-kind caller must reference an existing task.
     requires:

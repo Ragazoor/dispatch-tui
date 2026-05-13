@@ -84,7 +84,7 @@ creation.
 
 `dispatch setup` configures Claude Code integration:
 
-1. **MCP server** — registers the dispatch server in `~/.claude/.mcp.json`
+1. **MCP server** — registers the dispatch server in `~/.claude.json` (user-global). Earlier dispatch versions wrote to `~/.claude/.mcp.json`, which Claude Code never read; setup now cleans that up.
 2. **Plugin** — installs hooks, skills, and commands to `~/.claude/plugins/local/dispatch/`
 3. **Permissions** — adds MCP tool permissions to `~/.claude/settings.json`
 4. **Tmux** — enables `focus-events` globally (needed for split-view focus indicator)

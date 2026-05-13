@@ -99,7 +99,7 @@ enum Commands {
     },
     /// Emit a JSON object of HTTP headers identifying the current caller.
     ///
-    /// Used as a headersHelper in Claude Code's .mcp.json — invoked on every
+    /// Used as a headersHelper in Claude Code's ~/.claude.json — invoked on every
     /// MCP session start and reconnect. Pure path parser; reads only $PWD,
     /// no DB access.
     CallerHeaders,
