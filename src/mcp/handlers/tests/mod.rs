@@ -16,7 +16,7 @@ use axum::{
 use serde_json::{json, Value};
 
 use crate::db::{self, CreateLearningRow, CreateTaskRequest, Database};
-use crate::mcp::identity::CallerIdentity;
+use crate::mcp::identity::{CallerIdentity, IdentityError};
 use crate::mcp::McpState;
 use crate::models::{ProjectId, SubStatus, TaskStatus};
 use crate::process::{MockProcessRunner, ProcessRunner};
@@ -60,6 +60,15 @@ async fn call_as(
     params: Option<Value>,
     identity: CallerIdentity,
 ) -> JsonRpcResponse {
+    call_with_identity(state, method, params, Ok(identity)).await
+}
+
+async fn call_with_identity(
+    state: &Arc<McpState>,
+    method: &str,
+    params: Option<Value>,
+    identity: Result<CallerIdentity, IdentityError>,
+) -> JsonRpcResponse {
     let req = JsonRpcRequest {
         jsonrpc: "2.0".to_string(),
         id: Some(json!(1)),
@@ -88,7 +97,7 @@ async fn call_notification(
     };
     let response: Response = handle_mcp(
         State(state.clone()),
-        Extension(CallerIdentity::Session),
+        Extension(Ok(CallerIdentity::Session)),
         Json(req),
     )
     .await
@@ -336,6 +345,64 @@ async fn unknown_notification_returns_202_with_no_body() {
     let (status, body) = call_notification(&state, "notifications/something_new", None).await;
     assert_eq!(status, StatusCode::ACCEPTED);
     assert!(body.is_empty());
+}
+
+#[tokio::test]
+async fn initialize_succeeds_without_identity() {
+    let state = test_state().await;
+    let resp = call_with_identity(&state, "initialize", None, Err(IdentityError::Missing)).await;
+    assert!(resp.error.is_none(), "got error: {:?}", resp.error);
+    assert_eq!(resp.result.unwrap()["protocolVersion"], "2025-06-18");
+}
+
+#[tokio::test]
+async fn ping_succeeds_without_identity() {
+    let state = test_state().await;
+    let resp = call_with_identity(&state, "ping", None, Err(IdentityError::Missing)).await;
+    assert!(resp.error.is_none(), "got error: {:?}", resp.error);
+    assert_eq!(resp.result.unwrap(), json!({}));
+}
+
+#[tokio::test]
+async fn tools_list_succeeds_without_identity() {
+    let state = test_state().await;
+    let resp = call_with_identity(&state, "tools/list", None, Err(IdentityError::Missing)).await;
+    assert!(resp.error.is_none(), "got error: {:?}", resp.error);
+    let tools = resp.result.unwrap()["tools"].as_array().unwrap().len();
+    assert!(tools > 0);
+}
+
+#[tokio::test]
+async fn tools_call_without_identity_returns_invalid_request_with_request_id() {
+    let state = test_state().await;
+    let resp = call_with_identity(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "list_projects", "arguments": {} })),
+        Err(IdentityError::Missing),
+    )
+    .await;
+    let err = resp.error.expect("expected JSON-RPC error");
+    assert_eq!(err.code, -32600);
+    assert!(err.message.contains("missing"), "got: {}", err.message);
+    // Strict MCP clients reject `id: null` on error responses; the handler must
+    // echo back the request id (1) it parsed from the body.
+    assert_eq!(resp.id, Some(json!(1)));
+}
+
+#[tokio::test]
+async fn tools_call_with_conflict_identity_returns_invalid_request() {
+    let state = test_state().await;
+    let resp = call_with_identity(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "list_projects", "arguments": {} })),
+        Err(IdentityError::Conflict),
+    )
+    .await;
+    let err = resp.error.expect("expected JSON-RPC error");
+    assert_eq!(err.code, -32600);
+    assert_eq!(resp.id, Some(json!(1)));
 }
 
 /// Validates that JSON schemas in `tool_definitions()` match the argument structs.

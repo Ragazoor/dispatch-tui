@@ -1324,17 +1324,31 @@ rule CreateTaskViaMcp {
         -- transport carries identity. The dispatched-agent's worktree
         -- path (`.worktrees/<task-id>-<slug>`) is parsed by the
         -- `dispatch caller-headers` headersHelper, which emits
-        -- `X-Caller-Task-Id: <id>` on every MCP request. Axum middleware
-        -- (src/mcp/middleware.rs) extracts the header into a typed
-        -- CallerIdentity value attached to request extensions.
+        -- `X-Caller-Task-Id: <id>` on every MCP request.
         -- Non-dispatched sessions emit `X-Caller-Kind: session` instead
         -- and must pass project_id explicitly on every create_task call.
         -- Passing epic_id: null explicitly (as opposed to omitting it)
         -- means "no epic" even when the caller has one.
-        -- Validation errors: -32602 on unknown caller-task, unknown
-        -- project_id / epic_id, or Session-caller without project_id.
-        -- Missing / malformed identity headers are rejected at the
-        -- middleware layer with JSON-RPC -32600.
+        --
+        -- The Axum middleware (src/mcp/middleware.rs) is an *extractor*,
+        -- not a gatekeeper: it parses the two headers and attaches a
+        -- Result<CallerIdentity, IdentityError> to request extensions
+        -- without ever short-circuiting the request. This is required
+        -- because the middleware runs before the JSON-RPC body is
+        -- parsed and therefore has no request id to echo back — and a
+        -- JSON-RPC response with `id: null` is rejected by strict MCP
+        -- clients (Claude Code), which would abort the session during
+        -- the handshake.
+        --
+        -- Identity-free methods (`initialize`, `ping`, `tools/list`,
+        -- notifications) succeed regardless of header presence.
+        -- Identity-consuming tool calls (everything dispatched through
+        -- `tools/call`) reject missing or malformed identity at the
+        -- handler boundary with JSON-RPC -32600, echoing back the
+        -- request's actual id.
+        -- Other validation errors: -32602 on unknown caller-task,
+        -- unknown project_id / epic_id, or Session-caller without
+        -- project_id.
         -- Unlike the TUI CreateTask rule, this rule does not fire
         -- RecordRepoPath — MCP task creation skips repo path persistence.
         -- repo_path is expanded through expand_tilde before being

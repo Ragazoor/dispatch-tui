@@ -35,12 +35,25 @@ impl CallerIdentity {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IdentityError {
     Missing,
     Conflict,
     UnknownKind(String),
     InvalidTaskId(String),
+}
+
+impl std::fmt::Display for IdentityError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IdentityError::Missing => write!(f, "missing X-Caller-* identity header"),
+            IdentityError::Conflict => {
+                write!(f, "both X-Caller-Task-Id and X-Caller-Kind set")
+            }
+            IdentityError::UnknownKind(k) => write!(f, "unknown X-Caller-Kind: {k}"),
+            IdentityError::InvalidTaskId(s) => write!(f, "invalid X-Caller-Task-Id: {s}"),
+        }
+    }
 }
 
 #[cfg(test)]

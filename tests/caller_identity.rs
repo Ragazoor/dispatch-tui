@@ -141,7 +141,7 @@ async fn create_task_via_session_with_project_id_succeeds() {
 }
 
 #[tokio::test]
-async fn missing_identity_headers_returns_32600() {
+async fn missing_identity_headers_still_allows_initialize() {
     let (router, _db) = test_router().await;
     let resp = post_mcp(
         router,
@@ -153,5 +153,31 @@ async fn missing_identity_headers_returns_32600() {
         }),
     )
     .await;
+    assert!(resp.get("error").is_none(), "got: {resp}");
+    assert_eq!(resp["id"], json!(1), "got: {resp}");
+    assert_eq!(
+        resp["result"]["protocolVersion"].as_str(),
+        Some("2025-06-18"),
+        "got: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn missing_identity_headers_on_tools_call_returns_32600_with_request_id() {
+    let (router, _db) = test_router().await;
+    let resp = post_mcp(
+        router,
+        &[],
+        json!({
+            "jsonrpc": "2.0", "id": 42,
+            "method": "tools/call",
+            "params": {
+                "name": "list_projects",
+                "arguments": {}
+            }
+        }),
+    )
+    .await;
     assert_eq!(resp["error"]["code"], -32600, "got: {resp}");
+    assert_eq!(resp["id"], json!(42), "id must echo request, not be null");
 }

@@ -8,7 +8,7 @@ use axum::{
 };
 use serde_json::{json, Value};
 
-use crate::mcp::identity::CallerIdentity;
+use crate::mcp::identity::{CallerIdentity, IdentityError};
 use crate::mcp::McpState;
 
 use super::epics;
@@ -524,7 +524,7 @@ async fn handle_list_projects(
 
 pub async fn handle_mcp(
     State(state): State<Arc<McpState>>,
-    Extension(identity): Extension<CallerIdentity>,
+    Extension(identity_result): Extension<Result<CallerIdentity, IdentityError>>,
     Json(req): Json<JsonRpcRequest>,
 ) -> Response {
     // JSON-RPC 2.0 §4.1: a Notification (no `id`) must never receive a reply.
@@ -571,20 +571,23 @@ pub async fn handle_mcp(
 
         "tools/list" => JsonRpcResponse::ok(id, tool_definitions()),
 
-        "tools/call" => {
-            let params = req.params.unwrap_or(Value::Null);
-            let tool_name = params.get("name").and_then(Value::as_str).unwrap_or("");
-            let args = params.get("arguments").cloned().unwrap_or(Value::Null);
+        "tools/call" => match identity_result.as_ref() {
+            Err(e) => JsonRpcResponse::err(id, -32600, e.to_string()),
+            Ok(identity) => {
+                let params = req.params.unwrap_or(Value::Null);
+                let tool_name = params.get("name").and_then(Value::as_str).unwrap_or("");
+                let args = params.get("arguments").cloned().unwrap_or(Value::Null);
 
-            // Per MCP spec, tool-execution failures belong in `result` with
-            // `isError: true` — not as a JSON-RPC protocol error. Re-wrap any
-            // error returned by the tool dispatch path.
-            let resp = dispatch_tool(&state, id, &identity, tool_name, args).await;
-            match resp.error {
-                Some(err) => tool_error(resp.id, err.message),
-                None => resp,
+                // Per MCP spec, tool-execution failures belong in `result` with
+                // `isError: true` — not as a JSON-RPC protocol error. Re-wrap any
+                // error returned by the tool dispatch path.
+                let resp = dispatch_tool(&state, id, identity, tool_name, args).await;
+                match resp.error {
+                    Some(err) => tool_error(resp.id, err.message),
+                    None => resp,
+                }
             }
-        }
+        },
 
         other => JsonRpcResponse::err(id, -32601, format!("Method not found: {other}")),
     };
