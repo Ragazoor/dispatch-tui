@@ -62,14 +62,16 @@ impl ProjectContext {
         }
     }
 
-    pub(super) fn prompt_section(&self, task_id: TaskId) -> String {
+    pub(super) fn prompt_section(&self) -> String {
         format!(
             "\n\nThis task is in project #{}: {}.\n\
-            When creating sub-tasks via the create_task MCP tool, pass \
-            caller_task_id={} — the new task will inherit project_id \
-            (and epic_id, when not given) from this task so it lands in \
-            the same project and epic.",
-            self.project_id, self.project_name, task_id,
+            Sub-tasks created via the create_task MCP tool inherit the \
+            project (and epic, if any) from this task automatically — \
+            caller identity is established by the dispatch HTTP transport, \
+            not a tool argument. Pass project_id or epic_id explicitly only \
+            to override the inherited values; pass epic_id: null to create \
+            a task with no epic.",
+            self.project_id, self.project_name,
         )
     }
 }
@@ -95,14 +97,11 @@ pub(super) fn epic_preamble(epic: Option<&EpicContext>) -> (String, String) {
 }
 
 /// Returns `(project_id_line, project_section)` for embedding in agent prompts.
-pub(super) fn project_preamble(
-    project: Option<&ProjectContext>,
-    task_id: TaskId,
-) -> (String, String) {
+pub(super) fn project_preamble(project: Option<&ProjectContext>) -> (String, String) {
     let id_line = project.map_or(String::new(), |p| {
         format!("\n  ProjectId: {}", p.project_id)
     });
-    let section = project.map_or(String::new(), |p| p.prompt_section(task_id));
+    let section = project.map_or(String::new(), |p| p.prompt_section());
     (id_line, section)
 }
 
@@ -115,7 +114,7 @@ pub(super) fn task_block(
     project: Option<&ProjectContext>,
 ) -> String {
     let (epic_id_line, epic_section) = epic_preamble(epic);
-    let (project_id_line, project_section) = project_preamble(project, task_id);
+    let (project_id_line, project_section) = project_preamble(project);
     format!(
         "Task:\n  ID: {task_id}\n  Title: {title}\n  Description: {description}\
          {project_id_line}{epic_id_line}{epic_section}{project_section}"

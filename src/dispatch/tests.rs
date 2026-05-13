@@ -46,9 +46,9 @@ fn task_block_includes_project_section_when_present() {
     assert!(block.contains("ProjectId: 42"), "block was: {block}");
     assert!(block.contains("My Project"), "block was: {block}");
     assert!(
-        block.contains("caller_task_id=1"),
-        "should tell agent to pass caller_task_id=<this task id> so sub-tasks \
-         inherit project/epic; block was: {block}"
+        !block.contains("caller_task_id"),
+        "prompt should no longer mention caller_task_id — identity is in the \
+         MCP HTTP transport, not a tool argument. Block was: {block}"
     );
 }
 
