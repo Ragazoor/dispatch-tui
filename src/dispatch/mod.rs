@@ -103,6 +103,16 @@ pub fn merge_pr(pr_url: &str, runner: &dyn ProcessRunner) -> Result<()> {
     Ok(())
 }
 
+/// Extract the short repo name (e.g. `"my-repo"`) from a GitHub URL.
+///
+/// Returns `"other"` for non-GitHub URLs, empty strings, and malformed input.
+pub fn repo_name_from_url(url: &str) -> String {
+    extract_github_repo(url)
+        .and_then(|s| s.split('/').next_back())
+        .unwrap_or("other")
+        .to_string()
+}
+
 /// Extract `"org/repo"` from a GitHub URL.
 ///
 /// Handles `https://github.com/org/repo`, `.../pull/N`, `.../issues/N`,

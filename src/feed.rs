@@ -45,6 +45,98 @@ pub(crate) fn resolve_base_branches(
 /// concerns stay independent.
 const FEED_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
+/// Group feed items by repo name and upsert each group into its own sub-epic.
+/// Clears any flat feed tasks on the parent epic (migration + ongoing hygiene).
+/// Returns `true` on success, `false` on any DB error.
+async fn sync_grouped_feed(
+    db: &dyn crate::db::TaskStore,
+    parent_id: crate::models::EpicId,
+    project_id: crate::models::ProjectId,
+    items: &[crate::models::FeedItem],
+    repo_paths: &[String],
+    base_branches: &[String],
+) -> bool {
+    use std::collections::HashMap;
+
+    let mut groups: HashMap<String, Vec<usize>> = HashMap::new();
+    for (i, item) in items.iter().enumerate() {
+        let name = crate::dispatch::repo_name_from_url(&item.url);
+        groups.entry(name).or_default().push(i);
+    }
+
+    let existing_sub_epics = match db.list_sub_epics(parent_id).await {
+        Ok(e) => e,
+        Err(err) => {
+            tracing::warn!(
+                epic_id = parent_id.0,
+                "sync_grouped_feed: list_sub_epics failed: {err:#}"
+            );
+            return false;
+        }
+    };
+
+    for (repo_name, indices) in &groups {
+        let group_items: Vec<crate::models::FeedItem> =
+            indices.iter().map(|&i| items[i].clone()).collect();
+        let group_repo_paths: Vec<String> = indices
+            .iter()
+            .map(|&i| repo_paths.get(i).cloned().unwrap_or_default())
+            .collect();
+        let group_base_branches: Vec<String> = indices
+            .iter()
+            .map(|&i| base_branches.get(i).cloned().unwrap_or_default())
+            .collect();
+
+        let sub_epic_id =
+            if let Some(existing) = existing_sub_epics.iter().find(|e| e.title == *repo_name) {
+                existing.id
+            } else {
+                match db
+                    .create_epic(repo_name, "", "", Some(parent_id), project_id)
+                    .await
+                {
+                    Ok(e) => e.id,
+                    Err(err) => {
+                        tracing::warn!(
+                            epic_id = parent_id.0,
+                            repo = %repo_name,
+                            "sync_grouped_feed: create_epic failed: {err:#}"
+                        );
+                        return false;
+                    }
+                }
+            };
+
+        if let Err(err) = db
+            .upsert_feed_tasks(
+                sub_epic_id,
+                &group_items,
+                &group_repo_paths,
+                &group_base_branches,
+            )
+            .await
+        {
+            tracing::warn!(
+                epic_id = parent_id.0,
+                sub_epic_id = sub_epic_id.0,
+                "sync_grouped_feed: upsert_feed_tasks failed: {err:#}"
+            );
+            return false;
+        }
+    }
+
+    // Clear flat feed tasks from parent (migration + ongoing hygiene)
+    if let Err(err) = db.upsert_feed_tasks(parent_id, &[], &[], &[]).await {
+        tracing::warn!(
+            epic_id = parent_id.0,
+            "sync_grouped_feed: failed to clear parent feed tasks: {err:#}"
+        );
+        return false;
+    }
+
+    true
+}
+
 pub struct FeedRunner {
     db: Arc<dyn TaskStore>,
     notify: mpsc::UnboundedSender<McpEvent>,
@@ -118,6 +210,8 @@ impl FeedRunner {
             let cmd = cmd.clone();
             let epic_id = epic.id;
             let epic_title = epic.title.clone();
+            let epic_group_by_repo = epic.group_by_repo;
+            let epic_project_id = epic.project_id;
 
             tokio::task::spawn(async move {
                 let output = match tokio::process::Command::new("sh")
@@ -172,15 +266,33 @@ impl FeedRunner {
                 let repo_paths = resolve_feed_item_repo_paths(&items, &known_paths);
                 let base_branches = resolve_base_branches(&repo_paths, &*runner);
 
-                if let Err(err) = db
-                    .upsert_feed_tasks(epic_id, &items, &repo_paths, &base_branches)
+                let success = if epic_group_by_repo {
+                    sync_grouped_feed(
+                        &*db,
+                        epic_id,
+                        epic_project_id,
+                        &items,
+                        &repo_paths,
+                        &base_branches,
+                    )
                     .await
-                {
-                    tracing::warn!(
-                        epic_id = epic_id.0,
-                        "FeedRunner: upsert_feed_tasks failed: {err:#}"
-                    );
                 } else {
+                    match db
+                        .upsert_feed_tasks(epic_id, &items, &repo_paths, &base_branches)
+                        .await
+                    {
+                        Ok(()) => true,
+                        Err(err) => {
+                            tracing::warn!(
+                                epic_id = epic_id.0,
+                                "FeedRunner: upsert_feed_tasks failed: {err:#}"
+                            );
+                            false
+                        }
+                    }
+                };
+
+                if success {
                     // One targeted event per sync batch — the runtime reloads
                     // the epic and its tasks in a single splice.
                     let _ = notify.send(McpEvent::EpicChanged(epic_id));
@@ -474,6 +586,128 @@ mod tests {
 
         let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
         assert!(tasks.is_empty());
+    }
+
+    // --- group_by_repo feed grouping tests ---
+
+    #[tokio::test]
+    async fn tick_grouped_creates_sub_epics_per_repo() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let epic = db
+            .create_epic("Dependabot", "", "", None, ProjectId(1))
+            .await
+            .unwrap();
+        db.patch_epic(
+            epic.id,
+            &EpicPatch::new()
+                .feed_command(Some(
+                    r#"echo '[
+                        {"external_id":"1","title":"A","description":"","url":"https://github.com/org/repo-a/pull/1","status":"backlog","tag":"pr-review"},
+                        {"external_id":"2","title":"B","description":"","url":"https://github.com/org/repo-b/pull/1","status":"backlog","tag":"pr-review"}
+                    ]'"#,
+                ))
+                .group_by_repo(true),
+        )
+        .await
+        .unwrap();
+
+        let (mut runner, mut rx) = make_runner(db.clone());
+        runner.tick().await;
+        tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("timed out")
+            .expect("channel closed");
+
+        let sub_epics = db.list_sub_epics(epic.id).await.unwrap();
+        assert_eq!(sub_epics.len(), 2);
+        let names: Vec<&str> = sub_epics.iter().map(|e| e.title.as_str()).collect();
+        assert!(names.contains(&"repo-a"), "expected repo-a sub-epic, got {names:?}");
+        assert!(names.contains(&"repo-b"), "expected repo-b sub-epic, got {names:?}");
+
+        for sub in &sub_epics {
+            let tasks = db.list_tasks_for_epic(sub.id).await.unwrap();
+            assert_eq!(tasks.len(), 1, "sub-epic {} should have 1 task", sub.title);
+        }
+
+        let parent_tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+        assert_eq!(parent_tasks.len(), 0, "parent should have no direct tasks");
+    }
+
+    #[tokio::test]
+    async fn tick_grouped_migrates_existing_flat_tasks() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let epic = db
+            .create_epic("Dependabot", "", "", None, ProjectId(1))
+            .await
+            .unwrap();
+        // First run: flat (group_by_repo = false by default)
+        db.patch_epic(
+            epic.id,
+            &EpicPatch::new().feed_command(Some(
+                r#"echo '[{"external_id":"1","title":"A","description":"","url":"https://github.com/org/repo-a/pull/1","status":"backlog","tag":"pr-review"}]'"#,
+            )),
+        )
+        .await
+        .unwrap();
+        let (mut runner, mut rx) = make_runner(db.clone());
+        runner.tick().await;
+        tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("timed out")
+            .expect("closed");
+
+        let flat_tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+        assert_eq!(flat_tasks.len(), 1, "flat task should exist before migration");
+
+        // Enable group_by_repo and run again
+        db.patch_epic(epic.id, &EpicPatch::new().group_by_repo(true))
+            .await
+            .unwrap();
+        let (mut runner2, mut rx2) = make_runner(db.clone());
+        runner2.tick().await;
+        tokio::time::timeout(Duration::from_secs(5), rx2.recv())
+            .await
+            .expect("timed out")
+            .expect("closed");
+
+        let parent_tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+        assert_eq!(parent_tasks.len(), 0, "flat task should have migrated");
+
+        let sub_epics = db.list_sub_epics(epic.id).await.unwrap();
+        assert_eq!(sub_epics.len(), 1);
+        assert_eq!(sub_epics[0].title, "repo-a");
+        let sub_tasks = db.list_tasks_for_epic(sub_epics[0].id).await.unwrap();
+        assert_eq!(sub_tasks.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn tick_grouped_uses_other_for_no_url() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let epic = db
+            .create_epic("Feed", "", "", None, ProjectId(1))
+            .await
+            .unwrap();
+        db.patch_epic(
+            epic.id,
+            &EpicPatch::new()
+                .feed_command(Some(
+                    r#"echo '[{"external_id":"1","title":"X","description":"","status":"backlog","tag":"bug"}]'"#,
+                ))
+                .group_by_repo(true),
+        )
+        .await
+        .unwrap();
+
+        let (mut runner, mut rx) = make_runner(db.clone());
+        runner.tick().await;
+        tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("timed out")
+            .expect("closed");
+
+        let sub_epics = db.list_sub_epics(epic.id).await.unwrap();
+        assert_eq!(sub_epics.len(), 1);
+        assert_eq!(sub_epics[0].title, "other");
     }
 
     #[tokio::test]

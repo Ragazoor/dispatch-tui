@@ -1688,6 +1688,37 @@ fn finish_task_pull_fails() {
     assert!(matches!(result.unwrap_err(), FinishError::Other(_)));
 }
 
+// --- repo_name_from_url tests ---
+
+#[test]
+fn repo_name_from_url_extracts_last_segment() {
+    assert_eq!(
+        super::repo_name_from_url("https://github.com/org/my-repo/pull/42"),
+        "my-repo"
+    );
+    assert_eq!(
+        super::repo_name_from_url("https://github.com/org/my-repo"),
+        "my-repo"
+    );
+    assert_eq!(
+        super::repo_name_from_url("https://github.com/org/another-repo/issues/1"),
+        "another-repo"
+    );
+}
+
+#[test]
+fn repo_name_from_url_returns_other_for_non_github() {
+    assert_eq!(super::repo_name_from_url(""), "other");
+    assert_eq!(
+        super::repo_name_from_url("https://example.com/not-github"),
+        "other"
+    );
+    assert_eq!(
+        super::repo_name_from_url("https://gitlab.com/org/repo"),
+        "other"
+    );
+}
+
 // --- extract_github_repo tests ---
 
 #[test]
