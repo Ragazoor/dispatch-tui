@@ -638,3 +638,27 @@ fn flat_view_substatus_indicators_above_epic_headers() {
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);
 }
+
+/// Snapshot: ▼ appears at the bottom of the Backlog column when tasks overflow the visible area.
+/// Uses height=20 so the kanban area is short (≈8 rows), and 5 tasks × 3 rows = 15 > 8.
+#[test]
+fn snapshot_scroll_indicator_down() {
+    let tasks: Vec<_> = (1..=5).map(|i| make_task(i, TaskStatus::Backlog)).collect();
+    let mut app = App::new(tasks, ProjectId(1));
+    // Cursor at top: offset=0, only ▼ shows.
+    app.selection_mut().set_row(1, 0);
+    let rendered = render_to_string(&mut app, 120, 20);
+    insta::assert_snapshot!(rendered);
+}
+
+/// Snapshot: ▲ appears at the top border of the Backlog column when scrolled past items above.
+/// Cursor on the last task forces ratatui to scroll, making offset > 0.
+#[test]
+fn snapshot_scroll_indicator_up() {
+    let tasks: Vec<_> = (1..=5).map(|i| make_task(i, TaskStatus::Backlog)).collect();
+    let mut app = App::new(tasks, ProjectId(1));
+    // Cursor on task 5 (row index 4): ratatui adjusts offset to show it → ▲ appears.
+    app.selection_mut().set_row(1, 4);
+    let rendered = render_to_string(&mut app, 120, 20);
+    insta::assert_snapshot!(rendered);
+}

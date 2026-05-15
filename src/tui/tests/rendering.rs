@@ -1552,3 +1552,69 @@ async fn summary_shows_five_columns_when_archive_focused() {
         "summary row should NOT show Projects when Archive focused; got: {summary_row:?}"
     );
 }
+
+// ▼ = U+25BC (BLACK DOWN-POINTING TRIANGLE)
+// ▲ = U+25B2 (BLACK UP-POINTING TRIANGLE)
+// Distinct from ▸ U+25B8 used in the summary row for focused columns.
+
+#[tokio::test]
+async fn scroll_indicator_down_shown_when_items_overflow() {
+    // 5 Backlog tasks × 3 lines each = 15 lines; at height=20 kanban inner ≈ 8 lines → overflow
+    let tasks: Vec<_> = (1..=5).map(|i| make_task(i, TaskStatus::Backlog)).collect();
+    let mut app = App::new(tasks, ProjectId(1));
+    // Cursor at top (row 0): offset=0, only ▼ should show
+    app.selection_mut().set_row(1, 0);
+
+    let buf = render_to_buffer(&mut app, 120, 20);
+    assert!(
+        buffer_contains(&buf, "\u{25BC}"),
+        "▼ indicator should appear when items overflow below the visible area"
+    );
+    assert!(
+        !buffer_contains(&buf, "\u{25B2}"),
+        "▲ indicator should NOT appear when cursor is at the top"
+    );
+}
+
+#[tokio::test]
+async fn scroll_indicator_up_shown_when_scrolled_past_top() {
+    // 5 Backlog tasks, cursor on the last one → ratatui scrolls → offset > 0 → ▲ shows
+    let tasks: Vec<_> = (1..=5).map(|i| make_task(i, TaskStatus::Backlog)).collect();
+    let mut app = App::new(tasks, ProjectId(1));
+    app.selection_mut().set_row(1, 4); // row 4 = 5th task
+
+    let buf = render_to_buffer(&mut app, 120, 20);
+    assert!(
+        buffer_contains(&buf, "\u{25B2}"),
+        "▲ indicator should appear when scrolled past the top"
+    );
+}
+
+#[tokio::test]
+async fn no_scroll_indicators_when_items_fit() {
+    // 2 Backlog tasks × 3 lines = 6 lines; at height=40 kanban inner ≈ 28 lines → fits
+    let tasks = vec![
+        make_task(1, TaskStatus::Backlog),
+        make_task(2, TaskStatus::Backlog),
+    ];
+    let mut app = App::new(tasks, ProjectId(1));
+
+    let buf = render_to_buffer(&mut app, 120, 40);
+    assert!(
+        !buffer_contains(&buf, "\u{25BC}"),
+        "▼ should NOT appear when all items fit in the visible area"
+    );
+    assert!(
+        !buffer_contains(&buf, "\u{25B2}"),
+        "▲ should NOT appear when all items fit in the visible area"
+    );
+}
+
+#[tokio::test]
+async fn scroll_indicators_do_not_panic_on_empty_column() {
+    let mut app = App::new(vec![], ProjectId(1));
+    // Should render without panic
+    let buf = render_to_buffer(&mut app, 120, 20);
+    assert!(!buffer_contains(&buf, "\u{25BC}"));
+    assert!(!buffer_contains(&buf, "\u{25B2}"));
+}

@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use ratatui::{
     layout::{Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, BorderType, Borders, List, ListItem},
+    widgets::{Block, BorderType, Borders, List, ListItem, ListState},
     Frame,
 };
 
@@ -207,6 +207,8 @@ fn render_task_column(
         list_items.push(ListItem::new(card_rule_line(MUTED, col_area.width)));
     }
 
+    let item_heights: Vec<usize> = list_items.iter().map(|i| i.height()).collect();
+
     let on_select_all = app.on_select_all();
     let sel = app.selection_mut();
     if is_focused {
@@ -231,6 +233,15 @@ fn render_task_column(
     let inner = block.inner(col_area);
     frame.render_widget(block, col_area);
     frame.render_stateful_widget(List::new(list_items), inner, &mut sel.list_states[col_idx]);
+
+    render_scroll_indicators(
+        frame,
+        &sel.list_states[col_idx],
+        &item_heights,
+        inner,
+        col_area,
+        border_color,
+    );
 }
 
 fn render_archive_column(frame: &mut Frame, app: &mut App, area: Rect, now: DateTime<Utc>) {
@@ -276,6 +287,8 @@ fn render_archive_column(frame: &mut Frame, app: &mut App, area: Rect, now: Date
         items.push(ListItem::new(card_rule_line(MUTED, area.width)));
     }
 
+    let item_heights: Vec<usize> = items.iter().map(|i| i.height()).collect();
+
     let total = archived_epics.len() + archived_tasks.len();
     let title = format!(" Archive ({total}) ");
     let block = Block::default()
@@ -283,6 +296,58 @@ fn render_archive_column(frame: &mut Frame, app: &mut App, area: Rect, now: Date
         .title_style(Style::default().fg(color).add_modifier(Modifier::BOLD))
         .borders(Borders::TOP)
         .border_style(Style::default().fg(ARCHIVE_STRIPE));
+    let inner = block.inner(area);
     let list = List::new(items).block(block);
     frame.render_stateful_widget(list, area, &mut app.archive.list_state);
+
+    render_scroll_indicators(
+        frame,
+        &app.archive.list_state,
+        &item_heights,
+        inner,
+        area,
+        color,
+    );
+}
+
+/// Draw ▲ / ▼ scroll indicators at the right edge of a column when content
+/// overflows the visible area. Called after `render_stateful_widget` so the
+/// `ListState` offset has already been updated by ratatui for this frame.
+fn render_scroll_indicators(
+    frame: &mut Frame,
+    list_state: &ListState,
+    item_heights: &[usize],
+    inner: Rect,
+    col_area: Rect,
+    indicator_color: Color,
+) {
+    if col_area.width == 0 || col_area.height == 0 {
+        return;
+    }
+
+    let offset = list_state.offset();
+    let has_above = offset > 0;
+
+    let visible_height = inner.height as usize;
+    let remaining_height: usize = item_heights.get(offset..).unwrap_or_default().iter().sum();
+    let has_below = remaining_height > visible_height;
+
+    if !has_above && !has_below {
+        return;
+    }
+
+    let style = Style::default()
+        .fg(indicator_color)
+        .add_modifier(Modifier::BOLD);
+    let x = col_area.right().saturating_sub(1);
+    let buf = frame.buffer_mut();
+
+    if has_above {
+        buf[(x, col_area.top())].set_symbol("▲").set_style(style);
+    }
+    if has_below {
+        buf[(x, inner.bottom().saturating_sub(1))]
+            .set_symbol("▼")
+            .set_style(style);
+    }
 }
