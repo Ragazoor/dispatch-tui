@@ -727,13 +727,18 @@ pub(super) async fn handle_wrap_up(
     match rebase_result {
         Ok(()) => {
             state.notify_task_changed(task_id);
-            let verify_line =
-                match state.db.get_verify_command(&task.repo_path).await.unwrap_or(None) {
-                    Some(cmd) => format!(
-                        " **Verify before exiting**: run `{cmd}` in your worktree and confirm it passes."
-                    ),
-                    None => String::new(),
-                };
+            let verify_command = state
+                .db
+                .get_verify_command(&task.repo_path)
+                .await
+                .inspect_err(|e| tracing::warn!(task_id = task_id.0, "get_verify_command failed: {e:#}"))
+                .unwrap_or(None);
+            let verify_line = match verify_command {
+                Some(cmd) => format!(
+                    " **Verify before exiting**: run `{cmd}` in your worktree and confirm it passes."
+                ),
+                None => String::new(),
+            };
             JsonRpcResponse::ok(
                 id,
                 json!({"content": [{"type": "text", "text": format!(

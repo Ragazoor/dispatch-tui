@@ -2735,7 +2735,7 @@ async fn wrap_up_success_includes_verify_reminder_when_configured() {
 }
 
 #[tokio::test]
-async fn wrap_up_success_unchanged_when_unconfigured() {
+async fn wrap_up_success_omits_verify_reminder_when_unconfigured() {
     let (state, db) = make_state_with_runner(rebase_ok_runner()).await;
     let task_id = create_wrappable_task(&db).await;
 
