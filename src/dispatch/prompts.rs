@@ -1291,7 +1291,9 @@ mod tests {
         };
         let text = build_prompt(TaskId(1), "t", "d", None, None, None, &ctx);
 
-        let header_idx = text.find("## Verification").expect("section header present");
+        let header_idx = text
+            .find("## Verification")
+            .expect("section header present");
         assert_eq!(
             text.matches("## Verification").count(),
             1,
@@ -1325,7 +1327,10 @@ mod tests {
         let text = build_prompt(TaskId(1), "t", "d", None, None, None, &ctx);
         let task_idx = text.find("Your task is:").unwrap();
         let verify_idx = text.find("## Verification").unwrap();
-        assert!(task_idx < verify_idx, "verification must come after task block");
+        assert!(
+            task_idx < verify_idx,
+            "verification must come after task block"
+        );
     }
 
     #[test]

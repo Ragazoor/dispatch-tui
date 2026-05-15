@@ -523,7 +523,11 @@ fn dispatch_repo_set_verify_writes_command() {
         .args(["--db", db_arg, "repo", "set-verify", "/r", "cargo test"])
         .output()
         .unwrap();
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 
     let out = std::process::Command::new(bin)
         .args(["--db", db_arg, "repo", "list"])
@@ -555,7 +559,10 @@ fn dispatch_repo_clear_verify_removes_command() {
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("/r"), "path row must still appear after clear");
+    assert!(
+        stdout.contains("/r"),
+        "path row must still appear after clear"
+    );
     assert!(!stdout.contains("cargo test"), "command must be cleared");
 }
 
@@ -569,7 +576,13 @@ fn dispatch_repo_set_verify_rejects_newline() {
         .args(["--db", db_arg, "repo", "set-verify", "/r", "a\nb"])
         .output()
         .unwrap();
-    assert!(!out.status.success(), "expected exit failure for newline command");
+    assert!(
+        !out.status.success(),
+        "expected exit failure for newline command"
+    );
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.to_lowercase().contains("newline"), "expected newline error in stderr: {stderr}");
+    assert!(
+        stderr.to_lowercase().contains("newline"),
+        "expected newline error in stderr: {stderr}"
+    );
 }

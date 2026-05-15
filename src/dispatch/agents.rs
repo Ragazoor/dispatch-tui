@@ -282,12 +282,10 @@ pub async fn fetch_verify_command(
     db: &dyn crate::db::TaskStore,
     repo_path: &str,
 ) -> Option<String> {
-    db.get_verify_command(repo_path)
-        .await
-        .unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "failed to load verify_command; proceeding without it");
-            None
-        })
+    db.get_verify_command(repo_path).await.unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "failed to load verify_command; proceeding without it");
+        None
+    })
 }
 
 /// Re-borrow `LearningInjections` into a `PromptContext` carrying the

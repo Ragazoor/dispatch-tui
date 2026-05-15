@@ -731,7 +731,9 @@ pub(super) async fn handle_wrap_up(
                 .db
                 .get_verify_command(&task.repo_path)
                 .await
-                .inspect_err(|e| tracing::warn!(task_id = task_id.0, "get_verify_command failed: {e:#}"))
+                .inspect_err(|e| {
+                    tracing::warn!(task_id = task_id.0, "get_verify_command failed: {e:#}")
+                })
                 .unwrap_or(None);
             let verify_line = match verify_command {
                 Some(cmd) => format!(
@@ -977,8 +979,7 @@ pub(super) async fn handle_dispatch_next(
     let notify_tx = state.notify_tx.clone();
 
     let (procedural, tiered) = dispatch::build_and_record_injections(&*db, &next_task).await;
-    let verify_command =
-        dispatch::fetch_verify_command(&*db, &next_task.repo_path).await;
+    let verify_command = dispatch::fetch_verify_command(&*db, &next_task.repo_path).await;
 
     tokio::spawn(async move {
         let next_task_for_blocking = next_task.clone();

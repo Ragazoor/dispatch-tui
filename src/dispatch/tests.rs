@@ -883,7 +883,15 @@ fn dispatch_reuses_existing_worktree() {
     ]);
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None, None, &LearningInjections::default(), None).unwrap();
+    dispatch_agent(
+        &task,
+        &mock,
+        None,
+        None,
+        &LearningInjections::default(),
+        None,
+    )
+    .unwrap();
 
     let calls = mock.recorded_calls();
     assert!(
@@ -914,7 +922,15 @@ fn dispatch_sends_claude_command() {
     ]);
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None, None, &LearningInjections::default(), None).unwrap();
+    dispatch_agent(
+        &task,
+        &mock,
+        None,
+        None,
+        &LearningInjections::default(),
+        None,
+    )
+    .unwrap();
 
     let calls = mock.recorded_calls();
     // The literal send-keys call (index 3) carries the claude invocation
@@ -942,7 +958,15 @@ fn dispatch_agent_uses_default_permission_mode() {
     ]);
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None, None, &LearningInjections::default(), None).unwrap();
+    dispatch_agent(
+        &task,
+        &mock,
+        None,
+        None,
+        &LearningInjections::default(),
+        None,
+    )
+    .unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, 3, "claude");
@@ -1066,7 +1090,15 @@ fn quick_dispatch_agent_uses_default_permission_mode() {
     ]);
 
     let task = make_task(&repo_path);
-    quick_dispatch_agent(&task, &mock, None, None, &LearningInjections::default(), None).unwrap();
+    quick_dispatch_agent(
+        &task,
+        &mock,
+        None,
+        None,
+        &LearningInjections::default(),
+        None,
+    )
+    .unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, 3, "claude");
@@ -1415,7 +1447,15 @@ fn dispatch_uses_task_base_branch_in_prompt() {
 
     let mut task = make_task(&repo_path);
     task.base_branch = "master".to_string();
-    dispatch_agent(&task, &mock, None, None, &LearningInjections::default(), None).unwrap();
+    dispatch_agent(
+        &task,
+        &mock,
+        None,
+        None,
+        &LearningInjections::default(),
+        None,
+    )
+    .unwrap();
 
     // Verify the prompt uses task.base_branch directly — no symbolic-ref call needed
     let prompt_file = worktree_dir.join(".claude-prompt");
@@ -1440,7 +1480,14 @@ fn dispatch_fails_fast_if_git_fails() {
     ]);
 
     let task = make_task(&repo_path);
-    let result = dispatch_agent(&task, &mock, None, None, &LearningInjections::default(), None);
+    let result = dispatch_agent(
+        &task,
+        &mock,
+        None,
+        None,
+        &LearningInjections::default(),
+        None,
+    );
     assert!(result.is_err());
     let calls = mock.recorded_calls();
     assert_eq!(
@@ -1465,7 +1512,15 @@ fn quick_dispatch_reuses_existing_worktree() {
     ]);
 
     let task = make_task(&repo_path);
-    quick_dispatch_agent(&task, &mock, None, None, &LearningInjections::default(), None).unwrap();
+    quick_dispatch_agent(
+        &task,
+        &mock,
+        None,
+        None,
+        &LearningInjections::default(),
+        None,
+    )
+    .unwrap();
 
     let calls = mock.recorded_calls();
     assert!(
@@ -1492,7 +1547,15 @@ fn quick_dispatch_sends_rename_prompt() {
     ]);
 
     let task = make_task(&repo_path);
-    quick_dispatch_agent(&task, &mock, None, None, &LearningInjections::default(), None).unwrap();
+    quick_dispatch_agent(
+        &task,
+        &mock,
+        None,
+        None,
+        &LearningInjections::default(),
+        None,
+    )
+    .unwrap();
 
     let prompt_file = worktree_dir.join(".claude-prompt");
     let prompt = std::fs::read_to_string(prompt_file).unwrap();
@@ -1774,7 +1837,14 @@ fn dispatch_agent_fails_fast_with_empty_repo_path() {
     let mock = MockProcessRunner::new(vec![]);
     let mut task = make_task("/some/repo");
     task.repo_path = "".to_string();
-    let result = dispatch_agent(&task, &mock, None, None, &LearningInjections::default(), None);
+    let result = dispatch_agent(
+        &task,
+        &mock,
+        None,
+        None,
+        &LearningInjections::default(),
+        None,
+    );
     assert!(result.is_err());
     let msg = result.unwrap_err().to_string();
     assert!(
@@ -1909,7 +1979,15 @@ fn dispatch_agent_uses_task_base_branch_in_prompt() {
 
     let mut task = make_task(&repo_path);
     task.base_branch = "develop".to_string();
-    dispatch_agent(&task, &mock, None, None, &LearningInjections::default(), None).unwrap();
+    dispatch_agent(
+        &task,
+        &mock,
+        None,
+        None,
+        &LearningInjections::default(),
+        None,
+    )
+    .unwrap();
 
     let prompt_file = worktree_dir.join(".claude-prompt");
     let prompt = std::fs::read_to_string(prompt_file).unwrap();
@@ -2133,7 +2211,15 @@ fn dispatch_agent_includes_plugin_dir() {
     ]);
 
     let task = make_task(&repo_path);
-    dispatch_agent(&task, &mock, None, None, &LearningInjections::default(), None).unwrap();
+    dispatch_agent(
+        &task,
+        &mock,
+        None,
+        None,
+        &LearningInjections::default(),
+        None,
+    )
+    .unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, 3, "claude");

@@ -71,8 +71,7 @@ impl TuiRuntime {
         let project_ctx = dispatch::ProjectContext::from_db(&task, &*self.database).await;
         let (procedural, tiered) =
             dispatch::build_and_record_injections(&*self.database, &task).await;
-        let verify_command =
-            dispatch::fetch_verify_command(&*self.database, &task.repo_path).await;
+        let verify_command = dispatch::fetch_verify_command(&*self.database, &task.repo_path).await;
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
         tokio::task::spawn_blocking(move || {
@@ -187,8 +186,7 @@ impl TuiRuntime {
         let project_ctx = dispatch::ProjectContext::from_db(&task, &*self.database).await;
         let (procedural, tiered) =
             dispatch::build_and_record_injections(&*self.database, &task).await;
-        let verify_command =
-            dispatch::fetch_verify_command(&*self.database, &task.repo_path).await;
+        let verify_command = dispatch::fetch_verify_command(&*self.database, &task.repo_path).await;
         let label = mode.label();
         self.spawn_dispatch(
             task,
