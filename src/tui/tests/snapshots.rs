@@ -249,6 +249,7 @@ fn make_feed_epic(id: i64, title: &str, sort_order: i64) -> crate::models::Epic 
         created_at: now,
         updated_at: now,
         project_id: ProjectId(1),
+        group_by_repo: false,
     }
 }
 

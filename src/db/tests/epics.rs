@@ -773,6 +773,41 @@ async fn patch_epic_auto_dispatch_persists() {
 }
 
 #[tokio::test]
+async fn patch_epic_group_by_repo_defaults_false() {
+    let db = Database::open_in_memory().await.unwrap();
+    let epic = db
+        .create_epic("Test", "", "/repo", None, ProjectId(1))
+        .await
+        .unwrap();
+    assert!(!epic.group_by_repo);
+}
+
+#[tokio::test]
+async fn patch_epic_group_by_repo_persists() {
+    let db = Database::open_in_memory().await.unwrap();
+    let epic = db
+        .create_epic("Test", "", "/repo", None, ProjectId(1))
+        .await
+        .unwrap();
+    db.patch_epic(epic.id, &EpicPatch::new().group_by_repo(true))
+        .await
+        .unwrap();
+    let updated = db.get_epic(epic.id).await.unwrap().unwrap();
+    assert!(updated.group_by_repo);
+    db.patch_epic(epic.id, &EpicPatch::new().group_by_repo(false))
+        .await
+        .unwrap();
+    let re_disabled = db.get_epic(epic.id).await.unwrap().unwrap();
+    assert!(!re_disabled.group_by_repo);
+}
+
+#[tokio::test]
+async fn patch_epic_group_by_repo_changes_count() {
+    let _db = Database::open_in_memory().await.unwrap();
+    assert!(EpicPatch::new().group_by_repo(true).has_changes());
+}
+
+#[tokio::test]
 async fn list_all_tasks_with_epic_id_returns_only_tasks_with_epic() {
     let db = in_memory_db().await;
     let epic1_id = db
@@ -1040,6 +1075,7 @@ async fn epic_patch_each_setter_marks_has_changes() {
     assert!(EpicPatch::new().sort_order(None).has_changes());
     assert!(EpicPatch::new().repo_path("/r").has_changes());
     assert!(EpicPatch::new().auto_dispatch(true).has_changes());
+    assert!(EpicPatch::new().group_by_repo(true).has_changes());
     assert!(EpicPatch::new().feed_command(Some("cmd")).has_changes());
     assert!(EpicPatch::new().feed_command(None).has_changes());
     assert!(EpicPatch::new().feed_interval_secs(Some(60)).has_changes());

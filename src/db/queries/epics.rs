@@ -50,7 +50,7 @@ impl super::super::EpicCrud for Database {
             let mut stmt = conn
                 .prepare(
                     "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, \
-                     parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, project_id \
+                     parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, project_id, group_by_repo \
                      FROM epics ORDER BY COALESCE(sort_order, id) ASC, id ASC",
                 )
                 .context("Failed to prepare list_epics")?;
@@ -69,7 +69,7 @@ impl super::super::EpicCrud for Database {
             let mut stmt = conn
                 .prepare(
                     "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, \
-                     parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, project_id \
+                     parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, project_id, group_by_repo \
                      FROM epics WHERE parent_epic_id IS NULL ORDER BY COALESCE(sort_order, id) ASC, id ASC",
                 )
                 .context("Failed to prepare list_root_epics")?;
@@ -88,7 +88,7 @@ impl super::super::EpicCrud for Database {
             let mut stmt = conn
                 .prepare(
                     "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, \
-                     parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, project_id \
+                     parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, project_id, group_by_repo \
                      FROM epics WHERE parent_epic_id = ?1 ORDER BY COALESCE(sort_order, id) ASC, id ASC",
                 )
                 .context("Failed to prepare list_sub_epics")?;
@@ -139,6 +139,10 @@ impl super::super::EpicCrud for Database {
         if let Some(ad) = patch.auto_dispatch {
             sets.push("auto_dispatch = ?");
             values.push(Box::new(ad));
+        }
+        if let Some(gbr) = patch.group_by_repo {
+            sets.push("group_by_repo = ?");
+            values.push(Box::new(gbr));
         }
         if let Some(fc) = patch.feed_command {
             sets.push("feed_command = ?");
@@ -266,7 +270,7 @@ impl super::super::EpicCrud for Database {
 fn get_epic_row(conn: &rusqlite::Connection, id: EpicId) -> Result<Option<crate::models::Epic>> {
     conn.query_row(
         "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, \
-         parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, project_id \
+         parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, project_id, group_by_repo \
          FROM epics WHERE id = ?1",
         params![id.0],
         row_to_epic,
@@ -340,7 +344,7 @@ fn recalculate_epic_status_inner(
     let mut stmt = conn
         .prepare(
             "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, \
-             parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, project_id \
+             parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, project_id, group_by_repo \
              FROM epics WHERE parent_epic_id = ?1 ORDER BY COALESCE(sort_order, id) ASC, id ASC",
         )
         .context("Failed to prepare list_sub_epics (recalc)")?;

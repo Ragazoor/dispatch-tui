@@ -380,6 +380,7 @@ mod tests {
             parent_epic_id: None,
             feed_command: None,
             feed_interval_secs: None,
+            group_by_repo: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
             project_id: ProjectId(1),

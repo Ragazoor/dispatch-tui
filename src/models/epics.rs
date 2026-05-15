@@ -23,6 +23,7 @@ pub struct Epic {
     pub parent_epic_id: Option<EpicId>,
     pub feed_command: Option<String>,
     pub feed_interval_secs: Option<i64>,
+    pub group_by_repo: bool,
     pub project_id: ProjectId,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,

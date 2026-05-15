@@ -11,7 +11,7 @@ async fn fresh_db_has_latest_schema_version() {
         })
         .await
         .unwrap();
-    assert_eq!(version, 53);
+    assert_eq!(version, 54);
 }
 
 #[tokio::test]
@@ -347,7 +347,7 @@ async fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 53);
+    assert_eq!(version, 54);
 }
 
 #[tokio::test]
@@ -436,7 +436,7 @@ async fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 53);
+    assert_eq!(version, 54);
 }
 
 #[tokio::test]
@@ -541,7 +541,7 @@ async fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 53);
+    assert_eq!(version, 54);
 }
 
 #[tokio::test]
@@ -622,7 +622,7 @@ async fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 53);
+    assert_eq!(version, 54);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -743,7 +743,7 @@ async fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 53);
+    assert_eq!(version, 54);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -1742,7 +1742,7 @@ async fn migration_31_re_expands_tilde_paths() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 53);
+    assert_eq!(version, 54);
 }
 
 #[tokio::test]
@@ -1818,7 +1818,7 @@ async fn migrate_v32_adds_base_branch_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 53);
+    assert_eq!(version, 54);
 }
 
 #[tokio::test]
@@ -1921,11 +1921,11 @@ async fn migration_v38_feed_epic_columns() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 53);
+    assert_eq!(version, 54);
 }
 
 #[tokio::test]
-async fn fresh_db_schema_version_is_52() {
+async fn fresh_db_schema_version_is_54() {
     let db = in_memory_db().await;
     let version: i64 = db
         .db_call(|conn| {
@@ -1934,7 +1934,7 @@ async fn fresh_db_schema_version_is_52() {
         })
         .await
         .unwrap();
-    assert_eq!(version, 53);
+    assert_eq!(version, 54);
 }
 
 #[tokio::test]
@@ -2004,7 +2004,7 @@ async fn migration_v40_creates_learnings_table() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 53);
+    assert_eq!(version, 54);
 }
 
 #[tokio::test]
@@ -2063,6 +2063,10 @@ async fn migration_v41_drops_cost_usd_column() {
                  OR (scope != 'user' AND scope_ref IS NOT NULL)
              )
          );
+         CREATE TABLE epics (
+             id INTEGER PRIMARY KEY,
+             title TEXT NOT NULL DEFAULT ''
+         );
          CREATE INDEX IF NOT EXISTS idx_learnings_scope ON learnings(scope, scope_ref);
          CREATE INDEX IF NOT EXISTS idx_learnings_status ON learnings(status);
          INSERT INTO tasks (id, title, status) VALUES (999, 'test', 'backlog');
@@ -2075,7 +2079,7 @@ async fn migration_v41_drops_cost_usd_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 53);
+    assert_eq!(version, 54);
     // Original token data is preserved
     let row: (i64, i64, i64, i64, i64) = conn
         .query_row(
@@ -2148,6 +2152,10 @@ async fn test_migrate_v43_proposed_to_approved() {
                  OR (scope != 'user' AND scope_ref IS NOT NULL)
              )
          );
+         CREATE TABLE epics (
+             id INTEGER PRIMARY KEY,
+             title TEXT NOT NULL DEFAULT ''
+         );
          CREATE INDEX IF NOT EXISTS idx_learnings_scope ON learnings(scope, scope_ref);
          CREATE INDEX IF NOT EXISTS idx_learnings_status ON learnings(status);
          INSERT INTO learnings (kind, summary, scope, status) VALUES ('pitfall', 'test', 'user', 'proposed');
@@ -2187,7 +2195,7 @@ async fn test_migrate_v43_proposed_to_approved() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 53);
+    assert_eq!(version, 54);
 }
 
 #[tokio::test]
@@ -2334,6 +2342,10 @@ async fn migration_v52_adds_verify_command_to_repo_paths() {
                 id        INTEGER PRIMARY KEY,
                 path      TEXT NOT NULL UNIQUE,
                 last_used TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE TABLE epics (
+                id INTEGER PRIMARY KEY,
+                title TEXT NOT NULL DEFAULT ''
             );",
         )
         .unwrap();

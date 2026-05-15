@@ -133,6 +133,7 @@ patch_struct! {
         nullable sort_order:         i64,
         plain    repo_path:          &'a str,
         plain    auto_dispatch:      bool,
+        plain    group_by_repo:      bool,
         nullable feed_command:       &'a str,
         nullable feed_interval_secs: i64,
         plain    project_id:         ProjectId,

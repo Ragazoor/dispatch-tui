@@ -76,6 +76,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (51, migrate_v51_drop_pr_workflow_states), // drops pr_workflow_states created in v37
     (52, migrate_v52_add_verify_command_to_repo_paths),
     (53, migrate_v53_add_wrap_up_mode),
+    (54, migrate_v54_add_group_by_repo),
 ];
 
 fn migrate_v53_add_wrap_up_mode(conn: &Connection) -> Result<()> {
@@ -1149,6 +1150,16 @@ pub(super) fn migrate_v52_add_verify_command_to_repo_paths(conn: &Connection) ->
     if !column_exists(conn, "repo_paths", "verify_command") {
         conn.execute_batch("ALTER TABLE repo_paths ADD COLUMN verify_command TEXT")
             .context("v52: add verify_command column")?;
+    }
+    Ok(())
+}
+
+fn migrate_v54_add_group_by_repo(conn: &Connection) -> Result<()> {
+    if !column_exists(conn, "epics", "group_by_repo") {
+        conn.execute_batch(
+            "ALTER TABLE epics ADD COLUMN group_by_repo BOOLEAN NOT NULL DEFAULT 0;",
+        )
+        .context("Failed to add group_by_repo column to epics")?;
     }
     Ok(())
 }

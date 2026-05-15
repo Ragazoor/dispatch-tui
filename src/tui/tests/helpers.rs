@@ -103,6 +103,7 @@ pub(in crate::tui) fn make_epic(id: i64) -> Epic {
         parent_epic_id: None,
         feed_command: None,
         feed_interval_secs: None,
+        group_by_repo: false,
         created_at: now,
         updated_at: now,
         project_id: ProjectId(1),
