@@ -47,7 +47,8 @@ const FEED_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Group feed items by repo name and upsert each group into its own sub-epic.
 /// Clears any flat feed tasks on the parent epic (migration + ongoing hygiene).
-/// Returns `true` on success, `false` on any DB error.
+/// Returns `Some(sub_epic_ids)` on full success (one id per sub-epic written to),
+/// or `None` on any DB error.
 async fn sync_grouped_feed(
     db: &dyn crate::db::TaskStore,
     parent_id: crate::models::EpicId,
@@ -55,7 +56,7 @@ async fn sync_grouped_feed(
     items: &[crate::models::FeedItem],
     repo_paths: &[String],
     base_branches: &[String],
-) -> bool {
+) -> Option<Vec<crate::models::EpicId>> {
     use std::collections::HashMap;
 
     let mut groups: HashMap<String, Vec<usize>> = HashMap::new();
@@ -71,9 +72,12 @@ async fn sync_grouped_feed(
                 epic_id = parent_id.0,
                 "sync_grouped_feed: list_sub_epics failed: {err:#}"
             );
-            return false;
+            return None;
         }
     };
+
+    let mut all_ok = true;
+    let mut sub_epic_ids: Vec<crate::models::EpicId> = Vec::new();
 
     for (repo_name, indices) in &groups {
         let group_items: Vec<crate::models::FeedItem> =
@@ -102,7 +106,8 @@ async fn sync_grouped_feed(
                             repo = %repo_name,
                             "sync_grouped_feed: create_epic failed: {err:#}"
                         );
-                        return false;
+                        all_ok = false;
+                        continue;
                     }
                 }
             };
@@ -121,20 +126,22 @@ async fn sync_grouped_feed(
                 sub_epic_id = sub_epic_id.0,
                 "sync_grouped_feed: upsert_feed_tasks failed: {err:#}"
             );
-            return false;
+            all_ok = false;
+        } else {
+            sub_epic_ids.push(sub_epic_id);
         }
     }
 
-    // Clear flat feed tasks from parent (migration + ongoing hygiene)
+    // Always clear flat feed tasks from parent, regardless of per-group failures
     if let Err(err) = db.upsert_feed_tasks(parent_id, &[], &[], &[]).await {
         tracing::warn!(
             epic_id = parent_id.0,
             "sync_grouped_feed: failed to clear parent feed tasks: {err:#}"
         );
-        return false;
+        all_ok = false;
     }
 
-    true
+    if all_ok { Some(sub_epic_ids) } else { None }
 }
 
 pub struct FeedRunner {
@@ -266,8 +273,8 @@ impl FeedRunner {
                 let repo_paths = resolve_feed_item_repo_paths(&items, &known_paths);
                 let base_branches = resolve_base_branches(&repo_paths, &*runner);
 
-                let success = if epic_group_by_repo {
-                    sync_grouped_feed(
+                if epic_group_by_repo {
+                    if let Some(sub_ids) = sync_grouped_feed(
                         &*db,
                         epic_id,
                         epic_project_id,
@@ -276,26 +283,29 @@ impl FeedRunner {
                         &base_branches,
                     )
                     .await
+                    {
+                        let _ = notify.send(McpEvent::EpicChanged(epic_id)); // parent
+                        for sub_id in sub_ids {
+                            let _ = notify.send(McpEvent::EpicChanged(sub_id));
+                        }
+                    }
                 } else {
                     match db
                         .upsert_feed_tasks(epic_id, &items, &repo_paths, &base_branches)
                         .await
                     {
-                        Ok(()) => true,
+                        Ok(()) => {
+                            // One targeted event per sync batch — the runtime reloads
+                            // the epic and its tasks in a single splice.
+                            let _ = notify.send(McpEvent::EpicChanged(epic_id));
+                        }
                         Err(err) => {
                             tracing::warn!(
                                 epic_id = epic_id.0,
                                 "FeedRunner: upsert_feed_tasks failed: {err:#}"
                             );
-                            false
                         }
                     }
-                };
-
-                if success {
-                    // One targeted event per sync batch — the runtime reloads
-                    // the epic and its tasks in a single splice.
-                    let _ = notify.send(McpEvent::EpicChanged(epic_id));
                 }
             });
         }
