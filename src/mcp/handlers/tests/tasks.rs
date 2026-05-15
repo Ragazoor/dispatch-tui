@@ -8156,3 +8156,29 @@ async fn wrap_up_done_marks_task_done_without_git_ops() {
     let task = db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Done, "task should be marked Done");
 }
+
+#[tokio::test]
+async fn wrap_up_tool_schema_includes_done_action() {
+    let state = test_state().await;
+    let resp = call(&state, "tools/list", None).await;
+    let tools = resp.result.as_ref().unwrap()["tools"].as_array().unwrap();
+    let wrap_up = tools
+        .iter()
+        .find(|t| t["name"] == "wrap_up")
+        .expect("wrap_up not in tool list");
+    let action_enum = wrap_up["inputSchema"]["properties"]["action"]["enum"]
+        .as_array()
+        .expect("action should have an enum");
+    let values: Vec<&str> = action_enum
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect();
+    assert!(
+        values.contains(&"done"),
+        "wrap_up action enum should include 'done', got: {values:?}"
+    );
+    assert!(
+        values.contains(&"rebase"),
+        "wrap_up action enum should include 'rebase', got: {values:?}"
+    );
+}

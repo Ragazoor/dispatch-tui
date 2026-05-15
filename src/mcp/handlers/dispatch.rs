@@ -307,7 +307,7 @@ mcp_tools! {
         };
 
     async "wrap_up" => tasks::handle_wrap_up,
-        "Wrap up a running or review task by rebasing onto its base_branch. Blocks until the rebase completes and fast-forwards base_branch. NOTE: this tool does NOT close the session — it does not kill the tmux window or move the task to Done. After a successful response you MUST call `exit_session` to actually close; otherwise the tmux window stays alive and the task remains in its current status. For PR creation, follow the /wrap-up skill: author the title and body yourself, run `gh pr create --draft`, and record the URL via update_task with pr_url + status='review'.",
+        "Wrap up a running or review task. 'rebase' rebases onto base_branch and fast-forwards it (blocks until complete). 'done' marks the task Done immediately with no git operations — use for research, planning, or changes already committed to the base branch. Neither action closes the session: you MUST call `exit_session` afterward or the tmux window stays alive. For PR creation, follow the /wrap-up skill instead.",
         {
             "type": "object",
             "properties": {
@@ -317,8 +317,8 @@ mcp_tools! {
                 },
                 "action": {
                     "type": "string",
-                    "enum": ["rebase"],
-                    "description": "Only 'rebase' is supported. To create a PR, follow the /wrap-up skill (agent runs `gh pr create` with an authored title and body, then calls update_task to record pr_url + status='review')."
+                    "enum": ["rebase", "done"],
+                    "description": "'rebase' — rebase onto base_branch and fast-forward it. 'done' — mark task Done immediately, no git operations."
                 },
                 "learning_verdicts": {
                     "type": "array",
