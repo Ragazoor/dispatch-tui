@@ -530,6 +530,22 @@ rule ToggleAutoDispatch {
         -- immediately in the header indicator (green = auto, muted = manual).
 }
 
+rule ToggleGroupByRepo {
+    when: UserTogglesGroupByRepo(epic)
+
+    ensures:
+        epic.group_by_repo = not epic.group_by_repo
+
+    @guidance
+        -- Triggered by pressing R in the epic detail view (ViewMode::Epic).
+        -- A no-op outside that view. The indicator is only shown for feed
+        -- epics (feed_command != null); toggling on a non-feed epic is
+        -- harmless but has no visible effect.
+        -- The new value is persisted immediately and reflected in the header
+        -- indicator: green "group:on [R]" when true, muted "group:off [R]"
+        -- when false.
+}
+
 ------------------------------------------------------------
 -- Invariants
 ------------------------------------------------------------

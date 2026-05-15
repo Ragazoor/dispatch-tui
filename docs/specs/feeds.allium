@@ -316,6 +316,42 @@ rule UpsertFeedTasks {
         -- src/runtime/epics.rs::exec_trigger_epic_feed (manual "r").
 }
 
+rule GroupedFeedUpsert {
+    when: FeedCommand emitted items: FeedItem[] for epic
+          and epic.group_by_repo = true
+
+    -- When group_by_repo is enabled, items are grouped by repo name
+    -- (last path segment of extract_github_repo(url)), with "other" as the
+    -- fallback for items that lack a resolvable GitHub URL.
+    -- A sub-epic is found or created for each group name, then
+    -- UpsertFeedTasks is called per sub-epic. Finally UpsertFeedTasks is
+    -- called on the parent with an empty list, which the existing deletion
+    -- rule uses to remove all flat feed tasks from the parent.
+    -- This doubles as migration: on the first run after the flag is enabled,
+    -- pre-existing flat tasks are deleted and recreated under their repo sub-epics.
+
+    ensures:
+        let groups = group_by(items, item => repo_name(item.url))
+        for (name, group_items) in groups:
+            let sub_epic = Epic.find(parent = epic, title = name)
+                           ?? Epic.created(title: name, parent: epic,
+                                           project_id: epic.project_id,
+                                           repo_path: "", description: "")
+            UpsertFeedTasks(sub_epic, group_items)
+        UpsertFeedTasks(epic, [])
+
+    @guidance
+        -- repo_name(url) = last path segment of extract_github_repo(url),
+        -- or "other" when the URL yields no GitHub repo (empty URL, non-GitHub,
+        -- malformed). Implementation: src/feed.rs::sync_grouped_feed,
+        -- src/dispatch/mod.rs::repo_name_from_url.
+        -- Sub-epics are not auto-deleted when their tasks disappear; empty
+        -- sub-epics remain for the user to clean up manually.
+        -- UpsertFeedTasks(epic, []) uses the existing deletion rule to remove
+        -- all feed-managed tasks (external_id IS NOT NULL) directly under the
+        -- parent epic.
+}
+
 -- == Dispatch guard ==
 
 rule DispatchRequiresRepoPath {
