@@ -511,6 +511,88 @@ async fn verify_feed_command_failure_exits_nonzero() {
 }
 
 // ---------------------------------------------------------------------------
+// prune-repo-paths
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn prune_repo_paths_removes_nonexistent_paths() {
+    let db = NamedTempFile::new().unwrap();
+    let db_path = db.path().to_str().unwrap();
+    let bin = env!("CARGO_BIN_EXE_dispatch");
+
+    // A path that exists on disk
+    let real_dir = tempfile::tempdir().unwrap();
+    let real_path = real_dir.path().to_str().unwrap();
+
+    // A path that does not exist
+    let fake_path = "/tmp/dispatch-test-nonexistent-path-99999";
+
+    // Seed both paths into the DB via the repo sub-command (set-verify creates the row)
+    std::process::Command::new(bin)
+        .args(["--db", db_path, "repo", "set-verify", real_path, "echo ok"])
+        .status()
+        .unwrap();
+    std::process::Command::new(bin)
+        .args(["--db", db_path, "repo", "set-verify", fake_path, "echo ok"])
+        .status()
+        .unwrap();
+
+    // Run prune
+    let out = std::process::Command::new(bin)
+        .args(["--db", db_path, "prune-repo-paths"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains(fake_path),
+        "expected removed path in output, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("1 path(s) removed"),
+        "expected removal count in output, got: {stdout}"
+    );
+
+    // The real path should still be in the DB
+    let list_out = std::process::Command::new(bin)
+        .args(["--db", db_path, "repo", "list"])
+        .output()
+        .unwrap();
+    let list_stdout = String::from_utf8_lossy(&list_out.stdout);
+    assert!(
+        list_stdout.contains(real_path),
+        "real path must remain after prune, got: {list_stdout}"
+    );
+    assert!(
+        !list_stdout.contains(fake_path),
+        "fake path must be removed after prune, got: {list_stdout}"
+    );
+}
+
+#[tokio::test]
+async fn prune_repo_paths_empty_db_succeeds() {
+    let db = NamedTempFile::new().unwrap();
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_dispatch"))
+        .args(["--db", db.path().to_str().unwrap(), "prune-repo-paths"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("0 path(s) removed"),
+        "expected zero removals for empty DB, got: {stdout}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // repo set-verify / clear-verify / list
 // ---------------------------------------------------------------------------
 

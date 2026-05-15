@@ -109,6 +109,8 @@ enum Commands {
         #[command(subcommand)]
         action: RepoAction,
     },
+    /// Remove repo paths that no longer exist on the filesystem.
+    PruneRepoPaths,
 }
 
 #[derive(Subcommand)]
@@ -332,6 +334,21 @@ async fn main() -> Result<()> {
                     }
                 }
             }
+        }
+        Commands::PruneRepoPaths => {
+            let db = db::Database::open(&cli.db).await?;
+            let paths = db.list_repo_paths().await?;
+            let total = paths.len();
+            let mut removed = 0;
+            for p in &paths {
+                let expanded = expand_tilde(p);
+                if !std::path::Path::new(&expanded).exists() {
+                    db.delete_repo_path(p).await?;
+                    println!("removed: {p}");
+                    removed += 1;
+                }
+            }
+            println!("{removed} path(s) removed, {} kept.", total - removed);
         }
         Commands::Plan { id, path } => {
             if !path.exists() {
