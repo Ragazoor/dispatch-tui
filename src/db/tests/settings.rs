@@ -235,3 +235,63 @@ async fn tips_state_overwrite() {
     assert_eq!(seen_up_to, 5);
     assert_eq!(show_mode, crate::models::TipsShowMode::Never);
 }
+
+#[tokio::test]
+async fn verify_command_default_is_none() {
+    let db = in_memory_db().await;
+    db.save_repo_path("/home/me/repo").await.unwrap();
+    assert_eq!(db.get_verify_command("/home/me/repo").await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn verify_command_round_trip() {
+    let db = in_memory_db().await;
+    db.save_repo_path("/home/me/repo").await.unwrap();
+    db.set_verify_command("/home/me/repo", Some("cargo test")).await.unwrap();
+    assert_eq!(
+        db.get_verify_command("/home/me/repo").await.unwrap(),
+        Some("cargo test".to_string())
+    );
+}
+
+#[tokio::test]
+async fn verify_command_empty_clears() {
+    let db = in_memory_db().await;
+    db.save_repo_path("/r").await.unwrap();
+    db.set_verify_command("/r", Some("cargo test")).await.unwrap();
+    db.set_verify_command("/r", Some("")).await.unwrap();
+    assert_eq!(db.get_verify_command("/r").await.unwrap(), None);
+    db.set_verify_command("/r", Some("   ")).await.unwrap();
+    assert_eq!(db.get_verify_command("/r").await.unwrap(), None);
+    db.set_verify_command("/r", None).await.unwrap();
+    assert_eq!(db.get_verify_command("/r").await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn verify_command_rejects_newline() {
+    let db = in_memory_db().await;
+    db.save_repo_path("/r").await.unwrap();
+    let err = db.set_verify_command("/r", Some("a\nb")).await.unwrap_err();
+    assert!(
+        err.to_string().to_lowercase().contains("newline"),
+        "expected newline error, got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn verify_command_set_some_creates_row() {
+    let db = in_memory_db().await;
+    db.set_verify_command("/new/path", Some("cargo test")).await.unwrap();
+    assert!(db.list_repo_paths().await.unwrap().iter().any(|p| p == "/new/path"));
+    assert_eq!(
+        db.get_verify_command("/new/path").await.unwrap(),
+        Some("cargo test".to_string())
+    );
+}
+
+#[tokio::test]
+async fn verify_command_set_none_on_unknown_path_is_noop() {
+    let db = in_memory_db().await;
+    db.set_verify_command("/unknown", None).await.unwrap();
+    assert!(!db.list_repo_paths().await.unwrap().iter().any(|p| p == "/unknown"));
+}

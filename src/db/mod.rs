@@ -239,6 +239,8 @@ pub trait SettingsStore: Send + Sync {
         seen_up_to: u32,
         show_mode: crate::models::TipsShowMode,
     ) -> Result<()>;
+    async fn get_verify_command(&self, path: &str) -> Result<Option<String>>;
+    async fn set_verify_command(&self, path: &str, command: Option<&str>) -> Result<()>;
 }
 
 // ---------------------------------------------------------------------------

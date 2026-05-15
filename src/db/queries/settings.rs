@@ -196,4 +196,63 @@ impl super::super::SettingsStore for Database {
         self.db_call(move |conn| save_tips_state(conn, seen_up_to, show_mode))
             .await
     }
+
+    async fn get_verify_command(&self, path: &str) -> Result<Option<String>> {
+        let path = path.to_string();
+        self.db_call(move |conn| {
+            // query_row returns Err(QueryReturnedNoRows) when no row matches, so
+            // .optional() converts that to Ok(None). When a row exists but the
+            // column is SQL NULL, row.get::<_, Option<String>> returns Ok(None).
+            let result: Option<Option<String>> = conn
+                .query_row(
+                    "SELECT verify_command FROM repo_paths WHERE path = ?1",
+                    params![path],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()
+                .context("Failed to get verify_command")?;
+            // Flatten: no row → None, row with NULL → None, row with value → Some(v)
+            Ok(result.flatten())
+        })
+        .await
+    }
+
+    async fn set_verify_command(&self, path: &str, command: Option<&str>) -> Result<()> {
+        let path = path.to_string();
+        let resolved: Option<String> = match command {
+            Some(raw) => {
+                if raw.contains('\n') {
+                    anyhow::bail!("verify_command must not contain a newline");
+                }
+                let trimmed = raw.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                }
+            }
+            None => None,
+        };
+        self.db_call(move |conn| {
+            match resolved {
+                Some(cmd) => {
+                    conn.execute(
+                        "INSERT INTO repo_paths(path, verify_command) VALUES(?1, ?2)
+                         ON CONFLICT(path) DO UPDATE SET verify_command = excluded.verify_command",
+                        params![path, cmd],
+                    )
+                    .context("Failed to upsert verify_command")?;
+                }
+                None => {
+                    conn.execute(
+                        "UPDATE repo_paths SET verify_command = NULL WHERE path = ?1",
+                        params![path],
+                    )
+                    .context("Failed to clear verify_command")?;
+                }
+            }
+            Ok(())
+        })
+        .await
+    }
 }
