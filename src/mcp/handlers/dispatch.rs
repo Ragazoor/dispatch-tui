@@ -301,7 +301,7 @@ mcp_tools! {
                 "project_id": { "type": "integer", "description": "Move the epic to a different project. Use list_projects to look up IDs." },
                 "feed_command": { "type": ["string", "null"], "description": "Shell command that emits JSON FeedItems to populate tasks. Pass null to clear." },
                 "feed_interval_secs": { "type": ["integer", "null"], "description": "Polling interval in seconds (overrides the default). Pass null to clear." },
-                "group_by_repo": { "type": "boolean", "description": "When true, group feed tasks by repository path in the TUI." }
+                "group_by_repo": { "type": "boolean", "description": "When true, group feed tasks by repository path in the TUI. Pass false to disable grouping." }
             },
             "required": ["epic_id"]
         };
