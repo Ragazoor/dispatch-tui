@@ -8024,7 +8024,11 @@ async fn update_task_sets_wrap_up_mode() {
         })),
     )
     .await;
-    assert!(resp.result.is_some(), "expected success, got: {:?}", resp.error);
+    assert!(
+        resp.result.is_some(),
+        "expected success, got: {:?}",
+        resp.error
+    );
     assert!(resp.error.is_none());
 
     let task = state.db.get_task(task_id).await.unwrap().unwrap();
@@ -8082,14 +8086,16 @@ async fn get_task_shows_wrap_up_mode_when_set() {
         text.to_lowercase().contains("wrap-up") || text.to_lowercase().contains("wrap_up"),
         "expected wrap-up mode in output, got: {text}"
     );
-    assert!(text.contains("rebase"), "expected rebase in output, got: {text}");
+    assert!(
+        text.contains("rebase"),
+        "expected rebase in output, got: {text}"
+    );
 }
 
 #[tokio::test]
 async fn wrap_up_done_marks_task_done_without_git_ops() {
     use crate::process::MockProcessRunner;
-    let runner: Arc<dyn crate::process::ProcessRunner> =
-        Arc::new(MockProcessRunner::new(vec![]));
+    let runner: Arc<dyn crate::process::ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let state = Arc::new(McpState {
         db: db.clone(),
@@ -8131,7 +8137,11 @@ async fn wrap_up_done_marks_task_done_without_git_ops() {
         })),
     )
     .await;
-    assert!(!is_error(&resp), "expected success, got: {}", error_message(&resp));
+    assert!(
+        !is_error(&resp),
+        "expected success, got: {}",
+        error_message(&resp)
+    );
 
     let text = extract_response_text(&resp);
     assert!(

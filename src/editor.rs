@@ -643,7 +643,10 @@ mod tests {
             content.contains("--- WRAP_UP_MODE ---"),
             "should have WRAP_UP_MODE section: {content}"
         );
-        assert!(content.contains("rebase"), "should contain wrap-up mode value");
+        assert!(
+            content.contains("rebase"),
+            "should contain wrap-up mode value"
+        );
     }
 
     #[test]

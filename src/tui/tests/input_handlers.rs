@@ -789,7 +789,10 @@ fn submit_base_branch_sets_branch_and_advances_to_wrap_up_mode() {
     ));
     // Now transitions to wrap-up mode selection instead of creating the task directly.
     assert_eq!(app.input.mode, InputMode::InputWrapUpMode);
-    assert!(cmds.is_empty(), "no Insert yet — wrap-up mode selection is next");
+    assert!(
+        cmds.is_empty(),
+        "no Insert yet — wrap-up mode selection is next"
+    );
     assert_eq!(
         app.input.task_draft.as_ref().unwrap().base_branch,
         "develop"
@@ -812,11 +815,11 @@ fn submit_base_branch_empty_uses_draft_default() {
         crate::tui::messages::InputMessage::SubmitBaseBranch(String::new()),
     ));
     assert_eq!(app.input.mode, InputMode::InputWrapUpMode);
-    assert!(cmds.is_empty(), "no Insert yet — wrap-up mode selection is next");
-    assert_eq!(
-        app.input.task_draft.as_ref().unwrap().base_branch,
-        "main"
+    assert!(
+        cmds.is_empty(),
+        "no Insert yet — wrap-up mode selection is next"
     );
+    assert_eq!(app.input.task_draft.as_ref().unwrap().base_branch, "main");
 }
 
 #[test]
@@ -2191,9 +2194,12 @@ fn wrap_up_mode_r_selects_rebase_and_creates_task() {
             Command::Task(crate::tui::commands::TaskCommand::Insert { .. })
         )
     });
-    assert!(insert_cmd.is_some(), "expected Insert command, got {:?}", cmds);
-    if let Some(Command::Task(crate::tui::commands::TaskCommand::Insert { draft, .. })) =
-        insert_cmd
+    assert!(
+        insert_cmd.is_some(),
+        "expected Insert command, got {:?}",
+        cmds
+    );
+    if let Some(Command::Task(crate::tui::commands::TaskCommand::Insert { draft, .. })) = insert_cmd
     {
         assert_eq!(
             draft.wrap_up_mode,
@@ -2223,9 +2229,12 @@ fn wrap_up_mode_p_selects_pr_and_creates_task() {
             Command::Task(crate::tui::commands::TaskCommand::Insert { .. })
         )
     });
-    assert!(insert_cmd.is_some(), "expected Insert command, got {:?}", cmds);
-    if let Some(Command::Task(crate::tui::commands::TaskCommand::Insert { draft, .. })) =
-        insert_cmd
+    assert!(
+        insert_cmd.is_some(),
+        "expected Insert command, got {:?}",
+        cmds
+    );
+    if let Some(Command::Task(crate::tui::commands::TaskCommand::Insert { draft, .. })) = insert_cmd
     {
         assert_eq!(
             draft.wrap_up_mode,
@@ -2255,9 +2264,12 @@ fn wrap_up_mode_d_selects_done_and_creates_task() {
             Command::Task(crate::tui::commands::TaskCommand::Insert { .. })
         )
     });
-    assert!(insert_cmd.is_some(), "expected Insert command, got {:?}", cmds);
-    if let Some(Command::Task(crate::tui::commands::TaskCommand::Insert { draft, .. })) =
-        insert_cmd
+    assert!(
+        insert_cmd.is_some(),
+        "expected Insert command, got {:?}",
+        cmds
+    );
+    if let Some(Command::Task(crate::tui::commands::TaskCommand::Insert { draft, .. })) = insert_cmd
     {
         assert_eq!(
             draft.wrap_up_mode,
@@ -2287,9 +2299,12 @@ fn wrap_up_mode_enter_skips_and_creates_task_with_no_mode() {
             Command::Task(crate::tui::commands::TaskCommand::Insert { .. })
         )
     });
-    assert!(insert_cmd.is_some(), "expected Insert command, got {:?}", cmds);
-    if let Some(Command::Task(crate::tui::commands::TaskCommand::Insert { draft, .. })) =
-        insert_cmd
+    assert!(
+        insert_cmd.is_some(),
+        "expected Insert command, got {:?}",
+        cmds
+    );
+    if let Some(Command::Task(crate::tui::commands::TaskCommand::Insert { draft, .. })) = insert_cmd
     {
         assert_eq!(
             draft.wrap_up_mode, None,

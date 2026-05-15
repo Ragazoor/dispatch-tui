@@ -61,7 +61,11 @@ async fn sync_grouped_feed(
     // Using zip makes the per-index alignment structural rather than contractual.
     type GroupEntry = (crate::models::FeedItem, String, String);
     let mut groups: HashMap<String, Vec<GroupEntry>> = HashMap::new();
-    for ((item, rp), bb) in items.iter().zip(repo_paths.iter()).zip(base_branches.iter()) {
+    for ((item, rp), bb) in items
+        .iter()
+        .zip(repo_paths.iter())
+        .zip(base_branches.iter())
+    {
         let name = crate::dispatch::repo_name_from_url(&item.url);
         groups
             .entry(name)
@@ -627,8 +631,14 @@ mod tests {
         let sub_epics = db.list_sub_epics(epic.id).await.unwrap();
         assert_eq!(sub_epics.len(), 2);
         let names: Vec<&str> = sub_epics.iter().map(|e| e.title.as_str()).collect();
-        assert!(names.contains(&"repo-a"), "expected repo-a sub-epic, got {names:?}");
-        assert!(names.contains(&"repo-b"), "expected repo-b sub-epic, got {names:?}");
+        assert!(
+            names.contains(&"repo-a"),
+            "expected repo-a sub-epic, got {names:?}"
+        );
+        assert!(
+            names.contains(&"repo-b"),
+            "expected repo-b sub-epic, got {names:?}"
+        );
 
         for sub in &sub_epics {
             let tasks = db.list_tasks_for_epic(sub.id).await.unwrap();
@@ -663,7 +673,11 @@ mod tests {
             .expect("closed");
 
         let flat_tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
-        assert_eq!(flat_tasks.len(), 1, "flat task should exist before migration");
+        assert_eq!(
+            flat_tasks.len(),
+            1,
+            "flat task should exist before migration"
+        );
 
         // Enable group_by_repo and run again
         db.patch_epic(epic.id, &EpicPatch::new().group_by_repo(true))

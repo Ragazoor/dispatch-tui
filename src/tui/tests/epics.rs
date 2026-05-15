@@ -2663,7 +2663,10 @@ fn shift_r_outside_epic_view_is_noop() {
     let mut app = App::new(vec![], ProjectId(1));
     // Default view mode is not ViewMode::Epic
     let cmds = app.handle_key(make_key(KeyCode::Char('R')));
-    assert!(cmds.is_empty(), "R outside epic view should produce no commands, got {cmds:?}");
+    assert!(
+        cmds.is_empty(),
+        "R outside epic view should produce no commands, got {cmds:?}"
+    );
 }
 
 #[test]
