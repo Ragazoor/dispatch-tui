@@ -108,7 +108,7 @@ Tags (`TaskTag` in `src/models/tasks.rs`: `Bug`, `Feature`, `Chore`, `PrReview`,
 This file is intentionally slim — it is loaded into every agent's context. Read these on demand:
 
 - [docs/architecture.md](docs/architecture.md) — Message→Command, ProcessRunner, command queue draining, editor session invariant, review/security agent state machine, error handling, quick dispatch
-- [docs/conventions.md](docs/conventions.md) — `FieldUpdate`, `TaskPatch`/`EpicPatch` double-Option, DB trait narrowing, `conn()`, inline-mutation boundary, `let _`, dead code, sub-status TOCTOU, immutable `parent_epic_id`, Clippy, visibility
+- [docs/conventions.md](docs/conventions.md) — `FieldUpdate`, `TaskPatch`/`EpicPatch` double-Option, DB trait narrowing, `conn()`, inline-mutation boundary, `let _`, dead code, sub-status TOCTOU, immutable `parent_epic_id`, Clippy, visibility, performance footguns (`column_items_for_status` test-only; no `std::fs` in async)
 - [docs/module-map.md](docs/module-map.md) — file-by-file responsibilities
 - [docs/how-to.md](docs/how-to.md) — adding an MCP tool, TUI view, entity, database migration; projects feature; knowledge base MCP tools
 - [docs/mcp.md](docs/mcp.md) — MCP notification flow, error codes, debugging handlers, feed epics, knowledge base flow

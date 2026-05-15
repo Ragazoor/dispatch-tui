@@ -51,6 +51,7 @@ Migrations live in `src/db/migrations.rs` as standalone functions. We do **not**
 2. **Register it** in the `MIGRATIONS` array in `src/db/migrations.rs`: add `(N, migrate_vN_description)`. The loop in `Database::init_schema()` applies any migration where `current_version < N` and bumps `PRAGMA user_version` after each.
 3. **Update the schema test**: `fresh_db_has_latest_schema_version` in `src/db/tests/migrations.rs` asserts the final version number — bump it to match your new N.
 4. **Write a migration test** in `src/db/tests/migrations.rs` that creates a DB at the pre-migration schema, inserts test data, runs the migration, and verifies the result.
+5. **Cross-reference superseded migrations.** When a later migration drops or replaces a table/column introduced by an earlier one (create-then-drop pattern), add an inline comment on both `MIGRATIONS` entries noting the relationship — e.g. `// superseded by vN` on the original and `// drops table created in vM` on the new one. This prevents agents from trying to re-add something that was intentionally removed.
 
 ## Projects Feature
 
