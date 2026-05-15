@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use tracing::Level;
 use tracing_subscriber::EnvFilter;
 
-use dispatch_tui::db::TaskCrud;
+use dispatch_tui::db::{SettingsStore, TaskCrud};
 use dispatch_tui::tui::ui::truncate;
 use dispatch_tui::{db, models, runtime, service};
 
@@ -103,6 +103,21 @@ enum Commands {
     /// MCP session start and reconnect. Pure path parser; reads only $PWD,
     /// no DB access.
     CallerHeaders,
+    /// Manage per-repo settings (verify command, etc.).
+    Repo {
+        #[command(subcommand)]
+        action: RepoAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum RepoAction {
+    /// Set the verify command for a repo path. Creates the path entry if it doesn't exist.
+    SetVerify { path: String, command: String },
+    /// Clear the verify command for a repo path.
+    ClearVerify { path: String },
+    /// List known repo paths and their verify commands.
+    List,
 }
 
 fn parse_status(s: &str) -> anyhow::Result<models::TaskStatus> {
@@ -288,6 +303,32 @@ async fn main() -> Result<()> {
                 eprintln!("{stdout}");
             }
             std::process::exit(code);
+        }
+        Commands::Repo { action } => {
+            let db = db::Database::open(&cli.db).await?;
+            match action {
+                RepoAction::SetVerify { path, command } => {
+                    db.set_verify_command(&path, Some(&command)).await?;
+                    println!("verify_command set for {path}");
+                }
+                RepoAction::ClearVerify { path } => {
+                    db.set_verify_command(&path, None).await?;
+                    println!("verify_command cleared for {path}");
+                }
+                RepoAction::List => {
+                    let paths = db.list_repo_paths().await?;
+                    if paths.is_empty() {
+                        println!("No repo paths configured.");
+                    } else {
+                        for p in paths {
+                            match db.get_verify_command(&p).await? {
+                                Some(cmd) => println!("{p}\tverify: {cmd}"),
+                                None => println!("{p}"),
+                            }
+                        }
+                    }
+                }
+            }
         }
         Commands::Plan { id, path } => {
             if !path.exists() {
