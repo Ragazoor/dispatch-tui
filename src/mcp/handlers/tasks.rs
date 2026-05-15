@@ -851,6 +851,7 @@ fn do_dispatch(
     epic_ctx: Option<dispatch::EpicContext>,
     procedural: &[crate::models::Learning],
     tiered: &[crate::models::Learning],
+    verify_command: Option<String>,
 ) -> anyhow::Result<crate::models::DispatchResult> {
     let injections = dispatch::LearningInjections {
         procedural: procedural.iter().collect(),
@@ -863,6 +864,35 @@ fn do_dispatch(
             epic_ctx.as_ref(),
             Some(&project_ctx),
             &injections,
+            verify_command.as_deref(),
+        ),
+        DispatchMode::PrReview => dispatch::pr_review_agent(
+            task,
+            runner,
+            epic_ctx.as_ref(),
+            Some(&project_ctx),
+            verify_command.as_deref(),
+        ),
+        DispatchMode::Research => dispatch::research_agent(
+            task,
+            runner,
+            epic_ctx.as_ref(),
+            Some(&project_ctx),
+            verify_command.as_deref(),
+        ),
+        DispatchMode::Fix => dispatch::fix_task_agent(
+            task,
+            runner,
+            epic_ctx.as_ref(),
+            Some(&project_ctx),
+            verify_command.as_deref(),
+        ),
+        DispatchMode::Dependabot => dispatch::dependabot_review_agent(
+            task,
+            runner,
+            epic_ctx.as_ref(),
+            Some(&project_ctx),
+            verify_command.as_deref(),
         ),
         DispatchMode::Research => {
             dispatch::research_agent(task, runner, epic_ctx.as_ref(), Some(&project_ctx))
@@ -935,6 +965,13 @@ pub(super) async fn handle_dispatch_next(
     let notify_tx = state.notify_tx.clone();
 
     let (procedural, tiered) = dispatch::build_and_record_injections(&*db, &next_task).await;
+    let verify_command = db
+        .get_verify_command(&next_task.repo_path)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "failed to load verify_command; proceeding without it");
+            None
+        });
 
     tokio::spawn(async move {
         let next_task_for_blocking = next_task.clone();
@@ -946,6 +983,7 @@ pub(super) async fn handle_dispatch_next(
                 epic_ctx,
                 &procedural,
                 &tiered,
+                verify_command,
             )
         })
         .await;
@@ -1046,8 +1084,23 @@ pub(super) async fn handle_dispatch_task(
     let epic_id = task.epic_id;
 
     let (procedural, tiered) = dispatch::build_and_record_injections(&*db, &task).await;
+    let verify_command = db
+        .get_verify_command(&task.repo_path)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "failed to load verify_command; proceeding without it");
+            None
+        });
     let result = tokio::task::spawn_blocking(move || {
-        do_dispatch(&task, &*runner, project_ctx, epic_ctx, &procedural, &tiered)
+        do_dispatch(
+            &task,
+            &*runner,
+            project_ctx,
+            epic_ctx,
+            &procedural,
+            &tiered,
+            verify_command,
+        )
     })
     .await;
 

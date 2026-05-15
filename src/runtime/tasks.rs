@@ -184,6 +184,14 @@ impl TuiRuntime {
         let project_ctx = dispatch::ProjectContext::from_db(&task, &*self.database).await;
         let (procedural, tiered) =
             dispatch::build_and_record_injections(&*self.database, &task).await;
+        let verify_command = self
+            .database
+            .get_verify_command(&task.repo_path)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "failed to load verify_command; proceeding without it");
+                None
+            });
         let label = mode.label();
         self.spawn_dispatch(
             task,
@@ -199,10 +207,39 @@ impl TuiRuntime {
                         epic_ctx.as_ref(),
                         Some(&project_ctx),
                         &injections,
+                        verify_command.as_deref(),
+                    ),
+                    models::DispatchMode::PrReview => dispatch::pr_review_agent(
+                        t,
+                        r,
+                        epic_ctx.as_ref(),
+                        Some(&project_ctx),
+                        verify_command.as_deref(),
+                    ),
+                    models::DispatchMode::Research => dispatch::research_agent(
+                        t,
+                        r,
+                        epic_ctx.as_ref(),
+                        Some(&project_ctx),
+                        verify_command.as_deref(),
+                    ),
+                    models::DispatchMode::Fix => dispatch::fix_task_agent(
+                        t,
+                        r,
+                        epic_ctx.as_ref(),
+                        Some(&project_ctx),
+                        verify_command.as_deref(),
                     ),
                     models::DispatchMode::Research => {
                         dispatch::research_agent(t, r, epic_ctx.as_ref(), Some(&project_ctx))
                     }
+                    models::DispatchMode::Dependabot => dispatch::dependabot_review_agent(
+                        t,
+                        r,
+                        epic_ctx.as_ref(),
+                        Some(&project_ctx),
+                        verify_command.as_deref(),
+                    ),
                 }
             },
             label,

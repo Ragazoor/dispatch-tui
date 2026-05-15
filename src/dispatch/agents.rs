@@ -103,12 +103,14 @@ pub fn dispatch_agent(
     epic: Option<&EpicContext>,
     project: Option<&ProjectContext>,
     injections: &LearningInjections<'_>,
+    verify_command: Option<&str>,
 ) -> Result<DispatchResult> {
     dispatch_with_prompt(
         task,
         |repo_map| {
             let mut ctx = ctx_with_map(injections, repo_map);
             ctx.tag = task.tag;
+            ctx.verify_command = verify_command.map(str::to_owned);
             build_prompt(
                 task.id,
                 &task.title,
@@ -125,16 +127,66 @@ pub fn dispatch_agent(
     )
 }
 
+pub fn pr_review_agent(
+    task: &Task,
+    runner: &dyn ProcessRunner,
+    epic: Option<&EpicContext>,
+    project: Option<&ProjectContext>,
+    verify_command: Option<&str>,
+) -> Result<DispatchResult> {
+    dispatch_with_prompt(
+        task,
+        |repo_map| {
+            let mut ctx = PromptContext::with_map(LearningInjections::default(), repo_map);
+            ctx.verify_command = verify_command.map(str::to_owned);
+            build_pr_review_prompt(task.id, &task.title, &task.description, epic, project, &ctx)
+        },
+        runner,
+        Some(&task.base_branch),
+        None,
+    )
+}
+
+pub fn dependabot_review_agent(
+    task: &Task,
+    runner: &dyn ProcessRunner,
+    epic: Option<&EpicContext>,
+    project: Option<&ProjectContext>,
+    verify_command: Option<&str>,
+) -> Result<DispatchResult> {
+    dispatch_with_prompt(
+        task,
+        |repo_map| {
+            let mut ctx = PromptContext::with_map(LearningInjections::default(), repo_map);
+            ctx.verify_command = verify_command.map(str::to_owned);
+            build_dependabot_review_prompt(
+                task.id,
+                &task.title,
+                &task.description,
+                epic,
+                project,
+                &ctx,
+            )
+        },
+        runner,
+        Some(&task.base_branch),
+        None,
+    )
+}
+
+
 pub fn research_agent(
     task: &Task,
     runner: &dyn ProcessRunner,
     epic: Option<&EpicContext>,
     project: Option<&ProjectContext>,
+    verify_command: Option<&str>,
 ) -> Result<DispatchResult> {
     dispatch_with_prompt(
         task,
         |repo_map| {
-            let ctx = PromptContext::with_map(LearningInjections::default(), repo_map);
+            let mut ctx = PromptContext::with_map(LearningInjections::default(), repo_map);
+            ctx.verify_command = verify_command.map(str::to_owned);
             build_research_prompt(task.id, &task.title, &task.description, epic, project, &ctx)
         },
         runner,
@@ -142,6 +194,27 @@ pub fn research_agent(
         Some("plan"),
     )
 }
+
+pub fn fix_task_agent(
+    task: &Task,
+    runner: &dyn ProcessRunner,
+    epic: Option<&EpicContext>,
+    project: Option<&ProjectContext>,
+    verify_command: Option<&str>,
+) -> Result<DispatchResult> {
+    dispatch_with_prompt(
+        task,
+        |repo_map| {
+            let mut ctx = PromptContext::with_map(LearningInjections::default(), repo_map);
+            ctx.verify_command = verify_command.map(str::to_owned);
+            build_fix_task_prompt(task.id, &task.title, &task.description, epic, project, &ctx)
+        },
+        runner,
+        Some(&task.base_branch),
+        None,
+    )
+}
+
 
 pub fn quick_dispatch_agent(
     task: &Task,

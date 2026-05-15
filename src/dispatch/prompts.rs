@@ -241,6 +241,21 @@ not a source of truth.\n\n\
 /// Render the tiered-knowledge block placed between the task block and the
 /// addendum in a dispatch prompt. Returns an empty string when `picked` is
 /// empty so existing prompts are byte-identical when no learnings are injected.
+fn render_verification(cmd: Option<&str>) -> String {
+    match cmd {
+        None => String::new(),
+        Some(c) => format!(
+            "\n## Verification\n\
+             \n\
+             Before declaring work complete, run this in your worktree and confirm it passes:\n\
+             \n\
+             ````\n{c}\n````\n\
+             \n\
+             If it fails, fix the underlying issue rather than skipping it.\n"
+        ),
+    }
+}
+
 pub(super) fn render_validated_knowledge_block(picked: &[&Learning]) -> String {
     if picked.is_empty() {
         return String::new();
@@ -300,12 +315,13 @@ making any changes."
     } else {
         trailing_block()
     };
+    let verify = render_verification(ctx.verify_command.as_deref());
 
     format!(
         "{proc_prefix}Your task is:\n\
 {block}\n\
 \n\
-{knowledge}{repo_map}{addendum}\n\
+{knowledge}{repo_map}{verify}{addendum}\n\
 \n\
 {trailing}",
     )
@@ -522,6 +538,7 @@ pub struct PromptContext<'a> {
     pub learnings: LearningInjections<'a>,
     pub repo_map: Option<String>,
     pub tag: Option<TaskTag>,
+    pub verify_command: Option<String>,
 }
 
 impl<'a> PromptContext<'a> {
@@ -530,6 +547,7 @@ impl<'a> PromptContext<'a> {
             learnings,
             repo_map,
             tag: None,
+            verify_command: None,
         }
     }
 }
@@ -914,6 +932,7 @@ mod tests {
             learnings: injections,
             repo_map: None,
             tag: None,
+            verify_command: None,
         };
         let text = build_prompt(TaskId(1), "title", "desc", None, None, None, &ctx);
         assert!(text.starts_with("Always run tests before committing."));
@@ -942,6 +961,7 @@ mod tests {
             learnings: LearningInjections::default(),
             repo_map: Some(map.to_string()),
             tag: None,
+            verify_command: None,
         }
     }
 
@@ -986,6 +1006,7 @@ mod tests {
             },
             repo_map: Some(SAMPLE_MAP.to_string()),
             tag: None,
+            verify_command: None,
         };
         let text = build_prompt(TaskId(1), "t", "d", Some("/p/plan.md"), None, None, &ctx);
         let knowledge_at = text
@@ -1107,5 +1128,50 @@ mod tests {
         assert!(render_repo_map(None).is_empty());
         assert!(render_repo_map(Some("")).is_empty());
         assert!(render_repo_map(Some("   \n  ")).is_empty());
+    }
+
+    #[test]
+    fn build_prompt_includes_verification_section_when_configured() {
+        let ctx = PromptContext {
+            verify_command: Some("cargo test".to_string()),
+            ..PromptContext::default()
+        };
+        let text = build_prompt(TaskId(1), "t", "d", None, None, None, &ctx);
+
+        let header_idx = text.find("## Verification").expect("section header present");
+        assert_eq!(
+            text.matches("## Verification").count(),
+            1,
+            "section must appear exactly once"
+        );
+        let section = &text[header_idx..];
+        assert!(
+            section.contains("````\ncargo test\n````"),
+            "command must appear inside a 4-backtick fence:\n{section}"
+        );
+        assert!(
+            section.contains("Before declaring work complete"),
+            "instruction must precede the fence"
+        );
+    }
+
+    #[test]
+    fn build_prompt_omits_verification_section_when_none() {
+        let ctx = PromptContext::default();
+        let text = build_prompt(TaskId(1), "t", "d", None, None, None, &ctx);
+        assert!(!text.contains("## Verification"));
+        assert!(!text.contains("Verify before"));
+    }
+
+    #[test]
+    fn build_prompt_verify_section_appears_after_task_block() {
+        let ctx = PromptContext {
+            verify_command: Some("cargo test".to_string()),
+            ..PromptContext::default()
+        };
+        let text = build_prompt(TaskId(1), "t", "d", None, None, None, &ctx);
+        let task_idx = text.find("Your task is:").unwrap();
+        let verify_idx = text.find("## Verification").unwrap();
+        assert!(task_idx < verify_idx, "verification must come after task block");
     }
 }
