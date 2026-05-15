@@ -69,6 +69,7 @@ impl TuiRuntime {
                 feed_command: None,
                 feed_interval_secs: None,
                 project_id: None,
+                group_by_repo: None,
             })
             .await
         {
@@ -98,6 +99,7 @@ impl TuiRuntime {
                 feed_command: None,
                 feed_interval_secs: None,
                 project_id: None,
+                group_by_repo: None,
             })
             .await
         {

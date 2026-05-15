@@ -738,6 +738,30 @@ async fn mcp_create_sub_epic() {
 }
 
 #[tokio::test]
+async fn update_epic_group_by_repo() {
+    let state = test_state().await;
+    let epic = state
+        .db
+        .create_epic("Test", "", "/repo", None, ProjectId(1))
+        .await
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_epic",
+            "arguments": { "epic_id": epic.id.0, "group_by_repo": true }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
+
+    let updated = state.db.get_epic(epic.id).await.unwrap().unwrap();
+    assert!(updated.group_by_repo);
+}
+
+#[tokio::test]
 async fn create_epic_tool_schema_includes_parent_epic_id() {
     let state = test_state().await;
     let resp = call(&state, "tools/list", None).await;

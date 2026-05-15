@@ -21,6 +21,7 @@ pub struct UpdateEpicParams {
     pub feed_command: Option<FieldUpdate>,
     pub feed_interval_secs: Option<Option<i64>>,
     pub project_id: Option<ProjectId>,
+    pub group_by_repo: Option<bool>,
 }
 
 impl UpdateEpicParams {
@@ -59,6 +60,9 @@ impl UpdateEpicParams {
         }
         if self.project_id.is_some() {
             names.push("project_id");
+        }
+        if self.group_by_repo.is_some() {
+            names.push("group_by_repo");
         }
         names
     }
@@ -251,6 +255,9 @@ impl EpicService {
         if let Some(pid) = params.project_id {
             patch = patch.project_id(pid);
         }
+        if let Some(gbr) = params.group_by_repo {
+            patch = patch.group_by_repo(gbr);
+        }
 
         let epic_id = params.epic_id;
         self.db
@@ -275,6 +282,7 @@ impl EpicService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::{Database, EpicCrud};
 
     #[test]
     fn update_epic_params_has_any_field_consistent_with_updated_field_names() {
@@ -291,6 +299,7 @@ mod tests {
             feed_command: None,
             feed_interval_secs: None,
             project_id: None,
+            group_by_repo: None,
         };
         assert!(
             with_field.has_any_field(),
@@ -313,6 +322,7 @@ mod tests {
             feed_command: None,
             feed_interval_secs: None,
             project_id: None,
+            group_by_repo: None,
         };
         assert!(
             !empty.has_any_field(),
@@ -341,6 +351,7 @@ mod tests {
             feed_command: None,
             feed_interval_secs: None,
             project_id: None,
+            group_by_repo: None,
         };
         let cases: Vec<UpdateEpicParams> = vec![
             UpdateEpicParams {
@@ -383,6 +394,10 @@ mod tests {
                 project_id: Some(ProjectId(1)),
                 ..base()
             },
+            UpdateEpicParams {
+                group_by_repo: Some(true),
+                ..base()
+            },
         ];
         for params in &cases {
             assert!(
@@ -394,5 +409,34 @@ mod tests {
                 "updated_field_names() should be non-empty when a field is set"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn update_epic_sets_group_by_repo() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let epic = db
+            .create_epic("Test", "", "/repo", None, ProjectId(1))
+            .await
+            .unwrap();
+        assert!(!epic.group_by_repo);
+        let svc = EpicService::new(db.clone());
+        svc.update_epic(UpdateEpicParams {
+            epic_id: epic.id,
+            title: None,
+            description: None,
+            status: None,
+            plan_path: None,
+            sort_order: None,
+            repo_path: None,
+            auto_dispatch: None,
+            feed_command: None,
+            feed_interval_secs: None,
+            project_id: None,
+            group_by_repo: Some(true),
+        })
+        .await
+        .unwrap();
+        let updated = db.get_epic(epic.id).await.unwrap().unwrap();
+        assert!(updated.group_by_repo);
     }
 }

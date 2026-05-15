@@ -378,6 +378,7 @@ impl TuiRuntime {
                 feed_command: Some(applied.feed_command.clone()),
                 feed_interval_secs: Some(applied.feed_interval_secs),
                 project_id: None,
+                group_by_repo: None,
             })
             .await
         {
