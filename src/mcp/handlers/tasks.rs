@@ -13,7 +13,7 @@ use crate::models::{
 };
 use crate::service::{
     ClaimTaskParams, CreateTaskParams, FieldUpdate, LearningService, ListTasksFilter, ServiceError,
-    TaskService, UpdateTaskParams,
+    UpdateTaskParams,
 };
 
 use super::types::{
@@ -227,8 +227,8 @@ fn format_task_detail(task: &Task, epic_titles: &HashMap<EpicId, String>) -> Str
     text
 }
 
-fn plan_goal(path: &str) -> Option<String> {
-    let content = std::fs::read_to_string(path).ok()?;
+async fn plan_goal(path: &str) -> Option<String> {
+    let content = tokio::fs::read_to_string(path).await.ok()?;
     let description = crate::plan::parse_plan(&content).ok()?.description;
     (!description.is_empty()).then_some(description)
 }
@@ -367,7 +367,7 @@ pub(super) async fn handle_update_task(
     }
     let fields_display = params.updated_field_names().join(", ");
 
-    let svc = TaskService::new(state.db.clone());
+    let svc = state.task_service();
     match svc.update_task(params).await {
         Ok(result) => {
             state.notify_task_changed(TaskId(parsed.task_id));
@@ -440,7 +440,7 @@ pub(super) async fn handle_create_task(
         return resp;
     }
 
-    let svc = TaskService::new(state.db.clone());
+    let svc = state.task_service();
     match svc
         .create_task(CreateTaskParams {
             title: parsed.title,
@@ -478,7 +478,7 @@ pub(super) async fn handle_get_task(
     };
     tracing::info!(task_id = parsed.task_id, "MCP get_task");
 
-    let svc = TaskService::new(state.db.clone());
+    let svc = state.task_service();
     match svc.get_task(TaskId(parsed.task_id)).await {
         Ok(task) => {
             let epic_titles = build_epic_titles(state).await;
@@ -534,7 +534,7 @@ pub(super) async fn handle_list_tasks(
     let epic_id = parsed.epic_id.map(EpicId).or(derived_epic_id);
     let project_id = parsed.project_id.map(ProjectId).or(derived_project_id);
 
-    let svc = TaskService::new(state.db.clone());
+    let svc = state.task_service();
     match svc
         .list_tasks(ListTasksFilter {
             statuses: status_filter,
@@ -553,14 +553,15 @@ pub(super) async fn handle_list_tasks(
                 );
             }
             let epic_titles = build_epic_titles(state).await;
-            // Read each unique plan file once to avoid repeated blocking I/O per task.
+            // Read each unique plan file once to avoid repeated I/O per task.
             let plan_goals: HashMap<String, String> = {
                 let mut cache = HashMap::new();
                 for t in &filtered {
                     if let Some(path) = t.plan_path.as_deref() {
-                        cache
-                            .entry(path.to_owned())
-                            .or_insert_with(|| plan_goal(path).unwrap_or_default());
+                        if !cache.contains_key(path) {
+                            let goal = plan_goal(path).await.unwrap_or_default();
+                            cache.insert(path.to_owned(), goal);
+                        }
                     }
                 }
                 cache
@@ -596,7 +597,7 @@ pub(super) async fn handle_claim_task(
     };
     tracing::info!(task_id = parsed.task_id, worktree = %parsed.worktree, "MCP claim_task");
 
-    let svc = TaskService::new(state.db.clone());
+    let svc = state.task_service();
     match svc
         .claim_task(ClaimTaskParams {
             task_id: TaskId(parsed.task_id),
@@ -642,7 +643,7 @@ pub(super) async fn handle_wrap_up(
     };
     tracing::info!(task_id = parsed.task_id, action = ?parsed.action, "MCP wrap_up");
 
-    let svc = TaskService::new(state.db.clone());
+    let svc = state.task_service();
     let task = match svc.validate_wrap_up(TaskId(parsed.task_id)).await {
         Ok(t) => t,
         Err(e) => return service_err_to_response(id, e),
@@ -909,7 +910,7 @@ pub(super) async fn handle_dispatch_next(
         }
     }
 
-    let svc = TaskService::new(state.db.clone());
+    let svc = state.task_service();
     let next_task = match svc.next_backlog_task(EpicId(parsed.epic_id)).await {
         Ok(Some(task)) => task,
         Ok(None) => {
@@ -1094,7 +1095,7 @@ pub(super) async fn handle_send_message(
         Err(e) => return e,
     };
 
-    let svc = TaskService::new(state.db.clone());
+    let svc = state.task_service();
     let (from_task, to_task) = match svc
         .validate_send_message(TaskId(parsed.from_task_id), TaskId(parsed.to_task_id))
         .await
@@ -1177,7 +1178,7 @@ pub(super) async fn handle_report_usage(
     };
     tracing::info!(task_id = parsed.task_id, "MCP report_usage");
 
-    let svc = TaskService::new(state.db.clone());
+    let svc = state.task_service();
     match svc
         .report_usage(
             TaskId(parsed.task_id),

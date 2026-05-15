@@ -10,6 +10,7 @@ use tokio::sync::mpsc;
 use crate::db;
 use crate::models::{EpicId, TaskId};
 use crate::process::ProcessRunner;
+use crate::service::TaskService;
 
 /// Events sent from the MCP server to the TUI runtime.
 #[derive(Debug)]
@@ -62,6 +63,10 @@ impl McpState {
         if let Some(tx) = &self.notify_tx {
             let _ = tx.send(McpEvent::EpicChanged(epic_id));
         }
+    }
+
+    pub fn task_service(&self) -> TaskService {
+        TaskService::new(self.db.clone())
     }
 }
 
