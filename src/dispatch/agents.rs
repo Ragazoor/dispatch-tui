@@ -108,9 +108,8 @@ pub fn dispatch_agent(
     dispatch_with_prompt(
         task,
         |repo_map| {
-            let mut ctx = ctx_with_map(injections, repo_map);
+            let mut ctx = ctx_with_map(injections, repo_map).with_verify(verify_command);
             ctx.tag = task.tag;
-            ctx.verify_command = verify_command.map(str::to_owned);
             build_prompt(
                 task.id,
                 &task.title,
@@ -137,8 +136,8 @@ pub fn pr_review_agent(
     dispatch_with_prompt(
         task,
         |repo_map| {
-            let mut ctx = PromptContext::with_map(LearningInjections::default(), repo_map);
-            ctx.verify_command = verify_command.map(str::to_owned);
+            let ctx = PromptContext::with_map(LearningInjections::default(), repo_map)
+                .with_verify(verify_command);
             build_pr_review_prompt(task.id, &task.title, &task.description, epic, project, &ctx)
         },
         runner,
@@ -157,8 +156,8 @@ pub fn dependabot_review_agent(
     dispatch_with_prompt(
         task,
         |repo_map| {
-            let mut ctx = PromptContext::with_map(LearningInjections::default(), repo_map);
-            ctx.verify_command = verify_command.map(str::to_owned);
+            let ctx = PromptContext::with_map(LearningInjections::default(), repo_map)
+                .with_verify(verify_command);
             build_dependabot_review_prompt(
                 task.id,
                 &task.title,
@@ -185,8 +184,8 @@ pub fn research_agent(
     dispatch_with_prompt(
         task,
         |repo_map| {
-            let mut ctx = PromptContext::with_map(LearningInjections::default(), repo_map);
-            ctx.verify_command = verify_command.map(str::to_owned);
+            let ctx = PromptContext::with_map(LearningInjections::default(), repo_map)
+                .with_verify(verify_command);
             build_research_prompt(task.id, &task.title, &task.description, epic, project, &ctx)
         },
         runner,
@@ -205,8 +204,8 @@ pub fn fix_task_agent(
     dispatch_with_prompt(
         task,
         |repo_map| {
-            let mut ctx = PromptContext::with_map(LearningInjections::default(), repo_map);
-            ctx.verify_command = verify_command.map(str::to_owned);
+            let ctx = PromptContext::with_map(LearningInjections::default(), repo_map)
+                .with_verify(verify_command);
             build_fix_task_prompt(task.id, &task.title, &task.description, epic, project, &ctx)
         },
         runner,
@@ -227,8 +226,7 @@ pub fn quick_dispatch_agent(
     dispatch_with_prompt(
         task,
         |repo_map| {
-            let mut ctx = ctx_with_map(injections, repo_map);
-            ctx.verify_command = verify_command.map(str::to_owned);
+            let ctx = ctx_with_map(injections, repo_map).with_verify(verify_command);
             build_quick_dispatch_prompt(
                 task.id,
                 &task.title,
@@ -259,8 +257,8 @@ pub fn epic_planning_agent(
     dispatch_with_prompt(
         task,
         |repo_map| {
-            let mut ctx = PromptContext::with_map(LearningInjections::default(), repo_map);
-            ctx.verify_command = verify_command.map(str::to_owned);
+            let ctx = PromptContext::with_map(LearningInjections::default(), repo_map)
+                .with_verify(verify_command);
             build_epic_planning_prompt(
                 task.id,
                 &task.title,

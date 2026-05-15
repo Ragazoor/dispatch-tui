@@ -703,6 +703,11 @@ impl<'a> PromptContext<'a> {
             verify_command: None,
         }
     }
+
+    pub fn with_verify(mut self, cmd: Option<&str>) -> Self {
+        self.verify_command = cmd.map(str::to_owned);
+        self
+    }
 }
 
 pub async fn build_and_record_injections(

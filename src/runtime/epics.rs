@@ -174,8 +174,14 @@ impl TuiRuntime {
                 epic_id = epic_id.0,
                 "dispatching epic planning agent"
             );
-            match dispatch::epic_planning_agent(&task, epic_id, &epic_title, &project_ctx, &*runner, verify_command.as_deref())
-            {
+            match dispatch::epic_planning_agent(
+                &task,
+                epic_id,
+                &epic_title,
+                &project_ctx,
+                &*runner,
+                verify_command.as_deref(),
+            ) {
                 Ok(result) => {
                     let _ = tx.send(Message::Task(
                         crate::tui::messages::TaskMessage::Dispatched {

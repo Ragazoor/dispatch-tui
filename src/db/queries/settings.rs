@@ -200,9 +200,6 @@ impl super::super::SettingsStore for Database {
     async fn get_verify_command(&self, path: &str) -> Result<Option<String>> {
         let path = path.to_string();
         self.db_call(move |conn| {
-            // query_row returns Err(QueryReturnedNoRows) when no row matches, so
-            // .optional() converts that to Ok(None). When a row exists but the
-            // column is SQL NULL, row.get::<_, Option<String>> returns Ok(None).
             let result: Option<Option<String>> = conn
                 .query_row(
                     "SELECT verify_command FROM repo_paths WHERE path = ?1",
@@ -211,7 +208,6 @@ impl super::super::SettingsStore for Database {
                 )
                 .optional()
                 .context("Failed to get verify_command")?;
-            // Flatten: no row → None, row with NULL → None, row with value → Some(v)
             Ok(result.flatten())
         })
         .await

@@ -727,8 +727,7 @@ pub(super) async fn handle_wrap_up(
     match rebase_result {
         Ok(()) => {
             state.notify_task_changed(task_id);
-            let verify_command =
-                dispatch::fetch_verify_command(&*state.db, &task.repo_path).await;
+            let verify_command = dispatch::fetch_verify_command(&*state.db, &task.repo_path).await;
             let verify_line = match verify_command {
                 Some(cmd) => format!(
                     " **Verify before exiting**: run `{cmd}` in your worktree and confirm it passes."
