@@ -222,11 +222,13 @@ pub fn quick_dispatch_agent(
     epic: Option<&EpicContext>,
     project: Option<&ProjectContext>,
     injections: &LearningInjections<'_>,
+    verify_command: Option<&str>,
 ) -> Result<DispatchResult> {
     dispatch_with_prompt(
         task,
         |repo_map| {
-            let ctx = ctx_with_map(injections, repo_map);
+            let mut ctx = ctx_with_map(injections, repo_map);
+            ctx.verify_command = verify_command.map(str::to_owned);
             build_quick_dispatch_prompt(
                 task.id,
                 &task.title,

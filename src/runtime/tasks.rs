@@ -71,6 +71,14 @@ impl TuiRuntime {
         let project_ctx = dispatch::ProjectContext::from_db(&task, &*self.database).await;
         let (procedural, tiered) =
             dispatch::build_and_record_injections(&*self.database, &task).await;
+        let verify_command = self
+            .database
+            .get_verify_command(&task.repo_path)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "failed to load verify_command; proceeding without it");
+                None
+            });
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
         tokio::task::spawn_blocking(move || {
@@ -85,6 +93,7 @@ impl TuiRuntime {
                 epic_ctx.as_ref(),
                 Some(&project_ctx),
                 &injections,
+                verify_command.as_deref(),
             ) {
                 Ok(result) => {
                     let _ = tx.send(Message::Task(

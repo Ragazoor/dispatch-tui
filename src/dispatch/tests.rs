@@ -1066,7 +1066,7 @@ fn quick_dispatch_agent_uses_default_permission_mode() {
     ]);
 
     let task = make_task(&repo_path);
-    quick_dispatch_agent(&task, &mock, None, None, &LearningInjections::default()).unwrap();
+    quick_dispatch_agent(&task, &mock, None, None, &LearningInjections::default(), None).unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, 3, "claude");
@@ -1465,7 +1465,7 @@ fn quick_dispatch_reuses_existing_worktree() {
     ]);
 
     let task = make_task(&repo_path);
-    quick_dispatch_agent(&task, &mock, None, None, &LearningInjections::default()).unwrap();
+    quick_dispatch_agent(&task, &mock, None, None, &LearningInjections::default(), None).unwrap();
 
     let calls = mock.recorded_calls();
     assert!(
@@ -1492,7 +1492,7 @@ fn quick_dispatch_sends_rename_prompt() {
     ]);
 
     let task = make_task(&repo_path);
-    quick_dispatch_agent(&task, &mock, None, None, &LearningInjections::default()).unwrap();
+    quick_dispatch_agent(&task, &mock, None, None, &LearningInjections::default(), None).unwrap();
 
     let prompt_file = worktree_dir.join(".claude-prompt");
     let prompt = std::fs::read_to_string(prompt_file).unwrap();
