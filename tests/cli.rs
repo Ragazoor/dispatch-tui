@@ -555,6 +555,7 @@ fn dispatch_repo_clear_verify_removes_command() {
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("/r"), "path row must still appear after clear");
     assert!(!stdout.contains("cargo test"), "command must be cleared");
 }
 
