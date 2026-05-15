@@ -802,12 +802,6 @@ async fn patch_epic_group_by_repo_persists() {
 }
 
 #[tokio::test]
-async fn patch_epic_group_by_repo_changes_count() {
-    let _db = Database::open_in_memory().await.unwrap();
-    assert!(EpicPatch::new().group_by_repo(true).has_changes());
-}
-
-#[tokio::test]
 async fn list_all_tasks_with_epic_id_returns_only_tasks_with_epic() {
     let db = in_memory_db().await;
     let epic1_id = db

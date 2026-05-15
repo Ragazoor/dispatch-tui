@@ -2035,6 +2035,22 @@ async fn migration_v41_drops_cost_usd_column() {
              created_at TEXT NOT NULL DEFAULT (datetime('now')),
              updated_at TEXT NOT NULL DEFAULT (datetime('now'))
          );
+         CREATE TABLE epics (
+             id             INTEGER PRIMARY KEY,
+             title          TEXT NOT NULL,
+             description    TEXT NOT NULL DEFAULT '',
+             repo_path      TEXT NOT NULL DEFAULT '',
+             status         TEXT NOT NULL DEFAULT 'backlog',
+             plan_path      TEXT,
+             sort_order     INTEGER,
+             auto_dispatch  BOOLEAN NOT NULL DEFAULT 1,
+             parent_epic_id INTEGER,
+             feed_command   TEXT,
+             feed_interval_secs INTEGER,
+             project_id     INTEGER NOT NULL DEFAULT 1,
+             created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
+         );
          CREATE TABLE task_usage (
              task_id INTEGER NOT NULL PRIMARY KEY REFERENCES tasks(id),
              cost_usd REAL NOT NULL DEFAULT 0.0,
@@ -2132,6 +2148,22 @@ async fn test_migrate_v43_proposed_to_approved() {
              project_id INTEGER NOT NULL DEFAULT 1,
              created_at TEXT NOT NULL DEFAULT (datetime('now')),
              updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         CREATE TABLE epics (
+             id             INTEGER PRIMARY KEY,
+             title          TEXT NOT NULL,
+             description    TEXT NOT NULL DEFAULT '',
+             repo_path      TEXT NOT NULL DEFAULT '',
+             status         TEXT NOT NULL DEFAULT 'backlog',
+             plan_path      TEXT,
+             sort_order     INTEGER,
+             auto_dispatch  BOOLEAN NOT NULL DEFAULT 1,
+             parent_epic_id INTEGER,
+             feed_command   TEXT,
+             feed_interval_secs INTEGER,
+             project_id     INTEGER NOT NULL DEFAULT 1,
+             created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
          );
          CREATE TABLE learnings (
              id                INTEGER PRIMARY KEY,

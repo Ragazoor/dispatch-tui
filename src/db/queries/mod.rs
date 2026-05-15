@@ -114,7 +114,7 @@ pub(super) fn row_to_epic(row: &rusqlite::Row<'_>) -> rusqlite::Result<Epic> {
         feed_interval_secs: row
             .get::<_, Option<i64>>("feed_interval_secs")
             .unwrap_or(None),
-        group_by_repo: row.get::<_, bool>("group_by_repo").unwrap_or(false),
+        group_by_repo: row.get::<_, bool>("group_by_repo")?,
         project_id: ProjectId(row.get::<_, i64>("project_id")?),
         created_at: parse_datetime(&created_str),
         updated_at: parse_datetime(&updated_str),
