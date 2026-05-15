@@ -103,13 +103,17 @@ pub fn merge_pr(pr_url: &str, runner: &dyn ProcessRunner) -> Result<()> {
     Ok(())
 }
 
+/// Fallback group name used by `repo_name_from_url` when the URL is not a
+/// recognisable GitHub URL (empty, non-GitHub host, or malformed).
+pub const UNKNOWN_REPO_GROUP: &str = "other";
+
 /// Extract the short repo name (e.g. `"my-repo"`) from a GitHub URL.
 ///
-/// Returns `"other"` for non-GitHub URLs, empty strings, and malformed input.
+/// Returns [`UNKNOWN_REPO_GROUP`] for non-GitHub URLs, empty strings, and malformed input.
 pub fn repo_name_from_url(url: &str) -> String {
     extract_github_repo(url)
         .and_then(|s| s.split('/').next_back())
-        .unwrap_or("other")
+        .unwrap_or(UNKNOWN_REPO_GROUP)
         .to_string()
 }
 

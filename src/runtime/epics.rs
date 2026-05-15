@@ -51,13 +51,12 @@ impl TuiRuntime {
         status: Option<models::TaskStatus>,
         sort_order: Option<i64>,
     ) {
-        // Only call service if there's something to update
         if status.is_none() && sort_order.is_none() {
             return;
         }
-        if let Err(e) = self
-            .epic_svc
-            .update_epic(crate::service::UpdateEpicParams {
+        self.exec_patch_epic(
+            app,
+            crate::service::UpdateEpicParams {
                 epic_id: id,
                 title: None,
                 description: None,
@@ -70,11 +69,21 @@ impl TuiRuntime {
                 feed_interval_secs: None,
                 project_id: None,
                 group_by_repo: None,
-            })
-            .await
-        {
+            },
+            "updating epic",
+        )
+        .await;
+    }
+
+    async fn exec_patch_epic(
+        &self,
+        app: &mut App,
+        params: crate::service::UpdateEpicParams,
+        context: &str,
+    ) {
+        if let Err(e) = self.epic_svc.update_epic(params).await {
             app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                Self::db_error("updating epic", e),
+                Self::db_error(context, e),
             )));
         }
     }
@@ -85,9 +94,9 @@ impl TuiRuntime {
         id: models::EpicId,
         auto_dispatch: bool,
     ) {
-        if let Err(e) = self
-            .epic_svc
-            .update_epic(crate::service::UpdateEpicParams {
+        self.exec_patch_epic(
+            app,
+            crate::service::UpdateEpicParams {
                 epic_id: id,
                 title: None,
                 description: None,
@@ -100,13 +109,10 @@ impl TuiRuntime {
                 feed_interval_secs: None,
                 project_id: None,
                 group_by_repo: None,
-            })
-            .await
-        {
-            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                Self::db_error("toggling auto dispatch", e),
-            )));
-        }
+            },
+            "toggling auto dispatch",
+        )
+        .await;
     }
 
     pub(super) async fn exec_toggle_epic_group_by_repo(
@@ -115,9 +121,9 @@ impl TuiRuntime {
         id: models::EpicId,
         group_by_repo: bool,
     ) {
-        if let Err(e) = self
-            .epic_svc
-            .update_epic(crate::service::UpdateEpicParams {
+        self.exec_patch_epic(
+            app,
+            crate::service::UpdateEpicParams {
                 epic_id: id,
                 title: None,
                 description: None,
@@ -130,13 +136,10 @@ impl TuiRuntime {
                 feed_interval_secs: None,
                 project_id: None,
                 group_by_repo: Some(group_by_repo),
-            })
-            .await
-        {
-            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                Self::db_error("toggling group by repo", e),
-            )));
-        }
+            },
+            "toggling group by repo",
+        )
+        .await;
     }
 
     pub(super) async fn exec_refresh_epics_from_db(&self, app: &mut App) {

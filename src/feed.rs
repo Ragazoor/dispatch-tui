@@ -47,9 +47,8 @@ const FEED_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Group feed items by repo name and upsert each group into its own sub-epic.
 /// Clears any flat feed tasks on the parent epic (migration + ongoing hygiene).
-/// Returns `(sub_epic_ids, ok)` where `sub_epic_ids` contains all sub-epic IDs
-/// that were created or found (regardless of whether upsert succeeded), and `ok`
-/// is `true` only if every operation succeeded.
+/// Returns the IDs of all sub-epics that were found or created (used by the
+/// caller to notify the TUI, even when individual upserts partially fail).
 async fn sync_grouped_feed(
     db: &dyn crate::db::TaskStore,
     parent_id: crate::models::EpicId,
@@ -57,13 +56,17 @@ async fn sync_grouped_feed(
     items: &[crate::models::FeedItem],
     repo_paths: &[String],
     base_branches: &[String],
-) -> (Vec<crate::models::EpicId>, bool) {
-    use std::collections::HashMap;
-
-    let mut groups: HashMap<String, Vec<usize>> = HashMap::new();
-    for (i, item) in items.iter().enumerate() {
+) -> Vec<crate::models::EpicId> {
+    // Group co-indexed (item, repo_path, base_branch) tuples by repo name.
+    // Using zip makes the per-index alignment structural rather than contractual.
+    type GroupEntry = (crate::models::FeedItem, String, String);
+    let mut groups: HashMap<String, Vec<GroupEntry>> = HashMap::new();
+    for ((item, rp), bb) in items.iter().zip(repo_paths.iter()).zip(base_branches.iter()) {
         let name = crate::dispatch::repo_name_from_url(&item.url);
-        groups.entry(name).or_default().push(i);
+        groups
+            .entry(name)
+            .or_default()
+            .push((item.clone(), rp.clone(), bb.clone()));
     }
 
     let existing_sub_epics = match db.list_sub_epics(parent_id).await {
@@ -74,24 +77,16 @@ async fn sync_grouped_feed(
                 "sync_grouped_feed: list_sub_epics failed: {err:#}"
             );
             // list_sub_epics failed: no writes occurred, skip notifications
-            return (vec![], false);
+            return vec![];
         }
     };
 
-    let mut all_ok = true;
     let mut sub_epic_ids: Vec<crate::models::EpicId> = Vec::new();
 
-    for (repo_name, indices) in &groups {
-        let group_items: Vec<crate::models::FeedItem> =
-            indices.iter().map(|&i| items[i].clone()).collect();
-        let group_repo_paths: Vec<String> = indices
-            .iter()
-            .map(|&i| repo_paths.get(i).cloned().unwrap_or_default())
-            .collect();
-        let group_base_branches: Vec<String> = indices
-            .iter()
-            .map(|&i| base_branches.get(i).cloned().unwrap_or_default())
-            .collect();
+    for (repo_name, group) in &groups {
+        let group_items: Vec<_> = group.iter().map(|(item, _, _)| item.clone()).collect();
+        let group_repo_paths: Vec<_> = group.iter().map(|(_, rp, _)| rp.clone()).collect();
+        let group_base_branches: Vec<_> = group.iter().map(|(_, _, bb)| bb.clone()).collect();
 
         let sub_epic_id =
             if let Some(existing) = existing_sub_epics.iter().find(|e| e.title == *repo_name) {
@@ -108,7 +103,6 @@ async fn sync_grouped_feed(
                             repo = %repo_name,
                             "sync_grouped_feed: create_epic failed: {err:#}"
                         );
-                        all_ok = false;
                         continue;
                     }
                 }
@@ -132,20 +126,18 @@ async fn sync_grouped_feed(
                 sub_epic_id = sub_epic_id.0,
                 "sync_grouped_feed: upsert_feed_tasks failed: {err:#}"
             );
-            all_ok = false;
         }
     }
 
-    // Always clear flat feed tasks from parent, regardless of per-group failures
+    // Always clear flat feed tasks from parent, regardless of per-group failures.
     if let Err(err) = db.upsert_feed_tasks(parent_id, &[], &[], &[]).await {
         tracing::warn!(
             epic_id = parent_id.0,
             "sync_grouped_feed: failed to clear parent feed tasks: {err:#}"
         );
-        all_ok = false;
     }
 
-    (sub_epic_ids, all_ok)
+    sub_epic_ids
 }
 
 pub struct FeedRunner {
@@ -278,7 +270,7 @@ impl FeedRunner {
                 let base_branches = resolve_base_branches(&repo_paths, &*runner);
 
                 if epic_group_by_repo {
-                    let (sub_ids, _had_errors) = sync_grouped_feed(
+                    let sub_ids = sync_grouped_feed(
                         &*db,
                         epic_id,
                         epic_project_id,
@@ -287,7 +279,9 @@ impl FeedRunner {
                         &base_branches,
                     )
                     .await;
-                    let _ = notify.send(McpEvent::EpicChanged(epic_id)); // parent always
+                    // Parent's flat task list was cleared — notify so the TUI
+                    // reflects the empty list even when no sub-epics changed.
+                    let _ = notify.send(McpEvent::EpicChanged(epic_id));
                     for sub_id in sub_ids {
                         let _ = notify.send(McpEvent::EpicChanged(sub_id));
                     }
