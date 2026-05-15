@@ -1125,7 +1125,7 @@ fn epic_planning_agent_uses_default_permission_mode() {
         project_id: ProjectId(1),
         project_name: "Dispatch".to_string(),
     };
-    epic_planning_agent(&task, EpicId(7), "Big Epic", &project, &mock).unwrap();
+    epic_planning_agent(&task, EpicId(7), "Big Epic", &project, &mock, None).unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, 3, "claude");

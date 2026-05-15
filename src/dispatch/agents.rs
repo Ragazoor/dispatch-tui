@@ -250,6 +250,7 @@ pub fn epic_planning_agent(
     epic_title: &str,
     project: &ProjectContext,
     runner: &dyn ProcessRunner,
+    verify_command: Option<&str>,
 ) -> Result<DispatchResult> {
     let epic = EpicContext {
         epic_id,
@@ -258,7 +259,8 @@ pub fn epic_planning_agent(
     dispatch_with_prompt(
         task,
         |repo_map| {
-            let ctx = PromptContext::with_map(LearningInjections::default(), repo_map);
+            let mut ctx = PromptContext::with_map(LearningInjections::default(), repo_map);
+            ctx.verify_command = verify_command.map(str::to_owned);
             build_epic_planning_prompt(
                 task.id,
                 &task.title,

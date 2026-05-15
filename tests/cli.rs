@@ -586,3 +586,38 @@ fn dispatch_repo_set_verify_rejects_newline() {
         "expected newline error in stderr: {stderr}"
     );
 }
+
+#[test]
+fn dispatch_repo_set_verify_expands_tilde_in_path() {
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    let db_arg = tmp.path().to_str().unwrap();
+    let bin = env!("CARGO_BIN_EXE_dispatch");
+
+    // set-verify with a tilde-prefixed path
+    let out = std::process::Command::new(bin)
+        .args(["--db", db_arg, "repo", "set-verify", "~/r", "cargo test"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // list should show the expanded path, not the literal `~/r`
+    let out = std::process::Command::new(bin)
+        .args(["--db", db_arg, "repo", "list"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let home = std::env::var("HOME").unwrap();
+    let expanded = format!("{home}/r");
+    assert!(
+        stdout.contains(&expanded),
+        "expected expanded path {expanded} in list output, got: {stdout}"
+    );
+    assert!(
+        !stdout.contains("~/r"),
+        "tilde path must NOT appear verbatim in list output, got: {stdout}"
+    );
+}

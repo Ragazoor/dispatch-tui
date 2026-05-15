@@ -50,3 +50,22 @@ async fn verify_command_lookup_returns_none_for_unregistered_path() {
     let fetched = fetch_verify_command(&db, "/not/registered").await;
     assert_eq!(fetched, None);
 }
+
+#[tokio::test]
+async fn verify_command_lookup_requires_exact_path_match() {
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    let db = Database::open(tmp.path()).await.unwrap();
+
+    // Store under expanded path
+    db.set_verify_command("/home/me/repo", Some("cargo test"))
+        .await
+        .unwrap();
+
+    // Exact match works
+    let found = fetch_verify_command(&db, "/home/me/repo").await;
+    assert_eq!(found.as_deref(), Some("cargo test"));
+
+    // Different string (e.g. trailing slash) does NOT match
+    let not_found = fetch_verify_command(&db, "/home/me/repo/").await;
+    assert_eq!(not_found, None, "trailing slash must not match");
+}

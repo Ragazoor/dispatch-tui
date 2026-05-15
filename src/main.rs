@@ -5,6 +5,7 @@ use tracing::Level;
 use tracing_subscriber::EnvFilter;
 
 use dispatch_tui::db::{SettingsStore, TaskCrud};
+use dispatch_tui::models::expand_tilde;
 use dispatch_tui::tui::ui::truncate;
 use dispatch_tui::{db, models, runtime, service};
 
@@ -308,10 +309,12 @@ async fn main() -> Result<()> {
             let db = db::Database::open(&cli.db).await?;
             match action {
                 RepoAction::SetVerify { path, command } => {
+                    let path = expand_tilde(&path);
                     db.set_verify_command(&path, Some(&command)).await?;
                     println!("verify_command set for {path}");
                 }
                 RepoAction::ClearVerify { path } => {
+                    let path = expand_tilde(&path);
                     db.set_verify_command(&path, None).await?;
                     println!("verify_command cleared for {path}");
                 }
