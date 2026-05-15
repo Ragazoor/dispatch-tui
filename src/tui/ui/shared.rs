@@ -167,6 +167,16 @@ pub(in crate::tui::ui) fn render_tab_bar(frame: &mut Frame, app: &App, area: Rec
                 ("manual dispatch [U]  ", Style::default().fg(MUTED))
             };
             right_parts.push(Span::styled(label, style));
+
+            // Group-by-repo indicator — only for feed epics
+            if epic.feed_command.is_some() {
+                let (label, style) = if epic.group_by_repo {
+                    ("group:on [R]  ", Style::default().fg(Color::Green))
+                } else {
+                    ("group:off [R]  ", Style::default().fg(MUTED))
+                };
+                right_parts.push(Span::styled(label, style));
+            }
         }
     }
     if !app.repo_filter().is_empty() {

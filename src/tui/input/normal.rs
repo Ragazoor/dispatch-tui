@@ -409,6 +409,17 @@ impl App {
                 }
             }
 
+            KeyCode::Char('R') => {
+                if let ViewMode::Epic { epic_id, .. } = &self.board.view_mode {
+                    let id = *epic_id;
+                    self.update(Message::Epic(
+                        crate::tui::messages::EpicMessage::ToggleGroupByRepo(id),
+                    ))
+                } else {
+                    vec![]
+                }
+            }
+
             KeyCode::Char('F') => self.update(Message::Task(
                 crate::tui::messages::TaskMessage::ToggleFlattened,
             )),

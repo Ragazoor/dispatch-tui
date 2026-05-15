@@ -111,6 +111,21 @@ impl App {
         }
     }
 
+    pub(in crate::tui) fn handle_toggle_epic_group_by_repo(&mut self, id: EpicId) -> Vec<Command> {
+        if let Some(epic) = self.board.epics.iter_mut().find(|e| e.id == id) {
+            let new_val = !epic.group_by_repo;
+            epic.group_by_repo = new_val;
+            vec![Command::Epic(
+                crate::tui::commands::EpicCommand::ToggleGroupByRepo {
+                    id,
+                    group_by_repo: new_val,
+                },
+            )]
+        } else {
+            vec![]
+        }
+    }
+
     pub(in crate::tui) fn handle_batch_move_tasks(
         &mut self,
         ids: Vec<TaskId>,

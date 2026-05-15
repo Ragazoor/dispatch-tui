@@ -109,6 +109,36 @@ impl TuiRuntime {
         }
     }
 
+    pub(super) async fn exec_toggle_epic_group_by_repo(
+        &self,
+        app: &mut App,
+        id: models::EpicId,
+        group_by_repo: bool,
+    ) {
+        if let Err(e) = self
+            .epic_svc
+            .update_epic(crate::service::UpdateEpicParams {
+                epic_id: id,
+                title: None,
+                description: None,
+                status: None,
+                plan_path: None,
+                sort_order: None,
+                repo_path: None,
+                auto_dispatch: None,
+                feed_command: None,
+                feed_interval_secs: None,
+                project_id: None,
+                group_by_repo: Some(group_by_repo),
+            })
+            .await
+        {
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                Self::db_error("toggling group by repo", e),
+            )));
+        }
+    }
+
     pub(super) async fn exec_refresh_epics_from_db(&self, app: &mut App) {
         match self.database.list_epics().await {
             Ok(epics) => {

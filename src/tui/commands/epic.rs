@@ -24,5 +24,9 @@ pub enum EpicCommand {
         id: EpicId,
         auto_dispatch: bool,
     },
+    ToggleGroupByRepo {
+        id: EpicId,
+        group_by_repo: bool,
+    },
     RefreshFromDb,
 }

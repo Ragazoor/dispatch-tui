@@ -20,6 +20,7 @@ pub enum EpicMessage {
     Edited(Epic),
     Delete(EpicId),
     ToggleAutoDispatch(EpicId),
+    ToggleGroupByRepo(EpicId),
     ConfirmDelete,
     MoveStatus(EpicId, MoveDirection),
     Archive(EpicId),

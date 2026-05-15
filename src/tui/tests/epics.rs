@@ -2630,3 +2630,83 @@ fn flat_view_backlog_no_substatus_labels() {
         "Backlog column must not contain SubstatusLabel items"
     );
 }
+
+#[test]
+fn shift_r_in_epic_view_toggles_group_by_repo() {
+    let mut app = App::new(vec![], ProjectId(1));
+    let mut epic = make_epic(42);
+    epic.group_by_repo = false;
+    app.board.epics = vec![epic];
+
+    // Enter epic view
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        EpicId(42),
+    )));
+
+    // Press Shift+R — should return ToggleGroupByRepo command with group_by_repo = true
+    let cmds = app.handle_key(make_key(KeyCode::Char('R')));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Epic(crate::tui::commands::EpicCommand::ToggleGroupByRepo {
+            id: EpicId(42),
+            group_by_repo: true
+        })
+    )));
+
+    // Also verify in-memory state was updated
+    assert!(app.board.epics[0].group_by_repo);
+}
+
+#[test]
+fn epic_view_header_shows_group_by_repo_on_for_feed_epic() {
+    let mut app = App::new(vec![], ProjectId(1));
+    let mut epic = make_epic(1);
+    epic.feed_command = Some("echo '[]'".to_string());
+    epic.group_by_repo = true;
+    app.board.epics = vec![epic];
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        EpicId(1),
+    )));
+
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "group:on [R]"),
+        "Expected 'group:on [R]' in header for feed epic with group_by_repo=true"
+    );
+}
+
+#[test]
+fn epic_view_header_shows_group_by_repo_off_for_feed_epic() {
+    let mut app = App::new(vec![], ProjectId(1));
+    let mut epic = make_epic(1);
+    epic.feed_command = Some("echo '[]'".to_string());
+    epic.group_by_repo = false;
+    app.board.epics = vec![epic];
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        EpicId(1),
+    )));
+
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "group:off [R]"),
+        "Expected 'group:off [R]' in header for feed epic with group_by_repo=false"
+    );
+}
+
+#[test]
+fn epic_view_header_does_not_show_group_indicator_for_non_feed_epic() {
+    let mut app = App::new(vec![], ProjectId(1));
+    let mut epic = make_epic(1);
+    epic.feed_command = None;
+    epic.group_by_repo = false;
+    app.board.epics = vec![epic];
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        EpicId(1),
+    )));
+
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        !buffer_contains(&buf, "group:"),
+        "Expected no 'group:' indicator in header for non-feed epic"
+    );
+}

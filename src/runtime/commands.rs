@@ -258,6 +258,10 @@ async fn dispatch_epic(
             rt.exec_toggle_epic_auto_dispatch(app, id, auto_dispatch)
                 .await
         }
+        ToggleGroupByRepo { id, group_by_repo } => {
+            rt.exec_toggle_epic_group_by_repo(app, id, group_by_repo)
+                .await
+        }
         RefreshFromDb => rt.exec_refresh_epics_from_db(app).await,
     }
 }

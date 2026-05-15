@@ -85,6 +85,7 @@ fn dispatch_epic(app: &mut App, msg: EpicMessage) -> Vec<Command> {
         EpicMessage::Edited(epic) => app.handle_epic_edited(epic),
         EpicMessage::Delete(id) => app.handle_delete_epic(id),
         EpicMessage::ToggleAutoDispatch(id) => app.handle_toggle_epic_auto_dispatch(id),
+        EpicMessage::ToggleGroupByRepo(id) => app.handle_toggle_epic_group_by_repo(id),
         EpicMessage::ConfirmDelete => app.handle_confirm_delete_epic(),
         EpicMessage::MoveStatus(id, dir) => app.handle_move_epic_status(id, dir),
         EpicMessage::Archive(id) => app.handle_archive_epic(id),
