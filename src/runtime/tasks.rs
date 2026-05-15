@@ -71,14 +71,8 @@ impl TuiRuntime {
         let project_ctx = dispatch::ProjectContext::from_db(&task, &*self.database).await;
         let (procedural, tiered) =
             dispatch::build_and_record_injections(&*self.database, &task).await;
-        let verify_command = self
-            .database
-            .get_verify_command(&task.repo_path)
-            .await
-            .unwrap_or_else(|e| {
-                tracing::warn!(error = %e, "failed to load verify_command; proceeding without it");
-                None
-            });
+        let verify_command =
+            dispatch::fetch_verify_command(&*self.database, &task.repo_path).await;
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
         tokio::task::spawn_blocking(move || {
@@ -193,14 +187,8 @@ impl TuiRuntime {
         let project_ctx = dispatch::ProjectContext::from_db(&task, &*self.database).await;
         let (procedural, tiered) =
             dispatch::build_and_record_injections(&*self.database, &task).await;
-        let verify_command = self
-            .database
-            .get_verify_command(&task.repo_path)
-            .await
-            .unwrap_or_else(|e| {
-                tracing::warn!(error = %e, "failed to load verify_command; proceeding without it");
-                None
-            });
+        let verify_command =
+            dispatch::fetch_verify_command(&*self.database, &task.repo_path).await;
         let label = mode.label();
         self.spawn_dispatch(
             task,

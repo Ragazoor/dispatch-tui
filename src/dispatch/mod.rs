@@ -10,7 +10,8 @@ pub mod repo_map;
 mod worktree;
 
 pub use agents::{
-    create_main_session, dispatch_agent, epic_planning_agent, is_wrappable, quick_dispatch_agent,
+    create_main_session, dependabot_review_agent, dispatch_agent, epic_planning_agent,
+    fetch_verify_command, fix_task_agent, is_wrappable, pr_review_agent, quick_dispatch_agent,
     research_agent, resume_agent,
 };
 pub use finish::{finish_task, FinishError};

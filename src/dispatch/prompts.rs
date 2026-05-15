@@ -238,9 +238,9 @@ not a source of truth.\n\n\
     )
 }
 
-/// Render the tiered-knowledge block placed between the task block and the
-/// addendum in a dispatch prompt. Returns an empty string when `picked` is
-/// empty so existing prompts are byte-identical when no learnings are injected.
+/// Render the verification section injected between the repo-map and the
+/// mode-specific addendum. Returns an empty string when `cmd` is `None` so
+/// prompts are byte-identical when no verify command is configured.
 fn render_verification(cmd: Option<&str>) -> String {
     match cmd {
         None => String::new(),
@@ -256,6 +256,9 @@ fn render_verification(cmd: Option<&str>) -> String {
     }
 }
 
+/// Render the tiered-knowledge block placed between the task block and the
+/// addendum in a dispatch prompt. Returns an empty string when `picked` is
+/// empty so existing prompts are byte-identical when no learnings are injected.
 pub(super) fn render_validated_knowledge_block(picked: &[&Learning]) -> String {
     if picked.is_empty() {
         return String::new();
@@ -412,16 +415,120 @@ Then write a focused plan before making any changes:\n\
     let proc_prefix = render_procedural_prefix(&ctx.learnings.procedural);
     let knowledge = render_validated_knowledge_block(&ctx.learnings.tiered);
     let repo_map = render_repo_map(ctx.repo_map.as_deref());
+    let verify = render_verification(ctx.verify_command.as_deref());
 
     format!(
         "{proc_prefix}You are working interactively with the user.\n\
 \n\
 {block}\n\
 \n\
-{knowledge}{repo_map}{addendum}\n\
+{knowledge}{repo_map}{verify}{addendum}\n\
 \n\
 {trailing}",
         trailing = trailing_block(),
+    )
+}
+
+pub(super) fn build_pr_review_prompt(
+    task_id: TaskId,
+    title: &str,
+    description: &str,
+    epic: Option<&EpicContext>,
+    project: Option<&ProjectContext>,
+    ctx: &PromptContext<'_>,
+) -> String {
+    let block = task_block(task_id, title, description, epic, project);
+    let repo_map = render_repo_map(ctx.repo_map.as_deref());
+    let verify = render_verification(ctx.verify_command.as_deref());
+
+    format!(
+        "You are a PR reviewer.\n\
+\n\
+{block}\n\
+\n\
+{repo_map}{verify}1. Extract the PR URL or number from the task description.\n\
+2. Run `gh pr diff <number> | wc -l` to assess the diff size.\n\
+3. Run `/anthropic-review-pr:review-pr <number>` to perform a comprehensive review. \
+This skill orchestrates security, code-quality, test-coverage, performance, and documentation \
+sub-reviewers. The number of sub-reviewers launched scales with the diff size.\n\
+4. When the review is complete, call wrap_up to finish this task.\n\
+\n\
+Do NOT make code changes. Your job is to review, not to implement.\n\
+\n\
+{mcp}",
+        block = block,
+        mcp = mcp_tools_instruction(),
+    )
+}
+
+pub(super) fn build_dependabot_review_prompt(
+    task_id: TaskId,
+    title: &str,
+    description: &str,
+    epic: Option<&EpicContext>,
+    project: Option<&ProjectContext>,
+    ctx: &PromptContext<'_>,
+) -> String {
+    let block = task_block(task_id, title, description, epic, project);
+    let repo_map = render_repo_map(ctx.repo_map.as_deref());
+    let verify = render_verification(ctx.verify_command.as_deref());
+
+    format!(
+        "You are a Dependabot triage agent.\n\
+\n\
+{block}\n\
+\n\
+{repo_map}{verify}Your job: vet this dependency-bump PR and either auto-merge it (if \
+clearly safe) or ask the user a specific question (if not).\n\
+\n\
+1. Extract the PR URL and number from the task description.\n\
+2. If the task's pr_url is empty, call update_task(task_id={tid}, pr_url=<URL>).\n\
+3. Verify the PR is dependency-bump-only:\n\
+   - Run: gh pr view <number> --repo <owner/repo> --json author,commits,files\n\
+   - Every commit author login must be `app/dependabot` or `dependabot[bot]`.\n\
+   - Every changed file path must match one of: Cargo.toml, Cargo.lock, \
+package.json, package-lock.json, pnpm-lock.yaml, yarn.lock, requirements*.txt, \
+pyproject.toml, uv.lock, go.mod, go.sum, Gemfile, Gemfile.lock, composer.json, \
+composer.lock, .github/workflows/*.\n\
+   - If either check fails, jump to step 8 and ASK the user.\n\
+4. Parse the bump from the PR title (format: `Bump <pkg> from <X.Y.Z> to <A.B.C>`). \
+Classify as patch / minor / major using semver.\n\
+   - 0.x.y bumps: treat `0.X.y -> 0.X.(y+1)` as patch and `0.X.* -> 0.(X+1).*` \
+as major (0.x is unstable; minor in 0.x can break).\n\
+5. Check CI: gh pr checks <number> --repo <owner/repo>.\n\
+   - All checks passing -> continue to step 6.\n\
+   - Any check pending -> jump to step 8 and ASK whether to wait.\n\
+   - Any check failing -> jump to step 8 and ASK with the failure summary.\n\
+6. Decide by bump kind:\n\
+   - patch: auto-merge (step 7).\n\
+   - minor: try to find the changelog, in order:\n\
+       a. gh release view v<A.B.C> --repo <pkg-owner/pkg-repo> (and any \
+intermediate tags between <X.Y.Z> and <A.B.C>).\n\
+       b. The package repo's CHANGELOG.md between the two versions.\n\
+       c. The GitHub compare view if neither exists.\n\
+     Scan release notes for tokens (case-insensitive): BREAKING, breaking \
+change, removed, deprecat, incompatible, migration, major rewrite.\n\
+     - Changelog found AND no tokens matched -> auto-merge (step 7).\n\
+     - No changelog found OR any token matched -> jump to step 8.\n\
+   - major: jump to step 8 (always ASK).\n\
+7. Auto-merge:\n\
+   - gh pr review <number> --repo <owner/repo> --approve --body \"Auto-approved \
+by dispatch dependabot agent: <patch|minor> bump, CI green, dep-only, \
+changelog OK.\"\n\
+   - gh pr merge <number> --repo <owner/repo> --squash --auto\n\
+   - Note: --auto requires the repo to have branch protection with required \
+checks; without it, the PR merges immediately. If you see a warning to that \
+effect, surface it in the wrap-up message.\n\
+   - Then call wrap_up to finish this task.\n\
+8. Ask the user:\n\
+   - Write ONE direct question to the user that includes: the bump kind, \
+the dep-only verdict, CI status summary, changelog summary or its absence, \
+and the specific reason you are not auto-merging.\n\
+   - Stop and wait for the user's reply.\n\
+\n\
+{mcp}",
+        tid = task_id.0,
+        mcp = mcp_tools_instruction(),
     )
 }
 
@@ -435,13 +542,14 @@ pub(super) fn build_research_prompt(
 ) -> String {
     let block = task_block(task_id, title, description, epic, project);
     let repo_map = render_repo_map(ctx.repo_map.as_deref());
+    let verify = render_verification(ctx.verify_command.as_deref());
 
     format!(
         "You are a research agent.\n\
 \n\
 {block}\n\
 \n\
-{repo_map}Investigate the topic described above. You may read the codebase, documentation, and \
+{repo_map}{verify}Investigate the topic described above. You may read the codebase, documentation, and \
 external resources.\n\
 \n\
 When you have gathered sufficient information, present your findings clearly to the user \
@@ -453,6 +561,51 @@ Do NOT make code changes.\n\
 {mcp}",
         block = block,
         mcp = mcp_tools_instruction(),
+    )
+}
+
+pub(super) fn build_fix_task_prompt(
+    task_id: TaskId,
+    title: &str,
+    description: &str,
+    epic: Option<&EpicContext>,
+    project: Option<&ProjectContext>,
+    ctx: &PromptContext<'_>,
+) -> String {
+    let block = task_block(task_id, title, description, epic, project);
+    let repo_map = render_repo_map(ctx.repo_map.as_deref());
+    let verify = render_verification(ctx.verify_command.as_deref());
+
+    format!(
+        "You are a security fix agent.\n\
+\n\
+{block}\n\
+\n\
+{repo_map}{verify}Research the CVE or vulnerability described above, then apply a minimal targeted fix.\n\
+\n\
+TDD approach:\n\
+  1. Write a failing test that reproduces the vulnerability (if feasible)\n\
+  2. Apply the minimal fix to make the test pass\n\
+  3. Run the full test suite to verify nothing else breaks\n\
+  4. Commit and open a PR: gh pr create\n\
+\n\
+Focus on the smallest safe change. Avoid broad refactors.\n\
+\n\
+{tdd}\n\
+\n\
+{allium}\n\
+\n\
+{learning}\n\
+\n\
+{mcp}\n\
+\n\
+{wrap_up}",
+        block = block,
+        tdd = tdd_instruction(),
+        allium = allium_instruction(),
+        learning = learning_tools_instruction(),
+        mcp = mcp_tools_instruction(),
+        wrap_up = wrap_up_instruction(),
     )
 }
 
@@ -1160,7 +1313,7 @@ mod tests {
         let ctx = PromptContext::default();
         let text = build_prompt(TaskId(1), "t", "d", None, None, None, &ctx);
         assert!(!text.contains("## Verification"));
-        assert!(!text.contains("Verify before"));
+        assert!(!text.contains("Before declaring work complete"));
     }
 
     #[test]
@@ -1173,5 +1326,37 @@ mod tests {
         let task_idx = text.find("Your task is:").unwrap();
         let verify_idx = text.find("## Verification").unwrap();
         assert!(task_idx < verify_idx, "verification must come after task block");
+    }
+
+    #[test]
+    fn build_quick_dispatch_prompt_includes_verification_section_when_configured() {
+        let ctx = PromptContext {
+            verify_command: Some("cargo test".to_string()),
+            ..PromptContext::default()
+        };
+        let text = build_quick_dispatch_prompt(TaskId(1), "t", "d", None, None, &ctx);
+        assert!(
+            text.contains("## Verification"),
+            "quick dispatch prompt must include verification section when verify_command is set"
+        );
+        assert!(
+            text.contains("Before declaring work complete"),
+            "verification instruction must be present"
+        );
+        assert!(
+            text.contains("````\ncargo test\n````"),
+            "command must appear inside a 4-backtick fence"
+        );
+    }
+
+    #[test]
+    fn build_quick_dispatch_prompt_omits_verification_section_when_none() {
+        let ctx = PromptContext::default();
+        let text = build_quick_dispatch_prompt(TaskId(1), "t", "d", None, None, &ctx);
+        assert!(
+            !text.contains("## Verification"),
+            "quick dispatch prompt must not include verification section when verify_command is None"
+        );
+        assert!(!text.contains("Before declaring work complete"));
     }
 }

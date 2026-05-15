@@ -965,13 +965,8 @@ pub(super) async fn handle_dispatch_next(
     let notify_tx = state.notify_tx.clone();
 
     let (procedural, tiered) = dispatch::build_and_record_injections(&*db, &next_task).await;
-    let verify_command = db
-        .get_verify_command(&next_task.repo_path)
-        .await
-        .unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "failed to load verify_command; proceeding without it");
-            None
-        });
+    let verify_command =
+        dispatch::fetch_verify_command(&*db, &next_task.repo_path).await;
 
     tokio::spawn(async move {
         let next_task_for_blocking = next_task.clone();
@@ -1084,13 +1079,7 @@ pub(super) async fn handle_dispatch_task(
     let epic_id = task.epic_id;
 
     let (procedural, tiered) = dispatch::build_and_record_injections(&*db, &task).await;
-    let verify_command = db
-        .get_verify_command(&task.repo_path)
-        .await
-        .unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "failed to load verify_command; proceeding without it");
-            None
-        });
+    let verify_command = dispatch::fetch_verify_command(&*db, &task.repo_path).await;
     let result = tokio::task::spawn_blocking(move || {
         do_dispatch(
             &task,

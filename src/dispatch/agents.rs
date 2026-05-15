@@ -274,6 +274,22 @@ pub fn epic_planning_agent(
     )
 }
 
+/// Fetch the verify command for a repository path from the settings store.
+///
+/// Logs a warning and returns `None` if the DB lookup fails so callers can
+/// proceed without a verify command rather than aborting dispatch.
+pub async fn fetch_verify_command(
+    db: &dyn crate::db::TaskStore,
+    repo_path: &str,
+) -> Option<String> {
+    db.get_verify_command(repo_path)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "failed to load verify_command; proceeding without it");
+            None
+        })
+}
+
 /// Re-borrow `LearningInjections` into a `PromptContext` carrying the
 /// generated repo map. Inner `Vec<&Learning>` clones are cheap (pointer +
 /// length copies) and let the agent functions keep their callers' lifetime.
