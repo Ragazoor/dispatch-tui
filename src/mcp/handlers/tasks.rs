@@ -727,10 +727,17 @@ pub(super) async fn handle_wrap_up(
     match rebase_result {
         Ok(()) => {
             state.notify_task_changed(task_id);
+            let verify_line =
+                match state.db.get_verify_command(&task.repo_path).await.unwrap_or(None) {
+                    Some(cmd) => format!(
+                        " **Verify before exiting**: run `{cmd}` in your worktree and confirm it passes."
+                    ),
+                    None => String::new(),
+                };
             JsonRpcResponse::ok(
                 id,
                 json!({"content": [{"type": "text", "text": format!(
-                    "wrap_up complete (task {}, action: rebase). The session is NOT yet closed. \
+                    "wrap_up complete (task {}, action: rebase). The session is NOT yet closed.{verify_line} \
                 You MUST call `exit_session` next as your final action — without it, the tmux window stays alive \
                 and the task remains in its current status. Do not stop, and do not call any other tool first.",
                     parsed.task_id

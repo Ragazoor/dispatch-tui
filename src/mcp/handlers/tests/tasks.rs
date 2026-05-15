@@ -2698,6 +2698,69 @@ async fn wrap_up_rejects_unknown_verdict_string() {
 }
 
 // ---------------------------------------------------------------------------
+// wrap_up verify reminder tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn wrap_up_success_includes_verify_reminder_when_configured() {
+    let (state, db) = make_state_with_runner(rebase_ok_runner()).await;
+    let task_id = create_wrappable_task(&db).await;
+    db.set_verify_command("/repo", Some("cargo test"))
+        .await
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "wrap_up",
+            "arguments": { "task_id": task_id.0, "action": "rebase" }
+        })),
+    )
+    .await;
+
+    let text = extract_response_text(&resp);
+    assert!(
+        text.contains("Verify before exiting"),
+        "Expected 'Verify before exiting' in response, got: {text}"
+    );
+    assert!(
+        text.contains("cargo test"),
+        "Expected 'cargo test' in response, got: {text}"
+    );
+    assert!(
+        text.contains("exit_session"),
+        "Expected 'exit_session' in response, got: {text}"
+    );
+}
+
+#[tokio::test]
+async fn wrap_up_success_unchanged_when_unconfigured() {
+    let (state, db) = make_state_with_runner(rebase_ok_runner()).await;
+    let task_id = create_wrappable_task(&db).await;
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "wrap_up",
+            "arguments": { "task_id": task_id.0, "action": "rebase" }
+        })),
+    )
+    .await;
+
+    let text = extract_response_text(&resp);
+    assert!(
+        !text.contains("Verify before"),
+        "Expected no 'Verify before' in unconfigured response, got: {text}"
+    );
+    assert!(
+        text.contains("exit_session"),
+        "Expected 'exit_session' in response, got: {text}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // sub_status tests
 // ---------------------------------------------------------------------------
 
