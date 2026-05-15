@@ -59,7 +59,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (34, migrate_v34_add_parent_epic_id),
     (35, migrate_v35_add_self_ref_check),
     (36, migrate_v36_tips_state),
-    (37, migrate_v37_pr_workflow_states),
+    (37, migrate_v37_pr_workflow_states), // pr_workflow_states created here — superseded by v51 drop
     (38, migrate_v38_feed_epic_columns),
     (39, migrate_v39_add_projects),
     (40, migrate_v40_create_learnings),
@@ -73,7 +73,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (48, migrate_v48_learning_validation),
     (49, migrate_v49_rename_confirmed_to_upvote),
     (50, migrate_v50_add_hook_timestamps),
-    (51, migrate_v51_drop_pr_workflow_states),
+    (51, migrate_v51_drop_pr_workflow_states), // drops pr_workflow_states created in v37
 ];
 
 fn migrate_v1_add_plan_column(conn: &Connection) -> Result<()> {
