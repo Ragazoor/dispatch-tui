@@ -1,7 +1,7 @@
 //! Task wrap-up and finish handlers (rebase + cleanup, PR creation flow).
 
 use crate::dispatch;
-use crate::models::{SubStatus, TaskId, TaskStatus, WrapUpMode};
+use crate::models::{SubStatus, TaskId, TaskStatus};
 
 use super::super::types::*;
 use super::super::App;
@@ -147,7 +147,7 @@ impl App {
         self.input.mode = InputMode::Normal;
         if let Some(task) = self.find_task_mut(id) {
             task.status = TaskStatus::Done;
-            task.sub_status = SubStatus::None;
+            task.sub_status = SubStatus::default_for(TaskStatus::Done);
             let task_clone = task.clone();
             self.clear_agent_tracking(id);
             self.sync_board_selection();

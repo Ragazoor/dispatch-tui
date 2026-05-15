@@ -236,29 +236,14 @@ pub(in crate::tui) fn input_wrap_up_mode_lines(
     active: Style,
     hint: Style,
 ) -> Vec<Line<'static>> {
-    let title = app
-        .input
-        .task_draft
-        .as_ref()
-        .map(|d| d.title.clone())
-        .unwrap_or_default();
-    let tag = app
-        .input
-        .task_draft
-        .as_ref()
+    let draft = app.input.task_draft.as_ref();
+    let title = draft.map(|d| d.title.clone()).unwrap_or_default();
+    let tag = draft
         .and_then(|d| d.tag.as_ref())
         .map(|t| t.to_string())
         .unwrap_or_else(|| "none".to_string());
-    let repo_path = app
-        .input
-        .task_draft
-        .as_ref()
-        .map(|d| d.repo_path.clone())
-        .unwrap_or_default();
-    let base_branch = app
-        .input
-        .task_draft
-        .as_ref()
+    let repo_path = draft.map(|d| d.repo_path.clone()).unwrap_or_default();
+    let base_branch = draft
         .map(|d| d.base_branch.clone())
         .unwrap_or_else(|| "main".to_string());
     vec![
@@ -274,7 +259,7 @@ pub(in crate::tui) fn input_wrap_up_mode_lines(
             active,
         )),
         Line::from(""),
-        Line::from(Span::styled("  [Enter] skip  [Esc] cancel", hint)),
+        Line::from(Span::styled("  [Esc] cancel", hint)),
     ]
 }
 

@@ -2223,6 +2223,7 @@ fn wrap_up_mode_p_selects_pr_and_creates_task() {
             Command::Task(crate::tui::commands::TaskCommand::Insert { .. })
         )
     });
+    assert!(insert_cmd.is_some(), "expected Insert command, got {:?}", cmds);
     if let Some(Command::Task(crate::tui::commands::TaskCommand::Insert { draft, .. })) =
         insert_cmd
     {
@@ -2254,6 +2255,7 @@ fn wrap_up_mode_d_selects_done_and_creates_task() {
             Command::Task(crate::tui::commands::TaskCommand::Insert { .. })
         )
     });
+    assert!(insert_cmd.is_some(), "expected Insert command, got {:?}", cmds);
     if let Some(Command::Task(crate::tui::commands::TaskCommand::Insert { draft, .. })) =
         insert_cmd
     {

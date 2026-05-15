@@ -164,14 +164,11 @@ fn parse_sub_status_or_warn(raw: Option<String>) -> SubStatus {
 
 fn parse_wrap_up_mode_or_warn(raw: Option<String>) -> Option<WrapUpMode> {
     let s = raw?;
-    match WrapUpMode::parse(&s) {
-        Some(v) => Some(v),
-        None => {
-            let count = bump_decode_fallback();
-            tracing::warn!(raw = %s, count, "unrecognised wrap_up_mode, dropping");
-            None
-        }
-    }
+    WrapUpMode::parse(&s).or_else(|| {
+        let count = bump_decode_fallback();
+        tracing::warn!(raw = %s, count, "unrecognised wrap_up_mode, dropping");
+        None
+    })
 }
 
 fn parse_tag_or_warn(raw: Option<String>) -> Option<TaskTag> {
