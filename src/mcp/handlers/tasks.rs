@@ -873,13 +873,6 @@ fn do_dispatch(
             &injections,
             verify_command.as_deref(),
         ),
-        DispatchMode::PrReview => dispatch::pr_review_agent(
-            task,
-            runner,
-            epic_ctx.as_ref(),
-            Some(&project_ctx),
-            verify_command.as_deref(),
-        ),
         DispatchMode::Research => dispatch::research_agent(
             task,
             runner,
@@ -887,23 +880,6 @@ fn do_dispatch(
             Some(&project_ctx),
             verify_command.as_deref(),
         ),
-        DispatchMode::Fix => dispatch::fix_task_agent(
-            task,
-            runner,
-            epic_ctx.as_ref(),
-            Some(&project_ctx),
-            verify_command.as_deref(),
-        ),
-        DispatchMode::Dependabot => dispatch::dependabot_review_agent(
-            task,
-            runner,
-            epic_ctx.as_ref(),
-            Some(&project_ctx),
-            verify_command.as_deref(),
-        ),
-        DispatchMode::Research => {
-            dispatch::research_agent(task, runner, epic_ctx.as_ref(), Some(&project_ctx))
-        }
     }
 }
 
