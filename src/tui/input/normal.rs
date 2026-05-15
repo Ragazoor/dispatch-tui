@@ -320,7 +320,7 @@ impl App {
                     return self.update(Message::SelectAllColumn);
                 }
                 if let Some(task) = self.selected_task() {
-                    let id = task.id.0;
+                    let id = task.id;
                     return self.update(Message::Task(
                         crate::tui::messages::TaskMessage::OpenDetail(id),
                     ));

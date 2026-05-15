@@ -214,7 +214,7 @@ impl App {
         cmds
     }
 
-    pub(in crate::tui) fn handle_open_task_detail(&mut self, task_id: i64) -> Vec<Command> {
+    pub(in crate::tui) fn handle_open_task_detail(&mut self, task_id: TaskId) -> Vec<Command> {
         let previous = Box::new(self.board.view_mode.clone());
         self.board.view_mode = ViewMode::TaskDetail {
             task_id,

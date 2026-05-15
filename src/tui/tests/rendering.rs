@@ -361,7 +361,7 @@ async fn render_task_detail_overlay_shows_metadata() {
     // Placeholder: verify that opening the overlay does not crash the renderer.
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1));
     app.update(Message::Task(
-        crate::tui::messages::TaskMessage::OpenDetail(1),
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
     ));
     let _buf = render_to_buffer(&mut app, 120, 20);
 }
@@ -1064,7 +1064,7 @@ async fn render_detail_shows_sub_status() {
     // The old detail panel is replaced by the TaskDetail overlay (Task 6).
     // Placeholder: verify that the overlay renderer does not crash.
     app.update(Message::Task(
-        crate::tui::messages::TaskMessage::OpenDetail(1),
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
     ));
     let _buf = render_to_buffer(&mut app, 160, 30);
 }
@@ -1238,7 +1238,7 @@ async fn render_detail_task_with_tag_shows_tag() {
     let mut app = App::new(vec![task], ProjectId(1));
     // The old detail panel is replaced by the TaskDetail overlay (Task 6).
     app.update(Message::Task(
-        crate::tui::messages::TaskMessage::OpenDetail(1),
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
     ));
     let _buf = render_to_buffer(&mut app, 120, 30);
 }
@@ -1252,7 +1252,7 @@ async fn render_detail_task_with_pr_url() {
     app.update(Message::NavigateColumn(2));
     // The old detail panel is replaced by the TaskDetail overlay (Task 6).
     app.update(Message::Task(
-        crate::tui::messages::TaskMessage::OpenDetail(1),
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
     ));
     let _buf = render_to_buffer(&mut app, 160, 30);
 }

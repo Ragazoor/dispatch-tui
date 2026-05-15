@@ -1,5 +1,5 @@
 use super::*;
-use crate::models::TaskStatus;
+use crate::models::{TaskId, TaskStatus};
 use crate::tui::{Message, ViewMode};
 use crossterm::event::KeyCode;
 
@@ -24,11 +24,11 @@ fn make_app_with_task() -> App {
 fn open_task_detail_from_board_transitions_view_mode() {
     let mut app = make_app_with_task();
     app.update(Message::Task(
-        crate::tui::messages::TaskMessage::OpenDetail(1),
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
     ));
     assert!(
         matches!(&app.board.view_mode, ViewMode::TaskDetail { task_id, scroll, zoomed, .. }
-            if *task_id == 1 && *scroll == 0 && !zoomed)
+            if *task_id == TaskId(1) && *scroll == 0 && !zoomed)
     );
 }
 
@@ -36,7 +36,7 @@ fn open_task_detail_from_board_transitions_view_mode() {
 fn open_task_detail_stores_previous_board_mode() {
     let mut app = make_app_with_task();
     app.update(Message::Task(
-        crate::tui::messages::TaskMessage::OpenDetail(1),
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
     ));
     assert!(matches!(
         &app.board.view_mode,
@@ -48,7 +48,7 @@ fn open_task_detail_stores_previous_board_mode() {
 fn close_task_detail_restores_board_mode() {
     let mut app = make_app_with_task();
     app.update(Message::Task(
-        crate::tui::messages::TaskMessage::OpenDetail(1),
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
     ));
     app.update(Message::Task(
         crate::tui::messages::TaskMessage::CloseDetail,
@@ -65,7 +65,7 @@ fn open_task_detail_from_epic_stores_epic_mode() {
         parent: Box::new(ViewMode::Board(crate::tui::BoardSelection::new_for_board())),
     };
     app.update(Message::Task(
-        crate::tui::messages::TaskMessage::OpenDetail(99),
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(99)),
     ));
     assert!(matches!(
         &app.board.view_mode,
@@ -82,7 +82,7 @@ fn close_task_detail_from_epic_restores_epic_mode() {
         parent: Box::new(ViewMode::Board(crate::tui::BoardSelection::new_for_board())),
     };
     app.update(Message::Task(
-        crate::tui::messages::TaskMessage::OpenDetail(99),
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(99)),
     ));
     app.update(Message::Task(
         crate::tui::messages::TaskMessage::CloseDetail,
@@ -96,7 +96,7 @@ fn close_task_detail_from_epic_restores_epic_mode() {
 fn j_key_increments_scroll_in_task_detail() {
     let mut app = make_app_with_task();
     app.update(Message::Task(
-        crate::tui::messages::TaskMessage::OpenDetail(1),
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
     ));
     if let ViewMode::TaskDetail {
         ref mut max_scroll, ..
@@ -112,7 +112,7 @@ fn j_key_increments_scroll_in_task_detail() {
 fn k_key_at_zero_stays_at_zero() {
     let mut app = make_app_with_task();
     app.update(Message::Task(
-        crate::tui::messages::TaskMessage::OpenDetail(1),
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
     ));
     app.handle_key(make_key(KeyCode::Char('k')));
     assert!(matches!(&app.board.view_mode, ViewMode::TaskDetail { scroll, .. } if *scroll == 0));
@@ -122,7 +122,7 @@ fn k_key_at_zero_stays_at_zero() {
 fn j_key_clamped_at_max_scroll() {
     let mut app = make_app_with_task();
     app.update(Message::Task(
-        crate::tui::messages::TaskMessage::OpenDetail(1),
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
     ));
     if let ViewMode::TaskDetail {
         ref mut scroll,
@@ -141,7 +141,7 @@ fn j_key_clamped_at_max_scroll() {
 fn down_key_increments_scroll() {
     let mut app = make_app_with_task();
     app.update(Message::Task(
-        crate::tui::messages::TaskMessage::OpenDetail(1),
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
     ));
     if let ViewMode::TaskDetail {
         ref mut max_scroll, ..
@@ -157,7 +157,7 @@ fn down_key_increments_scroll() {
 fn k_key_decrements_scroll_from_nonzero() {
     let mut app = make_app_with_task();
     app.update(Message::Task(
-        crate::tui::messages::TaskMessage::OpenDetail(1),
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
     ));
     if let ViewMode::TaskDetail {
         ref mut scroll,
@@ -176,7 +176,7 @@ fn k_key_decrements_scroll_from_nonzero() {
 fn up_key_decrements_scroll() {
     let mut app = make_app_with_task();
     app.update(Message::Task(
-        crate::tui::messages::TaskMessage::OpenDetail(1),
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
     ));
     if let ViewMode::TaskDetail {
         ref mut scroll,
@@ -197,7 +197,7 @@ fn up_key_decrements_scroll() {
 fn z_key_toggles_zoomed_on() {
     let mut app = make_app_with_task();
     app.update(Message::Task(
-        crate::tui::messages::TaskMessage::OpenDetail(1),
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
     ));
     app.handle_key(make_key(KeyCode::Char('z')));
     assert!(matches!(&app.board.view_mode, ViewMode::TaskDetail { zoomed, .. } if *zoomed));
@@ -207,7 +207,7 @@ fn z_key_toggles_zoomed_on() {
 fn z_key_toggles_zoomed_off() {
     let mut app = make_app_with_task();
     app.update(Message::Task(
-        crate::tui::messages::TaskMessage::OpenDetail(1),
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
     ));
     app.handle_key(make_key(KeyCode::Char('z')));
     app.handle_key(make_key(KeyCode::Char('z')));
@@ -220,7 +220,7 @@ fn z_key_toggles_zoomed_off() {
 fn q_closes_task_detail() {
     let mut app = make_app_with_task();
     app.update(Message::Task(
-        crate::tui::messages::TaskMessage::OpenDetail(1),
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
     ));
     app.handle_key(make_key(KeyCode::Char('q')));
     assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
@@ -230,7 +230,7 @@ fn q_closes_task_detail() {
 fn esc_closes_task_detail() {
     let mut app = make_app_with_task();
     app.update(Message::Task(
-        crate::tui::messages::TaskMessage::OpenDetail(1),
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
     ));
     app.handle_key(make_key(KeyCode::Esc));
     assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
@@ -240,7 +240,7 @@ fn esc_closes_task_detail() {
 fn enter_closes_task_detail() {
     let mut app = make_app_with_task();
     app.update(Message::Task(
-        crate::tui::messages::TaskMessage::OpenDetail(1),
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
     ));
     app.handle_key(make_key(KeyCode::Enter));
     assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
@@ -252,7 +252,7 @@ fn enter_closes_task_detail() {
 fn n_key_is_inert_in_task_detail() {
     let mut app = make_app_with_task();
     app.update(Message::Task(
-        crate::tui::messages::TaskMessage::OpenDetail(1),
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
     ));
     app.handle_key(make_key(KeyCode::Char('n')));
     assert!(matches!(app.board.view_mode, ViewMode::TaskDetail { .. }));
@@ -263,7 +263,7 @@ fn n_key_is_inert_in_task_detail() {
 fn d_key_is_inert_in_task_detail() {
     let mut app = make_app_with_task();
     app.update(Message::Task(
-        crate::tui::messages::TaskMessage::OpenDetail(1),
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
     ));
     app.handle_key(make_key(KeyCode::Char('d')));
     assert!(matches!(app.board.view_mode, ViewMode::TaskDetail { .. }));
@@ -276,7 +276,7 @@ fn j_key_inert_when_no_description_and_max_scroll_zero() {
     let mut app = App::new(vec![], ProjectId(1));
     app.board.tasks.push(make_task(1, TaskStatus::Backlog)); // empty description
     app.update(Message::Task(
-        crate::tui::messages::TaskMessage::OpenDetail(1),
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
     ));
     // max_scroll defaults to 0
     app.handle_key(make_key(KeyCode::Char('j')));

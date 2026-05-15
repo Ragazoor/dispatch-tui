@@ -1186,7 +1186,7 @@ fn detail_panel_shows_pr_url() {
     }
     // The old detail panel is replaced by the TaskDetail overlay (Task 6).
     app.update(Message::Task(
-        crate::tui::messages::TaskMessage::OpenDetail(1),
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
     ));
     let _buf = render_to_buffer(&mut app, 200, 20);
 }

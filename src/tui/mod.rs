@@ -559,6 +559,10 @@ impl App {
     }
 
     /// Like `column_items_for_status` but uses pre-computed epic stats for sorting.
+    ///
+    /// Shares the epic filter+sort pipeline with [`Self::column_items_for_visual_column`]:
+    /// both apply view-mode epic filtering and sort by `(sort_order, id)`. This method
+    /// handles the flat-board layout; the visual-column path handles split-pane layout.
     pub fn column_items_for_status_with_stats<'a>(
         &'a self,
         status: TaskStatus,
@@ -731,6 +735,10 @@ impl App {
     /// Tasks are filtered by parent_status and sub_status matching the visual column.
     /// Running epics are placed in Active or Blocked based on their substatus;
     /// other epics appear in the first visual column of their parent status group.
+    ///
+    /// Shares the epic filter+sort pipeline with [`Self::column_items_for_status_with_stats`]:
+    /// both apply view-mode epic filtering and sort by `(sort_order, id)`. This method
+    /// handles the split-pane layout; the status-based path handles the flat-board layout.
     pub fn column_items_for_visual_column(&self, vcol_idx: usize) -> Vec<ColumnItem<'_>> {
         let vcol = &VisualColumn::ALL[vcol_idx];
         let tasks: Vec<&Task> = self

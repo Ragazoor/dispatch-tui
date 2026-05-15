@@ -28,7 +28,7 @@ pub(in crate::tui::ui::kanban) fn render_task_detail_overlay(
         _ => return,
     };
 
-    let Some(task) = app.board.tasks.iter().find(|t| t.id.0 == task_id).cloned() else {
+    let Some(task) = app.board.tasks.iter().find(|t| t.id == task_id).cloned() else {
         return;
     };
 

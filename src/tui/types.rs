@@ -692,7 +692,7 @@ pub enum ViewMode {
         parent: Box<ViewMode>,
     },
     TaskDetail {
-        task_id: i64,
+        task_id: TaskId,
         scroll: u16,
         zoomed: bool,
         /// Scroll limit — updated by the renderer each frame from the actual wrapped line count.

@@ -412,7 +412,7 @@ fn open_close_task_detail_via_messages() {
     let mut app = App::new(vec![], ProjectId(1));
     assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
     app.update(Message::Task(
-        crate::tui::messages::TaskMessage::OpenDetail(1),
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
     ));
     assert!(matches!(app.board.view_mode, ViewMode::TaskDetail { .. }));
     app.update(Message::Task(
@@ -892,7 +892,9 @@ fn enter_on_task_opens_task_detail() {
     app.selection_mut().set_row(1, 0);
     app.handle_key(make_key(KeyCode::Enter));
     // Should open task detail for the first task in Backlog column
-    assert!(matches!(app.board.view_mode, ViewMode::TaskDetail { task_id, .. } if task_id == 1));
+    assert!(
+        matches!(app.board.view_mode, ViewMode::TaskDetail { task_id, .. } if task_id == TaskId(1))
+    );
 }
 
 #[test]
@@ -1281,7 +1283,9 @@ fn handle_key_normal_enter_opens_task_detail() {
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 0);
     app.handle_key(make_key(KeyCode::Enter));
-    assert!(matches!(app.board.view_mode, ViewMode::TaskDetail { task_id, .. } if task_id == 1));
+    assert!(
+        matches!(app.board.view_mode, ViewMode::TaskDetail { task_id, .. } if task_id == TaskId(1))
+    );
 }
 
 #[test]

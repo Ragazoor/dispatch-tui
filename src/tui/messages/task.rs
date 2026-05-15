@@ -27,7 +27,7 @@ pub enum TaskMessage {
         task: Task,
     },
     Delete(TaskId),
-    OpenDetail(i64),
+    OpenDetail(TaskId),
     CloseDetail,
     ToggleFlattened,
     TmuxOutput {

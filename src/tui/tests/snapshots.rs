@@ -3,7 +3,7 @@ use ratatui::buffer::Buffer;
 
 use super::super::App;
 use super::{make_app, make_key, make_task, render_to_buffer};
-use crate::models::{ProjectId, TaskStatus};
+use crate::models::{ProjectId, TaskId, TaskStatus};
 use crossterm::event::KeyCode;
 
 fn buffer_to_string(buf: &Buffer) -> String {
@@ -331,7 +331,7 @@ fn snapshot_task_detail_overlay_peek() {
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
     app.board.tasks.push(task);
     app.update(Message::Task(
-        crate::tui::messages::TaskMessage::OpenDetail(1),
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
     ));
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);
@@ -346,7 +346,7 @@ fn snapshot_task_detail_overlay_zoomed() {
     task.repo_path = "/repo/my-project".to_string();
     app.board.tasks.push(task);
     app.update(Message::Task(
-        crate::tui::messages::TaskMessage::OpenDetail(1),
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
     ));
     if let ViewMode::TaskDetail { ref mut zoomed, .. } = app.board.view_mode {
         *zoomed = true;
@@ -365,7 +365,7 @@ fn snapshot_task_detail_overlay_empty_optional_fields() {
     // pr_url, plan_path, epic_id all None (default from make_task)
     app.board.tasks.push(task);
     app.update(Message::Task(
-        crate::tui::messages::TaskMessage::OpenDetail(1),
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
     ));
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);
