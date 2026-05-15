@@ -226,7 +226,7 @@ entity SavedRepoPath {
     verify_command: String?  -- single-line shell command run by agents before declaring work complete, e.g. "cargo test"
 
     invariant VerifyCommandSingleLine {
-        verify_command = null or not verify_command.contains("\n")
+        verify_command = null or not verify_command.contains("\n")  -- short-circuits: rhs only evaluated when verify_command != null
     }
 }
 

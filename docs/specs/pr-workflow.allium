@@ -227,6 +227,10 @@ rule WrapUpPr {
         -- both been removed. Rebase remains as a TUI/MCP path (see
         -- WrapUpRebase). The tmux window is preserved across PR
         -- creation so the agent can continue working (e.g., self-review).
+        --
+        -- The wrap_up success response (PR path) includes a "Verify before exiting: run `<c>`"
+        -- instruction when task.repo_path has verify_command = Some(c), appearing before the
+        -- PR creation instruction. When verify_command is null, the response is unchanged.
 }
 
 -- == Finish (Merge) ==
