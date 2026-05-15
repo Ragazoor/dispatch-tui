@@ -2290,6 +2290,24 @@ async fn migration_v45_is_idempotent() {
 }
 
 #[tokio::test]
+async fn migration_v52_is_idempotent() {
+    use rusqlite::Connection as RawConn;
+    let conn = RawConn::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE repo_paths (
+             id        INTEGER PRIMARY KEY,
+             path      TEXT NOT NULL UNIQUE,
+             last_used TEXT NOT NULL DEFAULT (datetime('now')),
+             verify_command TEXT
+         );",
+    )
+    .unwrap();
+
+    // Running the migration on a DB that already has the column must be a no-op.
+    crate::db::migrations::migrate_v52_add_verify_command_to_repo_paths(&conn).unwrap();
+}
+
+#[tokio::test]
 async fn migration_v52_adds_verify_command_to_repo_paths() {
     let temp = tempfile::NamedTempFile::new().unwrap();
     {
@@ -2303,6 +2321,19 @@ async fn migration_v52_adds_verify_command_to_repo_paths() {
         )
         .unwrap();
         conn.pragma_update(None, "user_version", 51).unwrap();
+
+        // assert column absent before migration
+        let cols_before: Vec<String> = conn
+            .prepare("SELECT name FROM pragma_table_info('repo_paths')")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(
+            !cols_before.contains(&"verify_command".to_string()),
+            "column must not exist before migration"
+        );
     }
 
     let db = crate::db::Database::open(temp.path()).await.unwrap();

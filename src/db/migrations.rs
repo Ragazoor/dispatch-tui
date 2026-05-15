@@ -1139,7 +1139,7 @@ fn migrate_v51_drop_pr_workflow_states(conn: &Connection) -> Result<()> {
         .context("Failed to drop pr_workflow_states table (migration v51)")
 }
 
-fn migrate_v52_add_verify_command_to_repo_paths(conn: &Connection) -> Result<()> {
+pub(super) fn migrate_v52_add_verify_command_to_repo_paths(conn: &Connection) -> Result<()> {
     if !column_exists(conn, "repo_paths", "verify_command") {
         conn.execute_batch("ALTER TABLE repo_paths ADD COLUMN verify_command TEXT")
             .context("v52: add verify_command column")?;
