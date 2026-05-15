@@ -115,6 +115,7 @@ async fn create_task_returning(
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await?;
     db.get_task(id)
@@ -357,6 +358,7 @@ async fn exec_refresh_from_db_syncs_external_changes() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -382,6 +384,7 @@ async fn exec_refresh_from_db_returns_commands_from_refresh() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -991,6 +994,7 @@ async fn exec_quick_dispatch_creates_task_and_dispatches() {
             repo_path: repo.to_string(),
             tag: None,
             base_branch: "main".into(),
+            wrap_up_mode: None,
         },
         None,
     )
@@ -1052,6 +1056,7 @@ async fn exec_quick_dispatch_sets_base_branch_to_repo_default() {
             // The draft default doesn't matter — quick-dispatch resolves
             // base_branch from the repo's `origin/HEAD`.
             base_branch: "main".into(),
+            wrap_up_mode: None,
         },
         None,
     )
@@ -1098,6 +1103,7 @@ async fn exec_quick_dispatch_with_epic_dispatches_successfully() {
             repo_path: repo.to_string(),
             tag: None,
             base_branch: "main".into(),
+            wrap_up_mode: None,
         },
         Some(epic.id),
     )
@@ -1140,6 +1146,7 @@ async fn exec_quick_dispatch_sends_error_on_failure() {
             repo_path: "/nonexistent".into(),
             tag: None,
             base_branch: "main".into(),
+            wrap_up_mode: None,
         },
         None,
     )
@@ -1178,6 +1185,7 @@ async fn exec_quick_dispatch_failure_sends_dispatch_failed_and_error() {
             repo_path: "/nonexistent".into(),
             tag: None,
             base_branch: "main".into(),
+            wrap_up_mode: None,
         },
         None,
     )

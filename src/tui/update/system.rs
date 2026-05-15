@@ -22,6 +22,7 @@ impl App {
             if let Some(bb) = edit.base_branch {
                 t.base_branch = bb;
             }
+            t.wrap_up_mode = edit.wrap_up_mode;
             t.updated_at = chrono::Utc::now();
         }
         self.sync_board_selection();
@@ -51,6 +52,7 @@ impl App {
                     repo_path,
                     tag: None,
                     base_branch: DEFAULT_BASE_BRANCH.to_string(),
+                    wrap_up_mode: None,
                 },
                 epic_id,
             },

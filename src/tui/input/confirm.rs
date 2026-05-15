@@ -183,6 +183,9 @@ impl App {
             KeyCode::Char('r') => {
                 self.update(Message::WrapUp(crate::tui::messages::WrapUpMessage::Rebase))
             }
+            KeyCode::Char('d') => {
+                self.update(Message::WrapUp(crate::tui::messages::WrapUpMessage::Done))
+            }
             KeyCode::Char('p') => {
                 // PR creation moved to the agent /wrap-up skill so the
                 // body actually reflects the diff rather than the stale

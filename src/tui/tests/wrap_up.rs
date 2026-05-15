@@ -916,3 +916,43 @@ fn handle_key_confirm_epic_wrap_up_routes_correctly() {
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::Normal);
 }
+
+#[test]
+fn confirm_wrap_up_d_marks_task_done_no_git_command() {
+    let mut app = App::new(
+        vec![{
+            let mut t = make_task(1, TaskStatus::Running);
+            t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+            t.tmux_window = Some("task-1".to_string());
+            t
+        }],
+        ProjectId(1),
+    );
+    app.input.mode = InputMode::ConfirmWrapUp(TaskId(1));
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
+
+    // Task should be marked Done in-memory
+    let task = app.board.tasks.iter().find(|t| t.id == TaskId(1)).unwrap();
+    assert_eq!(task.status, TaskStatus::Done, "task should be marked Done");
+
+    // Should emit a Persist command (no Finish/git command)
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+        )),
+        "expected Persist command, got {:?}",
+        cmds
+    );
+    assert!(
+        !cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::Finish { .. })
+        )),
+        "should NOT emit Finish (no git ops)"
+    );
+
+    // Mode should return to Normal
+    assert_eq!(app.input.mode, InputMode::Normal);
+}

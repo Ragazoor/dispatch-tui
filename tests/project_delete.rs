@@ -29,6 +29,7 @@ async fn delete_project_moves_tasks_and_epics_to_default() {
                 sort_order: None,
                 tag: None,
                 project_id: p.id,
+                wrap_up_mode: None,
             })
             .await
             .unwrap();

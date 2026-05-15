@@ -19,7 +19,7 @@ use "./core.allium" as core
 -- == Task Creation ==
 
 rule CreateTask {
-    when: CreateTask(title, description, repo_path, plan?, epic?, tag?, sort_order?, base_branch?)
+    when: CreateTask(title, description, repo_path, plan?, epic?, tag?, sort_order?, base_branch?, wrap_up_mode?)
 
     ensures: core/Task.created(
         title: title,
@@ -32,6 +32,7 @@ rule CreateTask {
         tag: tag,
         sort_order: sort_order,
         base_branch: base_branch ?? config.default_branch,
+        wrap_up_mode: wrap_up_mode,
         created_at: now,
         updated_at: now
     )
@@ -40,8 +41,27 @@ rule CreateTask {
         -- base_branch is set from user input during TUI task creation
         -- (InputBaseBranch step). If omitted (e.g. quick-dispatch), it
         -- defaults to config.default_branch (usually "main").
+        -- wrap_up_mode is set during the TUI creation form (InputWrapUpMode
+        -- step, after InputBaseBranch) or via the MCP create_task tool.
+        -- When null, the wrap-up path is decided at wrap-up time.
         -- When invoked from the epic view, epic is set to the
         -- current epic, auto-linking the new task as a subtask.
+}
+
+rule SetWrapUpMode {
+    when: SetWrapUpMode(task, mode?)
+
+    ensures: task.wrap_up_mode = mode
+    ensures: task.updated_at = now
+
+    @guidance
+        -- Sets or clears the preferred wrap-up path on an existing task.
+        -- Exposed via MCP update_task(wrap_up_mode: "rebase"|"pr"|"done"|null)
+        -- and the task editor (WRAP_UP_MODE section).
+        -- mode = null clears the preference; the next wrap-up will prompt
+        -- the user to choose.
+        -- This rule deliberately has no status precondition — the preference
+        -- can be updated at any point in the task lifecycle.
 }
 
 rule CreateQuickTask {
@@ -324,14 +344,16 @@ rule EditTask {
     when: EditTask(task)
 
     -- Opens $EDITOR with a structured file containing the task's
-    -- title, description, repo_path, status, plan, tag, and base_branch.
+    -- title, description, repo_path, status, plan, tag, base_branch,
+    -- and wrap_up_mode.
     -- The sections are delimited by `--- SECTION ---` markers
-    -- (TITLE, DESCRIPTION, REPO_PATH, STATUS, PLAN, TAG, BASE_BRANCH).
+    -- (TITLE, DESCRIPTION, REPO_PATH, STATUS, PLAN, TAG, BASE_BRANCH,
+    -- WRAP_UP_MODE).
     -- The user edits the file; on save, fields are parsed back.
     -- Empty title/description/repo_path retain their previous values.
     -- Empty plan or tag clears the field. Status parses to the
     -- previous value on invalid input. Empty base_branch retains the
-    -- previous value.
+    -- previous value. Empty wrap_up_mode clears the preference.
 
     ensures:
         let edited = EditorSession(task)
@@ -352,6 +374,7 @@ rule EditTask {
         else: task.tag = null
     ensures:
         if edited.base_branch != "": task.base_branch = edited.base_branch
+    ensures: task.wrap_up_mode = edited.wrap_up_mode
     ensures: task.updated_at = now
 
     @guidance

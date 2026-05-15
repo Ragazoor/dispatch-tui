@@ -24,6 +24,7 @@ async fn create_task_in_repo(state: &Arc<McpState>, repo: &str) -> crate::models
             sort_order: None,
             tag: None,
             project_id: pid,
+            wrap_up_mode: None,
         })
         .await
         .unwrap()
@@ -153,6 +154,7 @@ async fn record_learning_derives_scope_ref_for_epic() {
             sort_order: None,
             tag: None,
             project_id: pid,
+            wrap_up_mode: None,
         })
         .await
         .unwrap();

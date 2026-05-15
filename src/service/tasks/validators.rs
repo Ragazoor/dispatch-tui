@@ -71,5 +71,8 @@ pub(super) fn build_task_patch<'a>(
     if let Some(ts) = params.last_pre_tool_use_at {
         patch = patch.last_pre_tool_use_at(ts);
     }
+    if let Some(inner) = params.wrap_up_mode {
+        patch = patch.wrap_up_mode(inner);
+    }
     patch
 }

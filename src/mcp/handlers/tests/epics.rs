@@ -139,6 +139,7 @@ async fn get_epic_shows_subtask_summary() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -155,6 +156,7 @@ async fn get_epic_shows_subtask_summary() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -263,6 +265,7 @@ async fn list_epics_shows_subtask_counts() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -279,6 +282,7 @@ async fn list_epics_shows_subtask_counts() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();

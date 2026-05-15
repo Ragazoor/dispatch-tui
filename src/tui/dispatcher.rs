@@ -112,6 +112,7 @@ fn dispatch_input(app: &mut App, msg: InputMessage) -> Vec<Command> {
         InputMessage::SubmitRepoPath(value) => app.handle_submit_repo_path(value),
         InputMessage::SubmitTag(tag) => app.handle_submit_tag(tag),
         InputMessage::SubmitBaseBranch(value) => app.handle_submit_base_branch(value),
+        InputMessage::SubmitWrapUpMode(mode) => app.handle_submit_wrap_up_mode(mode),
         InputMessage::InputChar(c) => app.handle_input_char(c),
         InputMessage::InputBackspace => app.handle_input_backspace(),
         InputMessage::StartQuickDispatchSelection => app.handle_start_quick_dispatch_selection(),
@@ -171,6 +172,7 @@ fn dispatch_wrap_up(app: &mut App, msg: WrapUpMessage) -> Vec<Command> {
     match msg {
         WrapUpMessage::Start(id) => app.handle_start_wrap_up(id),
         WrapUpMessage::Rebase => app.handle_wrap_up_rebase(),
+        WrapUpMessage::Done => app.handle_wrap_up_done(),
         WrapUpMessage::Cancel => app.handle_cancel_wrap_up(),
         WrapUpMessage::EpicStart(id) => app.handle_start_epic_wrap_up(id),
         WrapUpMessage::EpicRebase => app.handle_epic_wrap_up(),

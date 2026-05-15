@@ -233,6 +233,39 @@ rule WrapUpPr {
         -- PR creation instruction. When verify_command is null, the response is unchanged.
 }
 
+rule WrapUpDone {
+    when: WrapUp(task, done)
+
+    -- Available from any running or review task with a worktree.
+    requires: task.status = review or task.status = running
+    requires: task.worktree != null
+
+    ensures: task.tmux_window = null
+    ensures: task.status = done
+    ensures: task.sub_status = core/SubStatus.default_for(done)
+    ensures: task.updated_at = now
+
+    @guidance
+        -- Closes the task without any git operations (no rebase, no push,
+        -- no PR creation). Useful for tasks whose work requires no branch
+        -- integration: research tasks, planning tasks, tasks that edit
+        -- only the repo root (e.g., config files already on the base branch).
+        --
+        -- TUI path: W then d. Calls handle_finish_complete directly —
+        -- the task moves to Done and the tmux window is killed in one step.
+        -- Unlike WrapUpRebase, there is no separate FinishTask command;
+        -- handle_finish_complete is invoked immediately.
+        --
+        -- MCP path: wrap_up(action="done"). No git operations are
+        -- performed. Like WrapUpRebase, the session is NOT closed by
+        -- wrap_up — the agent must call exit_session afterward. On
+        -- exit_session, the tmux window is killed and the task moves to Done.
+        --
+        -- /wrap-up skill path: if task.wrap_up_mode = done (from get_task),
+        -- or if the user selects "done" in Step 4, the skill calls
+        -- wrap_up(action="done") then exit_session without any git commands.
+}
+
 -- == Finish (Merge) ==
 
 rule FinishTaskSuccess {

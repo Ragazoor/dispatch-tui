@@ -75,7 +75,13 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (50, migrate_v50_add_hook_timestamps),
     (51, migrate_v51_drop_pr_workflow_states), // drops pr_workflow_states created in v37
     (52, migrate_v52_add_verify_command_to_repo_paths),
+    (53, migrate_v53_add_wrap_up_mode),
 ];
+
+fn migrate_v53_add_wrap_up_mode(conn: &Connection) -> Result<()> {
+    conn.execute_batch("ALTER TABLE tasks ADD COLUMN wrap_up_mode TEXT")
+        .context("Failed to add wrap_up_mode column")
+}
 
 fn migrate_v1_add_plan_column(conn: &Connection) -> Result<()> {
     let _ = conn.execute_batch("ALTER TABLE tasks ADD COLUMN plan TEXT");

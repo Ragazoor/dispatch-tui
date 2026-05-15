@@ -333,6 +333,7 @@ pub struct Task {
     pub updated_at: DateTime<Utc>,
     pub last_pre_tool_use_at: Option<DateTime<Utc>>,
     pub last_notification_at: Option<DateTime<Utc>>,
+    pub wrap_up_mode: Option<WrapUpMode>,
 }
 
 impl Task {
@@ -478,6 +479,50 @@ impl std::str::FromStr for TaskTag {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Self::parse(s).ok_or_else(|| format!("unknown tag: {s}"))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// WrapUpMode
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WrapUpMode {
+    Rebase,
+    Pr,
+    Done,
+}
+
+impl WrapUpMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WrapUpMode::Rebase => "rebase",
+            WrapUpMode::Pr => "pr",
+            WrapUpMode::Done => "done",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "rebase" => Some(WrapUpMode::Rebase),
+            "pr" => Some(WrapUpMode::Pr),
+            "done" => Some(WrapUpMode::Done),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for WrapUpMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for WrapUpMode {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s).ok_or_else(|| format!("unknown wrap-up mode: {s}"))
     }
 }
 
@@ -797,5 +842,34 @@ mod activity_tests {
             classify_agent_activity(Some(past), None, now),
             AgentActivity::Stale
         );
+    }
+}
+
+#[cfg(test)]
+mod wrap_up_mode_tests {
+    use super::*;
+
+    #[test]
+    fn wrap_up_mode_roundtrip() {
+        for mode in [WrapUpMode::Rebase, WrapUpMode::Pr, WrapUpMode::Done] {
+            let s = mode.as_str();
+            let parsed = WrapUpMode::parse(s).expect("parse should succeed");
+            assert_eq!(parsed, mode);
+        }
+    }
+
+    #[test]
+    fn wrap_up_mode_from_str() {
+        assert_eq!("rebase".parse::<WrapUpMode>().unwrap(), WrapUpMode::Rebase);
+        assert_eq!("pr".parse::<WrapUpMode>().unwrap(), WrapUpMode::Pr);
+        assert_eq!("done".parse::<WrapUpMode>().unwrap(), WrapUpMode::Done);
+        assert!("unknown".parse::<WrapUpMode>().is_err());
+    }
+
+    #[test]
+    fn wrap_up_mode_display() {
+        assert_eq!(WrapUpMode::Rebase.to_string(), "rebase");
+        assert_eq!(WrapUpMode::Pr.to_string(), "pr");
+        assert_eq!(WrapUpMode::Done.to_string(), "done");
     }
 }

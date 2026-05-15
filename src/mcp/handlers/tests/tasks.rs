@@ -125,6 +125,7 @@ async fn get_task_found() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -346,6 +347,7 @@ async fn update_task_accepts_string_task_id() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -385,6 +387,7 @@ async fn get_task_accepts_string_task_id() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -424,6 +427,7 @@ async fn update_task_with_plan() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -460,6 +464,7 @@ async fn update_task_title_only() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -500,6 +505,7 @@ async fn update_task_status_optional() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -536,6 +542,7 @@ async fn update_task_title_and_description() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -572,6 +579,7 @@ async fn update_task_repo_path() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -612,6 +620,7 @@ async fn update_task_no_fields_errors() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -644,6 +653,7 @@ async fn patch_task_sets_multiple_fields() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -684,6 +694,7 @@ async fn update_task_without_plan_preserves_existing() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -723,6 +734,7 @@ async fn update_task_sets_pr_fields() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -770,6 +782,7 @@ async fn list_tasks_returns_all_when_no_filter() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -786,6 +799,7 @@ async fn list_tasks_returns_all_when_no_filter() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -819,6 +833,7 @@ async fn list_tasks_filters_by_single_status() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -835,6 +850,7 @@ async fn list_tasks_filters_by_single_status() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -868,6 +884,7 @@ async fn list_tasks_filters_by_multiple_statuses() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -884,6 +901,7 @@ async fn list_tasks_filters_by_multiple_statuses() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -900,6 +918,7 @@ async fn list_tasks_filters_by_multiple_statuses() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -952,6 +971,7 @@ async fn claim_task_success() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -1000,6 +1020,7 @@ async fn claim_task_rejects_running_task() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -1037,6 +1058,7 @@ async fn claim_task_rejects_different_repo() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -1170,6 +1192,7 @@ async fn claim_task_accepts_string_task_id() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -1332,6 +1355,7 @@ async fn get_epic_shows_subtask_summary() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -1348,6 +1372,7 @@ async fn get_epic_shows_subtask_summary() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -1456,6 +1481,7 @@ async fn list_epics_shows_subtask_counts() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -1472,6 +1498,7 @@ async fn list_epics_shows_subtask_counts() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -1686,6 +1713,7 @@ async fn claim_task_rejects_done_task() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -1722,6 +1750,7 @@ async fn claim_task_rejects_review_task() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -1760,6 +1789,7 @@ async fn claim_task_worktree_without_worktrees_dir() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -2075,6 +2105,7 @@ async fn claim_task_updates_status_to_running() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -2140,6 +2171,7 @@ async fn wrap_up_rejects_backlog_task() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -2184,6 +2216,7 @@ async fn wrap_up_accepts_running_blocked_task() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -2241,6 +2274,7 @@ async fn wrap_up_accepts_running_active_task() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -2299,6 +2333,7 @@ async fn wrap_up_rebase_response_demands_exit_session_imperatively() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -2354,6 +2389,7 @@ async fn wrap_up_task_no_worktree() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -2386,6 +2422,7 @@ async fn wrap_up_invalid_action() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -2438,6 +2475,7 @@ async fn wrap_up_rebase_returns_started() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -2484,6 +2522,7 @@ async fn wrap_up_rejects_pr_action() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -2549,6 +2588,7 @@ async fn create_wrappable_task(db: &Arc<dyn db::TaskStore>) -> crate::models::Ta
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -2780,6 +2820,7 @@ async fn update_task_sets_sub_status() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -2820,6 +2861,7 @@ async fn update_task_rejects_invalid_sub_status_for_status() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -2852,6 +2894,7 @@ async fn update_task_rejects_bogus_sub_status() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -2884,6 +2927,7 @@ async fn update_task_sub_status_with_status_change() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -2921,6 +2965,7 @@ async fn update_task_status_running_with_needs_input() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -2960,6 +3005,7 @@ async fn update_task_sub_status_invalid_for_new_status() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -2993,6 +3039,7 @@ async fn list_tasks_shows_sub_status() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -3034,6 +3081,7 @@ async fn get_task_shows_sub_status() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -3089,6 +3137,7 @@ async fn wrap_up_rebase_conflict_returns_error() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -3143,6 +3192,7 @@ async fn wrap_up_rebase_not_on_main_returns_error() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -3193,6 +3243,7 @@ async fn update_task_status_recalculates_epic_status() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -3256,6 +3307,7 @@ async fn send_message_writes_file_and_sends_keys() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -3271,6 +3323,7 @@ async fn send_message_writes_file_and_sends_keys() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -3346,6 +3399,7 @@ async fn send_message_target_not_found() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -3389,6 +3443,7 @@ async fn send_message_target_no_worktree() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -3405,6 +3460,7 @@ async fn send_message_target_no_worktree() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -3451,6 +3507,7 @@ async fn send_message_target_no_tmux_window() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -3467,6 +3524,7 @@ async fn send_message_target_no_tmux_window() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -3860,6 +3918,7 @@ async fn list_tasks_filters_by_epic_id() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -3876,6 +3935,7 @@ async fn list_tasks_filters_by_epic_id() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -3920,6 +3980,7 @@ async fn list_tasks_filters_by_status_and_epic_id() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -3936,6 +3997,7 @@ async fn list_tasks_filters_by_status_and_epic_id() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -3979,6 +4041,7 @@ async fn list_tasks_epic_filter_no_match() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -4010,6 +4073,7 @@ async fn list_tasks_done_status_filter() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -4026,6 +4090,7 @@ async fn list_tasks_done_status_filter() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -4073,6 +4138,7 @@ async fn wrap_up_rebase_does_not_change_status() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -4134,6 +4200,7 @@ async fn wrap_up_rebase_does_not_recalculate_epic_status() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -4192,6 +4259,7 @@ async fn wrap_up_accepts_string_task_id() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -4243,6 +4311,7 @@ async fn get_task_shows_all_fields() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -4306,6 +4375,7 @@ async fn get_task_without_epic_omits_epic_line() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -4346,6 +4416,7 @@ async fn list_tasks_shows_tag_and_plan_indicators() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -4395,6 +4466,7 @@ async fn list_tasks_shows_epic_indicator() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -4434,6 +4506,7 @@ async fn list_tasks_truncates_long_descriptions() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -4471,6 +4544,7 @@ async fn list_tasks_excludes_archived_by_default() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -4487,6 +4561,7 @@ async fn list_tasks_excludes_archived_by_default() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -4582,6 +4657,7 @@ async fn dispatch_next_no_backlog_returns_success_noop() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -4644,6 +4720,7 @@ async fn dispatch_next_picks_first_backlog_subtask() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -4659,6 +4736,7 @@ async fn dispatch_next_picks_first_backlog_subtask() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -4745,6 +4823,7 @@ async fn dispatch_next_respects_sort_order() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -4760,6 +4839,7 @@ async fn dispatch_next_respects_sort_order() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -4837,6 +4917,7 @@ async fn dispatch_next_respects_tag_routing() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -4906,6 +4987,7 @@ async fn wrap_up_rebase_preserves_tmux_window() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -4973,6 +5055,7 @@ async fn wrap_up_rebase_conflict_sets_conflict_substatus() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -5038,6 +5121,7 @@ async fn wrap_up_rebase_clears_conflict_substatus_on_non_conflict_error() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -5147,6 +5231,7 @@ async fn update_task_with_base_branch_updates_it() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -5199,6 +5284,7 @@ async fn dispatch_next_returns_disabled_when_auto_dispatch_off() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -5332,6 +5418,7 @@ async fn dispatch_task_dispatches_backlog_task() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -5393,6 +5480,7 @@ async fn dispatch_task_returns_error_for_non_backlog_task() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -5461,6 +5549,7 @@ async fn dispatch_task_respects_tag_routing() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -5534,6 +5623,7 @@ async fn dispatch_task_dependabot_tag_routes_through_dispatch_agent() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -5622,6 +5712,7 @@ async fn dispatch_task_returns_error_when_dispatch_fails() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -5936,6 +6027,7 @@ async fn create_task_in_repo(state: &Arc<McpState>, repo: &str) -> crate::models
             sort_order: None,
             tag: None,
             project_id: pid,
+            wrap_up_mode: None,
         })
         .await
         .unwrap()
@@ -6065,6 +6157,7 @@ async fn record_learning_derives_scope_ref_for_epic() {
             sort_order: None,
             tag: None,
             project_id: pid,
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -6376,6 +6469,7 @@ async fn list_tasks_task_identity_scopes_to_epic_and_excludes_self() {
             sort_order: None,
             tag: None,
             project_id: pid,
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -6391,6 +6485,7 @@ async fn list_tasks_task_identity_scopes_to_epic_and_excludes_self() {
             sort_order: None,
             tag: None,
             project_id: pid,
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -6406,6 +6501,7 @@ async fn list_tasks_task_identity_scopes_to_epic_and_excludes_self() {
             sort_order: None,
             tag: None,
             project_id: pid,
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -6446,6 +6542,7 @@ async fn list_tasks_task_identity_scopes_to_project_when_no_epic() {
             sort_order: None,
             tag: None,
             project_id: pid,
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -6461,6 +6558,7 @@ async fn list_tasks_task_identity_scopes_to_project_when_no_epic() {
             sort_order: None,
             tag: None,
             project_id: pid,
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -6500,6 +6598,7 @@ async fn list_tasks_task_identity_explicit_scope_disables_auto_derivation() {
             sort_order: None,
             tag: None,
             project_id: p1,
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -6515,6 +6614,7 @@ async fn list_tasks_task_identity_explicit_scope_disables_auto_derivation() {
             sort_order: None,
             tag: None,
             project_id: p2,
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -6551,6 +6651,7 @@ async fn list_tasks_session_identity_no_scope_no_exclude() {
             sort_order: None,
             tag: None,
             project_id: p1,
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -6566,6 +6667,7 @@ async fn list_tasks_session_identity_no_scope_no_exclude() {
             sort_order: None,
             tag: None,
             project_id: p2,
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -6599,6 +6701,7 @@ async fn list_tasks_repo_paths_filter() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -6615,6 +6718,7 @@ async fn list_tasks_repo_paths_filter() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -6687,6 +6791,7 @@ async fn list_tasks_includes_plan_goal_in_output() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -6724,6 +6829,7 @@ async fn list_tasks_falls_back_to_description_when_no_plan() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -6797,6 +6903,7 @@ async fn seed_task_with_worktree(
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -6895,6 +7002,7 @@ async fn update_task_pr_finalisation_appends_reflection_nudge_by_default() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -6941,6 +7049,7 @@ async fn update_task_pr_finalisation_omits_nudge_when_disabled() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -6985,6 +7094,7 @@ async fn update_task_pr_set_without_status_does_not_nudge() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -7027,6 +7137,7 @@ async fn update_task_status_review_without_pr_url_change_does_not_nudge() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -7070,6 +7181,7 @@ async fn update_task_pr_url_already_set_does_not_nudge_again() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -7359,6 +7471,7 @@ async fn wrap_up_rebase_does_not_kill_window() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -7626,6 +7739,7 @@ async fn wrap_up_then_exit_session_end_to_end() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -7732,6 +7846,7 @@ async fn create_task_task_identity_inherits_project_and_epic() {
             sort_order: None,
             tag: None,
             project_id: parent_project,
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -7813,6 +7928,7 @@ async fn create_task_explicit_project_id_overrides_task_caller_project() {
             sort_order: None,
             tag: None,
             project_id: p1,
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -7852,6 +7968,7 @@ async fn create_task_explicit_null_epic_clears_inheritance() {
             sort_order: None,
             tag: None,
             project_id: parent_project,
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -7887,4 +8004,145 @@ async fn create_task_unknown_caller_identity_returns_error() {
     assert!(is_error(&resp));
     let msg = error_message(&resp);
     assert!(msg.to_lowercase().contains("caller"), "got {msg}");
+}
+
+// ---------------------------------------------------------------------------
+// wrap_up_mode tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn update_task_sets_wrap_up_mode() {
+    let state = test_state().await;
+    let task_id = create_task_fixture(&state).await;
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_task",
+            "arguments": { "task_id": task_id.0, "wrap_up_mode": "pr" }
+        })),
+    )
+    .await;
+    assert!(resp.result.is_some(), "expected success, got: {:?}", resp.error);
+    assert!(resp.error.is_none());
+
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    assert_eq!(task.wrap_up_mode, Some(crate::models::WrapUpMode::Pr));
+}
+
+#[tokio::test]
+async fn create_task_with_wrap_up_mode() {
+    let state = test_state().await;
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "create_task",
+            "arguments": { "title": "T", "repo_path": "/r", "project_id": 1, "wrap_up_mode": "done" }
+        })),
+    )
+    .await;
+    assert!(resp.result.is_some());
+    assert!(resp.error.is_none());
+    let task_id = extract_created_task_id(&resp);
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    assert_eq!(task.wrap_up_mode, Some(crate::models::WrapUpMode::Done));
+}
+
+#[tokio::test]
+async fn get_task_shows_wrap_up_mode_when_set() {
+    let state = test_state().await;
+    let task_id = state
+        .db
+        .create_task(CreateTaskRequest {
+            title: "T",
+            description: "",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+            wrap_up_mode: Some(crate::models::WrapUpMode::Rebase),
+        })
+        .await
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "get_task", "arguments": { "task_id": task_id.0 } })),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert!(
+        text.to_lowercase().contains("wrap-up") || text.to_lowercase().contains("wrap_up"),
+        "expected wrap-up mode in output, got: {text}"
+    );
+    assert!(text.contains("rebase"), "expected rebase in output, got: {text}");
+}
+
+#[tokio::test]
+async fn wrap_up_done_marks_task_done_without_git_ops() {
+    use crate::process::MockProcessRunner;
+    let runner: Arc<dyn crate::process::ProcessRunner> =
+        Arc::new(MockProcessRunner::new(vec![]));
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let state = Arc::new(McpState {
+        db: db.clone(),
+        notify_tx: None,
+        runner,
+    });
+
+    let task_id = db
+        .create_task(CreateTaskRequest {
+            title: "Done Task",
+            description: "",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Running,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+            wrap_up_mode: Some(crate::models::WrapUpMode::Done),
+        })
+        .await
+        .unwrap();
+    db.patch_task(
+        task_id,
+        &db::TaskPatch::new()
+            .worktree(Some("/repo/.worktrees/1-done-task"))
+            .tmux_window(Some("task-1")),
+    )
+    .await
+    .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "wrap_up",
+            "arguments": { "task_id": task_id.0, "action": "done" }
+        })),
+    )
+    .await;
+    assert!(!is_error(&resp), "expected success, got: {}", error_message(&resp));
+
+    let text = extract_response_text(&resp);
+    assert!(
+        text.contains("exit_session"),
+        "response should instruct to call exit_session, got: {text}"
+    );
+    assert!(
+        text.contains("done"),
+        "response should mention done action, got: {text}"
+    );
+
+    let task = db.get_task(task_id).await.unwrap().unwrap();
+    assert_eq!(task.status, TaskStatus::Done, "task should be marked Done");
 }

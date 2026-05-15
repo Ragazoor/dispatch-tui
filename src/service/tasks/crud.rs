@@ -254,6 +254,7 @@ impl TaskService {
                 sort_order: params.sort_order,
                 tag: params.tag,
                 project_id: params.project_id,
+                wrap_up_mode: params.wrap_up_mode,
             })
             .await
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;

@@ -24,6 +24,7 @@ async fn hook_event_flow_drives_sub_status_and_lifecycle() {
             tag: None,
             base_branch: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();

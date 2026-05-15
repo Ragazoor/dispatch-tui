@@ -142,6 +142,7 @@ impl TuiRuntime {
                 tag: None,
                 base_branch: None,
                 project_id: epic.project_id,
+                wrap_up_mode: None,
             })
             .await
         {

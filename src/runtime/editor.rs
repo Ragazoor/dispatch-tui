@@ -317,7 +317,8 @@ impl TuiRuntime {
             .description(applied.description.clone())
             .repo_path(applied.repo_path.clone())
             .tag(applied.tag)
-            .base_branch(applied.base_branch.clone());
+            .base_branch(applied.base_branch.clone())
+            .wrap_up_mode(applied.wrap_up_mode);
 
         if let Err(e) = self.task_svc.update_task(params).await {
             app.update(Message::System(crate::tui::messages::SystemMessage::Error(
@@ -343,6 +344,7 @@ impl TuiRuntime {
                 plan_path: plan,
                 tag: applied.tag,
                 base_branch: applied.base_branch,
+                wrap_up_mode: applied.wrap_up_mode,
             },
         )))
     }
@@ -841,6 +843,7 @@ mod tests {
                 sort_order: None,
                 tag: None,
                 project_id: ProjectId(1),
+                wrap_up_mode: None,
             })
             .await
             .unwrap();

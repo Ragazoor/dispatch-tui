@@ -9,7 +9,7 @@ use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
 use crate::models::{
     DispatchMode, EpicId, LearningId, LearningVerdict, ProjectId, SubStatus, Task, TaskId,
-    TaskStatus, TaskTag,
+    TaskStatus, TaskTag, WrapUpMode,
 };
 use crate::service::{
     ClaimTaskParams, CreateTaskParams, FieldUpdate, LearningService, ListTasksFilter, ServiceError,
@@ -53,6 +53,8 @@ pub(super) struct UpdateTaskArgs {
     pub(super) base_branch: Option<String>,
     #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
     pub(super) project_id: Option<i64>,
+    #[serde(default)]
+    pub(super) wrap_up_mode: Option<WrapUpMode>,
 }
 
 #[derive(Deserialize)]
@@ -113,12 +115,15 @@ pub(super) struct CreateTaskWithEpicArgs {
     pub(super) tag: Option<TaskTag>,
     #[serde(default)]
     pub(super) base_branch: Option<String>,
+    #[serde(default)]
+    pub(super) wrap_up_mode: Option<WrapUpMode>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub(super) enum WrapUpAction {
     Rebase,
+    Done,
 }
 
 #[derive(Debug, Deserialize)]
@@ -215,6 +220,9 @@ fn format_task_detail(task: &Task, epic_titles: &HashMap<EpicId, String>) -> Str
     }
     if let Some(sort_order) = task.sort_order {
         text.push_str(&format!("\nSort order: {sort_order}"));
+    }
+    if let Some(wrap_up_mode) = task.wrap_up_mode {
+        text.push_str(&format!("\nWrap-up mode: {wrap_up_mode}"));
     }
     text.push_str(&format!(
         "\nCreated: {}",
@@ -365,6 +373,9 @@ pub(super) async fn handle_update_task(
         }
         params = params.project_id(ProjectId(project_id));
     }
+    if parsed.wrap_up_mode.is_some() {
+        params = params.wrap_up_mode(parsed.wrap_up_mode);
+    }
     let fields_display = params.updated_field_names().join(", ");
 
     let svc = state.task_service();
@@ -452,6 +463,7 @@ pub(super) async fn handle_create_task(
             tag: parsed.tag,
             base_branch: parsed.base_branch,
             project_id: ProjectId(effective_project_id),
+            wrap_up_mode: parsed.wrap_up_mode,
         })
         .await
     {
@@ -695,37 +707,16 @@ pub(super) async fn handle_wrap_up(
     let runner = state.runner.clone();
     let notify_tx = state.notify_tx.clone();
     let task_id = task.id;
-
-    // Only WrapUpAction::Rebase is supported; PR creation is agent-driven
-    // (see plugin/skills/wrap-up/SKILL.md).
     let db = state.db.clone();
-    // Optimistically clear conflict sub_status before rebasing,
-    // matching the TUI behavior.
-    if task.sub_status == SubStatus::Conflict {
-        let clear_patch = db::TaskPatch::new().sub_status(SubStatus::default_for(task.status));
-        let _ = db.patch_task(task_id, &clear_patch).await;
-    }
-    let rebase_runner = runner.clone();
-    let rebase_base = base_branch.clone();
-    let rebase_result = match tokio::task::spawn_blocking(move || {
-        tracing::info!(task_id = task_id.0, %branch, "MCP wrap_up rebase starting");
-        dispatch::finish_task(
-            &repo_path,
-            &worktree,
-            &branch,
-            &rebase_base,
-            None,
-            &*rebase_runner,
-        )
-    })
-    .await
-    {
-        Ok(r) => r,
-        Err(e) => return JsonRpcResponse::err(id, -32603, format!("internal error: {e}")),
-    };
 
-    match rebase_result {
-        Ok(()) => {
+    match parsed.action {
+        WrapUpAction::Done => {
+            let patch = db::TaskPatch::new()
+                .status(TaskStatus::Done)
+                .sub_status(SubStatus::default_for(TaskStatus::Done));
+            if let Err(e) = db.patch_task(task_id, &patch).await {
+                return JsonRpcResponse::err(id, -32603, format!("wrap_up done failed: {e}"));
+            }
             state.notify_task_changed(task_id);
             let verify_command = dispatch::fetch_verify_command(&*state.db, &task.repo_path).await;
             let verify_line = match verify_command {
@@ -737,22 +728,63 @@ pub(super) async fn handle_wrap_up(
             JsonRpcResponse::ok(
                 id,
                 json!({"content": [{"type": "text", "text": format!(
-                    "wrap_up complete (task {}, action: rebase). The session is NOT yet closed.{verify_line} \
-                You MUST call `exit_session` next as your final action — without it, the tmux window stays alive \
-                and the task remains in its current status. Do not stop, and do not call any other tool first.",
+                    "wrap_up complete (task {}, action: done). Task marked as done — no git operations performed. \
+                The session is NOT yet closed.{verify_line} You MUST call `exit_session` next as your final action.",
                     parsed.task_id
                 )}]}),
             )
         }
-        Err(e) => {
-            if matches!(e, dispatch::FinishError::RebaseConflict(_)) {
-                let patch = db::TaskPatch::new().sub_status(SubStatus::Conflict);
-                let _ = db.patch_task(task_id, &patch).await;
+        WrapUpAction::Rebase => {
+            // Optimistically clear conflict sub_status before rebasing,
+            // matching the TUI behavior.
+            if task.sub_status == SubStatus::Conflict {
+                let clear_patch =
+                    db::TaskPatch::new().sub_status(SubStatus::default_for(task.status));
+                let _ = db.patch_task(task_id, &clear_patch).await;
             }
-            if let Some(tx) = notify_tx {
-                let _ = tx.send(crate::mcp::McpEvent::TaskChanged(task_id));
+            let rebase_runner = runner.clone();
+            let rebase_base = base_branch.clone();
+            let rebase_result = match tokio::task::spawn_blocking(move || {
+                tracing::info!(task_id = task_id.0, %branch, "MCP wrap_up rebase starting");
+                dispatch::finish_task(
+                    &repo_path,
+                    &worktree,
+                    &branch,
+                    &rebase_base,
+                    None,
+                    &*rebase_runner,
+                )
+            })
+            .await
+            {
+                Ok(r) => r,
+                Err(e) => return JsonRpcResponse::err(id, -32603, format!("internal error: {e}")),
+            };
+
+            match rebase_result {
+                Ok(()) => {
+                    state.notify_task_changed(task_id);
+                    JsonRpcResponse::ok(
+                        id,
+                        json!({"content": [{"type": "text", "text": format!(
+                            "wrap_up complete (task {}, action: rebase). The session is NOT yet closed. \
+                        You MUST call `exit_session` next as your final action — without it, the tmux window stays alive \
+                        and the task remains in its current status. Do not stop, and do not call any other tool first.",
+                            parsed.task_id
+                        )}]}),
+                    )
+                }
+                Err(e) => {
+                    if matches!(e, dispatch::FinishError::RebaseConflict(_)) {
+                        let patch = db::TaskPatch::new().sub_status(SubStatus::Conflict);
+                        let _ = db.patch_task(task_id, &patch).await;
+                    }
+                    if let Some(tx) = notify_tx {
+                        let _ = tx.send(crate::mcp::McpEvent::TaskChanged(task_id));
+                    }
+                    JsonRpcResponse::err(id, -32603, format!("wrap_up failed: {e}"))
+                }
             }
-            JsonRpcResponse::err(id, -32603, format!("wrap_up failed: {e}"))
         }
     }
 }

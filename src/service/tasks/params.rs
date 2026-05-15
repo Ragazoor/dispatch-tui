@@ -4,7 +4,7 @@
 //! TUI commands) construct one of these and pass it to the corresponding
 //! `TaskService` method.
 
-use crate::models::{EpicId, ProjectId, SubStatus, TaskId, TaskStatus, TaskTag};
+use crate::models::{EpicId, ProjectId, SubStatus, TaskId, TaskStatus, TaskTag, WrapUpMode};
 use crate::service::FieldUpdate;
 
 // ---------------------------------------------------------------------------
@@ -30,6 +30,8 @@ pub struct UpdateTaskParams {
     /// Outer `Some` means "write this column", inner value is the value to write
     /// (with `None` meaning clear-to-NULL).
     pub last_pre_tool_use_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
+    /// Double-Option: outer `None` = no-op; `Some(None)` = clear; `Some(Some(m))` = set.
+    pub wrap_up_mode: Option<Option<WrapUpMode>>,
 }
 
 impl UpdateTaskParams {
@@ -84,6 +86,9 @@ impl UpdateTaskParams {
         if self.last_pre_tool_use_at.is_some() {
             names.push("last_pre_tool_use_at");
         }
+        if self.wrap_up_mode.is_some() {
+            names.push("wrap_up_mode");
+        }
         names
     }
 
@@ -106,6 +111,7 @@ impl UpdateTaskParams {
             base_branch: None,
             project_id: None,
             last_pre_tool_use_at: None,
+            wrap_up_mode: None,
         }
     }
 
@@ -183,6 +189,11 @@ impl UpdateTaskParams {
         self.last_pre_tool_use_at = Some(value);
         self
     }
+
+    pub fn wrap_up_mode(mut self, mode: Option<WrapUpMode>) -> Self {
+        self.wrap_up_mode = Some(mode);
+        self
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -199,6 +210,7 @@ pub struct CreateTaskParams {
     pub tag: Option<TaskTag>,
     pub base_branch: Option<String>,
     pub project_id: ProjectId,
+    pub wrap_up_mode: Option<WrapUpMode>,
 }
 
 // ---------------------------------------------------------------------------
@@ -231,7 +243,7 @@ pub struct ListTasksFilter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{EpicId, ProjectId, SubStatus, TaskId, TaskStatus, TaskTag};
+    use crate::models::{EpicId, ProjectId, SubStatus, TaskId, TaskStatus, TaskTag, WrapUpMode};
     use crate::service::FieldUpdate;
 
     #[test]
@@ -289,6 +301,7 @@ mod tests {
             UpdateTaskParams::for_task(TaskId(1)).base_branch(Some("main".to_string())),
             UpdateTaskParams::for_task(TaskId(1)).project_id(ProjectId(1)),
             UpdateTaskParams::for_task(TaskId(1)).last_pre_tool_use_at(Some(chrono::Utc::now())),
+            UpdateTaskParams::for_task(TaskId(1)).wrap_up_mode(Some(WrapUpMode::Rebase)),
         ];
         for params in &cases {
             assert!(

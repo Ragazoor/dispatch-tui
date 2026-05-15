@@ -19,6 +19,7 @@ impl TuiRuntime {
             tag: draft.tag,
             base_branch: Some(draft.base_branch),
             project_id: app.active_project(),
+            wrap_up_mode: draft.wrap_up_mode,
         };
         if let Some(task) = self.create_task(app, params).await {
             app.update(Message::Task(crate::tui::messages::TaskMessage::Created {
@@ -52,6 +53,7 @@ impl TuiRuntime {
                     tag: None,
                     base_branch: Some(base_branch),
                     project_id: app.active_project(),
+                    wrap_up_mode: None,
                 },
             )
             .await

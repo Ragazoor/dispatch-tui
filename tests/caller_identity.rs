@@ -38,6 +38,7 @@ async fn create_parent_task(db: &Arc<dyn db::TaskStore>, project_id: ProjectId) 
         sort_order: None,
         tag: None,
         project_id,
+        wrap_up_mode: None,
     })
     .await
     .unwrap()

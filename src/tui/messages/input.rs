@@ -1,7 +1,7 @@
 //! Form input, text-entry, and confirmation-flow messages for the task
 //! creation, copy, edit, and delete flows.
 
-use crate::models::TaskTag;
+use crate::models::{TaskTag, WrapUpMode};
 
 /// Messages targeting the form-input flow.
 ///
@@ -19,6 +19,7 @@ pub enum InputMessage {
     SubmitRepoPath(String),
     SubmitTag(Option<TaskTag>),
     SubmitBaseBranch(String),
+    SubmitWrapUpMode(Option<WrapUpMode>),
     InputChar(char),
     InputBackspace,
     StartQuickDispatchSelection,

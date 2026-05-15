@@ -1,6 +1,6 @@
 //! Form input, text-entry, creation/edit/delete-flow handlers.
 
-use crate::models::TaskTag;
+use crate::models::{TaskTag, WrapUpMode};
 
 use super::super::types::*;
 use super::super::{filtered_repos, truncate_title, App, TITLE_DISPLAY_LENGTH};
@@ -15,10 +15,12 @@ impl App {
         let description = task.description.clone();
         let repo_path = task.repo_path.clone();
         let tag = task.tag;
+        let wrap_up_mode = task.wrap_up_mode;
         self.input.task_draft = Some(TaskDraft {
             title,
             description,
             tag,
+            wrap_up_mode,
             ..Default::default()
         });
         self.input.buffer = repo_path;
@@ -90,6 +92,7 @@ impl App {
                 repo_path: String::new(),
                 tag: None,
                 base_branch: "main".to_string(),
+                wrap_up_mode: None,
             });
             self.input.mode = InputMode::InputTag;
             self.set_status("Tag: [b]ug  [f]eature  [c]hore  [e]pic  [Enter] none".to_string());
@@ -145,13 +148,25 @@ impl App {
         if let Some(ref mut draft) = self.input.task_draft {
             draft.base_branch = base_branch;
         }
+        self.input.buffer.clear();
+        self.input.mode = InputMode::InputWrapUpMode;
+        self.set_status("Wrap-up: [r]ebase  [p]r  [d]one  [Enter] skip".to_string());
+        vec![]
+    }
+
+    pub(in crate::tui) fn handle_submit_wrap_up_mode(
+        &mut self,
+        mode: Option<WrapUpMode>,
+    ) -> Vec<Command> {
+        if let Some(ref mut draft) = self.input.task_draft {
+            draft.wrap_up_mode = mode;
+        }
         let repo_path = self
             .input
             .task_draft
             .as_ref()
             .map(|d| d.repo_path.clone())
             .unwrap_or_default();
-        self.input.buffer.clear();
         self.finish_task_creation(repo_path)
     }
 

@@ -257,6 +257,15 @@ pub(super) fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
+        InputMode::InputWrapUpMode => {
+            let text = app
+                .status
+                .message
+                .as_deref()
+                .unwrap_or("Wrap-up: [r]ebase  [p]r  [d]one  [Enter] skip");
+            let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
+            frame.render_widget(bar, area);
+        }
         InputMode::MainSessionDir => {
             let text = format!(
                 "Main session directory:  {}  [Enter] open  [Esc] cancel",

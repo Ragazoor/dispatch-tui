@@ -754,6 +754,7 @@ mod tests {
             project_id: ProjectId(1),
             last_pre_tool_use_at: None,
             last_notification_at: None,
+            wrap_up_mode: None,
         };
         assert!(task.epic_id.is_none());
     }
@@ -783,6 +784,7 @@ mod tests {
             project_id: ProjectId(1),
             last_pre_tool_use_at: None,
             last_notification_at: None,
+            wrap_up_mode: None,
         };
         assert_eq!(task.epic_id, Some(EpicId(5)));
     }
@@ -1074,6 +1076,7 @@ mod tests {
             project_id: ProjectId(1),
             last_pre_tool_use_at: None,
             last_notification_at: None,
+            wrap_up_mode: None,
         }
     }
 
@@ -1276,6 +1279,7 @@ mod tests {
             project_id: ProjectId(1),
             last_pre_tool_use_at: None,
             last_notification_at: None,
+            wrap_up_mode: None,
         }
     }
 
@@ -1380,6 +1384,7 @@ mod tests {
             project_id: ProjectId(1),
             last_pre_tool_use_at: None,
             last_notification_at: None,
+            wrap_up_mode: None,
         }
     }
 

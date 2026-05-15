@@ -9,7 +9,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 
-use crate::models::{Epic, EpicId, ProjectId, SubStatus, Task, TaskId, TaskStatus, TaskTag};
+use crate::models::{
+    Epic, EpicId, ProjectId, SubStatus, Task, TaskId, TaskStatus, TaskTag, WrapUpMode,
+};
 
 /// Process-wide counter incremented each time a row decode falls back to a
 /// default value (unknown enum string, malformed JSON list, etc.). Surfaces
@@ -30,7 +32,8 @@ fn bump_decode_fallback() -> u64 {
 pub(super) const TASK_COLUMNS: &str =
     "id, title, description, repo_path, status, worktree, tmux_window, \
      plan_path, epic_id, sub_status, pr_url, tag, sort_order, base_branch, external_id, \
-     created_at, updated_at, project_id, labels, last_pre_tool_use_at, last_notification_at";
+     created_at, updated_at, project_id, labels, last_pre_tool_use_at, last_notification_at, \
+     wrap_up_mode";
 
 pub(super) fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     let status_str: String = row.get("status")?;
@@ -75,6 +78,9 @@ pub(super) fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         updated_at: parse_datetime(&updated_str),
         last_pre_tool_use_at: read_optional_datetime(row, "last_pre_tool_use_at"),
         last_notification_at: read_optional_datetime(row, "last_notification_at"),
+        wrap_up_mode: parse_wrap_up_mode_or_warn(
+            row.get::<_, Option<String>>("wrap_up_mode").unwrap_or(None),
+        ),
     })
 }
 
@@ -153,6 +159,18 @@ fn parse_sub_status_or_warn(raw: Option<String>) -> SubStatus {
             }
         },
         None => SubStatus::None,
+    }
+}
+
+fn parse_wrap_up_mode_or_warn(raw: Option<String>) -> Option<WrapUpMode> {
+    let s = raw?;
+    match WrapUpMode::parse(&s) {
+        Some(v) => Some(v),
+        None => {
+            let count = bump_decode_fallback();
+            tracing::warn!(raw = %s, count, "unrecognised wrap_up_mode, dropping");
+            None
+        }
     }
 }
 

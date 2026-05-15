@@ -124,6 +124,7 @@ async fn create_task_fixture(state: &Arc<McpState>) -> crate::models::TaskId {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap()
@@ -144,6 +145,7 @@ async fn create_running_task_with_window(state: &Arc<McpState>) -> crate::models
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();

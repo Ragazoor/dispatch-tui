@@ -12,6 +12,8 @@ pub enum WrapUpMessage {
     Start(TaskId),
     /// Confirm per-task rebase wrap-up.
     Rebase,
+    /// Confirm per-task done wrap-up (mark done, no git ops).
+    Done,
     /// Cancel per-task wrap-up.
     Cancel,
     /// Begin per-epic batch wrap-up confirmation flow.

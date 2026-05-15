@@ -61,6 +61,7 @@ impl App {
             InputMode::ConfirmDeleteProject2 { id, item_count } => {
                 self.handle_key_confirm_delete_project2(key, id, item_count)
             }
+            InputMode::InputWrapUpMode => self.handle_key_wrap_up_mode(key),
         }
     }
 
@@ -379,6 +380,25 @@ impl App {
             KeyCode::Esc => self.update(Message::Input(
                 crate::tui::messages::InputMessage::CancelInput,
             )),
+            _ => vec![],
+        }
+    }
+
+    pub(in crate::tui) fn handle_key_wrap_up_mode(&mut self, key: KeyEvent) -> Vec<Command> {
+        use crate::models::WrapUpMode;
+        use crate::tui::messages::InputMessage;
+        match key.code {
+            KeyCode::Char('r') => self.update(Message::Input(InputMessage::SubmitWrapUpMode(
+                Some(WrapUpMode::Rebase),
+            ))),
+            KeyCode::Char('p') => self.update(Message::Input(InputMessage::SubmitWrapUpMode(
+                Some(WrapUpMode::Pr),
+            ))),
+            KeyCode::Char('d') => self.update(Message::Input(InputMessage::SubmitWrapUpMode(
+                Some(WrapUpMode::Done),
+            ))),
+            KeyCode::Enter => self.update(Message::Input(InputMessage::SubmitWrapUpMode(None))),
+            KeyCode::Esc => self.update(Message::Input(InputMessage::CancelInput)),
             _ => vec![],
         }
     }

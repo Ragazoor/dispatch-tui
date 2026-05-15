@@ -128,6 +128,7 @@ fn make_task(repo_path: &str) -> Task {
         project_id: ProjectId(1),
         last_pre_tool_use_at: None,
         last_notification_at: None,
+        wrap_up_mode: None,
     }
 }
 

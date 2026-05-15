@@ -230,6 +230,54 @@ pub(in crate::tui) fn input_base_branch_lines(
     ]
 }
 
+pub(in crate::tui) fn input_wrap_up_mode_lines(
+    app: &App,
+    completed: Style,
+    active: Style,
+    hint: Style,
+) -> Vec<Line<'static>> {
+    let title = app
+        .input
+        .task_draft
+        .as_ref()
+        .map(|d| d.title.clone())
+        .unwrap_or_default();
+    let tag = app
+        .input
+        .task_draft
+        .as_ref()
+        .and_then(|d| d.tag.as_ref())
+        .map(|t| t.to_string())
+        .unwrap_or_else(|| "none".to_string());
+    let repo_path = app
+        .input
+        .task_draft
+        .as_ref()
+        .map(|d| d.repo_path.clone())
+        .unwrap_or_default();
+    let base_branch = app
+        .input
+        .task_draft
+        .as_ref()
+        .map(|d| d.base_branch.clone())
+        .unwrap_or_else(|| "main".to_string());
+    vec![
+        Line::from(Span::styled(format!("  Title: {title}"), completed)),
+        Line::from(Span::styled(format!("  Tag: {tag}"), completed)),
+        Line::from(Span::styled(format!("  Repo: {repo_path}"), completed)),
+        Line::from(Span::styled(
+            format!("  Base branch: {base_branch}"),
+            completed,
+        )),
+        Line::from(Span::styled(
+            "  Wrap-up: [r]ebase  [p]r  [d]one  [Enter] skip",
+            active,
+        )),
+        Line::from(""),
+        Line::from(Span::styled("  [Enter] skip  [Esc] cancel", hint)),
+    ]
+}
+
 fn repo_picker_lines<'a>(
     app: &'a App,
     area: Rect,

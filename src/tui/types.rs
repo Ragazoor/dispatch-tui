@@ -5,7 +5,7 @@ use ratatui::widgets::ListState;
 
 use crate::models::{
     Epic, EpicId, EpicSubstatus, Project, ProjectId, Task, TaskId, TaskStatus, TaskTag, TaskUsage,
-    TipsShowMode, DEFAULT_BASE_BRANCH,
+    TipsShowMode, WrapUpMode, DEFAULT_BASE_BRANCH,
 };
 
 // ---------------------------------------------------------------------------
@@ -347,6 +347,7 @@ pub enum InputMode {
     ConfirmEditTask(TaskId),
     ConfirmQuit,
     InputBaseBranch,
+    InputWrapUpMode,
     // Project panel input modes
     InputProjectName {
         /// None = create new project, Some(id) = rename existing
@@ -373,6 +374,7 @@ pub struct TaskDraft {
     pub repo_path: String,
     pub tag: Option<TaskTag>,
     pub base_branch: String,
+    pub wrap_up_mode: Option<WrapUpMode>,
 }
 
 impl Default for TaskDraft {
@@ -383,6 +385,7 @@ impl Default for TaskDraft {
             repo_path: String::new(),
             tag: None,
             base_branch: DEFAULT_BASE_BRANCH.to_string(),
+            wrap_up_mode: None,
         }
     }
 }
@@ -585,6 +588,7 @@ pub struct TaskEdit {
     pub plan_path: Option<String>,
     pub tag: Option<TaskTag>,
     pub base_branch: Option<String>,
+    pub wrap_up_mode: Option<crate::models::WrapUpMode>,
 }
 
 // ---------------------------------------------------------------------------

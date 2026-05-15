@@ -665,6 +665,7 @@ fn render_input_form_confirm_retry_shows_options() {
         project_id: ProjectId(1),
         last_pre_tool_use_at: None,
         last_notification_at: None,
+        wrap_up_mode: None,
     };
     app.board.tasks.push(crashed_task);
     app.input.mode = InputMode::ConfirmRetry(TaskId(5));

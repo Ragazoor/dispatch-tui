@@ -1,7 +1,7 @@
 //! Task wrap-up and finish handlers (rebase + cleanup, PR creation flow).
 
 use crate::dispatch;
-use crate::models::{SubStatus, TaskId, TaskStatus};
+use crate::models::{SubStatus, TaskId, TaskStatus, WrapUpMode};
 
 use super::super::types::*;
 use super::super::App;
@@ -97,7 +97,7 @@ impl App {
 
         self.input.mode = InputMode::ConfirmWrapUp(id);
         self.set_status(format!(
-            "Wrap up {}: [r] rebase onto main  [Esc] cancel  (PR: agent /wrap-up skill)",
+            "Wrap up {}: [r] rebase onto main  [d] done (no git)  [Esc] cancel",
             branch
         ));
         vec![]
@@ -134,6 +134,27 @@ impl App {
                 worktree,
                 tmux_window: task.tmux_window.clone(),
             })]
+        } else {
+            vec![]
+        }
+    }
+
+    pub(in crate::tui) fn handle_wrap_up_done(&mut self) -> Vec<Command> {
+        let id = match self.input.mode {
+            InputMode::ConfirmWrapUp(id) => id,
+            _ => return vec![],
+        };
+        self.input.mode = InputMode::Normal;
+        if let Some(task) = self.find_task_mut(id) {
+            task.status = TaskStatus::Done;
+            task.sub_status = SubStatus::None;
+            let task_clone = task.clone();
+            self.clear_agent_tracking(id);
+            self.sync_board_selection();
+            self.set_status(format!("Task {} marked done", id));
+            vec![Command::Task(crate::tui::commands::TaskCommand::Persist(
+                task_clone,
+            ))]
         } else {
             vec![]
         }

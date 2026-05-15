@@ -34,6 +34,7 @@ async fn full_epic_lifecycle() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -49,6 +50,7 @@ async fn full_epic_lifecycle() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -121,6 +123,7 @@ async fn soft_archive_epic_does_not_violate_foreign_keys() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();

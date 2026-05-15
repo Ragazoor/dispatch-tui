@@ -12,7 +12,7 @@ use std::path::Path;
 use crate::models::{
     Epic, EpicId, FeedItem, Learning, LearningId, LearningKind, LearningRetrieval, LearningScope,
     LearningStatus, LearningVerdict, Project, ProjectId, RetrievalSource, SubStatus, Task, TaskId,
-    TaskStatus, TaskTag, TaskUsage, UsageReport,
+    TaskStatus, TaskTag, TaskUsage, UsageReport, WrapUpMode,
 };
 
 // ---------------------------------------------------------------------------
@@ -88,6 +88,7 @@ patch_struct! {
         plain    labels:       &'a [String],
         nullable last_pre_tool_use_at: chrono::DateTime<chrono::Utc>,
         nullable last_notification_at: chrono::DateTime<chrono::Utc>,
+        nullable wrap_up_mode: WrapUpMode,
     }
 }
 
@@ -107,6 +108,7 @@ pub struct CreateTaskRequest<'a> {
     pub sort_order: Option<i64>,
     pub tag: Option<TaskTag>,
     pub project_id: ProjectId,
+    pub wrap_up_mode: Option<WrapUpMode>,
 }
 
 // ---------------------------------------------------------------------------

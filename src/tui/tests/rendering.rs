@@ -588,6 +588,7 @@ async fn stress_db_with_many_tasks() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();

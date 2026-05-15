@@ -28,6 +28,7 @@ fn task_created_adds_to_list() {
         project_id: ProjectId(1),
         last_pre_tool_use_at: None,
         last_notification_at: None,
+        wrap_up_mode: None,
     };
     let mut app = App::new(vec![], ProjectId(1));
     let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Created {
@@ -57,12 +58,17 @@ fn repo_path_empty_uses_saved_path() {
     assert_eq!(app.input.mode, InputMode::InputBaseBranch);
     assert_eq!(app.input.buffer, "main");
     assert!(cmds.is_empty());
-    // Submitting base branch completes creation
-    let cmds2 = app.update(Message::Input(
+    // Submitting base branch goes to wrap-up mode
+    app.update(Message::Input(
         crate::tui::messages::InputMessage::SubmitBaseBranch("main".to_string()),
     ));
+    assert_eq!(app.input.mode, InputMode::InputWrapUpMode);
+    // Skipping wrap-up creates the task
+    let cmds3 = app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitWrapUpMode(None),
+    ));
     assert_eq!(app.input.mode, InputMode::Normal);
-    assert!(cmds2.iter().any(|c| matches!(
+    assert!(cmds3.iter().any(|c| matches!(
         c,
         Command::Task(crate::tui::commands::TaskCommand::Insert { ref draft, .. }) if draft.repo_path == "/tmp"
     )));
@@ -126,12 +132,17 @@ fn repo_path_nonempty_used_as_is() {
     assert_eq!(app.input.mode, InputMode::InputBaseBranch);
     assert_eq!(app.input.buffer, "main");
     assert!(cmds.is_empty());
-    // Submitting base branch completes creation
-    let cmds2 = app.update(Message::Input(
+    // Submitting base branch goes to wrap-up mode
+    app.update(Message::Input(
         crate::tui::messages::InputMessage::SubmitBaseBranch("main".to_string()),
     ));
+    assert_eq!(app.input.mode, InputMode::InputWrapUpMode);
+    // Skipping wrap-up completes creation
+    let cmds3 = app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitWrapUpMode(None),
+    ));
     assert_eq!(app.input.mode, InputMode::Normal);
-    assert!(cmds2
+    assert!(cmds3
         .iter()
         .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::Insert { ref draft, .. }) if draft.repo_path == "/tmp")));
     assert_eq!(app.board.tasks.len(), 0); // task not added until TaskCreated
@@ -150,6 +161,7 @@ fn task_edited_updates_fields() {
             plan_path: Some("docs/plan.md".into()),
             tag: None,
             base_branch: None,
+            wrap_up_mode: None,
         },
     )));
     assert_eq!(app.board.tasks[0].title, "New");
@@ -719,6 +731,7 @@ fn editor_result_task_edit_returns_finalize_command() {
         project_id: ProjectId(1),
         last_pre_tool_use_at: None,
         last_notification_at: None,
+        wrap_up_mode: None,
     };
     let mut app = App::new(vec![task.clone()], ProjectId(1));
     let cmds = app.update(Message::Editor(
@@ -759,7 +772,7 @@ fn submit_repo_path_advances_to_base_branch() {
 }
 
 #[test]
-fn submit_base_branch_creates_task_with_branch() {
+fn submit_base_branch_sets_branch_and_advances_to_wrap_up_mode() {
     let mut app = App::new(vec![], ProjectId(1));
     app.input.mode = InputMode::InputBaseBranch;
     app.input.task_draft = Some(TaskDraft {
@@ -768,19 +781,19 @@ fn submit_base_branch_creates_task_with_branch() {
         repo_path: "/tmp".to_string(),
         tag: Some(TaskTag::Bug),
         base_branch: "main".to_string(),
+        wrap_up_mode: None,
     });
     app.input.buffer = "develop".to_string();
     let cmds = app.update(Message::Input(
         crate::tui::messages::InputMessage::SubmitBaseBranch("develop".to_string()),
     ));
-    assert_eq!(app.input.mode, InputMode::Normal);
-    assert!(cmds.iter().any(|c| matches!(
-        c,
-        Command::Task(crate::tui::commands::TaskCommand::Insert { ref draft, .. })
-            if draft.repo_path == "/tmp"
-                && draft.tag == Some(TaskTag::Bug)
-                && draft.base_branch == "develop"
-    )));
+    // Now transitions to wrap-up mode selection instead of creating the task directly.
+    assert_eq!(app.input.mode, InputMode::InputWrapUpMode);
+    assert!(cmds.is_empty(), "no Insert yet — wrap-up mode selection is next");
+    assert_eq!(
+        app.input.task_draft.as_ref().unwrap().base_branch,
+        "develop"
+    );
 }
 
 #[test]
@@ -798,11 +811,12 @@ fn submit_base_branch_empty_uses_draft_default() {
     let cmds = app.update(Message::Input(
         crate::tui::messages::InputMessage::SubmitBaseBranch(String::new()),
     ));
-    assert_eq!(app.input.mode, InputMode::Normal);
-    assert!(cmds.iter().any(|c| matches!(
-        c,
-        Command::Task(crate::tui::commands::TaskCommand::Insert { ref draft, .. }) if draft.base_branch == "main"
-    )));
+    assert_eq!(app.input.mode, InputMode::InputWrapUpMode);
+    assert!(cmds.is_empty(), "no Insert yet — wrap-up mode selection is next");
+    assert_eq!(
+        app.input.task_draft.as_ref().unwrap().base_branch,
+        "main"
+    );
 }
 
 #[test]
@@ -1627,13 +1641,17 @@ fn handle_key_text_input_repo_enter_selects_cursor_repo() {
     app.input.repo_cursor = 1;
 
     let cmds = app.handle_key(make_key(KeyCode::Enter));
-    // Now advances to InputBaseBranch; task not created until base branch submitted
+    // Advances to InputBaseBranch; task not created until wrap-up mode selected
     assert_eq!(app.input.mode, InputMode::InputBaseBranch);
     assert!(cmds.is_empty());
-    let cmds2 = app.update(Message::Input(
+    app.update(Message::Input(
         crate::tui::messages::InputMessage::SubmitBaseBranch("main".to_string()),
     ));
-    assert!(cmds2.iter().any(|c| matches!(
+    assert_eq!(app.input.mode, InputMode::InputWrapUpMode);
+    let cmds3 = app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitWrapUpMode(None),
+    ));
+    assert!(cmds3.iter().any(|c| matches!(
         c,
         Command::Task(crate::tui::commands::TaskCommand::Insert { .. })
     )));
@@ -1651,13 +1669,17 @@ fn handle_key_text_input_enter_submits_typed_text() {
     app.input.buffer = "/tmp".to_string();
 
     let cmds = app.handle_key(make_key(KeyCode::Enter));
-    // Now advances to InputBaseBranch; task not created until base branch submitted
+    // Advances to InputBaseBranch; task not created until wrap-up mode selected
     assert_eq!(app.input.mode, InputMode::InputBaseBranch);
     assert!(cmds.is_empty());
-    let cmds2 = app.update(Message::Input(
+    app.update(Message::Input(
         crate::tui::messages::InputMessage::SubmitBaseBranch("main".to_string()),
     ));
-    assert!(cmds2.iter().any(|c| matches!(
+    assert_eq!(app.input.mode, InputMode::InputWrapUpMode);
+    let cmds3 = app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitWrapUpMode(None),
+    ));
+    assert!(cmds3.iter().any(|c| matches!(
         c,
         Command::Task(crate::tui::commands::TaskCommand::Insert { .. })
     )));
@@ -2117,4 +2139,159 @@ fn handle_key_tag_selects_fix() {
         app.input.task_draft.as_ref().unwrap().tag,
         Some(TaskTag::Fix)
     );
+}
+
+// ---------------------------------------------------------------------------
+// InputWrapUpMode tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn submit_base_branch_transitions_to_wrap_up_mode() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputBaseBranch;
+    app.input.task_draft = Some(TaskDraft {
+        title: "T".to_string(),
+        repo_path: "/repo".to_string(),
+        base_branch: "main".to_string(),
+        ..Default::default()
+    });
+    app.input.buffer = "main".to_string();
+
+    let cmds = app.handle_key(make_key(KeyCode::Enter));
+
+    assert_eq!(
+        app.input.mode,
+        InputMode::InputWrapUpMode,
+        "expected InputWrapUpMode after submitting base branch, got {:?}",
+        app.input.mode
+    );
+    assert!(
+        cmds.is_empty(),
+        "no commands should be emitted before wrap-up mode selection"
+    );
+}
+
+#[test]
+fn wrap_up_mode_r_selects_rebase_and_creates_task() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputWrapUpMode;
+    app.input.task_draft = Some(TaskDraft {
+        title: "T".to_string(),
+        repo_path: "/repo".to_string(),
+        base_branch: "main".to_string(),
+        ..Default::default()
+    });
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
+
+    assert_eq!(app.input.mode, InputMode::Normal);
+    let insert_cmd = cmds.iter().find(|c| {
+        matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::Insert { .. })
+        )
+    });
+    assert!(insert_cmd.is_some(), "expected Insert command, got {:?}", cmds);
+    if let Some(Command::Task(crate::tui::commands::TaskCommand::Insert { draft, .. })) =
+        insert_cmd
+    {
+        assert_eq!(
+            draft.wrap_up_mode,
+            Some(crate::models::WrapUpMode::Rebase),
+            "expected Rebase wrap_up_mode"
+        );
+    }
+}
+
+#[test]
+fn wrap_up_mode_p_selects_pr_and_creates_task() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputWrapUpMode;
+    app.input.task_draft = Some(TaskDraft {
+        title: "T".to_string(),
+        repo_path: "/repo".to_string(),
+        base_branch: "main".to_string(),
+        ..Default::default()
+    });
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('p')));
+
+    assert_eq!(app.input.mode, InputMode::Normal);
+    let insert_cmd = cmds.iter().find(|c| {
+        matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::Insert { .. })
+        )
+    });
+    if let Some(Command::Task(crate::tui::commands::TaskCommand::Insert { draft, .. })) =
+        insert_cmd
+    {
+        assert_eq!(
+            draft.wrap_up_mode,
+            Some(crate::models::WrapUpMode::Pr),
+            "expected Pr wrap_up_mode"
+        );
+    }
+}
+
+#[test]
+fn wrap_up_mode_d_selects_done_and_creates_task() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputWrapUpMode;
+    app.input.task_draft = Some(TaskDraft {
+        title: "T".to_string(),
+        repo_path: "/repo".to_string(),
+        base_branch: "main".to_string(),
+        ..Default::default()
+    });
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
+
+    assert_eq!(app.input.mode, InputMode::Normal);
+    let insert_cmd = cmds.iter().find(|c| {
+        matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::Insert { .. })
+        )
+    });
+    if let Some(Command::Task(crate::tui::commands::TaskCommand::Insert { draft, .. })) =
+        insert_cmd
+    {
+        assert_eq!(
+            draft.wrap_up_mode,
+            Some(crate::models::WrapUpMode::Done),
+            "expected Done wrap_up_mode"
+        );
+    }
+}
+
+#[test]
+fn wrap_up_mode_enter_skips_and_creates_task_with_no_mode() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputWrapUpMode;
+    app.input.task_draft = Some(TaskDraft {
+        title: "T".to_string(),
+        repo_path: "/repo".to_string(),
+        base_branch: "main".to_string(),
+        ..Default::default()
+    });
+
+    let cmds = app.handle_key(make_key(KeyCode::Enter));
+
+    assert_eq!(app.input.mode, InputMode::Normal);
+    let insert_cmd = cmds.iter().find(|c| {
+        matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::Insert { .. })
+        )
+    });
+    assert!(insert_cmd.is_some(), "expected Insert command, got {:?}", cmds);
+    if let Some(Command::Task(crate::tui::commands::TaskCommand::Insert { draft, .. })) =
+        insert_cmd
+    {
+        assert_eq!(
+            draft.wrap_up_mode, None,
+            "Enter should create task with no wrap-up mode"
+        );
+    }
 }

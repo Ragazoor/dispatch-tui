@@ -121,6 +121,14 @@ enum VerdictKind { helped | unused | wrong }
 --   query_learnings  — returned by an explicit query_learnings MCP call
 enum RetrievalSource { prompt_injection | procedural | query_learnings }
 
+-- WrapUpMode records the preferred wrap-up path for a task, set at creation
+-- time by the user or agent. When set, the /wrap-up skill honours it instead
+-- of prompting the user.
+--   rebase — rebase the task branch onto base_branch and fast-forward it
+--   pr     — agent authors and creates a draft PR (no git ops done by dispatch)
+--   done   — close without any git operations; task moves to Done directly
+enum WrapUpMode { rebase | pr | done }
+
 ------------------------------------------------------------
 -- Entities and Variants
 ------------------------------------------------------------
@@ -143,6 +151,7 @@ entity Task {
     external_id: String?  -- stable identifier for tasks sourced from a feed epic (see feeds.allium); null for hand-created tasks. Unique per (epic, external_id) when set.
     last_pre_tool_use_at: Timestamp?  -- wallclock of the most recent PreToolUse hook; null when the agent has never tooled (or after Stop)
     last_notification_at: Timestamp?  -- wallclock of the most recent Notification hook; null when no notification is pending (or after Stop)
+    wrap_up_mode: WrapUpMode?  -- preferred wrap-up path; null means decide at wrap-up time
     created_at: Timestamp
     updated_at: Timestamp
 

@@ -3,7 +3,7 @@ use chrono::NaiveDateTime;
 use rusqlite::{params, OptionalExtension};
 
 use crate::models::{
-    EpicId, FeedItem, ProjectId, SubStatus, TaskId, TaskStatus, TaskUsage, UsageReport,
+    EpicId, FeedItem, ProjectId, SubStatus, TaskId, TaskStatus, TaskUsage, UsageReport, WrapUpMode,
 };
 
 use super::super::{CreateTaskRequest, Database, TaskPatch};
@@ -23,6 +23,7 @@ struct OwnedCreateTaskRequest {
     sort_order: Option<i64>,
     tag: Option<crate::models::TaskTag>,
     project_id: ProjectId,
+    wrap_up_mode: Option<WrapUpMode>,
 }
 
 impl<'a> From<CreateTaskRequest<'a>> for OwnedCreateTaskRequest {
@@ -38,6 +39,7 @@ impl<'a> From<CreateTaskRequest<'a>> for OwnedCreateTaskRequest {
             sort_order: r.sort_order,
             tag: r.tag,
             project_id: r.project_id,
+            wrap_up_mode: r.wrap_up_mode,
         }
     }
 }
@@ -62,6 +64,7 @@ struct OwnedTaskPatch {
     labels: Option<Vec<String>>,
     last_pre_tool_use_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
     last_notification_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
+    wrap_up_mode: Option<Option<WrapUpMode>>,
 }
 
 impl OwnedTaskPatch {
@@ -83,6 +86,7 @@ impl OwnedTaskPatch {
             || self.labels.is_some()
             || self.last_pre_tool_use_at.is_some()
             || self.last_notification_at.is_some()
+            || self.wrap_up_mode.is_some()
     }
 }
 
@@ -106,6 +110,7 @@ impl<'a> From<&TaskPatch<'a>> for OwnedTaskPatch {
             labels: p.labels.map(|s| s.to_vec()),
             last_pre_tool_use_at: p.last_pre_tool_use_at,
             last_notification_at: p.last_notification_at,
+            wrap_up_mode: p.wrap_up_mode,
         }
     }
 }
@@ -119,8 +124,8 @@ impl super::super::TaskCrud for Database {
             conn.execute(
                 "INSERT INTO tasks \
                  (title, description, repo_path, plan_path, status, sub_status, base_branch, \
-                  epic_id, sort_order, tag, project_id) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                  epic_id, sort_order, tag, project_id, wrap_up_mode) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                 params![
                     req.title,
                     req.description,
@@ -133,6 +138,7 @@ impl super::super::TaskCrud for Database {
                     req.sort_order,
                     req.tag.map(|t| t.as_str()),
                     req.project_id.0,
+                    req.wrap_up_mode.map(|m| m.as_str()),
                 ],
             )
             .context("Failed to insert task")?;
@@ -327,6 +333,10 @@ impl super::super::TaskCrud for Database {
             if let Some(t) = patch.last_notification_at {
                 sets.push("last_notification_at = ?");
                 values.push(Box::new(t.map(super::format_datetime)));
+            }
+            if let Some(m) = patch.wrap_up_mode {
+                sets.push("wrap_up_mode = ?");
+                values.push(Box::new(m.map(|v| v.as_str().to_string())));
             }
 
             sets.push("updated_at = datetime('now')");

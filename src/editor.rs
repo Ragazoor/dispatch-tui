@@ -30,6 +30,9 @@ pub struct EditorFields {
     /// failures are recorded in `errors`.
     pub tag: Option<crate::models::TaskTag>,
     pub base_branch: String,
+    /// Parsed wrap-up mode, or `None` if the section was empty/absent or
+    /// unparseable. `None` is applied as "clear" in `apply_task_editor_fields`.
+    pub wrap_up_mode: Option<crate::models::WrapUpMode>,
     pub errors: Vec<EditorParseError>,
 }
 
@@ -152,9 +155,10 @@ pub fn parse_epic_editor_output(input: &str) -> EpicEditorFields {
 pub fn format_editor_content(task: &Task) -> String {
     let plan = task.plan_path.as_deref().unwrap_or("");
     let tag = task.tag.map(|t| t.as_str()).unwrap_or("");
+    let wrap_up_mode = task.wrap_up_mode.map(|m| m.as_str()).unwrap_or("");
     format!(
-        "--- TITLE ---\n{}\n--- DESCRIPTION ---\n{}\n--- REPO_PATH ---\n{}\n--- STATUS ---\n{}\n--- PLAN ---\n{}\n--- TAG ---\n{}\n--- BASE_BRANCH ---\n{}\n",
-        task.title, task.description, task.repo_path, task.status.as_str(), plan, tag, task.base_branch
+        "--- TITLE ---\n{}\n--- DESCRIPTION ---\n{}\n--- REPO_PATH ---\n{}\n--- STATUS ---\n{}\n--- PLAN ---\n{}\n--- TAG ---\n{}\n--- BASE_BRANCH ---\n{}\n--- WRAP_UP_MODE ---\n{}\n",
+        task.title, task.description, task.repo_path, task.status.as_str(), plan, tag, task.base_branch, wrap_up_mode
     )
 }
 
@@ -171,6 +175,7 @@ pub struct TaskEditApplied {
     pub plan_path: Option<String>,
     pub tag: Option<crate::models::TaskTag>,
     pub base_branch: Option<String>,
+    pub wrap_up_mode: Option<crate::models::WrapUpMode>,
 }
 
 /// Apply parsed editor fields on top of the task's existing values using
@@ -206,6 +211,7 @@ pub fn apply_task_editor_fields(task: &Task, fields: EditorFields) -> TaskEditAp
     } else {
         Some(fields.base_branch)
     };
+    let wrap_up_mode = fields.wrap_up_mode;
     TaskEditApplied {
         title,
         description,
@@ -214,6 +220,7 @@ pub fn apply_task_editor_fields(task: &Task, fields: EditorFields) -> TaskEditAp
         plan_path,
         tag,
         base_branch,
+        wrap_up_mode,
     }
 }
 
@@ -275,6 +282,14 @@ pub fn parse_editor_content(input: &str) -> EditorFields {
         &mut errors,
     );
 
+    let wrap_up_mode = parse_section(
+        s.remove("WRAP_UP_MODE").unwrap_or_default(),
+        "WRAP_UP_MODE",
+        crate::models::WrapUpMode::parse,
+        |raw| format!("unknown wrap-up mode: {raw:?} (valid: rebase, pr, done)"),
+        &mut errors,
+    );
+
     EditorFields {
         title: s.remove("TITLE").unwrap_or_default(),
         description: s.remove("DESCRIPTION").unwrap_or_default(),
@@ -283,6 +298,7 @@ pub fn parse_editor_content(input: &str) -> EditorFields {
         plan: s.remove("PLAN").unwrap_or_default(),
         tag,
         base_branch: s.remove("BASE_BRANCH").unwrap_or_default(),
+        wrap_up_mode,
         errors,
     }
 }
@@ -441,6 +457,7 @@ mod tests {
             project_id: ProjectId(1),
             last_pre_tool_use_at: None,
             last_notification_at: None,
+            wrap_up_mode: None,
         }
     }
 
@@ -614,6 +631,62 @@ mod tests {
         assert_eq!(applied.description, "New desc");
         // empty repo_path preserves prior
         assert_eq!(applied.repo_path, "/orig/repo");
+    }
+
+    #[test]
+    fn editor_includes_wrap_up_mode_section() {
+        let mut task = make_task("T", "D", "/repo", TaskStatus::Backlog, None);
+        task.wrap_up_mode = Some(crate::models::WrapUpMode::Rebase);
+        let content = format_editor_content(&task);
+        assert!(
+            content.contains("--- WRAP_UP_MODE ---"),
+            "should have WRAP_UP_MODE section: {content}"
+        );
+        assert!(content.contains("rebase"), "should contain wrap-up mode value");
+    }
+
+    #[test]
+    fn editor_roundtrip_wrap_up_mode() {
+        let mut task = make_task("T", "D", "/repo", TaskStatus::Backlog, None);
+        task.wrap_up_mode = Some(crate::models::WrapUpMode::Pr);
+        let content = format_editor_content(&task);
+        let fields = parse_editor_content(&content);
+        assert_eq!(fields.wrap_up_mode, Some(crate::models::WrapUpMode::Pr));
+    }
+
+    #[test]
+    fn editor_wrap_up_mode_none_when_empty() {
+        let input = "--- TITLE ---\nT\n--- WRAP_UP_MODE ---\n\n";
+        let fields = parse_editor_content(input);
+        assert_eq!(fields.wrap_up_mode, None);
+    }
+
+    #[test]
+    fn apply_task_editor_wrap_up_mode_set() {
+        let task = make_task("T", "D", "/repo", TaskStatus::Backlog, None);
+        let fields = EditorFields {
+            title: "T".into(),
+            wrap_up_mode: Some(crate::models::WrapUpMode::Done),
+            ..Default::default()
+        };
+        let applied = apply_task_editor_fields(&task, fields);
+        assert_eq!(applied.wrap_up_mode, Some(crate::models::WrapUpMode::Done));
+    }
+
+    #[test]
+    fn apply_task_editor_wrap_up_mode_clear() {
+        let mut task = make_task("T", "D", "/repo", TaskStatus::Backlog, None);
+        task.wrap_up_mode = Some(crate::models::WrapUpMode::Rebase);
+        let fields = EditorFields {
+            title: "T".into(),
+            wrap_up_mode: None,
+            ..Default::default()
+        };
+        let applied = apply_task_editor_fields(&task, fields);
+        assert_eq!(
+            applied.wrap_up_mode, None,
+            "empty wrap_up_mode section should clear it"
+        );
     }
 
     #[test]

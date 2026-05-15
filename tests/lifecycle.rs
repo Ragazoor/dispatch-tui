@@ -51,6 +51,7 @@ async fn full_lifecycle() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -79,6 +80,7 @@ async fn full_lifecycle() {
                 project_id: dispatch_tui::models::ProjectId(1),
                 last_pre_tool_use_at: None,
                 last_notification_at: None,
+                wrap_up_mode: None,
             },
         },
     ));

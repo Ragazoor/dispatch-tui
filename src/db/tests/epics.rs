@@ -57,6 +57,7 @@ async fn delete_epic_cascades_subtasks() {
         sort_order: None,
         tag: None,
         project_id: ProjectId(1),
+        wrap_up_mode: None,
     })
     .await
     .unwrap();
@@ -72,6 +73,7 @@ async fn delete_epic_cascades_subtasks() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -112,6 +114,7 @@ async fn delete_epic_with_sub_epics_succeeds() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -211,6 +214,7 @@ async fn task_epic_id_roundtrip() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -243,6 +247,7 @@ async fn list_tasks_for_epic() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -258,6 +263,7 @@ async fn list_tasks_for_epic() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -792,6 +798,7 @@ async fn list_all_tasks_with_epic_id_returns_only_tasks_with_epic() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -807,6 +814,7 @@ async fn list_all_tasks_with_epic_id_returns_only_tasks_with_epic() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -822,6 +830,7 @@ async fn list_all_tasks_with_epic_id_returns_only_tasks_with_epic() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
@@ -934,6 +943,7 @@ async fn recalculate_parent_status_from_sub_epic() {
             sort_order: None,
             tag: None,
             project_id: ProjectId(1),
+            wrap_up_mode: None,
         })
         .await
         .unwrap();
