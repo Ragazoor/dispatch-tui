@@ -193,7 +193,7 @@ entity Epic {
     parent: Epic?         -- null for root epics; set for nested sub-epics
     feed_command: String?           -- shell command that emits FeedItem JSON (see feeds.allium); null for non-feed epics
     feed_interval_secs: Integer?    -- per-epic poll cadence in seconds; null falls back to config.default_feed_interval
-    group_by_repo: bool = false      -- when true, feed tasks are grouped into sub-epics by repo name (see feeds.allium)
+    group_by_repo: Boolean = false      -- when true, feed tasks are grouped into sub-epics by repo name (see feeds.allium)
     created_at: Timestamp
     updated_at: Timestamp
 
