@@ -47,8 +47,9 @@ const FEED_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Group feed items by repo name and upsert each group into its own sub-epic.
 /// Clears any flat feed tasks on the parent epic (migration + ongoing hygiene).
-/// Returns `Some(sub_epic_ids)` on full success (one id per sub-epic written to),
-/// or `None` on any DB error.
+/// Returns `(sub_epic_ids, ok)` where `sub_epic_ids` contains all sub-epic IDs
+/// that were created or found (regardless of whether upsert succeeded), and `ok`
+/// is `true` only if every operation succeeded.
 async fn sync_grouped_feed(
     db: &dyn crate::db::TaskStore,
     parent_id: crate::models::EpicId,
@@ -56,7 +57,7 @@ async fn sync_grouped_feed(
     items: &[crate::models::FeedItem],
     repo_paths: &[String],
     base_branches: &[String],
-) -> Option<Vec<crate::models::EpicId>> {
+) -> (Vec<crate::models::EpicId>, bool) {
     use std::collections::HashMap;
 
     let mut groups: HashMap<String, Vec<usize>> = HashMap::new();
@@ -72,7 +73,8 @@ async fn sync_grouped_feed(
                 epic_id = parent_id.0,
                 "sync_grouped_feed: list_sub_epics failed: {err:#}"
             );
-            return None;
+            // list_sub_epics failed: no writes occurred, skip notifications
+            return (vec![], false);
         }
     };
 
@@ -112,6 +114,10 @@ async fn sync_grouped_feed(
                 }
             };
 
+        // Always collect the sub-epic ID so the caller can notify the TUI,
+        // even if the upsert below fails (partial writes are still visible).
+        sub_epic_ids.push(sub_epic_id);
+
         if let Err(err) = db
             .upsert_feed_tasks(
                 sub_epic_id,
@@ -127,8 +133,6 @@ async fn sync_grouped_feed(
                 "sync_grouped_feed: upsert_feed_tasks failed: {err:#}"
             );
             all_ok = false;
-        } else {
-            sub_epic_ids.push(sub_epic_id);
         }
     }
 
@@ -141,7 +145,7 @@ async fn sync_grouped_feed(
         all_ok = false;
     }
 
-    if all_ok { Some(sub_epic_ids) } else { None }
+    (sub_epic_ids, all_ok)
 }
 
 pub struct FeedRunner {
@@ -274,7 +278,7 @@ impl FeedRunner {
                 let base_branches = resolve_base_branches(&repo_paths, &*runner);
 
                 if epic_group_by_repo {
-                    if let Some(sub_ids) = sync_grouped_feed(
+                    let (sub_ids, _had_errors) = sync_grouped_feed(
                         &*db,
                         epic_id,
                         epic_project_id,
@@ -282,12 +286,10 @@ impl FeedRunner {
                         &repo_paths,
                         &base_branches,
                     )
-                    .await
-                    {
-                        let _ = notify.send(McpEvent::EpicChanged(epic_id)); // parent
-                        for sub_id in sub_ids {
-                            let _ = notify.send(McpEvent::EpicChanged(sub_id));
-                        }
+                    .await;
+                    let _ = notify.send(McpEvent::EpicChanged(epic_id)); // parent always
+                    for sub_id in sub_ids {
+                        let _ = notify.send(McpEvent::EpicChanged(sub_id));
                     }
                 } else {
                     match db
