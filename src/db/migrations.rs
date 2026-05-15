@@ -74,6 +74,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (49, migrate_v49_rename_confirmed_to_upvote),
     (50, migrate_v50_add_hook_timestamps),
     (51, migrate_v51_drop_pr_workflow_states), // drops pr_workflow_states created in v37
+    (52, migrate_v52_add_verify_command_to_repo_paths),
 ];
 
 fn migrate_v1_add_plan_column(conn: &Connection) -> Result<()> {
@@ -1136,4 +1137,12 @@ fn migrate_v50_add_hook_timestamps(conn: &Connection) -> Result<()> {
 fn migrate_v51_drop_pr_workflow_states(conn: &Connection) -> Result<()> {
     conn.execute_batch("DROP TABLE IF EXISTS pr_workflow_states;")
         .context("Failed to drop pr_workflow_states table (migration v51)")
+}
+
+fn migrate_v52_add_verify_command_to_repo_paths(conn: &Connection) -> Result<()> {
+    if !column_exists(conn, "repo_paths", "verify_command") {
+        conn.execute_batch("ALTER TABLE repo_paths ADD COLUMN verify_command TEXT")
+            .context("v52: add verify_command column")?;
+    }
+    Ok(())
 }

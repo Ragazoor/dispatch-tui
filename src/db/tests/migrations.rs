@@ -11,7 +11,7 @@ async fn fresh_db_has_latest_schema_version() {
         })
         .await
         .unwrap();
-    assert_eq!(version, 51);
+    assert_eq!(version, 52);
 }
 
 #[tokio::test]
@@ -330,7 +330,7 @@ async fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 51);
+    assert_eq!(version, 52);
 }
 
 #[tokio::test]
@@ -419,7 +419,7 @@ async fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 51);
+    assert_eq!(version, 52);
 }
 
 #[tokio::test]
@@ -524,7 +524,7 @@ async fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 51);
+    assert_eq!(version, 52);
 }
 
 #[tokio::test]
@@ -605,7 +605,7 @@ async fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 51);
+    assert_eq!(version, 52);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -726,7 +726,7 @@ async fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 51);
+    assert_eq!(version, 52);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -1725,7 +1725,7 @@ async fn migration_31_re_expands_tilde_paths() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 51);
+    assert_eq!(version, 52);
 }
 
 #[tokio::test]
@@ -1801,7 +1801,7 @@ async fn migrate_v32_adds_base_branch_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 51);
+    assert_eq!(version, 52);
 }
 
 #[tokio::test]
@@ -1904,11 +1904,11 @@ async fn migration_v38_feed_epic_columns() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 51);
+    assert_eq!(version, 52);
 }
 
 #[tokio::test]
-async fn fresh_db_schema_version_is_51() {
+async fn fresh_db_schema_version_is_52() {
     let db = in_memory_db().await;
     let version: i64 = db
         .db_call(|conn| {
@@ -1917,7 +1917,7 @@ async fn fresh_db_schema_version_is_51() {
         })
         .await
         .unwrap();
-    assert_eq!(version, 51);
+    assert_eq!(version, 52);
 }
 
 #[tokio::test]
@@ -1987,7 +1987,7 @@ async fn migration_v40_creates_learnings_table() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 51);
+    assert_eq!(version, 52);
 }
 
 #[tokio::test]
@@ -2058,7 +2058,7 @@ async fn migration_v41_drops_cost_usd_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 51);
+    assert_eq!(version, 52);
     // Original token data is preserved
     let row: (i64, i64, i64, i64, i64) = conn
         .query_row(
@@ -2170,7 +2170,7 @@ async fn test_migrate_v43_proposed_to_approved() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 51);
+    assert_eq!(version, 52);
 }
 
 #[tokio::test]
@@ -2287,4 +2287,57 @@ async fn migration_v45_is_idempotent() {
 
     // Running the migration on a DB that already has the column must be a no-op.
     crate::db::migrations::migrate_v45_add_task_labels(&conn).unwrap();
+}
+
+#[tokio::test]
+async fn migration_v52_adds_verify_command_to_repo_paths() {
+    let temp = tempfile::NamedTempFile::new().unwrap();
+    {
+        let conn = rusqlite::Connection::open(temp.path()).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE repo_paths (
+                id        INTEGER PRIMARY KEY,
+                path      TEXT NOT NULL UNIQUE,
+                last_used TEXT NOT NULL DEFAULT (datetime('now'))
+            );",
+        )
+        .unwrap();
+        conn.pragma_update(None, "user_version", 51).unwrap();
+    }
+
+    let db = crate::db::Database::open(temp.path()).await.unwrap();
+    let columns: Vec<(String, String, i64)> = db
+        .db_call(|conn| {
+            conn.prepare("SELECT name, type, \"notnull\" FROM pragma_table_info('repo_paths')")
+                .map_err(anyhow::Error::from)?
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .map_err(anyhow::Error::from)?
+                .collect::<Result<_, _>>()
+                .map_err(anyhow::Error::from)
+        })
+        .await
+        .unwrap();
+
+    let verify = columns
+        .iter()
+        .find(|(n, _, _)| n == "verify_command")
+        .expect("verify_command column must be added by migration v52");
+    assert_eq!(verify.1, "TEXT");
+    assert_eq!(verify.2, 0, "verify_command must be nullable");
+}
+
+#[tokio::test]
+async fn fresh_db_has_verify_command_column() {
+    let temp = tempfile::NamedTempFile::new().unwrap();
+    let db = crate::db::Database::open(temp.path()).await.unwrap();
+    db.db_call(|conn| {
+        conn.execute(
+            "INSERT INTO repo_paths(path, verify_command) VALUES('/x', 'cargo test')",
+            [],
+        )
+        .map(|_| ())
+        .map_err(anyhow::Error::from)
+    })
+    .await
+    .expect("verify_command must exist on fresh schema");
 }

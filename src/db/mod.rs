@@ -511,9 +511,10 @@ fn init_schema_sync(conn: &Connection) -> Result<()> {
             updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
         );
         CREATE TABLE IF NOT EXISTS repo_paths (
-            id        INTEGER PRIMARY KEY,
-            path      TEXT NOT NULL UNIQUE,
-            last_used TEXT NOT NULL DEFAULT (datetime('now'))
+            id             INTEGER PRIMARY KEY,
+            path           TEXT NOT NULL UNIQUE,
+            last_used      TEXT NOT NULL DEFAULT (datetime('now')),
+            verify_command TEXT
         );",
     )
     .context("Failed to create schema")?;
