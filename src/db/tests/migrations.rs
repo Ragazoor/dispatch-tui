@@ -2079,10 +2079,6 @@ async fn migration_v41_drops_cost_usd_column() {
                  OR (scope != 'user' AND scope_ref IS NOT NULL)
              )
          );
-         CREATE TABLE epics (
-             id INTEGER PRIMARY KEY,
-             title TEXT NOT NULL DEFAULT ''
-         );
          CREATE INDEX IF NOT EXISTS idx_learnings_scope ON learnings(scope, scope_ref);
          CREATE INDEX IF NOT EXISTS idx_learnings_status ON learnings(status);
          INSERT INTO tasks (id, title, status) VALUES (999, 'test', 'backlog');
@@ -2183,10 +2179,6 @@ async fn test_migrate_v43_proposed_to_approved() {
                  (scope = 'user' AND scope_ref IS NULL)
                  OR (scope != 'user' AND scope_ref IS NOT NULL)
              )
-         );
-         CREATE TABLE epics (
-             id INTEGER PRIMARY KEY,
-             title TEXT NOT NULL DEFAULT ''
          );
          CREATE INDEX IF NOT EXISTS idx_learnings_scope ON learnings(scope, scope_ref);
          CREATE INDEX IF NOT EXISTS idx_learnings_status ON learnings(status);
