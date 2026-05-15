@@ -2636,6 +2636,7 @@ fn shift_r_in_epic_view_toggles_group_by_repo() {
     let mut app = App::new(vec![], ProjectId(1));
     let mut epic = make_epic(42);
     epic.group_by_repo = false;
+    epic.feed_command = Some("echo '[]'".to_string());
     app.board.epics = vec![epic];
 
     // Enter epic view
@@ -2655,6 +2656,14 @@ fn shift_r_in_epic_view_toggles_group_by_repo() {
 
     // Also verify in-memory state was updated
     assert!(app.board.epics[0].group_by_repo);
+}
+
+#[test]
+fn shift_r_outside_epic_view_is_noop() {
+    let mut app = App::new(vec![], ProjectId(1));
+    // Default view mode is not ViewMode::Epic
+    let cmds = app.handle_key(make_key(KeyCode::Char('R')));
+    assert!(cmds.is_empty(), "R outside epic view should produce no commands, got {cmds:?}");
 }
 
 #[test]
