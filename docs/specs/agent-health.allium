@@ -1,0 +1,236 @@
+-- allium: 3
+-- agent-health.allium
+--
+-- Scope: Classification of tmux pane activity, crashed-agent detection,
+--        notifications (needs-input, review), and Claude Code hook handlers.
+-- Excludes: Task lifecycle (see tasks.allium); MCP tools (see mcp-task-tools.allium);
+--           dispatch and retry (see dispatch.allium).
+
+use "./core.allium" as core
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- == Agent Health ==
+
+rule ClassifyAgentActivity {
+    -- Derives sub_status for running tasks from hook event timestamps.
+    -- ACTIVE_THRESHOLD = 2 minutes.
+    when: tick
+
+    requires: task.status = running
+    requires: task.sub_status not in {crashed, conflict}
+
+    ensures:
+        if task.last_notification_at > task.last_pre_tool_use_at:
+            task.sub_status = needs_input
+        else if now - task.last_pre_tool_use_at <= 2.minutes:
+            task.sub_status = active
+        else:
+            task.sub_status = stale
+
+    @guidance
+        -- Crashed and Conflict are orthogonal — set by DetectCrashedAgent
+        -- and conflict detectors respectively, never overridden here.
+        -- The wallclock Staleness enum (Fresh/Aging/Stale at 3d/7d) is
+        -- independent — it decorates card ages.
+        -- Every transition into running stamps last_pre_tool_use_at = now
+        -- (DispatchTask on Backlog→Running, ResumeTask on resume, and the
+        -- manual move handler on Review→Running) so this classifier returns
+        -- Active through the ACTIVE_THRESHOLD window before the agent's first
+        -- real PreToolUse hook fires. Without seeding on the manual Review→
+        -- Running path, a task whose Stop hook cleared the timestamp would
+        -- be classified Stale on the very next tick — and because the card
+        -- derives its minute label from the same timestamp, it would render
+        -- the meaningless "stale · 0m". Recovery from Stale → Active is
+        -- driven entirely by fresh PreToolUse hook timestamps (and
+        -- Notification timestamps for needs_input); there is no separate
+        -- in-memory activity timer.
+        -- Ownership invariant: only hook events (PreToolUse / Stop) and the
+        -- "transition into Running" seeds write last_pre_tool_use_at. Generic
+        -- in-memory persists from the TUI (sort_order swaps, tick sub_status
+        -- updates, editor saves) MUST NOT include this column — a stale
+        -- in-memory snapshot would otherwise overwrite a fresher hook write
+        -- and flick the task into Stale on the next tick.
+        -- Card label: when sub_status = stale, the card renders the idle
+        -- time as "stale · Xm" where X = now - last_pre_tool_use_at. If
+        -- last_pre_tool_use_at is null (legacy pre-v50 rows, or a transient
+        -- window before the seed write commits), the card renders just
+        -- "stale" with no minute suffix rather than "stale · 0m".
+}
+
+rule DetectCrashedAgent {
+    -- Fires when the tmux window disappears for a running task.
+    when: WindowGone(task)
+
+    requires: task.status = running
+
+    ensures: task.sub_status = crashed
+    ensures:
+        if notifications_enabled:
+            DesktopNotification(
+                task: task,
+                urgency: urgent,
+                about: agent_crashed
+            )
+
+    @guidance
+        -- Triggered by the WindowGone message, which is sent when the
+        -- runtime detects that the task's tmux window no longer exists.
+        -- The tmux_window field is NOT cleared for crashed tasks, so that
+        -- the window name remains available for the ConfirmRetry prompt.
+        -- Recovery from Crashed happens via RetryResume, which kills the
+        -- old window, dispatches a fresh agent, and resets sub_status to
+        -- active. ClassifyAgentActivity intentionally skips Crashed and
+        -- Conflict so the human-actionable state is not silently masked
+        -- by stale hook timestamps.
+        -- For non-running tasks (e.g. review tasks), window closure
+        -- silently clears task.tmux_window = null without changing
+        -- sub_status or sending notifications. This is the normal exit
+        -- path for review agents and detached sessions.
+}
+
+-- == Notifications ==
+
+rule NotifyNeedsInput {
+    when: task: core/Task.sub_status transitions_to needs_input
+
+    requires: task.status = running
+
+    ensures:
+        if notifications_enabled:
+            DesktopNotification(
+                task: task,
+                urgency: urgent,
+                about: needs_input
+            )
+
+    @guidance
+        -- Notifications are deduplicated: each notification fires at most
+        -- once per transition to needs_input. The notified state is
+        -- cleared when sub_status leaves needs_input, allowing
+        -- re-notification on a subsequent re-entry. The clearing happens
+        -- unconditionally, even when notifications are disabled, so that
+        -- stale entries do not suppress notifications after re-enabling.
+        -- The task is in running/needs_input (Blocked visual column),
+        -- set by HookNotification when the agent raises a notification.
+}
+
+rule NotifyReview {
+    when: task: core/Task.status transitions_to review
+
+    ensures:
+        if notifications_enabled:
+            DesktopNotification(
+                task: task,
+                urgency: normal,
+                about: status_review
+            )
+
+    @guidance
+        -- Notifications are gated by a user-togglable notifications_enabled
+        -- setting (N key in TUI). When disabled, no notifications are sent.
+        -- Notifications are deduplicated: each notification fires at most
+        -- once per transition to review. The notified state is cleared
+        -- when the task leaves review status. The clearing happens
+        -- unconditionally, even when notifications are disabled, so that
+        -- stale entries do not suppress notifications after re-enabling.
+}
+
+rule ClearNeedsInput {
+    -- When HookPreToolUse fires, update_status_if(running, running) resets
+    -- sub_status to active via the auto-reset behavior.
+    when: HookFired(hook: pre_tool_use, task: task)
+
+    requires: task.sub_status = needs_input
+
+    ensures: task.sub_status = core/SubStatus.default_for(running)  -- i.e. active
+
+    @guidance
+        -- sub_status = needs_input is set by HookNotification when the agent
+        -- raises a notification. It is cleared when the agent resumes and
+        -- HookPreToolUse fires, which calls:
+        --   dispatch update <id> running
+        -- The update_status_if auto-reset sets sub_status = active.
+        -- This allows re-notification if the agent raises another notification.
+}
+
+-- == Hook-Based Status Transitions ==
+-- Claude Code hooks (PreToolUse, Stop, Notification) bridge the agent
+-- session lifecycle to task status. These rules describe the CLI hook
+-- script installed by `dispatch setup`.
+
+rule HookPreToolUse {
+    when: PreToolUse(task, tool_name)
+
+    -- Skip dispatch MCP tool calls: these are management operations
+    -- (get_task, wrap_up, update_task, etc.), not implementation work.
+    -- Without this filter, wrap-up fails because get_task and wrap_up
+    -- calls clobber review status before the handler can check it.
+    requires: not tool_name starts_with "mcp__dispatch__"
+
+    ensures: task.status = running
+    ensures: task.sub_status = core/SubStatus.default_for(running)
+    ensures: task.last_pre_tool_use_at = now
+
+    @guidance
+        -- Fires on every non-dispatch tool use. The unconditional
+        -- transition is correct: backlog -> running on first dispatch,
+        -- review -> running on session resume, running -> running is
+        -- a no-op. Only done/archived tasks should not be modified,
+        -- but agents are never dispatched into done/archived worktrees.
+        -- The sub_status reset to active (default for running) also
+        -- clears needs_input when the agent resumes after a notification.
+}
+
+rule HookStop {
+    when: Stop(task)
+
+    requires: task.status = running
+
+    ensures: task.status = review
+    ensures: task.sub_status = core/SubStatus.default_for(review)
+    ensures: task.last_pre_tool_use_at = null
+    ensures: task.last_notification_at = null
+}
+
+rule HookNotification {
+    when: HookFired(hook: notification, task: task)
+    requires: task.status = running
+
+    ensures: task.sub_status = needs_input
+    ensures: task.last_notification_at = now
+
+    @guidance
+        -- HookNotification fires when the agent raises a notification
+        -- (e.g. a permission prompt). The hook calls:
+        --   dispatch update <id> running --only-if running --sub-status needs_input
+        -- This sets sub_status=needs_input while keeping status=running.
+        -- The task appears in the Blocked visual column (running, needs_input).
+        -- When the agent resumes, HookPreToolUse fires and update_status_if
+        -- resets sub_status back to active (default for running).
+        --
+        -- CLI surface note: `dispatch update <id> <status> [--only-if X]
+        -- [--sub-status Y] [--needs-input]` is a non-MCP, human/hook-driven
+        -- entry point implemented by cli_update_task. Unlike the MCP
+        -- update_task tool — which blocks transitions into `done` and
+        -- `archived` so agents cannot self-promote past Review — the CLI
+        -- accepts any TaskStatus value, including `done` and `archived`.
+        -- This is intentional: Claude Code hooks and human operators use
+        -- the CLI to drive lifecycle steps that agents must not perform
+        -- on their own.
+        --
+        -- Flag deprecation: `--needs-input` is deprecated in favour of
+        -- `--sub-status needs_input`. When both are present, `--sub-status`
+        -- wins (resolved at src/main.rs Update arm). Hook scripts written
+        -- before the sub-status flag existed continue to work unchanged.
+}
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+-- Q1: Should stale/crashed detection trigger automatic status changes
+--     (e.g., moving back to Backlog), or should it remain advisory-only
+--     as it is today?

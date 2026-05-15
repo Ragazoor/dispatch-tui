@@ -1,0 +1,454 @@
+-- allium: 3
+-- dispatch.allium
+--
+-- Scope: Dispatching tasks into worktrees and tmux sessions — repo-path
+--        persistence, prompt augmentation, retry flows, and the surfaces
+--        the user sees while a dispatch is in flight.
+-- Excludes: Task creation and lifecycle (see tasks.allium); PR/wrap-up
+--           flows (see pr-workflow.allium); split-pane behaviour
+--           (see split-pane.allium); MCP dispatch tools (see
+--           mcp-task-tools.allium); epic dispatch (see epics.allium);
+--           learning prompt augmentation (see learnings.allium).
+
+use "./core.allium" as core
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- == Repo Path ==
+
+rule RecordRepoPath {
+    when: RepoPathUsed(path)
+
+    ensures: core/SavedRepoPath.created_or_updated(
+        path: path,
+        last_used: now
+    )
+
+    @guidance
+        -- Fires whenever a repo path is used to create a task or epic
+        -- through the TUI:
+        --   - TUI task creation (after InputBaseBranch submission)
+        --   - TUI quick-dispatch (Shift+D)
+        --   - TUI epic creation
+        --   - TUI task edit (EditTask) when repo_path changes to a
+        --     non-empty value, so sibling feed items (e.g. other
+        --     Dependabot PRs in the same repo) can be auto-resolved
+        --     by resolve_feed_item_repo_paths on subsequent feed syncs
+        -- The path is first expand_tilde'd. If a SavedRepoPath with
+        -- the same path already exists, last_used is bumped to now;
+        -- otherwise a new record is created.
+        -- Not fired for MCP task creation (create_task tool) — that
+        -- skips repo path persistence. (There is no CLI for task
+        -- creation; tasks are created exclusively via MCP.) Cap
+        -- enforcement (maximum stored paths) is an implementation
+        -- detail and not specified here.
+}
+
+-- == Dispatch ==
+
+rule DispatchTask {
+    when: DispatchTask(task)
+
+    requires: task.status = backlog
+    -- Tasks with a plan always dispatch. Tasks without a plan dispatch
+    -- unless they carry the research tag (the only remaining tag that
+    -- routes to a dedicated agent).
+    requires: task.has_plan = true
+              or task.tag != research
+
+    ensures: task.status = running
+    ensures: task.sub_status = core/SubStatus.default_for(running)
+    ensures: task.last_pre_tool_use_at = now
+    ensures: task.worktree = core/Worktree.created(
+        path: task.repo_path + "/.worktrees/" + task.id + "-" + slugify(task.title),
+        branch: task.id + "-" + slugify(task.title)
+    )
+    ensures: task.tmux_window = core/TmuxWindow.created(name: "task-" + task.id)
+    ensures: AgentLaunched(task: task, mode: standard)
+
+    @guidance
+        -- Before creating the worktree, `git fetch origin <base_branch>` is
+        -- run in the repo root to update the remote-tracking ref. On success,
+        -- the worktree branch is created from `origin/<base_branch>` so the
+        -- agent starts from the latest remote state. On fetch failure (no
+        -- origin remote, network error), the step is skipped silently and the
+        -- worktree falls back to the local base branch.
+        -- Specifically: `git worktree add -B <branch> <path> origin/<base_branch>`.
+        -- If the worktree directory already exists on disk (pre-created),
+        -- the fetch and git worktree add steps are both skipped.
+        -- The launched Claude command includes a plugin-dir flag so
+        -- the agent discovers dispatch plugin skills (e.g. /wrap-up).
+        -- The agent prompt is prepended with a `git rebase <base>`
+        -- preamble so the agent picks up latest base changes on first
+        -- run (also useful when an agent is resumed after time passes).
+        -- Task-agent dispatches launch Claude in auto mode by default —
+        -- i.e. without a --permission-mode flag — so agents can edit
+        -- files without per-edit approval. The Research agent is the
+        -- sole exception: it launches with --permission-mode plan so
+        -- investigation stays read-only. The prompt content — not the
+        -- permission flag — differentiates the other modes.
+
+        -- == Unified prompt skeleton ==
+        -- Every task-agent prompt produced by build_prompt /
+        -- build_quick_dispatch_prompt / build_epic_planning_prompt has
+        -- the same shape:
+        --
+        --   {rebase_preamble}              (git rebase <base> instruction)
+        --   {worktree_preamble}            ("Always work from this
+        --                                    worktree folder — do not
+        --                                    `cd` to the parent repo
+        --                                    or other directories.")
+        --   {preamble}                     (one line, mode-specific)
+        --   <blank>
+        --   Task:                          (shared task_block, always)
+        --     ID: ...
+        --     Title: ...
+        --     Description: ...
+        --     EpicId: ...                  (only if task.epic != null)
+        --   {epic sibling-communication}   (only if task.epic != null)
+        --   <blank>
+        --   {validated_knowledge}          (tiered learnings; see
+        --                                    AugmentDispatchPromptWithLearnings)
+        --   {repo_map}                     (optional ctags-derived structural
+        --                                    summary; see AugmentDispatchPromptWithRepoMap.
+        --                                    Empty when generation is disabled,
+        --                                    the binary is missing, or the
+        --                                    invocation fails / times out.)
+        --   {mode_addendum}                (mode-specific block)
+        --   <blank>
+        --   {tdd_instruction}              (shared verbatim)
+        --   {allium_instruction}           (shared verbatim)
+        --   {mcp_tools_instruction}        (shared verbatim)
+        --   {learning_tools_instruction}   (shared verbatim — one-line
+        --                                    nudge to call query_learnings
+        --                                    when uncertain, and use the
+        --                                    /learnings skill to record or
+        --                                    upvote entries)
+        --   {wrap_up_instruction}          (shared verbatim, universal)
+        --
+        -- DispatchTask emits one of two variants of build_prompt:
+        --   * has_plan = false: preamble "Your task is:" and the addendum
+        --     is plan_or_brainstorm_instruction (conditional: if vague
+        --     use /brainstorming, else write the plan directly under
+        --     docs/plans/ and attach via update_task).
+        --   * has_plan = true: preamble "Your task is:" and the addendum
+        --     references the plan path with a "review and ask permission
+        --     before implementing" instruction.
+        -- CreateQuickTask (build_quick_dispatch_prompt) is the exception:
+        -- its preamble is "You are working interactively with the user."
+        -- rather than "Your task is:" — quick dispatch begins as an
+        -- interactive conversation where the agent elicits the goal
+        -- before writing a plan.
+        -- task_block does NOT include a Tag: line — tag is metadata for
+        -- the kanban board, not for prompt context (it would invite the
+        -- agent to over-fit on labels rather than the description).
+        -- wrap_up_instruction is shared by every dispatched agent so the
+        -- whole task lifecycle terminates the same way regardless of
+        -- mode (the wording covers plan-attach, work-package-creation,
+        -- and implementation completion).
+        -- DispatchResearchTask is an exception to the unified trailing
+        -- block: its prompt includes only {mcp_tools_instruction} and
+        -- omits tdd, allium, learning_tools, and wrap_up. The research agent
+        -- presents findings interactively and does not terminate via
+        -- the standard wrap-up flow.
+        -- Dependabot exception: when task.tag = dependabot, build_prompt
+        -- replaces the plan_or_brainstorm addendum with a dependabot
+        -- review runbook (vet the PR, classify the bump as patch/minor/
+        -- major via semver, check CI, scan the changelog, auto-approve
+        -- + merge if safe via `gh pr review --approve` and `gh pr merge
+        -- --squash --auto`, else ask the user and set sub_status =
+        -- needs_input). The trailing block is also reduced to just
+        -- {mcp_tools_instruction} + {learning_tools_instruction} — no
+        -- tdd, no allium, and explicitly NO wrap_up_instruction, because
+        -- the dependabot task is auto-cleaned when its PR merges (or
+        -- the user takes over). All other tag values (including
+        -- pr_review, fix) fall through to this rule and use the full
+        -- trailing block — those tags are purely kanban-board labels,
+        -- not routing keys.
+}
+
+rule DispatchResearchTask {
+    when: DispatchResearchTask(task)
+
+    requires: task.status = backlog
+    requires: task.has_plan = false
+    requires: task.tag = research
+
+    ensures: task.status = running
+    ensures: task.sub_status = core/SubStatus.default_for(running)
+    ensures: task.last_pre_tool_use_at = now
+    ensures: task.worktree = core/Worktree.created(
+        path: task.repo_path + "/.worktrees/" + task.id + "-" + slugify(task.title),
+        branch: task.id + "-" + slugify(task.title)
+    )
+    ensures: task.tmux_window = core/TmuxWindow.created(name: "task-" + task.id)
+    ensures: AgentLaunched(task: task, mode: research)
+
+    @guidance
+        -- Research mode: the agent investigates the topic in the task
+        -- description by reading code, docs, and external resources.
+        -- It presents findings to the user and waits for instructions.
+        -- The agent makes no code changes and does not wrap up autonomously.
+        -- Uses --permission-mode plan (same as other task dispatches).
+        -- Prompt note: build_research_prompt emits a stripped-down
+        -- trailing block — only {mcp_tools_instruction}, no tdd,
+        -- allium, learning_tools, or wrap_up. The research agent
+        -- presents findings interactively and does not terminate via
+        -- the standard wrap-up flow.
+}
+
+rule ResumeTask {
+    when: ResumeTask(task)
+
+    requires: task.status in {running, review}
+    requires: task.worktree != null
+    requires: task.tmux_window = null
+
+    ensures: task.tmux_window = core/TmuxWindow.created(name: "task-" + task.id)
+    ensures: task.status = running
+    ensures: task.sub_status = core/SubStatus.default_for(running)
+    ensures: task.last_pre_tool_use_at = now
+    ensures: AgentLaunched(task: task, mode: resume)
+}
+
+-- == Retry ==
+
+rule RetryResume {
+    when: RetryResume(task)
+
+    requires: task.status = running
+    requires: task.worktree != null
+
+    ensures:
+        if task.tmux_window != null:
+            OldTmuxWindow.killed(window: task.tmux_window)
+    ensures: task.sub_status = active
+    ensures: task.last_pre_tool_use_at = now
+    ensures: task.tmux_window = core/TmuxWindow.created(name: "task-" + task.id)
+    ensures: AgentLaunched(task: task, mode: resume)
+
+    @guidance
+        -- If the task already has a tmux window (e.g. a crashed or stale
+        -- session), the existing window is killed before creating a fresh
+        -- one. This tears down the old process cleanly.
+}
+
+rule RetryFresh {
+    when: RetryFresh(task)
+
+    requires: task.status = running
+
+    -- Destroys existing worktree, resets to backlog, then re-dispatches
+    ensures:
+        if task.worktree != null:
+            not exists task.worktree
+    ensures: task.worktree = null
+    ensures: task.tmux_window = null
+    ensures: task.status = backlog
+    ensures: task.sub_status = core/SubStatus.default_for(backlog)
+    ensures: AgentLaunched(task: task, mode: standard)
+
+    @guidance
+        -- RetryFresh dispatches directly via the standard dispatch
+        -- path. The unified prompt skeleton handles both has_plan = true
+        -- (review-and-implement) and has_plan = false (brainstorm-or-plan
+        -- conditional) variants without any branch in this rule.
+}
+
+-- == Prompt Augmentation ==
+
+rule AugmentDispatchPromptWithRepoMap {
+    when: AgentLaunched(task, mode)
+
+    requires: mode in {standard, resume, quick, epic_planning, research}
+    requires: config.repo_map_enabled = true
+
+    let binary = CtagsBinary.detected_at_startup()
+    let worktree = task.worktree.path
+    let budget = config.repo_map_token_budget
+
+    ensures:
+        if binary != null and Generated(binary, worktree, budget) = success(map) and map != "":
+            DispatchPromptAugmentedWithRepoMap(task: task, map: map)
+            CacheWritten(path: worktree + "/.dispatch/repo-map.txt", contents: map)
+
+    @guidance
+        -- The repo map is a token-budgeted structural summary of the
+        -- worktree, derived from `ctags -R --output-format=json` and grouped
+        -- by file with kind-prefixed symbol lists. Files are ranked by symbol
+        -- count descending. Per-file output is capped so a single large file
+        -- cannot swallow the budget. Token count is proxied as `chars / 4`.
+        -- Kinds are normalised to lowercase with spaces replaced by `-`
+        -- (no language mapping table — that is deferred to a future T3 tier).
+        --
+        -- The Universal Ctags binary is detected ONCE at TUI startup
+        -- (src/runtime/mod.rs::run_tui), trying `ctags` then
+        -- `universal-ctags` and accepting only outputs whose `--version`
+        -- begins with `Universal Ctags`. Exuberant Ctags (legacy) is
+        -- rejected because its JSON output is incompatible. The detected
+        -- binary is held on App and threaded through the dispatch path.
+        --
+        -- Generation runs at dispatch time (after provision_worktree,
+        -- before prompt construction) with a 5-second watchdog. If the
+        -- binary is absent (detection returned null), exits non-zero, or
+        -- exceeds the timeout, the prompt is built without a repo-map
+        -- block — dispatch never fails because of a missing or broken map.
+        --
+        -- The map is written to <worktree>/.dispatch/repo-map.txt for
+        -- inspection. provision_worktree creates <worktree>/.dispatch/ and
+        -- idempotently appends `.dispatch/` to <worktree>/.gitignore so the
+        -- cache is never staged.
+        --
+        -- The cache is regenerated on every dispatch (no on-disk reuse) —
+        -- worktrees are short-lived and the agent reads files for fresh
+        -- detail anyway. Cache invalidation on file changes is deferred.
+        --
+        -- Implementation lives in src/dispatch/repo_map.rs. The injection
+        -- point in the unified prompt skeleton sits between the validated
+        -- knowledge block and the mode addendum.
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface RepoPathPicker {
+    facing user: User
+
+    let saved = core/SavedRepoPaths ordered_by last_used desc
+    let query: String = ""
+    let cursor: Integer = 0
+
+    -- Fuzzy subsequence match: every character of lowercased query
+    -- appears in the lowercased path as a forward subsequence.
+    -- Empty query matches all saved paths.
+    let filtered = saved where fuzzy_subsequence(lowercase(query), lowercase(path))
+
+    exposes:
+        query
+        filtered
+        cursor
+
+    provides:
+        -- Typing appends to query and resets cursor to 0
+        TypeChar(user, char)
+            ensures: query = query + char
+            ensures: cursor = 0
+
+        -- Backspace removes the last character of query
+        Backspace(user)
+            when query != ""
+            ensures: query = remove_last(query)
+            ensures: cursor = 0
+
+        -- Up/Down arrows move the cursor within the filtered list
+        -- (wrapping). No printable character is a navigation alias —
+        -- letters such as j/k are typed into query, not interpreted as
+        -- nav commands.
+        CursorDown(user)
+            when filtered.count > 0
+            ensures: cursor = (cursor + 1) mod filtered.count
+
+        CursorUp(user)
+            when filtered.count > 0
+            ensures: cursor = (cursor - 1 + filtered.count) mod filtered.count
+
+        -- Enter: select filtered[cursor] if filtered is non-empty,
+        -- otherwise use literal query as the path. (For pickers that do
+        -- not allow free-form paths, e.g. the QuickDispatch picker
+        -- variant, the empty-filtered branch is a no-op.)
+        Confirm(user)
+            ensures:
+                if filtered.count > 0:
+                    SelectedPath(filtered[cursor].path)
+                else:
+                    SelectedPath(query)
+
+        -- Escape dismisses the picker without selecting
+        Dismiss(user)
+
+    @guarantee CursorResetOnEntry
+        -- cursor is always 0 when the picker is first displayed.
+        -- This ensures the most-recently-used path is pre-selected.
+
+    @guarantee NoPrintableShortcut
+        -- No printable character (letter, digit, punctuation) is a
+        -- navigation or selection shortcut. Every printable character
+        -- is appended to query via TypeChar; navigation goes through
+        -- the arrow keys; selection goes through Enter. This contract
+        -- is shared by every InputMode that renders this picker —
+        -- in particular it forbids the historical j/k nav alias and
+        -- the historical 1-9 instant-select shortcut, both of which
+        -- broke fuzzy filtering on paths containing those characters.
+
+    @guidance
+        -- This surface appears during task creation (InputRepoPath),
+        -- epic creation (InputEpicRepoPath), main-session repo set
+        -- (MainSessionDir), and quick dispatch (QuickDispatch). It
+        -- replaces a plain text input with a fuzzy-filtered list of
+        -- previously-used repo paths. The filtered list is ordered by
+        -- recency (most recent first). When the user has not typed
+        -- anything, all saved paths are shown, letting them pick with
+        -- a single keystroke.
+}
+
+surface DispatchingFeedback {
+    facing user: User
+
+    -- This surface tracks tasks that are mid-dispatch — between the
+    -- user pressing Enter / Shift+D and the dispatch worker reporting
+    -- success or failure. Set membership and per-task start time are
+    -- implementation-internal (`app.dispatching` HashSet plus a
+    -- sibling start-time map); the surface contract is the visible
+    -- behaviour of the status bar and card line-2 indicator.
+
+    @guarantee StickyUntilEmpty
+        -- status_text persists across Tick events while `dispatching` is
+        -- non-empty. The 5-second STATUS_MESSAGE_TTL that applies to ad-hoc
+        -- status messages is bypassed for dispatching feedback.
+
+    @guarantee ClearedWhenEmpty
+        -- status_text becomes null the moment `dispatching` drains,
+        -- regardless of how the last entry was removed (Dispatched,
+        -- DispatchFailed, or watchdog timeout).
+
+    @guarantee DispatchingTimeout
+        -- A task that remains in `dispatching` for more than 60 seconds is
+        -- removed by the next Tick and a "dispatch timed out" failure toast
+        -- is shown. Defence-in-depth against a stuck dispatch worker
+        -- (e.g. an agent panic that escapes catch_unwind).
+
+    @guarantee DeletedTaskPruned
+        -- If a task referenced in `dispatching` is deleted from the task
+        -- list (e.g. via `d`), the next Tick removes the stale ID so the
+        -- status text never references a vanished task.
+
+    @guarantee SinglePathMutation
+        -- Mutation of `dispatching` flows through a single helper so the
+        -- sticky status text is always kept in sync with set membership.
+        -- Routing through `app.update(MarkDispatching)` from another
+        -- update handler is forbidden (recursive update hazard).
+
+    @guidance
+        -- Dispatch is asynchronous: the worker runs `git fetch origin
+        -- <base_branch>`, creates the worktree and tmux window, then
+        -- starts the agent. On a slow network this takes several seconds.
+        -- The DispatchingFeedback surface gives the user continuous
+        -- evidence that the work is in flight rather than a non-responsive
+        -- UI. It is rendered in two places: the status bar (full
+        -- status_text) and each affected task card's secondary line
+        -- (spinner glyph + "dispatching…"). Once `dispatching` is empty
+        -- the status bar reverts to its idle state and cards return to
+        -- their normal indicator.
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+-- RunningTaskHasWorktree: Tasks dispatched via DispatchTask or ClaimTaskViaMcp
+-- always have a worktree. However, manual forward movement (m key) can move a
+-- task to running without provisioning a worktree. The dispatch flow is the
+-- canonical path; manual moves are overrides.

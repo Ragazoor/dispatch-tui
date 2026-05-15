@@ -85,7 +85,7 @@ rule RecordRepoPathFromEpic {
     )
 
     @guidance
-        -- Mirrors RecordRepoPath in tasks.allium but fires on the
+        -- Mirrors RecordRepoPath in dispatch.allium but fires on the
         -- TUI-driven CreateEpic trigger. Same upsert semantics: update
         -- last_used if the path exists, create if not.
         -- Note: MCP-created epics (via the create_epic tool) do not
@@ -191,7 +191,7 @@ rule EpicBatchWrapUp {
     when: EpicBatchWrapUp(epic, rebase)
 
     -- Rebase-only batch. PR creation is no longer batched from the
-    -- TUI — see WrapUpPr in tasks.allium. Author bespoke PRs from
+    -- TUI — see WrapUpPr in pr-workflow.allium. Author bespoke PRs from
     -- the agent /wrap-up skill instead.
 
     let review_tasks = epic.subtasks where status = review and worktree != null

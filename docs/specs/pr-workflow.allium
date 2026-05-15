@@ -1,0 +1,279 @@
+-- allium: 3
+-- pr-workflow.allium
+--
+-- Scope: PR creation, polling, merge detection, wrap-up flows, and the
+--        rebase/merge finish paths for tasks.
+-- Excludes: Task creation and kanban lifecycle (see tasks.allium);
+--           dispatch (see dispatch.allium); split pane (see split-pane.allium);
+--           epic wrap-up (see epics.allium).
+
+use "./core.allium" as core
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- == PR Workflow ==
+
+rule CreatePr {
+    when: CreatePr(task)
+
+    requires: task.status = running or task.status = review
+    requires: task.worktree != null
+
+    ensures: task.pr_url != null
+    ensures: task.status = review
+    ensures: task.sub_status = core/SubStatus.default_for(review)
+    ensures: task.updated_at = now
+    ensures: PrCreated(base: task.base_branch, head: task.worktree.branch)
+
+    @guidance
+        -- The PR-creation transition. The pr_url is supplied by the
+        -- agent (via update_task) after the agent itself runs
+        -- `gh pr create --draft`. Dispatch no longer drives the push
+        -- or the gh invocation — see WrapUpPr for the rationale and
+        -- the agent-side command sequence. The task always transitions
+        -- to review with sub_status = awaiting_review regardless of
+        -- the starting status (Running or Review).
+}
+
+rule MergePr {
+    when: MergePr(task)
+
+    requires: task.status = review
+    requires: task.pr_url != null
+    requires: task.sub_status = approved
+
+    ensures: PrMerged(task: task)
+
+    @guidance
+        -- Human-initiated merge of an approved PR via the TUI.
+        -- Bound to the [P] key (uppercase); [p] opens the PR URL in
+        -- the browser instead. Selecting [P] on an approved review task
+        -- enters the ConfirmMergePr confirmation prompt before the
+        -- actual merge. Pressing [P] on a task that is not in review,
+        -- has no PR URL, or is not approved sets an informational
+        -- status message without prompting.
+        -- Runs `gh pr merge --squash` on the task's pr_url.
+        -- On success, fires PrMerged which transitions the task to done.
+        -- On failure, the error is shown in the status bar via
+        -- MergePrFailed without changing task state; sub_status remains
+        -- approved so the user can retry.
+        --
+        -- Precondition enforced at TUI input layer; the merge runtime
+        -- accepts any sub_status. Callers from new surfaces must
+        -- replicate the guard.
+}
+
+rule PollPrStatus {
+    when: Tick
+
+    for task in core/Tasks where status = review and pr_url != null:
+
+        -- Branch on GitHub's reported PR state:
+        --   Merged -> fire PrMerged; no sub_status update
+        --   Open   -> refresh sub_status from review_decision
+        --   Closed -> no effect (silently ignored)
+        ensures:
+            let status = check_pr_status(task.pr_url)
+            if status.state = merged:
+                PrMerged(task: task)
+            else if status.state = open and task.sub_status != conflict:
+                let new_sub =
+                    if status.review_decision = approved:
+                        core/SubStatus.approved
+                    else if status.review_decision = changes_requested:
+                        core/SubStatus.changes_requested
+                    else:
+                        core/SubStatus.awaiting_review
+                if task.sub_status != new_sub:
+                    task.sub_status = new_sub
+
+    @guidance
+        -- Runs during each tick for review tasks with a pr_url. Polls
+        -- GitHub every pr_poll_interval (30s) via `gh pr view` to check
+        -- merge status and review decision.
+        -- Merged PRs: fire PrMerged which transitions the task to done.
+        -- Open PRs: update sub_status to reflect the current review
+        -- decision (approved | changes_requested | awaiting_review).
+        -- Tasks currently in sub_status = conflict are NOT overwritten
+        -- by the review-decision update, so conflict state persists
+        -- across polls until the user resolves it.
+        -- Closed-without-merge PRs: silently ignored by the poll loop.
+        -- The task remains in review and requires manual intervention
+        -- (move to done or re-dispatch).
+}
+
+rule PrMerged {
+    when: PrMerged(task)
+
+    requires: task.status = review
+
+    ensures: task.status = done
+    ensures: task.sub_status = core/SubStatus.default_for(done)
+    ensures: task.tmux_window = null
+    ensures: task.updated_at = now
+    ensures:
+        if notifications_enabled:
+            DesktopNotification(task: task, urgency: normal, about: pr_merged)
+
+    @guidance
+        -- This is an automatic transition triggered by PR status polling.
+        -- It bypasses the ConfirmDone human confirmation because the PR
+        -- merge itself is the human confirmation (via GitHub review process).
+        -- The Review Board UI has been removed; no board cleanup side effect fires.
+        -- Like other status-changing rules, the underlying patch flow
+        -- (src/service/tasks/crud.rs) triggers EpicStatusRecalculation on
+        -- the parent epic when the task belongs to one.
+}
+
+-- == Wrap Up ==
+
+rule WrapUpRebase {
+    when: WrapUp(task, rebase)
+
+    -- Available from any running or review task with a worktree.
+    requires: task.status = review or task.status = running
+    requires: task.worktree != null
+
+    let branch = task.worktree.branch
+
+    ensures:
+        if task.sub_status = conflict:
+            task.sub_status = core/SubStatus.default_for(task.status)
+    ensures: BranchRebased(branch: branch, onto: task.base_branch)
+    ensures: task.updated_at = now
+
+    @guidance
+        -- WrapUpRebase is the rebase mechanic only — it does NOT change
+        -- task.status or kill the tmux window. The Done transition for
+        -- the MCP path is owned by ExitSession (the agent must call
+        -- exit_session to close its session, which marks the task done
+        -- and kills tmux). The TUI path (W then r) emits FinishTask and
+        -- is governed by FinishTaskSuccess, which keeps its own Done
+        -- transition independent of this rule.
+        --
+        -- Optimistically clears conflict sub_status before attempting the
+        -- rebase, so the task is no longer visually flagged while the
+        -- rebase runs in the background.
+        -- Steps (all via finish_task in dispatch.rs):
+        --   1. Verify the repo root is on task.base_branch; abort if not.
+        --   2. If origin remote exists, `git pull origin <base_branch>`
+        --      in the repo root (skipped when no remote is configured).
+        --   3. `git rebase <base_branch>` from the task's worktree.
+        --      On conflict: abort the rebase and emit RebaseConflict.
+        --   4. `git merge --ff-only <branch>` in the repo root to
+        --      fast-forward the base branch to the rebased branch.
+        -- The worktree is preserved after a successful rebase (cleaned
+        -- up only on archive). The MCP wrap_up handler calls finish_task
+        -- with tmux_window=None so the agent's session stays alive until
+        -- it explicitly calls exit_session. Available from both the TUI
+        -- (W then r) and MCP (wrap_up tool with action "rebase").
+        --
+        -- Shared-worktree TUI fast-path: when the TUI Finish path (W+r)
+        -- detects that another active task shares the same worktree,
+        -- it bypasses rebase / fast-forward entirely. Instead it patches
+        -- the task to clear worktree and tmux_window and emits
+        -- FinishComplete, advancing the task directly to Done. The MCP
+        -- wrap_up handler has no equivalent shared-worktree check —
+        -- it always invokes finish_task and attempts the rebase. This
+        -- asymmetry is intentional: the MCP path is agent-driven and
+        -- expects an isolated worktree per task.
+}
+
+rule WrapUpPr {
+    when: WrapUp(task, pr)
+
+    -- Available from any running or review task with a worktree.
+    requires: task.status = review or task.status = running
+    requires: task.worktree != null
+
+    ensures: task.pr_url != null
+    ensures: task.status = review
+    ensures: task.sub_status = core/SubStatus.default_for(review)
+    ensures: task.updated_at = now
+    ensures: PrCreated(base: task.base_branch, head: task.worktree.branch)
+
+    @guidance
+        -- Agent-driven PR creation. The /wrap-up skill instructs the
+        -- agent to inspect its own diff, draft a title and body that
+        -- reflect the actual work, run
+        --   git push -u origin <branch>
+        --   gh pr create --draft --base <task.base_branch>
+        --     --head <owner>:<branch> --repo <owner>/<repo>
+        --     --title <agent-authored> --body <agent-authored>
+        -- and then call MCP update_task with pr_url=<url> and
+        -- status=review to trigger this rule. The --head uses the
+        -- owner:branch format so `gh` resolves the branch in the same
+        -- repo as --repo (rather than the authenticated user's
+        -- namespace). The PR base is task.base_branch (not hardcoded
+        -- "main"). PR status polling (PollPrStatus) takes over once
+        -- the URL is recorded.
+        --
+        -- Rationale: previously dispatch's Rust code ran `gh pr create`
+        -- using task.title and task.description for the title and body.
+        -- That body was set at task-creation time and rarely matched
+        -- the work actually shipped. Letting the agent author the PR
+        -- after implementation produces materially better PRs.
+        --
+        -- The MCP wrap_up tool no longer accepts action="pr"; the
+        -- TUI W+p shortcut and the epic-merge MergeAction::Pr have
+        -- both been removed. Rebase remains as a TUI/MCP path (see
+        -- WrapUpRebase). The tmux window is preserved across PR
+        -- creation so the agent can continue working (e.g., self-review).
+}
+
+-- == Finish (Merge) ==
+
+rule FinishTaskSuccess {
+    when: FinishTask(task)
+
+    requires: task.status = review
+    requires: task.worktree != null
+
+    let branch = task.worktree.branch
+
+    -- Preconditions verified at execution time:
+    -- repo root must be on task.base_branch
+    -- merge must succeed (no conflicts)
+
+    ensures: BranchMerged(branch: branch, into: task.base_branch)
+    ensures: task.tmux_window = null
+    ensures: task.status = done
+    ensures: task.sub_status = core/SubStatus.default_for(done)
+    ensures: task.updated_at = now
+
+    @guidance
+        -- Same finish_task path as WrapUpRebase. The implementation
+        -- rebases the task branch onto task.base_branch (after pulling
+        -- latest from origin), then fast-forwards task.base_branch to
+        -- the rebased branch, then kills the tmux window.
+        -- Worktree is preserved after finish; it will be cleaned up
+        -- when the task is archived. If another active task shares the
+        -- same worktree, the worktree is detached from this task but
+        -- not removed from disk (same shared-worktree logic as FinishTaskSuccess).
+}
+
+rule FinishTaskConflict {
+    when: RebaseConflict(task)
+
+    -- Fires when FinishTask's or WrapUpRebase's rebase encounters a conflict.
+    -- The rebase is aborted and the task is marked with conflict sub_status.
+    -- The task may be in either running or review status at this point,
+    -- so conflict is a valid sub_status for both parent statuses.
+
+    ensures: task.sub_status = conflict
+    ensures: UserInformed(about: rebase_conflict, task: task)
+
+    @guidance
+        -- Conflict has the highest visual column priority (0, above
+        -- crashed at 1). It appears in the Stale visual column alongside
+        -- stale and crashed tasks.
+        -- Conflict is valid for both running and review tasks: review
+        -- tasks hit it during FinishTask (merge via TUI), running tasks
+        -- hit it during WrapUpRebase.
+        -- Staleness detection skips conflict tasks (they are not
+        -- re-evaluated for inactivity).
+        -- PR review polling skips overwriting conflict sub_status.
+        -- Wrap-up rebase clears conflict optimistically before rebasing.
+}

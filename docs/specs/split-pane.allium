@@ -1,0 +1,218 @@
+-- allium: 3
+-- split-pane.allium
+--
+-- Scope: Split-pane lifecycle, focus border, jump-to-agent, pin task,
+--        swap, and tmux detach interactions.
+-- Excludes: Task lifecycle (see tasks.allium); dispatch (see dispatch.allium);
+--           PR/wrap-up (see pr-workflow.allium).
+
+use "./core.allium" as core
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- == Detach Tmux ==
+
+rule DetachTmux {
+    when: ConfirmDetachTmux(task)
+
+    requires: task.tmux_window != null
+
+    ensures: task.tmux_window = null
+    ensures:
+        if task.sub_status in {stale, crashed}:
+            task.sub_status = core/SubStatus.default_for(task.status)
+
+    @guidance
+        -- Kills the tmux window for a task while preserving the
+        -- worktree. The agent is gone but the branch remains for
+        -- PR review or later resume. Clears agent health tracking
+        -- (captured tmux output, crash detection). Only Stale/Crashed
+        -- sub_statuses are reset to the default for the task's
+        -- current status; all other sub_statuses are preserved.
+        -- Allowed for any task with a tmux window: Running tasks
+        -- have their live agent terminated; Review tasks lose their
+        -- post-completion session. Triggered via the TUI (T key,
+        -- uppercase). Always shows a confirmation prompt
+        -- ("Detach tmux panel? [y/n]") before detaching, whether the
+        -- target is a single task or a batch of multi-selected tasks.
+}
+
+rule BatchDetachTmux {
+    when: BatchDetachTmux(tasks)
+
+    -- Filters to tasks that have a tmux window, then detaches all.
+    let detachable = tasks where tmux_window != null
+
+    requires: detachable.count > 0
+
+    ensures:
+        for task in detachable:
+            DetachTmux(task)
+
+    @guidance
+        -- Triggered via the TUI (T key, uppercase) when tasks are
+        -- multi-selected. Shows a confirmation prompt with the count
+        -- of detachable tasks ("Detach N tmux panels? [y/n]"). Tasks
+        -- that lack a tmux window are silently
+        -- filtered out before the prompt.
+}
+
+-- == Split Pane Lifecycle ==
+--
+-- When a task lifecycle event clears or replaces a task's tmux window,
+-- the split pane must be updated if that task is currently pinned.
+-- The pane is never destroyed — its content is respawned as a fresh
+-- shell so that split mode remains active without visual disruption.
+
+rule SplitPaneRespawnOnWindowCleared {
+    -- Fires whenever a lifecycle event clears a pinned task's tmux_window.
+    -- The trigger is the clearing of task.tmux_window, not the specific
+    -- event type. This covers all paths:
+    --   - WrapUpRebase / FinishTaskSuccess (rebase completes → Done)
+    --   - PrMerged (PR merged on GitHub → Done)
+    --   - ConfirmDone (manual Review → Done)
+    --   - ArchiveTask (any status → Archived)
+    --   - RetryResume (old window killed, new dispatch starts)
+    --
+    -- NOT triggered by WrapUpPr — the tmux window stays alive after PR
+    -- creation so the agent can continue working (e.g., self-review).
+    -- NOT triggered by failure paths (FinishTaskConflict, PrFailed) —
+    -- the pane should keep showing the agent session for inspection.
+
+    when: task.tmux_window cleared
+    requires: split_pane.active = true
+    requires: split_pane.pinned_task = task
+
+    ensures: split_pane.pinned_task = null
+    ensures: split_pane.active = true
+    ensures: split_pane.pane = RespawnedPane(split_pane.pane)
+
+    @guidance
+        -- The pane content is replaced in-place using tmux respawn-pane,
+        -- which kills the current process and starts a fresh shell without
+        -- destroying the pane itself. This avoids the flicker that would
+        -- occur from a kill-then-recreate sequence.
+        --
+        -- Handlers that also emit KillTmuxWindow for the old window name
+        -- are harmless — the window no longer exists as a standalone window
+        -- (it was absorbed into the pane via join-pane), so the kill is a
+        -- no-op. The respawn handles the actual cleanup.
+        --
+        -- If the pane was already closed externally, the respawn
+        -- degrades gracefully to SplitPaneClosed (full reset).
+}
+
+-- == Split Pane Focus Border ==
+--
+-- When split mode is active, the TUI renders a thin border around its
+-- entire area. The border color indicates whether the TUI pane has focus:
+-- cyan when focused, dim when the agent pane has focus.
+-- Requires tmux `focus-events on` for crossterm to receive focus events.
+
+rule SplitPaneFocusBorder {
+    when: split_pane.active = true
+
+    ensures: TUI renders Borders::ALL around entire area
+    ensures: border_color = CYAN when split_pane.focused = true
+    ensures: border_color = BORDER when split_pane.focused = false
+
+    @guidance
+        -- The border is only rendered during split mode. Normal single-pane
+        -- usage has no border. FocusChanged events update split_pane.focused
+        -- only when split is active — otherwise they are ignored.
+}
+
+-- == Jump to Agent Window ([g] key) ==
+--
+-- Pressing [g] on a task jumps tmux focus to that task's agent window.
+-- In the normal case this is a standalone tmux window. When the task is
+-- currently pinned in the split pane, the pane is targeted directly.
+
+rule JumpToAgentWindow {
+    when: UserAction([g], task)
+    requires: task.tmux_window != null
+
+    ensures: tmux_focus = task.tmux_window
+
+    @guidance
+        -- [g] jumps to the agent's window. In the normal case (no split, or
+        -- split active but a different task is pinned), this calls
+        -- tmux select-window on task.tmux_window.
+        --
+        -- Edge case: when the task is the currently pinned split-pane task,
+        -- its pane has been joined into the dispatch window via join-pane and
+        -- the original standalone window no longer exists. In this case [g]
+        -- calls tmux select-pane on split_pane.right_pane_id instead.
+        --
+        -- Contrast with [G], which peeks at the window in-place without
+        -- transferring focus.
+}
+
+-- == Pin Task in Split Pane ([G] key) ==
+--
+-- Pressing [G] on a task in split mode pins that task's tmux window into the
+-- right pane without transferring tmux focus. The user stays on the TUI board.
+-- Outside split mode [G] is a no-op.
+
+rule PinTaskInSplitPane {
+    when: UserAction([G], task)
+    requires: split_pane.active = true
+    requires: task.tmux_window != null
+
+    ensures: split_pane.pinned_task = task
+    ensures: split_pane.pane = task.tmux_window
+    ensures: split_pane.focused = unchanged  -- focus does NOT transfer
+
+    @guidance
+        -- When the selected task is already pinned, the action is a no-op.
+        -- When a different task is pinned, the pane content is swapped in-place
+        -- via tmux swap-pane. The old content is returned to a standalone window.
+        --
+        -- No tmux select-pane is called — the TUI pane retains focus throughout.
+        -- [g] (lowercase) is the complementary "take over the window" action.
+        --
+        -- Outside split mode [G] emits no commands.
+}
+
+rule SwapSplitPane {
+    when: UserAction([G], task)
+    requires: split_pane.active = true
+    requires: task.tmux_window != null
+    requires: split_pane.pinned_task != task  -- no-op when already pinned
+
+    ensures:
+        if split_pane.pinned_task != null:
+            -- Swap: the currently pinned task's pane is returned to a
+            -- standalone window, and the new task's window is joined
+            -- into the split pane.
+            SplitPaneSwapped(
+                new_task: task,
+                old_task: split_pane.pinned_task
+            )
+        else:
+            SplitPanePinned(task: task)
+    ensures: split_pane.pinned_task = task
+    ensures: split_pane.pane = task.tmux_window
+
+    @guidance
+        -- This rule specifies the swap case for [G]; the pin-empty case
+        -- is covered by PinTaskInSplitPane. When the pane already holds
+        -- a different task's window, the old window is swapped out via
+        -- tmux swap-pane and returned to the standalone window list.
+        -- tmux focus is NOT transferred — the TUI pane retains focus
+        -- throughout the swap.
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+-- SplitPaneStability: When split mode is active, the pane must never be
+-- destroyed and recreated in response to task lifecycle events. Pane content
+-- is replaced in-place (respawn) to avoid visual flicker. The only operations
+-- that destroy the pane are explicit user actions: toggling split mode off
+-- (S key) or manually closing the pane. Lifecycle events (finish, PR creation)
+-- respawn the pane content and clear pinned_task, but keep active=true and
+-- pane intact.

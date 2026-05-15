@@ -3,7 +3,9 @@
 --
 -- Scope: Shared domain model for the dispatch system
 -- Includes: External entities, enumerations, core entities, config, VisualColumn and FlattenedView concepts
--- Excludes: Rules, invariants (see tasks.allium, epics.allium)
+-- Excludes: Rules, invariants (see tasks.allium, dispatch.allium, agent-health.allium,
+--           pr-workflow.allium, split-pane.allium, mcp-task-tools.allium, epics.allium,
+--           learnings.allium)
 
 ------------------------------------------------------------
 -- External Entities
@@ -288,7 +290,7 @@ entity Learning {
 
     -- True when this learning is relevant to the given task's dispatch.
     -- task-scoped learnings are excluded from auto-injection; they surface
-    -- via query_learnings on demand (see tasks.allium).
+    -- via query_learnings on demand (see learnings.allium).
     applies_to_dispatch(task):
         status = approved
         and (
@@ -396,10 +398,10 @@ config {
 
     -- When true, the MCP wrap_up response includes a nudge asking the agent
     -- to propose learnings before finishing. Prompt encouragement only;
-    -- agents may wrap up without proposing. (see tasks.allium: WrapUpReflection)
+    -- agents may wrap up without proposing. (see learnings.allium: WrapUpReflection)
     learning_reflection_enabled: Boolean = true
 
-    -- Repo map (T2 / ctags) — see tasks.allium: AugmentDispatchPromptWithRepoMap.
+    -- Repo map (T2 / ctags) — see dispatch.allium: AugmentDispatchPromptWithRepoMap.
     -- Token budget for the structural summary injected into dispatch prompts.
     -- The renderer proxies token count as `chars / 4` and stops emitting once
     -- the budget is reached; per-file output is also capped so a single large
@@ -549,3 +551,19 @@ concept FlattenedView {
         and task.repo_path in view.active_repo_filter
         and (view.is_board or task.is_descendant_of(view.current_epic))
 }
+
+-- == Cursor Selection Preservation ==
+
+rule selection_preservation:
+    When the cursor has an anchor (a task or epic ID) and column items are recomputed
+    (on any status change, task movement, filter change, or data refresh), the cursor
+    position is resolved by locating the anchor item in the new item list.
+
+    If the anchor item is found: the cursor moves to the item's new column and row,
+    following the item if it changed columns.
+
+    If the anchor item is not present (deleted or moved outside board scope): the cursor
+    clamps to the nearest valid position in the current column.
+
+    When the cursor is on the select-all column header (on_select_all = true), the anchor
+    is None and the header state is preserved across refreshes.

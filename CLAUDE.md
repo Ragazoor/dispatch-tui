@@ -84,8 +84,14 @@ Always use TDD. Express intended behaviour as tests before writing the code that
 The Allium specs in `docs/specs/` are the **source of truth** for domain logic:
 
 - `core.allium` — domain model (entities, enums, config, VisualColumn)
-- `tasks.allium` — task lifecycle, agent health, hooks, notifications, split pane, MCP task tools
+- `tasks.allium` — task lifecycle (creation, status movement, reorder, archive, copy, editor)
+- `dispatch.allium` — dispatching tasks, retry flows, repo-path persistence
+- `agent-health.allium` — activity classification, crash detection, notifications, Claude Code hooks
+- `pr-workflow.allium` — PR creation, polling, merge detection, wrap-up, finish paths
+- `split-pane.allium` — split-pane lifecycle, focus border, jump-to-agent, pin, swap, tmux detach
+- `mcp-task-tools.allium` — MCP tools for task management and the CLI plan-attachment surface
 - `epics.allium` — epic lifecycle and MCP epic tools
+- `learnings.allium` — knowledge base rules and MCP learning tools
 
 Consult the relevant spec before changing core behavior. Use `allium:tend` and `allium:weed` skills to keep spec and code aligned.
 
