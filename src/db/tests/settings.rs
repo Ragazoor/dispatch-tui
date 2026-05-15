@@ -276,6 +276,11 @@ async fn verify_command_rejects_newline() {
         err.to_string().to_lowercase().contains("newline"),
         "expected newline error, got: {err}"
     );
+    let err = db.set_verify_command("/r", Some("a\rb")).await.unwrap_err();
+    assert!(
+        err.to_string().to_lowercase().contains("carriage return"),
+        "expected carriage return error, got: {err}"
+    );
 }
 
 #[tokio::test]
@@ -294,4 +299,10 @@ async fn verify_command_set_none_on_unknown_path_is_noop() {
     let db = in_memory_db().await;
     db.set_verify_command("/unknown", None).await.unwrap();
     assert!(!db.list_repo_paths().await.unwrap().iter().any(|p| p == "/unknown"));
+}
+
+#[tokio::test]
+async fn verify_command_get_unknown_path_is_none() {
+    let db = in_memory_db().await;
+    assert_eq!(db.get_verify_command("/does/not/exist").await.unwrap(), None);
 }

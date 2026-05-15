@@ -221,8 +221,10 @@ impl super::super::SettingsStore for Database {
         let path = path.to_string();
         let resolved: Option<String> = match command {
             Some(raw) => {
-                if raw.contains('\n') {
-                    anyhow::bail!("verify_command must not contain a newline");
+                if raw.contains('\n') || raw.contains('\r') {
+                    anyhow::bail!(
+                        "verify_command must not contain a newline or carriage return (use && or ; to chain steps)"
+                    );
                 }
                 let trimmed = raw.trim();
                 if trimmed.is_empty() {

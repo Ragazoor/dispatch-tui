@@ -240,6 +240,15 @@ pub trait SettingsStore: Send + Sync {
         show_mode: crate::models::TipsShowMode,
     ) -> Result<()>;
     async fn get_verify_command(&self, path: &str) -> Result<Option<String>>;
+    /// Set the verify command for a known repo path.
+    ///
+    /// If `command` is `Some(cmd)` and the path does not exist in `repo_paths`, a new
+    /// row is inserted (with `last_used = now()`), equivalent to calling `save_repo_path`
+    /// first. If `command` is `None`, the column is cleared to NULL; unknown paths are
+    /// silently ignored (no row created).
+    ///
+    /// `command` must not contain a newline (`\n`) or carriage return (`\r`); returns
+    /// an error if it does. Empty or whitespace-only commands are treated as `None`.
     async fn set_verify_command(&self, path: &str, command: Option<&str>) -> Result<()>;
 }
 
