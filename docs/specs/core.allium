@@ -223,6 +223,11 @@ entity TaskUsage {
 entity SavedRepoPath {
     path: String             -- filesystem path, unique across all saved paths
     last_used: Timestamp     -- updated on each use; drives recency ordering
+    verify_command: String?  -- single-line shell command run by agents before declaring work complete, e.g. "cargo test"
+
+    invariant VerifyCommandSingleLine {
+        verify_command = null or not verify_command.contains("\n")
+    }
 }
 
 -- Project is a user-defined grouping for tasks and epics.

@@ -127,6 +127,14 @@ rule DispatchTask {
         --                                    /learnings skill to record or
         --                                    upvote entries)
         --   {wrap_up_instruction}          (shared verbatim, universal)
+        --   {verification_section}         (optional; see below)
+        --
+        -- When task.repo_path has a SavedRepoPath row with verify_command = Some(c),
+        -- the dispatch prompt includes a "## Verification" section instructing the
+        -- agent to run `c` in its worktree before declaring work complete. The
+        -- command is rendered inside a quadruple-backtick fenced block so
+        -- backticks in the command cannot escape. When verify_command is null,
+        -- the section is absent.
         --
         -- DispatchTask emits one of two variants of build_prompt:
         --   * has_plan = false: preamble "Your task is:" and the addendum

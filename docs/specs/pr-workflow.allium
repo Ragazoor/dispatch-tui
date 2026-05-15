@@ -179,6 +179,12 @@ rule WrapUpRebase {
         -- it always invokes finish_task and attempts the rebase. This
         -- asymmetry is intentional: the MCP path is agent-driven and
         -- expects an isolated worktree per task.
+        --
+        -- The wrap_up success response includes a "Verify before exiting:
+        -- run `<c>`" sentence between the "session is NOT yet closed" line
+        -- and the "call exit_session" line when task.repo_path has
+        -- verify_command = Some(c). When verify_command is null, the
+        -- response text is byte-for-byte identical to today.
 }
 
 rule WrapUpPr {
