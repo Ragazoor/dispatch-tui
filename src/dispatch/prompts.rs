@@ -964,7 +964,6 @@ mod tests {
         assert!(!text.contains("Validated knowledge for this task"));
     }
 
-
     #[test]
     fn build_prompt_with_dependabot_tag_includes_review_section() {
         let ctx = PromptContext {
