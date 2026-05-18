@@ -30,6 +30,7 @@ const TUI_WINDOW_NAME: &str = "TUI";
 use crate::db::{ProjectCrud, SettingsStore, TaskCrud};
 use crate::models::TaskId;
 use crate::process::{ProcessRunner, RealProcessRunner};
+use crate::service::embeddings::EmbeddingService;
 use crate::service::FieldUpdate;
 use crate::tui::messages::LearningMessage;
 use crate::tui::{self, App, Command, Message, RepoFilterMode};
@@ -78,7 +79,7 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
     let (mcp_notify_tx, mut mcp_notify_rx) = mpsc::unbounded_channel::<mcp::McpEvent>();
     let feed_notify_tx = mcp_notify_tx.clone();
     tokio::spawn(async move {
-        if let Err(e) = mcp::serve(mcp_db, port, mcp_notify_tx, mcp_runner).await {
+        if let Err(e) = mcp::serve(mcp_db, port, mcp_notify_tx, mcp_runner, EmbeddingService::new_noop()).await {
             eprintln!("MCP server error: {e}");
         }
     });

@@ -10,6 +10,7 @@ use tokio::sync::mpsc;
 use crate::db;
 use crate::models::{EpicId, TaskId};
 use crate::process::ProcessRunner;
+use crate::service::embeddings::EmbeddingService;
 use crate::service::TaskService;
 
 /// Events sent from the MCP server to the TUI runtime.
@@ -33,6 +34,9 @@ pub struct McpState {
     pub notify_tx: Option<mpsc::UnboundedSender<McpEvent>>,
     /// Process runner shared with TuiRuntime for executing git/tmux operations.
     pub runner: Arc<dyn ProcessRunner>,
+    /// Embedding service used for RAG-based query_learnings and for computing
+    /// embeddings when a learning is recorded via MCP.
+    pub embedding_service: Arc<EmbeddingService>,
 }
 
 impl McpState {
@@ -74,11 +78,13 @@ pub fn router(
     db: Arc<dyn db::TaskStore>,
     notify_tx: Option<mpsc::UnboundedSender<McpEvent>>,
     runner: Arc<dyn ProcessRunner>,
+    embedding_service: Arc<EmbeddingService>,
 ) -> Router {
     let state = Arc::new(McpState {
         db,
         notify_tx,
         runner,
+        embedding_service,
     });
     Router::new()
         .route("/mcp", post(handlers::handle_mcp))
@@ -93,8 +99,9 @@ pub async fn serve(
     port: u16,
     notify_tx: mpsc::UnboundedSender<McpEvent>,
     runner: Arc<dyn ProcessRunner>,
+    embedding_service: Arc<EmbeddingService>,
 ) -> anyhow::Result<()> {
-    let app = router(db, Some(notify_tx), runner);
+    let app = router(db, Some(notify_tx), runner, embedding_service);
     let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{port}")).await?;
     axum::serve(listener, app).await?;
     Ok(())

@@ -20,6 +20,7 @@ use crate::mcp::identity::{CallerIdentity, IdentityError};
 use crate::mcp::McpState;
 use crate::models::{ProjectId, SubStatus, TaskStatus};
 use crate::process::{MockProcessRunner, ProcessRunner};
+use crate::service::embeddings::{serialize_embedding, EmbeddingService};
 
 use super::dispatch::{handle_mcp, tool_definitions};
 use super::epics::{CreateEpicArgs, GetEpicArgs, UpdateEpicArgs};
@@ -36,6 +37,7 @@ async fn test_state() -> Arc<McpState> {
         db,
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     })
 }
 
@@ -46,6 +48,7 @@ async fn test_state_with_db() -> (Arc<McpState>, Arc<dyn db::TaskStore>) {
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
     (state, db)
 }
@@ -588,7 +591,7 @@ async fn tool_schemas_match_arg_structs() {
         ),
         (
             "query_learnings",
-            BTreeSet::from(["task_id", "tag_filter", "limit"]),
+            BTreeSet::from(["task_id", "query", "tag_filter", "limit"]),
             BTreeSet::from(["task_id"]),
             json!({"task_id": 1}),
         ),

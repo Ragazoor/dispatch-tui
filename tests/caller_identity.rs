@@ -18,11 +18,12 @@ use dispatch_tui::db::{self, CreateTaskRequest, Database};
 use dispatch_tui::mcp::identity::{HEADER_KIND, HEADER_TASK_ID};
 use dispatch_tui::models::{ProjectId, TaskId, TaskStatus};
 use dispatch_tui::process::{MockProcessRunner, ProcessRunner};
+use dispatch_tui::service::embeddings::EmbeddingService;
 
 async fn test_router() -> (axum::Router, Arc<dyn db::TaskStore>) {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let router = dispatch_tui::mcp::router(db.clone(), None, runner);
+    let router = dispatch_tui::mcp::router(db.clone(), None, runner, EmbeddingService::new_noop());
     (router, db)
 }
 

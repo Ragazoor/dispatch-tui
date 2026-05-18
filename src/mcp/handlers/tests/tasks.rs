@@ -2202,6 +2202,7 @@ async fn wrap_up_accepts_running_blocked_task() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
 
     let task_id = db
@@ -2260,6 +2261,7 @@ async fn wrap_up_accepts_running_active_task() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
 
     let task_id = db
@@ -2319,6 +2321,7 @@ async fn wrap_up_rebase_response_demands_exit_session_imperatively() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
 
     let task_id = db
@@ -2461,6 +2464,7 @@ async fn wrap_up_rebase_returns_started() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
 
     let task_id = db
@@ -2562,6 +2566,7 @@ async fn make_state_with_runner(
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
     (state, db)
 }
@@ -3124,6 +3129,7 @@ async fn wrap_up_rebase_conflict_returns_error() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
 
     let task_id = db
@@ -3179,6 +3185,7 @@ async fn wrap_up_rebase_not_on_main_returns_error() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
 
     let task_id = db
@@ -3293,6 +3300,7 @@ async fn send_message_writes_file_and_sends_keys() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
 
     // Create sender and receiver tasks
@@ -3579,6 +3587,7 @@ async fn test_state_with_notify() -> (
         db,
         notify_tx: Some(tx),
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
     (state, rx)
 }
@@ -4125,6 +4134,7 @@ async fn wrap_up_rebase_does_not_change_status() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
 
     let task_id = db
@@ -4183,6 +4193,7 @@ async fn wrap_up_rebase_does_not_recalculate_epic_status() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
 
     let epic = db
@@ -4246,6 +4257,7 @@ async fn wrap_up_accepts_string_task_id() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
 
     let task_id = db
@@ -4703,6 +4715,7 @@ async fn dispatch_next_picks_first_backlog_subtask() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
 
     let epic = db
@@ -4804,6 +4817,7 @@ async fn dispatch_next_respects_sort_order() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
 
     let epic = db
@@ -4898,6 +4912,7 @@ async fn dispatch_next_respects_tag_routing() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
 
     let epic = db
@@ -4974,6 +4989,7 @@ async fn wrap_up_rebase_preserves_tmux_window() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
 
     let task_id = db
@@ -5042,6 +5058,7 @@ async fn wrap_up_rebase_conflict_sets_conflict_substatus() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
 
     let task_id = db
@@ -5108,6 +5125,7 @@ async fn wrap_up_rebase_clears_conflict_substatus_on_non_conflict_error() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
 
     let task_id = db
@@ -5405,6 +5423,7 @@ async fn dispatch_task_dispatches_backlog_task() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
 
     let task_id = db
@@ -5534,6 +5553,7 @@ async fn dispatch_task_respects_tag_routing() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
 
     // Feature-tagged task with no plan → should route to Plan mode
@@ -5610,6 +5630,7 @@ async fn dispatch_task_dependabot_tag_routes_through_dispatch_agent() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
 
     let task_id = db
@@ -5699,6 +5720,7 @@ async fn dispatch_task_returns_error_when_dispatch_fails() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
 
     let task_id = db
@@ -5752,6 +5774,7 @@ async fn create_task_with_project_id_assigns_correctly() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
 
     let resp = call(
@@ -5787,6 +5810,7 @@ async fn create_epic_without_project_id_assigns_to_default() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
 
     let resp = call(
@@ -5818,6 +5842,7 @@ async fn create_epic_with_project_id_assigns_correctly() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
 
     let resp = call(
@@ -5854,6 +5879,7 @@ async fn list_projects_returns_all_projects() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
 
     let resp = call(
@@ -5889,6 +5915,7 @@ async fn update_task_project_id_moves_task() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
 
     let task_id = create_task_fixture(&state).await;
@@ -5941,6 +5968,7 @@ async fn update_epic_project_id_moves_epic() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
 
     let epic = db
@@ -5980,6 +6008,7 @@ async fn update_epic_invalid_project_id_returns_error() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
 
     let epic = db
@@ -6042,6 +6071,10 @@ async fn create_approved_learning(
     tags: &[&str],
 ) -> crate::models::LearningId {
     let tag_strings: Vec<String> = tags.iter().map(|s| s.to_string()).collect();
+    // Store a stub embedding so the RAG pipeline can score this learning.
+    // EmbeddingService::new_test() returns vec![0.1; 384], which yields
+    // cosine similarity = 1.0 against any query embedded by the same stub.
+    let stub_emb: Vec<u8> = serialize_embedding(&vec![0.1f32; 384]);
     let id = state
         .db
         .create_learning(CreateLearningRow {
@@ -6052,7 +6085,7 @@ async fn create_approved_learning(
             scope_ref,
             tags: &tag_strings,
             source_task_id: None,
-            embedding: None,
+            embedding: Some(&stub_emb),
         })
         .await
         .unwrap();
@@ -6321,6 +6354,9 @@ async fn query_learnings_returns_approved_for_task() {
 
 #[tokio::test]
 async fn query_learnings_tag_filter_narrows_results() {
+    // tag_filter is a soft boost in the RAG pipeline, not a hard filter.
+    // Both learnings score identically (same stub embedding) but the
+    // rust-tagged one gets a small boost. Both should appear.
     let state = test_state().await;
     let task_id = create_task_in_repo(&state, "/repo/tagged").await;
     create_approved_learning(
@@ -6345,16 +6381,17 @@ async fn query_learnings_tag_filter_narrows_results() {
         "tools/call",
         Some(json!({
             "name": "query_learnings",
-            "arguments": { "task_id": task_id.0, "tag_filter": "rust" }
+            "arguments": { "task_id": task_id.0, "tag_filter": ["rust"] }
         })),
     )
     .await;
     assert!(resp.error.is_none());
     let text = extract_response_text(&resp);
-    assert!(text.contains("Rust tips"), "expected rust learning");
+    assert!(text.contains("Rust tips"), "expected rust-tagged learning");
+    // tag_filter is a soft boost — untagged/differently-tagged entries are NOT excluded
     assert!(
-        !text.contains("Testing tips"),
-        "should not see testing learning"
+        text.contains("Testing tips"),
+        "tag_filter is soft: non-matching entries should still appear"
     );
 }
 
@@ -6885,6 +6922,7 @@ async fn make_rebase_state() -> (Arc<dyn db::TaskStore>, Arc<McpState>) {
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
     (db, state)
 }
@@ -7723,6 +7761,7 @@ async fn wrap_up_then_exit_session_end_to_end() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
 
     let epic = db
@@ -8103,6 +8142,7 @@ async fn wrap_up_done_marks_task_done_without_git_ops() {
         db: db.clone(),
         notify_tx: None,
         runner,
+        embedding_service: EmbeddingService::new_test(),
     });
 
     let task_id = db

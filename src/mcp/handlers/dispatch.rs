@@ -433,21 +433,26 @@ mcp_tools! {
         };
 
     async "query_learnings" => learnings::handle_query_learnings,
-        "Query the knowledge base for entries relevant to the current task's context (user + project + repo + epic scopes). Ordered by scope priority then upvote count. Excludes task-scoped entries.",
+        "Query the knowledge base for entries relevant to the current task's context using semantic search (RAG). Excludes task-scoped entries.",
         {
             "type": "object",
             "properties": {
                 "task_id": {
                     "type": "integer",
-                    "description": "ID of the calling task — determines which repo/project/epic to query"
+                    "description": "ID of the calling task — determines which repo/project/epic to use for scope boosting"
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Optional semantic query string. When omitted, the task's title and description are used as the query."
                 },
                 "tag_filter": {
-                    "type": "string",
-                    "description": "Optional tag to filter results — only learnings tagged with this value are returned"
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Optional list of tags to soft-boost — learnings with matching tags score higher but untagged entries are not excluded"
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Maximum number of results to return (default 20, max 50)"
+                    "description": "Maximum number of results to return (default 50, max 50)"
                 }
             },
             "required": ["task_id"]

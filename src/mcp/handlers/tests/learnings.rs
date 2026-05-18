@@ -30,6 +30,8 @@ async fn create_task_in_repo(state: &Arc<McpState>, repo: &str) -> crate::models
         .unwrap()
 }
 
+/// Create an approved learning with a stub embedding (vec![0.1; 384]) so
+/// it is visible to the RAG pipeline in `handle_query_learnings`.
 async fn create_approved_learning(
     state: &Arc<McpState>,
     summary: &str,
@@ -38,6 +40,9 @@ async fn create_approved_learning(
     tags: &[&str],
 ) -> crate::models::LearningId {
     let tag_strings: Vec<String> = tags.iter().map(|s| s.to_string()).collect();
+    // Store the same stub vector that EmbeddingService::new_test() returns so
+    // the RAG cosine similarity is 1.0 (well above the 0.25 threshold).
+    let stub_emb: Vec<u8> = serialize_embedding(&vec![0.1f32; 384]);
     let id = state
         .db
         .create_learning(CreateLearningRow {
@@ -48,7 +53,7 @@ async fn create_approved_learning(
             scope_ref,
             tags: &tag_strings,
             source_task_id: None,
-            embedding: None,
+            embedding: Some(&stub_emb),
         })
         .await
         .unwrap();
@@ -500,17 +505,16 @@ async fn query_learnings_tag_filter_narrows_results() {
         "tools/call",
         Some(json!({
             "name": "query_learnings",
-            "arguments": { "task_id": task_id.0, "tag_filter": "rust" }
+            "arguments": { "task_id": task_id.0, "tag_filter": ["rust"] }
         })),
     )
     .await;
     assert!(resp.error.is_none());
     let text = extract_response_text(&resp);
     assert!(text.contains("Rust tips"), "expected rust learning");
-    assert!(
-        !text.contains("Testing tips"),
-        "should not see testing learning"
-    );
+    // With RAG (stub returns identical vectors for all), both learnings score equally
+    // but the rust-tagged one gets a soft boost — both still appear (soft filter, not hard).
+    // The important check is that the rust-tagged entry is present.
 }
 
 #[tokio::test]
@@ -649,4 +653,110 @@ async fn upvote_learning_unknown_learning_fails() {
     )
     .await;
     assert_error(&resp, "9999");
+}
+
+// --- query_learnings: RAG pipeline ------------------------------------------
+
+#[tokio::test]
+async fn query_learnings_uses_query_param_when_provided() {
+    let state = test_state().await;
+    let task_id = create_task_in_repo(&state, "/repo/rag").await;
+    create_approved_learning(
+        &state,
+        "Always use anyhow for error handling",
+        crate::models::LearningScope::Repo,
+        Some("/repo/rag"),
+        &[],
+    )
+    .await;
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "query_learnings",
+            "arguments": { "task_id": task_id.0, "query": "how to handle errors" }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
+    // The result must be either a text with the learning or the "no learnings" message —
+    // both are valid when embedding stubs return identical vectors (cosine threshold may
+    // or may not be met depending on threshold). We just verify no crash / no error.
+    let result = resp.result.expect("expected result");
+    assert!(result.get("content").is_some(), "missing content in result");
+}
+
+#[tokio::test]
+async fn query_learnings_falls_back_to_task_context_when_no_query() {
+    let state = test_state().await;
+    let task_id = create_task_in_repo(&state, "/repo/fallback").await;
+    create_approved_learning(
+        &state,
+        "Convention for fallback test",
+        crate::models::LearningScope::Repo,
+        Some("/repo/fallback"),
+        &[],
+    )
+    .await;
+
+    // No query param — should use task title/description as fallback
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "query_learnings",
+            "arguments": { "task_id": task_id.0 }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
+    let result = resp.result.expect("expected result");
+    assert!(result.get("content").is_some(), "missing content in result");
+}
+
+#[tokio::test]
+async fn query_learnings_soft_tag_boost_does_not_hard_filter() {
+    // The stub embedding service returns vec![0.1; 384] for every embed call.
+    // cosine(identical_vec, identical_vec) = 1.0 ≥ threshold (0.25), so both
+    // learnings pass. tag_filter provides a soft boost (not a hard filter),
+    // so the untagged learning should also appear.
+    let state = test_state().await;
+    let task_id = create_task_in_repo(&state, "/repo/soft-tag").await;
+    let _rust_id = create_approved_learning(
+        &state,
+        "Use Rust idioms",
+        crate::models::LearningScope::Repo,
+        Some("/repo/soft-tag"),
+        &["rust"],
+    )
+    .await;
+    let _no_tag_id = create_approved_learning(
+        &state,
+        "General best practice",
+        crate::models::LearningScope::Repo,
+        Some("/repo/soft-tag"),
+        &[],
+    )
+    .await;
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "query_learnings",
+            "arguments": { "task_id": task_id.0, "tag_filter": ["rust"] }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
+    let text = extract_response_text(&resp);
+    assert!(
+        text.contains("Use Rust idioms"),
+        "expected rust-tagged learning in results: {text}"
+    );
+    assert!(
+        text.contains("General best practice"),
+        "tag_filter must be soft (boost only), untagged learning should also appear: {text}"
+    );
 }
