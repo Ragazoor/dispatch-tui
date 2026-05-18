@@ -9,16 +9,26 @@ use crate::models::learnings::{Learning, LearningKind, LearningScope};
 // EmbeddingService — dedicated OS thread owns the fastembed model
 // ---------------------------------------------------------------------------
 
-struct EmbedRequest {
+struct EmbedSingle {
     // In test mode the stub thread ignores text, but the field is populated by callers.
     #[allow(dead_code)]
     text: String,
     reply: oneshot::Sender<Result<Vec<f32>>>,
 }
 
+struct EmbedBatch {
+    texts: Vec<String>,
+    reply: oneshot::Sender<Result<Vec<Vec<f32>>>>,
+}
+
+enum EmbedMsg {
+    Single(EmbedSingle),
+    Batch(EmbedBatch),
+}
+
 #[derive(Clone)]
 pub struct EmbeddingService {
-    tx: std::sync::mpsc::Sender<EmbedRequest>,
+    tx: std::sync::mpsc::Sender<EmbedMsg>,
 }
 
 impl EmbeddingService {
@@ -30,14 +40,23 @@ impl EmbeddingService {
         let mut model = TextEmbedding::try_new(
             InitOptions::new(EmbeddingModel::BGESmallENV15).with_show_download_progress(true),
         )?;
-        let (tx, rx) = std::sync::mpsc::channel::<EmbedRequest>();
+        let (tx, rx) = std::sync::mpsc::channel::<EmbedMsg>();
         std::thread::spawn(move || {
-            while let Ok(req) = rx.recv() {
-                let result = model
-                    .embed(vec![req.text.as_str()], None)
-                    .map(|mut vecs| vecs.remove(0))
-                    .map_err(anyhow::Error::from);
-                let _ = req.reply.send(result);
+            while let Ok(msg) = rx.recv() {
+                match msg {
+                    EmbedMsg::Single(EmbedSingle { text, reply }) => {
+                        let result = model
+                            .embed(vec![text.as_str()], None)
+                            .map(|mut vecs| vecs.remove(0))
+                            .map_err(anyhow::Error::from);
+                        let _ = reply.send(result);
+                    }
+                    EmbedMsg::Batch(EmbedBatch { texts, reply }) => {
+                        let refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
+                        let result = model.embed(refs, None).map_err(anyhow::Error::from);
+                        let _ = reply.send(result);
+                    }
+                }
             }
         });
         Ok(Arc::new(Self { tx }))
@@ -46,53 +65,50 @@ impl EmbeddingService {
     /// Test stub — returns deterministic vec![0.1; 384] without loading the model.
     #[cfg(test)]
     pub fn new_test() -> Arc<Self> {
-        let (tx, rx) = std::sync::mpsc::channel::<EmbedRequest>();
+        let (tx, rx) = std::sync::mpsc::channel::<EmbedMsg>();
         std::thread::spawn(move || {
-            while let Ok(req) = rx.recv() {
-                let _ = req.reply.send(Ok(vec![0.1f32; 384]));
+            while let Ok(msg) = rx.recv() {
+                match msg {
+                    EmbedMsg::Single(EmbedSingle { reply, .. }) => {
+                        let _ = reply.send(Ok(vec![0.1f32; 384]));
+                    }
+                    EmbedMsg::Batch(EmbedBatch { texts, reply }) => {
+                        let result = texts.iter().map(|_| vec![0.1f32; 384]).collect();
+                        let _ = reply.send(Ok(result));
+                    }
+                }
             }
         });
         Arc::new(Self { tx })
     }
 
-    /// Test-only stub. All production call sites use the real EmbeddingService.
-    ///
-    /// In test builds: returns `vec![0.1f32; 384]` so existing tests that
-    /// incidentally call `create_learning` or `update_learning` continue to pass.
-    ///
-    /// In production builds: returns an error, causing the service call to fail
-    /// with a clear message prompting the caller to wire the real service.
+    /// Test-only stub that returns fixed 0.1 vectors. All production call sites use the real
+    /// EmbeddingService. Must be `pub` so integration tests can access it.
     pub fn new_noop() -> Arc<Self> {
-        #[cfg(test)]
-        let thread_fn = |rx: std::sync::mpsc::Receiver<EmbedRequest>| {
-            std::thread::spawn(move || {
-                while let Ok(req) = rx.recv() {
-                    let _ = req.reply.send(Ok(vec![0.1f32; 384]));
+        let (tx, rx) = std::sync::mpsc::channel::<EmbedMsg>();
+        std::thread::spawn(move || {
+            while let Ok(msg) = rx.recv() {
+                match msg {
+                    EmbedMsg::Single(EmbedSingle { reply, .. }) => {
+                        let _ = reply.send(Ok(vec![0.1f32; 384]));
+                    }
+                    EmbedMsg::Batch(EmbedBatch { texts, reply }) => {
+                        let result = texts.iter().map(|_| vec![0.1f32; 384]).collect();
+                        let _ = reply.send(Ok(result));
+                    }
                 }
-            });
-        };
-        #[cfg(not(test))]
-        let thread_fn = |rx: std::sync::mpsc::Receiver<EmbedRequest>| {
-            std::thread::spawn(move || {
-                while let Ok(req) = rx.recv() {
-                    let _ = req.reply.send(Err(anyhow::anyhow!(
-                        "EmbeddingService not yet wired — call site must be updated in Task 8/9"
-                    )));
-                }
-            });
-        };
-        let (tx, rx) = std::sync::mpsc::channel::<EmbedRequest>();
-        thread_fn(rx);
+            }
+        });
         Arc::new(Self { tx })
     }
 
     pub async fn embed(&self, text: impl Into<String>) -> Result<Vec<f32>> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.tx
-            .send(EmbedRequest {
+            .send(EmbedMsg::Single(EmbedSingle {
                 text: text.into(),
                 reply: reply_tx,
-            })
+            }))
             .map_err(|e| anyhow::anyhow!("EmbeddingService channel closed: {e}"))?;
         reply_rx
             .await
@@ -100,11 +116,19 @@ impl EmbeddingService {
     }
 
     pub async fn embed_batch(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>> {
-        let mut results = Vec::with_capacity(texts.len());
-        for text in texts {
-            results.push(self.embed(text).await?);
+        if texts.is_empty() {
+            return Ok(vec![]);
         }
-        Ok(results)
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.tx
+            .send(EmbedMsg::Batch(EmbedBatch {
+                texts,
+                reply: reply_tx,
+            }))
+            .map_err(|e| anyhow::anyhow!("EmbeddingService channel closed: {e}"))?;
+        reply_rx
+            .await
+            .map_err(|_| anyhow::anyhow!("EmbeddingService reply channel dropped"))?
     }
 }
 
@@ -207,6 +231,8 @@ pub fn rag_rank_learnings<'a>(
     tag_filter: &[String],
     limit: usize,
 ) -> Vec<&'a Learning> {
+    let tag_set: std::collections::HashSet<&str> =
+        tag_filter.iter().map(|s| s.as_str()).collect();
     let mut scored: Vec<ScoredLearning<'_>> = candidates
         .iter()
         .filter_map(|(learning, emb)| {
@@ -221,13 +247,13 @@ pub fn rag_rank_learnings<'a>(
                 task_repo,
                 task_project,
             );
-            let tag_boost = if tag_filter.is_empty() {
+            let tag_boost = if tag_set.is_empty() {
                 0.0
             } else {
                 let matches = learning
                     .tags
                     .iter()
-                    .filter(|t| tag_filter.contains(t))
+                    .filter(|t| tag_set.contains(t.as_str()))
                     .count();
                 matches as f32 * 0.05
             };

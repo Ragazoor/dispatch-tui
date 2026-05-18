@@ -304,11 +304,11 @@ impl super::super::LearningStore for Database {
 
     async fn list_all_approved_non_task_learnings(
         &self,
-    ) -> Result<Vec<(Learning, Option<Vec<u8>>)>> {
+    ) -> Result<Vec<(Learning, Vec<u8>)>> {
         self.db_call(move |conn| {
             let sql = format!(
                 "SELECT {LEARNING_COLUMNS}, embedding FROM learnings \
-                 WHERE status = 'approved' AND scope != 'task' \
+                 WHERE status = 'approved' AND scope != 'task' AND embedding IS NOT NULL \
                  ORDER BY id"
             );
             let mut stmt = conn
@@ -317,8 +317,8 @@ impl super::super::LearningStore for Database {
             let rows = stmt
                 .query_map([], |row| {
                     let learning = row_to_learning(row)?;
-                    // embedding is at index 13 (after the 13 LEARNING_COLUMNS)
-                    let embedding: Option<Vec<u8>> = row.get(13)?;
+                    // embedding is at index 13 (after the 13 LEARNING_COLUMNS); NOT NULL guaranteed by SQL
+                    let embedding: Vec<u8> = row.get(13)?;
                     Ok((learning, embedding))
                 })
                 .context("Failed to query approved non-task learnings")?

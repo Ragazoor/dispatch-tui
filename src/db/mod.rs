@@ -357,11 +357,11 @@ pub trait LearningStore: Send + Sync {
         epic_id: Option<EpicId>,
     ) -> Result<Vec<Learning>>;
 
-    /// Returns all approved, non-task-scoped learnings with their raw embedding bytes.
-    /// Used by the embedding backfill and RAG pipeline to access stored vectors.
+    /// Returns all approved, non-task-scoped learnings that have embeddings stored,
+    /// with their raw embedding bytes. Used by the RAG pipeline.
     async fn list_all_approved_non_task_learnings(
         &self,
-    ) -> Result<Vec<(Learning, Option<Vec<u8>>)>>;
+    ) -> Result<Vec<(Learning, Vec<u8>)>>;
 
     /// Returns approved, non-task-scoped learnings that have no embedding stored yet.
     /// Used by the backfill job to determine which learnings need to be embedded.

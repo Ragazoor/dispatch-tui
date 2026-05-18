@@ -2556,8 +2556,8 @@ async fn backfill_fills_missing_embeddings() {
     let l2 = db.get_learning(id2).await.unwrap().unwrap();
     // Verify via list_all_approved_non_task_learnings which returns embeddings
     let all = db.list_all_approved_non_task_learnings().await.unwrap();
-    let emb1 = all.iter().find(|(l, _)| l.id == l1.id).and_then(|(_, e)| e.as_ref());
-    let emb2 = all.iter().find(|(l, _)| l.id == l2.id).and_then(|(_, e)| e.as_ref());
+    let emb1 = all.iter().find(|(l, _)| l.id == l1.id).map(|(_, e)| e);
+    let emb2 = all.iter().find(|(l, _)| l.id == l2.id).map(|(_, e)| e);
     assert!(emb1.is_some_and(|e| !e.is_empty()), "learning 1 should have embedding");
     assert!(emb2.is_some_and(|e| !e.is_empty()), "learning 2 should have embedding");
 }

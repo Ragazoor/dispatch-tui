@@ -278,15 +278,13 @@ pub(crate) async fn backfill_embeddings(
         return Ok(());
     }
     tracing::info!("Backfilling embeddings for {} learnings", missing.len());
-    for learning in &missing {
-        let text = embed_text_for_learning(
-            learning.kind,
-            &learning.summary,
-            &learning.tags,
-            learning.detail.as_deref(),
-        );
-        let emb_vec = emb_svc.embed(text).await?;
-        let emb_bytes = serialize_embedding(&emb_vec);
+    let texts: Vec<String> = missing
+        .iter()
+        .map(|l| embed_text_for_learning(l.kind, &l.summary, &l.tags, l.detail.as_deref()))
+        .collect();
+    let embeddings = emb_svc.embed_batch(texts).await?;
+    for (learning, emb_vec) in missing.iter().zip(embeddings.iter()) {
+        let emb_bytes = serialize_embedding(emb_vec);
         db.patch_learning(
             learning.id,
             &crate::db::LearningPatch::new().embedding(&emb_bytes),

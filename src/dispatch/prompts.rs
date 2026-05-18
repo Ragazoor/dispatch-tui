@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::db;
 use crate::models::{
-    EpicId, Learning, LearningKind, LearningScope, ProjectId, Task, TaskId, TaskTag,
+    EpicId, Learning, LearningKind, ProjectId, Task, TaskId, TaskTag,
 };
 use crate::service::embeddings::{
     deserialize_embedding, embed_text_for_query, rag_rank_learnings, EmbeddingService,
@@ -493,30 +493,12 @@ IMPORTANT: Do NOT start implementing. Your job ends after creating the work pack
 /// Maximum total learnings injected into a dispatch prompt via RAG.
 pub const DISPATCH_INJECTION_CAP: usize = 5;
 
-// Legacy tiered constants — kept so existing tests continue to compile.
-// The tiered selection path is no longer used by the dispatch pipeline.
-#[allow(dead_code)]
-const TIER_ORDER: [LearningScope; 4] = [
-    LearningScope::Epic,
-    LearningScope::Repo,
-    LearningScope::Project,
-    LearningScope::User,
-];
-#[allow(dead_code)]
-const PER_TIER: usize = 2;
-/// Kept for call-site compatibility; value is now `DISPATCH_INJECTION_CAP`.
-#[allow(dead_code)]
-pub const INJECTION_CAP: usize = DISPATCH_INJECTION_CAP;
-
-/// Push-injection groups for a dispatch prompt. Both lists hold borrowed
-/// `Learning`s so the caller keeps ownership of the active list returned by
-/// `LearningStore::list_learnings_for_dispatch`.
+/// Push-injection groups for a dispatch prompt.
 #[derive(Default, Clone)]
 pub struct LearningInjections<'a> {
     /// Procedural-kind learnings, rendered verbatim near the top of the prompt.
-    /// Expected to be ordered by scope priority then `upvote_count DESC`.
     pub procedural: Vec<&'a Learning>,
-    /// Non-procedural learnings selected by `select_tiered_learnings`.
+    /// Non-procedural learnings ranked by the RAG pipeline.
     pub tiered: Vec<&'a Learning>,
 }
 
@@ -591,10 +573,9 @@ pub async fn list_learnings_for_dispatch_rag(
         }
     };
 
-    // Decode BLOB embeddings; drop rows with no embedding stored yet.
     let candidates: Vec<(Learning, Vec<f32>)> = rows
         .into_iter()
-        .filter_map(|(l, bytes)| bytes.map(|b| (l, deserialize_embedding(&b))))
+        .map(|(l, b)| (l, deserialize_embedding(&b)))
         .collect();
 
     let epic_id_str = task.epic_id.map(|e| e.0.to_string());
@@ -612,11 +593,10 @@ pub async fn list_learnings_for_dispatch_rag(
         candidates.len(),
     );
 
-    // Partition: procedurals always come first (they are instructions).
     let (procedurals, others): (Vec<&Learning>, Vec<&Learning>) =
         all_ranked.into_iter().partition(|l| l.kind == LearningKind::Procedural);
 
-    // Fill remaining cap slots with non-procedurals; procedurals are never cut.
+    // Cap applied after partition so procedurals always win their slots.
     let remaining = DISPATCH_INJECTION_CAP.saturating_sub(procedurals.len());
     let mut result: Vec<&Learning> = procedurals;
     result.extend(others.into_iter().take(remaining));
@@ -654,135 +634,12 @@ pub async fn build_and_record_injections(
     (procedural, non_procedural)
 }
 
-#[allow(dead_code)]
-pub(crate) fn select_tiered_learnings(learnings: &[Learning], cap: usize) -> Vec<&Learning> {
-    use std::collections::HashSet;
-    let mut picked: Vec<&Learning> = Vec::new();
-    let mut seen: HashSet<i64> = HashSet::new();
-    for tier in TIER_ORDER {
-        let mut tier_items: Vec<&Learning> = learnings
-            .iter()
-            .filter(|l| l.scope == tier && l.kind != LearningKind::Procedural)
-            .collect();
-        tier_items.sort_by(|a, b| {
-            b.upvote_count
-                .cmp(&a.upvote_count)
-                .then(b.updated_at.cmp(&a.updated_at))
-        });
-        for l in tier_items.into_iter().take(PER_TIER) {
-            if picked.len() >= cap {
-                return picked;
-            }
-            if seen.insert(l.id.0) {
-                picked.push(l);
-            }
-        }
-    }
-    picked
-}
-
-#[cfg(test)]
-mod tiered_selection_tests {
-    use super::*;
-    use crate::models::{Learning, LearningId, LearningKind, LearningScope, LearningStatus};
-    use chrono::{TimeZone, Utc};
-
-    fn seed(id: i64, scope: LearningScope, count: i64) -> Learning {
-        Learning {
-            id: LearningId(id),
-            kind: LearningKind::Pitfall,
-            summary: format!("learning {id}"),
-            detail: None,
-            scope,
-            scope_ref: match scope {
-                LearningScope::User => None,
-                _ => Some("ref".into()),
-            },
-            tags: vec![],
-            status: LearningStatus::Approved,
-            source_task_id: None,
-            upvote_count: count,
-            last_upvoted_at: None,
-            created_at: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
-            updated_at: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
-        }
-    }
-
-    fn seed_kind(id: i64, scope: LearningScope, kind: LearningKind) -> Learning {
-        let mut l = seed(id, scope, 0);
-        l.kind = kind;
-        l
-    }
-
-    #[test]
-    fn picks_top_two_per_scope_in_tier_order() {
-        let learnings = vec![
-            seed(1, LearningScope::Epic, 5),
-            seed(2, LearningScope::Epic, 4),
-            seed(3, LearningScope::Epic, 3),
-            seed(4, LearningScope::Repo, 2),
-            seed(5, LearningScope::Repo, 1),
-            seed(6, LearningScope::Repo, 0),
-            seed(7, LearningScope::User, 0),
-        ];
-        let picked = select_tiered_learnings(&learnings, 8);
-        let ids: Vec<i64> = picked.iter().map(|l| l.id.0).collect();
-        assert_eq!(ids, vec![1, 2, 4, 5, 7]);
-    }
-
-    #[test]
-    fn caps_at_eight() {
-        let mut learnings = vec![];
-        let mut id = 1;
-        for s in [
-            LearningScope::Epic,
-            LearningScope::Repo,
-            LearningScope::Project,
-            LearningScope::User,
-        ] {
-            for i in 0..3 {
-                learnings.push(seed(id, s, i));
-                id += 1;
-            }
-        }
-        // 4 tiers * 3 entries = 12, take 2 each = 8, cap = 8.
-        assert_eq!(select_tiered_learnings(&learnings, 8).len(), 8);
-    }
-
-    #[test]
-    fn skips_procedural_entries() {
-        let learnings = vec![
-            seed_kind(1, LearningScope::Epic, LearningKind::Procedural),
-            seed(2, LearningScope::Epic, 0),
-        ];
-        let picked = select_tiered_learnings(&learnings, 8);
-        let ids: Vec<i64> = picked.iter().map(|l| l.id.0).collect();
-        assert_eq!(ids, vec![2]);
-    }
-
-    #[test]
-    fn dedups_by_id_across_tiers() {
-        // Same id appearing twice in input (shouldn't happen in practice,
-        // but if it did the function must not duplicate).
-        let learnings = vec![
-            seed(1, LearningScope::Epic, 5),
-            seed(1, LearningScope::Repo, 5),
-        ];
-        let picked = select_tiered_learnings(&learnings, 8);
-        let ids: Vec<i64> = picked.iter().map(|l| l.id.0).collect();
-        assert_eq!(ids, vec![1]);
-    }
-
-    #[test]
-    fn empty_input_returns_empty() {
-        assert!(select_tiered_learnings(&[], 8).is_empty());
-    }
-}
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+    use crate::models::LearningScope;
 
     #[test]
     fn learning_instruction_references_learnings_skill() {

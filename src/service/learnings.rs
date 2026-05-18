@@ -665,13 +665,9 @@ mod learning_tests {
             .iter()
             .find(|(l, _)| l.id == id)
             .expect("newly created learning should appear in approved non-task learnings");
-        let emb_bytes = emb_entry
-            .1
-            .as_ref()
-            .expect("embedding must be Some after create");
         // EmbeddingService::new_test() returns vec![0.1f32; 384], which is 384 * 4 = 1536 bytes.
         assert_eq!(
-            emb_bytes.len(),
+            emb_entry.1.len(),
             384 * 4,
             "embedding should be 1536 bytes for 384 f32 values"
         );
@@ -710,7 +706,7 @@ mod learning_tests {
         let emb_before = before
             .iter()
             .find(|(l, _)| l.id == id)
-            .and_then(|(_, e)| e.as_ref())
+            .map(|(_, e)| e)
             .expect("learning must have embedding after sentinel write");
         assert_eq!(emb_before.as_slice(), sentinel.as_slice());
 
@@ -729,7 +725,7 @@ mod learning_tests {
         let emb_after = after
             .iter()
             .find(|(l, _)| l.id == id)
-            .and_then(|(_, e)| e.as_ref())
+            .map(|(_, e)| e)
             .expect("learning must still have embedding after update");
 
         // The sentinel must be gone — re-embedding was called and returned the stub bytes.
@@ -789,7 +785,7 @@ mod learning_tests {
         let emb = entries
             .iter()
             .find(|(l, _)| l.id == id)
-            .and_then(|(_, e)| e.as_ref())
+            .map(|(_, e)| e)
             .expect("learning must still have embedding");
         assert_eq!(
             emb.as_slice(),

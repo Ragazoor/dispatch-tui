@@ -188,20 +188,16 @@ pub(super) async fn handle_query_learnings(
         Err(e) => return JsonRpcResponse::err(id, -32603, format!("database error: {e}")),
     };
 
-    // Build query text: use explicit query param when provided, otherwise fall
-    // back to the task's title + description.
     let query_text = match parsed.query {
         Some(q) => q,
         None => embed_text_for_query(&task.title, &task.description),
     };
 
-    // Embed the query string.
     let query_vec = match state.embedding_service.embed(query_text).await {
         Ok(v) => v,
         Err(e) => return JsonRpcResponse::err(id, -32603, format!("embedding error: {e}")),
     };
 
-    // Fetch all approved non-task-scoped candidates with their stored embeddings.
     let candidates_raw = match state.db.list_all_approved_non_task_learnings().await {
         Ok(c) => c,
         Err(e) => return JsonRpcResponse::err(id, -32603, format!("database error: {e}")),
@@ -209,14 +205,9 @@ pub(super) async fn handle_query_learnings(
 
     let candidates: Vec<(crate::models::Learning, Vec<f32>)> = candidates_raw
         .into_iter()
-        .filter_map(|(l, emb_bytes)| {
-            let bytes = emb_bytes?;
-            Some((l, deserialize_embedding(&bytes)))
-        })
+        .map(|(l, b)| (l, deserialize_embedding(&b)))
         .collect();
 
-    // RAG ranking with scope boosts and soft tag boost.
-    let threshold = QUERY_LEARNINGS_RAG_THRESHOLD;
     let tag_filter = parsed.tag_filter.unwrap_or_default();
     let limit = parsed.limit.unwrap_or(50).min(50) as usize;
 
@@ -228,12 +219,11 @@ pub(super) async fn handle_query_learnings(
         epic_id_str.as_deref(),
         Some(task.repo_path.as_str()),
         Some(project_id_str.as_str()),
-        threshold,
+        QUERY_LEARNINGS_RAG_THRESHOLD,
         &tag_filter,
         limit,
     );
 
-    // Record retrievals for analytics.
     for l in &ranked {
         if let Err(e) = state
             .db

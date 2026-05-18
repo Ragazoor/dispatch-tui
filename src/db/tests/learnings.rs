@@ -705,7 +705,7 @@ async fn create_learning_with_embedding_stores_it() {
         .unwrap();
     let results = db.list_all_approved_non_task_learnings().await.unwrap();
     let found = results.iter().find(|(l, _)| l.id == id).unwrap();
-    assert_eq!(found.1.as_ref().map(|b| b.len()), Some(1536));
+    assert_eq!(found.1.len(), 1536);
 }
 
 #[tokio::test]
