@@ -77,12 +77,15 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
     #[cfg(not(test))]
     let emb_svc = {
         eprintln!("Loading embedding model...");
-        EmbeddingService::new().map_err(|e| {
-            anyhow::anyhow!(
-                "Failed to initialise embedding model: {e}\n\
-                 Clear cache with: rm -rf ~/.cache/huggingface/hub/"
-            )
-        })?
+        tokio::task::spawn_blocking(EmbeddingService::new)
+            .await
+            .map_err(|e| anyhow::anyhow!("Embedding thread panicked: {e}"))? // join error
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to initialise embedding model: {e}\n\
+                     Clear cache with: rm -rf ~/.cache/huggingface/hub/"
+                )
+            })?
     };
     #[cfg(test)]
     let emb_svc = EmbeddingService::new_noop();
@@ -91,7 +94,8 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
     {
         let db_for_backfill = database.clone();
         let emb_svc_for_backfill = emb_svc.clone();
-        tokio::spawn(async move {
+        // Fire-and-forget: partial work is retried on next startup.
+        let _ = tokio::spawn(async move {
             if let Err(e) = backfill_embeddings(db_for_backfill, emb_svc_for_backfill).await {
                 tracing::warn!("Embedding backfill failed: {e}");
             }
@@ -263,7 +267,7 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
 ///
 /// Runs at startup in a background task. Failures are logged via `tracing::warn`
 /// by the caller; this function propagates errors so the caller can decide.
-pub async fn backfill_embeddings(
+pub(crate) async fn backfill_embeddings(
     db: Arc<dyn crate::db::LearningStore + Send + Sync>,
     emb_svc: Arc<EmbeddingService>,
 ) -> Result<()> {
