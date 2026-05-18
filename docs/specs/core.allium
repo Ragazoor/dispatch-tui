@@ -567,6 +567,15 @@ concept FlattenedView {
         and (view.is_board or task.is_descendant_of(view.current_epic))
 }
 
+-- == Only Active Filter ==
+
+rule only_active_filter:
+    When view.only_active is true, only tasks where tmux_window is set
+    are included in tasks_for_current_view. This filter is applied in
+    addition to the repo filter and project filter.
+    The filter is toggled via the [f] overlay's "Active sessions only"
+    row (cursor position 0, Space to toggle).
+
 -- == Cursor Selection Preservation ==
 
 rule selection_preservation:
