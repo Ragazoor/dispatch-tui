@@ -16,8 +16,10 @@ impl App {
             KeyCode::Char('k') | KeyCode::Up => self.update(Message::MoveRepoCursor(-1)),
             KeyCode::Char(' ') => {
                 let idx = self.input.repo_cursor;
-                if idx < self.board.repo_paths.len() {
-                    let path = self.board.repo_paths[idx].clone();
+                if idx == 0 {
+                    self.update(Message::ToggleOnlyActive)
+                } else if idx <= self.board.repo_paths.len() {
+                    let path = self.board.repo_paths[idx - 1].clone();
                     self.update(Message::ToggleRepoFilter(path))
                 } else {
                     vec![]
@@ -33,7 +35,13 @@ impl App {
                 }
             }
             KeyCode::Tab => self.update(Message::ToggleRepoFilterMode),
-            KeyCode::Backspace | KeyCode::Delete => self.update(Message::StartDeleteRepoPath),
+            KeyCode::Backspace | KeyCode::Delete => {
+                if self.input.repo_cursor > 0 {
+                    self.update(Message::StartDeleteRepoPath)
+                } else {
+                    vec![]
+                }
+            }
             KeyCode::Char('s') => self.update(Message::StartSavePreset),
             KeyCode::Char('x') => self.update(Message::StartDeletePreset),
             KeyCode::Char(c @ 'A'..='Z') => {
@@ -92,8 +100,8 @@ impl App {
         match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') => {
                 let idx = self.input.repo_cursor;
-                if idx < self.board.repo_paths.len() {
-                    let path = self.board.repo_paths[idx].clone();
+                if idx > 0 && idx <= self.board.repo_paths.len() {
+                    let path = self.board.repo_paths[idx - 1].clone();
                     self.update(Message::DeleteRepoPath(path))
                 } else {
                     self.input.mode = InputMode::RepoFilter;

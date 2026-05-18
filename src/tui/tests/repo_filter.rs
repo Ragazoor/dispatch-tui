@@ -593,7 +593,7 @@ fn repo_filter_space_toggles_cursor_repo() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
     app.input.mode = InputMode::RepoFilter;
-    app.input.repo_cursor = 1; // pointing at /repo-b
+    app.input.repo_cursor = 2; // cursor 2 = repo index 1 = /repo-b
     app.handle_key(make_key(KeyCode::Char(' ')));
     assert!(
         app.filter.repos.contains("/repo-b"),
@@ -763,6 +763,7 @@ fn backspace_in_repo_filter_starts_delete() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string()];
     app.input.mode = InputMode::RepoFilter;
+    app.input.repo_cursor = 1; // cursor 1 = repo index 0, so Backspace will trigger
     app.handle_key(make_key(KeyCode::Backspace));
     assert_eq!(app.input.mode, InputMode::ConfirmDeleteRepoPath);
 }
@@ -772,6 +773,7 @@ fn delete_key_in_repo_filter_starts_delete() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string()];
     app.input.mode = InputMode::RepoFilter;
+    app.input.repo_cursor = 1; // cursor 1 = repo index 0, so Delete will trigger
     app.handle_key(make_key(KeyCode::Delete));
     assert_eq!(app.input.mode, InputMode::ConfirmDeleteRepoPath);
 }
@@ -781,7 +783,7 @@ fn y_in_confirm_delete_repo_path_confirms() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string()];
     app.input.mode = InputMode::ConfirmDeleteRepoPath;
-    app.input.repo_cursor = 0;
+    app.input.repo_cursor = 1; // cursor 1 = repo index 0 = /repo-a
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert_eq!(app.input.mode, InputMode::RepoFilter);
     assert!(cmds
@@ -821,7 +823,7 @@ fn handle_key_repo_filter_space_toggles_cursor_item() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
     app.input.mode = InputMode::RepoFilter;
-    app.input.repo_cursor = 0;
+    app.input.repo_cursor = 1; // cursor 1 = repo index 0 = /repo
 
     app.handle_key(make_key(KeyCode::Char(' ')));
     assert!(app.filter.repos.contains("/repo"));
@@ -854,7 +856,7 @@ fn handle_key_repo_filter_backspace_starts_delete_repo_path() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo".to_string()];
     app.input.mode = InputMode::RepoFilter;
-    app.input.repo_cursor = 0;
+    app.input.repo_cursor = 1; // cursor 1 = repo index 0, so Backspace will trigger
 
     app.handle_key(make_key(KeyCode::Backspace));
     assert_eq!(*app.mode(), InputMode::ConfirmDeleteRepoPath);
@@ -959,7 +961,7 @@ fn handle_key_confirm_delete_repo_path_y_deletes() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
     app.input.mode = InputMode::ConfirmDeleteRepoPath;
-    app.input.repo_cursor = 0;
+    app.input.repo_cursor = 1; // cursor 1 = repo index 0 = /repo
 
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert!(cmds.iter().any(|c| matches!(c, Command::DeleteRepoPath(_))));
@@ -980,7 +982,7 @@ fn handle_key_confirm_delete_repo_path_uppercase_y() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo".to_string()];
     app.input.mode = InputMode::ConfirmDeleteRepoPath;
-    app.input.repo_cursor = 0;
+    app.input.repo_cursor = 1; // cursor 1 = repo index 0 = /repo
 
     let cmds = app.handle_key(make_key(KeyCode::Char('Y')));
     assert!(cmds.iter().any(|c| matches!(c, Command::DeleteRepoPath(_))));
@@ -1103,6 +1105,56 @@ fn buffered_editor_keystrokes_do_not_leak_into_repo_picker() {}
 // ---------------------------------------------------------------------------
 // Epic-in-epic: TUI navigation tests
 // ---------------------------------------------------------------------------
+
+#[test]
+fn space_at_cursor_zero_toggles_only_active() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo-a".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+    app.input.repo_cursor = 0;
+
+    assert!(!app.filter.only_active);
+    app.handle_key(make_key(KeyCode::Char(' ')));
+    assert!(app.filter.only_active);
+
+    app.handle_key(make_key(KeyCode::Char(' ')));
+    assert!(!app.filter.only_active);
+}
+
+#[test]
+fn space_at_cursor_one_toggles_first_repo() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+    app.input.repo_cursor = 1; // cursor 1 = repo index 0
+
+    app.handle_key(make_key(KeyCode::Char(' ')));
+    assert!(app.filter.repos.contains("/repo-a"));
+    assert!(!app.filter.repos.contains("/repo-b"));
+}
+
+#[test]
+fn backspace_at_cursor_zero_is_noop() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo-a".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+    app.input.repo_cursor = 0;
+
+    // Should not enter ConfirmDeleteRepoPath mode
+    app.handle_key(make_key(KeyCode::Backspace));
+    assert_eq!(app.input.mode, InputMode::RepoFilter);
+}
+
+#[test]
+fn backspace_at_cursor_one_starts_delete() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo-a".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+    app.input.repo_cursor = 1; // cursor 1 = repo index 0
+
+    app.handle_key(make_key(KeyCode::Backspace));
+    assert_eq!(app.input.mode, InputMode::ConfirmDeleteRepoPath);
+}
 
 #[test]
 fn enter_sub_epic_from_epic_view_nests_parent() {
