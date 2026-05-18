@@ -2407,7 +2407,11 @@ async fn create_task_with_epic_inherits_epic_project_id() {
         .unwrap();
 
     let task = svc.get_task(task_id).await.unwrap();
-    assert_eq!(task.project_id, ProjectId(1), "task project_id must match epic's");
+    assert_eq!(
+        task.project_id,
+        ProjectId(1),
+        "task project_id must match epic's"
+    );
     assert_eq!(task.epic_id, Some(epic.id));
 }
 
@@ -2457,7 +2461,11 @@ async fn update_task_epic_id_coerces_project_id() {
         .unwrap();
 
     let task = svc.get_task(task_id).await.unwrap();
-    assert_eq!(task.project_id, ProjectId(1), "project_id must match epic after linking");
+    assert_eq!(
+        task.project_id,
+        ProjectId(1),
+        "project_id must match epic after linking"
+    );
     assert_eq!(task.epic_id, Some(epic.id));
 }
 

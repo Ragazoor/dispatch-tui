@@ -312,10 +312,7 @@ impl EpicService {
                 .patch_epic(sub.id, &EpicPatch::new().project_id(project_id))
                 .await
             {
-                tracing::warn!(
-                    "cascade_project_id: patch_epic {} failed: {e}",
-                    sub.id.0
-                );
+                tracing::warn!("cascade_project_id: patch_epic {} failed: {e}", sub.id.0);
             }
             Box::pin(self.cascade_project_id(sub.id, project_id)).await;
         }
@@ -336,10 +333,7 @@ impl EpicService {
                 .patch_task(task.id, &TaskPatch::new().project_id(project_id))
                 .await
             {
-                tracing::warn!(
-                    "cascade_project_id: patch_task {} failed: {e}",
-                    task.id.0
-                );
+                tracing::warn!("cascade_project_id: patch_task {} failed: {e}", task.id.0);
             }
         }
     }
@@ -611,6 +605,9 @@ mod tests {
         assert_eq!(sub_after.project_id, proj2.id, "sub-epic must follow root");
 
         let task_after = db.get_task(task_id).await.unwrap().unwrap();
-        assert_eq!(task_after.project_id, proj2.id, "task must follow root epic");
+        assert_eq!(
+            task_after.project_id, proj2.id,
+            "task must follow root epic"
+        );
     }
 }

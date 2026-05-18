@@ -771,13 +771,7 @@ fn epic_planning_prompt_uses_task_block_not_epic_header() {
 fn epic_planning_prompt_includes_work_package_steps_and_no_implement_guard() {
     let project = project_ctx();
     let epic = epic_ctx();
-    let prompt = build_epic_planning_prompt(
-        TaskId(1),
-        "Plan",
-        "Desc",
-        &epic,
-        &project,
-    );
+    let prompt = build_epic_planning_prompt(TaskId(1), "Plan", "Desc", &epic, &project);
     assert!(prompt.contains("create_task"), "should mention create_task");
     assert!(prompt.contains("update_epic"), "should mention update_epic");
     assert!(prompt.contains("sort_order"), "should mention sort_order");

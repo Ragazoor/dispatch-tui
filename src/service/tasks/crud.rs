@@ -69,7 +69,8 @@ impl TaskService {
             None
         };
 
-        let mut patch = build_task_patch(&params, expanded_repo_path.as_deref(), validated_sub_status);
+        let mut patch =
+            build_task_patch(&params, expanded_repo_path.as_deref(), validated_sub_status);
         if let Some(pid) = epic_project_id {
             patch = patch.project_id(pid);
         }

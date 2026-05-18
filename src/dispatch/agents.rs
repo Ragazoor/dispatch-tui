@@ -169,15 +169,7 @@ pub fn epic_planning_agent(
     };
     dispatch_with_prompt(
         task,
-        || {
-            build_epic_planning_prompt(
-                task.id,
-                &task.title,
-                &task.description,
-                &epic,
-                project,
-            )
-        },
+        || build_epic_planning_prompt(task.id, &task.title, &task.description, &epic, project),
         runner,
         Some(&task.base_branch),
         None,
