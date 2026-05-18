@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::db::{self, EpicPatch};
+use crate::db::{self, EpicPatch, TaskPatch};
 use crate::models::{Epic, EpicId, ProjectId, Task, TaskStatus};
 
 use super::{FieldUpdate, ServiceError};
@@ -88,16 +88,37 @@ pub struct CreateEpicParams {
 // ---------------------------------------------------------------------------
 
 pub struct EpicService {
-    pub db: Arc<dyn db::EpicCrud>,
+    pub db: Arc<dyn db::TaskAndEpicStore>,
 }
 
 impl EpicService {
-    pub fn new(db: Arc<dyn db::EpicCrud>) -> Self {
+    pub fn new(db: Arc<dyn db::TaskAndEpicStore>) -> Self {
         Self { db }
     }
 
     pub async fn create_epic(&self, params: CreateEpicParams) -> Result<Epic, ServiceError> {
         let repo_path = crate::models::expand_tilde(&params.repo_path);
+
+        // When creating a sub-epic, coerce project_id to match the parent's.
+        let project_id = if let Some(parent_id) = params.parent_epic_id {
+            match self.db.get_epic(parent_id).await {
+                Ok(Some(parent)) => parent.project_id,
+                Ok(None) => {
+                    return Err(ServiceError::NotFound(format!(
+                        "Parent epic {} not found",
+                        parent_id.0
+                    )))
+                }
+                Err(e) => {
+                    return Err(ServiceError::Internal(format!(
+                        "Database error looking up parent epic: {e}"
+                    )))
+                }
+            }
+        } else {
+            params.project_id
+        };
+
         let epic = self
             .db
             .create_epic(
@@ -105,7 +126,7 @@ impl EpicService {
                 &params.description,
                 &repo_path,
                 params.parent_epic_id,
-                params.project_id,
+                project_id,
             )
             .await
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
@@ -283,7 +304,7 @@ impl EpicService {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::db::{Database, EpicCrud};
+    use crate::db::{CreateTaskRequest, Database, EpicCrud, ProjectCrud, TaskCrud};
 
     #[test]
     fn update_epic_params_has_any_field_consistent_with_updated_field_names() {
@@ -439,5 +460,102 @@ mod tests {
         .unwrap();
         let updated = db.get_epic(epic.id).await.unwrap().unwrap();
         assert!(updated.group_by_repo);
+    }
+
+    #[tokio::test]
+    async fn create_sub_epic_inherits_parent_project_id() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let svc = EpicService::new(db.clone());
+
+        let parent = db
+            .create_epic("Parent", "", "/r", None, ProjectId(1))
+            .await
+            .unwrap();
+        assert_eq!(parent.project_id, ProjectId(1));
+
+        let proj2 = db.create_project("P2", 2).await.unwrap();
+
+        let sub = svc
+            .create_epic(CreateEpicParams {
+                title: "Sub".into(),
+                description: "".into(),
+                repo_path: "/r".into(),
+                sort_order: None,
+                parent_epic_id: Some(parent.id),
+                feed_command: None,
+                feed_interval_secs: None,
+                project_id: proj2.id,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            sub.project_id,
+            ProjectId(1),
+            "sub-epic project_id must match parent's"
+        );
+        assert_eq!(sub.parent_epic_id, Some(parent.id));
+    }
+
+    #[tokio::test]
+    async fn update_epic_project_id_cascades_to_children() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let svc = EpicService::new(db.clone());
+
+        let proj2 = db.create_project("P2", 2).await.unwrap();
+
+        let root = db
+            .create_epic("Root", "", "/r", None, ProjectId(1))
+            .await
+            .unwrap();
+
+        let sub = db
+            .create_epic("Sub", "", "/r", Some(root.id), ProjectId(1))
+            .await
+            .unwrap();
+        assert_eq!(sub.project_id, ProjectId(1));
+
+        let task_id = db
+            .create_task(CreateTaskRequest {
+                title: "T",
+                description: "",
+                repo_path: "/r",
+                plan: None,
+                status: TaskStatus::Backlog,
+                base_branch: "main",
+                epic_id: Some(root.id),
+                sort_order: None,
+                tag: None,
+                project_id: ProjectId(1),
+                wrap_up_mode: None,
+            })
+            .await
+            .unwrap();
+
+        svc.update_epic(UpdateEpicParams {
+            epic_id: root.id,
+            title: None,
+            description: None,
+            status: None,
+            plan_path: None,
+            sort_order: None,
+            repo_path: None,
+            auto_dispatch: None,
+            feed_command: None,
+            feed_interval_secs: None,
+            project_id: Some(proj2.id),
+            group_by_repo: None,
+        })
+        .await
+        .unwrap();
+
+        let root_after = db.get_epic(root.id).await.unwrap().unwrap();
+        assert_eq!(root_after.project_id, proj2.id, "root epic project_id");
+
+        let sub_after = db.get_epic(sub.id).await.unwrap().unwrap();
+        assert_eq!(sub_after.project_id, proj2.id, "sub-epic must follow root");
+
+        let task_after = db.get_task(task_id).await.unwrap().unwrap();
+        assert_eq!(task_after.project_id, proj2.id, "task must follow root epic");
     }
 }

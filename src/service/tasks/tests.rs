@@ -2,7 +2,7 @@
 use std::sync::Arc;
 
 use super::{ClaimTaskParams, CreateTaskParams, ListTasksFilter, TaskService, UpdateTaskParams};
-use crate::db::{self, Database, ProjectCrud, TaskCrud};
+use crate::db::{self, Database, ProjectCrud, TaskAndEpicStore, TaskCrud};
 use crate::models::{
     EpicId, HookEventKind, ProjectId, SubStatus, TaskId, TaskStatus, TaskTag, UsageReport,
 };
@@ -19,7 +19,7 @@ fn task_svc(db: &Arc<dyn db::TaskStore>) -> TaskService {
 }
 
 fn epic_svc(db: &Arc<dyn db::TaskStore>) -> EpicService {
-    let d: Arc<dyn db::EpicCrud> = db.clone();
+    let d: Arc<dyn db::TaskAndEpicStore> = db.clone();
     EpicService::new(d)
 }
 
