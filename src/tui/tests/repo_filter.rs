@@ -1279,3 +1279,29 @@ fn only_active_filter_off_shows_all_tasks() {
     let visible = app.tasks_for_current_view();
     assert_eq!(visible.len(), 2);
 }
+
+#[test]
+fn status_bar_shows_active_badge_when_only_active_enabled() {
+    let mut app = make_app();
+    app.filter.only_active = true;
+    app.input.mode = InputMode::Normal;
+
+    let buf = render_to_buffer(&mut app, 120, 40);
+    assert!(
+        buffer_contains(&buf, "[active]"),
+        "status bar should show [active] badge when only_active is set"
+    );
+}
+
+#[test]
+fn status_bar_no_active_badge_when_only_active_disabled() {
+    let mut app = make_app();
+    app.filter.only_active = false;
+    app.input.mode = InputMode::Normal;
+
+    let buf = render_to_buffer(&mut app, 120, 40);
+    assert!(
+        !buffer_contains(&buf, "[active]"),
+        "status bar should not show [active] badge when only_active is false"
+    );
+}

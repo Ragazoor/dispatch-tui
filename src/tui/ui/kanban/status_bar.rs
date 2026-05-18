@@ -90,6 +90,14 @@ pub(super) fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 prefix.append(&mut spans);
                 spans = prefix;
             }
+            if app.filter_only_active() {
+                let mut prefix = vec![Span::styled(
+                    "[active] ",
+                    Style::default().fg(CYAN).add_modifier(Modifier::BOLD),
+                )];
+                prefix.append(&mut spans);
+                spans = prefix;
+            }
             if app.needs_review_count > 0 {
                 let mut prefix = vec![Span::styled(
                     format!("[KB:{}] ", app.needs_review_count),
