@@ -1049,6 +1049,54 @@ fn toggle_only_active_flips_flag() {
 }
 
 #[test]
+fn repo_filter_cursor_zero_is_toggle_row() {
+    // After opening the filter, cursor starts at 0 (toggle row).
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
+    app.update(Message::StartRepoFilter);
+    assert_eq!(app.input.repo_cursor, 0);
+}
+
+#[test]
+fn repo_filter_cursor_navigates_past_toggle_row() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+    app.input.repo_cursor = 0;
+
+    // Down from 0 → 1 (first repo)
+    app.update(Message::MoveRepoCursor(1));
+    assert_eq!(app.input.repo_cursor, 1);
+
+    // Down again → 2 (second repo)
+    app.update(Message::MoveRepoCursor(1));
+    assert_eq!(app.input.repo_cursor, 2);
+
+    // Down from last repo wraps to 0 (toggle row)
+    app.update(Message::MoveRepoCursor(1));
+    assert_eq!(app.input.repo_cursor, 0);
+
+    // Up from 0 wraps to last repo
+    app.update(Message::MoveRepoCursor(-1));
+    assert_eq!(app.input.repo_cursor, 2);
+}
+
+#[test]
+fn repo_filter_cursor_navigates_with_no_repos() {
+    // With zero repos, only the toggle row exists at cursor 0.
+    let mut app = make_app();
+    app.board.repo_paths = vec![];
+    app.input.mode = InputMode::RepoFilter;
+    app.input.repo_cursor = 0;
+
+    // Moving up or down stays at 0 (wraps within single item)
+    app.update(Message::MoveRepoCursor(1));
+    assert_eq!(app.input.repo_cursor, 0);
+    app.update(Message::MoveRepoCursor(-1));
+    assert_eq!(app.input.repo_cursor, 0);
+}
+
+#[test]
 #[ignore = "requires a real TTY and interactive editor session; run manually to verify"]
 fn buffered_editor_keystrokes_do_not_leak_into_repo_picker() {}
 

@@ -18,6 +18,8 @@ impl App {
             InputMode::InputRepoPath | InputMode::InputEpicRepoPath | InputMode::MainSessionDir
         ) {
             filtered_repos(&self.board.repo_paths, &self.input.buffer).len()
+        } else if matches!(self.input.mode, InputMode::RepoFilter) {
+            self.board.repo_paths.len() + 1 // +1 for the "Active sessions only" toggle at cursor 0
         } else {
             self.board.repo_paths.len()
         };
