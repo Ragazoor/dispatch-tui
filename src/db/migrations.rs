@@ -77,6 +77,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (52, migrate_v52_add_verify_command_to_repo_paths),
     (53, migrate_v53_add_wrap_up_mode),
     (54, migrate_v54_add_group_by_repo),
+    (55, migrate_v55_add_learning_embedding),
 ];
 
 fn migrate_v53_add_wrap_up_mode(conn: &Connection) -> Result<()> {
@@ -1162,4 +1163,22 @@ fn migrate_v54_add_group_by_repo(conn: &Connection) -> Result<()> {
         .context("Failed to add group_by_repo column to epics")?;
     }
     Ok(())
+}
+
+fn migrate_v55_add_learning_embedding(conn: &Connection) -> Result<()> {
+    // Skip if learnings table doesn't exist (e.g. in tests with minimal schemas)
+    let table_exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='learnings'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|n| n > 0)
+        .unwrap_or(false);
+    if !table_exists {
+        return Ok(());
+    }
+
+    conn.execute_batch("ALTER TABLE learnings ADD COLUMN embedding BLOB;")
+        .context("Failed to add embedding column to learnings")
 }

@@ -11,7 +11,7 @@ async fn fresh_db_has_latest_schema_version() {
         })
         .await
         .unwrap();
-    assert_eq!(version, 54);
+    assert_eq!(version, 55);
 }
 
 #[tokio::test]
@@ -347,7 +347,7 @@ async fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 54);
+    assert_eq!(version, 55);
 }
 
 #[tokio::test]
@@ -436,7 +436,7 @@ async fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 54);
+    assert_eq!(version, 55);
 }
 
 #[tokio::test]
@@ -541,7 +541,7 @@ async fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 54);
+    assert_eq!(version, 55);
 }
 
 #[tokio::test]
@@ -622,7 +622,7 @@ async fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 54);
+    assert_eq!(version, 55);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -743,7 +743,7 @@ async fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 54);
+    assert_eq!(version, 55);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -1742,7 +1742,7 @@ async fn migration_31_re_expands_tilde_paths() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 54);
+    assert_eq!(version, 55);
 }
 
 #[tokio::test]
@@ -1818,7 +1818,7 @@ async fn migrate_v32_adds_base_branch_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 54);
+    assert_eq!(version, 55);
 }
 
 #[tokio::test]
@@ -1921,7 +1921,7 @@ async fn migration_v38_feed_epic_columns() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 54);
+    assert_eq!(version, 55);
 }
 
 #[tokio::test]
@@ -1934,7 +1934,7 @@ async fn fresh_db_schema_version_is_54() {
         })
         .await
         .unwrap();
-    assert_eq!(version, 54);
+    assert_eq!(version, 55);
 }
 
 #[tokio::test]
@@ -2004,7 +2004,7 @@ async fn migration_v40_creates_learnings_table() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 54);
+    assert_eq!(version, 55);
 }
 
 #[tokio::test]
@@ -2091,7 +2091,7 @@ async fn migration_v41_drops_cost_usd_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 54);
+    assert_eq!(version, 55);
     // Original token data is preserved
     let row: (i64, i64, i64, i64, i64) = conn
         .query_row(
@@ -2219,7 +2219,7 @@ async fn test_migrate_v43_proposed_to_approved() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 54);
+    assert_eq!(version, 55);
 }
 
 #[tokio::test]
@@ -2424,4 +2424,21 @@ async fn fresh_db_has_verify_command_column() {
     })
     .await
     .expect("verify_command must exist on fresh schema");
+}
+
+#[test]
+fn test_v55_learning_embedding_column() {
+    use rusqlite::Connection as RawConn;
+    let conn = RawConn::open_in_memory().unwrap();
+    super::super::init_schema_sync(&conn).unwrap();
+    // embedding column is nullable BLOB
+    conn.execute(
+        "INSERT INTO learnings (kind, summary, scope, status, tags, upvote_count, created_at, updated_at) VALUES ('convention', 's', 'user', 'approved', '[]', 0, '2026-05-18T00:00:00Z', '2026-05-18T00:00:00Z')",
+        [],
+    ).unwrap();
+    conn.execute("UPDATE learnings SET embedding = X'01020304'", []).unwrap();
+    let val: Option<Vec<u8>> = conn
+        .query_row("SELECT embedding FROM learnings LIMIT 1", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(val, Some(vec![1, 2, 3, 4]));
 }
