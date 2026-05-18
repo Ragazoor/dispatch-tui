@@ -749,12 +749,14 @@ fn delete_repo_path_removes_from_active_filter() {
 fn delete_repo_path_clamps_cursor() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
-    app.input.repo_cursor = 1;
+    // cursor 2 = second repo in new model (cursor 1..=N where N=repo count)
+    app.input.repo_cursor = 2;
     // Simulate the path being removed (RepoPathsUpdated would do this in practice)
     app.update(Message::RepoPathsUpdated(vec!["/repo-a".to_string()]));
-    assert!(
-        app.input.repo_cursor < app.board.repo_paths.len(),
-        "cursor should be clamped after repo list shrinks"
+    // cursor 0..=1 valid for 1 repo; cursor 2 should clamp to 1
+    assert_eq!(
+        app.input.repo_cursor, 1,
+        "cursor should be clamped to len when repo list shrinks"
     );
 }
 

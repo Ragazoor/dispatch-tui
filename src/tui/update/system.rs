@@ -31,11 +31,8 @@ impl App {
 
     pub(in crate::tui) fn handle_repo_paths_updated(&mut self, paths: Vec<String>) -> Vec<Command> {
         self.board.repo_paths = paths;
-        if !self.board.repo_paths.is_empty() {
-            self.input.repo_cursor = self.input.repo_cursor.min(self.board.repo_paths.len() - 1);
-        } else {
-            self.input.repo_cursor = 0;
-        }
+        // cursor 0 = toggle row, 1..=len = repo rows; clamp to len (not len-1)
+        self.input.repo_cursor = self.input.repo_cursor.min(self.board.repo_paths.len());
         vec![]
     }
 
