@@ -18,7 +18,7 @@ struct EmbedRequest {
 
 #[derive(Clone)]
 pub struct EmbeddingService {
-    tx: std::sync::mpsc::SyncSender<EmbedRequest>,
+    tx: std::sync::mpsc::Sender<EmbedRequest>,
 }
 
 impl EmbeddingService {
@@ -30,7 +30,7 @@ impl EmbeddingService {
         let mut model = TextEmbedding::try_new(
             InitOptions::new(EmbeddingModel::BGESmallENV15).with_show_download_progress(true),
         )?;
-        let (tx, rx) = std::sync::mpsc::sync_channel::<EmbedRequest>(64);
+        let (tx, rx) = std::sync::mpsc::channel::<EmbedRequest>();
         std::thread::spawn(move || {
             while let Ok(req) = rx.recv() {
                 let result = model
@@ -46,7 +46,7 @@ impl EmbeddingService {
     /// Test stub — returns deterministic vec![0.1; 384] without loading the model.
     #[cfg(test)]
     pub fn new_test() -> Arc<Self> {
-        let (tx, rx) = std::sync::mpsc::sync_channel::<EmbedRequest>(64);
+        let (tx, rx) = std::sync::mpsc::channel::<EmbedRequest>();
         std::thread::spawn(move || {
             while let Ok(req) = rx.recv() {
                 let _ = req.reply.send(Ok(vec![0.1f32; 384]));
@@ -69,8 +69,11 @@ impl EmbeddingService {
     }
 
     pub async fn embed_batch(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>> {
-        let futures: Vec<_> = texts.into_iter().map(|t| self.embed(t)).collect();
-        futures::future::try_join_all(futures).await
+        let mut results = Vec::with_capacity(texts.len());
+        for text in texts {
+            results.push(self.embed(text).await?);
+        }
+        Ok(results)
     }
 }
 
