@@ -61,7 +61,7 @@ fn teardown_tmux_for_tui(original_name: Option<&str>, runner: &dyn ProcessRunner
 // run_tui — entry point for the TUI mode
 // ---------------------------------------------------------------------------
 
-pub async fn run_tui(db_path: &Path, port: u16, repo_map_token_budget: usize) -> Result<()> {
+pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
     if std::env::var("TMUX").is_err() {
         anyhow::bail!("dispatch tui must be run inside a tmux session (TMUX is not set)");
     }
@@ -73,24 +73,6 @@ pub async fn run_tui(db_path: &Path, port: u16, repo_map_token_budget: usize) ->
     // 2. Spawn MCP server with notification channel
     let runner: Arc<dyn ProcessRunner> = Arc::new(RealProcessRunner);
 
-    let ctags_binary = if repo_map_token_budget == 0 {
-        tracing::info!("repo map disabled (--no-repo-map or budget 0); skipping ctags detection");
-        None
-    } else {
-        let detected = dispatch::repo_map::detect_ctags(&*runner);
-        match &detected {
-            Some(b) => tracing::info!(binary = %b.as_str(), "Universal Ctags detected for repo map"),
-            None => tracing::warn!(
-                "no Universal Ctags binary found on PATH; repo map will be omitted from dispatch prompts"
-            ),
-        }
-        detected
-    };
-    dispatch::repo_map::install_settings(dispatch::repo_map::RepoMapSettings {
-        binary: ctags_binary,
-        budget_tokens: repo_map_token_budget,
-        timeout: dispatch::repo_map::DEFAULT_TIMEOUT,
-    });
     let mcp_db = database.clone();
     let mcp_runner = runner.clone();
     let (mcp_notify_tx, mut mcp_notify_rx) = mpsc::unbounded_channel::<mcp::McpEvent>();

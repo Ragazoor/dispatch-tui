@@ -29,15 +29,6 @@ enum Commands {
         /// MCP server port
         #[arg(long, env = "DISPATCH_PORT", default_value_t = dispatch_tui::DEFAULT_PORT)]
         port: u16,
-        /// Approximate token budget for the ctags-derived repo map injected
-        /// into dispatch prompts. Output is truncated to fit. See
-        /// `AugmentDispatchPromptWithRepoMap` in `docs/specs/tasks.allium`.
-        #[arg(long, env = "DISPATCH_REPO_MAP_TOKEN_BUDGET", default_value_t = 4000)]
-        repo_map_token_budget: usize,
-        /// Disable repo-map injection. ctags is not invoked at dispatch time
-        /// even if a Universal Ctags binary is detected at startup.
-        #[arg(long)]
-        no_repo_map: bool,
     },
     /// Update a task's status
     Update {
@@ -138,11 +129,7 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Tui {
-            port,
-            repo_map_token_budget,
-            no_repo_map,
-        } => {
+        Commands::Tui { port } => {
             let data_dir = cli.db.parent().unwrap_or(std::path::Path::new("."));
             std::fs::create_dir_all(data_dir)?;
             let log_path = data_dir.join("app.log");
@@ -155,12 +142,7 @@ async fn main() -> Result<()> {
                 .with_ansi(false)
                 .with_env_filter(EnvFilter::from_default_env().add_directive(Level::INFO.into()))
                 .init();
-            let repo_map_budget = if no_repo_map {
-                0
-            } else {
-                repo_map_token_budget
-            };
-            runtime::run_tui(&cli.db, port, repo_map_budget).await?;
+            runtime::run_tui(&cli.db, port).await?;
         }
         Commands::Update {
             id,
