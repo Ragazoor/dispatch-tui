@@ -216,9 +216,9 @@ pub(super) fn render_procedural_prefix(procedurals: &[&Learning]) -> String {
 }
 
 
-/// Render the verification section injected between the repo-map and the
-/// mode-specific addendum. Returns an empty string when `cmd` is `None` so
-/// prompts are byte-identical when no verify command is configured.
+/// Render the verification section injected before the mode-specific addendum.
+/// Returns an empty string when `cmd` is `None` so prompts are byte-identical
+/// when no verify command is configured.
 fn render_verification(cmd: Option<&str>) -> String {
     match cmd {
         None => String::new(),
