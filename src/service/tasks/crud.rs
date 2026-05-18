@@ -61,7 +61,31 @@ impl TaskService {
         let task_id = params.task_id;
         let expanded_repo_path = params.repo_path.as_deref().map(crate::models::expand_tilde);
         let validated_sub_status = self.validate_sub_status(task_id, &params).await?;
-        let patch = build_task_patch(&params, expanded_repo_path.as_deref(), validated_sub_status);
+
+        // When linking to a new epic, coerce project_id to match the epic's project.
+        let epic_project_id = if let Some(eid) = params.epic_id {
+            match self.db.get_epic(eid).await {
+                Ok(Some(epic)) => Some(epic.project_id),
+                Ok(None) => {
+                    return Err(ServiceError::NotFound(format!(
+                        "Epic {} not found",
+                        eid.0
+                    )))
+                }
+                Err(e) => {
+                    return Err(ServiceError::Internal(format!(
+                        "Database error looking up epic: {e}"
+                    )))
+                }
+            }
+        } else {
+            None
+        };
+
+        let mut patch = build_task_patch(&params, expanded_repo_path.as_deref(), validated_sub_status);
+        if let Some(pid) = epic_project_id {
+            patch = patch.project_id(pid);
+        }
 
         // Snapshot the task before the patch so we can detect the
         // null-pr_url → set transition without an extra round-trip later.
@@ -234,6 +258,26 @@ impl TaskService {
     ) -> Result<Task, ServiceError> {
         let repo_path = crate::models::expand_tilde(&params.repo_path);
 
+        // When linking to an epic, coerce project_id to match the epic's project.
+        let project_id = if let Some(eid) = params.epic_id {
+            match self.db.get_epic(eid).await {
+                Ok(Some(epic)) => epic.project_id,
+                Ok(None) => {
+                    return Err(ServiceError::NotFound(format!(
+                        "Epic {} not found",
+                        eid.0
+                    )))
+                }
+                Err(e) => {
+                    return Err(ServiceError::Internal(format!(
+                        "Database error looking up epic: {e}"
+                    )))
+                }
+            }
+        } else {
+            params.project_id
+        };
+
         let plan = params.plan_path.as_deref().map(|p| {
             std::fs::canonicalize(p)
                 .map(|abs| abs.to_string_lossy().into_owned())
@@ -253,7 +297,7 @@ impl TaskService {
                 epic_id: params.epic_id,
                 sort_order: params.sort_order,
                 tag: params.tag,
-                project_id: params.project_id,
+                project_id,
                 wrap_up_mode: params.wrap_up_mode,
             })
             .await
