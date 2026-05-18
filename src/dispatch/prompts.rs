@@ -1,6 +1,11 @@
+use std::sync::Arc;
+
 use crate::db;
 use crate::models::{
     EpicId, Learning, LearningKind, LearningScope, ProjectId, Task, TaskId, TaskTag,
+};
+use crate::service::embeddings::{
+    deserialize_embedding, embed_text_for_query, rag_rank_learnings, EmbeddingService,
 };
 
 /// Plugin dir flag added to all Claude agent invocations so dispatched agents
@@ -485,15 +490,23 @@ IMPORTANT: Do NOT start implementing. Your job ends after creating the work pack
     )
 }
 
+/// Maximum total learnings injected into a dispatch prompt via RAG.
+pub const DISPATCH_INJECTION_CAP: usize = 5;
+
+// Legacy tiered constants — kept so existing tests continue to compile.
+// The tiered selection path is no longer used by the dispatch pipeline.
+#[allow(dead_code)]
 const TIER_ORDER: [LearningScope; 4] = [
     LearningScope::Epic,
     LearningScope::Repo,
     LearningScope::Project,
     LearningScope::User,
 ];
+#[allow(dead_code)]
 const PER_TIER: usize = 2;
-/// Maximum total learnings injected into a dispatch prompt across all scope tiers.
-pub const INJECTION_CAP: usize = 8;
+/// Kept for call-site compatibility; value is now `DISPATCH_INJECTION_CAP`.
+#[allow(dead_code)]
+pub const INJECTION_CAP: usize = DISPATCH_INJECTION_CAP;
 
 /// Push-injection groups for a dispatch prompt. Both lists hold borrowed
 /// `Learning`s so the caller keeps ownership of the active list returned by
@@ -532,22 +545,92 @@ impl<'a> PromptContext<'a> {
     }
 }
 
+/// Default cosine similarity threshold for dispatch injection.
+/// Learnings below this threshold are excluded regardless of scope/upvote boosts.
+pub const DISPATCH_RAG_THRESHOLD: f32 = 0.25;
+
+/// Build the learning injections for a dispatch prompt using the RAG pipeline.
+///
+/// Steps:
+/// 1. Embeds the task title + description to form a query vector.
+/// 2. Fetches all approved non-task-scoped learnings with embeddings from the DB.
+/// 3. Ranks them by cosine similarity + scope/upvote boost (via `rag_rank_learnings`).
+/// 4. Procedural-kind results are placed first, then everything else.
+/// 5. Returns at most `DISPATCH_INJECTION_CAP` results total.
+///
+/// On embedding failure the function falls back to an empty list so a single
+/// model error never blocks dispatch.
+pub async fn list_learnings_for_dispatch_rag(
+    db: &dyn crate::db::TaskStore,
+    task: &Task,
+    emb_svc: &Arc<EmbeddingService>,
+    threshold: f32,
+) -> Vec<Learning> {
+    let query_text = embed_text_for_query(&task.title, &task.description);
+    let query_vec = match emb_svc.embed(query_text).await {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(
+                task_id = task.id.0,
+                error = ?e,
+                "dispatch RAG: embedding query failed, skipping injection"
+            );
+            return vec![];
+        }
+    };
+
+    let rows = match db.list_all_approved_non_task_learnings().await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(
+                task_id = task.id.0,
+                error = ?e,
+                "dispatch RAG: failed to fetch learnings, skipping injection"
+            );
+            return vec![];
+        }
+    };
+
+    // Decode BLOB embeddings; drop rows with no embedding stored yet.
+    let candidates: Vec<(Learning, Vec<f32>)> = rows
+        .into_iter()
+        .filter_map(|(l, bytes)| bytes.map(|b| (l, deserialize_embedding(&b))))
+        .collect();
+
+    let epic_id_str = task.epic_id.map(|e| e.0.to_string());
+    let project_id_str = task.project_id.0.to_string();
+    let ranked = rag_rank_learnings(
+        &candidates,
+        &query_vec,
+        epic_id_str.as_deref(),
+        Some(task.repo_path.as_str()),
+        Some(project_id_str.as_str()),
+        threshold,
+        &[],
+        DISPATCH_INJECTION_CAP,
+    );
+
+    // Procedural learnings first, then everything else.
+    let (procedurals, others): (Vec<&Learning>, Vec<&Learning>) =
+        ranked.into_iter().partition(|l| l.kind == LearningKind::Procedural);
+
+    procedurals
+        .into_iter()
+        .chain(others)
+        .cloned()
+        .collect()
+}
+
 pub async fn build_and_record_injections(
     db: &dyn crate::db::TaskStore,
     task: &crate::models::Task,
+    emb_svc: &Arc<EmbeddingService>,
 ) -> (Vec<Learning>, Vec<Learning>) {
     use crate::models::RetrievalSource;
-    let active = db
-        .list_learnings_for_dispatch(Some(task.project_id), &task.repo_path, task.epic_id)
-        .await
-        .unwrap_or_default();
-    let (procedural, non_procedural): (Vec<_>, Vec<_>) = active
+    let all = list_learnings_for_dispatch_rag(db, task, emb_svc, DISPATCH_RAG_THRESHOLD).await;
+    let (procedural, tiered): (Vec<_>, Vec<_>) = all
         .into_iter()
         .partition(|l| l.kind == LearningKind::Procedural);
-    let tiered: Vec<Learning> = select_tiered_learnings(&non_procedural, INJECTION_CAP)
-        .into_iter()
-        .cloned()
-        .collect();
     let pairs = procedural
         .iter()
         .map(|l| (l.id, RetrievalSource::Procedural))
@@ -569,6 +652,7 @@ pub async fn build_and_record_injections(
     (procedural, tiered)
 }
 
+#[allow(dead_code)]
 pub(crate) fn select_tiered_learnings(learnings: &[Learning], cap: usize) -> Vec<&Learning> {
     use std::collections::HashSet;
     let mut picked: Vec<&Learning> = Vec::new();
@@ -1081,5 +1165,267 @@ mod tests {
             "quick dispatch prompt must not include verification section when verify_command is None"
         );
         assert!(!text.contains("Before declaring work complete"));
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod rag_dispatch_tests {
+    use std::sync::Arc;
+
+    use crate::db::{
+        CreateLearningRow, CreateTaskRequest, Database, LearningRetrievalStore, LearningStore,
+        TaskCrud,
+    };
+    use crate::models::{LearningKind, LearningScope, ProjectId, TaskStatus};
+    use crate::service::embeddings::{serialize_embedding, EmbeddingService};
+
+    use super::{build_and_record_injections, list_learnings_for_dispatch_rag, DISPATCH_INJECTION_CAP};
+
+    // The test EmbeddingService returns vec![0.1f32; 384]. Use the same dimensionality
+    // for stored embeddings so cosine similarity is computed correctly.
+    fn fake_emb_bytes() -> Vec<u8> {
+        serialize_embedding(&vec![0.1f32; 384])
+    }
+
+    async fn seed_db() -> Arc<Database> {
+        Arc::new(Database::open_in_memory().await.unwrap())
+    }
+
+    async fn make_task(db: &Arc<Database>) -> crate::models::Task {
+        let id = db
+            .create_task(CreateTaskRequest {
+                title: "test task",
+                description: "test description",
+                repo_path: "/repo/test",
+                plan: None,
+                status: TaskStatus::Backlog,
+                base_branch: "main",
+                epic_id: None,
+                sort_order: None,
+                tag: None,
+                project_id: ProjectId(1),
+                wrap_up_mode: None,
+            })
+            .await
+            .unwrap();
+        db.get_task(id).await.unwrap().unwrap()
+    }
+
+    #[tokio::test]
+    async fn dispatch_injection_returns_procedurals_first() {
+        let db = seed_db().await;
+        let task = make_task(&db).await;
+        let emb = fake_emb_bytes();
+
+        let proc_id = db
+            .create_learning(CreateLearningRow {
+                kind: LearningKind::Procedural,
+                summary: "always run clippy",
+                detail: None,
+                scope: LearningScope::User,
+                scope_ref: None,
+                tags: &[],
+                source_task_id: None,
+                embedding: Some(&emb),
+            })
+            .await
+            .unwrap();
+
+        for i in 0..2 {
+            db.create_learning(CreateLearningRow {
+                kind: LearningKind::Convention,
+                summary: &format!("convention {i}"),
+                detail: None,
+                scope: LearningScope::User,
+                scope_ref: None,
+                tags: &[],
+                source_task_id: None,
+                embedding: Some(&emb),
+            })
+            .await
+            .unwrap();
+        }
+
+        let emb_svc = EmbeddingService::new_test();
+        // threshold=0.0 so all candidates pass the cosine filter
+        let results = list_learnings_for_dispatch_rag(&*db, &task, &emb_svc, 0.0).await;
+
+        assert!(!results.is_empty(), "should return at least one learning");
+        assert_eq!(
+            results[0].id, proc_id,
+            "procedural learning should be first"
+        );
+        assert_eq!(
+            results[0].kind,
+            LearningKind::Procedural,
+            "first result must be procedural"
+        );
+    }
+
+    #[tokio::test]
+    async fn dispatch_injection_excludes_task_scoped_learnings() {
+        let db = seed_db().await;
+        let task = make_task(&db).await;
+        let emb = fake_emb_bytes();
+
+        // Task-scoped learning — should be excluded by list_all_approved_non_task_learnings
+        db.create_learning(CreateLearningRow {
+            kind: LearningKind::Convention,
+            summary: "task-scoped learning",
+            detail: None,
+            scope: LearningScope::Task,
+            scope_ref: Some(&task.id.0.to_string()),
+            tags: &[],
+            source_task_id: Some(task.id),
+            embedding: Some(&emb),
+        })
+        .await
+        .unwrap();
+
+        let emb_svc = EmbeddingService::new_test();
+        let results = list_learnings_for_dispatch_rag(&*db, &task, &emb_svc, 0.0).await;
+
+        assert!(
+            results.iter().all(|l| l.scope != LearningScope::Task),
+            "task-scoped learnings must not appear in dispatch injection"
+        );
+    }
+
+    #[tokio::test]
+    async fn dispatch_injection_respects_cap_of_5() {
+        let db = seed_db().await;
+        let task = make_task(&db).await;
+        let emb = fake_emb_bytes();
+
+        // Seed 8 approved non-task learnings with embeddings
+        for i in 0..8 {
+            db.create_learning(CreateLearningRow {
+                kind: LearningKind::Convention,
+                summary: &format!("convention {i}"),
+                detail: None,
+                scope: LearningScope::User,
+                scope_ref: None,
+                tags: &[],
+                source_task_id: None,
+                embedding: Some(&emb),
+            })
+            .await
+            .unwrap();
+        }
+
+        let emb_svc = EmbeddingService::new_test();
+        let results = list_learnings_for_dispatch_rag(&*db, &task, &emb_svc, 0.0).await;
+
+        assert_eq!(
+            results.len(),
+            DISPATCH_INJECTION_CAP,
+            "should return at most DISPATCH_INJECTION_CAP ({DISPATCH_INJECTION_CAP}) learnings"
+        );
+    }
+
+    #[tokio::test]
+    async fn dispatch_injection_excludes_learnings_without_embeddings() {
+        let db = seed_db().await;
+        let task = make_task(&db).await;
+        let emb = fake_emb_bytes();
+
+        // One learning with embedding, one without
+        let with_emb_id = db
+            .create_learning(CreateLearningRow {
+                kind: LearningKind::Convention,
+                summary: "has embedding",
+                detail: None,
+                scope: LearningScope::User,
+                scope_ref: None,
+                tags: &[],
+                source_task_id: None,
+                embedding: Some(&emb),
+            })
+            .await
+            .unwrap();
+
+        let no_emb_id = db
+            .create_learning(CreateLearningRow {
+                kind: LearningKind::Convention,
+                summary: "no embedding",
+                detail: None,
+                scope: LearningScope::User,
+                scope_ref: None,
+                tags: &[],
+                source_task_id: None,
+                embedding: None,
+            })
+            .await
+            .unwrap();
+
+        let emb_svc = EmbeddingService::new_test();
+        let results = list_learnings_for_dispatch_rag(&*db, &task, &emb_svc, 0.0).await;
+
+        assert!(
+            results.iter().any(|l| l.id == with_emb_id),
+            "learning with embedding should be included"
+        );
+        assert!(
+            results.iter().all(|l| l.id != no_emb_id),
+            "learning without embedding should be excluded"
+        );
+    }
+
+    #[tokio::test]
+    async fn build_and_record_injections_partitions_and_records() {
+        let db = seed_db().await;
+        let task = make_task(&db).await;
+        let emb = fake_emb_bytes();
+
+        let proc_id = db
+            .create_learning(CreateLearningRow {
+                kind: LearningKind::Procedural,
+                summary: "always run tests",
+                detail: None,
+                scope: LearningScope::User,
+                scope_ref: None,
+                tags: &[],
+                source_task_id: None,
+                embedding: Some(&emb),
+            })
+            .await
+            .unwrap();
+
+        let conv_id = db
+            .create_learning(CreateLearningRow {
+                kind: LearningKind::Convention,
+                summary: "use Arc for shared state",
+                detail: None,
+                scope: LearningScope::Repo,
+                scope_ref: Some("/repo/test"),
+                tags: &[],
+                source_task_id: None,
+                embedding: Some(&emb),
+            })
+            .await
+            .unwrap();
+
+        let emb_svc = EmbeddingService::new_test();
+        let (procedural, tiered) =
+            build_and_record_injections(&*db, &task, &emb_svc).await;
+
+        assert_eq!(procedural.len(), 1);
+        assert_eq!(procedural[0].id, proc_id);
+        assert_eq!(tiered.len(), 1);
+        assert_eq!(tiered[0].id, conv_id);
+
+        let rows = db.list_retrievals_for_task(task.id).await.unwrap();
+        assert_eq!(rows.len(), 2);
+        let proc_row = rows.iter().find(|r| r.learning_id == proc_id).unwrap();
+        assert!(matches!(
+            proc_row.source,
+            crate::models::RetrievalSource::Procedural
+        ));
+        let tier_row = rows.iter().find(|r| r.learning_id == conv_id).unwrap();
+        assert!(matches!(
+            tier_row.source,
+            crate::models::RetrievalSource::PromptInjection
+        ));
     }
 }

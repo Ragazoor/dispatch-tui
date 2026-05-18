@@ -71,8 +71,12 @@ impl TuiRuntime {
         app.update(Message::RepoPathsUpdated(paths));
         let epic_ctx = dispatch::EpicContext::from_db(&task, &*self.database).await;
         let project_ctx = dispatch::ProjectContext::from_db(&task, &*self.database).await;
-        let (procedural, tiered) =
-            dispatch::build_and_record_injections(&*self.database, &task).await;
+        let (procedural, tiered) = dispatch::build_and_record_injections(
+            &*self.database,
+            &task,
+            &crate::service::embeddings::EmbeddingService::new_noop(),
+        )
+        .await;
         let verify_command = dispatch::fetch_verify_command(&*self.database, &task.repo_path).await;
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
@@ -186,8 +190,12 @@ impl TuiRuntime {
     pub(super) async fn exec_dispatch_agent(&self, task: models::Task, mode: models::DispatchMode) {
         let epic_ctx = dispatch::EpicContext::from_db(&task, &*self.database).await;
         let project_ctx = dispatch::ProjectContext::from_db(&task, &*self.database).await;
-        let (procedural, tiered) =
-            dispatch::build_and_record_injections(&*self.database, &task).await;
+        let (procedural, tiered) = dispatch::build_and_record_injections(
+            &*self.database,
+            &task,
+            &crate::service::embeddings::EmbeddingService::new_noop(),
+        )
+        .await;
         let verify_command = dispatch::fetch_verify_command(&*self.database, &task.repo_path).await;
         let label = mode.label();
         self.spawn_dispatch(

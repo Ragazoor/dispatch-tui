@@ -2374,6 +2374,7 @@ async fn load_main_session_clears_stale_window() {
 #[tokio::test]
 async fn build_learning_injections_partitions_and_records_retrievals() {
     use crate::models::{LearningKind, LearningScope, RetrievalSource};
+    use crate::service::embeddings::{serialize_embedding, EmbeddingService};
 
     let (rt, _app) = test_runtime().await;
     // Seed a task in the default project.
@@ -2388,6 +2389,10 @@ async fn build_learning_injections_partitions_and_records_retrievals() {
     .await
     .unwrap();
 
+    // RAG pipeline requires stored embeddings. Seed fake BLOB bytes so both
+    // learnings survive the `embedding IS NULL` filter.
+    let fake_emb = serialize_embedding(&[0.1f32; 384]);
+
     // Seed two approved learnings: one repo-scoped non-procedural, one
     // user-scoped procedural. Both should land in the dispatch list for
     // a task in /repo/a.
@@ -2401,7 +2406,7 @@ async fn build_learning_injections_partitions_and_records_retrievals() {
             scope_ref: None,
             tags: &[],
             source_task_id: None,
-            embedding: None,
+            embedding: Some(&fake_emb),
         })
         .await
         .unwrap();
@@ -2415,13 +2420,14 @@ async fn build_learning_injections_partitions_and_records_retrievals() {
             scope_ref: Some("/repo/a"),
             tags: &[],
             source_task_id: None,
-            embedding: None,
+            embedding: Some(&fake_emb),
         })
         .await
         .unwrap();
 
+    let emb_svc = EmbeddingService::new_test();
     let (procedural, tiered) =
-        crate::dispatch::build_and_record_injections(&*rt.database, &task).await;
+        crate::dispatch::build_and_record_injections(&*rt.database, &task, &emb_svc).await;
     assert_eq!(procedural.len(), 1);
     assert_eq!(procedural[0].id, proc_id);
     assert_eq!(tiered.len(), 1);
