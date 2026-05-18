@@ -720,7 +720,7 @@ impl HookEventKind {
 }
 
 /// Time without a PreToolUse event before a running agent is considered Stale.
-pub const ACTIVE_THRESHOLD: chrono::Duration = chrono::Duration::minutes(2);
+pub const ACTIVE_THRESHOLD: chrono::Duration = chrono::Duration::minutes(10);
 
 /// Live activity classification for a running agent, derived from hook event
 /// timestamps. Distinct from the wallclock `Staleness` enum (which colors card
