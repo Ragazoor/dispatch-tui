@@ -8169,10 +8169,7 @@ async fn wrap_up_tool_schema_includes_done_action() {
     let action_enum = wrap_up["inputSchema"]["properties"]["action"]["enum"]
         .as_array()
         .expect("action should have an enum");
-    let values: Vec<&str> = action_enum
-        .iter()
-        .filter_map(|v| v.as_str())
-        .collect();
+    let values: Vec<&str> = action_enum.iter().filter_map(|v| v.as_str()).collect();
     assert!(
         values.contains(&"done"),
         "wrap_up action enum should include 'done', got: {values:?}"
