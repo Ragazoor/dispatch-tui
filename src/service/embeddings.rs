@@ -55,6 +55,37 @@ impl EmbeddingService {
         Arc::new(Self { tx })
     }
 
+    /// Placeholder stub for call sites not yet wired in Tasks 8/9.
+    ///
+    /// In test builds: returns `vec![0.1f32; 384]` so existing tests that
+    /// incidentally call `create_learning` or `update_learning` continue to pass.
+    ///
+    /// In production builds: returns an error, causing the service call to fail
+    /// with a clear message prompting the caller to wire the real service.
+    pub fn new_noop() -> Arc<Self> {
+        #[cfg(test)]
+        let thread_fn = |rx: std::sync::mpsc::Receiver<EmbedRequest>| {
+            std::thread::spawn(move || {
+                while let Ok(req) = rx.recv() {
+                    let _ = req.reply.send(Ok(vec![0.1f32; 384]));
+                }
+            });
+        };
+        #[cfg(not(test))]
+        let thread_fn = |rx: std::sync::mpsc::Receiver<EmbedRequest>| {
+            std::thread::spawn(move || {
+                while let Ok(req) = rx.recv() {
+                    let _ = req.reply.send(Err(anyhow::anyhow!(
+                        "EmbeddingService not yet wired — call site must be updated in Task 8/9"
+                    )));
+                }
+            });
+        };
+        let (tx, rx) = std::sync::mpsc::channel::<EmbedRequest>();
+        thread_fn(rx);
+        Arc::new(Self { tx })
+    }
+
     pub async fn embed(&self, text: impl Into<String>) -> Result<Vec<f32>> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.tx

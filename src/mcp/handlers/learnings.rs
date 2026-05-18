@@ -5,6 +5,7 @@ use crate::db::LearningFilter;
 use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
 use crate::models::{LearningId, LearningKind, LearningScope, LearningStatus, RetrievalSource};
+use crate::service::embeddings::EmbeddingService;
 use crate::service::LearningService;
 
 use super::types::{
@@ -92,7 +93,7 @@ pub(super) async fn handle_record_learning(
     };
 
     let similar_scope_ref = scope_ref.clone();
-    let svc = LearningService::new(state.db.clone());
+    let svc = LearningService::new(state.db.clone(), EmbeddingService::new_noop());
     match svc
         .create_learning(crate::service::CreateLearningParams {
             kind: parsed.kind,
@@ -256,7 +257,7 @@ pub(super) async fn handle_upvote_learning(
         "MCP upvote_learning"
     );
 
-    let svc = LearningService::new(state.db.clone());
+    let svc = LearningService::new(state.db.clone(), EmbeddingService::new_noop());
     match svc.upvote_learning(LearningId(parsed.learning_id)).await {
         Ok(()) => JsonRpcResponse::ok(
             id,

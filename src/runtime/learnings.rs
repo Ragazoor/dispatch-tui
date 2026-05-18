@@ -3,6 +3,7 @@ use crate::db;
 #[cfg(test)]
 use crate::models::ProjectId;
 use crate::models::{LearningId, LearningStatus};
+use crate::service::embeddings::EmbeddingService;
 use crate::service::LearningService;
 
 impl TuiRuntime {
@@ -56,14 +57,14 @@ impl TuiRuntime {
 
     pub(super) async fn exec_archive_learning(&self, app: &mut App, id: LearningId) {
         let db: Arc<dyn db::TaskStore> = self.database.clone();
-        let svc = LearningService::new(db);
+        let svc = LearningService::new(db, EmbeddingService::new_noop());
         let result = svc.archive_learning(id).await;
         Self::handle_action_result(app, id, "archive", result);
     }
 
     pub(super) async fn exec_reject_learning(&self, app: &mut App, id: LearningId) {
         let db: Arc<dyn db::TaskStore> = self.database.clone();
-        let svc = LearningService::new(db);
+        let svc = LearningService::new(db, EmbeddingService::new_noop());
         let result = svc.reject_learning(id).await;
         Self::handle_action_result(app, id, "reject", result);
     }
@@ -74,7 +75,7 @@ impl TuiRuntime {
     /// up the new status.
     pub(super) async fn exec_approve_learning(&self, app: &mut App, id: LearningId) {
         let db: Arc<dyn db::TaskStore> = self.database.clone();
-        let svc = LearningService::new(db.clone());
+        let svc = LearningService::new(db.clone(), EmbeddingService::new_noop());
         match svc.approve_learning(id).await {
             Ok(()) => match db.get_learning(id).await {
                 Ok(Some(updated)) => {

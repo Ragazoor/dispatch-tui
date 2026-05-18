@@ -16,6 +16,7 @@ use crate::editor::{
 #[cfg(test)]
 use crate::models::ProjectId;
 use crate::process::ProcessRunner;
+use crate::service::embeddings::EmbeddingService;
 use crate::service::{UpdateEpicParams, UpdateTaskParams};
 use crate::tui::messages::LearningMessage;
 use crate::tui::{App, Command, EditKind, EditorOutcome, Message};
@@ -279,7 +280,7 @@ impl TuiRuntime {
         };
 
         let db: Arc<dyn crate::db::TaskStore> = self.database.clone();
-        let svc = crate::service::LearningService::new(db.clone());
+        let svc = crate::service::LearningService::new(db.clone(), EmbeddingService::new_noop());
         match svc.update_learning(params).await {
             Ok(()) => {
                 if let Ok(Some(updated)) = db.get_learning(learning.id).await {
@@ -639,10 +640,13 @@ mod learning_editor_tests {
             })
             .await
             .unwrap();
-        crate::service::LearningService::new(db.clone() as Arc<dyn crate::db::TaskStore>)
-            .reject_learning(id)
-            .await
-            .unwrap();
+        crate::service::LearningService::new(
+            db.clone() as Arc<dyn crate::db::TaskStore>,
+            EmbeddingService::new_noop(),
+        )
+        .reject_learning(id)
+        .await
+        .unwrap();
         let learning = make_learning(id);
         let rt = make_runtime(db.clone());
         let mut app = App::new(vec![], ProjectId(1));

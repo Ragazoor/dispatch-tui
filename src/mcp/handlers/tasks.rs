@@ -11,6 +11,7 @@ use crate::models::{
     DispatchMode, EpicId, LearningId, LearningVerdict, ProjectId, SubStatus, Task, TaskId,
     TaskStatus, TaskTag, WrapUpMode,
 };
+use crate::service::embeddings::EmbeddingService;
 use crate::service::{
     ClaimTaskParams, CreateTaskParams, FieldUpdate, LearningService, ListTasksFilter, ServiceError,
     UpdateTaskParams,
@@ -670,7 +671,7 @@ pub(super) async fn handle_wrap_up(
             .into_iter()
             .map(|v| (LearningId(v.learning_id), v.verdict))
             .collect();
-        let learning_svc = LearningService::new(state.db.clone());
+        let learning_svc = LearningService::new(state.db.clone(), EmbeddingService::new_noop());
         if let Err(e) = learning_svc.apply_verdicts(task.id, parsed_verdicts).await {
             return service_err_to_response(id, e);
         }

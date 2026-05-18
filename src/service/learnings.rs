@@ -5,6 +5,7 @@ use crate::models::{
     Learning, LearningId, LearningKind, LearningScope, LearningStatus, LearningVerdict,
     RetrievalSource, TaskId,
 };
+use crate::service::embeddings::{embed_text_for_learning, serialize_embedding, EmbeddingService};
 
 use super::{FieldUpdate, ServiceError};
 
@@ -37,11 +38,15 @@ pub struct UpdateLearningParams {
 
 pub struct LearningService {
     pub db: Arc<dyn db::TaskStore>,
+    embedding_service: Arc<EmbeddingService>,
 }
 
 impl LearningService {
-    pub fn new(db: Arc<dyn db::TaskStore>) -> Self {
-        Self { db }
+    pub fn new(db: Arc<dyn db::TaskStore>, embedding_service: Arc<EmbeddingService>) -> Self {
+        Self {
+            db,
+            embedding_service,
+        }
     }
 
     pub async fn create_learning(
@@ -67,6 +72,18 @@ impl LearningService {
                 }
             }
         }
+        let text = embed_text_for_learning(
+            params.kind,
+            &params.summary,
+            &params.tags,
+            params.detail.as_deref(),
+        );
+        let emb_vec = self
+            .embedding_service
+            .embed(text)
+            .await
+            .map_err(|e| ServiceError::Internal(format!("embedding error: {e}")))?;
+        let emb_bytes = serialize_embedding(&emb_vec);
         self.db
             .create_learning(CreateLearningRow {
                 kind: params.kind,
@@ -76,7 +93,7 @@ impl LearningService {
                 scope_ref: params.scope_ref.as_deref(),
                 tags: &params.tags,
                 source_task_id: params.source_task_id,
-                embedding: None,
+                embedding: Some(&emb_bytes),
             })
             .await
             .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
@@ -162,6 +179,14 @@ impl LearningService {
                 return Err(ServiceError::Validation("summary must not be empty".into()));
             }
         }
+        let needs_reembed = params.summary.is_some()
+            || params.detail.is_some()
+            || params.kind.is_some()
+            || params.tags.is_some();
+
+        // Declare outside the `if` block so the borrow outlives the patch.
+        let emb_bytes_storage: Vec<u8>;
+
         let mut patch = LearningPatch::new();
         if let Some(ref s) = params.summary {
             patch = patch.summary(s.as_str());
@@ -178,6 +203,33 @@ impl LearningService {
         if let Some(ref t) = params.tags {
             patch = patch.tags(t.as_slice());
         }
+
+        if needs_reembed {
+            let summary = params
+                .summary
+                .as_deref()
+                .unwrap_or(learning.summary.as_str());
+            let kind = params.kind.unwrap_or(learning.kind);
+            let tags = params
+                .tags
+                .as_ref()
+                .map(|t| t.as_slice())
+                .unwrap_or(learning.tags.as_slice());
+            let detail = match &params.detail {
+                Some(FieldUpdate::Set(v)) => Some(v.as_str()),
+                Some(FieldUpdate::Clear) => None,
+                None => learning.detail.as_deref(),
+            };
+            let text = embed_text_for_learning(kind, summary, tags, detail);
+            let emb_vec = self
+                .embedding_service
+                .embed(text)
+                .await
+                .map_err(|e| ServiceError::Internal(format!("embedding error: {e}")))?;
+            emb_bytes_storage = serialize_embedding(&emb_vec);
+            patch = patch.embedding(&emb_bytes_storage);
+        }
+
         self.db
             .patch_learning(params.id, &patch)
             .await
@@ -249,16 +301,17 @@ mod learning_tests {
         LearningId, LearningKind, LearningScope, LearningStatus, LearningVerdict, ProjectId,
         RetrievalSource, TaskId, TaskStatus,
     };
+    use crate::service::embeddings::EmbeddingService;
     use crate::service::ServiceError;
 
     async fn service() -> LearningService {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
-        LearningService::new(db)
+        LearningService::new(db, EmbeddingService::new_test())
     }
 
     async fn service_with_db() -> (LearningService, Arc<dyn TaskStore>) {
         let db: Arc<dyn TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
-        (LearningService::new(db.clone()), db)
+        (LearningService::new(db.clone(), EmbeddingService::new_test()), db)
     }
 
     async fn seed_task(db: &Arc<dyn TaskStore>) -> TaskId {
@@ -583,5 +636,144 @@ mod learning_tests {
         let (svc, db) = service_with_db().await;
         let task_id = seed_task(&db).await;
         svc.apply_verdicts(task_id, vec![]).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn create_learning_embeds_on_write() {
+        let db: Arc<dyn TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+        let emb_svc = EmbeddingService::new_test();
+        let svc = LearningService::new(db.clone(), emb_svc);
+        let id = svc
+            .create_learning(CreateLearningParams {
+                kind: LearningKind::Convention,
+                summary: "test summary".to_string(),
+                detail: None,
+                scope: LearningScope::User,
+                scope_ref: None,
+                tags: vec![],
+                source_task_id: None,
+            })
+            .await
+            .unwrap();
+        // Retrieve the raw row and verify embedding bytes are stored.
+        let learnings_with_emb = db
+            .list_all_approved_non_task_learnings()
+            .await
+            .unwrap();
+        let emb_entry = learnings_with_emb
+            .iter()
+            .find(|(l, _)| l.id == id)
+            .expect("newly created learning should appear in approved non-task learnings");
+        let emb_bytes = emb_entry
+            .1
+            .as_ref()
+            .expect("embedding must be Some after create");
+        // EmbeddingService::new_test() returns vec![0.1f32; 384], which is 384 * 4 = 1536 bytes.
+        assert_eq!(
+            emb_bytes.len(),
+            384 * 4,
+            "embedding should be 1536 bytes for 384 f32 values"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_learning_reembeds_when_summary_changes() {
+        let db: Arc<dyn TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+        let emb_svc = EmbeddingService::new_test();
+        let svc = LearningService::new(db.clone(), emb_svc);
+        let id = svc
+            .create_learning(CreateLearningParams {
+                kind: LearningKind::Convention,
+                summary: "original summary".to_string(),
+                detail: None,
+                scope: LearningScope::User,
+                scope_ref: None,
+                tags: vec![],
+                source_task_id: None,
+            })
+            .await
+            .unwrap();
+
+        // Verify embedding was stored on create.
+        let before = db.list_all_approved_non_task_learnings().await.unwrap();
+        let emb_before = before
+            .iter()
+            .find(|(l, _)| l.id == id)
+            .and_then(|(_, e)| e.as_ref())
+            .expect("learning must have embedding after create");
+        assert_eq!(emb_before.len(), 384 * 4);
+
+        // Update the summary — should trigger re-embedding.
+        svc.update_learning(UpdateLearningParams {
+            id,
+            summary: Some("updated summary".to_string()),
+            detail: None,
+            kind: None,
+            tags: None,
+        })
+        .await
+        .unwrap();
+
+        let after = db.list_all_approved_non_task_learnings().await.unwrap();
+        let emb_after = after
+            .iter()
+            .find(|(l, _)| l.id == id)
+            .and_then(|(_, e)| e.as_ref())
+            .expect("learning must still have embedding after update");
+
+        // The test stub always returns vec![0.1; 384], so the embedding bytes are
+        // deterministic — verify the embedding is present and correct size.
+        assert_eq!(emb_after.len(), 384 * 4);
+    }
+
+    #[tokio::test]
+    async fn update_learning_skips_reembed_when_no_content_fields_change() {
+        use crate::db::LearningPatch as DbLearningPatch;
+
+        let db: Arc<dyn TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+        let emb_svc = EmbeddingService::new_test();
+        let svc = LearningService::new(db.clone(), emb_svc);
+        let id = svc
+            .create_learning(CreateLearningParams {
+                kind: LearningKind::Convention,
+                summary: "stable summary".to_string(),
+                detail: None,
+                scope: LearningScope::User,
+                scope_ref: None,
+                tags: vec![],
+                source_task_id: None,
+            })
+            .await
+            .unwrap();
+
+        // Replace the embedding with a sentinel value so we can detect if it gets overwritten.
+        let sentinel: Vec<u8> = vec![0xAB; 1536];
+        db.patch_learning(id, &DbLearningPatch::new().embedding(&sentinel))
+            .await
+            .unwrap();
+
+        // Call update_learning with no content fields changed — should NOT trigger re-embed.
+        svc.update_learning(UpdateLearningParams {
+            id,
+            summary: None,
+            detail: None,
+            kind: None,
+            tags: None,
+        })
+        .await
+        .unwrap();
+
+        // Verify the sentinel embedding was NOT overwritten.
+        let entries = db.list_all_approved_non_task_learnings().await.unwrap();
+        let emb = entries
+            .iter()
+            .find(|(l, _)| l.id == id)
+            .and_then(|(_, e)| e.as_ref())
+            .expect("learning must still have embedding");
+        assert_eq!(
+            emb.as_slice(),
+            sentinel.as_slice(),
+            "embedding must not be overwritten when no content fields change"
+        );
     }
 }
