@@ -290,6 +290,10 @@ impl App {
         &self.filter.presets
     }
 
+    pub fn filter_only_active(&self) -> bool {
+        self.filter.only_active
+    }
+
     /// Bootstrap-only carve-out: set during runtime startup from the saved
     /// `notifications_enabled` setting before the message loop begins. After
     /// bootstrap completes, this state is mutated only via Messages. See the
@@ -459,6 +463,7 @@ impl App {
     pub fn tasks_for_current_view(&self) -> Vec<&Task> {
         let repo_match = |t: &&Task| self.repo_matches(&t.repo_path);
         let project_match = |t: &&Task| self.project_matches(t.project_id);
+        let active_match = |t: &&Task| self.filter.task_matches(*t);
         match self.effective_view_mode() {
             ViewMode::Board(_) => self
                 .board
@@ -470,6 +475,7 @@ impl App {
                 })
                 .filter(repo_match)
                 .filter(project_match)
+                .filter(active_match)
                 .collect(),
             ViewMode::Epic { epic_id, .. } => {
                 let current = *epic_id;
@@ -485,6 +491,7 @@ impl App {
                         .filter(|t| subtree.contains(&t.id) && t.status != TaskStatus::Archived)
                         .filter(repo_match)
                         .filter(project_match)
+                        .filter(active_match)
                         .collect()
                 } else {
                     self.board
@@ -493,6 +500,7 @@ impl App {
                         .filter(|t| t.epic_id == Some(current) && t.status != TaskStatus::Archived)
                         .filter(repo_match)
                         .filter(project_match)
+                        .filter(active_match)
                         .collect()
                 }
             }

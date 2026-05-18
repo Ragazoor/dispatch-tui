@@ -1188,3 +1188,37 @@ fn enter_sub_epic_from_epic_view_nests_parent() {
         _ => panic!("Expected ViewMode::Epic"),
     }
 }
+
+// ---------------------------------------------------------------------------
+// Task filtering with only_active
+// ---------------------------------------------------------------------------
+
+#[test]
+fn only_active_filter_hides_tasks_without_tmux_window() {
+    let mut app = App::new(vec![], ProjectId(1));
+    let mut t1 = make_task(1, TaskStatus::Running);
+    t1.tmux_window = Some("dispatch:1".to_string());
+    let mut t2 = make_task(2, TaskStatus::Running);
+    t2.tmux_window = None;
+    let mut t3 = make_task(3, TaskStatus::Backlog);
+    t3.tmux_window = None;
+    app.board.tasks = vec![t1, t2, t3];
+    app.filter.only_active = true;
+
+    let visible = app.tasks_for_current_view();
+    let ids: Vec<_> = visible.iter().map(|t| t.id.0).collect();
+    assert_eq!(ids, vec![1], "only task with tmux_window should be visible");
+}
+
+#[test]
+fn only_active_filter_off_shows_all_tasks() {
+    let mut app = App::new(vec![], ProjectId(1));
+    let mut t1 = make_task(1, TaskStatus::Running);
+    t1.tmux_window = Some("dispatch:1".to_string());
+    let mut t2 = make_task(2, TaskStatus::Backlog);
+    t2.tmux_window = None;
+    app.board.tasks = vec![t1, t2];
+
+    let visible = app.tasks_for_current_view();
+    assert_eq!(visible.len(), 2);
+}
