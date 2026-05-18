@@ -5,7 +5,7 @@ use crate::models::{
     EpicId, Learning, LearningKind, ProjectId, Task, TaskId, TaskTag,
 };
 use crate::service::embeddings::{
-    deserialize_embedding, embed_text_for_query, rag_rank_learnings, EmbeddingService,
+    deserialize_candidate_rows, embed_text_for_query, rag_rank_learnings, EmbeddingService,
 };
 
 /// Plugin dir flag added to all Claude agent invocations so dispatched agents
@@ -527,9 +527,7 @@ impl<'a> PromptContext<'a> {
     }
 }
 
-/// Default cosine similarity threshold for dispatch injection.
-/// Learnings below this threshold are excluded regardless of scope/upvote boosts.
-pub const DISPATCH_RAG_THRESHOLD: f32 = 0.25;
+pub use crate::service::embeddings::RAG_SIMILARITY_THRESHOLD as DISPATCH_RAG_THRESHOLD;
 
 /// Build the learning injections for a dispatch prompt using the RAG pipeline.
 ///
@@ -573,15 +571,11 @@ pub async fn list_learnings_for_dispatch_rag(
         }
     };
 
-    let candidates: Vec<(Learning, Vec<f32>)> = rows
-        .into_iter()
-        .map(|(l, b)| (l, deserialize_embedding(&b)))
-        .collect();
+    let candidates = deserialize_candidate_rows(rows);
 
     let epic_id_str = task.epic_id.map(|e| e.0.to_string());
     let project_id_str = task.project_id.0.to_string();
-    // Pass candidates.len() as the limit so the cap is applied AFTER the
-    // procedural-first partition below. Procedurals always win their slots.
+    // Pass candidates.len() so the cap is applied after the procedural partition below.
     let all_ranked = rag_rank_learnings(
         &candidates,
         &query_vec,
@@ -596,7 +590,6 @@ pub async fn list_learnings_for_dispatch_rag(
     let (procedurals, others): (Vec<&Learning>, Vec<&Learning>) =
         all_ranked.into_iter().partition(|l| l.kind == LearningKind::Procedural);
 
-    // Cap applied after partition so procedurals always win their slots.
     let remaining = DISPATCH_INJECTION_CAP.saturating_sub(procedurals.len());
     let mut result: Vec<&Learning> = procedurals;
     result.extend(others.into_iter().take(remaining));

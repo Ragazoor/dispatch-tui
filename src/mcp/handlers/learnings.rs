@@ -6,10 +6,8 @@ use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
 use crate::models::{LearningId, LearningKind, LearningScope, LearningStatus, RetrievalSource};
 
-// RAG similarity threshold: candidates below this cosine similarity are filtered out
-pub const QUERY_LEARNINGS_RAG_THRESHOLD: f32 = 0.25;
 use crate::service::embeddings::{
-    deserialize_embedding, embed_text_for_query, rag_rank_learnings,
+    deserialize_candidate_rows, embed_text_for_query, rag_rank_learnings, RAG_SIMILARITY_THRESHOLD,
 };
 use crate::service::LearningService;
 
@@ -203,10 +201,7 @@ pub(super) async fn handle_query_learnings(
         Err(e) => return JsonRpcResponse::err(id, -32603, format!("database error: {e}")),
     };
 
-    let candidates: Vec<(crate::models::Learning, Vec<f32>)> = candidates_raw
-        .into_iter()
-        .map(|(l, b)| (l, deserialize_embedding(&b)))
-        .collect();
+    let candidates = deserialize_candidate_rows(candidates_raw);
 
     let tag_filter = parsed.tag_filter.unwrap_or_default();
     let limit = parsed.limit.unwrap_or(50).min(50) as usize;
@@ -219,7 +214,7 @@ pub(super) async fn handle_query_learnings(
         epic_id_str.as_deref(),
         Some(task.repo_path.as_str()),
         Some(project_id_str.as_str()),
-        QUERY_LEARNINGS_RAG_THRESHOLD,
+        RAG_SIMILARITY_THRESHOLD,
         &tag_filter,
         limit,
     );

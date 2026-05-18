@@ -63,23 +63,10 @@ impl EmbeddingService {
     }
 
     /// Test stub — returns deterministic vec![0.1; 384] without loading the model.
+    /// Integration tests (not `#[cfg(test)]`) use `new_noop` directly.
     #[cfg(test)]
     pub fn new_test() -> Arc<Self> {
-        let (tx, rx) = std::sync::mpsc::channel::<EmbedMsg>();
-        std::thread::spawn(move || {
-            while let Ok(msg) = rx.recv() {
-                match msg {
-                    EmbedMsg::Single(EmbedSingle { reply, .. }) => {
-                        let _ = reply.send(Ok(vec![0.1f32; 384]));
-                    }
-                    EmbedMsg::Batch(EmbedBatch { texts, reply }) => {
-                        let result = texts.iter().map(|_| vec![0.1f32; 384]).collect();
-                        let _ = reply.send(Ok(result));
-                    }
-                }
-            }
-        });
-        Arc::new(Self { tx })
+        Self::new_noop()
     }
 
     /// Test-only stub that returns fixed 0.1 vectors. All production call sites use the real
@@ -212,9 +199,20 @@ pub fn upvote_boost(upvote_count: i64) -> f32 {
     (upvote_count.max(0).min(10) as f32) * 0.005
 }
 
-pub(crate) struct ScoredLearning<'a> {
-    pub(crate) learning: &'a Learning,
-    pub(crate) score: f32,
+/// Minimum cosine similarity for a learning to be a RAG candidate.
+/// Used by both dispatch injection and the `query_learnings` MCP tool.
+pub const RAG_SIMILARITY_THRESHOLD: f32 = 0.25;
+
+/// Decode raw embedding bytes returned by the DB into f32 vectors.
+pub fn deserialize_candidate_rows(rows: Vec<(Learning, Vec<u8>)>) -> Vec<(Learning, Vec<f32>)> {
+    rows.into_iter()
+        .map(|(l, b)| (l, deserialize_embedding(&b)))
+        .collect()
+}
+
+struct ScoredLearning<'a> {
+    learning: &'a Learning,
+    score: f32,
 }
 
 /// Rank candidate learnings by RAG score.
