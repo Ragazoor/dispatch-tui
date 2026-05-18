@@ -373,6 +373,9 @@ rule CreateEpicViaMcp {
         -- create_epic tool. When omitted, the handler resolves the
         -- default project and assigns it to the new epic. An unknown
         -- project_id returns a -32602 validation error.
+        -- When parent_epic_id is provided, project_id is always coerced
+        -- to match the parent's project_id, ignoring the caller-supplied
+        -- value (see EpicProjectConsistency invariant).
         -- feed_command and feed_interval_secs are NOT exposed by the
         -- MCP create_epic tool — even though the underlying service
         -- accepts them, the handler hardcodes them to null. Feeds are
@@ -588,3 +591,20 @@ rule ToggleGroupByRepo {
     -- Epic cards show colored status indicators (●N) for each non-zero
     -- child count by parent status, using the column palette colors.
     -- Sub-epic children are counted alongside task children in the indicators.
+
+@invariant EpicProjectConsistency
+    -- All tasks directly owned by an epic share the epic's project_id.
+    -- All sub-epics of an epic share their parent's project_id.
+    --
+    -- Enforcement (service layer, not DB):
+    --   create_epic: when parent_epic_id is set, project_id is coerced to the
+    --     parent's project_id regardless of the value passed by the caller.
+    --   create_task: when epic_id is set, project_id is coerced to the
+    --     epic's project_id regardless of the value passed by the caller.
+    --   update_task: when epic_id changes, project_id is coerced to the
+    --     target epic's project_id.
+    --   update_epic: when project_id is changed, cascades to all direct
+    --     sub-epics (recursively) and all direct subtasks.
+    --
+    -- Rationale: without this invariant an epic appears different across
+    -- project views because some of its children carry a different project_id.
