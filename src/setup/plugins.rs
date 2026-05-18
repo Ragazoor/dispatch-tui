@@ -108,32 +108,42 @@ pub fn remove_plugin(plugin_path: &std::path::Path) -> Result<bool> {
 // ---------------------------------------------------------------------------
 
 const EXAMPLE_FEED_SCRIPT: &str = include_str!("../../scripts/fetch-dependabot.sh");
+const EXAMPLE_REPOS_CONF: &str = include_str!("../../scripts/repos.conf");
 
-/// Write the embedded example feed script to `<data_dir>/scripts/fetch-dependabot.sh`,
-/// chmod 0755. Idempotent: if the target file already exists, it is left
-/// untouched so user edits survive across `dispatch setup` runs.
+/// Create `path` with `content` only if it does not already exist. Preserves
+/// user edits across repeated `dispatch setup` runs.
+fn install_if_absent(path: &std::path::Path, content: &str, executable: bool) -> Result<()> {
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+    {
+        Ok(mut file) => {
+            file.write_all(content.as_bytes())
+                .with_context(|| format!("Failed to write {}", path.display()))?;
+            if executable {
+                fs::set_permissions(path, fs::Permissions::from_mode(0o755))
+                    .with_context(|| format!("Failed to set permissions on {}", path.display()))?;
+            }
+            Ok(())
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(e) => Err(anyhow::Error::new(e)
+            .context(format!("Failed to create {}", path.display()))),
+    }
+}
+
+/// Write the embedded example feed script and repos.conf to `<data_dir>/scripts/`.
+/// Idempotent: existing files are left untouched so user edits survive across
+/// `dispatch setup` runs.
 pub fn install_example_script(data_dir: &Path) -> Result<PathBuf> {
     let scripts_dir = data_dir.join("scripts");
     fs::create_dir_all(&scripts_dir)
         .with_context(|| format!("Failed to create {}", scripts_dir.display()))?;
 
     let path = scripts_dir.join("fetch-dependabot.sh");
-    match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o755)
-        .open(&path)
-    {
-        Ok(mut file) => file
-            .write_all(EXAMPLE_FEED_SCRIPT.as_bytes())
-            .with_context(|| format!("Failed to write {}", path.display()))?,
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
-        Err(e) => {
-            return Err(
-                anyhow::Error::new(e).context(format!("Failed to create {}", path.display()))
-            )
-        }
-    }
+    install_if_absent(&path, EXAMPLE_FEED_SCRIPT, true)?;
+    install_if_absent(&scripts_dir.join("repos.conf"), EXAMPLE_REPOS_CONF, false)?;
     Ok(path)
 }
 
@@ -267,6 +277,51 @@ mod tests {
             std::fs::read_to_string(&path).unwrap(),
             "#!/usr/bin/env bash\nexit 0\n",
             "install must not overwrite user edits to the example script"
+        );
+    }
+
+    // -- repos.conf --
+
+    #[test]
+    fn install_example_script_also_installs_repos_conf() {
+        let data_dir = tempfile::tempdir().unwrap();
+        install_example_script(data_dir.path()).unwrap();
+        let repos_conf = data_dir.path().join("scripts").join("repos.conf");
+        assert!(repos_conf.exists(), "repos.conf must be installed alongside fetch-dependabot.sh");
+    }
+
+    #[test]
+    fn install_example_script_preserves_user_repos_conf() {
+        let data_dir = tempfile::tempdir().unwrap();
+        install_example_script(data_dir.path()).unwrap();
+        let repos_conf = data_dir.path().join("scripts").join("repos.conf");
+        std::fs::write(&repos_conf, "REPOS=(\"myorg/custom\")\n").unwrap();
+        install_example_script(data_dir.path()).unwrap();
+        let content = std::fs::read_to_string(&repos_conf).unwrap();
+        assert_eq!(
+            content,
+            "REPOS=(\"myorg/custom\")\n",
+            "install must not overwrite user edits to repos.conf"
+        );
+    }
+
+    #[test]
+    fn fetch_dependabot_uses_repos_conf_when_present() {
+        // Write a repos.conf with a fake repo; the script should attempt to probe
+        // it and fail — but the failure message confirms repos.conf was sourced.
+        let data_dir = tempfile::tempdir().unwrap();
+        let script_path = install_example_script(data_dir.path()).unwrap();
+        let repos_conf = data_dir.path().join("scripts").join("repos.conf");
+        std::fs::write(&repos_conf, "REPOS=(\"fake-owner/fake-repo-xyz\")\n").unwrap();
+
+        let output = std::process::Command::new("bash")
+            .arg(&script_path)
+            .output()
+            .expect("script must be runnable");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("fake-owner/fake-repo-xyz"),
+            "script must attempt to probe repos from repos.conf; stderr={stderr}"
         );
     }
 

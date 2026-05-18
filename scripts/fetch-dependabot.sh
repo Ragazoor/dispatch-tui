@@ -13,18 +13,25 @@
 #   [{"external_id":"dep:owner/repo#42","title":"#42 Bump foo","description":"...","url":"...","status":"backlog","tag":"dependabot"}]
 
 # ---------------------------------------------------------------------------
-# Configure your repositories here (space-separated "owner/repo" slugs).
-REPOS=""
+# Repositories: edit repos.conf in the same directory (SSOT), or set REPOS
+# directly below as a fallback when repos.conf is not present.
+REPOS=()
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [[ -f "$SCRIPT_DIR/repos.conf" ]]; then
+  # shellcheck source=repos.conf
+  source "$SCRIPT_DIR/repos.conf"
+fi
 # ---------------------------------------------------------------------------
 
-if [ -z "$REPOS" ]; then
+if [[ ${#REPOS[@]} -eq 0 ]]; then
   echo "[]"
   exit 0
 fi
 
 result="[]"
 
-for repo in $REPOS; do
+for repo in "${REPOS[@]}"; do
   # Probe repo existence/auth first — `gh pr list --author app/dependabot`
   # silently returns [] on 404/SSO failures, so we'd never see auth issues.
   probe=$(gh api "/repos/$repo" --jq '.full_name' 2>&1)

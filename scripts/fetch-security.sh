@@ -15,11 +15,17 @@
 
 set -euo pipefail
 
-REPOS=(
-  # Add "owner/repo" slugs here, one per line. Example:
-  #   "myorg/frontend"
-  #   "myorg/backend"
-)
+# ---------------------------------------------------------------------------
+# Repositories: edit repos.conf in the same directory (SSOT), or set REPOS
+# directly below as a fallback when repos.conf is not present.
+REPOS=()
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [[ -f "$SCRIPT_DIR/repos.conf" ]]; then
+  # shellcheck source=repos.conf
+  source "$SCRIPT_DIR/repos.conf"
+fi
+# ---------------------------------------------------------------------------
 
 if [[ ${#REPOS[@]} -eq 0 ]]; then
   echo '[]'
