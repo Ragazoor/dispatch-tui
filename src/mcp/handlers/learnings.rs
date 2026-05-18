@@ -5,6 +5,9 @@ use crate::db::LearningFilter;
 use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
 use crate::models::{LearningId, LearningKind, LearningScope, LearningStatus, RetrievalSource};
+
+// RAG similarity threshold: candidates below this cosine similarity are filtered out
+pub const QUERY_LEARNINGS_RAG_THRESHOLD: f32 = 0.25;
 use crate::service::embeddings::{
     deserialize_embedding, embed_text_for_query, rag_rank_learnings,
 };
@@ -213,7 +216,7 @@ pub(super) async fn handle_query_learnings(
         .collect();
 
     // RAG ranking with scope boosts and soft tag boost.
-    let threshold = 0.25f32;
+    let threshold = QUERY_LEARNINGS_RAG_THRESHOLD;
     let tag_filter = parsed.tag_filter.unwrap_or_default();
     let limit = parsed.limit.unwrap_or(50).min(50) as usize;
 

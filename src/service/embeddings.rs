@@ -55,7 +55,7 @@ impl EmbeddingService {
         Arc::new(Self { tx })
     }
 
-    /// Placeholder stub for call sites not yet wired in Tasks 8/9.
+    /// Test-only stub. All production call sites use the real EmbeddingService.
     ///
     /// In test builds: returns `vec![0.1f32; 384]` so existing tests that
     /// incidentally call `create_learning` or `update_learning` continue to pass.

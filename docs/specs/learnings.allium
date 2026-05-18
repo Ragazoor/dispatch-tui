@@ -147,7 +147,7 @@ use "./core.allium" as core
 --     that relied on `tag_filter` as a strict filter must migrate.
 --
 --   Results are ordered by score DESC.
---   limit capped at 50 (default: 20).
+--   limit capped at 50 (default: 50).
 --   For each returned learning, the runtime records a core/Retrieval with
 --   source = query_learnings (see Retrievals & Verdicts below).
 --
@@ -400,7 +400,7 @@ rule QueryLearningsViaMcp {
 
     ensures: returns approved core/Learning records where applies_to_dispatch(task),
              ranked by RAG-style semantic similarity to the query text and returned
-             in score-DESC order, limited to min(limit ?? 20, 50)
+             in score-DESC order, limited to min(limit ?? 50, 50)
 
     @guidance
         -- BREAKING CHANGE: tag_filter is no longer a hard AND filter. It was
