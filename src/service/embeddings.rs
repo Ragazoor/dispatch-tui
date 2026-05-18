@@ -6,8 +6,7 @@ pub fn embed_text_for_learning(
     tags: &[String],
     detail: Option<&str>,
 ) -> String {
-    let kind_str = format!("{kind}");
-    let mut parts = vec![format!("{kind_str}: {summary}")];
+    let mut parts = vec![format!("{kind}: {summary}")];
     if !tags.is_empty() {
         parts.push(tags.join(", "));
     }
@@ -52,21 +51,21 @@ pub fn scope_multiplier_for(
 ) -> f32 {
     match scope {
         LearningScope::Epic => {
-            if scope_ref.is_some() && scope_ref == task_epic_id {
+            if matches!((scope_ref, task_epic_id), (Some(a), Some(b)) if a == b) {
                 0.30
             } else {
                 0.0
             }
         }
         LearningScope::Repo => {
-            if scope_ref.is_some() && scope_ref == task_repo {
+            if matches!((scope_ref, task_repo), (Some(a), Some(b)) if a == b) {
                 0.20
             } else {
                 0.0
             }
         }
         LearningScope::Project => {
-            if scope_ref.is_some() && scope_ref == task_project {
+            if matches!((scope_ref, task_project), (Some(a), Some(b)) if a == b) {
                 0.10
             } else {
                 0.0
@@ -78,16 +77,18 @@ pub fn scope_multiplier_for(
 }
 
 pub fn upvote_boost(upvote_count: i64) -> f32 {
-    (upvote_count.min(10) as f32) * 0.005
+    (upvote_count.max(0).min(10) as f32) * 0.005
 }
 
-pub struct ScoredLearning<'a> {
-    pub learning: &'a Learning,
-    pub score: f32,
+pub(crate) struct ScoredLearning<'a> {
+    pub(crate) learning: &'a Learning,
+    pub(crate) score: f32,
 }
 
-/// Rank candidate learnings by RAG score. Returns sorted vec (highest score first),
-/// filtered by threshold and limited to `limit`.
+/// Rank candidate learnings by RAG score.
+///
+/// `candidates` must contain only approved learnings (status filtering is the caller's responsibility).
+/// Returns sorted vec (highest score first), filtered by threshold and limited to `limit`.
 pub fn rag_rank_learnings<'a>(
     candidates: &'a [(Learning, Vec<f32>)],
     query_vec: &[f32],
@@ -135,6 +136,26 @@ pub fn rag_rank_learnings<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::{LearningId, LearningKind, LearningScope, LearningStatus};
+    use chrono::{TimeZone, Utc};
+
+    fn make_test_learning(id: i64, scope: LearningScope, scope_ref: Option<&str>) -> Learning {
+        Learning {
+            id: LearningId(id),
+            kind: LearningKind::Pitfall,
+            summary: format!("learning {id}"),
+            detail: None,
+            scope,
+            scope_ref: scope_ref.map(|s| s.to_string()),
+            tags: vec![],
+            status: LearningStatus::Approved,
+            source_task_id: None,
+            upvote_count: 0,
+            last_upvoted_at: None,
+            created_at: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            updated_at: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+        }
+    }
 
     #[test]
     fn cosine_identical_vectors() {
@@ -191,5 +212,42 @@ mod tests {
         let high_cos = 0.55f32;
         let high_boost = 0.10f32;
         assert!(low_cos * (1.0 + low_boost) < high_cos * (1.0 + high_boost));
+    }
+
+    #[test]
+    fn rag_rank_learnings_orders_by_score() {
+        // high_sim: User scope, cosine≈1.0 (query nearly identical to embedding)
+        let high_sim_learning = make_test_learning(1, LearningScope::User, None);
+        // low_sim: Repo scope with matching repo, cosine≈0.26 (scope boost won't overcome gap)
+        let low_sim_learning = make_test_learning(2, LearningScope::Repo, Some("my-repo"));
+
+        // query vec
+        let query = vec![1.0f32, 0.0, 0.0];
+        // high_sim_emb has cosine=1.0 with query (same direction)
+        let high_sim_emb = vec![1.0f32, 0.0, 0.0];
+        // low_sim_emb has cosine≈0.26 with query (mostly orthogonal, small component along query)
+        // [1, 0, 0] · [0.26, 0.97, 0] = 0.26; norms = 1.0 * 1.0; cosine ≈ 0.26
+        let low_sim_emb = vec![0.26f32, 0.97f32, 0.0f32];
+
+        let candidates = vec![
+            (high_sim_learning, high_sim_emb),
+            (low_sim_learning, low_sim_emb),
+        ];
+        let results = rag_rank_learnings(
+            &candidates,
+            &query,
+            None,
+            Some("my-repo"),
+            None,
+            0.0,
+            &[],
+            10,
+        );
+        // high_sim: cosine=1.0, User scope_mul=0.10 → score=1.0*(1.10)=1.10
+        // low_sim: cosine≈0.26, Repo+match scope_mul=0.20 → score≈0.26*(1.20)≈0.31
+        // Verify high-cosine candidate ranks first
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].id, LearningId(1), "high cosine should rank first");
+        assert_eq!(results[1].id, LearningId(2), "low cosine should rank second");
     }
 }
