@@ -599,7 +599,9 @@ pub async fn list_learnings_for_dispatch_rag(
 
     let epic_id_str = task.epic_id.map(|e| e.0.to_string());
     let project_id_str = task.project_id.0.to_string();
-    let ranked = rag_rank_learnings(
+    // Pass candidates.len() as the limit so the cap is applied AFTER the
+    // procedural-first partition below. Procedurals always win their slots.
+    let all_ranked = rag_rank_learnings(
         &candidates,
         &query_vec,
         epic_id_str.as_deref(),
@@ -607,18 +609,18 @@ pub async fn list_learnings_for_dispatch_rag(
         Some(project_id_str.as_str()),
         threshold,
         &[],
-        DISPATCH_INJECTION_CAP,
+        candidates.len(),
     );
 
-    // Procedural learnings first, then everything else.
+    // Partition: procedurals always come first (they are instructions).
     let (procedurals, others): (Vec<&Learning>, Vec<&Learning>) =
-        ranked.into_iter().partition(|l| l.kind == LearningKind::Procedural);
+        all_ranked.into_iter().partition(|l| l.kind == LearningKind::Procedural);
 
-    procedurals
-        .into_iter()
-        .chain(others)
-        .cloned()
-        .collect()
+    // Fill remaining cap slots with non-procedurals; procedurals are never cut.
+    let remaining = DISPATCH_INJECTION_CAP.saturating_sub(procedurals.len());
+    let mut result: Vec<&Learning> = procedurals;
+    result.extend(others.into_iter().take(remaining));
+    result.into_iter().cloned().collect()
 }
 
 pub async fn build_and_record_injections(
@@ -628,14 +630,14 @@ pub async fn build_and_record_injections(
 ) -> (Vec<Learning>, Vec<Learning>) {
     use crate::models::RetrievalSource;
     let all = list_learnings_for_dispatch_rag(db, task, emb_svc, DISPATCH_RAG_THRESHOLD).await;
-    let (procedural, tiered): (Vec<_>, Vec<_>) = all
+    let (procedural, non_procedural): (Vec<_>, Vec<_>) = all
         .into_iter()
         .partition(|l| l.kind == LearningKind::Procedural);
     let pairs = procedural
         .iter()
         .map(|l| (l.id, RetrievalSource::Procedural))
         .chain(
-            tiered
+            non_procedural
                 .iter()
                 .map(|l| (l.id, RetrievalSource::PromptInjection)),
         );
@@ -649,7 +651,7 @@ pub async fn build_and_record_injections(
             );
         }
     }
-    (procedural, tiered)
+    (procedural, non_procedural)
 }
 
 #[allow(dead_code)]
