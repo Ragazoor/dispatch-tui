@@ -110,23 +110,18 @@ pub(in crate::tui::ui::kanban) fn render_repo_filter_overlay(
 
     // Toggle row — "Active sessions only"
     let toggle_checked = if app.filter_only_active() { "x" } else { " " };
-    if cursor == 0 {
-        lines.push(Line::from(vec![
-            Span::styled("  ►", cursor_style),
-            Span::styled(
-                format!(" [{toggle_checked}] Active sessions only"),
-                cursor_style,
-            ),
-        ]));
+    let (toggle_indicator, toggle_style) = if cursor == 0 {
+        ("  ►", cursor_style)
     } else {
-        lines.push(Line::from(vec![
-            Span::styled("   ", desc_style),
-            Span::styled(
-                format!(" [{toggle_checked}] Active sessions only"),
-                desc_style,
-            ),
-        ]));
-    }
+        ("   ", desc_style)
+    };
+    lines.push(Line::from(vec![
+        Span::styled(toggle_indicator, toggle_style),
+        Span::styled(
+            format!(" [{toggle_checked}] Active sessions only"),
+            toggle_style,
+        ),
+    ]));
 
     // Repo list (scrollable)
     if scroll > 0 {
