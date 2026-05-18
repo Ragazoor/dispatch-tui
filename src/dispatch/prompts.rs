@@ -603,28 +603,22 @@ pub async fn build_and_record_injections(
 ) -> (Vec<Learning>, Vec<Learning>) {
     use crate::models::RetrievalSource;
     let all = list_learnings_for_dispatch_rag(db, task, emb_svc, DISPATCH_RAG_THRESHOLD).await;
-    let (procedural, non_procedural): (Vec<_>, Vec<_>) = all
-        .into_iter()
-        .partition(|l| l.kind == LearningKind::Procedural);
-    let pairs = procedural
-        .iter()
-        .map(|l| (l.id, RetrievalSource::Procedural))
-        .chain(
-            non_procedural
-                .iter()
-                .map(|l| (l.id, RetrievalSource::PromptInjection)),
-        );
-    for (lid, source) in pairs {
-        if let Err(e) = db.record_retrieval(task.id, lid, source).await {
+    for l in &all {
+        let source = if l.kind == LearningKind::Procedural {
+            RetrievalSource::Procedural
+        } else {
+            RetrievalSource::PromptInjection
+        };
+        if let Err(e) = db.record_retrieval(task.id, l.id, source).await {
             tracing::warn!(
                 task_id = task.id.0,
-                learning_id = lid.0,
+                learning_id = l.id.0,
                 error = ?e,
                 "failed to record learning retrieval"
             );
         }
     }
-    (procedural, non_procedural)
+    all.into_iter().partition(|l| l.kind == LearningKind::Procedural)
 }
 
 

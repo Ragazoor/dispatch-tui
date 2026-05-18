@@ -140,7 +140,9 @@ pub fn embed_text_for_query(title: &str, description: &str) -> String {
 }
 
 pub fn serialize_embedding(v: &[f32]) -> Vec<u8> {
-    v.iter().flat_map(|f| f.to_le_bytes()).collect()
+    let mut out = Vec::with_capacity(v.len() * 4);
+    out.extend(v.iter().flat_map(|f| f.to_le_bytes()));
+    out
 }
 
 pub fn deserialize_embedding(b: &[u8]) -> Vec<f32> {

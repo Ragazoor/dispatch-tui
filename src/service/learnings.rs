@@ -184,7 +184,7 @@ impl LearningService {
             || params.kind.is_some()
             || params.tags.is_some();
 
-        let emb_bytes_storage: Option<Vec<u8>> = if needs_reembed {
+        let new_emb_bytes: Option<Vec<u8>> = if needs_reembed {
             let summary = params
                 .summary
                 .as_deref()
@@ -227,7 +227,7 @@ impl LearningService {
         if let Some(ref t) = params.tags {
             patch = patch.tags(t.as_slice());
         }
-        if let Some(ref bytes) = emb_bytes_storage {
+        if let Some(ref bytes) = new_emb_bytes {
             patch = patch.embedding(bytes);
         }
 

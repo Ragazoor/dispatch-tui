@@ -101,7 +101,7 @@ pub(super) async fn handle_record_learning(
         },
     };
 
-    let similar_scope_ref = scope_ref.clone();
+    let scope_filter = scope_ref.clone();
     let svc = LearningService::new(state.db.clone(), state.embedding_service.clone());
     match svc
         .create_learning(crate::service::CreateLearningParams {
@@ -121,7 +121,7 @@ pub(super) async fn handle_record_learning(
                 .list_learnings(LearningFilter {
                     status: Some(LearningStatus::Approved),
                     scope: Some(parsed.scope),
-                    scope_ref: similar_scope_ref,
+                    scope_ref: scope_filter,
                     ..Default::default()
                 })
                 .await

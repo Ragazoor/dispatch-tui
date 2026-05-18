@@ -91,16 +91,16 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
     let emb_svc = EmbeddingService::new_noop();
 
     // 3. Backfill embeddings for any learnings that were created before the model was available.
-    {
-        let db_for_backfill = database.clone();
-        let emb_svc_for_backfill = emb_svc.clone();
-        // Fire-and-forget: partial work is retried on next startup.
-        let _ = tokio::spawn(async move {
-            if let Err(e) = backfill_embeddings(db_for_backfill, emb_svc_for_backfill).await {
+    // Fire-and-forget: partial work is retried on next startup.
+    let _ = tokio::spawn({
+        let db = database.clone();
+        let emb = emb_svc.clone();
+        async move {
+            if let Err(e) = backfill_embeddings(db, emb).await {
                 tracing::warn!("Embedding backfill failed: {e}");
             }
-        });
-    }
+        }
+    });
 
     // 4. Spawn MCP server with notification channel
     let runner: Arc<dyn ProcessRunner> = Arc::new(RealProcessRunner);
