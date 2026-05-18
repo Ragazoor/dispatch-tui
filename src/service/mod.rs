@@ -1,3 +1,4 @@
+pub mod embeddings;
 pub mod epics;
 pub mod learnings;
 pub mod tasks;
