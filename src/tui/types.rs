@@ -560,6 +560,7 @@ pub struct FilterState {
     pub repos: HashSet<String>,
     pub mode: RepoFilterMode,
     pub presets: Vec<(String, HashSet<String>, RepoFilterMode)>,
+    pub only_active: bool,
 }
 
 impl FilterState {
@@ -571,6 +572,11 @@ impl FilterState {
             RepoFilterMode::Include => self.repos.contains(repo_path),
             RepoFilterMode::Exclude => !self.repos.contains(repo_path),
         }
+    }
+
+    /// Returns false when `only_active` is set and the task has no tmux window.
+    pub fn task_matches(&self, task: &crate::models::Task) -> bool {
+        !self.only_active || task.tmux_window.is_some()
     }
 }
 

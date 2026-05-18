@@ -996,6 +996,36 @@ fn handle_key_repo_filter_routes_correctly() {
     assert_eq!(app.input.mode, InputMode::Normal);
 }
 
+// ---------------------------------------------------------------------------
+// only_active field and task_matches tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn filter_state_task_matches_only_active_false_always_passes() {
+    use crate::tui::FilterState;
+    let state = FilterState::default();
+    assert!(!state.only_active);
+    let mut t = make_task(1, TaskStatus::Running);
+    t.tmux_window = None;
+    assert!(state.task_matches(&t));
+    t.tmux_window = Some("dispatch:1".to_string());
+    assert!(state.task_matches(&t));
+}
+
+#[test]
+fn filter_state_task_matches_only_active_true_requires_tmux_window() {
+    use crate::tui::FilterState;
+    let mut state = FilterState::default();
+    state.only_active = true;
+
+    let mut t = make_task(1, TaskStatus::Running);
+    t.tmux_window = None;
+    assert!(!state.task_matches(&t));
+
+    t.tmux_window = Some("dispatch:1".to_string());
+    assert!(state.task_matches(&t));
+}
+
 /// ConfirmDeleteRepoPath mode routes correctly.
 #[test]
 fn handle_key_confirm_delete_repo_path_routes_correctly() {
