@@ -498,7 +498,7 @@ pub const INJECTION_CAP: usize = 8;
 /// Push-injection groups for a dispatch prompt. Both lists hold borrowed
 /// `Learning`s so the caller keeps ownership of the active list returned by
 /// `LearningStore::list_learnings_for_dispatch`.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct LearningInjections<'a> {
     /// Procedural-kind learnings, rendered verbatim near the top of the prompt.
     /// Expected to be ordered by scope priority then `upvote_count DESC`.

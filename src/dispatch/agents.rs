@@ -92,7 +92,8 @@ pub fn dispatch_agent(
     dispatch_with_prompt(
         task,
         || {
-            let mut ctx = ctx_with_learnings(injections).with_verify(verify_command);
+            let mut ctx =
+                PromptContext::with_learnings(injections.clone()).with_verify(verify_command);
             ctx.tag = task.tag;
             build_prompt(
                 task.id,
@@ -140,7 +141,7 @@ pub fn quick_dispatch_agent(
     dispatch_with_prompt(
         task,
         || {
-            let ctx = ctx_with_learnings(injections).with_verify(verify_command);
+            let ctx = PromptContext::with_learnings(injections.clone()).with_verify(verify_command);
             build_quick_dispatch_prompt(
                 task.id,
                 &task.title,
@@ -187,16 +188,6 @@ pub async fn fetch_verify_command(
     db.get_verify_command(repo_path).await.unwrap_or_else(|e| {
         tracing::warn!(error = %e, "failed to load verify_command; proceeding without it");
         None
-    })
-}
-
-/// Re-borrow `LearningInjections` into a `PromptContext`. Inner
-/// `Vec<&Learning>` clones are cheap (pointer + length copies) and let the
-/// agent functions keep their callers' lifetime.
-fn ctx_with_learnings<'a>(injections: &'a LearningInjections<'a>) -> PromptContext<'a> {
-    PromptContext::with_learnings(LearningInjections {
-        procedural: injections.procedural.clone(),
-        tiered: injections.tiered.clone(),
     })
 }
 
