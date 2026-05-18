@@ -195,7 +195,6 @@ impl TuiRuntime {
         }));
 
         let project_ctx = dispatch::ProjectContext::from_db(&task, &*self.database).await;
-        let verify_command = dispatch::fetch_verify_command(&*self.database, &task.repo_path).await;
 
         // Dispatch the planning subtask asynchronously
         let tx = self.msg_tx.clone();
@@ -216,7 +215,6 @@ impl TuiRuntime {
                 &epic_title,
                 &project_ctx,
                 &*runner,
-                verify_command.as_deref(),
             ) {
                 Ok(result) => {
                     let _ = tx.send(Message::Task(

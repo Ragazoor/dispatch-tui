@@ -697,7 +697,6 @@ fn all_aligned_prompts() -> [(&'static str, String); 4] {
                 "Planning subtask for epic",
                 &epic,
                 &project,
-                &PromptContext::default(),
             ),
         ),
     ]
@@ -744,7 +743,6 @@ fn epic_planning_prompt_uses_task_block_not_epic_header() {
         "Planning subtask",
         &epic,
         &project,
-        &PromptContext::default(),
     );
     assert!(
         prompt.starts_with("You are planning an epic."),
@@ -779,7 +777,6 @@ fn epic_planning_prompt_includes_work_package_steps_and_no_implement_guard() {
         "Desc",
         &epic,
         &project,
-        &PromptContext::default(),
     );
     assert!(prompt.contains("create_task"), "should mention create_task");
     assert!(prompt.contains("update_epic"), "should mention update_epic");
@@ -1048,7 +1045,7 @@ fn epic_planning_agent_uses_default_permission_mode() {
         project_id: ProjectId(1),
         project_name: "Dispatch".to_string(),
     };
-    epic_planning_agent(&task, EpicId(7), "Big Epic", &project, &mock, None).unwrap();
+    epic_planning_agent(&task, EpicId(7), "Big Epic", &project, &mock).unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, 3, "claude");
@@ -1510,7 +1507,6 @@ fn epic_planning_prompt_contains_epic_context() {
         "Rework the login flow",
         &epic,
         &project,
-        &PromptContext::default(),
     );
     assert!(prompt.contains("EpicId: 42"));
     assert!(prompt.contains("Redesign auth"));

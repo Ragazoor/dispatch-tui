@@ -442,7 +442,6 @@ pub(super) fn build_epic_planning_prompt(
     task_description: &str,
     epic: &EpicContext,
     project: &ProjectContext,
-    ctx: &PromptContext<'_>,
 ) -> String {
     let block = task_block(
         task_id,

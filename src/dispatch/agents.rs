@@ -162,7 +162,6 @@ pub fn epic_planning_agent(
     epic_title: &str,
     project: &ProjectContext,
     runner: &dyn ProcessRunner,
-    verify_command: Option<&str>,
 ) -> Result<DispatchResult> {
     let epic = EpicContext {
         epic_id,
@@ -171,14 +170,12 @@ pub fn epic_planning_agent(
     dispatch_with_prompt(
         task,
         || {
-            let ctx = PromptContext::default().with_verify(verify_command);
             build_epic_planning_prompt(
                 task.id,
                 &task.title,
                 &task.description,
                 &epic,
                 project,
-                &ctx,
             )
         },
         runner,
