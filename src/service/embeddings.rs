@@ -62,7 +62,7 @@ impl EmbeddingService {
     ///
     /// In production builds: returns an error, causing the service call to fail
     /// with a clear message prompting the caller to wire the real service.
-    pub fn new_noop() -> Arc<Self> {
+    pub(crate) fn new_noop() -> Arc<Self> {
         #[cfg(test)]
         let thread_fn = |rx: std::sync::mpsc::Receiver<EmbedRequest>| {
             std::thread::spawn(move || {

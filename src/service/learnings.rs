@@ -184,27 +184,7 @@ impl LearningService {
             || params.kind.is_some()
             || params.tags.is_some();
 
-        // Declare outside the `if` block so the borrow outlives the patch.
-        let emb_bytes_storage: Vec<u8>;
-
-        let mut patch = LearningPatch::new();
-        if let Some(ref s) = params.summary {
-            patch = patch.summary(s.as_str());
-        }
-        if let Some(ref d) = params.detail {
-            patch = match d {
-                FieldUpdate::Set(v) => patch.detail(Some(v.as_str())),
-                FieldUpdate::Clear => patch.detail(None),
-            };
-        }
-        if let Some(k) = params.kind {
-            patch = patch.kind(k);
-        }
-        if let Some(ref t) = params.tags {
-            patch = patch.tags(t.as_slice());
-        }
-
-        if needs_reembed {
+        let emb_bytes_storage: Option<Vec<u8>> = if needs_reembed {
             let summary = params
                 .summary
                 .as_deref()
@@ -226,8 +206,29 @@ impl LearningService {
                 .embed(text)
                 .await
                 .map_err(|e| ServiceError::Internal(format!("embedding error: {e}")))?;
-            emb_bytes_storage = serialize_embedding(&emb_vec);
-            patch = patch.embedding(&emb_bytes_storage);
+            Some(serialize_embedding(&emb_vec))
+        } else {
+            None
+        };
+
+        let mut patch = LearningPatch::new();
+        if let Some(ref s) = params.summary {
+            patch = patch.summary(s.as_str());
+        }
+        if let Some(ref d) = params.detail {
+            patch = match d {
+                FieldUpdate::Set(v) => patch.detail(Some(v.as_str())),
+                FieldUpdate::Clear => patch.detail(None),
+            };
+        }
+        if let Some(k) = params.kind {
+            patch = patch.kind(k);
+        }
+        if let Some(ref t) = params.tags {
+            patch = patch.tags(t.as_slice());
+        }
+        if let Some(ref bytes) = emb_bytes_storage {
+            patch = patch.embedding(bytes);
         }
 
         self.db
@@ -678,6 +679,9 @@ mod learning_tests {
 
     #[tokio::test]
     async fn update_learning_reembeds_when_summary_changes() {
+        use crate::db::LearningPatch as DbLearningPatch;
+        use crate::service::embeddings::serialize_embedding;
+
         let db: Arc<dyn TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
         let emb_svc = EmbeddingService::new_test();
         let svc = LearningService::new(db.clone(), emb_svc);
@@ -694,16 +698,23 @@ mod learning_tests {
             .await
             .unwrap();
 
-        // Verify embedding was stored on create.
+        // Replace the embedding with a sentinel value so we can detect if re-embedding
+        // was actually triggered (the stub always returns vec![0.1f32; 384]).
+        let sentinel: Vec<u8> = vec![0xFFu8; 1536];
+        db.patch_learning(id, &DbLearningPatch::new().embedding(&sentinel))
+            .await
+            .unwrap();
+
+        // Confirm sentinel is stored.
         let before = db.list_all_approved_non_task_learnings().await.unwrap();
         let emb_before = before
             .iter()
             .find(|(l, _)| l.id == id)
             .and_then(|(_, e)| e.as_ref())
-            .expect("learning must have embedding after create");
-        assert_eq!(emb_before.len(), 384 * 4);
+            .expect("learning must have embedding after sentinel write");
+        assert_eq!(emb_before.as_slice(), sentinel.as_slice());
 
-        // Update the summary — should trigger re-embedding.
+        // Update the summary — should trigger re-embedding, replacing the sentinel.
         svc.update_learning(UpdateLearningParams {
             id,
             summary: Some("updated summary".to_string()),
@@ -721,9 +732,19 @@ mod learning_tests {
             .and_then(|(_, e)| e.as_ref())
             .expect("learning must still have embedding after update");
 
-        // The test stub always returns vec![0.1; 384], so the embedding bytes are
-        // deterministic — verify the embedding is present and correct size.
-        assert_eq!(emb_after.len(), 384 * 4);
+        // The sentinel must be gone — re-embedding was called and returned the stub bytes.
+        assert_ne!(
+            emb_after.as_slice(),
+            sentinel.as_slice(),
+            "embedding must be updated from sentinel after summary change"
+        );
+        // The stub returns vec![0.1f32; 384]; verify the result matches.
+        let expected = serialize_embedding(&vec![0.1f32; 384]);
+        assert_eq!(
+            emb_after.as_slice(),
+            expected.as_slice(),
+            "embedding must equal stub output after re-embed"
+        );
     }
 
     #[tokio::test]
