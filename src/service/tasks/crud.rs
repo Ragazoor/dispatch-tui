@@ -64,20 +64,7 @@ impl TaskService {
 
         // When linking to a new epic, coerce project_id to match the epic's project.
         let epic_project_id = if let Some(eid) = params.epic_id {
-            match self.db.get_epic(eid).await {
-                Ok(Some(epic)) => Some(epic.project_id),
-                Ok(None) => {
-                    return Err(ServiceError::NotFound(format!(
-                        "Epic {} not found",
-                        eid.0
-                    )))
-                }
-                Err(e) => {
-                    return Err(ServiceError::Internal(format!(
-                        "Database error looking up epic: {e}"
-                    )))
-                }
-            }
+            Some(self.resolve_epic_project_id(eid).await?)
         } else {
             None
         };
@@ -135,6 +122,22 @@ impl TaskService {
             task_id,
             was_pr_finalisation,
         })
+    }
+
+    async fn resolve_epic_project_id(
+        &self,
+        epic_id: EpicId,
+    ) -> Result<crate::models::ProjectId, ServiceError> {
+        match self.db.get_epic(epic_id).await {
+            Ok(Some(epic)) => Ok(epic.project_id),
+            Ok(None) => Err(ServiceError::NotFound(format!(
+                "Epic {} not found",
+                epic_id.0
+            ))),
+            Err(e) => Err(ServiceError::Internal(format!(
+                "Database error looking up epic: {e}"
+            ))),
+        }
     }
 
     /// Validate `params.sub_status` against the task's effective (current or
@@ -260,20 +263,7 @@ impl TaskService {
 
         // When linking to an epic, coerce project_id to match the epic's project.
         let project_id = if let Some(eid) = params.epic_id {
-            match self.db.get_epic(eid).await {
-                Ok(Some(epic)) => epic.project_id,
-                Ok(None) => {
-                    return Err(ServiceError::NotFound(format!(
-                        "Epic {} not found",
-                        eid.0
-                    )))
-                }
-                Err(e) => {
-                    return Err(ServiceError::Internal(format!(
-                        "Database error looking up epic: {e}"
-                    )))
-                }
-            }
+            self.resolve_epic_project_id(eid).await?
         } else {
             params.project_id
         };
