@@ -1,4 +1,78 @@
+use std::sync::Arc;
+
+use anyhow::Result;
+use tokio::sync::oneshot;
+
 use crate::models::learnings::{Learning, LearningKind, LearningScope};
+
+// ---------------------------------------------------------------------------
+// EmbeddingService — dedicated OS thread owns the fastembed model
+// ---------------------------------------------------------------------------
+
+struct EmbedRequest {
+    // In test mode the stub thread ignores text, but the field is populated by callers.
+    #[allow(dead_code)]
+    text: String,
+    reply: oneshot::Sender<Result<Vec<f32>>>,
+}
+
+#[derive(Clone)]
+pub struct EmbeddingService {
+    tx: std::sync::mpsc::SyncSender<EmbedRequest>,
+}
+
+impl EmbeddingService {
+    /// Initialise with the real fastembed model. Blocks until model is loaded.
+    /// Call at startup before the TUI opens.
+    #[cfg(not(test))]
+    pub fn new() -> Result<Arc<Self>> {
+        use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+        let mut model = TextEmbedding::try_new(
+            InitOptions::new(EmbeddingModel::BGESmallENV15).with_show_download_progress(true),
+        )?;
+        let (tx, rx) = std::sync::mpsc::sync_channel::<EmbedRequest>(64);
+        std::thread::spawn(move || {
+            while let Ok(req) = rx.recv() {
+                let result = model
+                    .embed(vec![req.text.as_str()], None)
+                    .map(|mut vecs| vecs.remove(0))
+                    .map_err(anyhow::Error::from);
+                let _ = req.reply.send(result);
+            }
+        });
+        Ok(Arc::new(Self { tx }))
+    }
+
+    /// Test stub — returns deterministic vec![0.1; 384] without loading the model.
+    #[cfg(test)]
+    pub fn new_test() -> Arc<Self> {
+        let (tx, rx) = std::sync::mpsc::sync_channel::<EmbedRequest>(64);
+        std::thread::spawn(move || {
+            while let Ok(req) = rx.recv() {
+                let _ = req.reply.send(Ok(vec![0.1f32; 384]));
+            }
+        });
+        Arc::new(Self { tx })
+    }
+
+    pub async fn embed(&self, text: impl Into<String>) -> Result<Vec<f32>> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.tx
+            .send(EmbedRequest {
+                text: text.into(),
+                reply: reply_tx,
+            })
+            .map_err(|e| anyhow::anyhow!("EmbeddingService channel closed: {e}"))?;
+        reply_rx
+            .await
+            .map_err(|_| anyhow::anyhow!("EmbeddingService reply channel dropped"))?
+    }
+
+    pub async fn embed_batch(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>> {
+        let futures: Vec<_> = texts.into_iter().map(|t| self.embed(t)).collect();
+        futures::future::try_join_all(futures).await
+    }
+}
 
 pub fn embed_text_for_learning(
     kind: LearningKind,
@@ -136,6 +210,31 @@ pub fn rag_rank_learnings<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn embedding_service_returns_384_dims() {
+        let svc = EmbeddingService::new_test();
+        let result = svc.embed("hello world").await.unwrap();
+        assert_eq!(result.len(), 384);
+    }
+
+    #[tokio::test]
+    async fn embedding_service_batch_returns_correct_count() {
+        let svc = EmbeddingService::new_test();
+        let texts = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let result = svc.embed_batch(texts).await.unwrap();
+        assert_eq!(result.len(), 3);
+        assert!(result.iter().all(|v| v.len() == 384));
+    }
+
+    #[tokio::test]
+    async fn embedding_service_concurrent_calls() {
+        let svc = EmbeddingService::new_test();
+        let svc2 = svc.clone();
+        let (r1, r2) = tokio::join!(svc.embed("first"), svc2.embed("second"),);
+        assert_eq!(r1.unwrap().len(), 384);
+        assert_eq!(r2.unwrap().len(), 384);
+    }
     use crate::models::{LearningId, LearningKind, LearningScope, LearningStatus};
     use chrono::{TimeZone, Utc};
 

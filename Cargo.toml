@@ -28,6 +28,7 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 tempfile = "3"
 tui-tree-widget = "0.23"
 fastembed = "5"
+futures = "0.3"
 
 [dev-dependencies]
 insta = "1"
