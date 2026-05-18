@@ -463,7 +463,7 @@ impl App {
     pub fn tasks_for_current_view(&self) -> Vec<&Task> {
         let repo_match = |t: &&Task| self.repo_matches(&t.repo_path);
         let project_match = |t: &&Task| self.project_matches(t.project_id);
-        let active_match = |t: &&Task| self.filter.task_matches(*t);
+        let active_match = |t: &&Task| self.filter.task_matches(t);
         match self.effective_view_mode() {
             ViewMode::Board(_) => self
                 .board
