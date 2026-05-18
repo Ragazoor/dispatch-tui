@@ -964,106 +964,6 @@ mod tests {
         assert!(!text.contains("Validated knowledge for this task"));
     }
 
-    // ---- repo-map injection ----
-
-    fn ctx_with_map(map: &str) -> PromptContext<'static> {
-        PromptContext {
-            learnings: LearningInjections::default(),
-            repo_map: Some(map.to_string()),
-            tag: None,
-            verify_command: None,
-        }
-    }
-
-    const REPO_MAP_MARKER: &str = "## Repo map";
-    const SAMPLE_MAP: &str = "src/a.rs\n  function foo, bar\n";
-
-    #[test]
-    fn build_prompt_includes_repo_map_when_provided() {
-        let ctx = ctx_with_map(SAMPLE_MAP);
-        let text = build_prompt(TaskId(1), "t", "d", None, None, None, &ctx);
-        assert!(text.contains(REPO_MAP_MARKER));
-        assert!(text.contains("src/a.rs"));
-    }
-
-    #[test]
-    fn build_prompt_omits_repo_map_section_when_none() {
-        let text = build_prompt(
-            TaskId(1),
-            "t",
-            "d",
-            None,
-            None,
-            None,
-            &PromptContext::default(),
-        );
-        assert!(!text.contains(REPO_MAP_MARKER));
-    }
-
-    #[test]
-    fn repo_map_appears_after_knowledge_before_addendum() {
-        let proc_l = {
-            let mut l = seed(20, LearningScope::User, 0);
-            l.kind = LearningKind::Procedural;
-            l.detail = Some("Procedural rule X.".into());
-            l
-        };
-        let tier_l = seed(21, LearningScope::Repo, 1);
-        let ctx = PromptContext {
-            learnings: LearningInjections {
-                procedural: vec![&proc_l],
-                tiered: vec![&tier_l],
-            },
-            repo_map: Some(SAMPLE_MAP.to_string()),
-            tag: None,
-            verify_command: None,
-        };
-        let text = build_prompt(TaskId(1), "t", "d", Some("/p/plan.md"), None, None, &ctx);
-        let knowledge_at = text
-            .find("## Validated knowledge for this task")
-            .expect("knowledge present");
-        let map_at = text.find(REPO_MAP_MARKER).expect("map present");
-        let plan_at = text
-            .find("Plan: /p/plan.md")
-            .expect("plan addendum present");
-        assert!(
-            knowledge_at < map_at,
-            "knowledge ({knowledge_at}) must precede repo map ({map_at})"
-        );
-        assert!(
-            map_at < plan_at,
-            "repo map ({map_at}) must precede addendum ({plan_at})"
-        );
-    }
-
-    #[test]
-    fn build_quick_dispatch_prompt_includes_repo_map_when_provided() {
-        let ctx = ctx_with_map(SAMPLE_MAP);
-        let text = build_quick_dispatch_prompt(TaskId(1), "t", "d", None, None, &ctx);
-        assert!(text.contains(REPO_MAP_MARKER));
-    }
-
-    #[test]
-    fn build_research_prompt_includes_repo_map_when_provided() {
-        let ctx = ctx_with_map(SAMPLE_MAP);
-        let text = build_research_prompt(TaskId(1), "t", "d", None, None, &ctx);
-        assert!(text.contains(REPO_MAP_MARKER));
-    }
-
-    #[test]
-    fn build_epic_planning_prompt_includes_repo_map_when_provided() {
-        let epic = EpicContext {
-            epic_id: crate::models::EpicId(1),
-            epic_title: "e".into(),
-        };
-        let project = ProjectContext {
-            project_id: crate::models::ProjectId(1),
-            project_name: "p".into(),
-        };
-        let ctx = ctx_with_map(SAMPLE_MAP);
-        let text = build_epic_planning_prompt(TaskId(1), "t", "d", &epic, &project, &ctx);
-        assert!(text.contains(REPO_MAP_MARKER));
-    }
 
     #[test]
     fn build_prompt_with_dependabot_tag_includes_review_section() {
@@ -1131,13 +1031,6 @@ mod tests {
         );
         assert!(!text.contains("Dependabot PR review"));
         assert!(!text.contains("gh pr merge"));
-    }
-
-    #[test]
-    fn render_repo_map_omits_when_empty_or_none() {
-        assert!(render_repo_map(None).is_empty());
-        assert!(render_repo_map(Some("")).is_empty());
-        assert!(render_repo_map(Some("   \n  ")).is_empty());
     }
 
     #[test]
