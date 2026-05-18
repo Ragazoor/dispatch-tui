@@ -32,32 +32,31 @@ pub(in crate::tui::ui::kanban) fn render_repo_filter_overlay(
         preset_count + 2
     } else {
         0
-    }; // header + presets + blank line
+    };
     let input_line = if matches!(app.mode(), InputMode::InputPresetName) {
         1
     } else {
         0
     };
-    // Cap popup height to screen minus 4; repos may scroll if they don't fit
-    // +6: blank(1) + preset_lines + blank(1) + 2_help_lines(2) + borders(2)
-    let popup_height = (repo_count as u16 + preset_lines as u16 + input_line as u16 + 6)
-        .clamp(7, area.height.saturating_sub(4));
+    // +7: blank(1) + toggle_row(1) + blank(1) + 2_help_lines(2) + borders(2)
+    let popup_height = (repo_count as u16 + preset_lines as u16 + input_line as u16 + 7)
+        .clamp(8, area.height.saturating_sub(4));
     let popup_width = (area.width * 70 / 100).clamp(30, 60);
     let x = area.x + (area.width.saturating_sub(popup_width)) / 2;
     let y = area.y + (area.height.saturating_sub(popup_height)) / 2;
     let popup_area = Rect::new(x, y, popup_width, popup_height);
 
-    // How many repo rows fit: content height minus non-repo fixed lines
-    // non_repo = blank(1) + preset_lines + blank(1) + 2_help_lines(2) = 4 + preset_lines
-    let content_height = popup_height.saturating_sub(2) as usize; // minus borders
-    let non_repo_lines = preset_lines + input_line + 4; // blank + presets + blank + 2 help lines
-    let visible_repos = content_height.saturating_sub(non_repo_lines).max(1);
-
+    // Repos scroll: cursor 0 = toggle row (not a repo), cursor 1..=N = repo index cursor-1.
     let cursor = app.input.repo_cursor;
+    let repo_cursor = cursor.saturating_sub(1);
+    let content_height = popup_height.saturating_sub(2) as usize;
+    // non_repo = blank(1) + preset_lines + toggle_row(1) + blank(1) + 2_help_lines(2)
+    let non_repo_lines = preset_lines + input_line + 5;
+    let visible_repos = content_height.saturating_sub(non_repo_lines).max(1);
     let scroll = if repo_count <= visible_repos {
         0
     } else {
-        cursor
+        repo_cursor
             .saturating_sub(visible_repos - 1)
             .min(repo_count - visible_repos)
     };
@@ -109,6 +108,26 @@ pub(in crate::tui::ui::kanban) fn render_repo_filter_overlay(
         lines.push(Line::from(""));
     }
 
+    // Toggle row — "Active sessions only"
+    let toggle_checked = if app.filter_only_active() { "x" } else { " " };
+    if cursor == 0 {
+        lines.push(Line::from(vec![
+            Span::styled("  ►", cursor_style),
+            Span::styled(
+                format!(" [{toggle_checked}] Active sessions only"),
+                cursor_style,
+            ),
+        ]));
+    } else {
+        lines.push(Line::from(vec![
+            Span::styled("   ", desc_style),
+            Span::styled(
+                format!(" [{toggle_checked}] Active sessions only"),
+                desc_style,
+            ),
+        ]));
+    }
+
     // Repo list (scrollable)
     if scroll > 0 {
         lines.push(Line::from(Span::styled(
@@ -131,7 +150,7 @@ pub(in crate::tui::ui::kanban) fn render_repo_filter_overlay(
         };
         let is_broken = !std::path::Path::new(path).is_dir();
         let broken_mark = if is_broken { " [!]" } else { "" };
-        if i == cursor {
+        if i == repo_cursor && cursor > 0 {
             let style = if is_broken {
                 broken_style
             } else {
@@ -199,7 +218,7 @@ pub(in crate::tui::ui::kanban) fn render_repo_filter_overlay(
         InputMode::ConfirmDeleteRepoPath => {
             let path_label = app
                 .repo_paths()
-                .get(app.input.repo_cursor)
+                .get(app.input.repo_cursor.saturating_sub(1))
                 .map(|p| p.as_str())
                 .unwrap_or("?");
             lines.push(Line::from(vec![

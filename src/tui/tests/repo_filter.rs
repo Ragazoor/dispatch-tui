@@ -1102,6 +1102,61 @@ fn repo_filter_cursor_navigates_with_no_repos() {
 #[ignore = "requires a real TTY and interactive editor session; run manually to verify"]
 fn buffered_editor_keystrokes_do_not_leak_into_repo_picker() {}
 
+#[test]
+fn repo_filter_overlay_shows_toggle_row() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo-a".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+
+    let buf = render_to_buffer(&mut app, 80, 30);
+    assert!(
+        buffer_contains(&buf, "Active sessions only"),
+        "overlay should show the toggle row"
+    );
+}
+
+#[test]
+fn repo_filter_overlay_toggle_row_shows_checked_when_active() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo-a".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+    app.filter.only_active = true;
+
+    let buf = render_to_buffer(&mut app, 80, 30);
+    assert!(
+        buffer_contains(&buf, "[x] Active sessions only"),
+        "toggle row should show [x] when only_active is true"
+    );
+}
+
+#[test]
+fn repo_filter_overlay_toggle_row_has_cursor_indicator_at_cursor_zero() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo-a".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+    app.input.repo_cursor = 0;
+
+    let buf = render_to_buffer(&mut app, 80, 30);
+    assert!(
+        buffer_contains(&buf, "► [ ] Active sessions only"),
+        "cursor indicator should appear on toggle row when cursor == 0"
+    );
+}
+
+#[test]
+fn repo_filter_overlay_repo_row_has_cursor_at_cursor_one() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo-a".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+    app.input.repo_cursor = 1; // cursor 1 = repo index 0
+
+    let buf = render_to_buffer(&mut app, 80, 30);
+    assert!(
+        buffer_contains(&buf, "►"),
+        "cursor indicator should appear on repo row when cursor == 1"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Epic-in-epic: TUI navigation tests
 // ---------------------------------------------------------------------------
