@@ -16,6 +16,7 @@ use crate::editor::{
 #[cfg(test)]
 use crate::models::ProjectId;
 use crate::process::ProcessRunner;
+#[cfg(test)]
 use crate::service::embeddings::EmbeddingService;
 use crate::service::{UpdateEpicParams, UpdateTaskParams};
 use crate::tui::messages::LearningMessage;
@@ -280,7 +281,7 @@ impl TuiRuntime {
         };
 
         let db: Arc<dyn crate::db::TaskStore> = self.database.clone();
-        let svc = crate::service::LearningService::new(db.clone(), EmbeddingService::new_noop());
+        let svc = crate::service::LearningService::new(db.clone(), self.emb_svc.clone());
         match svc.update_learning(params).await {
             Ok(()) => {
                 if let Ok(Some(updated)) = db.get_learning(learning.id).await {
@@ -496,6 +497,7 @@ mod learning_editor_tests {
             msg_tx: tx,
             runner,
             editor_session: Arc::new(std::sync::Mutex::new(None)),
+            emb_svc: EmbeddingService::new_noop(),
         }
     }
 
@@ -810,6 +812,7 @@ mod tests {
             msg_tx: tx,
             runner,
             editor_session: Arc::new(Mutex::new(None)),
+            emb_svc: EmbeddingService::new_noop(),
         };
         let app = App::new(vec![], ProjectId(1));
         (rt, app)
@@ -879,6 +882,7 @@ mod tests {
             msg_tx: tx,
             runner,
             editor_session: Arc::new(Mutex::new(None)),
+            emb_svc: EmbeddingService::new_noop(),
         };
         let mut app = App::new(vec![task.clone()], ProjectId(1));
 
@@ -940,6 +944,7 @@ mod tests {
             msg_tx: tx,
             runner,
             editor_session: Arc::new(Mutex::new(None)),
+            emb_svc: EmbeddingService::new_noop(),
         };
         let mut app = App::new(vec![task.clone()], ProjectId(1));
 
@@ -988,6 +993,7 @@ mod tests {
             msg_tx: tx,
             runner,
             editor_session: Arc::new(Mutex::new(None)),
+            emb_svc: EmbeddingService::new_noop(),
         };
         let mut app = App::new(vec![task.clone()], ProjectId(1));
 
@@ -1037,6 +1043,7 @@ mod tests {
             msg_tx: tx,
             runner,
             editor_session: Arc::new(Mutex::new(None)),
+            emb_svc: EmbeddingService::new_noop(),
         };
         let mut app = App::new(vec![task.clone()], ProjectId(1));
 

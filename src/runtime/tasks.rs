@@ -74,7 +74,7 @@ impl TuiRuntime {
         let (procedural, tiered) = dispatch::build_and_record_injections(
             &*self.database,
             &task,
-            &crate::service::embeddings::EmbeddingService::new_noop(),
+            &self.emb_svc,
         )
         .await;
         let verify_command = dispatch::fetch_verify_command(&*self.database, &task.repo_path).await;
@@ -193,7 +193,7 @@ impl TuiRuntime {
         let (procedural, tiered) = dispatch::build_and_record_injections(
             &*self.database,
             &task,
-            &crate::service::embeddings::EmbeddingService::new_noop(),
+            &self.emb_svc,
         )
         .await;
         let verify_command = dispatch::fetch_verify_command(&*self.database, &task.repo_path).await;

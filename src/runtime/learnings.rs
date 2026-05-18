@@ -3,6 +3,7 @@ use crate::db;
 #[cfg(test)]
 use crate::models::ProjectId;
 use crate::models::{LearningId, LearningStatus};
+#[cfg(test)]
 use crate::service::embeddings::EmbeddingService;
 use crate::service::LearningService;
 
@@ -57,14 +58,14 @@ impl TuiRuntime {
 
     pub(super) async fn exec_archive_learning(&self, app: &mut App, id: LearningId) {
         let db: Arc<dyn db::TaskStore> = self.database.clone();
-        let svc = LearningService::new(db, EmbeddingService::new_noop());
+        let svc = LearningService::new(db, self.emb_svc.clone());
         let result = svc.archive_learning(id).await;
         Self::handle_action_result(app, id, "archive", result);
     }
 
     pub(super) async fn exec_reject_learning(&self, app: &mut App, id: LearningId) {
         let db: Arc<dyn db::TaskStore> = self.database.clone();
-        let svc = LearningService::new(db, EmbeddingService::new_noop());
+        let svc = LearningService::new(db, self.emb_svc.clone());
         let result = svc.reject_learning(id).await;
         Self::handle_action_result(app, id, "reject", result);
     }
@@ -75,7 +76,7 @@ impl TuiRuntime {
     /// up the new status.
     pub(super) async fn exec_approve_learning(&self, app: &mut App, id: LearningId) {
         let db: Arc<dyn db::TaskStore> = self.database.clone();
-        let svc = LearningService::new(db.clone(), EmbeddingService::new_noop());
+        let svc = LearningService::new(db.clone(), self.emb_svc.clone());
         match svc.approve_learning(id).await {
             Ok(()) => match db.get_learning(id).await {
                 Ok(Some(updated)) => {
@@ -165,6 +166,7 @@ mod tests {
             msg_tx: tx,
             runner,
             editor_session: Arc::new(std::sync::Mutex::new(None)),
+            emb_svc: EmbeddingService::new_noop(),
         }
     }
 

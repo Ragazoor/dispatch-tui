@@ -71,15 +71,43 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
     let database = Arc::new(db::Database::open(db_path).await?);
     let tasks = database.list_all().await?;
 
-    // 2. Spawn MCP server with notification channel
+    // 2. Initialise the embedding model (blocks until loaded; may download on first run).
+    // In test builds, `EmbeddingService::new()` is not available — tests bypass run_tui entirely
+    // and construct TuiRuntime directly, so this branch is only reached in production.
+    #[cfg(not(test))]
+    let emb_svc = {
+        eprintln!("Loading embedding model...");
+        EmbeddingService::new().map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to initialise embedding model: {e}\n\
+                 Clear cache with: rm -rf ~/.cache/huggingface/hub/"
+            )
+        })?
+    };
+    #[cfg(test)]
+    let emb_svc = EmbeddingService::new_noop();
+
+    // 3. Backfill embeddings for any learnings that were created before the model was available.
+    {
+        let db_for_backfill = database.clone();
+        let emb_svc_for_backfill = emb_svc.clone();
+        tokio::spawn(async move {
+            if let Err(e) = backfill_embeddings(db_for_backfill, emb_svc_for_backfill).await {
+                tracing::warn!("Embedding backfill failed: {e}");
+            }
+        });
+    }
+
+    // 4. Spawn MCP server with notification channel
     let runner: Arc<dyn ProcessRunner> = Arc::new(RealProcessRunner);
 
     let mcp_db = database.clone();
     let mcp_runner = runner.clone();
+    let mcp_emb_svc = emb_svc.clone();
     let (mcp_notify_tx, mut mcp_notify_rx) = mpsc::unbounded_channel::<mcp::McpEvent>();
     let feed_notify_tx = mcp_notify_tx.clone();
     tokio::spawn(async move {
-        if let Err(e) = mcp::serve(mcp_db, port, mcp_notify_tx, mcp_runner, EmbeddingService::new_noop()).await {
+        if let Err(e) = mcp::serve(mcp_db, port, mcp_notify_tx, mcp_runner, mcp_emb_svc).await {
             eprintln!("MCP server error: {e}");
         }
     });
@@ -199,6 +227,7 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
         msg_tx,
         runner,
         editor_session: Arc::new(std::sync::Mutex::new(None)),
+        emb_svc,
     };
     let result = run_loop(
         &mut app,
@@ -227,6 +256,43 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
+// Embedding backfill — run at startup to embed learnings missing vectors
+// ---------------------------------------------------------------------------
+
+/// Backfills embeddings for any learnings that have no embedding stored.
+///
+/// Runs at startup in a background task. Failures are logged via `tracing::warn`
+/// by the caller; this function propagates errors so the caller can decide.
+pub async fn backfill_embeddings(
+    db: Arc<dyn crate::db::LearningStore + Send + Sync>,
+    emb_svc: Arc<EmbeddingService>,
+) -> Result<()> {
+    use crate::service::embeddings::{embed_text_for_learning, serialize_embedding};
+
+    let missing = db.list_learnings_missing_embedding().await?;
+    if missing.is_empty() {
+        return Ok(());
+    }
+    tracing::info!("Backfilling embeddings for {} learnings", missing.len());
+    for learning in &missing {
+        let text = embed_text_for_learning(
+            learning.kind,
+            &learning.summary,
+            &learning.tags,
+            learning.detail.as_deref(),
+        );
+        let emb_vec = emb_svc.embed(text).await?;
+        let emb_bytes = serialize_embedding(&emb_vec);
+        db.patch_learning(
+            learning.id,
+            &crate::db::LearningPatch::new().embedding(&emb_bytes),
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // TuiRuntime — shared context for command execution
 // ---------------------------------------------------------------------------
 
@@ -245,6 +311,8 @@ struct TuiRuntime {
     /// by refusing to start a new one while this slot is populated.
     editor_session: Arc<std::sync::Mutex<Option<editor::EditorSession>>>,
     feed_runner: Option<crate::feed::FeedRunner>,
+    /// Shared embedding service for RAG-based learning injection and editor updates.
+    emb_svc: Arc<EmbeddingService>,
 }
 
 mod agents;
