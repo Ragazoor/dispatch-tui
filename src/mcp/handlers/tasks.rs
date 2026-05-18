@@ -11,7 +11,6 @@ use crate::models::{
     DispatchMode, EpicId, LearningId, LearningVerdict, ProjectId, SubStatus, Task, TaskId,
     TaskStatus, TaskTag, WrapUpMode,
 };
-use crate::service::embeddings::EmbeddingService;
 use crate::service::{
     ClaimTaskParams, CreateTaskParams, FieldUpdate, LearningService, ListTasksFilter, ServiceError,
     UpdateTaskParams,
@@ -671,7 +670,7 @@ pub(super) async fn handle_wrap_up(
             .into_iter()
             .map(|v| (LearningId(v.learning_id), v.verdict))
             .collect();
-        let learning_svc = LearningService::new(state.db.clone(), EmbeddingService::new_noop());
+        let learning_svc = LearningService::new(state.db.clone(), state.embedding_service.clone());
         if let Err(e) = learning_svc.apply_verdicts(task.id, parsed_verdicts).await {
             return service_err_to_response(id, e);
         }
@@ -991,7 +990,7 @@ pub(super) async fn handle_dispatch_next(
     let (procedural, tiered) = dispatch::build_and_record_injections(
         &*db,
         &next_task,
-        &crate::service::embeddings::EmbeddingService::new_noop(),
+        &state.embedding_service,
     )
     .await;
     let verify_command = dispatch::fetch_verify_command(&*db, &next_task.repo_path).await;
@@ -1109,7 +1108,7 @@ pub(super) async fn handle_dispatch_task(
     let (procedural, tiered) = dispatch::build_and_record_injections(
         &*db,
         &task,
-        &crate::service::embeddings::EmbeddingService::new_noop(),
+        &state.embedding_service,
     )
     .await;
     let verify_command = dispatch::fetch_verify_command(&*db, &task.repo_path).await;
