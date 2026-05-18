@@ -111,12 +111,42 @@ use "./core.allium" as core
 --   tags defaults to the empty set.
 --   Return: the new learning_id.
 --
--- query_learnings(task_id, tag_filter?, limit?)
---   Returns approved learnings for the task's scope union.
+-- query_learnings(task_id, query?, tag_filter?, limit?)
+--   Returns approved learnings for the task's scope union ranked by semantic
+--   similarity to a query text (RAG-style retrieval).
 --   Entries with status in {needs_review, rejected, archived} are excluded.
 --   Excludes task-scoped entries from the auto-retrieved set.
---   When tag_filter is provided, only entries whose tags set contains tag_filter.
---   Ordered by scope_priority(scope) then upvote_count DESC.
+--
+--   Semantic query resolution:
+--     - When `query` is provided, it is used verbatim as the semantic query text.
+--     - When `query` is omitted, the query text defaults to the concatenation of
+--       the task's title and description.
+--   The query text is embedded and compared by cosine similarity against each
+--   candidate learning's stored embedding.
+--
+--   Similarity threshold:
+--     - Candidates whose cosine similarity is below
+--       config.query_similarity_threshold (default 0.25) are excluded outright.
+--
+--   Ranking score for surviving candidates:
+--     score = cosine * (1 + scope_multiplier)
+--           + upvote_boost
+--           + tag_boost
+--   where:
+--     - scope_multiplier reflects scope_priority(scope) (epic > repo > project > user)
+--     - upvote_boost is a monotonic function of upvote_count
+--     - tag_boost = config.tag_match_boost (default 0.05) per element of
+--       (tags ∩ tag_filter)
+--
+--   BREAKING CHANGE — tag_filter semantics:
+--     Previously, `tag_filter` acted as a HARD AND filter: only learnings whose
+--     tags set contained every element of `tag_filter` were returned. After this
+--     change, `tag_filter` is a SOFT score boost: every learning above the cosine
+--     threshold is eligible to be returned, but learnings whose tags intersect
+--     `tag_filter` are ranked higher by `tag_boost` per matching tag. Callers
+--     that relied on `tag_filter` as a strict filter must migrate.
+--
+--   Results are ordered by score DESC.
 --   limit capped at 50 (default: 20).
 --   For each returned learning, the runtime records a core/Retrieval with
 --   source = query_learnings (see Retrievals & Verdicts below).
@@ -211,6 +241,22 @@ invariant ApprovedLearningsHaveScopeRef {
     for l in core/Learnings:
         l.status = approved and l.scope != user implies l.scope_ref != null
 }
+
+-- Invariant: EmbeddingConsistency
+--
+-- When a learning's `summary`, `detail`, `kind`, or `tags` are updated, the
+-- `embedding` column MUST be regenerated as part of the same write operation.
+-- The DB row must never contain a stale embedding after a successful save.
+--
+-- This is a process-level invariant about write atomicity, not a property over
+-- a single point-in-time entity state, so it is recorded here in prose rather
+-- than as an expression-bearing `invariant Name { ... }` block. It is enforced
+-- at the service layer (LearningService) by computing the embedding from the
+-- post-write field values and writing both fields in the same transaction.
+--
+-- Affected rules: EditLearning (summary | detail | kind | tags update),
+-- RecordLearningViaMcp (creation), and any future rule that mutates one of the
+-- embedding inputs.
 
 -- No two approved learnings may have the same (kind, summary, scope, scope_ref)
 -- tuple. This is a soft constraint enforced by convention: the service layer does
@@ -350,14 +396,39 @@ rule RecordLearningViaMcp {
 }
 
 rule QueryLearningsViaMcp {
-    when: McpQueryLearnings(task, tag_filter?, limit?)
+    when: McpQueryLearnings(task, query?, tag_filter?, limit?)
 
     ensures: returns approved core/Learning records where applies_to_dispatch(task),
-             filtered to those whose tags intersect tag_filter (when tag_filter is provided),
-             ordered by scope_priority(scope) then upvote_count desc,
-             limited to min(limit ?? 20, 50)
+             ranked by RAG-style semantic similarity to the query text and returned
+             in score-DESC order, limited to min(limit ?? 20, 50)
 
     @guidance
+        -- BREAKING CHANGE: tag_filter is no longer a hard AND filter. It was
+        -- previously: "only entries whose tags contain every tag_filter element".
+        -- It is now a soft score boost: every learning above the cosine
+        -- similarity threshold is eligible, and matching tags merely raise the
+        -- score (config.tag_match_boost per matching tag, default +0.05).
+        --
+        -- Query text resolution:
+        --   - When `query` is provided, it is used verbatim as the semantic
+        --     query text.
+        --   - When `query` is omitted, the query text defaults to
+        --     concat(task.title, task.description).
+        --
+        -- Similarity threshold:
+        --   Candidates with cosine similarity below
+        --   config.query_similarity_threshold (default 0.25) are excluded
+        --   outright. The threshold is configurable to allow tuning recall
+        --   vs. precision per deployment.
+        --
+        -- Scoring formula (applied to surviving candidates):
+        --   score = cosine * (1 + scope_multiplier)
+        --         + upvote_boost
+        --         + tag_boost
+        --   where scope_multiplier follows scope_priority (epic > repo >
+        --   project > user), upvote_boost is a monotonic function of
+        --   upvote_count, and tag_boost = config.tag_match_boost * |tags ∩ tag_filter|.
+        --
         -- Retrieval unions: user + project:<task.project_id> + repo:<task.repo_path>
         -- + epic:<task.epic_id> (if task has an epic). task-scoped learnings are excluded from
         -- applies_to_dispatch; agents can reach them by calling this tool with
