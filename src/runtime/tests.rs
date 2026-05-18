@@ -2401,6 +2401,7 @@ async fn build_learning_injections_partitions_and_records_retrievals() {
             scope_ref: None,
             tags: &[],
             source_task_id: None,
+            embedding: None,
         })
         .await
         .unwrap();
@@ -2414,6 +2415,7 @@ async fn build_learning_injections_partitions_and_records_retrievals() {
             scope_ref: Some("/repo/a"),
             tags: &[],
             source_task_id: None,
+            embedding: None,
         })
         .await
         .unwrap();

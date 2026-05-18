@@ -194,6 +194,7 @@ mod tests {
             scope_ref: None,
             tags: &[],
             source_task_id: None,
+            embedding: None,
         })
         .await
         .unwrap()
@@ -254,6 +255,7 @@ mod tests {
                 scope_ref: Some("/repo"),
                 tags: &[],
                 source_task_id: None,
+                embedding: None,
             })
             .await
             .unwrap();
@@ -266,6 +268,7 @@ mod tests {
                 scope_ref: None,
                 tags: &[],
                 source_task_id: None,
+                embedding: None,
             })
             .await
             .unwrap();

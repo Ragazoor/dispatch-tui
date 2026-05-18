@@ -519,6 +519,7 @@ mod learning_editor_tests {
                 scope_ref: None,
                 tags: &[],
                 source_task_id: None,
+                embedding: None,
             })
             .await
             .unwrap();
@@ -563,6 +564,7 @@ mod learning_editor_tests {
                 scope_ref: None,
                 tags: &[],
                 source_task_id: None,
+                embedding: None,
             })
             .await
             .unwrap();
@@ -600,6 +602,7 @@ mod learning_editor_tests {
                 scope_ref: None,
                 tags: &[],
                 source_task_id: None,
+                embedding: None,
             })
             .await
             .unwrap();
@@ -632,6 +635,7 @@ mod learning_editor_tests {
                 scope_ref: None,
                 tags: &[],
                 source_task_id: None,
+                embedding: None,
             })
             .await
             .unwrap();

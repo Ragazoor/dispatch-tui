@@ -76,6 +76,7 @@ impl LearningService {
                 scope_ref: params.scope_ref.as_deref(),
                 tags: &params.tags,
                 source_task_id: params.source_task_id,
+                embedding: None,
             })
             .await
             .map_err(|e| ServiceError::Internal(format!("database error: {e}")))

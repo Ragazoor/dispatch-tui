@@ -151,6 +151,7 @@ async fn soft_archive_epic_does_not_violate_foreign_keys() {
         scope_ref: Some("/repo"),
         tags: &[],
         source_task_id: Some(task_id),
+        embedding: None,
     })
     .await
     .unwrap();

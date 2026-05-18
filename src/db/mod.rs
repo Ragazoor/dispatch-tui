@@ -290,11 +290,12 @@ pub trait ProjectCrud: Send + Sync {
 patch_struct! {
     /// Builder for selective learning field updates.
     pub struct LearningPatch<'a> {
-        plain    status:  LearningStatus,
-        plain    summary: &'a str,
-        nullable detail:  &'a str,
-        plain    kind:    LearningKind,
-        plain    tags:    &'a [String],
+        plain    status:    LearningStatus,
+        plain    summary:   &'a str,
+        nullable detail:    &'a str,
+        plain    kind:      LearningKind,
+        plain    tags:      &'a [String],
+        plain    embedding: &'a [u8],
     }
 }
 
@@ -324,6 +325,7 @@ pub struct CreateLearningRow<'a> {
     pub scope_ref: Option<&'a str>,
     pub tags: &'a [String],
     pub source_task_id: Option<TaskId>,
+    pub embedding: Option<&'a [u8]>,
 }
 
 // ---------------------------------------------------------------------------
@@ -354,6 +356,16 @@ pub trait LearningStore: Send + Sync {
         repo_path: &str,
         epic_id: Option<EpicId>,
     ) -> Result<Vec<Learning>>;
+
+    /// Returns all approved, non-task-scoped learnings with their raw embedding bytes.
+    /// Used by the embedding backfill and RAG pipeline to access stored vectors.
+    async fn list_all_approved_non_task_learnings(
+        &self,
+    ) -> Result<Vec<(Learning, Option<Vec<u8>>)>>;
+
+    /// Returns approved, non-task-scoped learnings that have no embedding stored yet.
+    /// Used by the backfill job to determine which learnings need to be embedded.
+    async fn list_learnings_missing_embedding(&self) -> Result<Vec<Learning>>;
 }
 
 // ---------------------------------------------------------------------------

@@ -2365,6 +2365,7 @@ async fn upsert_feed_tasks_can_purge_task_with_associated_learning() {
         scope_ref: None,
         tags: &[],
         source_task_id: Some(task_id),
+        embedding: None,
     })
     .await
     .unwrap();

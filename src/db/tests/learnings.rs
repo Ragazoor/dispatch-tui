@@ -14,6 +14,7 @@ async fn landscape_kind_can_be_recorded() {
             scope_ref: Some("/home/user/repo"),
             tags: &[],
             source_task_id: None,
+            embedding: None,
         })
         .await
         .unwrap();
@@ -51,6 +52,7 @@ async fn create_and_get_learning() {
             scope_ref: Some("/home/user/repo"),
             tags: &["rust".to_string(), "async".to_string()],
             source_task_id: None,
+            embedding: None,
         })
         .await
         .unwrap();
@@ -88,6 +90,7 @@ async fn create_learning_user_scope_has_null_scope_ref() {
             scope_ref: None,
             tags: &[],
             source_task_id: None,
+            embedding: None,
         })
         .await
         .unwrap();
@@ -109,6 +112,7 @@ async fn scope_ref_consistency_constraint_is_enforced() {
             scope_ref: Some("should-not-be-here"),
             tags: &[],
             source_task_id: None,
+            embedding: None,
         })
         .await;
     assert!(
@@ -131,6 +135,7 @@ async fn list_learnings_filter_by_status() {
             scope_ref: None,
             tags: &[],
             source_task_id: None,
+            embedding: None,
         })
         .await
         .unwrap();
@@ -143,6 +148,7 @@ async fn list_learnings_filter_by_status() {
             scope_ref: None,
             tags: &[],
             source_task_id: None,
+            embedding: None,
         })
         .await
         .unwrap();
@@ -189,6 +195,7 @@ async fn list_learnings_approved_filter_excludes_rejected_and_archived() {
             scope_ref: None,
             tags: &[],
             source_task_id: None,
+            embedding: None,
         })
         .await
         .unwrap();
@@ -201,6 +208,7 @@ async fn list_learnings_approved_filter_excludes_rejected_and_archived() {
             scope_ref: None,
             tags: &[],
             source_task_id: None,
+            embedding: None,
         })
         .await
         .unwrap();
@@ -213,6 +221,7 @@ async fn list_learnings_approved_filter_excludes_rejected_and_archived() {
             scope_ref: None,
             tags: &[],
             source_task_id: None,
+            embedding: None,
         })
         .await
         .unwrap();
@@ -256,6 +265,7 @@ async fn patch_learning_updates_summary_and_updated_at() {
             scope_ref: None,
             tags: &[],
             source_task_id: None,
+            embedding: None,
         })
         .await
         .unwrap();
@@ -282,6 +292,7 @@ async fn upvote_learning_increments_count_and_timestamps() {
             scope_ref: None,
             tags: &[],
             source_task_id: None,
+            embedding: None,
         })
         .await
         .unwrap();
@@ -317,6 +328,7 @@ async fn delete_learning_removes_row() {
             scope_ref: None,
             tags: &[],
             source_task_id: None,
+            embedding: None,
         })
         .await
         .unwrap();
@@ -341,6 +353,7 @@ async fn list_learnings_for_dispatch_unions_scopes() {
             scope_ref: None,
             tags: &[],
             source_task_id: None,
+            embedding: None,
         })
         .await
         .unwrap();
@@ -354,6 +367,7 @@ async fn list_learnings_for_dispatch_unions_scopes() {
             scope_ref: Some("/repo/a"),
             tags: &[],
             source_task_id: None,
+            embedding: None,
         })
         .await
         .unwrap();
@@ -367,6 +381,7 @@ async fn list_learnings_for_dispatch_unions_scopes() {
             scope_ref: Some("/repo/b"),
             tags: &[],
             source_task_id: None,
+            embedding: None,
         })
         .await
         .unwrap();
@@ -380,6 +395,7 @@ async fn list_learnings_for_dispatch_unions_scopes() {
             scope_ref: Some("42"),
             tags: &[],
             source_task_id: None,
+            embedding: None,
         })
         .await
         .unwrap();
@@ -420,6 +436,7 @@ async fn list_learnings_for_dispatch_procedural_first() {
             scope_ref: None,
             tags: &[],
             source_task_id: None,
+            embedding: None,
         })
         .await
         .unwrap();
@@ -432,6 +449,7 @@ async fn list_learnings_for_dispatch_procedural_first() {
             scope_ref: None,
             tags: &[],
             source_task_id: None,
+            embedding: None,
         })
         .await
         .unwrap();
@@ -468,6 +486,7 @@ async fn list_learnings_for_dispatch_excludes_non_approved() {
             scope_ref: None,
             tags: &[],
             source_task_id: None,
+            embedding: None,
         })
         .await
         .unwrap();
@@ -488,6 +507,7 @@ async fn list_learnings_for_dispatch_excludes_non_approved() {
             scope_ref: None,
             tags: &[],
             source_task_id: None,
+            embedding: None,
         })
         .await
         .unwrap();
@@ -523,6 +543,7 @@ async fn make_db_with_task_and_learning() -> (Database, crate::models::TaskId, L
             scope_ref: Some("/repo/a"),
             tags: &[],
             source_task_id: None,
+            embedding: None,
         })
         .await
         .unwrap();
@@ -632,6 +653,7 @@ async fn list_learnings_for_dispatch_excludes_needs_review() {
             scope_ref: Some("/repo/a"),
             tags: &[],
             source_task_id: None,
+            embedding: None,
         })
         .await
         .unwrap();
@@ -656,4 +678,94 @@ async fn list_learnings_for_dispatch_excludes_needs_review() {
         ids.contains(&healthy),
         "approved learning should still surface"
     );
+}
+
+#[tokio::test]
+async fn create_learning_with_embedding_stores_it() {
+    use crate::db::{LearningPatch, LearningStore};
+    use crate::models::{LearningKind, LearningScope, LearningStatus};
+    let db = in_memory_db().await;
+    let fake_emb = vec![0u8; 1536]; // 384 f32s * 4 bytes
+    let id = db
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Convention,
+            summary: "test learning",
+            detail: None,
+            scope: LearningScope::User,
+            scope_ref: None,
+            tags: &[],
+            source_task_id: None,
+            embedding: Some(&fake_emb),
+        })
+        .await
+        .unwrap();
+    // Approve it (already approved by default, but patch status to confirm)
+    db.patch_learning(id, &LearningPatch::new().status(LearningStatus::Approved))
+        .await
+        .unwrap();
+    let results = db.list_all_approved_non_task_learnings().await.unwrap();
+    let found = results.iter().find(|(l, _)| l.id == id).unwrap();
+    assert_eq!(found.1.as_ref().map(|b| b.len()), Some(1536));
+}
+
+#[tokio::test]
+async fn list_learnings_missing_embedding_finds_null_rows() {
+    use crate::db::{LearningPatch, LearningStore};
+    use crate::models::{LearningKind, LearningScope, LearningStatus};
+    let db = in_memory_db().await;
+    let id = db
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Pitfall,
+            summary: "no embedding",
+            detail: None,
+            scope: LearningScope::User,
+            scope_ref: None,
+            tags: &[],
+            source_task_id: None,
+            embedding: None,
+        })
+        .await
+        .unwrap();
+    db.patch_learning(id, &LearningPatch::new().status(LearningStatus::Approved))
+        .await
+        .unwrap();
+    let missing = db.list_learnings_missing_embedding().await.unwrap();
+    assert!(missing.iter().any(|l| l.id == id));
+}
+
+#[tokio::test]
+async fn patch_learning_can_set_embedding() {
+    use crate::db::{LearningPatch, LearningStore};
+    use crate::models::{LearningKind, LearningScope, LearningStatus};
+    let db = in_memory_db().await;
+    let id = db
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Convention,
+            summary: "update test",
+            detail: None,
+            scope: LearningScope::User,
+            scope_ref: None,
+            tags: &[],
+            source_task_id: None,
+            embedding: None,
+        })
+        .await
+        .unwrap();
+    db.patch_learning(id, &LearningPatch::new().status(LearningStatus::Approved))
+        .await
+        .unwrap();
+
+    // Initially missing
+    let missing = db.list_learnings_missing_embedding().await.unwrap();
+    assert!(missing.iter().any(|l| l.id == id));
+
+    // Patch with embedding
+    let fake_emb = vec![1u8; 1536];
+    db.patch_learning(id, &LearningPatch::new().embedding(&fake_emb))
+        .await
+        .unwrap();
+
+    // No longer missing
+    let missing_after = db.list_learnings_missing_embedding().await.unwrap();
+    assert!(!missing_after.iter().any(|l| l.id == id));
 }

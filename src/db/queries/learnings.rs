@@ -59,11 +59,12 @@ impl super::super::LearningStore for Database {
         let scope_ref = row.scope_ref.map(str::to_owned);
         let tags = row.tags.to_vec();
         let source_task_id = row.source_task_id;
+        let embedding = row.embedding.map(|b| b.to_vec());
         self.db_call(move |conn| {
             let tags_json = write_json_string_vec(&tags)?;
             conn.execute(
-                "INSERT INTO learnings (kind, summary, detail, scope, scope_ref, tags, status, source_task_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'approved', ?7)",
+                "INSERT INTO learnings (kind, summary, detail, scope, scope_ref, tags, status, source_task_id, embedding)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'approved', ?7, ?8)",
                 params![
                     kind.as_str(),
                     summary,
@@ -72,6 +73,7 @@ impl super::super::LearningStore for Database {
                     scope_ref,
                     tags_json,
                     source_task_id.map(|t| t.0),
+                    embedding,
                 ],
             )
             .context("Failed to insert learning")?;
@@ -159,6 +161,7 @@ impl super::super::LearningStore for Database {
         let detail = patch.detail.map(|d| d.map(str::to_owned));
         let kind = patch.kind;
         let tags = patch.tags.map(|t| t.to_vec());
+        let embedding = patch.embedding.map(|b| b.to_vec());
 
         self.db_call(move |conn| {
             let mut sets: Vec<String> = Vec::new();
@@ -183,6 +186,10 @@ impl super::super::LearningStore for Database {
             if let Some(tags) = tags {
                 sets.push(format!("tags = ?{}", bind.len() + 1));
                 bind.push(Box::new(write_json_string_vec(&tags)?));
+            }
+            if let Some(embedding) = embedding {
+                sets.push(format!("embedding = ?{}", bind.len() + 1));
+                bind.push(Box::new(embedding));
             }
 
             sets.push("updated_at = datetime('now')".to_string());
@@ -290,6 +297,53 @@ impl super::super::LearningStore for Database {
                 .context("Failed to query learnings for dispatch")?
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .context("Failed to collect learnings for dispatch")?;
+            Ok(rows)
+        })
+        .await
+    }
+
+    async fn list_all_approved_non_task_learnings(
+        &self,
+    ) -> Result<Vec<(Learning, Option<Vec<u8>>)>> {
+        self.db_call(move |conn| {
+            let sql = format!(
+                "SELECT {LEARNING_COLUMNS}, embedding FROM learnings \
+                 WHERE status = 'approved' AND scope != 'task' \
+                 ORDER BY id"
+            );
+            let mut stmt = conn
+                .prepare(&sql)
+                .context("Failed to prepare list_all_approved_non_task_learnings")?;
+            let rows = stmt
+                .query_map([], |row| {
+                    let learning = row_to_learning(row)?;
+                    // embedding is at index 13 (after the 13 LEARNING_COLUMNS)
+                    let embedding: Option<Vec<u8>> = row.get(13)?;
+                    Ok((learning, embedding))
+                })
+                .context("Failed to query approved non-task learnings")?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .context("Failed to collect approved non-task learnings")?;
+            Ok(rows)
+        })
+        .await
+    }
+
+    async fn list_learnings_missing_embedding(&self) -> Result<Vec<Learning>> {
+        self.db_call(move |conn| {
+            let sql = format!(
+                "SELECT {LEARNING_COLUMNS} FROM learnings \
+                 WHERE embedding IS NULL AND status = 'approved' AND scope != 'task' \
+                 ORDER BY id"
+            );
+            let mut stmt = conn
+                .prepare(&sql)
+                .context("Failed to prepare list_learnings_missing_embedding")?;
+            let rows = stmt
+                .query_map([], row_to_learning)
+                .context("Failed to query learnings missing embedding")?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .context("Failed to collect learnings missing embedding")?;
             Ok(rows)
         })
         .await

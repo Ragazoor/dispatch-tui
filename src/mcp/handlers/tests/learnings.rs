@@ -48,6 +48,7 @@ async fn create_approved_learning(
             scope_ref,
             tags: &tag_strings,
             source_task_id: None,
+            embedding: None,
         })
         .await
         .unwrap();
