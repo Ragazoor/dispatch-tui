@@ -2,7 +2,7 @@
 use std::sync::Arc;
 
 use super::{ClaimTaskParams, CreateTaskParams, ListTasksFilter, TaskService, UpdateTaskParams};
-use crate::db::{self, Database, ProjectCrud, TaskAndEpicStore, TaskCrud};
+use crate::db::{self, Database, ProjectCrud, TaskCrud};
 use crate::models::{
     EpicId, HookEventKind, ProjectId, SubStatus, TaskId, TaskStatus, TaskTag, UsageReport,
 };

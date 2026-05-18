@@ -286,7 +286,62 @@ impl EpicService {
             .await
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
 
+        if let Some(new_pid) = params.project_id {
+            self.cascade_project_id(epic_id, new_pid).await;
+        }
+
         Ok(epic_id)
+    }
+
+    /// Recursively update project_id for all direct sub-epics and direct tasks
+    /// of the given epic. Called when an epic's project_id changes.
+    async fn cascade_project_id(&self, epic_id: EpicId, project_id: ProjectId) {
+        let sub_epics = match self.db.list_sub_epics(epic_id).await {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(
+                    "cascade_project_id: list_sub_epics failed for epic {}: {e}",
+                    epic_id.0
+                );
+                return;
+            }
+        };
+        for sub in sub_epics {
+            if let Err(e) = self
+                .db
+                .patch_epic(sub.id, &EpicPatch::new().project_id(project_id))
+                .await
+            {
+                tracing::warn!(
+                    "cascade_project_id: patch_epic {} failed: {e}",
+                    sub.id.0
+                );
+            }
+            Box::pin(self.cascade_project_id(sub.id, project_id)).await;
+        }
+
+        let tasks = match self.db.list_tasks_for_epic(epic_id).await {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(
+                    "cascade_project_id: list_tasks_for_epic failed for epic {}: {e}",
+                    epic_id.0
+                );
+                return;
+            }
+        };
+        for task in tasks {
+            if let Err(e) = self
+                .db
+                .patch_task(task.id, &TaskPatch::new().project_id(project_id))
+                .await
+            {
+                tracing::warn!(
+                    "cascade_project_id: patch_task {} failed: {e}",
+                    task.id.0
+                );
+            }
+        }
     }
 
     pub async fn delete_epic(&self, epic_id: EpicId) -> Result<(), ServiceError> {
