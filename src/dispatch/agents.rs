@@ -11,16 +11,15 @@ use super::prompts::{
     build_tmux_window_name, rebase_preamble, EpicContext, LearningInjections, ProjectContext,
     PromptContext, DISPATCH_PLUGIN_DIR,
 };
-use super::repo_map::{self, SystemCtagsExec};
 use super::worktree::provision_worktree;
 
-/// Provision worktree, generate the repo map, build the prompt, write the
-/// prompt file, launch Claude via tmux.
+/// Provision worktree, build the prompt, write the prompt file, launch Claude
+/// via tmux.
 ///
-/// The `make_prompt` closure receives the optional repo-map text generated
-/// over the freshly-provisioned worktree. Splitting the build step into a
-/// closure lets each agent variant compose its own context (learnings, plan,
-/// etc.) while keeping the post-provision repo-map generation in one place.
+/// The `make_prompt` closure builds the full prompt string for the agent.
+/// Splitting the build step into a closure lets each agent variant compose its
+/// own context (learnings, plan, etc.) while keeping the post-provision launch
+/// logic in one place.
 ///
 /// `permission_mode` controls Claude's `--permission-mode` flag:
 /// `None` launches in Claude's default (auto) mode, used by every task
@@ -28,7 +27,7 @@ use super::worktree::provision_worktree;
 /// investigation stays read-only.
 fn dispatch_with_prompt(
     task: &Task,
-    make_prompt: impl FnOnce(Option<String>) -> String,
+    make_prompt: impl FnOnce() -> String,
     runner: &dyn ProcessRunner,
     base_branch: Option<&str>,
     permission_mode: Option<&str>,
@@ -52,22 +51,7 @@ fn dispatch_with_prompt(
 
     let provision = provision_worktree(task, runner, Some(resolved))?;
 
-    let repo_map = {
-        let s = repo_map::settings();
-        if s.budget_tokens == 0 {
-            None
-        } else {
-            repo_map::generate(
-                &SystemCtagsExec,
-                s.binary.as_ref(),
-                std::path::Path::new(&provision.worktree_path),
-                s.budget_tokens,
-                s.timeout,
-            )
-        }
-    };
-
-    let prompt = make_prompt(repo_map);
+    let prompt = make_prompt();
     let full_prompt = format!(
         "{}\n\n\
          Always work from this worktree folder — do not `cd` to the parent repo \
@@ -107,8 +91,8 @@ pub fn dispatch_agent(
 ) -> Result<DispatchResult> {
     dispatch_with_prompt(
         task,
-        |repo_map| {
-            let mut ctx = ctx_with_map(injections, repo_map).with_verify(verify_command);
+        || {
+            let mut ctx = ctx_with_learnings(injections).with_verify(verify_command);
             ctx.tag = task.tag;
             build_prompt(
                 task.id,
@@ -135,9 +119,8 @@ pub fn research_agent(
 ) -> Result<DispatchResult> {
     dispatch_with_prompt(
         task,
-        |repo_map| {
-            let ctx = PromptContext::with_map(LearningInjections::default(), repo_map)
-                .with_verify(verify_command);
+        || {
+            let ctx = PromptContext::default().with_verify(verify_command);
             build_research_prompt(task.id, &task.title, &task.description, epic, project, &ctx)
         },
         runner,
@@ -156,8 +139,8 @@ pub fn quick_dispatch_agent(
 ) -> Result<DispatchResult> {
     dispatch_with_prompt(
         task,
-        |repo_map| {
-            let ctx = ctx_with_map(injections, repo_map).with_verify(verify_command);
+        || {
+            let ctx = ctx_with_learnings(injections).with_verify(verify_command);
             build_quick_dispatch_prompt(
                 task.id,
                 &task.title,
@@ -187,9 +170,8 @@ pub fn epic_planning_agent(
     };
     dispatch_with_prompt(
         task,
-        |repo_map| {
-            let ctx = PromptContext::with_map(LearningInjections::default(), repo_map)
-                .with_verify(verify_command);
+        || {
+            let ctx = PromptContext::default().with_verify(verify_command);
             build_epic_planning_prompt(
                 task.id,
                 &task.title,
@@ -219,20 +201,14 @@ pub async fn fetch_verify_command(
     })
 }
 
-/// Re-borrow `LearningInjections` into a `PromptContext` carrying the
-/// generated repo map. Inner `Vec<&Learning>` clones are cheap (pointer +
-/// length copies) and let the agent functions keep their callers' lifetime.
-fn ctx_with_map<'a>(
-    injections: &'a LearningInjections<'a>,
-    repo_map: Option<String>,
-) -> PromptContext<'a> {
-    PromptContext::with_map(
-        LearningInjections {
-            procedural: injections.procedural.clone(),
-            tiered: injections.tiered.clone(),
-        },
-        repo_map,
-    )
+/// Re-borrow `LearningInjections` into a `PromptContext`. Inner
+/// `Vec<&Learning>` clones are cheap (pointer + length copies) and let the
+/// agent functions keep their callers' lifetime.
+fn ctx_with_learnings<'a>(injections: &'a LearningInjections<'a>) -> PromptContext<'a> {
+    PromptContext::with_learnings(LearningInjections {
+        procedural: injections.procedural.clone(),
+        tiered: injections.tiered.clone(),
+    })
 }
 
 /// Re-open a tmux window for an existing worktree and resume the most recent
