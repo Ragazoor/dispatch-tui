@@ -1015,8 +1015,7 @@ fn filter_state_task_matches_only_active_false_always_passes() {
 #[test]
 fn filter_state_task_matches_only_active_true_requires_tmux_window() {
     use crate::tui::FilterState;
-    let mut state = FilterState::default();
-    state.only_active = true;
+    let state = FilterState { only_active: true, ..Default::default() };
 
     let mut t = make_task(1, TaskStatus::Running);
     t.tmux_window = None;
