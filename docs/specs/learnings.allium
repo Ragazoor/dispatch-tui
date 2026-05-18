@@ -9,8 +9,7 @@
 --           rule implementations, invariants.
 -- Excludes: Core entity/enum definitions (see core.allium — Learning,
 --           LearningScope, LearningKind, LearningStatus, Retrieval,
---           Verdict, VerdictKind, RetrievalSource); repo-map augmentation
---           (see dispatch.allium — AugmentDispatchPromptWithRepoMap).
+--           Verdict, VerdictKind, RetrievalSource).
 
 use "./core.allium" as core
 

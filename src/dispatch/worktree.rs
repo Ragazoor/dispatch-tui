@@ -9,8 +9,8 @@ use crate::tmux;
 use super::prompts::build_tmux_window_name;
 use super::stderr_str;
 
-/// Directory inside each worktree where dispatch caches per-worktree artefacts
-/// (e.g. the repo map). Always added to `<worktree>/.gitignore` so a casual
+/// Directory inside each worktree where dispatch stores per-worktree artefacts.
+/// Always added to `<worktree>/.gitignore` so a casual
 /// `git add .` from an agent does not stage these files.
 const DISPATCH_DIR: &str = ".dispatch";
 const GITIGNORE_FILE: &str = ".gitignore";
