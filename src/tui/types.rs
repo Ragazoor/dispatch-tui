@@ -191,6 +191,7 @@ pub enum Message {
     StartDeleteRepoPath,
     DeleteRepoPath(String),
     CancelPresetInput,
+    ToggleOnlyActive,
     FilterPresetsLoaded(Vec<(String, HashSet<String>, RepoFilterMode)>),
     /// Wrap-up flow messages (rebase only — PR creation is agent-driven via the
     /// `/wrap-up` skill). See [`crate::tui::messages::WrapUpMessage`].

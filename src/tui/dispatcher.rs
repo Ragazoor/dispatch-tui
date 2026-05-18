@@ -243,6 +243,7 @@ pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
         Message::ToggleRepoFilter(path) => app.handle_toggle_repo_filter(path),
         Message::ToggleAllRepoFilter => app.handle_toggle_all_repo_filter(),
         Message::ToggleRepoFilterMode => app.handle_toggle_repo_filter_mode(),
+        Message::ToggleOnlyActive => app.handle_toggle_only_active(),
         Message::MoveRepoCursor(delta) => app.handle_move_repo_cursor(delta),
         Message::StartSavePreset => app.handle_start_save_preset(),
         Message::SaveFilterPreset(name) => app.handle_save_filter_preset(name),

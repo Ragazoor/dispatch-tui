@@ -1037,6 +1037,18 @@ fn handle_key_confirm_delete_repo_path_routes_correctly() {
 }
 
 #[test]
+fn toggle_only_active_flips_flag() {
+    let mut app = make_app();
+    assert!(!app.filter.only_active);
+
+    app.update(Message::ToggleOnlyActive);
+    assert!(app.filter.only_active);
+
+    app.update(Message::ToggleOnlyActive);
+    assert!(!app.filter.only_active);
+}
+
+#[test]
 #[ignore = "requires a real TTY and interactive editor session; run manually to verify"]
 fn buffered_editor_keystrokes_do_not_leak_into_repo_picker() {}
 

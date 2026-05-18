@@ -68,6 +68,12 @@ impl App {
         vec![]
     }
 
+    pub(in crate::tui) fn handle_toggle_only_active(&mut self) -> Vec<Command> {
+        self.filter.only_active = !self.filter.only_active;
+        self.sync_board_selection();
+        vec![]
+    }
+
     pub(in crate::tui) fn handle_toggle_all_repo_filter(&mut self) -> Vec<Command> {
         if self.filter.repos.len() == self.board.repo_paths.len() {
             self.filter.repos.clear();
