@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use include_dir::{include_dir, Dir};
 use std::fs;
 use std::io::Write;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use crate::db::{Database, EpicCrud, EpicPatch};

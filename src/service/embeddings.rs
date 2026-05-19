@@ -47,13 +47,12 @@ impl EmbeddingService {
                     EmbedMsg::Single(EmbedSingle { text, reply }) => {
                         let result = model
                             .embed(vec![text.as_str()], None)
-                            .map(|mut vecs| vecs.remove(0))
-                            .map_err(anyhow::Error::from);
+                            .map(|mut vecs| vecs.remove(0));
                         let _ = reply.send(result);
                     }
                     EmbedMsg::Batch(EmbedBatch { texts, reply }) => {
                         let refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
-                        let result = model.embed(refs, None).map_err(anyhow::Error::from);
+                        let result = model.embed(refs, None);
                         let _ = reply.send(result);
                     }
                 }
