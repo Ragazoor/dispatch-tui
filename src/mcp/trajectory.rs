@@ -7,7 +7,6 @@ use tokio::io::AsyncWriteExt;
 
 #[derive(Debug, Serialize)]
 pub struct TrajectoryEntry {
-    pub schema_version: &'static str,
     pub timestamp: DateTime<Utc>,
     pub task_id: i64,
     pub method: String,
@@ -32,7 +31,14 @@ pub async fn append_entry(worktree: &Path, entry: &TrajectoryEntry) {
             return;
         }
     };
-    match serde_json::to_string(entry) {
+    #[derive(Serialize)]
+    struct WithVersion<'a> {
+        schema_version: &'static str,
+        #[serde(flatten)]
+        entry: &'a TrajectoryEntry,
+    }
+    let payload = WithVersion { schema_version: SCHEMA_VERSION, entry };
+    match serde_json::to_string(&payload) {
         Ok(line) => {
             let bytes = format!("{line}\n");
             if let Err(e) = file.write_all(bytes.as_bytes()).await {
@@ -55,7 +61,6 @@ mod tests {
 
     fn make_entry(method: &str) -> TrajectoryEntry {
         TrajectoryEntry {
-            schema_version: SCHEMA_VERSION,
             timestamp: Utc::now(),
             task_id: 42,
             method: method.to_string(),
@@ -104,6 +109,7 @@ mod tests {
         let dir = tempdir().unwrap();
         // .dispatch/ not created — should not panic
         append_entry(dir.path(), &make_entry("get_task")).await;
+        assert!(!dir.path().join(".dispatch/trajectory.jsonl").exists());
     }
 
     #[tokio::test]
@@ -125,6 +131,6 @@ mod tests {
         assert_eq!(parsed["duration_ms"], 10);
         let ts_str = parsed["timestamp"].as_str().unwrap();
         let parsed_ts = chrono::DateTime::parse_from_rfc3339(ts_str).unwrap();
-        assert_eq!(parsed_ts.timestamp(), expected_ts.timestamp());
+        assert_eq!(parsed_ts.timestamp_nanos_opt(), expected_ts.timestamp_nanos_opt());
     }
 }
