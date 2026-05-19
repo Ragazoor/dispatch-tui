@@ -190,9 +190,7 @@ impl LearningService {
                 .as_deref()
                 .unwrap_or(learning.summary.as_str());
             let kind = params.kind.unwrap_or(learning.kind);
-            let tags = params
-                .tags.as_deref()
-                .unwrap_or(learning.tags.as_slice());
+            let tags = params.tags.as_deref().unwrap_or(learning.tags.as_slice());
             let detail = match &params.detail {
                 Some(FieldUpdate::Set(v)) => Some(v.as_str()),
                 Some(FieldUpdate::Clear) => None,
