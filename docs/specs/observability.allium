@@ -1,0 +1,164 @@
+-- allium: 3
+-- observability.allium
+--
+-- Scope: Trajectory persistence — per-task audit log of MCP tool calls.
+-- Includes: TrajectoryEntry value type, append-on-each-MCP-call rule,
+--           fire-and-forget error handling, gitignore guarantee.
+-- Excludes: tmux pane capture, Claude lifecycle hooks (PreToolUse, Stop —
+--           see agent-health.allium), dispatch-internal commands, reader UIs,
+--           replay tooling.
+
+use "./core.allium" as core
+
+------------------------------------------------------------
+-- Value Types
+------------------------------------------------------------
+
+-- A single line in <worktree>/.dispatch/trajectory.jsonl. Each MCP tool call
+-- from a dispatched-agent caller becomes one TrajectoryEntry, serialised as
+-- a single JSON object on its own line.
+--
+-- args and result are stored as opaque JSON strings to keep this spec free
+-- of MCP payload shape; the schema_version field lets readers detect format
+-- evolution.
+value TrajectoryEntry {
+    schema_version: String     -- semver string, e.g. "1.0.0"
+    timestamp:      Timestamp  -- UTC, RFC 3339
+    task_id:        String     -- stringified Task.id of the caller
+    method:         String     -- MCP tool name (e.g. "update_task")
+    args:           String     -- full tool arguments as received, JSON-encoded
+    result:         String     -- response payload on success (JSON-encoded);
+                               -- on failure, the JSON object {"error": "<msg>"}
+    duration_ms:    Integer    -- wall-clock time from dispatch to response
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    trajectory_schema_version: String = "1.0.0"
+    trajectory_relative_path: String = ".dispatch/trajectory.jsonl"
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- == Append on MCP tool call ==
+
+rule TrajectoryAppend {
+    -- After every dispatched-agent MCP tool call, append a TrajectoryEntry
+    -- to the per-task trajectory file. Session callers and tasks without a
+    -- worktree produce no entry.
+    when: McpToolCall(caller_identity, method, args, result, duration_ms)
+
+    -- Only Task-kind callers are logged. Session callers are silently dropped.
+    requires: caller_identity.kind = task
+
+    -- The caller's task must exist and have a worktree. When the worktree is
+    -- absent (e.g. backlog tasks invoking MCP before dispatch) the entry is
+    -- silently dropped.
+    requires: core/Task.exists(caller_identity.task_id)
+    requires: core/Task.find(caller_identity.task_id).worktree != null
+
+    ensures: append_jsonl(
+        path: core/Task.find(caller_identity.task_id).worktree.path
+              + "/" + config.trajectory_relative_path,
+        entry: TrajectoryEntry {
+            schema_version: config.trajectory_schema_version,
+            timestamp: now,
+            task_id: str(caller_identity.task_id),
+            method: method,
+            args: args,
+            result: result,
+            duration_ms: duration_ms
+        }
+    )
+
+    @guidance
+        -- append_jsonl is a black-box: it opens the file in append mode,
+        -- creates parent directories as needed, writes one JSON-encoded
+        -- TrajectoryEntry followed by "\n", and closes the file.
+        -- Implementation lives behind the MCP handler dispatch boundary so
+        -- that every tool call (create_task, update_task, query_learnings,
+        -- propose_learning, report_usage, send_message, claim, dispatch,
+        -- list_tasks, list_epics, …) is captured uniformly.
+        -- The duration_ms field measures the wall-clock interval from the
+        -- moment the handler receives the parsed JSON-RPC request to the
+        -- moment it returns a response (success or error).
+        -- For failed handler invocations, the result string is the JSON
+        -- object {"error": "<msg>"} where <msg> is the JSON-RPC error
+        -- message; the duration_ms still reflects time-to-error.
+}
+
+-- == Fire-and-forget error handling ==
+
+rule TrajectoryWriteFailureIsSilent {
+    -- Trajectory writes are best-effort. File I/O errors (permission denied,
+    -- disk full, missing parent directory after racy removal, …) must not
+    -- propagate to the calling MCP handler or affect the handler's response.
+    when: TrajectoryWriteFailed(task_id, error)
+
+    ensures: TrajectoryWriteWarning(task_id: task_id, error: error)
+
+    @guidance
+        -- The implementation wraps the append in a fallible block; on error
+        -- the error is forwarded to tracing::warn (target: "trajectory")
+        -- with the task_id and error message, and the handler proceeds to
+        -- return its normal response. There is no retry, no buffering, no
+        -- dead-letter file.
+        -- TrajectoryWriteWarning is observable via the standard tracing
+        -- subscriber; it has no entity representation in this spec.
+}
+
+-- == Gitignore guarantee ==
+
+rule TrajectoryNotGitTracked {
+    -- Trajectory files live under <worktree>/.dispatch/, which must be
+    -- gitignored inside the worktree so trajectory output never leaks into
+    -- commits or PRs.
+    when: WorktreeProvisioned(task, worktree)
+
+    ensures: WorktreeGitignoreContains(
+        worktree: worktree,
+        entry: ".dispatch/"
+    )
+
+    @guidance
+        -- Enforced at worktree provisioning time: after `git worktree add`,
+        -- the dispatch code appends ".dispatch/" to <worktree>/.gitignore
+        -- (creating the file if absent, deduplicating if already present).
+        -- The .gitignore entry is local to the worktree and not committed
+        -- back to the base branch.
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+-- Every persisted TrajectoryEntry must carry the current schema version.
+-- Readers use this field to dispatch between format versions; an entry
+-- without a schema_version is unreadable.
+invariant TrajectoryEntryHasSchemaVersion {
+    for e in TrajectoryEntries:
+        e.schema_version != ""
+}
+
+-- A trajectory entry's task_id must identify a real task. Entries are only
+-- ever produced by TrajectoryAppend, which guards on Task.exists, so this
+-- holds by construction.
+invariant TrajectoryEntryReferencesRealTask {
+    for e in TrajectoryEntries:
+        core/Task.exists(e.task_id)
+}
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+open question "Retention: trajectory.jsonl grows unbounded for long-lived tasks. Should there be a size cap, rotation policy, or a wrap-up-time truncation? Currently the file is left untouched for the life of the worktree."
+
+open question "Replay: should a future reader tool reconstruct task state from trajectory.jsonl, or is it write-only audit? The schema_version field is forward-looking but no reader is specified."
+
+open question "Concurrency: when an agent and a runtime path both attempt MCP tool calls for the same task in the same instant, the JSONL append must remain line-atomic. Is single-process open(O_APPEND) sufficient, or is an explicit advisory lock required?"
