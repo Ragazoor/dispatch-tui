@@ -312,7 +312,10 @@ mod learning_tests {
 
     async fn service_with_db() -> (LearningService, Arc<dyn TaskStore>) {
         let db: Arc<dyn TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
-        (LearningService::new(db.clone(), EmbeddingService::new_test()), db)
+        (
+            LearningService::new(db.clone(), EmbeddingService::new_test()),
+            db,
+        )
     }
 
     async fn seed_task(db: &Arc<dyn TaskStore>) -> TaskId {
@@ -657,10 +660,7 @@ mod learning_tests {
             .await
             .unwrap();
         // Retrieve the raw row and verify embedding bytes are stored.
-        let learnings_with_emb = db
-            .list_all_approved_non_task_learnings()
-            .await
-            .unwrap();
+        let learnings_with_emb = db.list_all_approved_non_task_learnings().await.unwrap();
         let emb_entry = learnings_with_emb
             .iter()
             .find(|(l, _)| l.id == id)

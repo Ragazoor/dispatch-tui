@@ -1,9 +1,7 @@
 use std::sync::Arc;
 
 use crate::db;
-use crate::models::{
-    EpicId, Learning, LearningKind, ProjectId, Task, TaskId, TaskTag,
-};
+use crate::models::{EpicId, Learning, LearningKind, ProjectId, Task, TaskId, TaskTag};
 use crate::service::embeddings::{
     deserialize_candidate_rows, embed_text_for_query, rag_rank_learnings, EmbeddingService,
 };
@@ -587,8 +585,9 @@ pub async fn list_learnings_for_dispatch_rag(
         candidates.len(),
     );
 
-    let (procedurals, others): (Vec<&Learning>, Vec<&Learning>) =
-        all_ranked.into_iter().partition(|l| l.kind == LearningKind::Procedural);
+    let (procedurals, others): (Vec<&Learning>, Vec<&Learning>) = all_ranked
+        .into_iter()
+        .partition(|l| l.kind == LearningKind::Procedural);
 
     let remaining = DISPATCH_INJECTION_CAP.saturating_sub(procedurals.len());
     let mut result: Vec<&Learning> = procedurals;
@@ -618,9 +617,9 @@ pub async fn build_and_record_injections(
             );
         }
     }
-    all.into_iter().partition(|l| l.kind == LearningKind::Procedural)
+    all.into_iter()
+        .partition(|l| l.kind == LearningKind::Procedural)
 }
-
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
@@ -1026,7 +1025,9 @@ mod rag_dispatch_tests {
     use crate::models::{LearningKind, LearningScope, ProjectId, TaskStatus};
     use crate::service::embeddings::{serialize_embedding, EmbeddingService};
 
-    use super::{build_and_record_injections, list_learnings_for_dispatch_rag, DISPATCH_INJECTION_CAP};
+    use super::{
+        build_and_record_injections, list_learnings_for_dispatch_rag, DISPATCH_INJECTION_CAP,
+    };
 
     // The test EmbeddingService returns vec![0.1f32; 384]. Use the same dimensionality
     // for stored embeddings so cosine similarity is computed correctly.
@@ -1253,8 +1254,7 @@ mod rag_dispatch_tests {
             .unwrap();
 
         let emb_svc = EmbeddingService::new_test();
-        let (procedural, tiered) =
-            build_and_record_injections(&*db, &task, &emb_svc).await;
+        let (procedural, tiered) = build_and_record_injections(&*db, &task, &emb_svc).await;
 
         assert_eq!(procedural.len(), 1);
         assert_eq!(procedural[0].id, proc_id);

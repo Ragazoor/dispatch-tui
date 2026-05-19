@@ -231,8 +231,7 @@ pub fn rag_rank_learnings<'a>(
     tag_filter: &[String],
     limit: usize,
 ) -> Vec<&'a Learning> {
-    let tag_set: std::collections::HashSet<&str> =
-        tag_filter.iter().map(|s| s.as_str()).collect();
+    let tag_set: std::collections::HashSet<&str> = tag_filter.iter().map(|s| s.as_str()).collect();
     let mut scored: Vec<ScoredLearning<'_>> = candidates
         .iter()
         .filter_map(|(learning, emb)| {
@@ -263,7 +262,11 @@ pub fn rag_rank_learnings<'a>(
         })
         .collect();
 
-    scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    scored.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     scored.into_iter().take(limit).map(|s| s.learning).collect()
 }
 
@@ -406,7 +409,15 @@ mod tests {
         // low_sim: cosine≈0.26, Repo+match scope_mul=0.20 → score≈0.26*(1.20)≈0.31
         // Verify high-cosine candidate ranks first
         assert_eq!(results.len(), 2);
-        assert_eq!(results[0].id, LearningId(1), "high cosine should rank first");
-        assert_eq!(results[1].id, LearningId(2), "low cosine should rank second");
+        assert_eq!(
+            results[0].id,
+            LearningId(1),
+            "high cosine should rank first"
+        );
+        assert_eq!(
+            results[1].id,
+            LearningId(2),
+            "low cosine should rank second"
+        );
     }
 }

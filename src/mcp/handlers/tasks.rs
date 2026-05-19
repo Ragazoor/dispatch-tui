@@ -987,12 +987,8 @@ pub(super) async fn handle_dispatch_next(
     let runner = state.runner.clone();
     let notify_tx = state.notify_tx.clone();
 
-    let (procedural, tiered) = dispatch::build_and_record_injections(
-        &*db,
-        &next_task,
-        &state.embedding_service,
-    )
-    .await;
+    let (procedural, tiered) =
+        dispatch::build_and_record_injections(&*db, &next_task, &state.embedding_service).await;
     let verify_command = dispatch::fetch_verify_command(&*db, &next_task.repo_path).await;
 
     tokio::spawn(async move {
@@ -1105,12 +1101,8 @@ pub(super) async fn handle_dispatch_task(
     let notify_tx = state.notify_tx.clone();
     let epic_id = task.epic_id;
 
-    let (procedural, tiered) = dispatch::build_and_record_injections(
-        &*db,
-        &task,
-        &state.embedding_service,
-    )
-    .await;
+    let (procedural, tiered) =
+        dispatch::build_and_record_injections(&*db, &task, &state.embedding_service).await;
     let verify_command = dispatch::fetch_verify_command(&*db, &task.repo_path).await;
     let result = tokio::task::spawn_blocking(move || {
         do_dispatch(

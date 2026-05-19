@@ -2436,7 +2436,8 @@ fn test_v55_learning_embedding_column() {
         "INSERT INTO learnings (kind, summary, scope, status, tags, upvote_count, created_at, updated_at) VALUES ('convention', 's', 'user', 'approved', '[]', 0, '2026-05-18T00:00:00Z', '2026-05-18T00:00:00Z')",
         [],
     ).unwrap();
-    conn.execute("UPDATE learnings SET embedding = X'01020304'", []).unwrap();
+    conn.execute("UPDATE learnings SET embedding = X'01020304'", [])
+        .unwrap();
     let val: Option<Vec<u8>> = conn
         .query_row("SELECT embedding FROM learnings LIMIT 1", [], |r| r.get(0))
         .unwrap();

@@ -2500,7 +2500,7 @@ async fn parse_filter_setting_empty_when_no_settings() {
 
 #[tokio::test]
 async fn backfill_fills_missing_embeddings() {
-    use crate::db::{LearningStore, CreateLearningRow};
+    use crate::db::{CreateLearningRow, LearningStore};
     use crate::models::{LearningKind, LearningScope};
     use crate::service::embeddings::EmbeddingService;
 
@@ -2536,12 +2536,18 @@ async fn backfill_fills_missing_embeddings() {
 
     // Confirm both are missing embeddings before backfill.
     let missing_before = db.list_learnings_missing_embedding().await.unwrap();
-    assert_eq!(missing_before.len(), 2, "expected 2 learnings missing embeddings");
+    assert_eq!(
+        missing_before.len(),
+        2,
+        "expected 2 learnings missing embeddings"
+    );
 
     // Run the backfill using the test stub service.
     let emb_svc = EmbeddingService::new_noop();
     let db_for_backfill: Arc<dyn crate::db::LearningStore + Send + Sync> = db.clone();
-    super::backfill_embeddings(db_for_backfill, emb_svc).await.unwrap();
+    super::backfill_embeddings(db_for_backfill, emb_svc)
+        .await
+        .unwrap();
 
     // After backfill, no learnings should be missing embeddings.
     let missing_after = db.list_learnings_missing_embedding().await.unwrap();
@@ -2558,15 +2564,21 @@ async fn backfill_fills_missing_embeddings() {
     let all = db.list_all_approved_non_task_learnings().await.unwrap();
     let emb1 = all.iter().find(|(l, _)| l.id == l1.id).map(|(_, e)| e);
     let emb2 = all.iter().find(|(l, _)| l.id == l2.id).map(|(_, e)| e);
-    assert!(emb1.is_some_and(|e| !e.is_empty()), "learning 1 should have embedding");
-    assert!(emb2.is_some_and(|e| !e.is_empty()), "learning 2 should have embedding");
+    assert!(
+        emb1.is_some_and(|e| !e.is_empty()),
+        "learning 1 should have embedding"
+    );
+    assert!(
+        emb2.is_some_and(|e| !e.is_empty()),
+        "learning 2 should have embedding"
+    );
 }
 
 #[tokio::test]
 async fn backfill_is_noop_when_no_missing_embeddings() {
-    use crate::db::{LearningStore, CreateLearningRow};
+    use crate::db::{CreateLearningRow, LearningStore};
     use crate::models::{LearningKind, LearningScope};
-    use crate::service::embeddings::{EmbeddingService, serialize_embedding};
+    use crate::service::embeddings::{serialize_embedding, EmbeddingService};
 
     let db = Arc::new(Database::open_in_memory().await.unwrap());
 
@@ -2586,13 +2598,21 @@ async fn backfill_is_noop_when_no_missing_embeddings() {
     .unwrap();
 
     let missing_before = db.list_learnings_missing_embedding().await.unwrap();
-    assert!(missing_before.is_empty(), "precondition: no missing embeddings");
+    assert!(
+        missing_before.is_empty(),
+        "precondition: no missing embeddings"
+    );
 
     // Backfill should succeed without doing any work.
     let emb_svc = EmbeddingService::new_noop();
     let db_for_backfill: Arc<dyn crate::db::LearningStore + Send + Sync> = db.clone();
-    super::backfill_embeddings(db_for_backfill, emb_svc).await.unwrap();
+    super::backfill_embeddings(db_for_backfill, emb_svc)
+        .await
+        .unwrap();
 
     let missing_after = db.list_learnings_missing_embedding().await.unwrap();
-    assert!(missing_after.is_empty(), "still no missing embeddings after no-op backfill");
+    assert!(
+        missing_after.is_empty(),
+        "still no missing embeddings after no-op backfill"
+    );
 }

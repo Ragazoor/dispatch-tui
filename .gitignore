@@ -7,3 +7,4 @@ docs/plans/**
 .claude-messages/
 scripts/local/
 .dispatch/
+.fastembed_cache/

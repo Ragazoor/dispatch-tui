@@ -128,8 +128,9 @@ fn install_if_absent(path: &std::path::Path, content: &str, executable: bool) ->
             Ok(())
         }
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
-        Err(e) => Err(anyhow::Error::new(e)
-            .context(format!("Failed to create {}", path.display()))),
+        Err(e) => {
+            Err(anyhow::Error::new(e).context(format!("Failed to create {}", path.display())))
+        }
     }
 }
 
@@ -287,7 +288,10 @@ mod tests {
         let data_dir = tempfile::tempdir().unwrap();
         install_example_script(data_dir.path()).unwrap();
         let repos_conf = data_dir.path().join("scripts").join("repos.conf");
-        assert!(repos_conf.exists(), "repos.conf must be installed alongside fetch-dependabot.sh");
+        assert!(
+            repos_conf.exists(),
+            "repos.conf must be installed alongside fetch-dependabot.sh"
+        );
     }
 
     #[test]
@@ -299,8 +303,7 @@ mod tests {
         install_example_script(data_dir.path()).unwrap();
         let content = std::fs::read_to_string(&repos_conf).unwrap();
         assert_eq!(
-            content,
-            "REPOS=(\"myorg/custom\")\n",
+            content, "REPOS=(\"myorg/custom\")\n",
             "install must not overwrite user edits to repos.conf"
         );
     }

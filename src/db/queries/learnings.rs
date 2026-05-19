@@ -302,9 +302,7 @@ impl super::super::LearningStore for Database {
         .await
     }
 
-    async fn list_all_approved_non_task_learnings(
-        &self,
-    ) -> Result<Vec<(Learning, Vec<u8>)>> {
+    async fn list_all_approved_non_task_learnings(&self) -> Result<Vec<(Learning, Vec<u8>)>> {
         self.db_call(move |conn| {
             let sql = format!(
                 "SELECT {LEARNING_COLUMNS}, embedding FROM learnings \
