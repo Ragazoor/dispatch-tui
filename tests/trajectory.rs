@@ -1,9 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 //! Integration tests for MCP trajectory persistence.
-//!
-//! Test 1 (happy path) will fail until Task 3 wires up `append_entry` into
-//! `handle_mcp`. Tests 2 and 3 should pass immediately because they verify
-//! that no file is written (no wiring needed for the negative cases).
 
 use std::sync::Arc;
 
@@ -41,8 +37,6 @@ async fn post_mcp(router: axum::Router, headers: &[(&str, &str)], body: Value) -
 
 /// Happy path: a task-identity call with a worktree set should write one
 /// JSONL entry to `<worktree>/.dispatch/trajectory.jsonl`.
-///
-/// This test will FAIL until Task 3 wires `append_entry` into `handle_mcp`.
 #[tokio::test]
 async fn task_identity_with_worktree_writes_trajectory_entry() {
     let tmp = tempfile::tempdir().unwrap();

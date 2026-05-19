@@ -15,7 +15,7 @@ pub struct TrajectoryEntry {
     pub duration_ms: u64,
 }
 
-pub const SCHEMA_VERSION: &str = "1.0.0";
+const SCHEMA_VERSION: &str = "1.0.0";
 
 pub async fn append_entry(worktree: &Path, entry: &TrajectoryEntry) {
     let path = worktree.join(".dispatch").join("trajectory.jsonl");

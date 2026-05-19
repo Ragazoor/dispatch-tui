@@ -77,16 +77,22 @@ rule TrajectoryAppend {
     )
 
     @guidance
-        -- append_jsonl is a black-box: it opens the file in append mode,
-        -- creates parent directories as needed, writes one JSON-encoded
-        -- TrajectoryEntry followed by "\n", and closes the file.
+        -- append_jsonl is a black-box: it opens the file in append mode
+        -- (O_APPEND | O_CREAT), writes one JSON-encoded TrajectoryEntry
+        -- followed by "\n", and closes the file.
+        -- The parent `.dispatch/` directory must already exist — append_jsonl
+        -- does NOT create parent directories. If `.dispatch/` is absent the
+        -- file open fails, the error is swallowed via tracing::warn, and no
+        -- entry is written (noop).
         -- Implementation lives behind the MCP handler dispatch boundary so
         -- that every tool call (create_task, update_task, query_learnings,
         -- propose_learning, report_usage, send_message, claim, dispatch,
         -- list_tasks, list_epics, …) is captured uniformly.
         -- The duration_ms field measures the wall-clock interval from the
         -- moment the handler receives the parsed JSON-RPC request to the
-        -- moment it returns a response (success or error).
+        -- moment it returns a response (success or error). The timestamp
+        -- field records the start of the call (before dispatch_tool runs),
+        -- not the time of writing.
         -- For failed handler invocations, the result string is the JSON
         -- object {"error": "<msg>"} where <msg> is the JSON-RPC error
         -- message; the duration_ms still reflects time-to-error.
