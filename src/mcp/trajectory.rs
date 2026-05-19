@@ -5,6 +5,8 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::io::AsyncWriteExt;
 
+use crate::dispatch::DISPATCH_DIR;
+
 #[derive(Debug, Serialize)]
 pub struct TrajectoryEntry {
     pub timestamp: DateTime<Utc>,
@@ -18,7 +20,7 @@ pub struct TrajectoryEntry {
 const SCHEMA_VERSION: &str = "1.0.0";
 
 pub async fn append_entry(worktree: &Path, entry: &TrajectoryEntry) {
-    let path = worktree.join(".dispatch").join("trajectory.jsonl");
+    let path = worktree.join(DISPATCH_DIR).join("trajectory.jsonl");
     let mut file = match tokio::fs::OpenOptions::new()
         .append(true)
         .create(true)
@@ -39,9 +41,9 @@ pub async fn append_entry(worktree: &Path, entry: &TrajectoryEntry) {
     }
     let payload = WithVersion { schema_version: SCHEMA_VERSION, entry };
     match serde_json::to_string(&payload) {
-        Ok(line) => {
-            let bytes = format!("{line}\n");
-            if let Err(e) = file.write_all(bytes.as_bytes()).await {
+        Ok(mut line) => {
+            line.push('\n');
+            if let Err(e) = file.write_all(line.as_bytes()).await {
                 tracing::warn!(error = ?e, path = %path.display(), "failed to write trajectory entry");
             }
         }

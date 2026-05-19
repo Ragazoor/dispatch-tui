@@ -1,39 +1,13 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 //! Integration tests for MCP trajectory persistence.
 
-use std::sync::Arc;
+mod common;
 
-use axum::{
-    body::{to_bytes, Body},
-    http::Request,
-};
 use serde_json::{json, Value};
-use tower::ServiceExt;
 
-use dispatch_tui::db::{self, CreateTaskRequest, Database};
+use dispatch_tui::db::{self, CreateTaskRequest};
 use dispatch_tui::mcp::identity::{HEADER_KIND, HEADER_TASK_ID};
 use dispatch_tui::models::{ProjectId, TaskId, TaskStatus};
-use dispatch_tui::process::{MockProcessRunner, ProcessRunner};
-
-async fn test_router() -> (axum::Router, Arc<dyn db::TaskStore>) {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
-    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let router = dispatch_tui::mcp::router(db.clone(), None, runner);
-    (router, db)
-}
-
-async fn post_mcp(router: axum::Router, headers: &[(&str, &str)], body: Value) -> Value {
-    let mut builder = Request::post("/mcp").header("content-type", "application/json");
-    for (k, v) in headers {
-        builder = builder.header(*k, *v);
-    }
-    let resp = router
-        .oneshot(builder.body(Body::from(body.to_string())).unwrap())
-        .await
-        .unwrap();
-    let bytes = to_bytes(resp.into_body(), 65_536).await.unwrap();
-    serde_json::from_slice(&bytes).unwrap()
-}
 
 /// Happy path: a task-identity call with a worktree set should write one
 /// JSONL entry to `<worktree>/.dispatch/trajectory.jsonl`.
@@ -42,7 +16,7 @@ async fn task_identity_with_worktree_writes_trajectory_entry() {
     let tmp = tempfile::tempdir().unwrap();
     tokio::fs::create_dir_all(tmp.path().join(".dispatch")).await.unwrap();
 
-    let (router, db) = test_router().await;
+    let (router, db) = common::test_router().await;
 
     // Create a task and set its worktree to the temp dir.
     let task_id: TaskId = db
@@ -68,7 +42,7 @@ async fn task_identity_with_worktree_writes_trajectory_entry() {
         .unwrap();
 
     // Call list_tasks via MCP with the task's identity header.
-    let _resp = post_mcp(
+    let _resp = common::post_mcp(
         router,
         &[(HEADER_TASK_ID, &task_id.0.to_string())],
         json!({
@@ -121,7 +95,7 @@ async fn task_identity_with_worktree_writes_trajectory_entry() {
 /// file. (No worktree path → nothing to write to.)
 #[tokio::test]
 async fn task_identity_without_worktree_writes_no_file() {
-    let (router, db) = test_router().await;
+    let (router, db) = common::test_router().await;
 
     let task_id: TaskId = db
         .create_task(CreateTaskRequest {
@@ -142,7 +116,7 @@ async fn task_identity_without_worktree_writes_no_file() {
 
     // Do NOT set a worktree on this task.
 
-    let resp = post_mcp(
+    let resp = common::post_mcp(
         router,
         &[(HEADER_TASK_ID, &task_id.0.to_string())],
         json!({
@@ -176,9 +150,9 @@ async fn session_identity_writes_no_trajectory_file() {
     let tmp = tempfile::tempdir().unwrap();
     tokio::fs::create_dir_all(tmp.path().join(".dispatch")).await.unwrap();
 
-    let (router, _db) = test_router().await;
+    let (router, _db) = common::test_router().await;
 
-    let _resp = post_mcp(
+    let _resp = common::post_mcp(
         router,
         &[(HEADER_KIND, "session")],
         json!({

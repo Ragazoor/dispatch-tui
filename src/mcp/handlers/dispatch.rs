@@ -586,37 +586,42 @@ pub async fn handle_mcp(
                 let tool_name = params.get("name").and_then(Value::as_str).unwrap_or("");
                 let args = params.get("arguments").cloned().unwrap_or(Value::Null);
 
+                let is_task_caller = matches!(identity, CallerIdentity::Task(_));
+                let trajectory_args = if is_task_caller { Some(args.clone()) } else { None };
+
                 let start = std::time::Instant::now();
                 let start_utc = Utc::now();
-                let resp = dispatch_tool(&state, id, identity, tool_name, args.clone()).await;
+                let resp = dispatch_tool(&state, id, identity, tool_name, args).await;
 
-                if let CallerIdentity::Task(task_id) = identity {
+                if let (CallerIdentity::Task(task_id), Some(traj_args)) =
+                    (identity, trajectory_args)
+                {
                     let duration_ms = start.elapsed().as_millis() as u64;
                     let result_value = match &resp.error {
                         Some(err) => serde_json::json!({"error": err.message}),
                         None => resp.result.clone().unwrap_or(Value::Null),
                     };
-                    let worktree_path = state.db.get_task(*task_id).await
-                        .ok()
-                        .flatten()
-                        .and_then(|t| t.worktree);
-                    if let Some(worktree) = worktree_path {
-                        let entry = trajectory::TrajectoryEntry {
-                            timestamp: start_utc,
-                            task_id: task_id.0,
-                            method: tool_name.to_string(),
-                            args,
-                            result: result_value,
-                            duration_ms,
-                        };
-                        let _ = tokio::spawn(async move {
-                            trajectory::append_entry(
-                                std::path::Path::new(&worktree),
-                                &entry,
-                            )
-                            .await;
-                        });
-                    }
+                    let entry = trajectory::TrajectoryEntry {
+                        timestamp: start_utc,
+                        task_id: task_id.0,
+                        method: tool_name.to_string(),
+                        args: traj_args,
+                        result: result_value,
+                        duration_ms,
+                    };
+                    let db = Arc::clone(&state.db);
+                    let tid = *task_id;
+                    let _ = tokio::spawn(async move {
+                        if let Ok(Some(task)) = db.get_task(tid).await {
+                            if let Some(worktree) = task.worktree {
+                                trajectory::append_entry(
+                                    std::path::Path::new(&worktree),
+                                    &entry,
+                                )
+                                .await;
+                            }
+                        }
+                    });
                 }
 
                 // Per MCP spec, tool-execution failures belong in `result` with

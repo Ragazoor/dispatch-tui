@@ -12,7 +12,7 @@ use super::stderr_str;
 /// Directory inside each worktree where dispatch stores per-worktree artefacts.
 /// Always added to `<worktree>/.gitignore` so a casual
 /// `git add .` from an agent does not stage these files.
-const DISPATCH_DIR: &str = ".dispatch";
+pub(crate) const DISPATCH_DIR: &str = ".dispatch";
 const GITIGNORE_FILE: &str = ".gitignore";
 const DISPATCH_GITIGNORE_LINE: &str = ".dispatch/";
 
