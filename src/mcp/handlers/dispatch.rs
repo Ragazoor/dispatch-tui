@@ -9,7 +9,9 @@ use axum::{
 use serde_json::{json, Value};
 
 use crate::mcp::identity::{CallerIdentity, IdentityError};
+use crate::mcp::trajectory;
 use crate::mcp::McpState;
+use chrono::Utc;
 
 use super::epics;
 use super::learnings;
@@ -584,10 +586,41 @@ pub async fn handle_mcp(
                 let tool_name = params.get("name").and_then(Value::as_str).unwrap_or("");
                 let args = params.get("arguments").cloned().unwrap_or(Value::Null);
 
+                let start = std::time::Instant::now();
+                let resp = dispatch_tool(&state, id, identity, tool_name, args.clone()).await;
+
+                if let CallerIdentity::Task(task_id) = identity {
+                    let duration_ms = start.elapsed().as_millis() as u64;
+                    let result_value = match &resp.error {
+                        Some(err) => serde_json::json!({"error": err.message}),
+                        None => resp.result.clone().unwrap_or(Value::Null),
+                    };
+                    let entry = trajectory::TrajectoryEntry {
+                        timestamp: Utc::now(),
+                        task_id: task_id.0,
+                        method: tool_name.to_string(),
+                        args,
+                        result: result_value,
+                        duration_ms,
+                    };
+                    let db = Arc::clone(&state.db);
+                    let tid = *task_id;
+                    tokio::spawn(async move {
+                        if let Ok(Some(task)) = db.get_task(tid).await {
+                            if let Some(worktree) = task.worktree {
+                                trajectory::append_entry(
+                                    std::path::Path::new(&worktree),
+                                    &entry,
+                                )
+                                .await;
+                            }
+                        }
+                    });
+                }
+
                 // Per MCP spec, tool-execution failures belong in `result` with
                 // `isError: true` — not as a JSON-RPC protocol error. Re-wrap any
                 // error returned by the tool dispatch path.
-                let resp = dispatch_tool(&state, id, identity, tool_name, args).await;
                 match resp.error {
                     Some(err) => tool_error(resp.id, err.message),
                     None => resp,
