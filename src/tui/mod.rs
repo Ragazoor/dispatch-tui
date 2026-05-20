@@ -1028,8 +1028,6 @@ impl App {
         }
     }
 
-    /// Reset all kanban column scroll offsets to 0.
-    /// Call after filter or view-mode changes so columns don't appear empty.
     pub(in crate::tui) fn reset_column_scroll(&mut self) {
         for state in &mut self.selection_mut().list_states {
             *state.offset_mut() = 0;
