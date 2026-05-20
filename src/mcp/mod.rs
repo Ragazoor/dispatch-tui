@@ -34,9 +34,9 @@ pub enum McpEvent {
 
 /// One-time token linking a wrap_up call to its exit_session close.
 /// `reflected` tracks whether the reflection prompt has been shown (first call).
-pub struct ExitToken {
-    pub token: String,
-    pub reflected: bool,
+pub(crate) struct ExitToken {
+    pub(crate) token: String,
+    pub(crate) reflected: bool,
 }
 
 pub struct McpState {

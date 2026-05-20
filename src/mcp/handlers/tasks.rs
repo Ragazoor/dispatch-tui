@@ -872,7 +872,6 @@ pub(super) async fn handle_exit_session(
 
     // Two-call flow: first call returns a reflection prompt; second call closes the session.
     // Single write-lock validates the token and flips reflected atomically (no TOCTOU window).
-    // Order: token missing → token wrong → window missing → reflected check.
     let already_reflected = {
         let mut map = state.exit_tokens.write().unwrap();
         match map.get_mut(&task_id) {
@@ -925,6 +924,7 @@ Then call exit_session again (with the same token) to close the session."}]}),
     if let Err(e) = state.db.patch_task(task_id, &patch).await {
         tracing::warn!(task_id = task_id.0, "exit_session: failed to apply closing patch: {e}");
     }
+    state.notify_task_changed(task_id);
     if let Some(epic_id) = task.epic_id {
         if let Err(err) = state.db.recalculate_epic_status(epic_id).await {
             tracing::warn!(
@@ -932,9 +932,6 @@ Then call exit_session again (with the same token) to close the session."}]}),
                 epic_id.0
             );
         }
-    }
-    state.notify_task_changed(task_id);
-    if let Some(epic_id) = task.epic_id {
         state.notify_epic_changed(epic_id);
     }
     let tmux_window = task.tmux_window;
