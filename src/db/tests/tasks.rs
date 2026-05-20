@@ -1215,101 +1215,6 @@ async fn patch_task_clears_sort_order() {
 }
 
 #[tokio::test]
-async fn report_usage_first_insert() {
-    let db = Database::open_in_memory().await.unwrap();
-    let id = db
-        .create_task(CreateTaskRequest {
-            title: "T",
-            description: "D",
-            repo_path: "/r",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            project_id: ProjectId(1),
-            wrap_up_mode: None,
-        })
-        .await
-        .unwrap();
-    db.report_usage(
-        id,
-        &UsageReport {
-            input_tokens: 10_000,
-            output_tokens: 2_000,
-            cache_read_tokens: 0,
-            cache_write_tokens: 0,
-        },
-    )
-    .await
-    .unwrap();
-    let all = db.get_all_usage().await.unwrap();
-    assert_eq!(all.len(), 1);
-    assert_eq!(all[0].task_id, id);
-    assert_eq!(all[0].input_tokens, 10_000);
-    assert_eq!(all[0].output_tokens, 2_000);
-    assert_eq!(all[0].cache_read_tokens, 0);
-    assert_eq!(all[0].cache_write_tokens, 0);
-}
-
-#[tokio::test]
-async fn report_usage_accumulates() {
-    let db = Database::open_in_memory().await.unwrap();
-    let id = db
-        .create_task(CreateTaskRequest {
-            title: "T",
-            description: "D",
-            repo_path: "/r",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            project_id: ProjectId(1),
-            wrap_up_mode: None,
-        })
-        .await
-        .unwrap();
-    db.report_usage(
-        id,
-        &UsageReport {
-            input_tokens: 1_000,
-            output_tokens: 500,
-            cache_read_tokens: 100,
-            cache_write_tokens: 50,
-        },
-    )
-    .await
-    .unwrap();
-    db.report_usage(
-        id,
-        &UsageReport {
-            input_tokens: 500,
-            output_tokens: 250,
-            cache_read_tokens: 50,
-            cache_write_tokens: 25,
-        },
-    )
-    .await
-    .unwrap();
-    let all = db.get_all_usage().await.unwrap();
-    assert_eq!(all.len(), 1);
-    let u = &all[0];
-    assert_eq!(u.input_tokens, 1_500);
-    assert_eq!(u.output_tokens, 750);
-    assert_eq!(u.cache_read_tokens, 150);
-    assert_eq!(u.cache_write_tokens, 75);
-}
-
-#[tokio::test]
-async fn get_all_usage_empty() {
-    let db = Database::open_in_memory().await.unwrap();
-    assert!(db.get_all_usage().await.unwrap().is_empty());
-}
-
-#[tokio::test]
 async fn task_sub_status_persists() {
     let db = Database::open_in_memory().await.unwrap();
     let id = db
@@ -2384,9 +2289,7 @@ async fn upsert_feed_tasks_can_purge_task_with_associated_learning() {
 }
 
 #[tokio::test]
-async fn upsert_feed_tasks_can_purge_task_with_reported_usage() {
-    use crate::models::UsageReport;
-
+async fn upsert_feed_tasks_can_purge_stale_task() {
     let db = in_memory_db().await;
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
@@ -2397,24 +2300,11 @@ async fn upsert_feed_tasks_can_purge_task_with_reported_usage() {
     db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
         .await
         .unwrap();
-    let task_id = db.list_tasks_for_epic(epic.id).await.unwrap()[0].id;
-
-    db.report_usage(
-        task_id,
-        &UsageReport {
-            input_tokens: 1,
-            output_tokens: 1,
-            cache_read_tokens: 0,
-            cache_write_tokens: 0,
-        },
-    )
-    .await
-    .unwrap();
 
     let next = vec![make_feed_item("ext-2", "second")];
     db.upsert_feed_tasks(epic.id, &next, &["/repo".to_string()], &main_branches(1))
         .await
-        .expect("stale feed task with reported usage should be purgeable");
+        .expect("stale feed task should be purgeable");
 }
 
 // ---------------------------------------------------------------------------

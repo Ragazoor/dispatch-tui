@@ -132,9 +132,6 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
     app.update(Message::ProjectsUpdated(projects));
     let paths = database.list_repo_paths().await.unwrap_or_default();
     app.update(Message::RepoPathsUpdated(paths));
-    let usage = database.get_all_usage().await.unwrap_or_default();
-    app.update(Message::RefreshUsage(usage));
-
     load_notifications_pref(&*database, &mut app).await;
     load_main_session(&*database, &*runner, &mut app).await;
     load_per_project_repo_filters(&*database, &mut app).await;

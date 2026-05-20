@@ -125,7 +125,7 @@ mod tests {
         tokio::fs::create_dir_all(dir.path().join(".dispatch"))
             .await
             .unwrap();
-        let entry = make_entry("report_usage");
+        let entry = make_entry("get_task");
         let expected_ts = entry.timestamp;
         append_entry(dir.path(), &entry).await;
         let content = tokio::fs::read_to_string(dir.path().join(".dispatch/trajectory.jsonl"))
@@ -134,7 +134,7 @@ mod tests {
         let parsed: Value = serde_json::from_str(content.trim()).unwrap();
         assert_eq!(parsed["schema_version"], SCHEMA_VERSION);
         assert_eq!(parsed["task_id"], 42);
-        assert_eq!(parsed["method"], "report_usage");
+        assert_eq!(parsed["method"], "get_task");
         assert_eq!(parsed["args"], json!({"task_id": 42}));
         assert_eq!(parsed["duration_ms"], 10);
         let ts_str = parsed["timestamp"].as_str().unwrap();

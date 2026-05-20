@@ -11,7 +11,7 @@ async fn fresh_db_has_latest_schema_version() {
         })
         .await
         .unwrap();
-    assert_eq!(version, 55);
+    assert_eq!(version, 56);
 }
 
 #[tokio::test]
@@ -347,7 +347,7 @@ async fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 55);
+    assert_eq!(version, 56);
 }
 
 #[tokio::test]
@@ -436,7 +436,7 @@ async fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 55);
+    assert_eq!(version, 56);
 }
 
 #[tokio::test]
@@ -541,7 +541,7 @@ async fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 55);
+    assert_eq!(version, 56);
 }
 
 #[tokio::test]
@@ -622,7 +622,7 @@ async fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 55);
+    assert_eq!(version, 56);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -743,7 +743,7 @@ async fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 55);
+    assert_eq!(version, 56);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -1742,7 +1742,7 @@ async fn migration_31_re_expands_tilde_paths() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 55);
+    assert_eq!(version, 56);
 }
 
 #[tokio::test]
@@ -1818,7 +1818,7 @@ async fn migrate_v32_adds_base_branch_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 55);
+    assert_eq!(version, 56);
 }
 
 #[tokio::test]
@@ -1921,7 +1921,7 @@ async fn migration_v38_feed_epic_columns() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 55);
+    assert_eq!(version, 56);
 }
 
 #[tokio::test]
@@ -1934,7 +1934,7 @@ async fn fresh_db_schema_version_is_54() {
         })
         .await
         .unwrap();
-    assert_eq!(version, 55);
+    assert_eq!(version, 56);
 }
 
 #[tokio::test]
@@ -2004,7 +2004,7 @@ async fn migration_v40_creates_learnings_table() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 55);
+    assert_eq!(version, 56);
 }
 
 #[tokio::test]
@@ -2091,30 +2091,16 @@ async fn migration_v41_drops_cost_usd_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 55);
-    // Original token data is preserved
-    let row: (i64, i64, i64, i64, i64) = conn
+    assert_eq!(version, 56);
+    // task_usage dropped entirely by v56
+    let table_count: i64 = conn
         .query_row(
-            "SELECT task_id, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens
-             FROM task_usage WHERE task_id = 999",
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='task_usage'",
             [],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(row, (999, 100, 50, 10, 5));
-    // cost_usd column no longer exists
-    let has_cost_usd: bool = conn
-        .query_row(
-            "SELECT COUNT(*) FROM pragma_table_info('task_usage') WHERE name = 'cost_usd'",
-            [],
-            |r| r.get::<_, i64>(0),
-        )
-        .map(|n| n > 0)
-        .unwrap_or(false);
-    assert!(
-        !has_cost_usd,
-        "cost_usd column should have been removed by migration v41"
-    );
+    assert_eq!(table_count, 0, "task_usage should be dropped by v56");
 }
 
 #[tokio::test]
@@ -2219,7 +2205,7 @@ async fn test_migrate_v43_proposed_to_approved() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 55);
+    assert_eq!(version, 56);
 }
 
 #[tokio::test]
@@ -2442,4 +2428,22 @@ fn test_v55_learning_embedding_column() {
         .query_row("SELECT embedding FROM learnings LIMIT 1", [], |r| r.get(0))
         .unwrap();
     assert_eq!(val, Some(vec![1, 2, 3, 4]));
+}
+
+#[tokio::test]
+async fn migrate_v56_drops_task_usage_table() {
+    let db = in_memory_db().await;
+
+    let count: i64 = db
+        .db_call(|conn| {
+            conn.query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='task_usage'",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(anyhow::Error::from)
+        })
+        .await
+        .unwrap();
+    assert_eq!(count, 0, "task_usage should be dropped by v56");
 }

@@ -84,18 +84,6 @@ pub(super) struct ClaimTaskArgs {
 }
 
 #[derive(Deserialize)]
-pub(super) struct ReportUsageArgs {
-    #[serde(deserialize_with = "deserialize_flexible_i64")]
-    pub(super) task_id: i64,
-    pub(super) input_tokens: i64,
-    pub(super) output_tokens: i64,
-    #[serde(default)]
-    pub(super) cache_read_tokens: i64,
-    #[serde(default)]
-    pub(super) cache_write_tokens: i64,
-}
-
-#[derive(Deserialize)]
 pub(super) struct CreateTaskWithEpicArgs {
     pub(super) title: String,
     pub(super) repo_path: String,
@@ -805,13 +793,11 @@ pub(super) async fn handle_wrap_up(
         WrapUpAction::Pr => {
             let pr_url = match parsed.pr_url.as_deref() {
                 Some(u) if !u.is_empty() => u.to_string(),
-                _ => {
-                    return JsonRpcResponse::err(
-                        id,
-                        -32602,
-                        "pr_url is required for action 'pr' — pass the URL returned by `gh pr create`",
-                    )
-                }
+                _ => return JsonRpcResponse::err(
+                    id,
+                    -32602,
+                    "pr_url is required for action 'pr' — pass the URL returned by `gh pr create`",
+                ),
             };
             let patch = db::TaskPatch::new()
                 .status(TaskStatus::Review)
@@ -834,8 +820,8 @@ pub(super) async fn handle_wrap_up(
                 id,
                 json!({"content": [{"type": "text", "text": format!(
                     "PR recorded (task {tid}, pr_url: {pr_url}). \
-Your session is complete — do not call `exit_session`. \
-PR polling will move this task to Done when the PR merges.",
+                Your session is complete — do not call `exit_session`. \
+                PR polling will move this task to Done when the PR merges.",
                     tid = parsed.task_id
                 )}]}),
             )
@@ -923,7 +909,10 @@ Then call exit_session again (with the same token) to close the session."}]}),
         base_patch
     };
     if let Err(e) = state.db.patch_task(task_id, &patch).await {
-        tracing::warn!(task_id = task_id.0, "exit_session: failed to apply closing patch: {e}");
+        tracing::warn!(
+            task_id = task_id.0,
+            "exit_session: failed to apply closing patch: {e}"
+        );
     }
     state.notify_task_changed(task_id);
     if let Some(epic_id) = task.epic_id {
@@ -942,7 +931,10 @@ Then call exit_session again (with the same token) to close the session."}]}),
             let _ = crate::tmux::kill_window(window, &*runner);
         }
     });
-    JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": "Session closed."}]}))
+    JsonRpcResponse::ok(
+        id,
+        json!({"content": [{"type": "text", "text": "Session closed."}]}),
+    )
 }
 
 fn do_dispatch(
@@ -1284,40 +1276,4 @@ pub(super) async fn handle_send_message(
             to_task.id.0, to_task.title
         )}]}),
     )
-}
-
-pub(super) async fn handle_report_usage(
-    state: &McpState,
-    id: Option<Value>,
-    _identity: &CallerIdentity,
-    args: Value,
-) -> JsonRpcResponse {
-    let parsed = match parse_args::<ReportUsageArgs>(&id, args) {
-        Ok(a) => a,
-        Err(resp) => return resp,
-    };
-    tracing::info!(task_id = parsed.task_id, "MCP report_usage");
-
-    let svc = state.task_service();
-    match svc
-        .report_usage(
-            TaskId(parsed.task_id),
-            &crate::models::UsageReport {
-                input_tokens: parsed.input_tokens,
-                output_tokens: parsed.output_tokens,
-                cache_read_tokens: parsed.cache_read_tokens,
-                cache_write_tokens: parsed.cache_write_tokens,
-            },
-        )
-        .await
-    {
-        Ok(()) => {
-            state.notify();
-            JsonRpcResponse::ok(
-                id,
-                json!({"content": [{"type": "text", "text": format!("Usage recorded for task {}", parsed.task_id)}]}),
-            )
-        }
-        Err(e) => service_err_to_response(id, e),
-    }
 }

@@ -1228,23 +1228,6 @@ fn w_key_on_non_review_task_is_noop() {
 }
 
 #[test]
-fn handle_refresh_usage_stores_by_task_id() {
-    use crate::models::TaskUsage;
-    let mut app = make_app();
-    let usage = vec![TaskUsage {
-        task_id: TaskId(1),
-        input_tokens: 10_000,
-        output_tokens: 2_000,
-        cache_read_tokens: 500,
-        cache_write_tokens: 100,
-        updated_at: chrono::Utc::now(),
-    }];
-    app.update(Message::RefreshUsage(usage));
-    assert!(app.board.usage.contains_key(&TaskId(1)));
-    assert_eq!(app.board.usage[&TaskId(1)].input_tokens, 10_000);
-}
-
-#[test]
 fn active_task_output_does_not_emit_persist() {
     let mut app = App::new(vec![make_task(3, TaskStatus::Running)], ProjectId(1));
     app.board.tasks[0].sub_status = SubStatus::Active;

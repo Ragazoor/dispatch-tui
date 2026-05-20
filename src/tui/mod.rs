@@ -128,7 +128,6 @@ impl App {
                 projects: Vec::new(),
                 view_mode: ViewMode::default(),
                 repo_paths: Vec::new(),
-                usage: HashMap::new(),
                 split: SplitState::default(),
                 flattened: false,
             },

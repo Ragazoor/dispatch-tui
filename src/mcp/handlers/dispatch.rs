@@ -373,20 +373,6 @@ PR polling drives the task to Done on merge.",
             "required": ["task_id"]
         };
 
-    async "report_usage" => tasks::handle_report_usage,
-        "Report token usage for a task session. Accumulates across sessions.",
-        {
-            "type": "object",
-            "properties": {
-                "task_id":            { "type": "integer", "description": "The task ID" },
-                "input_tokens":       { "type": "integer", "description": "Input tokens used" },
-                "output_tokens":      { "type": "integer", "description": "Output tokens used" },
-                "cache_read_tokens":  { "type": "integer", "description": "Cache read tokens (optional)" },
-                "cache_write_tokens": { "type": "integer", "description": "Cache write tokens (optional)" }
-            },
-            "required": ["task_id", "input_tokens", "output_tokens"]
-        };
-
     async "send_message" => tasks::handle_send_message,
         "Send a message/prompt to another running agent. The message is written to a file in the target's worktree and a notification is injected into their tmux window. Fire-and-forget — no response tracking.",
         {

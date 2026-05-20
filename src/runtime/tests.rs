@@ -1546,14 +1546,6 @@ async fn exec_refresh_epics_from_db_syncs_to_app() {
     assert_eq!(app.epics()[0].title, "Direct");
 }
 
-#[tokio::test]
-async fn exec_refresh_usage_from_db_syncs_to_app() {
-    let (rt, mut app) = test_runtime().await;
-    // Just verify it doesn't error with empty DB
-    rt.exec_refresh_usage_from_db(&mut app).await;
-    assert!(app.error_popup().is_none());
-}
-
 // -----------------------------------------------------------------------
 // Split mode tests
 // -----------------------------------------------------------------------

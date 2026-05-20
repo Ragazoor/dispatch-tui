@@ -129,19 +129,6 @@ async fn soft_archive_epic_does_not_violate_foreign_keys() {
         .unwrap();
     db.set_task_epic_id(task_id, Some(epic.id)).await.unwrap();
 
-    // Insert a task_usage row — every dispatched task gets one.
-    db.report_usage(
-        task_id,
-        &UsageReport {
-            input_tokens: 10,
-            output_tokens: 20,
-            cache_read_tokens: 0,
-            cache_write_tokens: 0,
-        },
-    )
-    .await
-    .unwrap();
-
     // Insert a learning that references the task as its source.
     db.create_learning(CreateLearningRow {
         kind: LearningKind::Convention,
@@ -171,8 +158,4 @@ async fn soft_archive_epic_does_not_violate_foreign_keys() {
     assert_eq!(archived_task.status, TaskStatus::Archived);
     let archived_epic = db.get_epic(epic.id).await.unwrap().unwrap();
     assert_eq!(archived_epic.status, TaskStatus::Archived);
-
-    // Usage row still references the (still-existing) task.
-    let usage_rows = db.get_all_usage().await.unwrap();
-    assert!(usage_rows.iter().any(|u| u.task_id == task_id));
 }

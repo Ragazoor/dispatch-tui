@@ -4,7 +4,7 @@ use std::time::Instant;
 use ratatui::widgets::ListState;
 
 use crate::models::{
-    Epic, EpicId, EpicSubstatus, Project, ProjectId, Task, TaskId, TaskStatus, TaskTag, TaskUsage,
+    Epic, EpicId, EpicSubstatus, Project, ProjectId, Task, TaskId, TaskStatus, TaskTag,
     TipsShowMode, WrapUpMode, DEFAULT_BASE_BRANCH,
 };
 
@@ -172,7 +172,6 @@ pub enum Message {
     SplitPaneClosed,
     /// Epic-domain messages — see [`crate::tui::messages::EpicMessage`].
     Epic(crate::tui::messages::EpicMessage),
-    RefreshUsage(Vec<TaskUsage>),
     /// PR flow messages — see [`crate::tui::messages::PrMessage`].
     Pr(crate::tui::messages::PrMessage),
     // Repo filter
@@ -401,7 +400,6 @@ pub struct BoardState {
     pub(in crate::tui) projects: Vec<Project>,
     pub(in crate::tui) view_mode: ViewMode,
     pub(in crate::tui) repo_paths: Vec<String>,
-    pub(in crate::tui) usage: HashMap<TaskId, TaskUsage>,
     pub(in crate::tui) split: SplitState,
     /// Flattened rendering mode: when true, epic cards are hidden and every
     /// descendant task of the current view surfaces directly in its status

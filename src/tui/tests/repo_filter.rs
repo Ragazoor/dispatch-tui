@@ -1437,7 +1437,11 @@ fn filter_and_view_changes_reset_column_scroll_offsets() {
         }
         update(&mut app);
         for state in &app.selection().list_states {
-            assert_eq!(state.offset(), 0, "{label} should reset column scroll offsets");
+            assert_eq!(
+                state.offset(),
+                0,
+                "{label} should reset column scroll offsets"
+            );
         }
     }
 
@@ -1461,6 +1465,8 @@ fn filter_and_view_changes_reset_column_scroll_offsets() {
         app.update(Message::LoadFilterPreset("my-preset".to_string()));
     });
     check("ToggleFlattened", |app| {
-        app.update(Message::Task(crate::tui::messages::TaskMessage::ToggleFlattened));
+        app.update(Message::Task(
+            crate::tui::messages::TaskMessage::ToggleFlattened,
+        ));
     });
 }

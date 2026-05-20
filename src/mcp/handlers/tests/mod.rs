@@ -26,20 +26,30 @@ use super::dispatch::{handle_mcp, tool_definitions};
 use super::epics::{CreateEpicArgs, GetEpicArgs, UpdateEpicArgs};
 use super::tasks::{
     ClaimTaskArgs, CreateTaskWithEpicArgs, DispatchNextArgs, ExitSessionArgs, GetTaskArgs,
-    ListTasksArgs, ReportUsageArgs, SendMessageArgs, UpdateTaskArgs, WrapUpArgs,
+    ListTasksArgs, SendMessageArgs, UpdateTaskArgs, WrapUpArgs,
 };
 use super::types::{JsonRpcRequest, JsonRpcResponse};
 
 async fn test_state() -> Arc<McpState> {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    Arc::new(McpState::new(db, None, runner, EmbeddingService::new_test()))
+    Arc::new(McpState::new(
+        db,
+        None,
+        runner,
+        EmbeddingService::new_test(),
+    ))
 }
 
 async fn test_state_with_db() -> (Arc<McpState>, Arc<dyn db::TaskStore>) {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
+    let state = Arc::new(McpState::new(
+        db.clone(),
+        None,
+        runner,
+        EmbeddingService::new_test(),
+    ));
     (state, db)
 }
 
@@ -535,19 +545,6 @@ async fn tool_schemas_match_arg_structs() {
             json!({"task_id": 1, "action": "rebase", "learning_verdicts": [{"learning_id": 1, "verdict": "helped"}]}),
         ),
         (
-            "report_usage",
-            BTreeSet::from([
-                "task_id",
-                "input_tokens",
-                "output_tokens",
-                "cache_read_tokens",
-                "cache_write_tokens",
-            ]),
-            BTreeSet::from(["task_id", "input_tokens", "output_tokens"]),
-            json!({"task_id": 1, "input_tokens": 1000,
-                   "output_tokens": 500, "cache_read_tokens": 100, "cache_write_tokens": 50}),
-        ),
-        (
             "send_message",
             BTreeSet::from(["from_task_id", "to_task_id", "body"]),
             BTreeSet::from(["from_task_id", "to_task_id", "body"]),
@@ -634,9 +631,6 @@ async fn tool_schemas_match_arg_structs() {
             }
             "claim_task" => {
                 serde_json::from_value::<ClaimTaskArgs>(payload.clone()).unwrap();
-            }
-            "report_usage" => {
-                serde_json::from_value::<ReportUsageArgs>(payload.clone()).unwrap();
             }
             "create_epic" => {
                 serde_json::from_value::<CreateEpicArgs>(payload.clone()).unwrap();

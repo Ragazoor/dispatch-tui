@@ -3,9 +3,7 @@ use std::sync::Arc;
 
 use super::{ClaimTaskParams, CreateTaskParams, ListTasksFilter, TaskService, UpdateTaskParams};
 use crate::db::{self, Database, ProjectCrud, TaskCrud};
-use crate::models::{
-    EpicId, HookEventKind, ProjectId, SubStatus, TaskId, TaskStatus, TaskTag, UsageReport,
-};
+use crate::models::{EpicId, HookEventKind, ProjectId, SubStatus, TaskId, TaskStatus, TaskTag};
 use crate::service::epics::{CreateEpicParams, EpicService, UpdateEpicParams};
 use crate::service::{FieldUpdate, ServiceError};
 
@@ -410,25 +408,6 @@ async fn get_task_not_found() {
     let db = test_db().await;
     let svc = task_svc(&db);
     let err = svc.get_task(TaskId(999)).await.unwrap_err();
-    assert!(matches!(err, ServiceError::NotFound(_)));
-}
-
-#[tokio::test]
-async fn report_usage_for_nonexistent_task() {
-    let db = test_db().await;
-    let svc = task_svc(&db);
-    let err = svc
-        .report_usage(
-            TaskId(999),
-            &UsageReport {
-                input_tokens: 100,
-                output_tokens: 50,
-                cache_read_tokens: 0,
-                cache_write_tokens: 0,
-            },
-        )
-        .await
-        .unwrap_err();
     assert!(matches!(err, ServiceError::NotFound(_)));
 }
 

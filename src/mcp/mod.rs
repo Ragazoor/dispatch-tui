@@ -101,10 +101,13 @@ impl McpState {
     /// Returns the token string to embed in the response.
     pub fn issue_exit_token(&self, task_id: TaskId) -> String {
         let token = Uuid::new_v4().to_string();
-        self.exit_tokens
-            .write()
-            .unwrap()
-            .insert(task_id, ExitToken { token: token.clone(), reflected: false });
+        self.exit_tokens.write().unwrap().insert(
+            task_id,
+            ExitToken {
+                token: token.clone(),
+                reflected: false,
+            },
+        );
         token
     }
 

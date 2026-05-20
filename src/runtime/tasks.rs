@@ -348,7 +348,6 @@ impl TuiRuntime {
             }
         }
         self.exec_refresh_epics_from_db(app).await;
-        self.exec_refresh_usage_from_db(app).await;
         self.exec_refresh_needs_review_count(app).await;
         cmds
     }

@@ -53,19 +53,6 @@ impl TuiRuntime {
         }
     }
 
-    pub(super) async fn exec_refresh_usage_from_db(&self, app: &mut App) {
-        match self.database.get_all_usage().await {
-            Ok(usage) => {
-                app.update(Message::RefreshUsage(usage));
-            }
-            Err(e) => {
-                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                    Self::db_error("refreshing usage", e),
-                )));
-            }
-        }
-    }
-
     pub(super) fn exec_open_in_browser(&self, url: String) {
         let runner = self.runner.clone();
         tokio::task::spawn_blocking(move || {

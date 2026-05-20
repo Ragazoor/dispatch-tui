@@ -9,7 +9,7 @@ use std::sync::Arc;
 use crate::db::{self, CreateTaskRequest, TaskPatch};
 use crate::models::{
     classify_agent_activity, EpicId, HookEventKind, SubStatus, Task, TaskId, TaskStatus,
-    UsageReport, DEFAULT_BASE_BRANCH,
+    DEFAULT_BASE_BRANCH,
 };
 use crate::service::ServiceError;
 
@@ -406,20 +406,6 @@ impl TaskService {
         }
 
         Ok(task)
-    }
-
-    pub async fn report_usage(
-        &self,
-        task_id: TaskId,
-        usage: &UsageReport,
-    ) -> Result<(), ServiceError> {
-        // Verify task exists
-        self.get_task(task_id).await?;
-
-        self.db
-            .report_usage(task_id, usage)
-            .await
-            .map_err(|e| ServiceError::Internal(format!("Failed to record usage: {e}")))
     }
 
     pub async fn validate_send_message(

@@ -12,7 +12,7 @@ use std::path::Path;
 use crate::models::{
     Epic, EpicId, FeedItem, Learning, LearningId, LearningKind, LearningRetrieval, LearningScope,
     LearningStatus, LearningVerdict, Project, ProjectId, RetrievalSource, SubStatus, Task, TaskId,
-    TaskStatus, TaskTag, TaskUsage, UsageReport, WrapUpMode,
+    TaskStatus, TaskTag, WrapUpMode,
 };
 
 // ---------------------------------------------------------------------------
@@ -159,8 +159,6 @@ pub trait TaskCrud: Send + Sync {
         worktree: &str,
         exclude_id: TaskId,
     ) -> Result<bool>;
-    async fn report_usage(&self, task_id: TaskId, usage: &UsageReport) -> Result<()>;
-    async fn get_all_usage(&self) -> Result<Vec<TaskUsage>>;
     /// Upsert tasks from a feed. Inserts new tasks; on conflict (epic_id, external_id)
     /// updates title and description only — status and other user-managed fields are preserved.
     ///

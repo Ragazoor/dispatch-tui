@@ -3,9 +3,7 @@
 use std::collections::HashSet;
 
 use crate::dispatch;
-use crate::models::{
-    descendant_epic_ids, DispatchMode, Epic, EpicId, Task, TaskId, TaskStatus, TaskUsage,
-};
+use crate::models::{descendant_epic_ids, DispatchMode, Epic, EpicId, Task, TaskId, TaskStatus};
 
 use super::super::types::*;
 use super::super::{truncate_title, App, TITLE_DISPLAY_LENGTH};
@@ -242,11 +240,6 @@ impl App {
         vec![]
     }
 
-    pub(in crate::tui) fn handle_refresh_usage(&mut self, usage: Vec<TaskUsage>) -> Vec<Command> {
-        self.board.usage = usage.into_iter().map(|u| (u.task_id, u)).collect();
-        vec![]
-    }
-
     pub(in crate::tui) fn handle_epic_created(&mut self, epic: Epic) -> Vec<Command> {
         self.board.epics.push(epic);
         vec![]
@@ -362,8 +355,8 @@ impl App {
     pub(in crate::tui) fn handle_archive_epic(&mut self, id: EpicId) -> Vec<Command> {
         // Soft-archive: recursively transition the epic + all sub-epics + their
         // active subtasks to status = Archived. Nothing is deleted, so the
-        // archive path doesn't exercise FK references from task_usage /
-        // learnings.source_task_id (which would block a hard delete).
+        // archive path doesn't exercise FK references from learnings.source_task_id
+        // (which would block a hard delete).
         let mut cmds = Vec::new();
 
         let subtree = descendant_epic_ids(id, &self.board.epics);

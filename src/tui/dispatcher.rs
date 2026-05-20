@@ -219,7 +219,6 @@ pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
             app.handle_split_pane_opened(pane_id, task_id)
         }
         Message::SplitPaneClosed => app.handle_split_pane_closed(),
-        Message::RefreshUsage(usage) => app.handle_refresh_usage(usage),
         Message::RepoPathsUpdated(paths) => app.handle_repo_paths_updated(paths),
 
         // ── Task wrap-up ──
