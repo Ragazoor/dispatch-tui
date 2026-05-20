@@ -1384,3 +1384,31 @@ fn only_active_filter_column_item_count_excludes_inactive_epics() {
     let count = app.column_item_count(TaskStatus::Backlog);
     assert_eq!(count, 1, "only the epic with an active task should be counted");
 }
+
+#[test]
+fn only_active_filter_shows_root_epic_when_grandchild_task_is_active() {
+    // epic(10) → sub-epic(20) → task(with tmux_window)
+    // Root epic should be visible because a descendant task is active.
+    let mut app = App::new(vec![], ProjectId(1));
+
+    let mut root_epic = make_epic(10);
+    root_epic.status = TaskStatus::Backlog;
+
+    let mut sub_epic = make_epic(20);
+    sub_epic.status = TaskStatus::Backlog;
+    sub_epic.parent_epic_id = Some(EpicId(10));
+
+    let mut t = make_task(1, TaskStatus::Backlog);
+    t.epic_id = Some(EpicId(20));
+    t.tmux_window = Some("dispatch:1".to_string());
+
+    app.board.epics = vec![root_epic, sub_epic];
+    app.board.tasks = vec![t];
+    app.filter.only_active = true;
+
+    let items = app.column_items_for_status(TaskStatus::Backlog);
+    assert!(
+        items.iter().any(|i| matches!(i, ColumnItem::Epic(e) if e.id == EpicId(10))),
+        "root epic should be visible when a grandchild task is active"
+    );
+}

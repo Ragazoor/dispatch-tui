@@ -736,7 +736,7 @@ impl App {
                 .iter()
                 .filter(|e| {
                     e.parent_epic_id.is_none()
-                        && self.filter.matches(&e.repo_path)
+                        && self.repo_matches(&e.repo_path)
                         && self.project_matches(e.project_id)
                         && e.status == status
                         && self.epic_matches(e.id)
