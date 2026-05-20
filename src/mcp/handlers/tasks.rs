@@ -725,11 +725,18 @@ pub(super) async fn handle_wrap_up(
                 ),
                 None => String::new(),
             };
+            let token = uuid::Uuid::new_v4().to_string();
+            state.exit_tokens.write().unwrap().insert(
+                task_id,
+                crate::mcp::ExitToken { token: token.clone(), reflected: false },
+            );
             JsonRpcResponse::ok(
                 id,
                 json!({"content": [{"type": "text", "text": format!(
                     "wrap_up complete (task {}, action: done). Task marked as done — no git operations performed. \
-                The session is NOT yet closed.{verify_line} You MUST call `exit_session` next as your final action.",
+                The session is NOT yet closed.{verify_line} \
+                Exit token: {token} — pass this token to exit_session to close your session. \
+                You MUST call `exit_session` next as your final action.",
                     parsed.task_id
                 )}]}),
             )
@@ -772,10 +779,16 @@ pub(super) async fn handle_wrap_up(
                         ),
                         None => String::new(),
                     };
+                    let token = uuid::Uuid::new_v4().to_string();
+                    state.exit_tokens.write().unwrap().insert(
+                        task_id,
+                        crate::mcp::ExitToken { token: token.clone(), reflected: false },
+                    );
                     JsonRpcResponse::ok(
                         id,
                         json!({"content": [{"type": "text", "text": format!(
                             "wrap_up complete (task {}, action: rebase). The session is NOT yet closed.{verify_line} \
+                        Exit token: {token} — pass this token to exit_session. \
                         You MUST call `exit_session` next as your final action — without it, the tmux window stays alive \
                         and the task remains in its current status. Do not stop, and do not call any other tool first.",
                             parsed.task_id

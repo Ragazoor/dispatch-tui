@@ -2359,6 +2359,15 @@ async fn wrap_up_rebase_response_demands_exit_session_imperatively() {
         !text.contains("when ready"),
         "response must not be advisory ('when ready'); got: {text}"
     );
+
+    let map = state.exit_tokens.read().unwrap();
+    let et = map
+        .get(&task_id)
+        .expect("token should be stored after successful rebase");
+    assert!(
+        text.contains(&et.token),
+        "response must include the exit token; got: {text}"
+    );
 }
 
 #[tokio::test]
@@ -2485,6 +2494,85 @@ async fn wrap_up_rebase_returns_started() {
         text.contains("wrap_up complete"),
         "Expected 'wrap_up complete', got: {text}"
     );
+}
+
+#[tokio::test]
+async fn wrap_up_rebase_returns_exit_token() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"main\n"),
+        MockProcessRunner::fail(""),
+        MockProcessRunner::ok(),
+        MockProcessRunner::ok(),
+    ]));
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
+    let task_id = create_wrappable_task(&db).await;
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "wrap_up", "arguments": { "task_id": task_id.0, "action": "rebase" } })),
+    )
+    .await;
+
+    assert!(!is_error(&resp), "expected success, got: {}", error_message(&resp));
+    let text = extract_response_text(&resp);
+
+    let map = state.exit_tokens.read().unwrap();
+    let et = map.get(&task_id).expect("token should be in exit_tokens after wrap_up rebase");
+    assert!(!et.token.is_empty(), "token must be non-empty");
+    assert!(!et.reflected, "reflected must start false");
+    assert!(
+        text.contains(&et.token),
+        "response text must contain the token; got: {text}"
+    );
+}
+
+#[tokio::test]
+async fn wrap_up_done_returns_exit_token() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
+
+    let task_id = db
+        .create_task(CreateTaskRequest {
+            title: "T",
+            description: "d",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Running,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+            wrap_up_mode: None,
+        })
+        .await
+        .unwrap();
+    db.patch_task(
+        task_id,
+        &db::TaskPatch::new()
+            .worktree(Some("/repo/.worktrees/1-t"))
+            .tmux_window(Some("task-1")),
+    )
+    .await
+    .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "wrap_up", "arguments": { "task_id": task_id.0, "action": "done" } })),
+    )
+    .await;
+
+    assert!(!is_error(&resp), "expected success, got: {}", error_message(&resp));
+    let text = extract_response_text(&resp);
+
+    let map = state.exit_tokens.read().unwrap();
+    let et = map.get(&task_id).expect("token should be in exit_tokens after wrap_up done");
+    assert!(!et.token.is_empty(), "token must be non-empty");
+    assert!(text.contains(&et.token), "response text must contain the token; got: {text}");
 }
 
 #[tokio::test]
