@@ -1308,3 +1308,79 @@ fn status_bar_no_active_badge_when_only_active_disabled() {
         "status bar should not show [active] badge when only_active is false"
     );
 }
+
+// Epic filtering with only_active
+// ---------------------------------------------------------------------------
+
+#[test]
+fn only_active_filter_hides_epic_with_no_active_tasks() {
+    let mut app = App::new(vec![], ProjectId(1));
+    let mut epic = make_epic(10);
+    epic.status = TaskStatus::Backlog;
+    let mut t = make_task(1, TaskStatus::Backlog);
+    t.epic_id = Some(EpicId(10));
+    t.tmux_window = None;
+    app.board.epics = vec![epic];
+    app.board.tasks = vec![t];
+    app.filter.only_active = true;
+
+    let items = app.column_items_for_status(TaskStatus::Backlog);
+    assert!(
+        items.iter().all(|i| !matches!(i, ColumnItem::Epic(_))),
+        "epic with no active tasks should be hidden when only_active is set"
+    );
+}
+
+#[test]
+fn only_active_filter_shows_epic_with_active_task() {
+    let mut app = App::new(vec![], ProjectId(1));
+    let mut epic = make_epic(10);
+    epic.status = TaskStatus::Backlog;
+    let mut t = make_task(1, TaskStatus::Backlog);
+    t.epic_id = Some(EpicId(10));
+    t.tmux_window = Some("dispatch:1".to_string());
+    app.board.epics = vec![epic];
+    app.board.tasks = vec![t];
+    app.filter.only_active = true;
+
+    let items = app.column_items_for_status(TaskStatus::Backlog);
+    assert!(
+        items.iter().any(|i| matches!(i, ColumnItem::Epic(e) if e.id == EpicId(10))),
+        "epic with an active task should be visible when only_active is set"
+    );
+}
+
+#[test]
+fn only_active_filter_off_shows_epics_without_active_tasks() {
+    let mut app = App::new(vec![], ProjectId(1));
+    let mut epic = make_epic(10);
+    epic.status = TaskStatus::Backlog;
+    app.board.epics = vec![epic];
+    app.filter.only_active = false;
+
+    let items = app.column_items_for_status(TaskStatus::Backlog);
+    assert!(
+        items.iter().any(|i| matches!(i, ColumnItem::Epic(e) if e.id == EpicId(10))),
+        "epic should be visible when only_active is off"
+    );
+}
+
+#[test]
+fn only_active_filter_column_item_count_excludes_inactive_epics() {
+    let mut app = App::new(vec![], ProjectId(1));
+    let mut epic_active = make_epic(10);
+    epic_active.status = TaskStatus::Backlog;
+    let mut epic_inactive = make_epic(20);
+    epic_inactive.status = TaskStatus::Backlog;
+
+    let mut t = make_task(1, TaskStatus::Backlog);
+    t.epic_id = Some(EpicId(10));
+    t.tmux_window = Some("dispatch:1".to_string());
+
+    app.board.epics = vec![epic_active, epic_inactive];
+    app.board.tasks = vec![t];
+    app.filter.only_active = true;
+
+    let count = app.column_item_count(TaskStatus::Backlog);
+    assert_eq!(count, 1, "only the epic with an active task should be counted");
+}

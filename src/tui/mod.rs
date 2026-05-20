@@ -457,6 +457,14 @@ impl App {
         self.active_is_default || project_id == self.active_project
     }
 
+    fn epic_has_active_task(&self, epic_id: EpicId) -> bool {
+        let epic_ids = crate::models::descendant_epic_ids(epic_id, &self.board.epics);
+        self.board
+            .tasks
+            .iter()
+            .any(|t| matches!(t.epic_id, Some(eid) if epic_ids.contains(&eid)) && t.tmux_window.is_some())
+    }
+
     /// Return tasks visible in the current view.
     /// Board view: standalone tasks only (epic_id is None).
     /// Epic view: only subtasks of the active epic.
@@ -650,6 +658,9 @@ impl App {
                     if !self.project_matches(epic.project_id) {
                         continue;
                     }
+                    if self.filter.only_active && !self.epic_has_active_task(epic.id) {
+                        continue;
+                    }
                     if epic.status == status {
                         items.push(ColumnItem::Epic(epic));
                     }
@@ -660,6 +671,9 @@ impl App {
                 let current = *epic_id;
                 for epic in &self.board.epics {
                     if epic.parent_epic_id != Some(current) {
+                        continue;
+                    }
+                    if self.filter.only_active && !self.epic_has_active_task(epic.id) {
                         continue;
                     }
                     if epic.status == status {
@@ -722,6 +736,7 @@ impl App {
                         && self.filter.matches(&e.repo_path)
                         && self.project_matches(e.project_id)
                         && e.status == status
+                        && (!self.filter.only_active || self.epic_has_active_task(e.id))
                 })
                 .count(),
             ViewMode::Epic { epic_id, .. } => {
@@ -729,7 +744,11 @@ impl App {
                 self.board
                     .epics
                     .iter()
-                    .filter(|e| e.parent_epic_id == Some(current) && e.status == status)
+                    .filter(|e| {
+                        e.parent_epic_id == Some(current)
+                            && e.status == status
+                            && (!self.filter.only_active || self.epic_has_active_task(e.id))
+                    })
                     .count()
             }
             ViewMode::TaskDetail { .. } | ViewMode::Learnings { .. } => {
@@ -766,6 +785,7 @@ impl App {
                     e.parent_epic_id.is_none()
                         && self.repo_matches(&e.repo_path)
                         && self.project_matches(e.project_id)
+                        && (!self.filter.only_active || self.epic_has_active_task(e.id))
                 })
                 .collect(),
             ViewMode::Epic { epic_id, .. } => {
@@ -773,7 +793,10 @@ impl App {
                 self.board
                     .epics
                     .iter()
-                    .filter(|e| e.parent_epic_id == Some(current))
+                    .filter(|e| {
+                        e.parent_epic_id == Some(current)
+                            && (!self.filter.only_active || self.epic_has_active_task(e.id))
+                    })
                     .collect()
             }
             ViewMode::TaskDetail { .. } | ViewMode::Learnings { .. } => {
