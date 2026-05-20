@@ -167,8 +167,11 @@ rule WrapUpRebase {
         -- The worktree is preserved after a successful rebase (cleaned
         -- up only on archive). The MCP wrap_up handler calls finish_task
         -- with tmux_window=None so the agent's session stays alive until
-        -- it explicitly calls exit_session. Available from both the TUI
-        -- (W then r) and MCP (wrap_up tool with action "rebase").
+        -- it explicitly calls exit_session. The MCP wrap_up handler returns
+        -- an exit token in its success response. The agent MUST pass this
+        -- token to exit_session to close its session.
+        -- Available from both the TUI (W then r) and MCP (wrap_up tool with
+        -- action "rebase").
         --
         -- Shared-worktree TUI fast-path: when the TUI Finish path (W+r)
         -- detects that another active task shares the same worktree,
@@ -208,8 +211,12 @@ rule WrapUpPr {
         --   gh pr create --draft --base <task.base_branch>
         --     --head <owner>:<branch> --repo <owner>/<repo>
         --     --title <agent-authored> --body <agent-authored>
-        -- and then call MCP update_task with pr_url=<url> and
-        -- status=review to trigger this rule. The --head uses the
+        -- and then call MCP wrap_up with action="pr" and pr_url=<url> to trigger
+        -- this rule. wrap_up(action="pr") sets task.pr_url and task.status=review
+        -- in a single call. No exit token is returned — the agent must NOT call
+        -- exit_session. The agent exits naturally; window closure on a review task
+        -- silently clears tmux_window (handled by DetectCrashedAgent which skips
+        -- non-running tasks). The --head uses the
         -- owner:branch format so `gh` resolves the branch in the same
         -- repo as --repo (rather than the authenticated user's
         -- namespace). The PR base is task.base_branch (not hardcoded
@@ -222,11 +229,9 @@ rule WrapUpPr {
         -- the work actually shipped. Letting the agent author the PR
         -- after implementation produces materially better PRs.
         --
-        -- The MCP wrap_up tool no longer accepts action="pr"; the
-        -- TUI W+p shortcut and the epic-merge MergeAction::Pr have
-        -- both been removed. Rebase remains as a TUI/MCP path (see
-        -- WrapUpRebase). The tmux window is preserved across PR
-        -- creation so the agent can continue working (e.g., self-review).
+        -- The MCP wrap_up tool accepts action="pr" with a required pr_url argument.
+        -- The TUI W+p shortcut and the epic-merge MergeAction::Pr have both been
+        -- removed. Rebase remains as a TUI/MCP path (see WrapUpRebase).
         --
         -- The wrap_up success response (PR path) includes a "Verify before exiting: run `<c>`"
         -- instruction when task.repo_path has verify_command = Some(c), appearing before the
@@ -257,13 +262,47 @@ rule WrapUpDone {
         -- handle_finish_complete is invoked immediately.
         --
         -- MCP path: wrap_up(action="done"). No git operations are
-        -- performed. Like WrapUpRebase, the session is NOT closed by
-        -- wrap_up — the agent must call exit_session afterward. On
-        -- exit_session, the tmux window is killed and the task moves to Done.
+        -- performed. The response includes an exit token. The agent MUST
+        -- pass this token to exit_session. On exit_session, the tmux window
+        -- is killed. The task was already marked Done by wrap_up(done);
+        -- exit_session only clears tmux_window.
         --
         -- /wrap-up skill path: if task.wrap_up_mode = done (from get_task),
         -- or if the user selects "done" in Step 4, the skill calls
         -- wrap_up(action="done") then exit_session without any git commands.
+}
+
+rule ExitSession {
+    when: ExitSession(task, token)
+
+    requires: task.tmux_window != null
+    requires: token = ExitToken.valid_for(task)
+
+    -- Two-phase: first call returns reflection prompt (sets token.reflected = true).
+    -- Second call closes the session.
+    ensures:
+        if not token.reflected:
+            token.reflected = true
+            ReflectionPromptShown(task: task)
+        else:
+            task.tmux_window = null
+            ExitTokenConsumed(task: task)
+            if task.status = running:
+                task.status = done
+                task.sub_status = core/SubStatus.default_for(done)
+            task.updated_at = now
+
+    @guidance
+        -- ExitToken is issued by wrap_up(rebase) and wrap_up(done). It is NOT
+        -- issued by wrap_up(pr) — the PR path does not call exit_session.
+        -- The token is stored in McpState.exit_tokens (in-memory HashMap).
+        -- First call: token validated, reflected set to true, reflection prompt returned.
+        -- Agent optionally calls record_learning (separate tool) between calls.
+        -- Second call: token removed, session closed.
+        -- If task.status = done (wrap_up done path), only tmux_window is cleared.
+        -- If task.status = running (wrap_up rebase path), status moves to done.
+        -- Calling exit_session without a token → error "call wrap_up first".
+        -- Calling exit_session with wrong token → error "invalid exit token".
 }
 
 -- == Finish (Merge) ==

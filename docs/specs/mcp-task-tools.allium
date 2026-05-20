@@ -396,3 +396,62 @@ rule AttachPlanViaCli {
 --     Operator-only — never invoked by agents or hooks.
 --   • `dispatch update <id> <status> ...` — see HookNotification in agent-health.allium.
 --   • `dispatch verify-feed <command>` — see VerifyFeed in feeds.allium.
+
+-- == MCP Wrap-Up and Exit Tools ==
+
+rule WrapUpViaMcp {
+    when: McpWrapUp(task, action, pr_url?)
+
+    requires: task.status = running or task.status = review
+    requires: task.worktree != null
+    requires:
+        if action = pr: pr_url != null and pr_url != ""
+
+    ensures:
+        if action = rebase:
+            BranchRebased(branch: task.worktree.branch, onto: task.base_branch)
+            ExitToken.issued(task: task)
+        else if action = done:
+            task.status = done
+            task.sub_status = core/SubStatus.default_for(done)
+            ExitToken.issued(task: task)
+        else if action = pr:
+            task.pr_url = pr_url
+            task.status = review
+            task.sub_status = core/SubStatus.default_for(review)
+            -- No ExitToken issued on the PR path
+
+    @guidance
+        -- wrap_up is the mandatory step before exit_session (for rebase/done paths).
+        -- action="pr": agent has already run git push and gh pr create; passes the
+        -- resulting URL as pr_url. No exit_session call follows.
+        -- action="rebase" / "done": response text contains the exit token the agent
+        -- must pass to exit_session.
+}
+
+rule ExitSessionViaMcp {
+    when: McpExitSession(task, token)
+
+    requires: task.tmux_window != null
+    requires: ExitToken.exists_for(task)
+    requires: token = ExitToken.value_for(task)
+
+    ensures:
+        if not ExitToken.reflected_for(task):
+            ExitToken.set_reflected(task)
+            ReflectionPromptShown(task: task)
+        else:
+            ExitToken.consumed(task)
+            task.tmux_window = null
+            if task.status = running:
+                task.status = done
+                task.sub_status = core/SubStatus.default_for(done)
+            task.updated_at = now
+
+    @guidance
+        -- exit_session requires a token (issued by wrap_up rebase/done).
+        -- First call: reflect — agent may call record_learning between calls.
+        -- Second call: close — task moves to done (if running) or just clears window.
+        -- PR path tasks never call exit_session; their tmux window is cleared
+        -- automatically when Claude Code exits (DetectCrashedAgent skips review tasks).
+}
