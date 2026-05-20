@@ -7,7 +7,7 @@ description: Manage the knowledge base lifecycle — query, upvote, and record e
 
 Use this skill to interact with the shared knowledge base — recording new entries and upvoting entries that proved useful.
 
-To *query* the knowledge base mid-task, call `query_learnings` directly (with `task_id` and an optional `tag_filter` matching a single tag). Do that whenever you are uncertain about conventions, tests, repo patterns, or how to debug — before guessing or asking.
+To *query* the knowledge base mid-task, call `query_learnings` directly (with `task_id` and an optional `tag_filter` as an array of tags, e.g. `["conventions", "rust"]`). Do that when anything is unclear — before guessing or asking.
 
 **Announce at start:** "I'm using the learnings skill to interact with the knowledge base."
 

@@ -139,12 +139,11 @@ pub(super) fn mcp_tools_instruction() -> &'static str {
 /// One-line knowledge-base nudge for dispatched agents. The earlier
 /// seven-skill checkpoint list saw <2 invocations each across hundreds
 /// of dispatches — replaced with a direct prompt to query the KB
-/// whenever the agent is uncertain.
+/// whenever anything is unclear.
 pub(super) fn learning_tools_instruction() -> &'static str {
-    "Knowledge base: when uncertain about conventions, tests, repo patterns, \
-or how to debug, call `query_learnings` to check the knowledge base before \
-guessing or asking. Use `/learnings` to record useful findings or upvote \
-entries that helped."
+    "Knowledge base: when anything is unclear, call `query_learnings` to check \
+the knowledge base before guessing or asking. Use `/learnings` to record useful \
+findings or upvote entries that helped."
 }
 
 /// Instructions for writing a plan and attaching it to the task via MCP.
@@ -427,7 +426,7 @@ pub(super) fn build_research_prompt(
 external resources.\n\
 \n\
 When you have gathered sufficient information, present your findings clearly to the user \
-and wait for further instructions. Do NOT wrap up autonomously — that is for the user to \
+and wait for further instructions. Do NOT call /wrap-up — that is for the user to \
 decide.\n\
 \n\
 Do NOT make code changes.\n\
@@ -646,6 +645,31 @@ mod tests {
         assert!(
             text.contains("before guessing or asking"),
             "learning instruction should nudge agents to check the KB before guessing or asking, got: {text}"
+        );
+    }
+
+    #[test]
+    fn learning_instruction_covers_all_unclear_situations() {
+        let text = learning_tools_instruction();
+        assert!(
+            text.contains("anything is unclear"),
+            "learning instruction should say 'anything is unclear' rather than enumerating specific domains, got: {text}"
+        );
+    }
+
+    #[test]
+    fn research_prompt_names_forbidden_wrap_up_tool() {
+        let text = build_research_prompt(
+            TaskId(7),
+            "Research async runtimes",
+            "Compare tokio vs async-std",
+            None,
+            None,
+            &PromptContext::default(),
+        );
+        assert!(
+            text.contains("/wrap-up"),
+            "research prompt should explicitly forbid /wrap-up by name, got: {text}"
         );
     }
 
