@@ -6,6 +6,8 @@ pub mod trajectory;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+use uuid::Uuid;
+
 use axum::{routing::post, Router};
 use tokio::sync::mpsc;
 
@@ -93,6 +95,17 @@ impl McpState {
         if let Some(tx) = &self.notify_tx {
             let _ = tx.send(McpEvent::EpicChanged(epic_id));
         }
+    }
+
+    /// Issue a fresh exit token for a task, overwriting any existing one.
+    /// Returns the token string to embed in the response.
+    pub fn issue_exit_token(&self, task_id: TaskId) -> String {
+        let token = Uuid::new_v4().to_string();
+        self.exit_tokens
+            .write()
+            .unwrap()
+            .insert(task_id, ExitToken { token: token.clone(), reflected: false });
+        token
     }
 
     pub fn task_service(&self) -> TaskService {

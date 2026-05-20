@@ -728,11 +728,7 @@ pub(super) async fn handle_wrap_up(
                 ),
                 None => String::new(),
             };
-            let token = uuid::Uuid::new_v4().to_string();
-            state.exit_tokens.write().unwrap().insert(
-                task_id,
-                crate::mcp::ExitToken { token: token.clone(), reflected: false },
-            );
+            let token = state.issue_exit_token(task_id);
             JsonRpcResponse::ok(
                 id,
                 json!({"content": [{"type": "text", "text": format!(
@@ -782,11 +778,7 @@ pub(super) async fn handle_wrap_up(
                         ),
                         None => String::new(),
                     };
-                    let token = uuid::Uuid::new_v4().to_string();
-                    state.exit_tokens.write().unwrap().insert(
-                        task_id,
-                        crate::mcp::ExitToken { token: token.clone(), reflected: false },
-                    );
+                    let token = state.issue_exit_token(task_id);
                     JsonRpcResponse::ok(
                         id,
                         json!({"content": [{"type": "text", "text": format!(
@@ -898,19 +890,23 @@ pub(super) async fn handle_exit_session(
 
     // Two-call flow: first call sets reflected=true and returns a reflection prompt;
     // second call (reflected=true) removes the token and closes the session.
-    let is_reflected = {
-        let map = state.exit_tokens.read().unwrap();
-        map.get(&task_id).map(|et| et.reflected).unwrap_or(false)
+    // Single write-lock acquisition prevents a TOCTOU race between the read and the mutation.
+    let already_reflected = {
+        let mut map = state.exit_tokens.write().unwrap();
+        if let Some(et) = map.get_mut(&task_id) {
+            if et.reflected {
+                true
+            } else {
+                et.reflected = true;
+                false
+            }
+        } else {
+            // Token was concurrently consumed — treat as already closed.
+            true
+        }
     };
 
-    if !is_reflected {
-        state
-            .exit_tokens
-            .write()
-            .unwrap()
-            .get_mut(&task_id)
-            .unwrap()
-            .reflected = true;
+    if !already_reflected {
         return JsonRpcResponse::ok(
             id,
             json!({"content": [{"type": "text", "text": "\
