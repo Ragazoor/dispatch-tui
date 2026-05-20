@@ -896,7 +896,35 @@ pub(super) async fn handle_exit_session(
         );
     }
 
-    // Placeholder: two-call counter added in Task 6. Close immediately for now.
+    // Two-call flow: first call sets reflected=true and returns a reflection prompt;
+    // second call (reflected=true) removes the token and closes the session.
+    let is_reflected = {
+        let map = state.exit_tokens.read().unwrap();
+        map.get(&task_id).map(|et| et.reflected).unwrap_or(false)
+    };
+
+    if !is_reflected {
+        state
+            .exit_tokens
+            .write()
+            .unwrap()
+            .get_mut(&task_id)
+            .unwrap()
+            .reflected = true;
+        return JsonRpcResponse::ok(
+            id,
+            json!({"content": [{"type": "text", "text": "\
+Reflect on this session before closing.\n\
+\n\
+If you encountered any of the following, call record_learning for each one now:\n\
+  \u{2022} A pitfall \u{2014} something that wasted time or caused surprise\n\
+  \u{2022} A convention \u{2014} a pattern worth following consistently\n\
+  \u{2022} A tool tip or preference\n\
+\n\
+Then call exit_session again (with the same token) to close the session."}]}),
+        );
+    }
+
     state.exit_tokens.write().unwrap().remove(&task_id);
     let base_patch = crate::db::TaskPatch::new()
         .sub_status(SubStatus::default_for(TaskStatus::Done))

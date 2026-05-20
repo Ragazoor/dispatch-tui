@@ -594,7 +594,7 @@ async fn tool_schemas_match_arg_structs() {
         ),
         (
             "exit_session",
-            BTreeSet::from(["task_id", "has_learnings"]),
+            BTreeSet::from(["task_id", "token"]),
             BTreeSet::from(["task_id"]),
             json!({"task_id": 1}),
         ),

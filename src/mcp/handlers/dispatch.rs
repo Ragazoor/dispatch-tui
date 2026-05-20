@@ -479,9 +479,9 @@ mcp_tools! {
         };
 
     async "exit_session" => tasks::handle_exit_session,
-        "Close your agent session. Three-phase: first call asks if you found pitfalls/conventions/tool tips; \
-if yes (has_learnings=true) a second call prompts for record_learning details; \
-the final call closes the session.",
+        "Close your agent session. Two-phase: first call returns a reflection prompt asking you to call \
+record_learning for any pitfalls/conventions/tips you found; the second call (with the same token) closes \
+the session.",
         {
             "type": "object",
             "properties": {
@@ -489,9 +489,9 @@ the final call closes the session.",
                     "type": "integer",
                     "description": "The ID of the task whose session to close"
                 },
-                "has_learnings": {
-                    "type": "boolean",
-                    "description": "Answer to the reflection question: true = I found pitfalls/conventions/tips (prompts for record_learning details), false = nothing to record (closes session immediately). Omit on the first call."
+                "token": {
+                    "type": "string",
+                    "description": "Exit token obtained from wrap_up. Pass the same token on both the reflection call and the closing call."
                 }
             },
             "required": ["task_id"]

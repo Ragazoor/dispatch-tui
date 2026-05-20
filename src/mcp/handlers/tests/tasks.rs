@@ -7312,206 +7312,245 @@ async fn update_task_pr_url_already_set_does_not_nudge_again() {
 // -- exit_session tests -------------------------------------------------------
 
 #[tokio::test]
-async fn exit_session_first_call_returns_reflection_nudge() {
+async fn exit_session_first_call_returns_reflection_prompt() {
     let state = test_state().await;
     let task_id = create_running_task_with_window(&state).await;
+    state.exit_tokens.write().unwrap().insert(
+        task_id,
+        crate::mcp::ExitToken { token: "tok1".to_string(), reflected: false },
+    );
 
     let resp = call(
         &state,
         "tools/call",
         Some(json!({
             "name": "exit_session",
-            "arguments": { "task_id": task_id.0 }
+            "arguments": { "task_id": task_id.0, "token": "tok1" }
         })),
     )
     .await;
 
     let text = extract_response_text(&resp);
     assert!(
-        text.contains("pitfall") || text.contains("convention"),
-        "first call should ask about pitfalls/conventions; got: {text}"
-    );
-    assert!(
-        text.contains("has_learnings"),
-        "first call should mention has_learnings parameter; got: {text}"
+        text.contains("pitfall") || text.contains("convention") || text.contains("record_learning"),
+        "first call should prompt for reflection; got: {text}"
     );
     assert!(
         text.contains("exit_session"),
-        "first call should instruct to call exit_session again; got: {text}"
+        "first call should tell agent to call exit_session again; got: {text}"
     );
 
-    // Window must NOT be killed on first call
     let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    assert!(task.tmux_window.is_some(), "window should still be set after first call");
+    assert_ne!(task.status, TaskStatus::Done, "task should not be Done after first call");
+
+    let map = state.exit_tokens.read().unwrap();
     assert!(
-        task.tmux_window.is_some(),
-        "tmux_window should still be set after first call"
+        map.get(&task_id).map(|et| et.reflected).unwrap_or(false),
+        "reflected should be true after first call"
     );
 }
 
 #[tokio::test]
-async fn exit_session_has_learnings_true_returns_record_prompt() {
+async fn exit_session_second_call_closes_session() {
     let state = test_state().await;
     let task_id = create_running_task_with_window(&state).await;
+    state.exit_tokens.write().unwrap().insert(
+        task_id,
+        crate::mcp::ExitToken { token: "tok2".to_string(), reflected: false },
+    );
 
-    // First call
+    // First call — reflect
     call(
         &state,
         "tools/call",
-        Some(json!({ "name": "exit_session", "arguments": { "task_id": task_id.0 } })),
+        Some(json!({ "name": "exit_session", "arguments": { "task_id": task_id.0, "token": "tok2" } })),
     )
     .await;
 
-    // Second call: has_learnings=true
+    // Second call — close
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({
-            "name": "exit_session",
-            "arguments": { "task_id": task_id.0, "has_learnings": true }
-        })),
+        Some(json!({ "name": "exit_session", "arguments": { "task_id": task_id.0, "token": "tok2" } })),
     )
     .await;
 
-    let text = extract_response_text(&resp);
-    assert!(
-        text.contains("record_learning"),
-        "has_learnings=true should prompt to call record_learning; got: {text}"
-    );
-    assert!(
-        text.contains("kind"),
-        "has_learnings=true should mention kind parameter; got: {text}"
-    );
-
-    // Session must NOT be closed yet
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
-    assert!(
-        task.tmux_window.is_some(),
-        "tmux_window should still be set after has_learnings=true"
-    );
-    assert_eq!(
-        task.status,
-        TaskStatus::Running,
-        "task should still be Running after has_learnings=true"
-    );
-}
-
-#[tokio::test]
-async fn exit_session_has_learnings_false_closes_session() {
-    let state = test_state().await;
-    let task_id = create_running_task_with_window(&state).await;
-
-    // First call
-    call(
-        &state,
-        "tools/call",
-        Some(json!({ "name": "exit_session", "arguments": { "task_id": task_id.0 } })),
-    )
-    .await;
-
-    // Second call: has_learnings=false — should close immediately
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "exit_session",
-            "arguments": { "task_id": task_id.0, "has_learnings": false }
-        })),
-    )
-    .await;
-
-    let text = extract_response_text(&resp);
-    assert_eq!(
-        text, "Session closed.",
-        "has_learnings=false should close session; got: {text}"
-    );
-
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
-    assert!(
-        task.tmux_window.is_none(),
-        "tmux_window should be cleared after has_learnings=false"
-    );
-    assert_eq!(task.status, TaskStatus::Done);
-}
-
-#[tokio::test]
-async fn exit_session_after_record_prompt_closes_with_has_learnings_false() {
-    // Stateless flow: 1st call asks, 2nd with has_learnings=true returns the
-    // record_learning prompt, 3rd with has_learnings=false closes.
-    let state = test_state().await;
-    let task_id = create_running_task_with_window(&state).await;
-
-    call(
-        &state,
-        "tools/call",
-        Some(json!({ "name": "exit_session", "arguments": { "task_id": task_id.0 } })),
-    )
-    .await;
-
-    call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "exit_session",
-            "arguments": { "task_id": task_id.0, "has_learnings": true }
-        })),
-    )
-    .await;
-
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "exit_session",
-            "arguments": { "task_id": task_id.0, "has_learnings": false }
-        })),
-    )
-    .await;
-
-    let text = extract_response_text(&resp);
-    assert_eq!(
-        text, "Session closed.",
-        "has_learnings=false should close session; got: {text}"
-    );
-
+    assert_eq!(extract_response_text(&resp), "Session closed.");
     let task = state.db.get_task(task_id).await.unwrap().unwrap();
     assert!(task.tmux_window.is_none());
     assert_eq!(task.status, TaskStatus::Done);
 }
 
 #[tokio::test]
-async fn exit_session_bare_call_after_has_learnings_true_still_asks() {
-    // Regression guard for the stateless model: the server keeps no per-task
-    // state, so a bare exit_session call always returns the reflection
-    // question — even after a previous has_learnings=true.
+async fn exit_session_closes_after_reflection_and_record_learning() {
     let state = test_state().await;
     let task_id = create_running_task_with_window(&state).await;
+    state.exit_tokens.write().unwrap().insert(
+        task_id,
+        crate::mcp::ExitToken { token: "tok3".to_string(), reflected: false },
+    );
+
+    // First call — reflect
+    call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "exit_session", "arguments": { "task_id": task_id.0, "token": "tok3" } })),
+    )
+    .await;
+
+    // (Agent would call record_learning here — separate tool, not simulated)
+
+    // Second call — close
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "exit_session", "arguments": { "task_id": task_id.0, "token": "tok3" } })),
+    )
+    .await;
+
+    assert_eq!(extract_response_text(&resp), "Session closed.");
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    assert!(task.tmux_window.is_none());
+    assert_eq!(task.status, TaskStatus::Done);
+}
+
+#[tokio::test]
+async fn exit_session_after_close_token_is_gone() {
+    let state = test_state().await;
+    let task_id = create_running_task_with_window(&state).await;
+    state.exit_tokens.write().unwrap().insert(
+        task_id,
+        crate::mcp::ExitToken { token: "tok4".to_string(), reflected: false },
+    );
+
+    // First call
+    call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "exit_session", "arguments": { "task_id": task_id.0, "token": "tok4" } })),
+    )
+    .await;
+
+    // Second call — closes session
+    call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "exit_session", "arguments": { "task_id": task_id.0, "token": "tok4" } })),
+    )
+    .await;
+
+    // Third call — token is gone (task also has no window now)
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "exit_session", "arguments": { "task_id": task_id.0, "token": "tok4" } })),
+    )
+    .await;
+    assert_error(&resp, "wrap_up first");
+}
+
+#[tokio::test]
+async fn exit_session_full_flow_rebase() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"main\n"),
+        MockProcessRunner::fail(""),
+        MockProcessRunner::ok(),
+        MockProcessRunner::ok(),
+    ]));
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
+    let task_id = create_wrappable_task(&db).await;
+    db.patch_task(task_id, &db::TaskPatch::new().tmux_window(Some("task-1")))
+        .await
+        .unwrap();
+
+    // Rebase
+    let wrap_resp = call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "wrap_up", "arguments": { "task_id": task_id.0, "action": "rebase" } })),
+    )
+    .await;
+    assert!(!is_error(&wrap_resp));
+
+    let token = state.exit_tokens.read().unwrap().get(&task_id).unwrap().token.clone();
+
+    // First exit_session — reflection prompt
+    let reflect_resp = call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "exit_session", "arguments": { "task_id": task_id.0, "token": token } })),
+    )
+    .await;
+    assert!(!is_error(&reflect_resp));
+    let reflect_text = extract_response_text(&reflect_resp);
+    assert!(
+        reflect_text.contains("record_learning") || reflect_text.contains("pitfall"),
+        "first call should be reflection prompt; got: {reflect_text}"
+    );
+
+    // Second exit_session — close
+    let close_resp = call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "exit_session", "arguments": { "task_id": task_id.0, "token": token } })),
+    )
+    .await;
+    assert_eq!(extract_response_text(&close_resp), "Session closed.");
+
+    let task = db.get_task(task_id).await.unwrap().unwrap();
+    assert_eq!(task.status, TaskStatus::Done);
+    assert!(task.tmux_window.is_none());
+}
+
+#[tokio::test]
+async fn wrap_up_second_call_overwrites_token() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
+        // First rebase
+        MockProcessRunner::ok_with_stdout(b"main\n"),
+        MockProcessRunner::fail(""),
+        MockProcessRunner::ok(),
+        MockProcessRunner::ok(),
+        // Second rebase
+        MockProcessRunner::ok_with_stdout(b"main\n"),
+        MockProcessRunner::fail(""),
+        MockProcessRunner::ok(),
+        MockProcessRunner::ok(),
+    ]));
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
+    let task_id = create_wrappable_task(&db).await;
+    db.patch_task(task_id, &db::TaskPatch::new().tmux_window(Some("task-1")))
+        .await
+        .unwrap();
 
     call(
         &state,
         "tools/call",
-        Some(json!({
-            "name": "exit_session",
-            "arguments": { "task_id": task_id.0, "has_learnings": true }
-        })),
+        Some(json!({ "name": "wrap_up", "arguments": { "task_id": task_id.0, "action": "rebase" } })),
     )
     .await;
+    let first_token = state.exit_tokens.read().unwrap().get(&task_id).unwrap().token.clone();
 
+    call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "wrap_up", "arguments": { "task_id": task_id.0, "action": "rebase" } })),
+    )
+    .await;
+    let second_token = state.exit_tokens.read().unwrap().get(&task_id).unwrap().token.clone();
+
+    assert_ne!(first_token, second_token, "second wrap_up should generate a new token");
+
+    // Old token rejected
     let resp = call(
         &state,
         "tools/call",
-        Some(json!({ "name": "exit_session", "arguments": { "task_id": task_id.0 } })),
+        Some(json!({ "name": "exit_session", "arguments": { "task_id": task_id.0, "token": first_token } })),
     )
     .await;
-
-    let text = extract_response_text(&resp);
-    assert!(
-        text.contains("has_learnings"),
-        "bare call should always ask for has_learnings; got: {text}"
-    );
-
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
-    assert_eq!(task.status, TaskStatus::Running);
-    assert!(task.tmux_window.is_some());
+    assert_error(&resp, "invalid exit token");
 }
 
 #[tokio::test]
@@ -7523,7 +7562,7 @@ async fn exit_session_unknown_task_returns_error() {
         "tools/call",
         Some(json!({
             "name": "exit_session",
-            "arguments": { "task_id": 9999 }
+            "arguments": { "task_id": 9999, "token": "any" }
         })),
     )
     .await;
@@ -7536,12 +7575,18 @@ async fn exit_session_task_without_window_returns_error() {
     let state = test_state().await;
     let task_id = create_task_fixture(&state).await; // Backlog task, no tmux_window
 
+    // Insert token so we get past the token check
+    state.exit_tokens.write().unwrap().insert(
+        task_id,
+        crate::mcp::ExitToken { token: "tok-no-win".to_string(), reflected: false },
+    );
+
     let resp = call(
         &state,
         "tools/call",
         Some(json!({
             "name": "exit_session",
-            "arguments": { "task_id": task_id.0 }
+            "arguments": { "task_id": task_id.0, "token": "tok-no-win" }
         })),
     )
     .await;
@@ -7645,13 +7690,17 @@ async fn exit_session_second_call_marks_task_done() {
     // recalculate_epic_status.
     let state = test_state().await;
     let task_id = create_running_task_with_window(&state).await;
+    state.exit_tokens.write().unwrap().insert(
+        task_id,
+        crate::mcp::ExitToken { token: "close-tok".to_string(), reflected: true },
+    );
 
     let resp = call(
         &state,
         "tools/call",
         Some(json!({
             "name": "exit_session",
-            "arguments": { "task_id": task_id.0, "has_learnings": false }
+            "arguments": { "task_id": task_id.0, "token": "close-tok" }
         })),
     )
     .await;
@@ -7668,13 +7717,17 @@ async fn exit_session_second_call_marks_task_done() {
 async fn exit_session_first_call_does_not_change_status() {
     let state = test_state().await;
     let task_id = create_running_task_with_window(&state).await;
+    state.exit_tokens.write().unwrap().insert(
+        task_id,
+        crate::mcp::ExitToken { token: "reflect-tok".to_string(), reflected: false },
+    );
 
     call(
         &state,
         "tools/call",
         Some(json!({
             "name": "exit_session",
-            "arguments": { "task_id": task_id.0 }
+            "arguments": { "task_id": task_id.0, "token": "reflect-tok" }
         })),
     )
     .await;
@@ -7705,13 +7758,17 @@ async fn exit_session_already_done_task_stays_done() {
         )
         .await
         .unwrap();
+    state.exit_tokens.write().unwrap().insert(
+        task_id,
+        crate::mcp::ExitToken { token: "close-done-tok".to_string(), reflected: true },
+    );
 
     call(
         &state,
         "tools/call",
         Some(json!({
             "name": "exit_session",
-            "arguments": { "task_id": task_id.0, "has_learnings": false }
+            "arguments": { "task_id": task_id.0, "token": "close-done-tok" }
         })),
     )
     .await;
@@ -7742,13 +7799,17 @@ async fn exit_session_recalculates_epic_status() {
         TaskStatus::Done,
         "precondition: epic should be in-progress before exit_session"
     );
+    state.exit_tokens.write().unwrap().insert(
+        task_id,
+        crate::mcp::ExitToken { token: "epic-close-tok".to_string(), reflected: true },
+    );
 
     call(
         &state,
         "tools/call",
         Some(json!({
             "name": "exit_session",
-            "arguments": { "task_id": task_id.0, "has_learnings": false }
+            "arguments": { "task_id": task_id.0, "token": "epic-close-tok" }
         })),
     )
     .await;
@@ -7775,13 +7836,17 @@ async fn exit_session_resets_sub_status_to_default_for_done() {
         )
         .await
         .unwrap();
+    state.exit_tokens.write().unwrap().insert(
+        task_id,
+        crate::mcp::ExitToken { token: "sub-close-tok".to_string(), reflected: true },
+    );
 
     call(
         &state,
         "tools/call",
         Some(json!({
             "name": "exit_session",
-            "arguments": { "task_id": task_id.0, "has_learnings": false }
+            "arguments": { "task_id": task_id.0, "token": "sub-close-tok" }
         })),
     )
     .await;
@@ -7802,23 +7867,29 @@ async fn exit_session_emits_refresh_after_done_patch() {
     let (state, mut rx) = test_state_with_notify().await;
     let task_id = create_running_task_with_window(&state).await;
 
+    // First call — reflect (drain any events)
+    state.exit_tokens.write().unwrap().insert(
+        task_id,
+        crate::mcp::ExitToken { token: "notify-tok".to_string(), reflected: false },
+    );
     call(
         &state,
         "tools/call",
         Some(json!({
             "name": "exit_session",
-            "arguments": { "task_id": task_id.0 }
+            "arguments": { "task_id": task_id.0, "token": "notify-tok" }
         })),
     )
     .await;
     while rx.try_recv().is_ok() {}
 
+    // Second call — close
     let resp = call(
         &state,
         "tools/call",
         Some(json!({
             "name": "exit_session",
-            "arguments": { "task_id": task_id.0, "has_learnings": false }
+            "arguments": { "task_id": task_id.0, "token": "notify-tok" }
         })),
     )
     .await;
@@ -7911,12 +7982,43 @@ async fn wrap_up_then_exit_session_end_to_end() {
         "after wrap_up: epic status must not change"
     );
 
+    // Extract the token that wrap_up placed in exit_tokens.
+    let token = {
+        let map = state.exit_tokens.read().unwrap();
+        map.get(&task_id)
+            .expect("wrap_up must have inserted an exit token")
+            .token
+            .clone()
+    };
+
+    // First exit_session call → reflection prompt.
+    let reflect_resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "exit_session",
+            "arguments": { "task_id": task_id.0, "token": token }
+        })),
+    )
+    .await;
+    assert!(reflect_resp.error.is_none(), "{:?}", reflect_resp.error);
+    let reflect_text = extract_response_text(&reflect_resp);
+    assert!(
+        reflect_text.contains("Reflect on this session"),
+        "first call should return reflection prompt, got: {reflect_text}"
+    );
+
+    // Task must still be Running after the first call.
+    let mid_task = db.get_task(task_id).await.unwrap().unwrap();
+    assert_eq!(mid_task.status, TaskStatus::Running);
+
+    // Second exit_session call → closes session.
     let close_resp = call(
         &state,
         "tools/call",
         Some(json!({
             "name": "exit_session",
-            "arguments": { "task_id": task_id.0, "has_learnings": false }
+            "arguments": { "task_id": task_id.0, "token": token }
         })),
     )
     .await;
