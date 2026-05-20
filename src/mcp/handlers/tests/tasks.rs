@@ -2198,12 +2198,7 @@ async fn wrap_up_accepts_running_blocked_task() {
         MockProcessRunner::ok(),                      // git rebase main
         MockProcessRunner::ok(),                      // git merge --ff-only
     ]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
 
     let task_id = db
         .create_task(CreateTaskRequest {
@@ -2257,12 +2252,7 @@ async fn wrap_up_accepts_running_active_task() {
         MockProcessRunner::ok(),                      // git rebase main
         MockProcessRunner::ok(),                      // git merge --ff-only
     ]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
 
     let task_id = db
         .create_task(CreateTaskRequest {
@@ -2317,12 +2307,7 @@ async fn wrap_up_rebase_response_demands_exit_session_imperatively() {
         MockProcessRunner::ok(),                      // git rebase main
         MockProcessRunner::ok(),                      // git merge --ff-only
     ]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
 
     let task_id = db
         .create_task(CreateTaskRequest {
@@ -2460,12 +2445,7 @@ async fn wrap_up_rebase_returns_started() {
         MockProcessRunner::ok(),                      // git rebase main
         MockProcessRunner::ok(),                      // git merge --ff-only
     ]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
 
     let task_id = db
         .create_task(CreateTaskRequest {
@@ -2562,12 +2542,7 @@ async fn make_state_with_runner(
     runner: Arc<dyn ProcessRunner>,
 ) -> (Arc<McpState>, Arc<dyn db::TaskStore>) {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
     (state, db)
 }
 
@@ -3125,12 +3100,7 @@ async fn wrap_up_rebase_conflict_returns_error() {
         MockProcessRunner::fail("CONFLICT (content): Merge conflict in foo.rs"), // git rebase
         MockProcessRunner::ok(),                      // git rebase --abort
     ]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
 
     let task_id = db
         .create_task(CreateTaskRequest {
@@ -3181,12 +3151,7 @@ async fn wrap_up_rebase_not_on_main_returns_error() {
         MockProcessRunner::fail(""), // git rev-parse (empty stdout → treated as non-main)
         MockProcessRunner::ok_with_stdout(b"feature\n"), // unused
     ]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
 
     let task_id = db
         .create_task(CreateTaskRequest {
@@ -3296,12 +3261,7 @@ async fn send_message_writes_file_and_sends_keys() {
         MockProcessRunner::ok(), // tmux send-keys -l (notification text)
         MockProcessRunner::ok(), // tmux send-keys Enter
     ]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
 
     // Create sender and receiver tasks
     let sender_id = db
@@ -3583,12 +3543,7 @@ async fn test_state_with_notify() -> (
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-    let state = Arc::new(McpState {
-        db,
-        notify_tx: Some(tx),
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db, Some(tx), runner, EmbeddingService::new_test()));
     (state, rx)
 }
 
@@ -4130,12 +4085,7 @@ async fn wrap_up_rebase_does_not_change_status() {
         MockProcessRunner::ok(),                      // git rebase main
         MockProcessRunner::ok(),                      // git merge --ff-only
     ]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
 
     let task_id = db
         .create_task(CreateTaskRequest {
@@ -4189,12 +4139,7 @@ async fn wrap_up_rebase_does_not_recalculate_epic_status() {
         MockProcessRunner::ok(),                      // git rebase main
         MockProcessRunner::ok(),                      // git merge --ff-only
     ]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
 
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
@@ -4253,12 +4198,7 @@ async fn wrap_up_accepts_string_task_id() {
         MockProcessRunner::ok(),                      // git rebase main
         MockProcessRunner::ok(),                      // git merge --ff-only
     ]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
 
     let task_id = db
         .create_task(CreateTaskRequest {
@@ -4711,12 +4651,7 @@ async fn dispatch_next_picks_first_backlog_subtask() {
         MockProcessRunner::ok(), // tmux send-keys -l (literal text)
         MockProcessRunner::ok(), // tmux send-keys Enter
     ]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
 
     let epic = db
         .create_epic("Test Epic", "desc", &repo_path, None, ProjectId(1))
@@ -4813,12 +4748,7 @@ async fn dispatch_next_respects_sort_order() {
         MockProcessRunner::ok(), // tmux send-keys -l (literal text)
         MockProcessRunner::ok(), // tmux send-keys Enter
     ]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
 
     let epic = db
         .create_epic("Test Epic", "desc", &repo_path, None, ProjectId(1))
@@ -4908,12 +4838,7 @@ async fn dispatch_next_respects_tag_routing() {
         MockProcessRunner::ok(), // tmux send-keys -l (literal text)
         MockProcessRunner::ok(), // tmux send-keys Enter
     ]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
 
     let epic = db
         .create_epic("Test Epic", "desc", &repo_path, None, ProjectId(1))
@@ -4985,12 +4910,7 @@ async fn wrap_up_rebase_preserves_tmux_window() {
         MockProcessRunner::ok(),                      // git rebase main
         MockProcessRunner::ok(),                      // git merge --ff-only
     ]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
 
     let task_id = db
         .create_task(CreateTaskRequest {
@@ -5054,12 +4974,7 @@ async fn wrap_up_rebase_conflict_sets_conflict_substatus() {
         MockProcessRunner::fail("CONFLICT (content): Merge conflict in foo.rs"), // git rebase
         MockProcessRunner::ok(),                      // git rebase --abort
     ]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
 
     let task_id = db
         .create_task(CreateTaskRequest {
@@ -5121,12 +5036,7 @@ async fn wrap_up_rebase_clears_conflict_substatus_on_non_conflict_error() {
         MockProcessRunner::fail("fatal: some other git error"), // git rebase (non-conflict failure)
         MockProcessRunner::ok(),     // git rebase --abort
     ]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
 
     let task_id = db
         .create_task(CreateTaskRequest {
@@ -5419,12 +5329,7 @@ async fn dispatch_task_dispatches_backlog_task() {
         MockProcessRunner::ok(), // tmux send-keys -l (literal text / write prompt file)
         MockProcessRunner::ok(), // tmux send-keys Enter
     ]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
 
     let task_id = db
         .create_task(CreateTaskRequest {
@@ -5549,12 +5454,7 @@ async fn dispatch_task_respects_tag_routing() {
         MockProcessRunner::ok(), // tmux send-keys -l (literal text / write prompt file)
         MockProcessRunner::ok(), // tmux send-keys Enter
     ]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
 
     // Feature-tagged task with no plan → should route to Plan mode
     let task_id = db
@@ -5626,12 +5526,7 @@ async fn dispatch_task_dependabot_tag_routes_through_dispatch_agent() {
         MockProcessRunner::ok(), // tmux send-keys -l (writes prompt file)
         MockProcessRunner::ok(), // tmux send-keys Enter
     ]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
 
     let task_id = db
         .create_task(CreateTaskRequest {
@@ -5716,12 +5611,7 @@ async fn dispatch_task_returns_error_when_dispatch_fails() {
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::fail("tmux: no server running"), // tmux new-window fails
     ]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
 
     let task_id = db
         .create_task(CreateTaskRequest {
@@ -5770,12 +5660,7 @@ async fn create_task_with_project_id_assigns_correctly() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let other = db.create_project("Other", 1).await.unwrap();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
 
     let resp = call(
         &state,
@@ -5806,12 +5691,7 @@ async fn create_task_with_project_id_assigns_correctly() {
 async fn create_epic_without_project_id_assigns_to_default() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
 
     let resp = call(
         &state,
@@ -5838,12 +5718,7 @@ async fn create_epic_with_project_id_assigns_correctly() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let other = db.create_project("Other", 1).await.unwrap();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
 
     let resp = call(
         &state,
@@ -5875,12 +5750,7 @@ async fn list_projects_returns_all_projects() {
     db.create_project("Dispatch", 1).await.unwrap();
     db.create_project("wizard_game", 2).await.unwrap();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
 
     let resp = call(
         &state,
@@ -5911,12 +5781,7 @@ async fn update_task_project_id_moves_task() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let other = db.create_project("Dispatch", 1).await.unwrap();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
 
     let task_id = create_task_fixture(&state).await;
     let default_id = db.get_default_project().await.unwrap().id;
@@ -5964,12 +5829,7 @@ async fn update_epic_project_id_moves_epic() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let other = db.create_project("Dispatch", 1).await.unwrap();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
 
     let epic = db
         .create_epic(
@@ -6004,12 +5864,7 @@ async fn update_epic_project_id_moves_epic() {
 async fn update_epic_invalid_project_id_returns_error() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
 
     let epic = db
         .create_epic(
@@ -6918,12 +6773,7 @@ async fn make_rebase_state() -> (Arc<dyn db::TaskStore>, Arc<McpState>) {
         MockProcessRunner::ok(),                      // git rebase main
         MockProcessRunner::ok(),                      // git merge --ff-only
     ]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
     (db, state)
 }
 
@@ -7757,12 +7607,7 @@ async fn wrap_up_then_exit_session_end_to_end() {
         MockProcessRunner::ok(), // tmux has-session
         MockProcessRunner::ok(), // tmux kill-window
     ]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
 
     let epic = db
         .create_epic("E2E Epic", "", "/repo", None, ProjectId(1))
@@ -8138,12 +7983,7 @@ async fn wrap_up_done_marks_task_done_without_git_ops() {
     use crate::process::MockProcessRunner;
     let runner: Arc<dyn crate::process::ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
 
     let task_id = db
         .create_task(CreateTaskRequest {

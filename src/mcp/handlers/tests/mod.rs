@@ -33,23 +33,13 @@ use super::types::{JsonRpcRequest, JsonRpcResponse};
 async fn test_state() -> Arc<McpState> {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    Arc::new(McpState {
-        db,
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    })
+    Arc::new(McpState::new(db, None, runner, EmbeddingService::new_test()))
 }
 
 async fn test_state_with_db() -> (Arc<McpState>, Arc<dyn db::TaskStore>) {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let state = Arc::new(McpState {
-        db: db.clone(),
-        notify_tx: None,
-        runner,
-        embedding_service: EmbeddingService::new_test(),
-    });
+    let state = Arc::new(McpState::new(db.clone(), None, runner, EmbeddingService::new_test()));
     (state, db)
 }
 

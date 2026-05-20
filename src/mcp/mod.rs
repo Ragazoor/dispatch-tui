@@ -3,7 +3,8 @@ pub mod identity;
 pub mod middleware;
 pub mod trajectory;
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
 use axum::{routing::post, Router};
 use tokio::sync::mpsc;
@@ -29,6 +30,13 @@ pub enum McpEvent {
     MessageSent { to_task_id: TaskId },
 }
 
+/// One-time token linking a wrap_up call to its exit_session close.
+/// `reflected` tracks whether the reflection prompt has been shown (first call).
+pub struct ExitToken {
+    pub token: String,
+    pub reflected: bool,
+}
+
 pub struct McpState {
     pub db: Arc<dyn db::TaskStore>,
     /// When set, MCP sends events after mutations to trigger TUI updates.
@@ -38,9 +46,26 @@ pub struct McpState {
     /// Embedding service used for RAG-based query_learnings and for computing
     /// embeddings when a learning is recorded via MCP.
     pub embedding_service: Arc<EmbeddingService>,
+    /// In-memory tokens issued by wrap_up, consumed by exit_session.
+    pub exit_tokens: Arc<RwLock<HashMap<TaskId, ExitToken>>>,
 }
 
 impl McpState {
+    pub fn new(
+        db: Arc<dyn db::TaskStore>,
+        notify_tx: Option<mpsc::UnboundedSender<McpEvent>>,
+        runner: Arc<dyn ProcessRunner>,
+        embedding_service: Arc<EmbeddingService>,
+    ) -> Self {
+        Self {
+            db,
+            notify_tx,
+            runner,
+            embedding_service,
+            exit_tokens: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
     pub fn notify(&self) {
         if let Some(tx) = &self.notify_tx {
             let _ = tx.send(McpEvent::Refresh);
@@ -81,12 +106,7 @@ pub fn router(
     runner: Arc<dyn ProcessRunner>,
     embedding_service: Arc<EmbeddingService>,
 ) -> Router {
-    let state = Arc::new(McpState {
-        db,
-        notify_tx,
-        runner,
-        embedding_service,
-    });
+    let state = Arc::new(McpState::new(db, notify_tx, runner, embedding_service));
     Router::new()
         .route("/mcp", post(handlers::handle_mcp))
         .layer(axum::middleware::from_fn(
