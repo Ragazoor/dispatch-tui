@@ -2575,20 +2575,21 @@ async fn wrap_up_done_returns_exit_token() {
     assert!(text.contains(&et.token), "response text must contain the token; got: {text}");
 }
 
+// ---------------------------------------------------------------------------
+// wrap_up PR action tests
+// ---------------------------------------------------------------------------
+
 #[tokio::test]
-async fn wrap_up_rejects_pr_action() {
-    // PR creation is now agent-driven. The /wrap-up skill instructs the
-    // agent to author the title/body, run gh pr create itself, and
-    // record the result via update_task. wrap_up only handles rebase.
+async fn wrap_up_pr_sets_review_and_pr_url() {
     let state = test_state().await;
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
-            title: "T",
+            title: "PR Task",
             description: "d",
             repo_path: "/repo",
             plan: None,
-            status: TaskStatus::Review,
+            status: TaskStatus::Running,
             base_branch: "main",
             epic_id: None,
             sort_order: None,
@@ -2602,7 +2603,7 @@ async fn wrap_up_rejects_pr_action() {
         .db
         .patch_task(
             task_id,
-            &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
+            &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-pr-task")),
         )
         .await
         .unwrap();
@@ -2612,14 +2613,129 @@ async fn wrap_up_rejects_pr_action() {
         "tools/call",
         Some(json!({
             "name": "wrap_up",
-            "arguments": { "task_id": task_id.0, "action": "pr" }
+            "arguments": {
+                "task_id": task_id.0,
+                "action": "pr",
+                "pr_url": "https://github.com/owner/repo/pull/42"
+            }
         })),
     )
     .await;
-    // Serde rejects the unknown variant — the message includes "pr"
-    // and lists the valid variants. The skill ensures agents no longer
-    // pass this argument.
-    assert_error(&resp, "unknown variant `pr`");
+
+    assert!(!is_error(&resp), "expected success, got: {}", error_message(&resp));
+
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    assert_eq!(task.status, TaskStatus::Review, "task should be in review");
+    assert_eq!(
+        task.pr_url.as_deref(),
+        Some("https://github.com/owner/repo/pull/42"),
+        "pr_url should be set"
+    );
+}
+
+#[tokio::test]
+async fn wrap_up_pr_without_pr_url_errors() {
+    let state = test_state().await;
+    let task_id = state
+        .db
+        .create_task(CreateTaskRequest {
+            title: "T",
+            description: "d",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Running,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+            wrap_up_mode: None,
+        })
+        .await
+        .unwrap();
+    state
+        .db
+        .patch_task(task_id, &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")))
+        .await
+        .unwrap();
+
+    // No pr_url provided
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "wrap_up", "arguments": { "task_id": task_id.0, "action": "pr" } })),
+    )
+    .await;
+    assert_error(&resp, "pr_url");
+
+    // Empty pr_url
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "wrap_up",
+            "arguments": { "task_id": task_id.0, "action": "pr", "pr_url": "" }
+        })),
+    )
+    .await;
+    assert_error(&resp, "pr_url");
+}
+
+#[tokio::test]
+async fn wrap_up_pr_response_contains_no_token() {
+    let state = test_state().await;
+    let task_id = state
+        .db
+        .create_task(CreateTaskRequest {
+            title: "T",
+            description: "d",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Running,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+            wrap_up_mode: None,
+        })
+        .await
+        .unwrap();
+    state
+        .db
+        .patch_task(task_id, &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")))
+        .await
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "wrap_up",
+            "arguments": {
+                "task_id": task_id.0,
+                "action": "pr",
+                "pr_url": "https://github.com/owner/repo/pull/1"
+            }
+        })),
+    )
+    .await;
+
+    assert!(!is_error(&resp), "expected success, got: {}", error_message(&resp));
+
+    // No token in exit_tokens map
+    let map = state.exit_tokens.read().unwrap();
+    assert!(
+        map.get(&task_id).is_none(),
+        "wrap_up(pr) must not insert an exit token"
+    );
+
+    // Response must tell agent not to call exit_session
+    let text = extract_response_text(&resp);
+    assert!(
+        text.contains("do not call exit_session") || text.contains("do not call `exit_session`"),
+        "response should tell agent not to call exit_session; got: {text}"
+    );
 }
 
 // ---------------------------------------------------------------------------

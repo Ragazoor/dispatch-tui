@@ -124,6 +124,7 @@ pub(super) struct CreateTaskWithEpicArgs {
 pub(super) enum WrapUpAction {
     Rebase,
     Done,
+    Pr,
 }
 
 #[derive(Debug, Deserialize)]
@@ -140,6 +141,8 @@ pub(super) struct WrapUpArgs {
     pub(super) action: WrapUpAction,
     #[serde(default)]
     pub(super) learning_verdicts: Option<Vec<VerdictArg>>,
+    #[serde(default)]
+    pub(super) pr_url: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -806,6 +809,46 @@ pub(super) async fn handle_wrap_up(
                     JsonRpcResponse::err(id, -32603, format!("wrap_up failed: {e}"))
                 }
             }
+        }
+        WrapUpAction::Pr => {
+            let pr_url = match parsed.pr_url.as_deref() {
+                Some(u) if !u.is_empty() => u.to_string(),
+                _ => {
+                    return JsonRpcResponse::err(
+                        id,
+                        -32602,
+                        "pr_url is required for action 'pr' — pass the URL returned by `gh pr create`",
+                    )
+                }
+            };
+            let patch = db::TaskPatch::new()
+                .status(TaskStatus::Review)
+                .sub_status(SubStatus::default_for(TaskStatus::Review))
+                .pr_url(Some(pr_url.as_str()));
+            if let Err(e) = state.db.patch_task(task_id, &patch).await {
+                return JsonRpcResponse::err(id, -32603, format!("wrap_up pr failed: {e}"));
+            }
+            if let Some(epic_id) = task.epic_id {
+                if let Err(err) = state.db.recalculate_epic_status(epic_id).await {
+                    tracing::warn!(
+                        "failed to recalculate epic status for epic {}: {err}",
+                        epic_id.0
+                    );
+                }
+            }
+            state.notify_task_changed(task_id);
+            if let Some(epic_id) = task.epic_id {
+                state.notify_epic_changed(epic_id);
+            }
+            JsonRpcResponse::ok(
+                id,
+                json!({"content": [{"type": "text", "text": format!(
+                    "PR recorded (task {tid}, pr_url: {pr_url}). \
+Your session is complete — do not call `exit_session`. \
+PR polling will move this task to Done when the PR merges.",
+                    tid = parsed.task_id
+                )}]}),
+            )
         }
     }
 }
