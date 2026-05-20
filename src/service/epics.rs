@@ -288,8 +288,8 @@ impl EpicService {
         let mut reparent_pid: Option<ProjectId> = None;
         match params.parent_epic_id {
             Some(Some(new_parent_id)) => {
-                self.check_no_cycle(params.epic_id, new_parent_id).await?;
                 let parent = self.get_epic(new_parent_id).await?;
+                self.check_no_cycle(params.epic_id, &parent).await?;
                 patch = patch.parent_epic_id(Some(new_parent_id));
                 if params.project_id.is_none() {
                     match self.db.get_epic(params.epic_id).await {
@@ -326,23 +326,30 @@ impl EpicService {
 
     /// Walk the ancestor chain of `proposed_parent` and return a Validation error
     /// if `epic_id` appears in it (which would create a cycle).
+    /// Takes a pre-fetched `&Epic` to avoid an extra DB round-trip.
     async fn check_no_cycle(
         &self,
         epic_id: EpicId,
-        proposed_parent: EpicId,
+        proposed_parent: &Epic,
     ) -> Result<(), ServiceError> {
-        let mut current = proposed_parent;
+        if proposed_parent.id == epic_id {
+            return Err(ServiceError::Validation(
+                "Setting this parent would create a cycle in the epic hierarchy".into(),
+            ));
+        }
+        let mut current_opt = proposed_parent.parent_epic_id;
         loop {
+            let current = match current_opt {
+                None => return Ok(()),
+                Some(c) => c,
+            };
             if current == epic_id {
                 return Err(ServiceError::Validation(
                     "Setting this parent would create a cycle in the epic hierarchy".into(),
                 ));
             }
             match self.db.get_epic(current).await {
-                Ok(Some(e)) => match e.parent_epic_id {
-                    Some(p) => current = p,
-                    None => return Ok(()),
-                },
+                Ok(Some(e)) => current_opt = e.parent_epic_id,
                 Ok(None) => return Ok(()),
                 Err(e) => return Err(ServiceError::Internal(format!("Database error: {e}"))),
             }
