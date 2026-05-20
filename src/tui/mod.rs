@@ -457,7 +457,10 @@ impl App {
         self.active_is_default || project_id == self.active_project
     }
 
-    fn epic_has_active_task(&self, epic_id: EpicId) -> bool {
+    pub(in crate::tui) fn epic_matches(&self, epic_id: EpicId) -> bool {
+        if !self.filter.only_active {
+            return true;
+        }
         let epic_ids = crate::models::descendant_epic_ids(epic_id, &self.board.epics);
         self.board
             .tasks
@@ -658,7 +661,7 @@ impl App {
                     if !self.project_matches(epic.project_id) {
                         continue;
                     }
-                    if self.filter.only_active && !self.epic_has_active_task(epic.id) {
+                    if !self.epic_matches(epic.id) {
                         continue;
                     }
                     if epic.status == status {
@@ -673,7 +676,7 @@ impl App {
                     if epic.parent_epic_id != Some(current) {
                         continue;
                     }
-                    if self.filter.only_active && !self.epic_has_active_task(epic.id) {
+                    if !self.epic_matches(epic.id) {
                         continue;
                     }
                     if epic.status == status {
@@ -736,7 +739,7 @@ impl App {
                         && self.filter.matches(&e.repo_path)
                         && self.project_matches(e.project_id)
                         && e.status == status
-                        && (!self.filter.only_active || self.epic_has_active_task(e.id))
+                        && self.epic_matches(e.id)
                 })
                 .count(),
             ViewMode::Epic { epic_id, .. } => {
@@ -747,7 +750,7 @@ impl App {
                     .filter(|e| {
                         e.parent_epic_id == Some(current)
                             && e.status == status
-                            && (!self.filter.only_active || self.epic_has_active_task(e.id))
+                            && self.epic_matches(e.id)
                     })
                     .count()
             }
@@ -785,7 +788,7 @@ impl App {
                     e.parent_epic_id.is_none()
                         && self.repo_matches(&e.repo_path)
                         && self.project_matches(e.project_id)
-                        && (!self.filter.only_active || self.epic_has_active_task(e.id))
+                        && self.epic_matches(e.id)
                 })
                 .collect(),
             ViewMode::Epic { epic_id, .. } => {
@@ -795,7 +798,7 @@ impl App {
                     .iter()
                     .filter(|e| {
                         e.parent_epic_id == Some(current)
-                            && (!self.filter.only_active || self.epic_has_active_task(e.id))
+                            && self.epic_matches(e.id)
                     })
                     .collect()
             }
