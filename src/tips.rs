@@ -50,6 +50,7 @@ pub fn embedded_tips() -> Vec<Tip> {
         ("010", include_str!("tips/010-wrap-up.md")),
         ("011", include_str!("tips/011-security-board.md")),
         ("012", include_str!("tips/012-flatten-view.md")),
+        ("013", include_str!("tips/013-projects.md")),
     ];
 
     let mut tips: Vec<Tip> = raw
@@ -118,8 +119,8 @@ mod tests {
         // The catalogue is intentionally tracked: bumping this count is a deliberate choice.
         assert_eq!(
             tips.len(),
-            12,
-            "expected 12 tips in the embedded catalogue, found {}",
+            13,
+            "expected 13 tips in the embedded catalogue, found {}",
             tips.len()
         );
 
