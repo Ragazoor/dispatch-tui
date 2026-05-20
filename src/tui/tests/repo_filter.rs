@@ -1345,7 +1345,9 @@ fn only_active_filter_shows_epic_with_active_task() {
 
     let items = app.column_items_for_status(TaskStatus::Backlog);
     assert!(
-        items.iter().any(|i| matches!(i, ColumnItem::Epic(e) if e.id == EpicId(10))),
+        items
+            .iter()
+            .any(|i| matches!(i, ColumnItem::Epic(e) if e.id == EpicId(10))),
         "epic with an active task should be visible when only_active is set"
     );
 }
@@ -1360,7 +1362,9 @@ fn only_active_filter_off_shows_epics_without_active_tasks() {
 
     let items = app.column_items_for_status(TaskStatus::Backlog);
     assert!(
-        items.iter().any(|i| matches!(i, ColumnItem::Epic(e) if e.id == EpicId(10))),
+        items
+            .iter()
+            .any(|i| matches!(i, ColumnItem::Epic(e) if e.id == EpicId(10))),
         "epic should be visible when only_active is off"
     );
 }
@@ -1382,7 +1386,10 @@ fn only_active_filter_column_item_count_excludes_inactive_epics() {
     app.filter.only_active = true;
 
     let count = app.column_item_count(TaskStatus::Backlog);
-    assert_eq!(count, 1, "only the epic with an active task should be counted");
+    assert_eq!(
+        count, 1,
+        "only the epic with an active task should be counted"
+    );
 }
 
 #[test]
@@ -1408,7 +1415,9 @@ fn only_active_filter_shows_root_epic_when_grandchild_task_is_active() {
 
     let items = app.column_items_for_status(TaskStatus::Backlog);
     assert!(
-        items.iter().any(|i| matches!(i, ColumnItem::Epic(e) if e.id == EpicId(10))),
+        items
+            .iter()
+            .any(|i| matches!(i, ColumnItem::Epic(e) if e.id == EpicId(10))),
         "root epic should be visible when a grandchild task is active"
     );
 }

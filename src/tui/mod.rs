@@ -462,10 +462,9 @@ impl App {
             return true;
         }
         let epic_ids = crate::models::descendant_epic_ids(epic_id, &self.board.epics);
-        self.board
-            .tasks
-            .iter()
-            .any(|t| matches!(t.epic_id, Some(eid) if epic_ids.contains(&eid)) && t.tmux_window.is_some())
+        self.board.tasks.iter().any(|t| {
+            matches!(t.epic_id, Some(eid) if epic_ids.contains(&eid)) && t.tmux_window.is_some()
+        })
     }
 
     /// Return tasks visible in the current view.
@@ -796,10 +795,7 @@ impl App {
                 self.board
                     .epics
                     .iter()
-                    .filter(|e| {
-                        e.parent_epic_id == Some(current)
-                            && self.epic_matches(e.id)
-                    })
+                    .filter(|e| e.parent_epic_id == Some(current) && self.epic_matches(e.id))
                     .collect()
             }
             ViewMode::TaskDetail { .. } | ViewMode::Learnings { .. } => {
