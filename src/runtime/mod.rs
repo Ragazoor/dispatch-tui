@@ -46,7 +46,11 @@ fn option_to_field_update(opt: Option<String>) -> FieldUpdate {
 
 /// Set up tmux for the TUI: rename the current window and bind Prefix+g to jump back.
 fn setup_tmux_for_tui(runner: &dyn ProcessRunner) {
-    let _ = tmux::rename_window("", TUI_WINDOW_NAME, runner);
+    // Use the pane ID of this process's own pane as the rename target. An empty-string
+    // target resolves to the session's focused window, which renames the wrong window
+    // when the user has a different window active at startup.
+    let target = tmux::current_pane_id(runner).unwrap_or_default();
+    let _ = tmux::rename_window(&target, TUI_WINDOW_NAME, runner);
     let _ = tmux::bind_key("g", &format!("select-window -t {TUI_WINDOW_NAME}"), runner);
 }
 
