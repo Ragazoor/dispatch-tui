@@ -381,6 +381,7 @@ impl TuiRuntime {
                 feed_interval_secs: Some(applied.feed_interval_secs),
                 project_id: None,
                 group_by_repo: None,
+                parent_epic_id: None,
             })
             .await
         {

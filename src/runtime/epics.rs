@@ -69,6 +69,7 @@ impl TuiRuntime {
                 feed_interval_secs: None,
                 project_id: None,
                 group_by_repo: None,
+                parent_epic_id: None,
             },
             "updating epic",
         )
@@ -109,6 +110,7 @@ impl TuiRuntime {
                 feed_interval_secs: None,
                 project_id: None,
                 group_by_repo: None,
+                parent_epic_id: None,
             },
             "toggling auto dispatch",
         )
@@ -136,6 +138,7 @@ impl TuiRuntime {
                 feed_interval_secs: None,
                 project_id: None,
                 group_by_repo: Some(group_by_repo),
+                parent_epic_id: None,
             },
             "toggling group by repo",
         )

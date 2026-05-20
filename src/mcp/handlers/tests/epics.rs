@@ -761,6 +761,149 @@ async fn update_epic_group_by_repo() {
     assert!(updated.group_by_repo);
 }
 
+// ---------------------------------------------------------------------------
+// update_epic parent_epic_id tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn update_epic_parent_id_set() {
+    let state = test_state().await;
+    let parent = state
+        .db
+        .create_epic("Parent", "", "/repo", None, ProjectId(1))
+        .await
+        .unwrap();
+    let child = state
+        .db
+        .create_epic("Child", "", "/repo", None, ProjectId(1))
+        .await
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_epic",
+            "arguments": { "epic_id": child.id.0, "parent_epic_id": parent.id.0 }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
+
+    let updated = state.db.get_epic(child.id).await.unwrap().unwrap();
+    assert_eq!(updated.parent_epic_id, Some(parent.id));
+}
+
+#[tokio::test]
+async fn update_epic_parent_id_clear() {
+    let state = test_state().await;
+    let parent = state
+        .db
+        .create_epic("Parent", "", "/repo", None, ProjectId(1))
+        .await
+        .unwrap();
+    let child = state
+        .db
+        .create_epic("Child", "", "/repo", Some(parent.id), ProjectId(1))
+        .await
+        .unwrap();
+    assert_eq!(child.parent_epic_id, Some(parent.id));
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_epic",
+            "arguments": { "epic_id": child.id.0, "parent_epic_id": null }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
+
+    let updated = state.db.get_epic(child.id).await.unwrap().unwrap();
+    assert!(
+        updated.parent_epic_id.is_none(),
+        "parent_epic_id should be cleared"
+    );
+}
+
+#[tokio::test]
+async fn update_epic_parent_id_absent_preserves_existing() {
+    let state = test_state().await;
+    let parent = state
+        .db
+        .create_epic("Parent", "", "/repo", None, ProjectId(1))
+        .await
+        .unwrap();
+    let child = state
+        .db
+        .create_epic("Child", "", "/repo", Some(parent.id), ProjectId(1))
+        .await
+        .unwrap();
+
+    // Update title only — parent_epic_id field absent
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_epic",
+            "arguments": { "epic_id": child.id.0, "title": "New Title" }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
+
+    let updated = state.db.get_epic(child.id).await.unwrap().unwrap();
+    assert_eq!(
+        updated.parent_epic_id,
+        Some(parent.id),
+        "parent_epic_id unchanged"
+    );
+}
+
+#[tokio::test]
+async fn update_epic_parent_id_cycle_returns_error() {
+    let state = test_state().await;
+    let a = state
+        .db
+        .create_epic("A", "", "/repo", None, ProjectId(1))
+        .await
+        .unwrap();
+    let b = state
+        .db
+        .create_epic("B", "", "/repo", Some(a.id), ProjectId(1))
+        .await
+        .unwrap();
+
+    // A → B already; setting A.parent = B would create B → A cycle
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_epic",
+            "arguments": { "epic_id": a.id.0, "parent_epic_id": b.id.0 }
+        })),
+    )
+    .await;
+    assert_error(&resp, "cycle");
+}
+
+#[tokio::test]
+async fn update_epic_tool_schema_includes_parent_epic_id() {
+    let state = test_state().await;
+    let resp = call(&state, "tools/list", None).await;
+    let tools = resp.result.as_ref().unwrap()["tools"].as_array().unwrap();
+    let update_epic = tools
+        .iter()
+        .find(|t| t["name"] == "update_epic")
+        .expect("update_epic not in tool list");
+    let props = &update_epic["inputSchema"]["properties"];
+    assert!(
+        props.get("parent_epic_id").is_some(),
+        "update_epic schema is missing parent_epic_id property"
+    );
+}
+
 #[tokio::test]
 async fn create_epic_tool_schema_includes_parent_epic_id() {
     let state = test_state().await;

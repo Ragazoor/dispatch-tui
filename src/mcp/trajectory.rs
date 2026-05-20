@@ -39,7 +39,10 @@ pub async fn append_entry(worktree: &Path, entry: &TrajectoryEntry) {
         #[serde(flatten)]
         entry: &'a TrajectoryEntry,
     }
-    let payload = WithVersion { schema_version: SCHEMA_VERSION, entry };
+    let payload = WithVersion {
+        schema_version: SCHEMA_VERSION,
+        entry,
+    };
     match serde_json::to_string(&payload) {
         Ok(mut line) => {
             line.push('\n');
@@ -75,13 +78,14 @@ mod tests {
     #[tokio::test]
     async fn append_creates_file_with_valid_json_line() {
         let dir = tempdir().unwrap();
-        tokio::fs::create_dir_all(dir.path().join(".dispatch")).await.unwrap();
+        tokio::fs::create_dir_all(dir.path().join(".dispatch"))
+            .await
+            .unwrap();
         let entry = make_entry("update_task");
         append_entry(dir.path(), &entry).await;
-        let content =
-            tokio::fs::read_to_string(dir.path().join(".dispatch/trajectory.jsonl"))
-                .await
-                .unwrap();
+        let content = tokio::fs::read_to_string(dir.path().join(".dispatch/trajectory.jsonl"))
+            .await
+            .unwrap();
         assert!(!content.is_empty());
         let parsed: Value = serde_json::from_str(content.trim()).unwrap();
         assert_eq!(parsed["schema_version"], "1.0.0");
@@ -93,13 +97,14 @@ mod tests {
     #[tokio::test]
     async fn append_adds_second_line() {
         let dir = tempdir().unwrap();
-        tokio::fs::create_dir_all(dir.path().join(".dispatch")).await.unwrap();
+        tokio::fs::create_dir_all(dir.path().join(".dispatch"))
+            .await
+            .unwrap();
         append_entry(dir.path(), &make_entry("get_task")).await;
         append_entry(dir.path(), &make_entry("list_tasks")).await;
-        let content =
-            tokio::fs::read_to_string(dir.path().join(".dispatch/trajectory.jsonl"))
-                .await
-                .unwrap();
+        let content = tokio::fs::read_to_string(dir.path().join(".dispatch/trajectory.jsonl"))
+            .await
+            .unwrap();
         let lines: Vec<&str> = content.lines().collect();
         assert_eq!(lines.len(), 2);
         let _: Value = serde_json::from_str(lines[0]).unwrap();
@@ -117,14 +122,15 @@ mod tests {
     #[tokio::test]
     async fn fields_round_trip_correctly() {
         let dir = tempdir().unwrap();
-        tokio::fs::create_dir_all(dir.path().join(".dispatch")).await.unwrap();
+        tokio::fs::create_dir_all(dir.path().join(".dispatch"))
+            .await
+            .unwrap();
         let entry = make_entry("report_usage");
         let expected_ts = entry.timestamp;
         append_entry(dir.path(), &entry).await;
-        let content =
-            tokio::fs::read_to_string(dir.path().join(".dispatch/trajectory.jsonl"))
-                .await
-                .unwrap();
+        let content = tokio::fs::read_to_string(dir.path().join(".dispatch/trajectory.jsonl"))
+            .await
+            .unwrap();
         let parsed: Value = serde_json::from_str(content.trim()).unwrap();
         assert_eq!(parsed["schema_version"], SCHEMA_VERSION);
         assert_eq!(parsed["task_id"], 42);
@@ -133,6 +139,9 @@ mod tests {
         assert_eq!(parsed["duration_ms"], 10);
         let ts_str = parsed["timestamp"].as_str().unwrap();
         let parsed_ts = chrono::DateTime::parse_from_rfc3339(ts_str).unwrap();
-        assert_eq!(parsed_ts.timestamp_nanos_opt(), expected_ts.timestamp_nanos_opt());
+        assert_eq!(
+            parsed_ts.timestamp_nanos_opt(),
+            expected_ts.timestamp_nanos_opt()
+        );
     }
 }

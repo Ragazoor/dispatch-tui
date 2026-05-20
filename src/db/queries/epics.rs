@@ -156,6 +156,10 @@ impl super::super::EpicCrud for Database {
             sets.push("project_id = ?");
             values.push(Box::new(pid.0));
         }
+        if let Some(peid) = patch.parent_epic_id {
+            sets.push("parent_epic_id = ?");
+            values.push(Box::new(peid.map(|e| e.0)));
+        }
 
         sets.push("updated_at = datetime('now')");
         values.push(Box::new(id.0));

@@ -533,6 +533,7 @@ async fn tool_schemas_match_arg_structs() {
                 "feed_command",
                 "feed_interval_secs",
                 "group_by_repo",
+                "parent_epic_id",
             ]),
             BTreeSet::from(["epic_id"]),
             json!({"epic_id": 1, "plan_path": "docs/plan.md", "sort_order": 42, "repo_path": "/new/path"}),

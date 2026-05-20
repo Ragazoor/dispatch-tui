@@ -289,7 +289,7 @@ mcp_tools! {
         { "type": "object", "properties": {} };
 
     async "update_epic" => epics::handle_update_epic,
-        "Update an epic's title, description, status, plan, sort order, repo path, project, or feed configuration.",
+        "Update an epic's title, description, status, plan, sort order, repo path, project, feed configuration, or parent epic.",
         {
             "type": "object",
             "properties": {
@@ -303,7 +303,8 @@ mcp_tools! {
                 "project_id": { "type": "integer", "description": "Move the epic to a different project. Use list_projects to look up IDs." },
                 "feed_command": { "type": ["string", "null"], "description": "Shell command that emits JSON FeedItems to populate tasks. Pass null to clear." },
                 "feed_interval_secs": { "type": ["integer", "null"], "description": "Polling interval in seconds (overrides the default). Pass null to clear." },
-                "group_by_repo": { "type": "boolean", "description": "When true, group feed tasks by repository path in the TUI. Pass false to disable grouping." }
+                "group_by_repo": { "type": "boolean", "description": "When true, group feed tasks by repository path in the TUI. Pass false to disable grouping." },
+                "parent_epic_id": { "type": ["integer", "null"], "description": "Re-parent this epic under another epic by ID. Pass null to make it a root epic. Cycle detection prevents hierarchical loops." }
             },
             "required": ["epic_id"]
         };
@@ -596,7 +597,10 @@ pub async fn handle_mcp(
                         Some(err) => serde_json::json!({"error": err.message}),
                         None => resp.result.clone().unwrap_or(Value::Null),
                     };
-                    let worktree = state.db.get_task(*task_id).await
+                    let worktree = state
+                        .db
+                        .get_task(*task_id)
+                        .await
                         .ok()
                         .flatten()
                         .and_then(|t| t.worktree);
@@ -610,11 +614,7 @@ pub async fn handle_mcp(
                             duration_ms,
                         };
                         let _ = tokio::spawn(async move {
-                            trajectory::append_entry(
-                                std::path::Path::new(&worktree),
-                                &entry,
-                            )
-                            .await;
+                            trajectory::append_entry(std::path::Path::new(&worktree), &entry).await;
                         });
                     }
                 }

@@ -14,7 +14,9 @@ use dispatch_tui::models::{ProjectId, TaskId, TaskStatus};
 #[tokio::test]
 async fn task_identity_with_worktree_writes_trajectory_entry() {
     let tmp = tempfile::tempdir().unwrap();
-    tokio::fs::create_dir_all(tmp.path().join(".dispatch")).await.unwrap();
+    tokio::fs::create_dir_all(tmp.path().join(".dispatch"))
+        .await
+        .unwrap();
 
     let (router, db) = common::test_router().await;
 
@@ -37,9 +39,12 @@ async fn task_identity_with_worktree_writes_trajectory_entry() {
         .unwrap();
 
     let worktree_path = tmp.path().to_str().unwrap().to_string();
-    db.patch_task(task_id, &db::TaskPatch::new().worktree(Some(&worktree_path)))
-        .await
-        .unwrap();
+    db.patch_task(
+        task_id,
+        &db::TaskPatch::new().worktree(Some(&worktree_path)),
+    )
+    .await
+    .unwrap();
 
     // Call list_tasks via MCP with the task's identity header.
     let _resp = common::post_mcp(
@@ -64,7 +69,11 @@ async fn task_identity_with_worktree_writes_trajectory_entry() {
 
     let content = tokio::fs::read_to_string(&trajectory_path).await.unwrap();
     let lines: Vec<&str> = content.lines().collect();
-    assert_eq!(lines.len(), 1, "expected exactly 1 trajectory line, got: {lines:?}");
+    assert_eq!(
+        lines.len(),
+        1,
+        "expected exactly 1 trajectory line, got: {lines:?}"
+    );
 
     let parsed: Value = serde_json::from_str(lines[0]).expect("trajectory line must be valid JSON");
     assert_eq!(
@@ -148,7 +157,9 @@ async fn task_identity_without_worktree_writes_no_file() {
 #[tokio::test]
 async fn session_identity_writes_no_trajectory_file() {
     let tmp = tempfile::tempdir().unwrap();
-    tokio::fs::create_dir_all(tmp.path().join(".dispatch")).await.unwrap();
+    tokio::fs::create_dir_all(tmp.path().join(".dispatch"))
+        .await
+        .unwrap();
 
     let (router, _db) = common::test_router().await;
 

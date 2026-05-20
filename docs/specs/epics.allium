@@ -424,12 +424,12 @@ rule ListEpicsViaMcp {
 
 rule UpdateEpicViaMcp {
     when: McpUpdateEpic(epic, title?, description?, status?, plan?, sort_order?, repo_path?,
-                        project_id?, feed_command?, feed_interval_secs?)
+                        project_id?, feed_command?, feed_interval_secs?, parent_epic_id?)
 
     requires: title != null or description != null or status != null
               or plan != null or sort_order != null or repo_path != null
               or project_id != null or feed_command != omitted
-              or feed_interval_secs != omitted
+              or feed_interval_secs != omitted or parent_epic_id != omitted
 
     -- project_id must refer to an existing project when provided
     requires:
@@ -439,6 +439,14 @@ rule UpdateEpicViaMcp {
     -- validation error instructing them to ask the human operator to
     -- archive from the TUI.
     requires: status != archived
+
+    -- parent_epic_id validation: parent must exist and no cycle may be introduced
+    requires:
+        if parent_epic_id != omitted and parent_epic_id != null:
+            Epic.exists(parent_epic_id)
+    requires:
+        if parent_epic_id != omitted and parent_epic_id != null:
+            not Epic.ancestor_chain(parent_epic_id).contains(epic.id)
 
     ensures:
         if title != null: epic.title = title
@@ -462,6 +470,17 @@ rule UpdateEpicViaMcp {
         -- feed_interval_secs supports three states: omitted (no change), an
         -- integer (set), or explicit null (clear to NULL)
         if feed_interval_secs != omitted: epic.feed_interval_secs = feed_interval_secs
+    ensures:
+        -- parent_epic_id uses triple-state semantics: omitted = no change,
+        -- integer = reparent under that epic, null = make this a root epic.
+        -- When reparenting causes a project_id mismatch, project_id is
+        -- cascaded from the new parent to this epic and all its descendants.
+        if parent_epic_id != omitted: epic.parent_epic_id = parent_epic_id
+    ensures:
+        if parent_epic_id != omitted and parent_epic_id != null
+           and Epic.get(parent_epic_id).project_id != epic.project_id:
+            forall d in Epic.descendants(epic.id) + [epic]:
+                d.project_id = Epic.get(parent_epic_id).project_id
 
     @guidance
         -- updated_at is refreshed automatically by the database layer
@@ -476,6 +495,10 @@ rule UpdateEpicViaMcp {
         -- feed_command and feed_interval_secs use triple-state JSON
         -- semantics: absent field = no change; explicit null = clear;
         -- string/integer value = set.
+        -- parent_epic_id uses the same triple-state JSON semantics.
+        -- Cycle detection walks the ancestor chain of the proposed parent;
+        -- if the current epic appears anywhere in that chain the update
+        -- is rejected with a -32602 validation error.
 }
 
 rule DispatchNextViaMcp {

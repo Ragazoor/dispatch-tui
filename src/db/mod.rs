@@ -117,14 +117,6 @@ pub struct CreateTaskRequest<'a> {
 
 patch_struct! {
     /// Builder for selective epic field updates.
-    ///
-    /// # Why `parent_epic_id` is absent
-    ///
-    /// Reparenting an epic is not supported. `parent_epic_id` is set once at
-    /// creation time via [`EpicCrud::create_epic`] and never changed afterward.
-    /// This keeps the parent chain immutable and prevents accidental cycle
-    /// introduction. The database enforces `CHECK (parent_epic_id != id)` (added
-    /// in migration v35) as a final guard against self-loops.
     pub struct EpicPatch<'a> {
         plain    title:              &'a str,
         plain    description:        &'a str,
@@ -137,6 +129,7 @@ patch_struct! {
         nullable feed_command:       &'a str,
         nullable feed_interval_secs: i64,
         plain    project_id:         ProjectId,
+        nullable parent_epic_id:     EpicId,
     }
 }
 
@@ -191,11 +184,10 @@ pub trait TaskCrud: Send + Sync {
 /// Epic CRUD, list, patch, recalculate status.
 #[async_trait::async_trait]
 pub trait EpicCrud: Send + Sync {
-    /// Create a new epic. `parent_epic_id` is set once here and never changed
-    /// via [`EpicPatch`] (reparenting is unsupported). The DB enforces
-    /// `CHECK (parent_epic_id != id)` (migration v35) to prevent self-loops,
-    /// and `recalculate_epic_status` uses a visited set to guard against any
-    /// cycle that might exist in older data.
+    /// Create a new epic. `parent_epic_id` can be changed later via
+    /// [`EpicCrud::patch_epic`]. The DB enforces `CHECK (parent_epic_id != id)`
+    /// (migration v35) to prevent self-loops; cycle detection is handled in
+    /// the service layer before any DB write.
     async fn create_epic(
         &self,
         title: &str,

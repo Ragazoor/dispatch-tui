@@ -666,6 +666,7 @@ async fn update_epic_status() {
         feed_interval_secs: None,
         project_id: None,
         group_by_repo: None,
+        parent_epic_id: None,
     })
     .await
     .unwrap();
@@ -707,6 +708,7 @@ async fn update_epic_no_fields_returns_error() {
             feed_interval_secs: None,
             project_id: None,
             group_by_repo: None,
+            parent_epic_id: None,
         })
         .await
         .unwrap_err();
@@ -747,6 +749,7 @@ async fn update_epic_auto_dispatch_persists() {
         feed_interval_secs: None,
         project_id: None,
         group_by_repo: None,
+        parent_epic_id: None,
     })
     .await
     .unwrap();
@@ -2092,6 +2095,7 @@ async fn update_epic_project_id_moves_epic() {
         feed_interval_secs: None,
         project_id: Some(other.id),
         group_by_repo: None,
+        parent_epic_id: None,
     })
     .await
     .unwrap();
