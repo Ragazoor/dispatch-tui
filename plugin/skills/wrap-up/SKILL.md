@@ -8,7 +8,7 @@ description: Use when implementation is complete to wrap up a dispatch worktree.
 Wrap up a dispatch worktree. The two paths:
 
 - **rebase** — dispatch handles it. The MCP `wrap_up` tool with `action: "rebase"` does the work; the task moves to Done and your tmux window is killed.
-- **pr** — you handle it. Inspect the diff you produced, write a real title and body that describe what was actually built, run `gh pr create --draft` yourself, then call MCP `update_task` to record the URL and move the task to Review. Dispatch deliberately no longer authors PR bodies because the auto-generated bodies were always worse than what you can write after seeing the work.
+- **pr** — you handle it. Inspect the diff you produced, write a real title and body that describe what was actually built, run `gh pr create --draft` yourself, then call MCP `wrap_up(action="pr", pr_url=<url>)` to record the URL and move the task to Review. Do not call `exit_session` — PR polling drives the task to Done on merge. Dispatch deliberately no longer authors PR bodies because the auto-generated bodies were always worse than what you can write after seeing the work.
 
 **Announce at start:** "I'm using the wrap-up skill to complete this task."
 
@@ -111,12 +111,15 @@ The tool blocks until the rebase completes and fast-forwards `{base_branch}`. It
 
 If `wrap_up` returns an error (e.g. rebase conflict, repo not on `{base_branch}`), show the user the exact error message and suggest resolution steps. Do not call `exit_session`. The task remains in its current status.
 
-**Call 2 — close.** On a successful `wrap_up` response, immediately call the `dispatch` MCP tool `exit_session` with:
+**Call 2 — reflect.** On a successful `wrap_up` response, the response text contains an **Exit token** (a UUID string). Immediately call the `dispatch` MCP tool `exit_session` with:
 - `task_id`: the integer from Step 1
+- `token`: the exit token from the wrap_up response
 
-`exit_session` may return a reflection prompt (asking whether you discovered any pitfalls / conventions / preferences worth recording). Follow its instructions: optionally call `record_learning` for each finding, then call `exit_session` again — repeat until it closes the session. The session ends only after `exit_session` finalises it.
+`exit_session` returns a reflection prompt. If you found pitfalls, conventions, or tool tips during this session, call `record_learning` for each one now.
 
-Do NOT stop between Call 1 and Call 2. Skipping `exit_session` leaves the tmux window alive and the task stuck.
+**Call 3 — close.** Call `exit_session` again with the same `task_id` and `token`. This closes the session. The token is consumed and cannot be reused.
+
+Do NOT stop between Call 1 and Call 3. Skipping `exit_session` leaves the tmux window alive and the task stuck.
 
 #### Validate retrieved knowledge
 
@@ -222,13 +225,15 @@ EOF
 
 If `gh` reports `a pull request for branch '...' already exists`, parse the URL it returns and use that — the PR already exists and your job is just to record it.
 
-#### 5d. Record the URL with dispatch
+#### 5d. Record the PR with dispatch
 
-Call the `dispatch` MCP tool `update_task` with:
+Call the `dispatch` MCP tool `wrap_up` with:
 - `task_id`: the integer from Step 1
+- `action`: `"pr"`
 - `pr_url`: the URL from Step 5c
-- `status`: `"review"`
 
-This moves the task to Review and triggers PR status polling. The response may include a reflection nudge — follow it if you have a learning to record. After this, `/code-review` will be injected into your session once the PR is ready.
+This moves the task to Review and starts PR status polling.
 
-If `update_task` returns an error, show the user the exact error message. Do not retry creating the PR — it already exists. The fix is on the dispatch side; either retry the `update_task` call after the issue is resolved, or ask the user to record the URL manually from the TUI.
+**Do NOT call `exit_session` after this.** The PR path does not issue an exit token. Your session is complete once `wrap_up(action="pr")` succeeds. Dispatch moves the task to Done automatically when the PR merges.
+
+If `wrap_up` returns an error, show the user the exact error message. Do not retry creating the PR — it already exists. Fix the reported issue then retry the `wrap_up` call, or ask the user to record the URL manually from the TUI.
