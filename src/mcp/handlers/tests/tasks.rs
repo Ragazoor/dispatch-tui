@@ -7550,6 +7550,44 @@ async fn exit_session_task_without_window_returns_error() {
 }
 
 #[tokio::test]
+async fn exit_session_without_token_errors() {
+    let state = test_state().await;
+    let task_id = create_running_task_with_window(&state).await;
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "exit_session", "arguments": { "task_id": task_id.0 } })),
+    )
+    .await;
+
+    assert_error(&resp, "wrap_up first");
+}
+
+#[tokio::test]
+async fn exit_session_with_wrong_token_errors() {
+    let state = test_state().await;
+    let task_id = create_running_task_with_window(&state).await;
+
+    state.exit_tokens.write().unwrap().insert(
+        task_id,
+        crate::mcp::ExitToken { token: "correct-token".to_string(), reflected: false },
+    );
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "exit_session",
+            "arguments": { "task_id": task_id.0, "token": "wrong-token" }
+        })),
+    )
+    .await;
+
+    assert_error(&resp, "invalid exit token");
+}
+
+#[tokio::test]
 async fn wrap_up_rebase_does_not_kill_window() {
     let state = test_state().await;
     let task_id = state

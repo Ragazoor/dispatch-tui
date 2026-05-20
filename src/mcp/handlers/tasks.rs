@@ -150,7 +150,7 @@ pub(super) struct ExitSessionArgs {
     #[serde(deserialize_with = "deserialize_flexible_i64")]
     pub(super) task_id: i64,
     #[serde(default)]
-    pub(super) has_learnings: Option<bool>,
+    pub(super) token: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -873,6 +873,21 @@ pub(super) async fn handle_exit_session(
         Err(e) => return JsonRpcResponse::err(id, -32603, format!("internal error: {e}")),
     };
 
+    let token = match parsed.token {
+        Some(t) => t,
+        None => return JsonRpcResponse::err(id, -32602, "no exit token — call wrap_up first"),
+    };
+
+    let token_match = {
+        let map = state.exit_tokens.read().unwrap();
+        map.get(&task_id).map(|et| et.token == token)
+    };
+    match token_match {
+        None => return JsonRpcResponse::err(id, -32602, "no exit token — call wrap_up first"),
+        Some(false) => return JsonRpcResponse::err(id, -32602, "invalid exit token"),
+        Some(true) => {}
+    }
+
     if task.tmux_window.is_none() {
         return JsonRpcResponse::err(
             id,
@@ -881,70 +896,39 @@ pub(super) async fn handle_exit_session(
         );
     }
 
-    // Stateless three-way dispatch driven by `has_learnings`:
-    //   None       → ask the agent to reflect (call again with true/false)
-    //   Some(true) → instruct agent to record_learning, then call again
-    //   Some(false)→ close the session
-    match parsed.has_learnings {
-        None => JsonRpcResponse::ok(
-            id,
-            json!({"content": [{"type": "text", "text": "\
-Before closing, reflect on this session.\n\
-\n\
-Did you encounter any of the following?\n\
-  \u{2022} A pitfall \u{2014} something that wasted time or caused surprise\n\
-  \u{2022} A convention \u{2014} a pattern worth following consistently\n\
-  \u{2022} A tool tip or preference\n\
-\n\
-Call exit_session(has_learnings=true) if yes, or exit_session(has_learnings=false) to close now."}]}),
-        ),
-        Some(true) => JsonRpcResponse::ok(
-            id,
-            json!({"content": [{"type": "text", "text": "\
-Record each finding with record_learning before closing:\n\
-  \u{2022} kind: pitfall | convention | preference | tool_recommendation\n\
-  \u{2022} summary: one clear sentence\n\
-  \u{2022} scope: repo | project | user | epic | task\n\
-\n\
-Check query_learnings first to avoid duplicates.\n\
-Call exit_session(has_learnings=false) when done to close the session."}]}),
-        ),
-        Some(false) => {
-            let patch = crate::db::TaskPatch::new()
-                .status(TaskStatus::Done)
-                .sub_status(SubStatus::default_for(TaskStatus::Done))
-                .tmux_window(None);
-            if let Err(e) = state.db.patch_task(task_id, &patch).await {
-                tracing::warn!(
-                    task_id = task_id.0,
-                    "exit_session: failed to apply closing patch: {e}"
-                );
-            }
-            if let Some(epic_id) = task.epic_id {
-                if let Err(err) = state.db.recalculate_epic_status(epic_id).await {
-                    tracing::warn!(
-                        "failed to recalculate epic status for epic {}: {err}",
-                        epic_id.0
-                    );
-                }
-            }
-            state.notify_task_changed(task_id);
-            if let Some(epic_id) = task.epic_id {
-                state.notify_epic_changed(epic_id);
-            }
-            let tmux_window = task.tmux_window;
-            let runner = state.runner.clone();
-            tokio::task::spawn_blocking(move || {
-                if let Some(window) = &tmux_window {
-                    let _ = crate::tmux::kill_window(window, &*runner);
-                }
-            });
-            JsonRpcResponse::ok(
-                id,
-                json!({"content": [{"type": "text", "text": "Session closed."}]}),
-            )
+    // Placeholder: two-call counter added in Task 6. Close immediately for now.
+    state.exit_tokens.write().unwrap().remove(&task_id);
+    let base_patch = crate::db::TaskPatch::new()
+        .sub_status(SubStatus::default_for(TaskStatus::Done))
+        .tmux_window(None);
+    let patch = if task.status == TaskStatus::Running {
+        base_patch.status(TaskStatus::Done)
+    } else {
+        base_patch
+    };
+    if let Err(e) = state.db.patch_task(task_id, &patch).await {
+        tracing::warn!(task_id = task_id.0, "exit_session: failed to apply closing patch: {e}");
+    }
+    if let Some(epic_id) = task.epic_id {
+        if let Err(err) = state.db.recalculate_epic_status(epic_id).await {
+            tracing::warn!(
+                "failed to recalculate epic status for epic {}: {err}",
+                epic_id.0
+            );
         }
     }
+    state.notify_task_changed(task_id);
+    if let Some(epic_id) = task.epic_id {
+        state.notify_epic_changed(epic_id);
+    }
+    let tmux_window = task.tmux_window;
+    let runner = state.runner.clone();
+    tokio::task::spawn_blocking(move || {
+        if let Some(window) = &tmux_window {
+            let _ = crate::tmux::kill_window(window, &*runner);
+        }
+    });
+    JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": "Session closed."}]}))
 }
 
 fn do_dispatch(
