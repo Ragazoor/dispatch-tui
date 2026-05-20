@@ -1421,3 +1421,96 @@ fn only_active_filter_shows_root_epic_when_grandchild_task_is_active() {
         "root epic should be visible when a grandchild task is active"
     );
 }
+
+#[test]
+fn filter_toggle_resets_column_scroll_offsets() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo".to_string()];
+    for state in &mut app.selection_mut().list_states {
+        *state.offset_mut() = 5;
+    }
+    app.update(Message::ToggleRepoFilter("/repo".to_string()));
+    for state in &app.selection().list_states {
+        assert_eq!(state.offset(), 0, "offset should be reset to 0 after filter change");
+    }
+}
+
+#[test]
+fn only_active_toggle_resets_column_scroll_offsets() {
+    let mut app = make_app();
+    for state in &mut app.selection_mut().list_states {
+        *state.offset_mut() = 3;
+    }
+    app.update(Message::ToggleOnlyActive);
+    for state in &app.selection().list_states {
+        assert_eq!(state.offset(), 0);
+    }
+}
+
+#[test]
+fn close_repo_filter_resets_column_scroll_offsets() {
+    let mut app = make_app();
+    app.input.mode = InputMode::RepoFilter;
+    for state in &mut app.selection_mut().list_states {
+        *state.offset_mut() = 7;
+    }
+    app.update(Message::CloseRepoFilter);
+    for state in &app.selection().list_states {
+        assert_eq!(state.offset(), 0);
+    }
+}
+
+#[test]
+fn toggle_repo_filter_mode_resets_column_scroll_offsets() {
+    let mut app = make_app();
+    for state in &mut app.selection_mut().list_states {
+        *state.offset_mut() = 2;
+    }
+    app.update(Message::ToggleRepoFilterMode);
+    for state in &app.selection().list_states {
+        assert_eq!(state.offset(), 0);
+    }
+}
+
+#[test]
+fn toggle_all_repo_filter_resets_column_scroll_offsets() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo".to_string()];
+    for state in &mut app.selection_mut().list_states {
+        *state.offset_mut() = 4;
+    }
+    app.update(Message::ToggleAllRepoFilter);
+    for state in &app.selection().list_states {
+        assert_eq!(state.offset(), 0);
+    }
+}
+
+#[test]
+fn load_filter_preset_resets_column_scroll_offsets() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo".to_string()];
+    app.filter.presets = vec![(
+        "my-preset".to_string(),
+        std::collections::HashSet::new(),
+        crate::tui::types::RepoFilterMode::Include,
+    )];
+    for state in &mut app.selection_mut().list_states {
+        *state.offset_mut() = 6;
+    }
+    app.update(Message::LoadFilterPreset("my-preset".to_string()));
+    for state in &app.selection().list_states {
+        assert_eq!(state.offset(), 0);
+    }
+}
+
+#[test]
+fn toggle_flattened_resets_column_scroll_offsets() {
+    let mut app = make_app();
+    for state in &mut app.selection_mut().list_states {
+        *state.offset_mut() = 8;
+    }
+    app.update(Message::Task(crate::tui::messages::TaskMessage::ToggleFlattened));
+    for state in &app.selection().list_states {
+        assert_eq!(state.offset(), 0, "offset should be reset after toggling flattened view");
+    }
+}

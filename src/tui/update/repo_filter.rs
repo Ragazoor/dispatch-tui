@@ -34,6 +34,7 @@ impl App {
     pub(in crate::tui) fn handle_close_repo_filter(&mut self) -> Vec<Command> {
         self.input.mode = InputMode::Normal;
         self.sync_board_selection();
+        self.reset_column_scroll();
         let mut paths: Vec<_> = self.filter.repos.iter().cloned().collect();
         paths.sort();
         let value = serde_json::to_string(&paths).unwrap_or_else(|_| "[]".to_string());
@@ -58,6 +59,7 @@ impl App {
             self.filter.repos.insert(path);
         }
         self.sync_board_selection();
+        self.reset_column_scroll();
         vec![]
     }
 
@@ -67,12 +69,14 @@ impl App {
             RepoFilterMode::Exclude => RepoFilterMode::Include,
         };
         self.sync_board_selection();
+        self.reset_column_scroll();
         vec![]
     }
 
     pub(in crate::tui) fn handle_toggle_only_active(&mut self) -> Vec<Command> {
         self.filter.only_active = !self.filter.only_active;
         self.sync_board_selection();
+        self.reset_column_scroll();
         vec![]
     }
 
@@ -83,6 +87,7 @@ impl App {
             self.filter.repos = self.board.repo_paths.iter().cloned().collect();
         }
         self.sync_board_selection();
+        self.reset_column_scroll();
         vec![]
     }
 
@@ -125,6 +130,7 @@ impl App {
                 .collect();
             self.filter.mode = *mode;
             self.sync_board_selection();
+            self.reset_column_scroll();
             self.set_status(format!("Loaded preset \"{name}\""));
         }
         vec![]

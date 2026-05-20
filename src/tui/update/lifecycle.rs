@@ -239,6 +239,7 @@ impl App {
         // tasks from the subtree merged in / split out), so selection row
         // indices may be out of bounds. Sync to follow the anchor.
         self.sync_board_selection();
+        self.reset_column_scroll();
         vec![]
     }
 }
