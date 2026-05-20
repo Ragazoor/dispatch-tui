@@ -285,32 +285,23 @@ impl EpicService {
             patch = patch.group_by_repo(gbr);
         }
 
-        // Handle parent_epic_id: validate, cycle-check, and schedule project cascade.
-        let mut reparent_project_id: Option<ProjectId> = None;
+        let mut reparent_pid: Option<ProjectId> = None;
         match params.parent_epic_id {
             Some(Some(new_parent_id)) => {
-                // Cycle check catches self-loops too (proposed_parent == epic_id walks 0 steps
-                // and immediately returns the cycle error).
                 self.check_no_cycle(params.epic_id, new_parent_id).await?;
-
-                let parent = self
-                    .db
-                    .get_epic(new_parent_id)
-                    .await
-                    .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?
-                    .ok_or_else(|| {
-                        ServiceError::NotFound(format!("Parent epic {} not found", new_parent_id.0))
-                    })?;
-
+                let parent = self.get_epic(new_parent_id).await?;
                 patch = patch.parent_epic_id(Some(new_parent_id));
-
-                // Schedule a project cascade if the parent has a different project and the
-                // caller didn't also supply an explicit project_id override.
                 if params.project_id.is_none() {
-                    if let Ok(Some(current)) = self.db.get_epic(params.epic_id).await {
-                        if current.project_id != parent.project_id {
-                            reparent_project_id = Some(parent.project_id);
+                    match self.db.get_epic(params.epic_id).await {
+                        Ok(Some(current)) if current.project_id != parent.project_id => {
+                            reparent_pid = Some(parent.project_id);
+                            patch = patch.project_id(parent.project_id);
                         }
+                        Err(e) => tracing::warn!(
+                            "update_epic: failed to check project cascade for epic {}: {e}",
+                            params.epic_id.0
+                        ),
+                        _ => {}
                     }
                 }
             }
@@ -326,17 +317,8 @@ impl EpicService {
             .await
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
 
-        if let Some(new_pid) = params.project_id {
-            self.cascade_project_id(epic_id, new_pid).await;
-        }
-
-        // Cascade project_id from the new parent when reparenting changes the project.
-        if let Some(proj_id) = reparent_project_id {
-            self.db
-                .patch_epic(epic_id, &EpicPatch::new().project_id(proj_id))
-                .await
-                .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
-            self.cascade_project_id(epic_id, proj_id).await;
+        if let Some(pid) = params.project_id.or(reparent_pid) {
+            self.cascade_project_id(epic_id, pid).await;
         }
 
         Ok(epic_id)
