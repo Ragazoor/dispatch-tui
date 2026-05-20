@@ -38,7 +38,11 @@ raw=$(gh search prs \
   --review-requested=@me \
   "${owner_flags[@]}" \
   --json number,title,body,url,repository,isDraft,updatedAt \
-  --limit 100)
+  --limit 100 2>&1) || {
+  echo "fetch-reviews: gh search prs failed: $raw" >&2
+  echo "[]"
+  exit 0
+}
 
 printf '%s' "$raw" | jq '[
   .[] |
