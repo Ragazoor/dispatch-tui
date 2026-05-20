@@ -78,7 +78,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (53, migrate_v53_add_wrap_up_mode),
     (54, migrate_v54_add_group_by_repo),
     (55, migrate_v55_add_learning_embedding),
-    (56, migrate_v56_drop_task_usage), // task_usage was never read by active code; dropped
+    (56, migrate_v56_drop_task_usage),
 ];
 
 fn migrate_v53_add_wrap_up_mode(conn: &Connection) -> Result<()> {
@@ -1166,11 +1166,6 @@ fn migrate_v54_add_group_by_repo(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn migrate_v56_drop_task_usage(conn: &Connection) -> Result<()> {
-    conn.execute_batch("DROP TABLE IF EXISTS task_usage;")
-        .context("Failed to drop task_usage table (migration v56)")
-}
-
 fn migrate_v55_add_learning_embedding(conn: &Connection) -> Result<()> {
     // Skip if learnings table doesn't exist (e.g. in tests with minimal schemas)
     let table_exists: bool = conn
@@ -1187,4 +1182,9 @@ fn migrate_v55_add_learning_embedding(conn: &Connection) -> Result<()> {
 
     conn.execute_batch("ALTER TABLE learnings ADD COLUMN embedding BLOB;")
         .context("Failed to add embedding column to learnings")
+}
+
+fn migrate_v56_drop_task_usage(conn: &Connection) -> Result<()> {
+    conn.execute_batch("DROP TABLE IF EXISTS task_usage;")
+        .context("Failed to drop task_usage table (migration v56)")
 }

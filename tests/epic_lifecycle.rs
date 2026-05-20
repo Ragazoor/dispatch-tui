@@ -95,8 +95,8 @@ async fn full_epic_lifecycle() {
     assert!(db.get_task(sub2).await.unwrap().is_none());
 }
 
-/// Regression: archiving an epic must not violate FK constraints, even when
-/// subtasks have rows in `task_usage` and `learnings.source_task_id`.
+/// Regression: archiving an epic must not violate FK constraints from
+/// `learnings.source_task_id`.
 ///
 /// Soft-archive transitions epic + subtasks to status='archived' via
 /// `patch_epic` / `patch_task` rather than `DELETE FROM tasks`, so the FK
