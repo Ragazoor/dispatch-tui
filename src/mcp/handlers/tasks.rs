@@ -870,31 +870,33 @@ pub(super) async fn handle_exit_session(
         None => return JsonRpcResponse::err(id, -32602, ERR_NO_TOKEN),
     };
 
-    // Two-call flow: first call returns a reflection prompt; second call closes the session.
-    // Single write-lock validates the token and flips reflected atomically (no TOCTOU window).
+    // Validate token, check session liveness, flip reflected, and (on second call) remove —
+    // all in one write-lock to prevent a concurrent second call from seeing stale reflected
+    // state and returning the reflection prompt twice.
+    // Token errors are checked before the window check so a closed session yields the right
+    // error when both the token and the window are gone simultaneously.
     let already_reflected = {
         let mut map = state.exit_tokens.write().unwrap();
-        match map.get_mut(&task_id) {
+        let reflected = match map.get(&task_id) {
             None => return JsonRpcResponse::err(id, -32602, ERR_NO_TOKEN),
             Some(et) if et.token != token => {
                 return JsonRpcResponse::err(id, -32602, "invalid exit token")
             }
-            Some(et) => {
-                if task.tmux_window.is_none() {
-                    return JsonRpcResponse::err(
-                        id,
-                        -32602,
-                        format!("task #{} has no active session", parsed.task_id),
-                    );
-                }
-                if et.reflected {
-                    true
-                } else {
-                    et.reflected = true;
-                    false
-                }
-            }
+            Some(et) => et.reflected,
+        };
+        if task.tmux_window.is_none() {
+            return JsonRpcResponse::err(
+                id,
+                -32602,
+                format!("task #{} has no active session", parsed.task_id),
+            );
         }
+        if reflected {
+            map.remove(&task_id);
+        } else {
+            map.get_mut(&task_id).unwrap().reflected = true;
+        }
+        reflected
     };
 
     if !already_reflected {
@@ -912,7 +914,6 @@ Then call exit_session again (with the same token) to close the session."}]}),
         );
     }
 
-    state.exit_tokens.write().unwrap().remove(&task_id);
     let base_patch = crate::db::TaskPatch::new()
         .sub_status(SubStatus::default_for(TaskStatus::Done))
         .tmux_window(None);
