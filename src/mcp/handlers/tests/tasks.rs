@@ -8404,4 +8404,8 @@ async fn wrap_up_tool_schema_includes_done_action() {
         values.contains(&"rebase"),
         "wrap_up action enum should include 'rebase', got: {values:?}"
     );
+    assert!(
+        values.contains(&"pr"),
+        "wrap_up action enum should include 'pr', got: {values:?}"
+    );
 }

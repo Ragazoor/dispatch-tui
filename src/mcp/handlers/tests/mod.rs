@@ -530,7 +530,7 @@ async fn tool_schemas_match_arg_structs() {
         ),
         (
             "wrap_up",
-            BTreeSet::from(["task_id", "action", "learning_verdicts"]),
+            BTreeSet::from(["task_id", "action", "pr_url", "learning_verdicts"]),
             BTreeSet::from(["task_id", "action"]),
             json!({"task_id": 1, "action": "rebase", "learning_verdicts": [{"learning_id": 1, "verdict": "helped"}]}),
         ),
@@ -595,8 +595,8 @@ async fn tool_schemas_match_arg_structs() {
         (
             "exit_session",
             BTreeSet::from(["task_id", "token"]),
-            BTreeSet::from(["task_id"]),
-            json!({"task_id": 1}),
+            BTreeSet::from(["task_id", "token"]),
+            json!({"task_id": 1, "token": "tok"}),
         ),
     ];
 

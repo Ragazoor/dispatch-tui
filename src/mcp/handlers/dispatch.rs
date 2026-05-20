@@ -310,7 +310,11 @@ mcp_tools! {
         };
 
     async "wrap_up" => tasks::handle_wrap_up,
-        "Wrap up a running or review task. 'rebase' rebases onto base_branch and fast-forwards it (blocks until complete). 'done' marks the task Done immediately with no git operations — use for research, planning, or changes already committed to the base branch. Neither action closes the session: you MUST call `exit_session` afterward or the tmux window stays alive. For PR creation, follow the /wrap-up skill instead.",
+        "Wrap up a running or review task. \
+'rebase' rebases onto base_branch and fast-forwards it (blocks until complete) — response includes an exit token you MUST pass to exit_session. \
+'done' marks the task Done immediately with no git operations — response also includes an exit token. \
+'pr' records the PR URL (required pr_url arg) and moves the task to Review — no exit token, do NOT call exit_session. \
+PR polling drives the task to Done on merge.",
         {
             "type": "object",
             "properties": {
@@ -320,8 +324,12 @@ mcp_tools! {
                 },
                 "action": {
                     "type": "string",
-                    "enum": ["rebase", "done"],
-                    "description": "'rebase' — rebase onto base_branch and fast-forward it. 'done' — mark task Done immediately, no git operations."
+                    "enum": ["rebase", "done", "pr"],
+                    "description": "'rebase' — rebase onto base_branch and fast-forward it (returns exit token). 'done' — mark task Done immediately, no git ops (returns exit token). 'pr' — record PR URL and move to review, no exit token."
+                },
+                "pr_url": {
+                    "type": "string",
+                    "description": "Required when action is 'pr'. The GitHub PR URL returned by gh pr create."
                 },
                 "learning_verdicts": {
                     "type": "array",
@@ -494,7 +502,7 @@ the session.",
                     "description": "Exit token obtained from wrap_up. Pass the same token on both the reflection call and the closing call."
                 }
             },
-            "required": ["task_id"]
+            "required": ["task_id", "token"]
         }
 }
 
