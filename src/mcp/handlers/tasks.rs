@@ -820,6 +820,7 @@ pub(super) async fn handle_wrap_up(
             if let Err(e) = state.db.patch_task(task_id, &patch).await {
                 return JsonRpcResponse::err(id, -32603, format!("wrap_up pr failed: {e}"));
             }
+            state.notify_task_changed(task_id);
             if let Some(epic_id) = task.epic_id {
                 if let Err(err) = state.db.recalculate_epic_status(epic_id).await {
                     tracing::warn!(
@@ -827,9 +828,6 @@ pub(super) async fn handle_wrap_up(
                         epic_id.0
                     );
                 }
-            }
-            state.notify_task_changed(task_id);
-            if let Some(epic_id) = task.epic_id {
                 state.notify_epic_changed(epic_id);
             }
             JsonRpcResponse::ok(
@@ -844,6 +842,8 @@ PR polling will move this task to Done when the PR merges.",
         }
     }
 }
+
+const ERR_NO_TOKEN: &str = "no exit token — call wrap_up first";
 
 pub(super) async fn handle_exit_session(
     state: &McpState,
@@ -867,42 +867,34 @@ pub(super) async fn handle_exit_session(
 
     let token = match parsed.token {
         Some(t) => t,
-        None => return JsonRpcResponse::err(id, -32602, "no exit token — call wrap_up first"),
+        None => return JsonRpcResponse::err(id, -32602, ERR_NO_TOKEN),
     };
 
-    let token_match = {
-        let map = state.exit_tokens.read().unwrap();
-        map.get(&task_id).map(|et| et.token == token)
-    };
-    match token_match {
-        None => return JsonRpcResponse::err(id, -32602, "no exit token — call wrap_up first"),
-        Some(false) => return JsonRpcResponse::err(id, -32602, "invalid exit token"),
-        Some(true) => {}
-    }
-
-    if task.tmux_window.is_none() {
-        return JsonRpcResponse::err(
-            id,
-            -32602,
-            format!("task #{} has no active session", parsed.task_id),
-        );
-    }
-
-    // Two-call flow: first call sets reflected=true and returns a reflection prompt;
-    // second call (reflected=true) removes the token and closes the session.
-    // Single write-lock acquisition prevents a TOCTOU race between the read and the mutation.
+    // Two-call flow: first call returns a reflection prompt; second call closes the session.
+    // Single write-lock validates the token and flips reflected atomically (no TOCTOU window).
+    // Order: token missing → token wrong → window missing → reflected check.
     let already_reflected = {
         let mut map = state.exit_tokens.write().unwrap();
-        if let Some(et) = map.get_mut(&task_id) {
-            if et.reflected {
-                true
-            } else {
-                et.reflected = true;
-                false
+        match map.get_mut(&task_id) {
+            None => return JsonRpcResponse::err(id, -32602, ERR_NO_TOKEN),
+            Some(et) if et.token != token => {
+                return JsonRpcResponse::err(id, -32602, "invalid exit token")
             }
-        } else {
-            // Token was concurrently consumed — treat as already closed.
-            true
+            Some(et) => {
+                if task.tmux_window.is_none() {
+                    return JsonRpcResponse::err(
+                        id,
+                        -32602,
+                        format!("task #{} has no active session", parsed.task_id),
+                    );
+                }
+                if et.reflected {
+                    true
+                } else {
+                    et.reflected = true;
+                    false
+                }
+            }
         }
     };
 
