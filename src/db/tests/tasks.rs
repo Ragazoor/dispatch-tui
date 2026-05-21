@@ -534,7 +534,7 @@ async fn patch_task_none_preserves_labels() {
 }
 
 #[tokio::test]
-async fn list_all_tolerates_corrupt_labels_json() {
+async fn list_all_errors_on_corrupt_labels_json() {
     let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
@@ -552,7 +552,6 @@ async fn list_all_tolerates_corrupt_labels_json() {
         })
         .await
         .unwrap();
-    // Inject malformed JSON directly via the connection.
     let task_id = id.0;
     db.db_call(move |conn| {
         conn.execute(
@@ -563,50 +562,11 @@ async fn list_all_tolerates_corrupt_labels_json() {
     })
     .await
     .unwrap();
-    // list_all must still succeed; the broken row falls back to empty labels.
-    let tasks = db.list_all().await.unwrap();
-    assert_eq!(tasks.len(), 1);
-    assert!(tasks[0].labels.is_empty());
-}
-
-#[tokio::test]
-async fn decode_fallback_counter_bumps_on_malformed_labels() {
-    let db = in_memory_db().await;
-    let id = db
-        .create_task(CreateTaskRequest {
-            title: "t",
-            description: "d",
-            repo_path: "/r",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            project_id: ProjectId(1),
-            wrap_up_mode: None,
-        })
-        .await
-        .unwrap();
-    // Inject malformed JSON in labels — bypasses CHECK constraints on enum
-    // columns and exercises the soft-fail branch in `read_json_string_vec`.
-    let task_id = id.0;
-    db.db_call(move |conn| {
-        conn.execute(
-            "UPDATE tasks SET labels = ?1 WHERE id = ?2",
-            rusqlite::params!["{not json", task_id],
-        )?;
-        Ok(())
-    })
-    .await
-    .unwrap();
-    let before = crate::db::decode_fallback_count();
-    let task = db.get_task(id).await.unwrap().expect("task exists");
-    assert!(task.labels.is_empty());
-    let after = crate::db::decode_fallback_count();
+    let result = db.list_all().await;
     assert!(
-        after > before,
-        "decode_fallback_count should increment on malformed JSON (before={before}, after={after})"
+        result.is_err(),
+        "expected Err on corrupt labels JSON, got {:?}",
+        result
     );
 }
 
@@ -2659,4 +2619,70 @@ async fn patch_task_wrap_up_mode() {
         .unwrap();
     let task = db.get_task(task.id).await.unwrap().unwrap();
     assert_eq!(task.wrap_up_mode, None);
+}
+
+#[tokio::test]
+async fn get_task_errors_on_unknown_tag() {
+    let db = in_memory_db().await;
+    let id = db
+        .create_task(CreateTaskRequest {
+            title: "t",
+            description: "",
+            repo_path: "/r",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+            wrap_up_mode: None,
+        })
+        .await
+        .unwrap();
+    let task_id = id.0;
+    db.db_call(move |conn| {
+        conn.execute(
+            "UPDATE tasks SET tag = 'xyzzy_unknown' WHERE id = ?1",
+            rusqlite::params![task_id],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let result = db.get_task(id).await;
+    assert!(result.is_err(), "expected Err on unknown tag, got {:?}", result);
+}
+
+#[tokio::test]
+async fn list_all_errors_on_unknown_wrap_up_mode() {
+    let db = in_memory_db().await;
+    let id = db
+        .create_task(CreateTaskRequest {
+            title: "t",
+            description: "",
+            repo_path: "/r",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+            wrap_up_mode: None,
+        })
+        .await
+        .unwrap();
+    let task_id = id.0;
+    db.db_call(move |conn| {
+        conn.execute(
+            "UPDATE tasks SET wrap_up_mode = 'unknown_mode' WHERE id = ?1",
+            rusqlite::params![task_id],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let result = db.list_all().await;
+    assert!(result.is_err(), "expected Err on unknown wrap_up_mode");
 }

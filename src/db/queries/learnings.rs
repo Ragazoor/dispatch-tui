@@ -24,7 +24,7 @@ fn row_to_learning(row: &rusqlite::Row<'_>) -> rusqlite::Result<Learning> {
     let created_str: String = row.get(11)?;
     let updated_str: String = row.get(12)?;
 
-    let tags = read_json_string_vec(row, "tags");
+    let tags = read_json_string_vec(row, "tags")?;
 
     let parse_dt = |s: &str| -> chrono::DateTime<Utc> {
         NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")

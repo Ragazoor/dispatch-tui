@@ -4,8 +4,6 @@ mod projects;
 mod settings;
 mod tasks;
 
-use std::sync::atomic::{AtomicU64, Ordering};
-
 use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 
@@ -13,19 +11,13 @@ use crate::models::{
     Epic, EpicId, ProjectId, SubStatus, Task, TaskId, TaskStatus, TaskTag, WrapUpMode,
 };
 
-/// Process-wide counter incremented each time a row decode falls back to a
-/// default value (unknown enum string, malformed JSON list, etc.). Surfaces
-/// slow-bleeding migration/decoding bugs that the per-warn `tracing::warn!`
-/// lines alone are too easy to miss.
-static DECODE_FALLBACK_COUNT: AtomicU64 = AtomicU64::new(0);
-
-/// Returns the current value of the process-wide decode-fallback counter.
-pub fn decode_fallback_count() -> u64 {
-    DECODE_FALLBACK_COUNT.load(Ordering::Relaxed)
-}
-
-fn bump_decode_fallback() -> u64 {
-    DECODE_FALLBACK_COUNT.fetch_add(1, Ordering::Relaxed) + 1
+/// Build a `FromSqlConversionFailure` error for an unrecognised enum string.
+fn unknown_enum(field: &'static str, raw: &str) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(
+        0,
+        rusqlite::types::Type::Text,
+        format!("unrecognised {field} value: {raw:?}").into(),
+    )
 }
 
 /// Column list shared by all task SELECT queries. Pair with `row_to_task`.
@@ -37,15 +29,8 @@ pub(super) const TASK_COLUMNS: &str =
 
 pub(super) fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     let status_str: String = row.get("status")?;
-    let status = TaskStatus::parse(&status_str).unwrap_or_else(|| {
-        let count = bump_decode_fallback();
-        tracing::warn!(
-            raw = %status_str,
-            count,
-            "unrecognised task status, defaulting to Backlog"
-        );
-        TaskStatus::Backlog
-    });
+    let status = TaskStatus::parse(&status_str)
+        .ok_or_else(|| unknown_enum("task_status", &status_str))?;
 
     let created_str: String = row.get("created_at")?;
     let updated_str: String = row.get("updated_at")?;
@@ -63,9 +48,9 @@ pub(super) fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
             .get::<_, Option<i64>>("epic_id")
             .unwrap_or(None)
             .map(EpicId),
-        sub_status: parse_sub_status_or_warn(row.get::<_, String>("sub_status").ok()),
+        sub_status: parse_sub_status(row.get::<_, String>("sub_status").ok())?,
         pr_url: row.get::<_, Option<String>>("pr_url").unwrap_or(None),
-        tag: parse_tag_or_warn(row.get::<_, Option<String>>("tag").unwrap_or(None)),
+        tag: parse_tag(row.get::<_, Option<String>>("tag").unwrap_or(None))?,
         sort_order: row.get::<_, Option<i64>>("sort_order").unwrap_or(None),
         base_branch: row
             .get::<_, Option<String>>("base_branch")
@@ -73,14 +58,14 @@ pub(super) fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
             .unwrap_or_else(|| "main".to_string()),
         external_id: row.get::<_, Option<String>>("external_id").unwrap_or(None),
         project_id: ProjectId(row.get::<_, i64>("project_id")?),
-        labels: read_json_string_vec(row, "labels"),
+        labels: read_json_string_vec(row, "labels")?,
         created_at: parse_datetime(&created_str),
         updated_at: parse_datetime(&updated_str),
         last_pre_tool_use_at: read_optional_datetime(row, "last_pre_tool_use_at"),
         last_notification_at: read_optional_datetime(row, "last_notification_at"),
-        wrap_up_mode: parse_wrap_up_mode_or_warn(
+        wrap_up_mode: parse_wrap_up_mode(
             row.get::<_, Option<String>>("wrap_up_mode").unwrap_or(None),
-        ),
+        )?,
     })
 }
 
@@ -94,15 +79,8 @@ pub(super) fn row_to_epic(row: &rusqlite::Row<'_>) -> rusqlite::Result<Epic> {
         title: row.get("title")?,
         description: row.get("description")?,
         repo_path: row.get("repo_path")?,
-        status: TaskStatus::parse(&status_str).unwrap_or_else(|| {
-            let count = bump_decode_fallback();
-            tracing::warn!(
-                raw = %status_str,
-                count,
-                "unrecognised epic status, defaulting to Backlog"
-            );
-            TaskStatus::Backlog
-        }),
+        status: TaskStatus::parse(&status_str)
+            .ok_or_else(|| unknown_enum("epic_status", &status_str))?,
         plan_path: row.get("plan_path")?,
         sort_order: row.get::<_, Option<i64>>("sort_order").unwrap_or(None),
         auto_dispatch: row.get::<_, bool>("auto_dispatch").unwrap_or(true),
@@ -121,66 +99,47 @@ pub(super) fn row_to_epic(row: &rusqlite::Row<'_>) -> rusqlite::Result<Epic> {
     })
 }
 
-/// Decode a JSON-encoded `Vec<String>` column. Tolerates NULL, missing
-/// columns, and malformed JSON by defaulting to an empty vector — a
-/// corrupt cell must never crash the TUI.
-pub(super) fn read_json_string_vec(row: &rusqlite::Row<'_>, column: &str) -> Vec<String> {
+/// Decode a JSON-encoded `Vec<String>` column. Returns an error for malformed
+/// JSON so corrupt cells surface immediately rather than silently becoming empty.
+pub(super) fn read_json_string_vec(
+    row: &rusqlite::Row<'_>,
+    column: &str,
+) -> rusqlite::Result<Vec<String>> {
     let raw: Option<String> = row.get::<_, Option<String>>(column).ok().flatten();
     match raw {
-        Some(s) => match serde_json::from_str::<Vec<String>>(&s) {
-            Ok(v) => v,
-            Err(e) => {
-                let count = bump_decode_fallback();
-                tracing::warn!(
-                    column,
-                    raw = %s,
-                    error = %e,
-                    count,
-                    "malformed JSON list, defaulting to empty"
-                );
-                Vec::new()
-            }
-        },
-        None => Vec::new(),
+        None => Ok(Vec::new()),
+        Some(s) => serde_json::from_str::<Vec<String>>(&s).map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Text,
+                format!("invalid JSON in column {column:?}: {e}").into(),
+            )
+        }),
     }
 }
 
-fn parse_sub_status_or_warn(raw: Option<String>) -> SubStatus {
+fn parse_sub_status(raw: Option<String>) -> rusqlite::Result<SubStatus> {
     match raw {
-        Some(s) => match SubStatus::parse(&s) {
-            Some(v) => v,
-            None => {
-                let count = bump_decode_fallback();
-                tracing::warn!(
-                    raw = %s,
-                    count,
-                    "unrecognised sub_status, defaulting to None"
-                );
-                SubStatus::None
-            }
-        },
-        None => SubStatus::None,
+        None => Ok(SubStatus::None),
+        Some(s) => SubStatus::parse(&s).ok_or_else(|| unknown_enum("sub_status", &s)),
     }
 }
 
-fn parse_wrap_up_mode_or_warn(raw: Option<String>) -> Option<WrapUpMode> {
-    let s = raw?;
-    WrapUpMode::parse(&s).or_else(|| {
-        let count = bump_decode_fallback();
-        tracing::warn!(raw = %s, count, "unrecognised wrap_up_mode, dropping");
-        None
-    })
+fn parse_wrap_up_mode(raw: Option<String>) -> rusqlite::Result<Option<WrapUpMode>> {
+    match raw {
+        None => Ok(None),
+        Some(s) => WrapUpMode::parse(&s)
+            .map(Some)
+            .ok_or_else(|| unknown_enum("wrap_up_mode", &s)),
+    }
 }
 
-fn parse_tag_or_warn(raw: Option<String>) -> Option<TaskTag> {
-    let s = raw?;
-    match TaskTag::parse(&s) {
-        Some(v) => Some(v),
-        None => {
-            let count = bump_decode_fallback();
-            tracing::warn!(raw = %s, count, "unrecognised task tag, dropping");
-            None
-        }
+fn parse_tag(raw: Option<String>) -> rusqlite::Result<Option<TaskTag>> {
+    match raw {
+        None => Ok(None),
+        Some(s) => TaskTag::parse(&s)
+            .map(Some)
+            .ok_or_else(|| unknown_enum("task_tag", &s)),
     }
 }
 
