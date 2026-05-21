@@ -545,6 +545,9 @@ async fn main() -> Result<()> {
                     if any_repair_failed {
                         std::process::exit(1);
                     }
+                    if json {
+                        println!("{}", format_json(&findings));
+                    }
                     return Ok(());
                 }
             }
