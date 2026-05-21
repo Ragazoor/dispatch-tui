@@ -1445,7 +1445,7 @@ fn quick_dispatch_no_new_entry_when_buffer_exactly_matches_repo() {
     app.board.repo_paths = vec!["/repo/a".to_string(), "/repo/b".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     app.input.buffer = "/repo/a".to_string(); // exact match → no new entry
-    // filtered = ["/repo/a"] only (only exact match on the query chars)
+                                              // filtered = ["/repo/a"] only (only exact match on the query chars)
     app.input.repo_cursor = 0;
     app.handle_key(make_key(KeyCode::Down));
     // filtered has 1 item, no new entry → wraps back to 0

@@ -3,7 +3,9 @@
 use crate::models::{TaskTag, WrapUpMode};
 
 use super::super::types::*;
-use super::super::{filtered_repos, has_new_repo_option, truncate_title, App, TITLE_DISPLAY_LENGTH};
+use super::super::{
+    filtered_repos, has_new_repo_option, truncate_title, App, TITLE_DISPLAY_LENGTH,
+};
 
 impl App {
     pub(in crate::tui) fn handle_copy_task(&mut self) -> Vec<Command> {
