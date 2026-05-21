@@ -39,6 +39,10 @@
 | `src/dispatch/prompts.rs` | Prompt construction (with-plan, no-plan variants, learning injection) |
 | `src/dispatch/worktree.rs` | Worktree creation/teardown |
 | `src/dispatch/finish.rs` | Rebase + fast-forward branch onto base branch, kill tmux window (`finish_task`); defines `FinishError` |
+| `src/feed/mod.rs` | `FeedRunner` struct, poll loop, `tick()` orchestration — composes exec/parse/ingest; re-exports `resolve_base_branches` |
+| `src/feed/exec.rs` | `resolve_base_branches()` (cached per-path git lookup), `exec_feed_command()` (async shell spawn + stdout capture) |
+| `src/feed/parse.rs` | `parse_feed_items()` — JSON → `Vec<FeedItem>` deserialization |
+| `src/feed/ingest.rs` | `sync_grouped_feed()` — groups items by repo, creates/reuses sub-epics, upserts tasks |
 | `src/process.rs` | `ProcessRunner` trait + `RealProcessRunner` / `MockProcessRunner` for testable shell execution |
 | `src/tmux.rs` | Tmux API: create windows, send keys, capture pane output, kill windows |
 | `src/editor.rs` | External `$EDITOR` integration for editing task/epic fields |

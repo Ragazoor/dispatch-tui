@@ -1,3 +1,7 @@
+mod exec;
+mod ingest;
+mod parse;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -6,148 +10,18 @@ use tokio::sync::mpsc;
 
 use crate::db::TaskStore;
 use crate::dispatch::resolve_feed_item_repo_paths;
-use crate::git::detect_default_branch;
 use crate::mcp::McpEvent;
-#[cfg(test)]
-use crate::models::ProjectId;
-use crate::models::{EpicId, FeedItem};
+use crate::models::EpicId;
 use crate::process::ProcessRunner;
+
+pub(crate) use exec::resolve_base_branches;
 
 const DEFAULT_FEED_INTERVAL: Duration = Duration::from_secs(30);
 
-/// Resolve a base branch for each `repo_paths[i]`, caching by unique path so
-/// `git symbolic-ref` is invoked at most once per distinct repo. Empty paths
-/// (unresolved repos) get `"main"` without shelling out.
-pub(crate) fn resolve_base_branches(
-    repo_paths: &[String],
-    runner: &dyn ProcessRunner,
-) -> Vec<String> {
-    let mut cache: HashMap<&str, String> = HashMap::new();
-    repo_paths
-        .iter()
-        .map(|path| {
-            cache
-                .entry(path.as_str())
-                .or_insert_with(|| {
-                    if path.is_empty() {
-                        "main".to_string()
-                    } else {
-                        detect_default_branch(path, runner)
-                    }
-                })
-                .clone()
-        })
-        .collect()
-}
-
 /// Poll interval for the background feed task.
-/// Kept in `feed.rs` (not reusing `TICK_INTERVAL` from `runtime`) so the two
+/// Kept in `feed` (not reusing `TICK_INTERVAL` from `runtime`) so the two
 /// concerns stay independent.
 const FEED_POLL_INTERVAL: Duration = Duration::from_secs(2);
-
-/// Group feed items by repo name and upsert each group into its own sub-epic.
-/// Clears any flat feed tasks on the parent epic (migration + ongoing hygiene).
-/// Returns the IDs of all sub-epics that were found or created (used by the
-/// caller to notify the TUI, even when individual upserts partially fail).
-async fn sync_grouped_feed(
-    db: &dyn crate::db::TaskStore,
-    parent_id: crate::models::EpicId,
-    project_id: crate::models::ProjectId,
-    items: &[crate::models::FeedItem],
-    repo_paths: &[String],
-    base_branches: &[String],
-) -> Vec<crate::models::EpicId> {
-    // Group co-indexed (item, repo_path, base_branch) tuples by repo name.
-    // Using zip makes the per-index alignment structural rather than contractual.
-    type GroupEntry = (crate::models::FeedItem, String, String);
-    let mut groups: HashMap<String, Vec<GroupEntry>> = HashMap::new();
-    for ((item, rp), bb) in items
-        .iter()
-        .zip(repo_paths.iter())
-        .zip(base_branches.iter())
-    {
-        let name = crate::dispatch::repo_name_from_url(&item.url);
-        groups
-            .entry(name)
-            .or_default()
-            .push((item.clone(), rp.clone(), bb.clone()));
-    }
-
-    let existing_sub_epics = match db.list_sub_epics(parent_id).await {
-        Ok(e) => e,
-        Err(err) => {
-            tracing::warn!(
-                epic_id = parent_id.0,
-                "sync_grouped_feed: list_sub_epics failed: {err:#}"
-            );
-            // list_sub_epics failed: no writes occurred, skip notifications
-            return vec![];
-        }
-    };
-
-    let active_sub_epics: Vec<_> = existing_sub_epics
-        .iter()
-        .filter(|e| e.status != crate::models::TaskStatus::Archived)
-        .collect();
-
-    let mut sub_epic_ids: Vec<crate::models::EpicId> = Vec::new();
-
-    for (repo_name, group) in &groups {
-        let group_items: Vec<_> = group.iter().map(|(item, _, _)| item.clone()).collect();
-        let group_repo_paths: Vec<_> = group.iter().map(|(_, rp, _)| rp.clone()).collect();
-        let group_base_branches: Vec<_> = group.iter().map(|(_, _, bb)| bb.clone()).collect();
-
-        let sub_epic_id =
-            if let Some(existing) = active_sub_epics.iter().find(|e| e.title == *repo_name) {
-                existing.id
-            } else {
-                match db
-                    .create_epic(repo_name, "", "", Some(parent_id), project_id)
-                    .await
-                {
-                    Ok(e) => e.id,
-                    Err(err) => {
-                        tracing::warn!(
-                            epic_id = parent_id.0,
-                            repo = %repo_name,
-                            "sync_grouped_feed: create_epic failed: {err:#}"
-                        );
-                        continue;
-                    }
-                }
-            };
-
-        // Always collect the sub-epic ID so the caller can notify the TUI,
-        // even if the upsert below fails (partial writes are still visible).
-        sub_epic_ids.push(sub_epic_id);
-
-        if let Err(err) = db
-            .upsert_feed_tasks(
-                sub_epic_id,
-                &group_items,
-                &group_repo_paths,
-                &group_base_branches,
-            )
-            .await
-        {
-            tracing::warn!(
-                epic_id = parent_id.0,
-                sub_epic_id = sub_epic_id.0,
-                "sync_grouped_feed: upsert_feed_tasks failed: {err:#}"
-            );
-        }
-    }
-
-    // Always clear flat feed tasks from parent, regardless of per-group failures.
-    if let Err(err) = db.upsert_feed_tasks(parent_id, &[], &[], &[]).await {
-        tracing::warn!(
-            epic_id = parent_id.0,
-            "sync_grouped_feed: failed to clear parent feed tasks: {err:#}"
-        );
-    }
-
-    sub_epic_ids
-}
 
 pub struct FeedRunner {
     db: Arc<dyn TaskStore>,
@@ -194,6 +68,15 @@ impl FeedRunner {
         let active_ids: std::collections::HashSet<EpicId> = epics.iter().map(|e| e.id).collect();
         self.last_run.retain(|id, _| active_ids.contains(id));
 
+        // Fetch once per tick so N concurrent spawned tasks don't each hit the DB.
+        let known_paths = match self.db.list_repo_paths().await {
+            Ok(p) => p,
+            Err(err) => {
+                tracing::warn!("FeedRunner: failed to list repo_paths, using empty sentinel: {err:#}");
+                vec![]
+            }
+        };
+
         for epic in epics {
             let Some(ref cmd) = epic.feed_command else {
                 continue;
@@ -224,62 +107,32 @@ impl FeedRunner {
             let epic_title = epic.title.clone();
             let epic_group_by_repo = epic.group_by_repo;
             let epic_project_id = epic.project_id;
+            let known_paths = known_paths.clone();
 
             tokio::task::spawn(async move {
-                let output = match tokio::process::Command::new("sh")
-                    .args(["-c", &cmd])
-                    .output()
-                    .await
-                {
-                    Ok(o) => o,
+                let Some(stdout) =
+                    exec::exec_feed_command(&cmd, epic_id.0, &epic_title).await
+                else {
+                    return;
+                };
+
+                let items = match parse::parse_feed_items(&stdout) {
+                    Ok(i) => i,
                     Err(err) => {
                         tracing::warn!(
                             epic_id = epic_id.0,
                             epic_title = %epic_title,
-                            "FeedRunner: failed to spawn command: {err:#}"
+                            "FeedRunner: failed to parse JSON output: {err:#}"
                         );
                         return;
                     }
                 };
 
-                if !output.status.success() {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    tracing::warn!(
-                        epic_id = epic_id.0,
-                        epic_title = %epic_title,
-                        "FeedRunner: command exited non-zero: {stderr}"
-                    );
-                    return;
-                }
-
-                let items: Vec<FeedItem> =
-                    match serde_json::from_slice::<Vec<FeedItem>>(&output.stdout) {
-                        Ok(i) => i,
-                        Err(err) => {
-                            tracing::warn!(
-                                epic_id = epic_id.0,
-                                epic_title = %epic_title,
-                                "FeedRunner: failed to parse JSON output: {err:#}"
-                            );
-                            return;
-                        }
-                    };
-
-                let known_paths = match db.list_repo_paths().await {
-                    Ok(p) => p,
-                    Err(err) => {
-                        tracing::warn!(
-                            epic_id = epic_id.0,
-                            "FeedRunner: failed to list repo_paths, using empty sentinel: {err:#}"
-                        );
-                        vec![]
-                    }
-                };
                 let repo_paths = resolve_feed_item_repo_paths(&items, &known_paths);
                 let base_branches = resolve_base_branches(&repo_paths, &*runner);
 
                 if epic_group_by_repo {
-                    let sub_ids = sync_grouped_feed(
+                    let sub_ids = ingest::sync_grouped_feed(
                         &*db,
                         epic_id,
                         epic_project_id,
@@ -320,22 +173,15 @@ impl FeedRunner {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
-    use super::*;
-    use crate::db::{Database, EpicCrud, EpicPatch, SettingsStore};
     use std::sync::Arc;
 
+    use super::*;
+    use crate::db::{Database, EpicCrud, EpicPatch, SettingsStore};
+    use crate::models::{ProjectId, TaskTag};
+
+    use super::exec::AlwaysFailRunner;
+
     // --- FeedRunner tests ---
-
-    /// A `ProcessRunner` that always returns a non-zero exit. Used in feed
-    /// tests that don't care about default-branch resolution — every
-    /// `git symbolic-ref` call falls back to `"main"`.
-    struct AlwaysFailRunner;
-
-    impl ProcessRunner for AlwaysFailRunner {
-        fn run(&self, _program: &str, _args: &[&str]) -> anyhow::Result<std::process::Output> {
-            crate::process::MockProcessRunner::fail("not a git repo")
-        }
-    }
 
     fn make_runner(db: Arc<Database>) -> (FeedRunner, mpsc::UnboundedReceiver<McpEvent>) {
         make_runner_with_runner(db, Arc::new(AlwaysFailRunner))
@@ -431,7 +277,6 @@ mod tests {
 
     #[tokio::test]
     async fn tick_persists_feed_tag() {
-        use crate::models::TaskTag;
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic = db
             .create_epic("Tagged Epic", "", "/repo", None, ProjectId(1))

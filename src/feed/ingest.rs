@@ -1,0 +1,277 @@
+use std::collections::HashMap;
+
+use crate::db::TaskStore;
+use crate::models::{EpicId, FeedItem, ProjectId};
+
+/// Group feed items by repo name and upsert each group into its own sub-epic.
+/// Clears any flat feed tasks on the parent epic (migration + ongoing hygiene).
+/// Returns the IDs of all sub-epics that were found or created (used by the
+/// caller to notify the TUI, even when individual upserts partially fail).
+pub(super) async fn sync_grouped_feed(
+    db: &dyn TaskStore,
+    parent_id: EpicId,
+    project_id: ProjectId,
+    items: &[FeedItem],
+    repo_paths: &[String],
+    base_branches: &[String],
+) -> Vec<EpicId> {
+    // Group co-indexed (item, repo_path, base_branch) tuples by repo name.
+    // Using zip makes the per-index alignment structural rather than contractual.
+    type GroupEntry = (FeedItem, String, String);
+    let mut groups: HashMap<String, Vec<GroupEntry>> = HashMap::new();
+    for ((item, rp), bb) in items
+        .iter()
+        .zip(repo_paths.iter())
+        .zip(base_branches.iter())
+    {
+        let name = crate::dispatch::repo_name_from_url(&item.url);
+        groups
+            .entry(name)
+            .or_default()
+            .push((item.clone(), rp.clone(), bb.clone()));
+    }
+
+    let existing_sub_epics = match db.list_sub_epics(parent_id).await {
+        Ok(e) => e,
+        Err(err) => {
+            tracing::warn!(
+                epic_id = parent_id.0,
+                "sync_grouped_feed: list_sub_epics failed: {err:#}"
+            );
+            // list_sub_epics failed: no writes occurred, skip notifications
+            return vec![];
+        }
+    };
+
+    let active_sub_epics: Vec<_> = existing_sub_epics
+        .iter()
+        .filter(|e| e.status != crate::models::TaskStatus::Archived)
+        .collect();
+
+    let mut sub_epic_ids: Vec<EpicId> = Vec::new();
+
+    for (repo_name, group) in &groups {
+        let group_items: Vec<_> = group.iter().map(|(item, _, _)| item.clone()).collect();
+        let group_repo_paths: Vec<_> = group.iter().map(|(_, rp, _)| rp.clone()).collect();
+        let group_base_branches: Vec<_> = group.iter().map(|(_, _, bb)| bb.clone()).collect();
+
+        let sub_epic_id =
+            if let Some(existing) = active_sub_epics.iter().find(|e| e.title == *repo_name) {
+                existing.id
+            } else {
+                match db
+                    .create_epic(repo_name, "", "", Some(parent_id), project_id)
+                    .await
+                {
+                    Ok(e) => e.id,
+                    Err(err) => {
+                        tracing::warn!(
+                            epic_id = parent_id.0,
+                            repo = %repo_name,
+                            "sync_grouped_feed: create_epic failed: {err:#}"
+                        );
+                        continue;
+                    }
+                }
+            };
+
+        // Always collect the sub-epic ID so the caller can notify the TUI,
+        // even if the upsert below fails (partial writes are still visible).
+        sub_epic_ids.push(sub_epic_id);
+
+        if let Err(err) = db
+            .upsert_feed_tasks(
+                sub_epic_id,
+                &group_items,
+                &group_repo_paths,
+                &group_base_branches,
+            )
+            .await
+        {
+            tracing::warn!(
+                epic_id = parent_id.0,
+                sub_epic_id = sub_epic_id.0,
+                "sync_grouped_feed: upsert_feed_tasks failed: {err:#}"
+            );
+        }
+    }
+
+    // Always clear flat feed tasks from parent, regardless of per-group failures.
+    if let Err(err) = db.upsert_feed_tasks(parent_id, &[], &[], &[]).await {
+        tracing::warn!(
+            epic_id = parent_id.0,
+            "sync_grouped_feed: failed to clear parent feed tasks: {err:#}"
+        );
+    }
+
+    sub_epic_ids
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::db::{Database, EpicCrud, EpicPatch};
+    use crate::models::{TaskStatus, TaskTag};
+
+    fn make_item(external_id: &str, url: &str) -> FeedItem {
+        FeedItem {
+            external_id: external_id.to_string(),
+            title: external_id.to_string(),
+            description: String::new(),
+            url: url.to_string(),
+            status: crate::models::TaskStatus::Backlog,
+            tag: TaskTag::PrReview,
+            labels: vec![],
+            sort_order: None,
+        }
+    }
+
+    /// Regression: archived sub-epics must not be reused when a new cycle runs.
+    ///
+    /// The lookup must use `active_sub_epics` (status != Archived), not the full
+    /// list — otherwise an archived sub-epic with the same repo name is matched
+    /// and reused instead of creating a fresh active one.
+    #[tokio::test]
+    async fn archived_sub_epic_not_reused() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let parent = db
+            .create_epic("Reviews", "", "", None, ProjectId(1))
+            .await
+            .unwrap();
+
+        // Create a sub-epic that is then archived.
+        let archived_sub = db
+            .create_epic("repo-a", "", "", Some(parent.id), ProjectId(1))
+            .await
+            .unwrap();
+        db.patch_epic(
+            archived_sub.id,
+            &EpicPatch::new().status(TaskStatus::Archived),
+        )
+        .await
+        .unwrap();
+
+        let items = vec![make_item(
+            "pr-1",
+            "https://github.com/org/repo-a/pull/1",
+        )];
+        let repo_paths = vec!["".to_string()];
+        let base_branches = vec!["main".to_string()];
+
+        let sub_ids =
+            sync_grouped_feed(&*db, parent.id, ProjectId(1), &items, &repo_paths, &base_branches)
+                .await;
+
+        assert_eq!(sub_ids.len(), 1, "should return exactly one sub-epic ID");
+        let new_id = sub_ids[0];
+        assert_ne!(
+            new_id, archived_sub.id,
+            "must create a new sub-epic, not reuse the archived one"
+        );
+
+        let all_subs = db.list_sub_epics(parent.id).await.unwrap();
+        let active: Vec<_> = all_subs
+            .iter()
+            .filter(|e| e.status != TaskStatus::Archived)
+            .collect();
+        assert_eq!(active.len(), 1, "exactly one active sub-epic after sync");
+        assert_eq!(active[0].title, "repo-a");
+        assert_eq!(active[0].id, new_id);
+
+        let tasks = db.list_tasks_for_epic(new_id).await.unwrap();
+        assert_eq!(tasks.len(), 1, "new sub-epic must have the feed task");
+        assert_eq!(tasks[0].external_id.as_deref(), Some("pr-1"));
+    }
+
+    #[tokio::test]
+    async fn items_grouped_by_repo_name() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let parent = db
+            .create_epic("Reviews", "", "", None, ProjectId(1))
+            .await
+            .unwrap();
+
+        let items = vec![
+            make_item("1", "https://github.com/org/repo-a/pull/1"),
+            make_item("2", "https://github.com/org/repo-b/pull/1"),
+        ];
+        let repo_paths = vec!["".to_string(), "".to_string()];
+        let base_branches = vec!["main".to_string(), "main".to_string()];
+
+        sync_grouped_feed(&*db, parent.id, ProjectId(1), &items, &repo_paths, &base_branches)
+            .await;
+
+        let subs = db.list_sub_epics(parent.id).await.unwrap();
+        assert_eq!(subs.len(), 2);
+        let names: Vec<&str> = subs.iter().map(|e| e.title.as_str()).collect();
+        assert!(names.contains(&"repo-a"), "got {names:?}");
+        assert!(names.contains(&"repo-b"), "got {names:?}");
+
+        for sub in &subs {
+            let tasks = db.list_tasks_for_epic(sub.id).await.unwrap();
+            assert_eq!(tasks.len(), 1, "sub-epic {} should have 1 task", sub.title);
+        }
+
+        let parent_tasks = db.list_tasks_for_epic(parent.id).await.unwrap();
+        assert_eq!(parent_tasks.len(), 0, "parent should have no direct tasks");
+    }
+
+    #[tokio::test]
+    async fn no_url_groups_as_other() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let parent = db
+            .create_epic("Reviews", "", "", None, ProjectId(1))
+            .await
+            .unwrap();
+
+        let items = vec![FeedItem {
+            external_id: "x".into(),
+            title: "X".into(),
+            description: String::new(),
+            url: String::new(),
+            status: TaskStatus::Backlog,
+            tag: TaskTag::Bug,
+            labels: vec![],
+            sort_order: None,
+        }];
+        let repo_paths = vec!["".to_string()];
+        let base_branches = vec!["main".to_string()];
+
+        sync_grouped_feed(&*db, parent.id, ProjectId(1), &items, &repo_paths, &base_branches)
+            .await;
+
+        let subs = db.list_sub_epics(parent.id).await.unwrap();
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0].title, "other");
+    }
+
+    #[tokio::test]
+    async fn existing_active_sub_epic_reused() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let parent = db
+            .create_epic("Reviews", "", "", None, ProjectId(1))
+            .await
+            .unwrap();
+
+        // Pre-create the sub-epic as active.
+        let pre_existing = db
+            .create_epic("repo-a", "", "", Some(parent.id), ProjectId(1))
+            .await
+            .unwrap();
+
+        let items = vec![make_item("1", "https://github.com/org/repo-a/pull/1")];
+        let repo_paths = vec!["".to_string()];
+        let base_branches = vec!["main".to_string()];
+
+        let sub_ids =
+            sync_grouped_feed(&*db, parent.id, ProjectId(1), &items, &repo_paths, &base_branches)
+                .await;
+
+        assert_eq!(sub_ids, vec![pre_existing.id], "should reuse existing active sub-epic");
+        let subs = db.list_sub_epics(parent.id).await.unwrap();
+        assert_eq!(subs.len(), 1, "no duplicate sub-epic should be created");
+    }
+}
