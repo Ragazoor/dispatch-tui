@@ -62,17 +62,10 @@ impl TaskService {
         let expanded_repo_path = params.repo_path.as_deref().map(crate::models::expand_tilde);
         let validated_sub_status = self.validate_sub_status(task_id, &params).await?;
 
-        // When linking to a new epic, project_id must agree with the epic's project.
-        // If the caller omitted project_id, derive it from the epic automatically.
         let epic_project_id = if let Some(eid) = params.epic_id {
             let epic_pid = self.resolve_epic_project_id(eid).await?;
             if let Some(explicit_pid) = params.project_id {
-                if explicit_pid != epic_pid {
-                    return Err(ServiceError::Validation(format!(
-                        "task project_id ({}) must match epic project_id ({})",
-                        explicit_pid.0, epic_pid.0
-                    )));
-                }
+                Self::check_task_project_matches_epic(explicit_pid, epic_pid)?;
             }
             Some(epic_pid)
         } else {
@@ -133,6 +126,19 @@ impl TaskService {
             task_id,
             was_pr_finalisation,
         })
+    }
+
+    fn check_task_project_matches_epic(
+        explicit: crate::models::ProjectId,
+        epic: crate::models::ProjectId,
+    ) -> Result<(), ServiceError> {
+        if explicit != epic {
+            return Err(ServiceError::Validation(format!(
+                "task project_id ({}) must match epic project_id ({})",
+                explicit.0, epic.0
+            )));
+        }
+        Ok(())
     }
 
     async fn resolve_epic_project_id(
@@ -274,12 +280,7 @@ impl TaskService {
 
         if let Some(eid) = params.epic_id {
             let epic_pid = self.resolve_epic_project_id(eid).await?;
-            if params.project_id != epic_pid {
-                return Err(ServiceError::Validation(format!(
-                    "task project_id ({}) must match epic project_id ({})",
-                    params.project_id.0, epic_pid.0
-                )));
-            }
+            Self::check_task_project_matches_epic(params.project_id, epic_pid)?;
         }
         let project_id = params.project_id;
 

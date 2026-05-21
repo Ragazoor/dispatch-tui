@@ -1214,7 +1214,6 @@ pub(super) fn migrate_v57_enforce_epic_project_consistency(conn: &Connection) ->
         }
     }
 
-    // Fix existing tasks whose project_id doesn't match their epic's.
     if tasks_has_epic && tasks_has_project && epics_has_project {
         conn.execute(
             "UPDATE tasks
@@ -1226,7 +1225,6 @@ pub(super) fn migrate_v57_enforce_epic_project_consistency(conn: &Connection) ->
         .context("Failed to fix task project_id violations")?;
     }
 
-    // Create triggers that reject any future insert or update violating the rule.
     // Guard against minimal test schemas that lack the required columns.
     if epics_has_parent && epics_has_project {
         conn.execute_batch(
