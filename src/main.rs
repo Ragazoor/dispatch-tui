@@ -109,6 +109,9 @@ enum Commands {
         /// Emit structured JSON instead of human-readable lines.
         #[arg(long)]
         json: bool,
+        /// Dry-run mode (default; detection only, no repairs applied).
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
@@ -132,6 +135,9 @@ enum DoctorCheck {
         /// Skip confirmation prompts when using --repair.
         #[arg(long)]
         force: bool,
+        /// Emit structured JSON instead of human-readable lines.
+        #[arg(long)]
+        json: bool,
     },
     /// Compare tasks.tmux_window values against live tmux windows.
     Sessions {
@@ -141,6 +147,9 @@ enum DoctorCheck {
         /// Skip confirmation prompts when using --repair.
         #[arg(long)]
         force: bool,
+        /// Emit structured JSON instead of human-readable lines.
+        #[arg(long)]
+        json: bool,
     },
     /// Verify git config core.hooksPath = .githooks for each known repo.
     Hooks {
@@ -150,6 +159,9 @@ enum DoctorCheck {
         /// Skip confirmation prompts when using --repair.
         #[arg(long)]
         force: bool,
+        /// Emit structured JSON instead of human-readable lines.
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -371,7 +383,11 @@ async fn main() -> Result<()> {
             }
             println!("{removed} path(s) removed, {} kept.", total - removed);
         }
-        Commands::Doctor { check, json } => {
+        Commands::Doctor {
+            check,
+            json,
+            dry_run: _,
+        } => {
             use dispatch_tui::cli::doctor::{
                 check_hooks, check_sessions, check_worktrees, format_human, format_json,
                 has_problems, repair_hooks_set_path, repair_sessions_kill_window,
@@ -394,16 +410,24 @@ async fn main() -> Result<()> {
 
             let mut findings = Vec::new();
 
+            // Resolve json: subcommand flag takes precedence over parent flag.
+            let json = match &check {
+                None => json,
+                Some(DoctorCheck::Worktrees { json, .. }) => *json,
+                Some(DoctorCheck::Sessions { json, .. }) => *json,
+                Some(DoctorCheck::Hooks { json, .. }) => *json,
+            };
+
             // Determine which checks to run and the repair/force flags.
             let (run_worktrees, run_sessions, run_hooks, repair, force) = match &check {
                 None => (true, true, true, false, false),
-                Some(DoctorCheck::Worktrees { repair, force }) => {
+                Some(DoctorCheck::Worktrees { repair, force, .. }) => {
                     (true, false, false, *repair, *force)
                 }
-                Some(DoctorCheck::Sessions { repair, force }) => {
+                Some(DoctorCheck::Sessions { repair, force, .. }) => {
                     (false, true, false, *repair, *force)
                 }
-                Some(DoctorCheck::Hooks { repair, force }) => {
+                Some(DoctorCheck::Hooks { repair, force, .. }) => {
                     (false, false, true, *repair, *force)
                 }
             };

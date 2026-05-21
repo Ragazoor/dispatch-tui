@@ -817,6 +817,29 @@ async fn doctor_worktrees_exits_nonzero_on_db_orphan() {
     );
 }
 
+#[test]
+fn doctor_worktrees_json_trailing_flag() {
+    let db = NamedTempFile::new().unwrap();
+    let out = binary()
+        .args([
+            "--db",
+            db.path().to_str().unwrap(),
+            "doctor",
+            "worktrees",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "expected exit 0, stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let _: Vec<serde_json::Value> = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("expected valid JSON array, got: {stdout} — error: {e}"));
+}
+
 #[tokio::test]
 async fn doctor_repair_force_clears_db_orphan_worktree() {
     let db = NamedTempFile::new().unwrap();
