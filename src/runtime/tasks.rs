@@ -1,6 +1,13 @@
 use super::*;
 use crate::models::ProjectId;
 
+fn effective_project_id(app: &App, epic_id: Option<models::EpicId>) -> ProjectId {
+    epic_id
+        .and_then(|eid| app.epics().iter().find(|e| e.id == eid))
+        .map(|e| e.project_id)
+        .unwrap_or(app.active_project())
+}
+
 impl TuiRuntime {
     pub(super) async fn exec_insert_task(
         &self,
@@ -9,10 +16,7 @@ impl TuiRuntime {
         epic_id: Option<models::EpicId>,
     ) {
         use crate::service::CreateTaskParams;
-        let project_id = epic_id
-            .and_then(|eid| app.epics().iter().find(|e| e.id == eid))
-            .map(|e| e.project_id)
-            .unwrap_or_else(|| app.active_project());
+        let project_id = effective_project_id(app, epic_id);
         let params = CreateTaskParams {
             title: draft.title,
             description: draft.description,
@@ -44,10 +48,7 @@ impl TuiRuntime {
         // detect_default_branch falls back to "main" when origin/HEAD is
         // unavailable, so dispatch doesn't fail on repos whose default isn't main.
         let base_branch = crate::git::detect_default_branch(&expanded, &*self.runner);
-        let project_id = epic_id
-            .and_then(|eid| app.epics().iter().find(|e| e.id == eid))
-            .map(|e| e.project_id)
-            .unwrap_or_else(|| app.active_project());
+        let project_id = effective_project_id(app, epic_id);
         let Some(task) = self
             .create_task(
                 app,
