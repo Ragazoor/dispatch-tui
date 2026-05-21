@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::Result;
 use sha2::{Digest, Sha256};
 
-use crate::dispatch::ensure_dispatch_dir_and_gitignore;
+use crate::dispatch::{ensure_dispatch_dir_and_gitignore, DISPATCH_DIR};
 use crate::service::embeddings::{
     cosine_similarity, deserialize_embedding, serialize_embedding, EmbeddingService,
     RAG_SIMILARITY_THRESHOLD,
@@ -20,10 +20,11 @@ pub struct IndexResult {
 
 pub struct SearchResult {
     pub file_path: String,
-    pub chunk_index: usize,
     pub chunk_text: String,
     pub score: f32,
 }
+
+const MAX_SCAN_CHUNKS: usize = 1000;
 
 struct EmbeddedFile {
     path: String,
@@ -32,12 +33,7 @@ struct EmbeddedFile {
     embeddings: Vec<Vec<f32>>,
 }
 
-// ---------------------------------------------------------------------------
-// Chunker
-// ---------------------------------------------------------------------------
-
-/// Parse the YAML frontmatter fence and return `(frontmatter_text, body)`.
-/// If no valid fence is found, returns `(None, content)`.
+/// Returns `(None, content)` if no valid frontmatter fence is found.
 fn split_frontmatter(content: &str) -> (Option<&str>, &str) {
     let s = content.trim_start();
     if !s.starts_with("---") {
@@ -64,7 +60,7 @@ fn split_frontmatter(content: &str) -> (Option<&str>, &str) {
 /// - The frontmatter block (if present) is prepended to every chunk.
 /// - Files with no H2 headers are one chunk (the whole body).
 /// - Files that are empty or contain only frontmatter produce no chunks.
-pub fn chunk_file(content: &str) -> Vec<String> {
+pub(crate) fn chunk_file(content: &str) -> Vec<String> {
     let (fm, body) = split_frontmatter(content);
 
     if body.trim().is_empty() {
@@ -105,10 +101,6 @@ pub fn chunk_file(content: &str) -> Vec<String> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Per-repo SQLite DB
-// ---------------------------------------------------------------------------
-
 const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS rag_files (
         file_path    TEXT PRIMARY KEY,
@@ -126,7 +118,7 @@ const SCHEMA: &str = "
 ";
 
 fn open_rag_db(repo_path: &Path) -> Result<rusqlite::Connection> {
-    let dispatch_dir = repo_path.join(".dispatch");
+    let dispatch_dir = repo_path.join(DISPATCH_DIR);
     std::fs::create_dir_all(&dispatch_dir)?;
     let conn = rusqlite::Connection::open(dispatch_dir.join("rag.db"))?;
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
@@ -134,12 +126,8 @@ fn open_rag_db(repo_path: &Path) -> Result<rusqlite::Connection> {
     Ok(conn)
 }
 
-// ---------------------------------------------------------------------------
-// File utilities
-// ---------------------------------------------------------------------------
-
 fn walk_md_files(repo_path: &Path) -> Result<Vec<std::path::PathBuf>> {
-    let dispatch_dir = repo_path.join(".dispatch");
+    let dispatch_dir = repo_path.join(DISPATCH_DIR);
     let mut files = Vec::new();
     for entry in ignore::WalkBuilder::new(repo_path).hidden(false).build() {
         let entry = entry?;
@@ -161,16 +149,8 @@ fn hash_file(path: &Path) -> Result<String> {
     Ok(format!("{:x}", Sha256::digest(&bytes)))
 }
 
-// ---------------------------------------------------------------------------
-// Private type aliases (reduce complexity warnings on spawn_blocking closures)
-// ---------------------------------------------------------------------------
-
 type DiffResult = (Vec<(std::path::PathBuf, String)>, Vec<String>, usize);
-type ChunkRows = Vec<(String, usize, String, Vec<f32>)>;
-
-// ---------------------------------------------------------------------------
-// RepoIndexService
-// ---------------------------------------------------------------------------
+type ChunkRows = Vec<(String, String, Vec<f32>)>;
 
 pub struct RepoIndexService {
     embedding_service: Arc<EmbeddingService>,
@@ -228,27 +208,48 @@ impl RepoIndexService {
         })
         .await??;
 
-        // Phase 2 (async): embed chunks for changed files.
-        let mut embedded: Vec<EmbeddedFile> = Vec::new();
+        // Phase 2 (async): read all changed files and embed their chunks in one batch.
+        struct FileChunks {
+            path: String,
+            hash: String,
+            chunks: Vec<String>,
+        }
 
+        let mut file_chunks: Vec<FileChunks> = Vec::new();
         for (path, hash) in to_index {
             let content = tokio::fs::read_to_string(&path).await?;
             let chunks = chunk_file(&content);
-            if chunks.is_empty() {
-                embedded.push(EmbeddedFile {
-                    path: path.to_string_lossy().into_owned(),
-                    hash,
-                    chunks: vec![],
-                    embeddings: vec![],
-                });
-                continue;
-            }
-            let vecs = self.embedding_service.embed_batch(chunks.clone()).await?;
-            embedded.push(EmbeddedFile {
+            file_chunks.push(FileChunks {
                 path: path.to_string_lossy().into_owned(),
                 hash,
                 chunks,
-                embeddings: vecs,
+            });
+        }
+
+        // Collect all chunks across all files into one flat vec for a single embed call.
+        let all_chunks: Vec<String> = file_chunks
+            .iter()
+            .flat_map(|f| f.chunks.iter().cloned())
+            .collect();
+
+        let all_vecs = if all_chunks.is_empty() {
+            vec![]
+        } else {
+            self.embedding_service.embed_batch(all_chunks).await?
+        };
+
+        // Reconstruct per-file EmbeddedFile from the flat result.
+        let mut embedded: Vec<EmbeddedFile> = Vec::new();
+        let mut offset = 0;
+        for fc in file_chunks {
+            let n = fc.chunks.len();
+            let embeddings = all_vecs[offset..offset + n].to_vec();
+            offset += n;
+            embedded.push(EmbeddedFile {
+                path: fc.path,
+                hash: fc.hash,
+                chunks: fc.chunks,
+                embeddings,
             });
         }
 
@@ -315,7 +316,7 @@ impl RepoIndexService {
         query: &str,
         limit: usize,
     ) -> Result<Vec<SearchResult>> {
-        let db_path = repo_path.join(".dispatch").join("rag.db");
+        let db_path = repo_path.join(DISPATCH_DIR).join("rag.db");
         if !db_path.exists() {
             return Ok(vec![]);
         }
@@ -326,22 +327,22 @@ impl RepoIndexService {
             let repo_path = repo_path.to_owned();
             move || -> Result<ChunkRows> {
                 let conn = open_rag_db(&repo_path)?;
-                let mut stmt = conn.prepare(
-                    "SELECT file_path, chunk_index, chunk_text, embedding \
-                     FROM rag_chunks LIMIT 1000",
-                )?;
+                let query = format!(
+                    "SELECT file_path, chunk_text, embedding \
+                     FROM rag_chunks LIMIT {MAX_SCAN_CHUNKS}"
+                );
+                let mut stmt = conn.prepare(&query)?;
                 let rows = stmt.query_map([], |r| {
                     Ok((
                         r.get::<_, String>(0)?,
-                        r.get::<_, usize>(1)?,
-                        r.get::<_, String>(2)?,
-                        r.get::<_, Vec<u8>>(3)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, Vec<u8>>(2)?,
                     ))
                 })?;
                 rows.map(|row| {
                     row.map_err(anyhow::Error::from)
-                        .map(|(path, idx, text, blob)| {
-                            (path, idx, text, deserialize_embedding(&blob))
+                        .map(|(path, text, blob)| {
+                            (path, text, deserialize_embedding(&blob))
                         })
                 })
                 .collect()
@@ -351,14 +352,13 @@ impl RepoIndexService {
 
         let mut scored: Vec<SearchResult> = candidates
             .into_iter()
-            .filter_map(|(path, idx, text, emb)| {
+            .filter_map(|(path, text, emb)| {
                 let score = cosine_similarity(&query_vec, &emb);
                 if score < RAG_SIMILARITY_THRESHOLD {
                     return None;
                 }
                 Some(SearchResult {
                     file_path: path,
-                    chunk_index: idx,
                     chunk_text: text,
                     score,
                 })
@@ -374,10 +374,6 @@ impl RepoIndexService {
         Ok(scored)
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]

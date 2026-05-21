@@ -118,7 +118,6 @@ pub(super) async fn handle_search_docs(
                 .map(|r| {
                     json!({
                         "file_path": r.file_path,
-                        "chunk_index": r.chunk_index,
                         "chunk_text": r.chunk_text,
                         "score": r.score,
                     })
