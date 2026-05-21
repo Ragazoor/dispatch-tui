@@ -75,16 +75,11 @@ pub(super) fn row_to_epic(row: &rusqlite::Row<'_>) -> rusqlite::Result<Epic> {
         status: TaskStatus::parse(&status_str)
             .ok_or_else(|| unknown_enum("epic_status", &status_str))?,
         plan_path: row.get("plan_path")?,
-        sort_order: row.get::<_, Option<i64>>("sort_order").unwrap_or(None),
-        auto_dispatch: row.get::<_, bool>("auto_dispatch").unwrap_or(true),
-        parent_epic_id: row
-            .get::<_, Option<i64>>("parent_epic_id")
-            .unwrap_or(None)
-            .map(EpicId),
-        feed_command: row.get::<_, Option<String>>("feed_command").unwrap_or(None),
-        feed_interval_secs: row
-            .get::<_, Option<i64>>("feed_interval_secs")
-            .unwrap_or(None),
+        sort_order: row.get("sort_order")?,
+        auto_dispatch: row.get("auto_dispatch")?,
+        parent_epic_id: row.get::<_, Option<i64>>("parent_epic_id")?.map(EpicId),
+        feed_command: row.get("feed_command")?,
+        feed_interval_secs: row.get("feed_interval_secs")?,
         group_by_repo: row.get::<_, bool>("group_by_repo")?,
         project_id: ProjectId(row.get::<_, i64>("project_id")?),
         created_at: parse_datetime(&created_str)?,

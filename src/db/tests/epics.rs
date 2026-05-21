@@ -1143,3 +1143,13 @@ async fn epic_patch_each_setter_marks_has_changes() {
     assert!(EpicPatch::new().feed_interval_secs(None).has_changes());
     assert!(EpicPatch::new().project_id(ProjectId(1)).has_changes());
 }
+
+#[tokio::test]
+async fn row_to_epic_auto_dispatch_defaults_to_true() {
+    let db = in_memory_db().await;
+    let epic = db
+        .create_epic("E", "D", "/repo", None, ProjectId(1))
+        .await
+        .unwrap();
+    assert!(epic.auto_dispatch, "auto_dispatch should default to true");
+}
