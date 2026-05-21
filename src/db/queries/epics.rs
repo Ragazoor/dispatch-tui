@@ -366,25 +366,22 @@ fn recalculate_epic_status_inner(
     let all_statuses: Vec<TaskStatus> =
         task_statuses.into_iter().chain(sub_epic_statuses).collect();
 
-    let new_status: Option<TaskStatus> = if all_statuses.is_empty() {
-        None // no active children — leave status unchanged
+    let target = if all_statuses.is_empty() {
+        epic.status
     } else if all_statuses.iter().all(|s| *s == TaskStatus::Done) {
-        if epic.status != TaskStatus::Done {
-            Some(TaskStatus::Done)
-        } else {
-            None // already done — no-op
-        }
+        TaskStatus::Done
     } else if epic.status == TaskStatus::Done {
-        Some(TaskStatus::Backlog) // regression: done epic has active non-done children
+        // regression: done epic has active non-done children
+        TaskStatus::Backlog
     } else {
-        None // leave status unchanged
+        epic.status
     };
 
-    if let Some(status) = new_status {
+    if target != epic.status {
         let rows = conn
             .execute(
                 "UPDATE epics SET status = ?1, updated_at = datetime('now') WHERE id = ?2",
-                params![status.as_str(), epic_id.0],
+                params![target.as_str(), epic_id.0],
             )
             .context("Failed to update epic status (recalc)")?;
         if rows == 0 {

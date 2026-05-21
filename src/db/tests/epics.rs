@@ -344,7 +344,7 @@ async fn recalculate_epic_status_running_task_leaves_epic_in_backlog() {
 
     db.recalculate_epic_status(epic.id).await.unwrap();
     let epic = db.get_epic(epic.id).await.unwrap().unwrap();
-    assert_eq!(epic.status, TaskStatus::Backlog); // running task does not auto-advance epic
+    assert_eq!(epic.status, TaskStatus::Backlog);
 }
 
 #[tokio::test]
@@ -739,7 +739,6 @@ async fn recalculate_epic_status_done_regresses_to_backlog_when_running_task_add
 
     db.recalculate_epic_status(epic.id).await.unwrap();
     let epic = db.get_epic(epic.id).await.unwrap().unwrap();
-    // Done epic with active non-done child → regression to backlog
     assert_eq!(epic.status, TaskStatus::Backlog);
 }
 
@@ -757,7 +756,7 @@ async fn recalculate_epic_status_no_active_children_leaves_status_unchanged() {
 
     db.recalculate_epic_status(epic.id).await.unwrap();
     let epic = db.get_epic(epic.id).await.unwrap().unwrap();
-    assert_eq!(epic.status, TaskStatus::Running); // no children → status unchanged
+    assert_eq!(epic.status, TaskStatus::Running);
 }
 
 #[tokio::test]
@@ -787,7 +786,7 @@ async fn recalculate_epic_status_done_epic_stays_done_when_all_tasks_archived() 
         .unwrap();
     db.recalculate_epic_status(epic.id).await.unwrap();
     let epic = db.get_epic(epic.id).await.unwrap().unwrap();
-    assert_eq!(epic.status, TaskStatus::Done); // already done, no active children → stay done
+    assert_eq!(epic.status, TaskStatus::Done);
 }
 
 #[tokio::test]
@@ -807,7 +806,7 @@ async fn recalculate_epic_status_all_done_stays_done_when_already_done() {
 
     db.recalculate_epic_status(epic.id).await.unwrap();
     let epic = db.get_epic(epic.id).await.unwrap().unwrap();
-    assert_eq!(epic.status, TaskStatus::Done); // already done, all children done → no-op
+    assert_eq!(epic.status, TaskStatus::Done);
 }
 
 #[tokio::test]

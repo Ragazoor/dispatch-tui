@@ -1265,7 +1265,7 @@ pub(super) fn migrate_v57_enforce_epic_project_consistency(conn: &Connection) ->
 }
 
 pub(super) fn migrate_v58_reset_intermediate_epic_statuses(conn: &Connection) -> Result<()> {
-    // Only update if the status column exists (defensive: some test schemas may be minimal)
+    // Guard for migration tests that run against minimal schemas without `epics.status`.
     if column_exists(conn, "epics", "status") {
         conn.execute(
             "UPDATE epics SET status = 'backlog', updated_at = datetime('now') WHERE status IN ('running', 'review')",
