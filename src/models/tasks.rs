@@ -767,8 +767,9 @@ mod activity_tests {
     #[test]
     fn old_pre_tool_use_classifies_stale() {
         let now = Utc::now();
+        let past = now - ACTIVE_THRESHOLD - Duration::seconds(1);
         assert_eq!(
-            classify_agent_activity(Some(at(10, now)), None, now),
+            classify_agent_activity(Some(past), None, now),
             AgentActivity::Stale
         );
     }

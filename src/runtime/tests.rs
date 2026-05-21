@@ -19,15 +19,17 @@ async fn db_error_formats_consistently() {
 #[tokio::test]
 async fn setup_tmux_for_tui_renames_window_and_binds_key() {
     let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // current_pane_id (display-message)
         MockProcessRunner::ok(), // rename_window
         MockProcessRunner::ok(), // bind_key
     ]);
     setup_tmux_for_tui(&mock);
     let calls = mock.recorded_calls();
-    assert_eq!(calls.len(), 2);
-    assert_eq!(calls[0].1, vec!["rename-window", "-t", "", TUI_WINDOW_NAME]);
+    assert_eq!(calls.len(), 3);
+    assert_eq!(calls[0].1, vec!["display-message", "-p", "#{pane_id}"]);
+    assert_eq!(calls[1].1, vec!["rename-window", "-t", "", TUI_WINDOW_NAME]);
     assert_eq!(
-        calls[1].1,
+        calls[2].1,
         vec![
             "bind-key",
             "g",

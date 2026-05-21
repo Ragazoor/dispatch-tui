@@ -2,7 +2,7 @@
 use super::*;
 use crate::models::{
     DispatchMode, EpicId, ProjectId, SubStatus, TaskId, TaskStatus, TaskTag,
-    DEFAULT_QUICK_TASK_TITLE,
+    ACTIVE_THRESHOLD, DEFAULT_QUICK_TASK_TITLE,
 };
 use crossterm::event::KeyCode;
 use std::time::{Duration, Instant};
@@ -1097,7 +1097,7 @@ fn tick_reclassifies_running_task_to_stale_when_pre_tool_use_is_old() {
     let mut app = App::new(vec![make_task(3, TaskStatus::Running)], ProjectId(1));
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
     app.board.tasks[0].sub_status = SubStatus::Active;
-    let old = chrono::Utc::now() - chrono::Duration::minutes(2) - chrono::Duration::seconds(5);
+    let old = chrono::Utc::now() - ACTIVE_THRESHOLD - chrono::Duration::seconds(5);
     app.board.tasks[0].last_pre_tool_use_at = Some(old);
 
     let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
