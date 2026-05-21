@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::models::TaskStatus;
+use crate::models::{TaskStatus, WrapUpMode};
 
 // ---------------------------------------------------------------------------
 // JSON-RPC request / response types
@@ -203,6 +203,39 @@ where
         }
     }
     deserializer.deserialize_option(NullableFlexI64)
+}
+
+/// Nullable WrapUpMode deserializer for `Option<Option<WrapUpMode>>` fields.
+/// Used with `#[serde(default)]` to distinguish absent (→ outer None),
+/// JSON null (→ Some(None) = clear), and a value (→ Some(Some(m)) = set).
+pub(super) fn deserialize_nullable_wrap_up_mode<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<WrapUpMode>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de;
+
+    struct NullableWrapUpMode;
+    impl<'de> de::Visitor<'de> for NullableWrapUpMode {
+        type Value = Option<Option<WrapUpMode>>;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("null or one of: rebase, pr, done")
+        }
+        fn visit_none<E: de::Error>(self) -> Result<Option<Option<WrapUpMode>>, E> {
+            Ok(Some(None))
+        }
+        fn visit_unit<E: de::Error>(self) -> Result<Option<Option<WrapUpMode>>, E> {
+            Ok(Some(None))
+        }
+        fn visit_some<D2: serde::Deserializer<'de>>(
+            self,
+            d: D2,
+        ) -> Result<Option<Option<WrapUpMode>>, D2::Error> {
+            WrapUpMode::deserialize(d).map(|m| Some(Some(m)))
+        }
+    }
+    deserializer.deserialize_option(NullableWrapUpMode)
 }
 
 // ---------------------------------------------------------------------------

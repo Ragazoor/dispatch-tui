@@ -764,6 +764,181 @@ async fn update_task_sets_pr_fields() {
     );
 }
 
+// -- wrap_up_mode tests -----------------------------------------------------
+
+#[tokio::test]
+async fn update_task_sets_wrap_up_mode() {
+    let state = test_state().await;
+    let task_id = create_task_fixture(&state).await;
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_task",
+            "arguments": { "task_id": task_id.0, "wrap_up_mode": "rebase" }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "got error: {:?}", resp.error);
+
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    assert_eq!(task.wrap_up_mode, Some(crate::models::WrapUpMode::Rebase));
+}
+
+#[tokio::test]
+async fn update_task_wrap_up_mode_all_variants() {
+    use crate::models::WrapUpMode;
+    let state = test_state().await;
+    let task_id = create_task_fixture(&state).await;
+
+    for (input, expected) in [
+        ("rebase", WrapUpMode::Rebase),
+        ("pr", WrapUpMode::Pr),
+        ("done", WrapUpMode::Done),
+    ] {
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({
+                "name": "update_task",
+                "arguments": { "task_id": task_id.0, "wrap_up_mode": input }
+            })),
+        )
+        .await;
+        assert!(
+            resp.error.is_none(),
+            "wrap_up_mode={input} should succeed, got: {:?}",
+            resp.error
+        );
+        let task = state.db.get_task(task_id).await.unwrap().unwrap();
+        assert_eq!(
+            task.wrap_up_mode,
+            Some(expected),
+            "wrap_up_mode should be {expected:?} after setting to {input}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn update_task_clears_wrap_up_mode_with_null() {
+    let state = test_state().await;
+    let task_id = create_task_fixture(&state).await;
+
+    // First set a mode
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_task",
+            "arguments": { "task_id": task_id.0, "wrap_up_mode": "pr" }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none());
+
+    // Now clear it with null
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_task",
+            "arguments": { "task_id": task_id.0, "wrap_up_mode": null }
+        })),
+    )
+    .await;
+    assert!(
+        resp.error.is_none(),
+        "clearing wrap_up_mode with null should succeed: {:?}",
+        resp.error
+    );
+
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    assert!(
+        task.wrap_up_mode.is_none(),
+        "wrap_up_mode should be cleared after null"
+    );
+}
+
+#[tokio::test]
+async fn update_task_rejects_invalid_wrap_up_mode() {
+    let state = test_state().await;
+    let task_id = create_task_fixture(&state).await;
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_task",
+            "arguments": { "task_id": task_id.0, "wrap_up_mode": "teleport" }
+        })),
+    )
+    .await;
+    assert!(is_error(&resp), "invalid wrap_up_mode should error");
+}
+
+#[tokio::test]
+async fn create_task_with_wrap_up_mode() {
+    let state = test_state().await;
+    let default_id = state.db.get_default_project().await.unwrap().id;
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "create_task",
+            "arguments": {
+                "title": "Task with mode",
+                "repo_path": "/repo",
+                "project_id": default_id,
+                "wrap_up_mode": "pr"
+            }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "got error: {:?}", resp.error);
+
+    let tasks = state.db.list_all().await.unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(
+        tasks[0].wrap_up_mode,
+        Some(crate::models::WrapUpMode::Pr)
+    );
+}
+
+#[tokio::test]
+async fn get_task_shows_wrap_up_mode() {
+    let state = test_state().await;
+    let task_id = create_task_fixture(&state).await;
+
+    // Set wrap_up_mode
+    call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_task",
+            "arguments": { "task_id": task_id.0, "wrap_up_mode": "rebase" }
+        })),
+    )
+    .await;
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "get_task",
+            "arguments": { "task_id": task_id.0 }
+        })),
+    )
+    .await;
+    let result = resp.result.unwrap();
+    let text = result["content"][0]["text"].as_str().unwrap();
+    assert!(
+        text.contains("rebase"),
+        "get_task should show wrap_up_mode: {text}"
+    );
+}
+
 // -- list_tasks tests -------------------------------------------------------
 
 #[tokio::test]
@@ -8608,54 +8783,6 @@ async fn create_task_unknown_caller_identity_returns_error() {
     assert!(is_error(&resp));
     let msg = error_message(&resp);
     assert!(msg.to_lowercase().contains("caller"), "got {msg}");
-}
-
-// ---------------------------------------------------------------------------
-// wrap_up_mode tests
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn update_task_sets_wrap_up_mode() {
-    let state = test_state().await;
-    let task_id = create_task_fixture(&state).await;
-
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "wrap_up_mode": "pr" }
-        })),
-    )
-    .await;
-    assert!(
-        resp.result.is_some(),
-        "expected success, got: {:?}",
-        resp.error
-    );
-    assert!(resp.error.is_none());
-
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
-    assert_eq!(task.wrap_up_mode, Some(crate::models::WrapUpMode::Pr));
-}
-
-#[tokio::test]
-async fn create_task_with_wrap_up_mode() {
-    let state = test_state().await;
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "create_task",
-            "arguments": { "title": "T", "repo_path": "/r", "project_id": 1, "wrap_up_mode": "done" }
-        })),
-    )
-    .await;
-    assert!(resp.result.is_some());
-    assert!(resp.error.is_none());
-    let task_id = extract_created_task_id(&resp);
-    let task = state.db.get_task(task_id).await.unwrap().unwrap();
-    assert_eq!(task.wrap_up_mode, Some(crate::models::WrapUpMode::Done));
 }
 
 #[tokio::test]

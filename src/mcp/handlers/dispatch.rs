@@ -147,6 +147,11 @@ mcp_tools! {
                 "project_id": {
                     "type": "integer",
                     "description": "Move the task to a different project. Use list_projects to look up IDs."
+                },
+                "wrap_up_mode": {
+                    "type": ["string", "null"],
+                    "description": "Pre-set the wrap-up action for this task: 'rebase' (rebase onto base_branch), 'pr' (create a PR), or 'done' (mark done immediately). Pass null to clear.",
+                    "enum": ["rebase", "pr", "done", null]
                 }
             },
             "required": ["task_id"]
@@ -206,6 +211,11 @@ mcp_tools! {
                 "project_id": {
                     "type": "integer",
                     "description": "Override the inherited project. Omit to inherit from the caller's task (when the caller is a dispatched agent). Required when the caller is a non-dispatched session."
+                },
+                "wrap_up_mode": {
+                    "type": "string",
+                    "description": "Pre-set the wrap-up action for this task: 'rebase' (rebase onto base_branch), 'pr' (create a PR), or 'done' (mark done immediately).",
+                    "enum": ["rebase", "pr", "done"]
                 }
             },
             "required": ["title", "repo_path"]

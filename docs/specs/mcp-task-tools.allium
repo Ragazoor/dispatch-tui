@@ -17,13 +17,14 @@ use "./core.allium" as core
 rule UpdateTaskViaMcp {
     when: McpUpdateTask(task, status?, sub_status?, plan?, title?, description?,
                         repo_path?, sort_order?, pr_url?, tag?, epic_id?,
-                        base_branch?, project_id?)
+                        base_branch?, project_id?, wrap_up_mode?)
 
     requires: status != null or sub_status != null or plan != null or title != null
               or description != null or repo_path != null
               or sort_order != null or epic_id != null
               or pr_url != null or tag != null
               or base_branch != null or project_id != null
+              or wrap_up_mode != null
 
     -- project_id must refer to an existing project when provided
     requires:
@@ -75,14 +76,22 @@ rule UpdateTaskViaMcp {
         if base_branch != null: task.base_branch = base_branch
     ensures:
         if project_id != null: task.project_id = project_id
+    -- wrap_up_mode: absent → no-op; null → clear; "rebase"/"pr"/"done" → set.
+    -- The Allium ensures clause only captures the set path; clearing is
+    -- documented in @guidance below.
+    ensures:
+        if wrap_up_mode != null: task.wrap_up_mode = wrap_up_mode
     ensures: task.updated_at = now
 
     @guidance
         -- MCP update_task accepts status, sub_status, plan_path, title,
         -- description, repo_path, sort_order, pr_url, tag, epic_id,
-        -- base_branch, and project_id. It does NOT accept worktree or
-        -- tmux_window — those are owned by the dispatch flow and never
-        -- set via MCP.
+        -- base_branch, project_id, and wrap_up_mode. It does NOT accept
+        -- worktree or tmux_window — those are owned by the dispatch flow
+        -- and never set via MCP.
+        -- wrap_up_mode can be set to "rebase", "pr", or "done" to pre-set
+        -- the wrap-up action for the task. Pass null explicitly to clear it
+        -- (omitting the field is a no-op).
         -- Note: worktree and tmux_window ARE mutable through the internal
         -- Rust TaskService::update_task API (UpdateTaskParams defines
         -- them; see src/service/tasks/params.rs). The runtime uses that
@@ -102,7 +111,8 @@ rule UpdateTaskViaMcp {
 rule CreateTaskViaMcp {
     when: McpCreateTask(caller_identity,
                         title, repo_path, description?, plan?,
-                        project_id?, epic_id?, sort_order?, tag?, base_branch?)
+                        project_id?, epic_id?, sort_order?, tag?, base_branch?,
+                        wrap_up_mode?)
 
     -- caller_identity is supplied by the dispatch HTTP transport, not by
     -- the tool arguments. It is one of:
@@ -147,6 +157,7 @@ rule CreateTaskViaMcp {
         sort_order: sort_order,
         base_branch: base_branch ?? config.default_branch,
         project_id: effective_project_id,
+        wrap_up_mode: wrap_up_mode,
         created_at: now,
         updated_at: now
     )

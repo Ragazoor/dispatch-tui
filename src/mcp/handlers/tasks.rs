@@ -17,8 +17,9 @@ use crate::service::{
 };
 
 use super::types::{
-    deserialize_flexible_i64, deserialize_nullable_flexible_i64, deserialize_optional_flexible_i64,
-    parse_args, service_err_to_response, JsonRpcResponse, StatusFilter,
+    deserialize_flexible_i64, deserialize_nullable_flexible_i64, deserialize_nullable_wrap_up_mode,
+    deserialize_optional_flexible_i64, parse_args, service_err_to_response, JsonRpcResponse,
+    StatusFilter,
 };
 
 // ---------------------------------------------------------------------------
@@ -53,8 +54,8 @@ pub(super) struct UpdateTaskArgs {
     pub(super) base_branch: Option<String>,
     #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
     pub(super) project_id: Option<i64>,
-    #[serde(default)]
-    pub(super) wrap_up_mode: Option<WrapUpMode>,
+    #[serde(default, deserialize_with = "deserialize_nullable_wrap_up_mode")]
+    pub(super) wrap_up_mode: Option<Option<WrapUpMode>>,
 }
 
 #[derive(Deserialize)]
@@ -370,8 +371,8 @@ pub(super) async fn handle_update_task(
         }
         params = params.project_id(ProjectId(project_id));
     }
-    if parsed.wrap_up_mode.is_some() {
-        params = params.wrap_up_mode(parsed.wrap_up_mode);
+    if let Some(mode) = parsed.wrap_up_mode {
+        params = params.wrap_up_mode(mode);
     }
     let fields_display = params.updated_field_names().join(", ");
 
