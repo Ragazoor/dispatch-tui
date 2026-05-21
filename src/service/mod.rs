@@ -1,3 +1,4 @@
+pub mod repo_index;
 pub mod embeddings;
 pub mod epics;
 pub mod learnings;
