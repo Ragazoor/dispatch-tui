@@ -139,6 +139,35 @@ where
     deserializer.deserialize_option(OptFlexI64)
 }
 
+/// Generic nullable deserializer for `Option<Option<T>>` fields where T: Deserialize.
+/// Distinguishes absent (→ outer None), JSON null (→ Some(None) = clear), value (→ Some(Some(v))).
+fn deserialize_nullable<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    use serde::de;
+    use std::marker::PhantomData;
+
+    struct Nullable<T>(PhantomData<T>);
+    impl<'de, T: serde::Deserialize<'de>> de::Visitor<'de> for Nullable<T> {
+        type Value = Option<Option<T>>;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("null or a value")
+        }
+        fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+            Ok(Some(None))
+        }
+        fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+            Ok(Some(None))
+        }
+        fn visit_some<D2: serde::Deserializer<'de>>(self, d: D2) -> Result<Self::Value, D2::Error> {
+            T::deserialize(d).map(|v| Some(Some(v)))
+        }
+    }
+    deserializer.deserialize_option(Nullable(PhantomData))
+}
+
 /// Nullable string deserializer for `Option<Option<String>>` fields.
 /// Used with `#[serde(default)]` to distinguish absent (→ outer None),
 /// JSON null (→ Some(None) = clear), and a value (→ Some(Some(v)) = set).
@@ -148,28 +177,7 @@ pub(super) fn deserialize_nullable_string<'de, D>(
 where
     D: serde::Deserializer<'de>,
 {
-    use serde::de;
-
-    struct NullableString;
-    impl<'de> de::Visitor<'de> for NullableString {
-        type Value = Option<Option<String>>;
-        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-            f.write_str("null or a string")
-        }
-        fn visit_none<E: de::Error>(self) -> Result<Option<Option<String>>, E> {
-            Ok(Some(None))
-        }
-        fn visit_unit<E: de::Error>(self) -> Result<Option<Option<String>>, E> {
-            Ok(Some(None))
-        }
-        fn visit_some<D2: serde::Deserializer<'de>>(
-            self,
-            d: D2,
-        ) -> Result<Option<Option<String>>, D2::Error> {
-            String::deserialize(d).map(|s| Some(Some(s)))
-        }
-    }
-    deserializer.deserialize_option(NullableString)
+    deserialize_nullable(deserializer)
 }
 
 /// Nullable flexible i64 deserializer for `Option<Option<i64>>` fields.
@@ -214,28 +222,7 @@ pub(super) fn deserialize_nullable_wrap_up_mode<'de, D>(
 where
     D: serde::Deserializer<'de>,
 {
-    use serde::de;
-
-    struct NullableWrapUpMode;
-    impl<'de> de::Visitor<'de> for NullableWrapUpMode {
-        type Value = Option<Option<WrapUpMode>>;
-        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-            f.write_str("null or one of: rebase, pr, done")
-        }
-        fn visit_none<E: de::Error>(self) -> Result<Option<Option<WrapUpMode>>, E> {
-            Ok(Some(None))
-        }
-        fn visit_unit<E: de::Error>(self) -> Result<Option<Option<WrapUpMode>>, E> {
-            Ok(Some(None))
-        }
-        fn visit_some<D2: serde::Deserializer<'de>>(
-            self,
-            d: D2,
-        ) -> Result<Option<Option<WrapUpMode>>, D2::Error> {
-            WrapUpMode::deserialize(d).map(|m| Some(Some(m)))
-        }
-    }
-    deserializer.deserialize_option(NullableWrapUpMode)
+    deserialize_nullable(deserializer)
 }
 
 // ---------------------------------------------------------------------------

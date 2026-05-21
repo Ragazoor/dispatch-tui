@@ -898,12 +898,9 @@ async fn create_task_with_wrap_up_mode() {
     .await;
     assert!(resp.error.is_none(), "got error: {:?}", resp.error);
 
-    let tasks = state.db.list_all().await.unwrap();
-    assert_eq!(tasks.len(), 1);
-    assert_eq!(
-        tasks[0].wrap_up_mode,
-        Some(crate::models::WrapUpMode::Pr)
-    );
+    let task_id = extract_created_task_id(&resp);
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    assert_eq!(task.wrap_up_mode, Some(crate::models::WrapUpMode::Pr));
 }
 
 #[tokio::test]

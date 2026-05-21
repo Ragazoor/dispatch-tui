@@ -76,9 +76,6 @@ rule UpdateTaskViaMcp {
         if base_branch != null: task.base_branch = base_branch
     ensures:
         if project_id != null: task.project_id = project_id
-    -- wrap_up_mode: absent → no-op; null → clear; "rebase"/"pr"/"done" → set.
-    -- The Allium ensures clause only captures the set path; clearing is
-    -- documented in @guidance below.
     ensures:
         if wrap_up_mode != null: task.wrap_up_mode = wrap_up_mode
     ensures: task.updated_at = now
