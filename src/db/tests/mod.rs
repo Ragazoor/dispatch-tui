@@ -8,6 +8,7 @@ mod migrations;
 mod projects;
 mod settings;
 mod tasks;
+mod usage;
 
 pub(super) async fn in_memory_db() -> Database {
     Database::open_in_memory().await.unwrap()

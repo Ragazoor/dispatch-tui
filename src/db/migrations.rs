@@ -81,6 +81,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (56, migrate_v56_drop_task_usage),
     (57, migrate_v57_enforce_epic_project_consistency),
     (58, migrate_v58_reset_intermediate_epic_statuses),
+    (59, migrate_v59_create_usage_events),
 ];
 
 fn migrate_v53_add_wrap_up_mode(conn: &Connection) -> Result<()> {
@@ -1274,4 +1275,18 @@ pub(super) fn migrate_v58_reset_intermediate_epic_statuses(conn: &Connection) ->
         .context("Failed to reset intermediate epic statuses to backlog (migration v58)")?;
     }
     Ok(())
+}
+
+fn migrate_v59_create_usage_events(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS usage_events (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            recorded_at TEXT    NOT NULL DEFAULT (datetime('now')),
+            category    TEXT    NOT NULL,
+            action      TEXT    NOT NULL,
+            detail      TEXT,
+            actor       TEXT    NOT NULL
+        )",
+    )
+    .context("Failed to create usage_events table")
 }
