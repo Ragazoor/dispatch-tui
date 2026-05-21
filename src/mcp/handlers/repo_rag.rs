@@ -38,11 +38,16 @@ async fn resolve_repo_path(
     let tid = crate::models::TaskId(task_id);
     match state.db.get_task(tid).await {
         Ok(Some(t)) => Ok(std::path::PathBuf::from(t.repo_path)),
-        Ok(None) => Err(tool_error(
+        Ok(None) => Err(JsonRpcResponse::err(
             id.clone(),
+            -32602,
             format!("task {task_id} not found — pass repo_path explicitly"),
         )),
-        Err(e) => Err(tool_error(id.clone(), format!("db error: {e}"))),
+        Err(e) => Err(JsonRpcResponse::err(
+            id.clone(),
+            -32603,
+            format!("db error: {e}"),
+        )),
     }
 }
 
@@ -107,8 +112,9 @@ pub(super) async fn handle_search_docs(
 
     match svc.search_docs(&repo_path, &parsed.query, limit).await {
         Ok(results) => {
+            let count = results.len();
             let items: Vec<Value> = results
-                .iter()
+                .into_iter()
                 .map(|r| {
                     json!({
                         "file_path": r.file_path,
@@ -118,7 +124,6 @@ pub(super) async fn handle_search_docs(
                     })
                 })
                 .collect();
-            let count = items.len();
             JsonRpcResponse::ok(
                 id,
                 json!({
@@ -128,7 +133,8 @@ pub(super) async fn handle_search_docs(
                             "results": items,
                             "count": count,
                         }))
-                        .unwrap_or_default()
+                        .unwrap_or_else(|_| format!("{{\"results\": [], \"count\": {count}}}"))
+
                     }]
                 }),
             )
