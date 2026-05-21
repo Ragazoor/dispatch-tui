@@ -598,9 +598,12 @@ rule ToggleGroupByRepo {
     --   the CreateEpic rule, so no information is lost.
     --   The running and review statuses are never set automatically; they are
     --   only reachable via manual MoveEpicForward / MoveEpicBackward actions.
+    --   Manual placements (including running / review) are preserved across
+    --   subsequent recalc calls — only the two auto-transitions above will
+    --   override a manual placement.
     --
-    -- The derived status is compared to the current epic.status; it is
-    -- applied whenever the derived status differs from the current status.
+    -- The new status is written only when one of the two auto-transitions
+    -- above fires; otherwise the DB row is left untouched.
     --
     -- Propagation: after recalculating an epic's status, if the epic has a
     -- parent, recalculate_epic_status is called on the parent as well.

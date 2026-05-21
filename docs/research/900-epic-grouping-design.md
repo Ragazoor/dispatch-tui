@@ -13,13 +13,13 @@ Epic cards drift across kanban columns as their child tasks progress (backlog �
 
 Replace the multi-state `recalculate_epic_status` derivation with a binary rule:
 
-| Condition | Derived status |
+| Condition | Auto-transition |
 |-----------|---------------|
-| No active children | backlog |
-| All active children done | done |
-| Otherwise (any child in backlog, running, or review) | backlog |
+| All active children done (≥1 child) | → done |
+| Epic is done AND has active non-done children | → backlog (regression) |
+| Otherwise (including no active children) | no change |
 
-The `running` and `review` intermediate states are no longer auto-reachable via recalculation. An epic with tasks in any mix of backlog/running/review always stays in the backlog column.
+The `running` and `review` intermediate states are no longer auto-reachable via recalculation. Recalc only fires for the two transitions above; in all other cases the epic stays wherever it was last placed (by creation, manual `h`/`l` move, or a prior auto-transition). An epic with tasks in any mix of backlog/running/review keeps its current column.
 
 ### Automatic transitions
 
@@ -32,7 +32,7 @@ Both are driven by the existing `recalculate_epic_status` call sites (task creat
 
 ### Manual moves
 
-`[` and `]` continue to traverse backlog → running → review → done manually. Manual moves can be overridden by the next recalc trigger (a task state change). This is intentional: recalc always wins.
+`[` and `]` continue to traverse backlog → running → review → done manually. Manual placement is preserved across subsequent recalc triggers — recalc only overrides manual placement to fire the two auto-transitions above (all-done → done, and done-regression → backlog).
 
 ### Card display
 
