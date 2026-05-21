@@ -2610,3 +2610,359 @@ async fn backfill_is_noop_when_no_missing_embeddings() {
         "still no missing embeddings after no-op backfill"
     );
 }
+
+// ---------------------------------------------------------------------------
+// exec_refresh_task
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn exec_refresh_task_updates_app_when_task_exists() {
+    let (rt, mut app) = test_runtime().await;
+    rt.exec_insert_task(
+        &mut app,
+        tui::TaskDraft {
+            title: "Refresh Me".into(),
+            description: "Desc".into(),
+            repo_path: "/repo".into(),
+            ..Default::default()
+        },
+        None,
+    )
+    .await;
+    let id = app.tasks()[0].id;
+    rt.database
+        .patch_task(
+            id,
+            &db::TaskPatch::new()
+                .status(models::TaskStatus::Running)
+                .sub_status(models::SubStatus::Active),
+        )
+        .await
+        .unwrap();
+
+    rt.exec_refresh_task(&mut app, id).await;
+
+    assert_eq!(app.tasks()[0].status, models::TaskStatus::Running);
+    assert!(app.error_popup().is_none());
+}
+
+#[tokio::test]
+async fn exec_refresh_task_falls_back_when_task_gone() {
+    let (rt, mut app) = test_runtime().await;
+    rt.exec_insert_task(
+        &mut app,
+        tui::TaskDraft {
+            title: "Gone Task".into(),
+            description: "Desc".into(),
+            repo_path: "/repo".into(),
+            ..Default::default()
+        },
+        None,
+    )
+    .await;
+    let id = app.tasks()[0].id;
+    rt.database.delete_task(id).await.unwrap();
+
+    rt.exec_refresh_task(&mut app, id).await;
+
+    assert!(app.tasks().is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// exec_refresh_epic
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn exec_refresh_epic_updates_app_when_epic_exists() {
+    let (rt, mut app) = test_runtime().await;
+    let epic = rt
+        .database
+        .create_epic("Epic", "desc", "/repo", None, ProjectId(1))
+        .await
+        .unwrap();
+    rt.exec_refresh_epics_from_db(&mut app).await;
+    rt.database
+        .patch_epic(
+            epic.id,
+            &db::EpicPatch::new().status(models::TaskStatus::Running),
+        )
+        .await
+        .unwrap();
+
+    rt.exec_refresh_epic(&mut app, epic.id).await;
+
+    assert_eq!(app.epics()[0].status, models::TaskStatus::Running);
+    assert!(app.error_popup().is_none());
+}
+
+#[tokio::test]
+async fn exec_refresh_epic_falls_back_when_epic_gone() {
+    let (rt, mut app) = test_runtime().await;
+    let epic = rt
+        .database
+        .create_epic("Gone Epic", "desc", "/repo", None, ProjectId(1))
+        .await
+        .unwrap();
+    rt.exec_refresh_epics_from_db(&mut app).await;
+    assert_eq!(app.epics().len(), 1);
+
+    rt.database.delete_epic(epic.id).await.unwrap();
+
+    rt.exec_refresh_epic(&mut app, epic.id).await;
+
+    assert!(app.epics().is_empty());
+}
+
+#[tokio::test]
+async fn exec_refresh_epic_also_reloads_epic_tasks() {
+    let (rt, mut app) = test_runtime().await;
+    let epic = rt
+        .database
+        .create_epic("Feed Epic", "desc", "/repo", None, ProjectId(1))
+        .await
+        .unwrap();
+    rt.exec_refresh_epics_from_db(&mut app).await;
+
+    // Insert a task linked to the epic directly in DB (simulates feed-sync)
+    rt.database
+        .create_task(crate::db::CreateTaskRequest {
+            title: "Feed Task",
+            description: "from feed",
+            repo_path: "/repo",
+            plan: None,
+            status: models::TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: Some(epic.id),
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+            wrap_up_mode: None,
+        })
+        .await
+        .unwrap();
+
+    rt.exec_refresh_epic(&mut app, epic.id).await;
+
+    // The new task should now be visible in app
+    assert_eq!(app.tasks().len(), 1);
+    assert_eq!(app.tasks()[0].title, "Feed Task");
+}
+
+// ---------------------------------------------------------------------------
+// exec_refresh_projects_from_db / exec_create_project / exec_rename_project /
+// exec_delete_project / exec_reorder_project
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn exec_refresh_projects_from_db_loads_projects() {
+    let (rt, mut app) = test_runtime().await;
+    assert!(app.projects().is_empty(), "app starts with no projects");
+
+    rt.exec_refresh_projects_from_db(&mut app).await;
+
+    assert!(!app.projects().is_empty());
+    assert!(app.projects().iter().any(|p| p.is_default));
+}
+
+#[tokio::test]
+async fn exec_create_project_adds_to_db_and_refreshes() {
+    let (rt, mut app) = test_runtime().await;
+    rt.exec_refresh_projects_from_db(&mut app).await;
+    let initial_count = app.projects().len();
+
+    rt.exec_create_project(&mut app, "My Project".into()).await;
+
+    assert_eq!(app.projects().len(), initial_count + 1);
+    assert!(app.projects().iter().any(|p| p.name == "My Project"));
+    assert!(rt
+        .database
+        .list_projects()
+        .await
+        .unwrap()
+        .iter()
+        .any(|p| p.name == "My Project"));
+    assert!(app.error_popup().is_none());
+}
+
+#[tokio::test]
+async fn exec_rename_project_updates_db_and_refreshes() {
+    let (rt, mut app) = test_runtime().await;
+    let project = rt.database.create_project("Old Name", 10).await.unwrap();
+    rt.exec_refresh_projects_from_db(&mut app).await;
+
+    rt.exec_rename_project(&mut app, project.id, "New Name".into())
+        .await;
+
+    assert!(app.projects().iter().any(|p| p.name == "New Name"));
+    assert!(!app.projects().iter().any(|p| p.name == "Old Name"));
+    assert!(app.error_popup().is_none());
+}
+
+#[tokio::test]
+async fn exec_delete_project_removes_and_refreshes() {
+    let (rt, mut app) = test_runtime().await;
+    let extra = rt.database.create_project("Extra", 10).await.unwrap();
+    rt.exec_refresh_projects_from_db(&mut app).await;
+    let initial_count = app.projects().len();
+
+    rt.exec_delete_project(&mut app, extra.id).await;
+
+    assert_eq!(app.projects().len(), initial_count - 1);
+    assert!(!app.projects().iter().any(|p| p.id == extra.id));
+    assert!(app.error_popup().is_none());
+}
+
+#[tokio::test]
+async fn exec_delete_project_switches_active_project_when_deleted_is_active() {
+    let (rt, mut app) = test_runtime().await;
+    let extra = rt.database.create_project("Extra", 10).await.unwrap();
+    rt.exec_refresh_projects_from_db(&mut app).await;
+    app.update(Message::SelectProject(extra.id));
+    assert_eq!(app.active_project(), extra.id);
+
+    rt.exec_delete_project(&mut app, extra.id).await;
+
+    let default_id = app.projects().iter().find(|p| p.is_default).unwrap().id;
+    assert_eq!(app.active_project(), default_id);
+    assert!(app.error_popup().is_none());
+}
+
+#[tokio::test]
+async fn exec_reorder_project_swaps_sort_orders() {
+    let (rt, mut app) = test_runtime().await;
+    // Default project has sort_order=0; create a second with sort_order=1
+    let second = rt.database.create_project("Second", 1).await.unwrap();
+    rt.exec_refresh_projects_from_db(&mut app).await;
+
+    let default_id = app.projects().iter().find(|p| p.is_default).unwrap().id;
+
+    // Move default project down (delta=1) → swaps sort_order with second
+    rt.exec_reorder_project(&mut app, default_id, 1).await;
+
+    let db_projects = rt.database.list_projects().await.unwrap();
+    let db_default = db_projects.iter().find(|p| p.id == default_id).unwrap();
+    let db_second = db_projects.iter().find(|p| p.id == second.id).unwrap();
+    assert_eq!(db_default.sort_order, 1);
+    assert_eq!(db_second.sort_order, 0);
+}
+
+// ---------------------------------------------------------------------------
+// exec_toggle_epic_auto_dispatch / exec_toggle_epic_group_by_repo
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn exec_toggle_epic_auto_dispatch_sets_flag_to_false() {
+    let (rt, mut app) = test_runtime().await;
+    let epic = rt
+        .database
+        .create_epic("AutoDispatch Epic", "desc", "/repo", None, ProjectId(1))
+        .await
+        .unwrap();
+    assert!(epic.auto_dispatch, "default auto_dispatch should be true");
+
+    rt.exec_toggle_epic_auto_dispatch(&mut app, epic.id, false)
+        .await;
+
+    let updated = rt.database.get_epic(epic.id).await.unwrap().unwrap();
+    assert!(!updated.auto_dispatch);
+    assert!(app.error_popup().is_none());
+}
+
+#[tokio::test]
+async fn exec_toggle_epic_auto_dispatch_sets_flag_to_true() {
+    let (rt, mut app) = test_runtime().await;
+    let epic = rt
+        .database
+        .create_epic("AutoDispatch Epic", "desc", "/repo", None, ProjectId(1))
+        .await
+        .unwrap();
+    rt.database
+        .patch_epic(epic.id, &db::EpicPatch::new().auto_dispatch(false))
+        .await
+        .unwrap();
+
+    rt.exec_toggle_epic_auto_dispatch(&mut app, epic.id, true)
+        .await;
+
+    let updated = rt.database.get_epic(epic.id).await.unwrap().unwrap();
+    assert!(updated.auto_dispatch);
+    assert!(app.error_popup().is_none());
+}
+
+#[tokio::test]
+async fn exec_toggle_epic_group_by_repo_sets_flag_to_true() {
+    let (rt, mut app) = test_runtime().await;
+    let epic = rt
+        .database
+        .create_epic("GroupByRepo Epic", "desc", "/repo", None, ProjectId(1))
+        .await
+        .unwrap();
+    assert!(!epic.group_by_repo, "default group_by_repo should be false");
+
+    rt.exec_toggle_epic_group_by_repo(&mut app, epic.id, true)
+        .await;
+
+    let updated = rt.database.get_epic(epic.id).await.unwrap().unwrap();
+    assert!(updated.group_by_repo);
+    assert!(app.error_popup().is_none());
+}
+
+#[tokio::test]
+async fn exec_toggle_epic_group_by_repo_sets_flag_to_false() {
+    let (rt, mut app) = test_runtime().await;
+    let epic = rt
+        .database
+        .create_epic("GroupByRepo Epic", "desc", "/repo", None, ProjectId(1))
+        .await
+        .unwrap();
+    rt.database
+        .patch_epic(epic.id, &db::EpicPatch::new().group_by_repo(true))
+        .await
+        .unwrap();
+
+    rt.exec_toggle_epic_group_by_repo(&mut app, epic.id, false)
+        .await;
+
+    let updated = rt.database.get_epic(epic.id).await.unwrap().unwrap();
+    assert!(!updated.group_by_repo);
+    assert!(app.error_popup().is_none());
+}
+
+// ---------------------------------------------------------------------------
+// exec_save_tips_state
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn exec_save_tips_state_persists_to_db() {
+    let (rt, _app) = test_runtime().await;
+
+    rt.exec_save_tips_state(7, models::TipsShowMode::NewOnly)
+        .await;
+
+    let (seen_up_to, show_mode) = rt.database.get_tips_state().await.unwrap();
+    assert_eq!(seen_up_to, 7);
+    assert_eq!(show_mode, models::TipsShowMode::NewOnly);
+}
+
+// ---------------------------------------------------------------------------
+// exec_check_pr_status — closed PR sends no message
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn exec_check_pr_status_closed_sends_no_message() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mock = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"CLOSED\n"), // gh pr view
+    ]));
+    let rt = make_runtime(db, tx, mock);
+
+    rt.exec_check_pr_status(TaskId(1), "https://github.com/org/repo/pull/42".to_string());
+
+    // Closed PRs intentionally produce no message
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(
+        rx.try_recv().is_err(),
+        "Expected no message for closed PR, but got one"
+    );
+}
