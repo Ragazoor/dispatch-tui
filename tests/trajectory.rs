@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 
 use dispatch_tui::db::{self, CreateTaskRequest};
 use dispatch_tui::mcp::identity::{HEADER_KIND, HEADER_TASK_ID};
+use dispatch_tui::mcp::trajectory::TRAJECTORIES_SUBDIR;
 use dispatch_tui::models::{ProjectId, TaskId, TaskStatus};
 
 /// Happy path: a task-identity call writes one JSONL entry to
@@ -49,7 +50,7 @@ async fn task_identity_writes_trajectory_entry() {
 
     let trajectory_path = data_dir
         .path()
-        .join("trajectories")
+        .join(TRAJECTORIES_SUBDIR)
         .join(format!("{}.jsonl", task_id.0));
     assert!(
         trajectory_path.exists(),
@@ -112,8 +113,6 @@ async fn task_identity_without_worktree_still_writes_trajectory() {
         .await
         .unwrap();
 
-    // Do NOT set a worktree on this task.
-
     let resp = common::post_mcp(
         router,
         &[(HEADER_TASK_ID, &task_id.0.to_string())],
@@ -134,7 +133,7 @@ async fn task_identity_without_worktree_still_writes_trajectory() {
 
     let trajectory_path = data_dir
         .path()
-        .join("trajectories")
+        .join(TRAJECTORIES_SUBDIR)
         .join(format!("{}.jsonl", task_id.0));
     assert!(
         trajectory_path.exists(),
@@ -161,7 +160,7 @@ async fn session_identity_writes_no_trajectory_file() {
 
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-    let trajectories_dir = data_dir.path().join("trajectories");
+    let trajectories_dir = data_dir.path().join(TRAJECTORIES_SUBDIR);
     assert!(
         !trajectories_dir.exists(),
         "trajectories/ must NOT be created for session-identity calls"

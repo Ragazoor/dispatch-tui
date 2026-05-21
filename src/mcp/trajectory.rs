@@ -5,6 +5,8 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::io::AsyncWriteExt;
 
+pub const TRAJECTORIES_SUBDIR: &str = "trajectories";
+
 #[derive(Debug, Serialize)]
 pub struct TrajectoryEntry {
     pub timestamp: DateTime<Utc>,
@@ -17,13 +19,13 @@ pub struct TrajectoryEntry {
 
 const SCHEMA_VERSION: &str = "1.0.0";
 
-pub async fn append_entry(data_dir: &Path, task_id: i64, entry: &TrajectoryEntry) {
-    let trajectories_dir = data_dir.join("trajectories");
+pub async fn append_entry(data_dir: &Path, entry: &TrajectoryEntry) {
+    let trajectories_dir = data_dir.join(TRAJECTORIES_SUBDIR);
     if let Err(e) = tokio::fs::create_dir_all(&trajectories_dir).await {
         tracing::warn!(error = ?e, path = %trajectories_dir.display(), "failed to create trajectories dir");
         return;
     }
-    let path = trajectories_dir.join(format!("{task_id}.jsonl"));
+    let path = trajectories_dir.join(format!("{}.jsonl", entry.task_id));
     let mut file = match tokio::fs::OpenOptions::new()
         .append(true)
         .create(true)
@@ -82,11 +84,12 @@ mod tests {
     async fn append_creates_file_with_valid_json_line() {
         let dir = tempdir().unwrap();
         let entry = make_entry("update_task");
-        append_entry(dir.path(), 42, &entry).await;
-        let content =
-            tokio::fs::read_to_string(dir.path().join("trajectories").join("42.jsonl"))
-                .await
-                .unwrap();
+        append_entry(dir.path(), &entry).await;
+        let content = tokio::fs::read_to_string(
+            dir.path().join(TRAJECTORIES_SUBDIR).join("42.jsonl"),
+        )
+        .await
+        .unwrap();
         assert!(!content.is_empty());
         let parsed: Value = serde_json::from_str(content.trim()).unwrap();
         assert_eq!(parsed["schema_version"], "1.0.0");
@@ -98,12 +101,13 @@ mod tests {
     #[tokio::test]
     async fn append_adds_second_line() {
         let dir = tempdir().unwrap();
-        append_entry(dir.path(), 42, &make_entry("get_task")).await;
-        append_entry(dir.path(), 42, &make_entry("list_tasks")).await;
-        let content =
-            tokio::fs::read_to_string(dir.path().join("trajectories").join("42.jsonl"))
-                .await
-                .unwrap();
+        append_entry(dir.path(), &make_entry("get_task")).await;
+        append_entry(dir.path(), &make_entry("list_tasks")).await;
+        let content = tokio::fs::read_to_string(
+            dir.path().join(TRAJECTORIES_SUBDIR).join("42.jsonl"),
+        )
+        .await
+        .unwrap();
         let lines: Vec<&str> = content.lines().collect();
         assert_eq!(lines.len(), 2);
         let _: Value = serde_json::from_str(lines[0]).unwrap();
@@ -113,18 +117,41 @@ mod tests {
     #[tokio::test]
     async fn append_auto_creates_trajectories_dir() {
         let dir = tempdir().unwrap();
-        // trajectories/ does NOT exist yet — should be created automatically
-        append_entry(dir.path(), 7, &make_entry("get_task")).await;
-        assert!(dir.path().join("trajectories").join("7.jsonl").exists());
+        let entry = TrajectoryEntry {
+            task_id: 7,
+            ..make_entry("get_task")
+        };
+        append_entry(dir.path(), &entry).await;
+        assert!(dir
+            .path()
+            .join(TRAJECTORIES_SUBDIR)
+            .join("7.jsonl")
+            .exists());
     }
 
     #[tokio::test]
     async fn different_tasks_get_separate_files() {
         let dir = tempdir().unwrap();
-        append_entry(dir.path(), 1, &make_entry("get_task")).await;
-        append_entry(dir.path(), 2, &make_entry("list_tasks")).await;
-        assert!(dir.path().join("trajectories").join("1.jsonl").exists());
-        assert!(dir.path().join("trajectories").join("2.jsonl").exists());
+        let e1 = TrajectoryEntry {
+            task_id: 1,
+            ..make_entry("get_task")
+        };
+        let e2 = TrajectoryEntry {
+            task_id: 2,
+            ..make_entry("list_tasks")
+        };
+        append_entry(dir.path(), &e1).await;
+        append_entry(dir.path(), &e2).await;
+        assert!(dir
+            .path()
+            .join(TRAJECTORIES_SUBDIR)
+            .join("1.jsonl")
+            .exists());
+        assert!(dir
+            .path()
+            .join(TRAJECTORIES_SUBDIR)
+            .join("2.jsonl")
+            .exists());
     }
 
     #[tokio::test]
@@ -132,11 +159,12 @@ mod tests {
         let dir = tempdir().unwrap();
         let entry = make_entry("get_task");
         let expected_ts = entry.timestamp;
-        append_entry(dir.path(), 42, &entry).await;
-        let content =
-            tokio::fs::read_to_string(dir.path().join("trajectories").join("42.jsonl"))
-                .await
-                .unwrap();
+        append_entry(dir.path(), &entry).await;
+        let content = tokio::fs::read_to_string(
+            dir.path().join(TRAJECTORIES_SUBDIR).join("42.jsonl"),
+        )
+        .await
+        .unwrap();
         let parsed: Value = serde_json::from_str(content.trim()).unwrap();
         assert_eq!(parsed["schema_version"], SCHEMA_VERSION);
         assert_eq!(parsed["task_id"], 42);

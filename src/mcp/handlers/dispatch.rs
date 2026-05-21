@@ -662,9 +662,8 @@ pub async fn handle_mcp(
                         duration_ms,
                     };
                     let data_dir = state.data_dir.clone();
-                    let tid = task_id.0;
                     let _ = tokio::spawn(async move {
-                        trajectory::append_entry(&data_dir, tid, &entry).await;
+                        trajectory::append_entry(&data_dir, &entry).await;
                     });
                 }
 

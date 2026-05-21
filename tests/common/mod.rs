@@ -15,8 +15,7 @@ use dispatch_tui::process::{MockProcessRunner, ProcessRunner};
 use dispatch_tui::service::embeddings::EmbeddingService;
 
 pub async fn test_router() -> (axum::Router, Arc<dyn db::TaskStore>) {
-    let tmp = tempfile::TempDir::new().unwrap();
-    test_router_with_data_dir(tmp.into_path().as_path()).await
+    test_router_with_data_dir(std::env::temp_dir().as_path()).await
 }
 
 pub async fn test_router_with_data_dir(data_dir: &Path) -> (axum::Router, Arc<dyn db::TaskStore>) {
