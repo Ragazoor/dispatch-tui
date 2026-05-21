@@ -1153,3 +1153,31 @@ async fn row_to_epic_auto_dispatch_defaults_to_true() {
         .unwrap();
     assert!(epic.auto_dispatch, "auto_dispatch should default to true");
 }
+
+#[tokio::test]
+async fn get_epic_errors_on_corrupt_auto_dispatch_type() {
+    // Regression: row.get::<_, bool>("auto_dispatch").unwrap_or(true) silently
+    // returned true when the column held a non-boolean value. Now uses `?` so
+    // schema drift surfaces immediately.
+    let db = in_memory_db().await;
+    let epic = db
+        .create_epic("E", "D", "/repo", None, ProjectId(1))
+        .await
+        .unwrap();
+    let epic_id = epic.id.0;
+    db.db_call(move |conn| {
+        conn.execute(
+            "UPDATE epics SET auto_dispatch = 'not-a-bool' WHERE id = ?1",
+            rusqlite::params![epic_id],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let result = db.get_epic(epic.id).await;
+    assert!(
+        result.is_err(),
+        "expected Err when auto_dispatch holds a non-boolean value, got {:?}",
+        result
+    );
+}

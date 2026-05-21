@@ -2736,3 +2736,43 @@ async fn row_to_task_base_branch_defaults_to_main() {
     let task = db.get_task(id).await.unwrap().unwrap();
     assert_eq!(task.base_branch, "main");
 }
+
+#[tokio::test]
+async fn get_task_errors_on_corrupt_sort_order_type() {
+    // Regression: row.get::<_, Option<i64>>("sort_order").unwrap_or(None) silently
+    // returned None when the column held a non-integer value. Now uses `?` so
+    // schema drift surfaces immediately.
+    let db = in_memory_db().await;
+    let id = db
+        .create_task(CreateTaskRequest {
+            title: "t",
+            description: "d",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+            wrap_up_mode: None,
+        })
+        .await
+        .unwrap();
+    let task_id = id.0;
+    db.db_call(move |conn| {
+        conn.execute(
+            "UPDATE tasks SET sort_order = 'not-an-int' WHERE id = ?1",
+            rusqlite::params![task_id],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let result = db.get_task(id).await;
+    assert!(
+        result.is_err(),
+        "expected Err when sort_order holds a non-integer value, got {:?}",
+        result
+    );
+}
