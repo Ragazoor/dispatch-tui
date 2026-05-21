@@ -80,6 +80,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (55, migrate_v55_add_learning_embedding),
     (56, migrate_v56_drop_task_usage),
     (57, migrate_v57_enforce_epic_project_consistency),
+    (58, migrate_v58_reset_intermediate_epic_statuses),
 ];
 
 fn migrate_v53_add_wrap_up_mode(conn: &Connection) -> Result<()> {
@@ -1260,5 +1261,17 @@ pub(super) fn migrate_v57_enforce_epic_project_consistency(conn: &Connection) ->
         .context("Failed to create task epic project consistency triggers")?;
     }
 
+    Ok(())
+}
+
+pub(super) fn migrate_v58_reset_intermediate_epic_statuses(conn: &Connection) -> Result<()> {
+    // Only update if the status column exists (defensive: some test schemas may be minimal)
+    if column_exists(conn, "epics", "status") {
+        conn.execute(
+            "UPDATE epics SET status = 'backlog', updated_at = datetime('now') WHERE status IN ('running', 'review')",
+            [],
+        )
+        .context("Failed to reset intermediate epic statuses to backlog (migration v58)")?;
+    }
     Ok(())
 }

@@ -11,7 +11,7 @@ async fn fresh_db_has_latest_schema_version() {
         })
         .await
         .unwrap();
-    assert_eq!(version, 57);
+    assert_eq!(version, 58);
 }
 
 #[tokio::test]
@@ -347,7 +347,7 @@ async fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 57);
+    assert_eq!(version, 58);
 }
 
 #[tokio::test]
@@ -436,7 +436,7 @@ async fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 57);
+    assert_eq!(version, 58);
 }
 
 #[tokio::test]
@@ -541,7 +541,7 @@ async fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 57);
+    assert_eq!(version, 58);
 }
 
 #[tokio::test]
@@ -622,7 +622,7 @@ async fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 57);
+    assert_eq!(version, 58);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -743,7 +743,7 @@ async fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 57);
+    assert_eq!(version, 58);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -1253,8 +1253,9 @@ async fn migration_v20_converts_done_boolean_to_status_enum() {
     assert_eq!(statuses[0], ("Done Epic".into(), "done".into()));
     assert_eq!(statuses[1], ("Empty Epic".into(), "backlog".into()));
     assert_eq!(statuses[2], ("All Done".into(), "done".into()));
-    assert_eq!(statuses[3], ("Running Epic".into(), "running".into()));
-    assert_eq!(statuses[4], ("Review Epic".into(), "review".into()));
+    // After v20 derives 'running' and 'review', v58 resets them to 'backlog'
+    assert_eq!(statuses[3], ("Running Epic".into(), "backlog".into()));
+    assert_eq!(statuses[4], ("Review Epic".into(), "backlog".into()));
 
     // done column should be removed (replaced by status enum)
     assert!(
@@ -1742,7 +1743,7 @@ async fn migration_31_re_expands_tilde_paths() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 57);
+    assert_eq!(version, 58);
 }
 
 #[tokio::test]
@@ -1818,7 +1819,7 @@ async fn migrate_v32_adds_base_branch_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 57);
+    assert_eq!(version, 58);
 }
 
 #[tokio::test]
@@ -1921,7 +1922,7 @@ async fn migration_v38_feed_epic_columns() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 57);
+    assert_eq!(version, 58);
 }
 
 #[tokio::test]
@@ -1934,7 +1935,7 @@ async fn fresh_db_schema_version_is_57() {
         })
         .await
         .unwrap();
-    assert_eq!(version, 57);
+    assert_eq!(version, 58);
 }
 
 #[tokio::test]
@@ -2004,7 +2005,7 @@ async fn migration_v40_creates_learnings_table() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 57);
+    assert_eq!(version, 58);
 }
 
 #[tokio::test]
@@ -2091,7 +2092,7 @@ async fn migration_v41_drops_cost_usd_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 57);
+    assert_eq!(version, 58);
     // task_usage dropped entirely by v56
     let table_count: i64 = conn
         .query_row(
@@ -2205,7 +2206,7 @@ async fn test_migrate_v43_proposed_to_approved() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 57);
+    assert_eq!(version, 58);
 }
 
 #[tokio::test]
@@ -2662,4 +2663,52 @@ async fn migrate_v57_trigger_blocks_update_that_breaks_consistency() {
         result.is_err(),
         "trigger must block UPDATE that creates project_id mismatch"
     );
+}
+
+// ---------------------------------------------------------------------------
+// v58 — reset intermediate epic statuses to backlog
+// ---------------------------------------------------------------------------
+
+#[test]
+fn migrate_v58_resets_running_and_review_epics_to_backlog() {
+    use rusqlite::Connection as RawConn;
+    let conn = RawConn::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE epics (
+             id INTEGER PRIMARY KEY,
+             title TEXT NOT NULL DEFAULT '',
+             description TEXT NOT NULL DEFAULT '',
+             repo_path TEXT NOT NULL DEFAULT '',
+             status TEXT NOT NULL DEFAULT 'backlog',
+             plan_path TEXT,
+             sort_order INTEGER,
+             auto_dispatch BOOLEAN NOT NULL DEFAULT 1,
+             parent_epic_id INTEGER,
+             feed_command TEXT,
+             feed_interval_secs INTEGER,
+             project_id INTEGER NOT NULL DEFAULT 1,
+             created_at TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+             group_by_repo BOOLEAN NOT NULL DEFAULT 0
+         );
+         INSERT INTO epics (id, title, status) VALUES (1, 'A', 'running');
+         INSERT INTO epics (id, title, status) VALUES (2, 'B', 'review');
+         INSERT INTO epics (id, title, status) VALUES (3, 'C', 'backlog');
+         INSERT INTO epics (id, title, status) VALUES (4, 'D', 'done');",
+    )
+    .unwrap();
+
+    crate::db::migrations::migrate_v58_reset_intermediate_epic_statuses(&conn).unwrap();
+
+    let status = |id: i64| -> String {
+        conn.query_row("SELECT status FROM epics WHERE id = ?", [id], |row| {
+            row.get(0)
+        })
+        .unwrap()
+    };
+
+    assert_eq!(status(1), "backlog"); // running → backlog
+    assert_eq!(status(2), "backlog"); // review → backlog
+    assert_eq!(status(3), "backlog"); // backlog unchanged
+    assert_eq!(status(4), "done"); // done unchanged
 }
