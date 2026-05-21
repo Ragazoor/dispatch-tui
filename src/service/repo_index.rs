@@ -24,8 +24,6 @@ pub struct SearchResult {
     pub score: f32,
 }
 
-const MAX_SCAN_CHUNKS: usize = 1000;
-
 struct EmbeddedFile {
     path: String,
     hash: String,
@@ -209,46 +207,44 @@ impl RepoIndexService {
         .await??;
 
         // Phase 2 (async): read all changed files and embed their chunks in one batch.
-        struct FileChunks {
-            path: String,
-            hash: String,
-            chunks: Vec<String>,
-        }
-
-        let mut file_chunks: Vec<FileChunks> = Vec::new();
+        let mut file_chunks: Vec<(String, String, Vec<String>)> = Vec::new();
         for (path, hash) in to_index {
             let content = tokio::fs::read_to_string(&path).await?;
             let chunks = chunk_file(&content);
-            file_chunks.push(FileChunks {
-                path: path.to_string_lossy().into_owned(),
-                hash,
-                chunks,
-            });
+            let path_str = path
+                .to_str()
+                .ok_or_else(|| anyhow::anyhow!("non-UTF-8 path: {:?}", path))?
+                .to_owned();
+            file_chunks.push((path_str, hash, chunks));
         }
 
-        // Collect all chunks across all files into one flat vec for a single embed call.
         let all_chunks: Vec<String> = file_chunks
             .iter()
-            .flat_map(|f| f.chunks.iter().cloned())
+            .flat_map(|f| f.2.iter().cloned())
             .collect();
+        let all_chunks_len = all_chunks.len();
 
         let all_vecs = if all_chunks.is_empty() {
             vec![]
         } else {
             self.embedding_service.embed_batch(all_chunks).await?
         };
+        debug_assert_eq!(
+            all_vecs.len(),
+            all_chunks_len,
+            "embed_batch must return exactly one vector per input"
+        );
 
-        // Reconstruct per-file EmbeddedFile from the flat result.
         let mut embedded: Vec<EmbeddedFile> = Vec::new();
         let mut offset = 0;
         for fc in file_chunks {
-            let n = fc.chunks.len();
+            let n = fc.2.len();
             let embeddings = all_vecs[offset..offset + n].to_vec();
             offset += n;
             embedded.push(EmbeddedFile {
-                path: fc.path,
-                hash: fc.hash,
-                chunks: fc.chunks,
+                path: fc.0,
+                hash: fc.1,
+                chunks: fc.2,
                 embeddings,
             });
         }
@@ -327,11 +323,10 @@ impl RepoIndexService {
             let repo_path = repo_path.to_owned();
             move || -> Result<ChunkRows> {
                 let conn = open_rag_db(&repo_path)?;
-                let query = format!(
-                    "SELECT file_path, chunk_text, embedding \
-                     FROM rag_chunks LIMIT {MAX_SCAN_CHUNKS}"
-                );
-                let mut stmt = conn.prepare(&query)?;
+                // Limit scan to MAX_SCAN_CHUNKS rows; repos with more chunks will return incomplete results.
+                let mut stmt = conn.prepare(
+                    "SELECT file_path, chunk_text, embedding FROM rag_chunks LIMIT 1000",
+                )?;
                 let rows = stmt.query_map([], |r| {
                     Ok((
                         r.get::<_, String>(0)?,

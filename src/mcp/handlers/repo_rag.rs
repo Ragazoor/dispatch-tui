@@ -90,6 +90,7 @@ pub(super) async fn handle_index_repo(
     }
 }
 
+#[allow(clippy::expect_used)]
 pub(super) async fn handle_search_docs(
     state: &McpState,
     id: Option<Value>,
@@ -132,7 +133,7 @@ pub(super) async fn handle_search_docs(
                             "results": items,
                             "count": count,
                         }))
-                        .unwrap_or_else(|_| format!("{{\"results\": [], \"count\": {count}}}"))
+                        .expect("Value built from json! macro is always serializable")
 
                     }]
                 }),
