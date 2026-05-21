@@ -1,5 +1,23 @@
 use serde::Serialize;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CheckKind {
+    Worktrees,
+    Sessions,
+    Hooks,
+}
+
+impl CheckKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Worktrees => "worktrees",
+            Self::Sessions => "sessions",
+            Self::Hooks => "hooks",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FindingStatus {
@@ -23,7 +41,7 @@ impl FindingStatus {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Finding {
-    pub check: &'static str,
+    pub check: CheckKind,
     pub status: FindingStatus,
     pub target: String,
     pub message: String,
@@ -40,7 +58,7 @@ pub fn format_human(findings: &[Finding]) -> String {
                 FindingStatus::Warn => "warn ",
                 FindingStatus::Error => "error",
             };
-            format!("{}  {}  {}  {}", status, f.check, f.target, f.message)
+            format!("{}  {}  {}  {}", status, f.check.as_str(), f.target, f.message)
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -73,7 +91,7 @@ pub fn check_worktrees(tasks: &[crate::models::Task], repo_paths: &[String]) -> 
         let path = crate::models::expand_tilde(wt);
         if !std::path::Path::new(&path).exists() {
             findings.push(Finding {
-                check: "worktrees",
+                check: CheckKind::Worktrees,
                 status: FindingStatus::Error,
                 target: wt.clone(),
                 message: format!("task #{} claims worktree but path does not exist", task.id.0),
@@ -97,7 +115,7 @@ pub fn check_worktrees(tasks: &[crate::models::Task], repo_paths: &[String]) -> 
             let path_str = p.to_string_lossy().to_string();
             if !db_worktrees.contains(&path_str) {
                 findings.push(Finding {
-                    check: "worktrees",
+                    check: CheckKind::Worktrees,
                     status: FindingStatus::Warn,
                     target: path_str,
                     message: "directory exists on disk but no task row has this worktree path"
@@ -139,7 +157,7 @@ pub fn check_sessions(
 
         if task_active && !window_alive {
             findings.push(Finding {
-                check: "sessions",
+                check: CheckKind::Sessions,
                 status: FindingStatus::Error,
                 target: window.clone(),
                 message: format!(
@@ -152,7 +170,7 @@ pub fn check_sessions(
             });
         } else if task_terminal && window_alive {
             findings.push(Finding {
-                check: "sessions",
+                check: CheckKind::Sessions,
                 status: FindingStatus::Warn,
                 target: window.clone(),
                 message: format!(
@@ -188,7 +206,7 @@ pub fn check_hooks(
 
         if current_value == ".githooks" {
             findings.push(Finding {
-                check: "hooks",
+                check: CheckKind::Hooks,
                 status: FindingStatus::Ok,
                 target: repo.clone(),
                 message: "core.hooksPath = .githooks".to_string(),
@@ -201,7 +219,7 @@ pub fn check_hooks(
                 format!("core.hooksPath = '{current_value}', expected '.githooks'")
             };
             findings.push(Finding {
-                check: "hooks",
+                check: CheckKind::Hooks,
                 status: FindingStatus::Warn,
                 target: repo.clone(),
                 message: format!("{detail}; pre-push hook will not run"),
@@ -228,14 +246,6 @@ pub fn repair_hooks_set_path(
         anyhow::bail!("git config failed: {}", stderr.trim());
     }
     Ok(())
-}
-
-/// Repair: kill a stale tmux window.
-pub fn repair_sessions_kill_window(
-    window: &str,
-    runner: &dyn crate::process::ProcessRunner,
-) -> anyhow::Result<()> {
-    crate::tmux::kill_window(window, runner)
 }
 
 /// Repair: remove an orphaned worktree directory from disk.
@@ -267,7 +277,7 @@ mod tests {
 
     fn ok_finding() -> Finding {
         Finding {
-            check: "hooks",
+            check: CheckKind::Hooks,
             status: FindingStatus::Ok,
             target: "/repo".to_string(),
             message: "core.hooksPath = .githooks".to_string(),
@@ -277,7 +287,7 @@ mod tests {
 
     fn warn_finding() -> Finding {
         Finding {
-            check: "worktrees",
+            check: CheckKind::Worktrees,
             status: FindingStatus::Warn,
             target: "/repo/.worktrees/task-5".to_string(),
             message: "directory exists but no matching DB row".to_string(),
@@ -397,7 +407,7 @@ mod tests {
             let findings = check_sessions(&[running_task(10, "task-10")], &mock);
             assert_eq!(findings.len(), 1);
             assert_eq!(findings[0].status, FindingStatus::Error);
-            assert_eq!(findings[0].check, "sessions");
+            assert_eq!(findings[0].check, CheckKind::Sessions);
             assert!(findings[0].repair_available);
             assert!(findings[0].target.contains("task-10"));
         }
@@ -501,7 +511,7 @@ mod tests {
             );
             assert_eq!(findings.len(), 1);
             assert_eq!(findings[0].status, FindingStatus::Error);
-            assert_eq!(findings[0].check, "worktrees");
+            assert_eq!(findings[0].check, CheckKind::Worktrees);
             assert!(findings[0].repair_available);
             assert!(findings[0].target.contains("task-1"));
         }
@@ -621,16 +631,6 @@ mod tests {
                 calls[0].1,
                 vec!["-C", "/my/repo", "config", "--local", "core.hooksPath", ".githooks"]
             );
-        }
-
-        #[test]
-        fn repair_sessions_kill_window_issues_correct_tmux_command() {
-            let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
-            repair_sessions_kill_window("task-42", &mock).unwrap();
-            let calls = mock.recorded_calls();
-            assert_eq!(calls.len(), 1);
-            assert_eq!(calls[0].0, "tmux");
-            assert_eq!(calls[0].1, vec!["kill-window", "-t", "task-42"]);
         }
 
         #[test]

@@ -390,8 +390,8 @@ async fn main() -> Result<()> {
         } => {
             use dispatch_tui::cli::doctor::{
                 check_hooks, check_sessions, check_worktrees, format_human, format_json,
-                has_problems, repair_hooks_set_path, repair_sessions_kill_window,
-                repair_worktrees_remove, FindingStatus,
+                has_problems, repair_hooks_set_path, repair_worktrees_remove, CheckKind,
+                FindingStatus,
             };
             use dispatch_tui::process::RealProcessRunner;
 
@@ -400,7 +400,6 @@ async fn main() -> Result<()> {
             let repo_paths = db.list_repo_paths().await?;
             let runner = RealProcessRunner;
 
-            // Collect all repos from settings store + task rows (deduped).
             let mut all_repos: Vec<String> = repo_paths;
             for t in &tasks {
                 if !all_repos.contains(&t.repo_path) {
@@ -418,7 +417,6 @@ async fn main() -> Result<()> {
                 Some(DoctorCheck::Hooks { json, .. }) => *json,
             };
 
-            // Determine which checks to run and the repair/force flags.
             let (run_worktrees, run_sessions, run_hooks, repair, force) = match &check {
                 None => (true, true, true, false, false),
                 Some(DoctorCheck::Worktrees { repair, force, .. }) => {
@@ -462,21 +460,20 @@ async fn main() -> Result<()> {
                         for f in &repairable {
                             eprintln!(
                                 "  would repair: {} {}  —  {}",
-                                f.check, f.target, f.message
+                                f.check.as_str(), f.target, f.message
                             );
                         }
                         std::process::exit(1);
                     }
                 } else {
-                    // --repair --force: apply all available repairs.
                     let mut any_repair_failed = false;
                     for f in &findings {
                         if !f.repair_available {
                             continue;
                         }
                         let result: anyhow::Result<()> = match f.check {
-                            "hooks" => repair_hooks_set_path(&f.target, &runner),
-                            "sessions" => match f.status {
+                            CheckKind::Hooks => repair_hooks_set_path(&f.target, &runner),
+                            CheckKind::Sessions => match f.status {
                                 FindingStatus::Error => {
                                     if let Some(task) = tasks.iter().find(|t| {
                                         t.tmux_window.as_deref() == Some(f.target.as_str())
@@ -496,11 +493,11 @@ async fn main() -> Result<()> {
                                     }
                                 }
                                 FindingStatus::Warn => {
-                                    repair_sessions_kill_window(&f.target, &runner)
+                                    dispatch_tui::tmux::kill_window(&f.target, &runner)
                                 }
                                 FindingStatus::Ok => Ok(()),
                             },
-                            "worktrees" => match f.status {
+                            CheckKind::Worktrees => match f.status {
                                 FindingStatus::Error => {
                                     if let Some(task) = tasks.iter().find(|t| {
                                         t.worktree.as_deref() == Some(f.target.as_str())
@@ -522,7 +519,7 @@ async fn main() -> Result<()> {
                                 FindingStatus::Warn => {
                                     let Some(repo) = all_repos
                                         .iter()
-                                        .find(|r| f.target.starts_with(r.as_str()))
+                                        .find(|r| f.target.starts_with(&format!("{r}/.worktrees/")))
                                         .cloned()
                                     else {
                                         eprintln!(
@@ -535,14 +532,13 @@ async fn main() -> Result<()> {
                                 }
                                 FindingStatus::Ok => Ok(()),
                             },
-                            _ => Ok(()),
                         };
                         match result {
                             Err(e) => {
                                 eprintln!("repair failed for {}: {e}", f.target);
                                 any_repair_failed = true;
                             }
-                            Ok(()) if !json => println!("repaired: {} {}", f.check, f.target),
+                            Ok(()) if !json => println!("repaired: {} {}", f.check.as_str(), f.target),
                             Ok(()) => {}
                         }
                     }
