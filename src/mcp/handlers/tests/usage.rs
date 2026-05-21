@@ -1,6 +1,5 @@
 #![allow(clippy::unwrap_used)]
 use super::*;
-use crate::db::UsageStore;
 
 #[tokio::test]
 async fn mcp_tool_call_records_usage_event() {
