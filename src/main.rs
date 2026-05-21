@@ -102,6 +102,14 @@ enum Commands {
     },
     /// Remove repo paths that no longer exist on the filesystem.
     PruneRepoPaths,
+    /// Self-diagnosis: detect (and optionally repair) common install inconsistencies.
+    Doctor {
+        #[command(subcommand)]
+        check: Option<DoctorCheck>,
+        /// Emit structured JSON instead of human-readable lines.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -112,6 +120,37 @@ enum RepoAction {
     ClearVerify { path: String },
     /// List known repo paths and their verify commands.
     List,
+}
+
+#[derive(Subcommand)]
+enum DoctorCheck {
+    /// Compare .worktrees/ directories against DB task rows.
+    Worktrees {
+        /// Apply available repairs (default is dry-run: detect only).
+        #[arg(long)]
+        repair: bool,
+        /// Skip confirmation prompts when using --repair.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Compare tasks.tmux_window values against live tmux windows.
+    Sessions {
+        /// Apply available repairs (default is dry-run: detect only).
+        #[arg(long)]
+        repair: bool,
+        /// Skip confirmation prompts when using --repair.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Verify git config core.hooksPath = .githooks for each known repo.
+    Hooks {
+        /// Apply available repairs (default is dry-run: detect only).
+        #[arg(long)]
+        repair: bool,
+        /// Skip confirmation prompts when using --repair.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 fn parse_status(s: &str) -> anyhow::Result<models::TaskStatus> {
@@ -331,6 +370,146 @@ async fn main() -> Result<()> {
                 }
             }
             println!("{removed} path(s) removed, {} kept.", total - removed);
+        }
+        Commands::Doctor { check, json } => {
+            use dispatch_tui::cli::doctor::{
+                check_hooks, check_sessions, check_worktrees, format_human, format_json,
+                has_problems, repair_hooks_set_path, repair_sessions_kill_window,
+                repair_worktrees_remove, FindingStatus,
+            };
+            use dispatch_tui::process::RealProcessRunner;
+
+            let db = db::Database::open(&cli.db).await?;
+            let tasks = db.list_all().await?;
+            let repo_paths = db.list_repo_paths().await?;
+            let runner = RealProcessRunner;
+
+            // Collect all repos from settings store + task rows (deduped).
+            let mut all_repos: Vec<String> = repo_paths;
+            for t in &tasks {
+                if !all_repos.contains(&t.repo_path) {
+                    all_repos.push(t.repo_path.clone());
+                }
+            }
+
+            let mut findings = Vec::new();
+
+            // Determine which checks to run and the repair/force flags.
+            let (run_worktrees, run_sessions, run_hooks, repair, force) = match &check {
+                None => (true, true, true, false, false),
+                Some(DoctorCheck::Worktrees { repair, force }) => {
+                    (true, false, false, *repair, *force)
+                }
+                Some(DoctorCheck::Sessions { repair, force }) => {
+                    (false, true, false, *repair, *force)
+                }
+                Some(DoctorCheck::Hooks { repair, force }) => {
+                    (false, false, true, *repair, *force)
+                }
+            };
+
+            if run_worktrees {
+                findings.extend(check_worktrees(&tasks, &all_repos));
+            }
+            if run_sessions {
+                findings.extend(check_sessions(&tasks, &runner));
+            }
+            if run_hooks {
+                findings.extend(check_hooks(&all_repos, &runner));
+            }
+
+            if repair {
+                // Without --force: print planned repairs and exit so operator can review.
+                if !force {
+                    let repairable: Vec<_> =
+                        findings.iter().filter(|f| f.repair_available).collect();
+                    if !repairable.is_empty() {
+                        eprintln!(
+                            "The following repairs would be applied (re-run with --force to apply):"
+                        );
+                        for f in &repairable {
+                            eprintln!(
+                                "  would repair: {} {}  —  {}",
+                                f.check, f.target, f.message
+                            );
+                        }
+                        std::process::exit(1);
+                    }
+                } else {
+                    // --repair --force: apply all available repairs.
+                    for f in &findings {
+                        if !f.repair_available {
+                            continue;
+                        }
+                        let result: anyhow::Result<()> = match f.check {
+                            "hooks" => repair_hooks_set_path(&f.target, &runner),
+                            "sessions" => match f.status {
+                                FindingStatus::Error => {
+                                    if let Some(task) = tasks.iter().find(|t| {
+                                        t.tmux_window.as_deref() == Some(f.target.as_str())
+                                    }) {
+                                        db.patch_task(
+                                            task.id,
+                                            &db::TaskPatch::new().tmux_window(None),
+                                        )
+                                        .await
+                                        .map_err(anyhow::Error::from)
+                                    } else {
+                                        Ok(())
+                                    }
+                                }
+                                FindingStatus::Warn => {
+                                    repair_sessions_kill_window(&f.target, &runner)
+                                }
+                                FindingStatus::Ok => Ok(()),
+                            },
+                            "worktrees" => match f.status {
+                                FindingStatus::Error => {
+                                    if let Some(task) = tasks.iter().find(|t| {
+                                        t.worktree.as_deref() == Some(f.target.as_str())
+                                    }) {
+                                        db.patch_task(
+                                            task.id,
+                                            &db::TaskPatch::new().worktree(None).tmux_window(None),
+                                        )
+                                        .await
+                                        .map_err(anyhow::Error::from)
+                                    } else {
+                                        Ok(())
+                                    }
+                                }
+                                FindingStatus::Warn => {
+                                    let repo = all_repos
+                                        .iter()
+                                        .find(|r| f.target.starts_with(r.as_str()))
+                                        .cloned()
+                                        .unwrap_or_default();
+                                    repair_worktrees_remove(&repo, &f.target, &runner)
+                                }
+                                FindingStatus::Ok => Ok(()),
+                            },
+                            _ => Ok(()),
+                        };
+                        match result {
+                            Err(e) => eprintln!("repair failed for {}: {e}", f.target),
+                            Ok(()) if !json => println!("repaired: {} {}", f.check, f.target),
+                            Ok(()) => {}
+                        }
+                    }
+                }
+            }
+
+            if json {
+                println!("{}", format_json(&findings));
+            } else if findings.is_empty() {
+                println!("all checks passed");
+            } else {
+                println!("{}", format_human(&findings));
+            }
+
+            if has_problems(&findings) {
+                std::process::exit(1);
+            }
         }
         Commands::Plan { id, path } => {
             if !path.exists() {

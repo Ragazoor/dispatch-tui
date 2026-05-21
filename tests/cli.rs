@@ -12,6 +12,7 @@ use tempfile::NamedTempFile;
 
 use dispatch_tui::db::{CreateTaskRequest, Database, ProjectCrud, TaskCrud, TaskPatch};
 use dispatch_tui::models::{SubStatus, TaskId, TaskStatus};
+use serde_json;
 
 fn binary() -> Command {
     Command::new(env!("CARGO_BIN_EXE_dispatch"))
@@ -702,5 +703,149 @@ fn dispatch_repo_set_verify_expands_tilde_in_path() {
     assert!(
         !stdout.contains("~/r"),
         "tilde path must NOT appear verbatim in list output, got: {stdout}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// dispatch doctor
+// ---------------------------------------------------------------------------
+
+#[test]
+fn doctor_no_subcommand_exits_zero_on_clean_db() {
+    let db = NamedTempFile::new().unwrap();
+    let out = binary()
+        .args(["--db", db.path().to_str().unwrap(), "doctor"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "expected exit 0 on clean DB, stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn doctor_worktrees_exits_zero_on_clean_db() {
+    let db = NamedTempFile::new().unwrap();
+    let out = binary()
+        .args(["--db", db.path().to_str().unwrap(), "doctor", "worktrees"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn doctor_sessions_exits_zero_on_clean_db() {
+    let db = NamedTempFile::new().unwrap();
+    let out = binary()
+        .args(["--db", db.path().to_str().unwrap(), "doctor", "sessions"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn doctor_hooks_exits_zero_on_clean_db() {
+    let db = NamedTempFile::new().unwrap();
+    let out = binary()
+        .args(["--db", db.path().to_str().unwrap(), "doctor", "hooks"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn doctor_json_flag_emits_valid_json_array() {
+    let db = NamedTempFile::new().unwrap();
+    let out = binary()
+        .args(["--db", db.path().to_str().unwrap(), "doctor", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let _: Vec<serde_json::Value> = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("expected valid JSON array, got: {stdout} — error: {e}"));
+}
+
+#[tokio::test]
+async fn doctor_worktrees_exits_nonzero_on_db_orphan() {
+    let db = NamedTempFile::new().unwrap();
+    let db_path = db.path().to_str().unwrap();
+
+    let task_id = seed_task(db.path(), "Orphan Test").await;
+    let conn = Database::open(db.path()).await.unwrap();
+    conn.patch_task(
+        task_id,
+        &TaskPatch::new()
+            .status(TaskStatus::Running)
+            .sub_status(SubStatus::Active)
+            .worktree(Some("/nonexistent/worktree/path-99999")),
+    )
+    .await
+    .unwrap();
+    drop(conn);
+
+    let out = binary()
+        .args(["--db", db_path, "doctor", "worktrees"])
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "expected exit 1 for DB orphan, stdout: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("error"),
+        "expected 'error' in output, got: {stdout}"
+    );
+}
+
+#[tokio::test]
+async fn doctor_repair_force_clears_db_orphan_worktree() {
+    let db = NamedTempFile::new().unwrap();
+    let db_path = db.path().to_str().unwrap();
+
+    let task_id = seed_task(db.path(), "Repair Test").await;
+    let conn = Database::open(db.path()).await.unwrap();
+    conn.patch_task(
+        task_id,
+        &TaskPatch::new()
+            .status(TaskStatus::Running)
+            .sub_status(SubStatus::Active)
+            .worktree(Some("/nonexistent/worktree/path-repair-test"))
+            .tmux_window(Some("task-repair")),
+    )
+    .await
+    .unwrap();
+    drop(conn);
+
+    let _out = binary()
+        .args(["--db", db_path, "doctor", "worktrees", "--repair", "--force"])
+        .output()
+        .unwrap();
+
+    let conn = Database::open(db.path()).await.unwrap();
+    let task = conn.get_task(task_id).await.unwrap().unwrap();
+    assert!(
+        task.worktree.is_none(),
+        "expected worktree to be cleared after --repair --force, got: {:?}",
+        task.worktree
     );
 }
