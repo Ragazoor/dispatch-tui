@@ -11,7 +11,7 @@ async fn fresh_db_has_latest_schema_version() {
         })
         .await
         .unwrap();
-    assert_eq!(version, 56);
+    assert_eq!(version, 57);
 }
 
 #[tokio::test]
@@ -347,7 +347,7 @@ async fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 56);
+    assert_eq!(version, 57);
 }
 
 #[tokio::test]
@@ -436,7 +436,7 @@ async fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 56);
+    assert_eq!(version, 57);
 }
 
 #[tokio::test]
@@ -541,7 +541,7 @@ async fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 56);
+    assert_eq!(version, 57);
 }
 
 #[tokio::test]
@@ -622,7 +622,7 @@ async fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 56);
+    assert_eq!(version, 57);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -743,7 +743,7 @@ async fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 56);
+    assert_eq!(version, 57);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -1742,7 +1742,7 @@ async fn migration_31_re_expands_tilde_paths() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 56);
+    assert_eq!(version, 57);
 }
 
 #[tokio::test]
@@ -1818,7 +1818,7 @@ async fn migrate_v32_adds_base_branch_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 56);
+    assert_eq!(version, 57);
 }
 
 #[tokio::test]
@@ -1921,7 +1921,7 @@ async fn migration_v38_feed_epic_columns() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 56);
+    assert_eq!(version, 57);
 }
 
 #[tokio::test]
@@ -1934,7 +1934,7 @@ async fn fresh_db_schema_version_is_54() {
         })
         .await
         .unwrap();
-    assert_eq!(version, 56);
+    assert_eq!(version, 57);
 }
 
 #[tokio::test]
@@ -2004,7 +2004,7 @@ async fn migration_v40_creates_learnings_table() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 56);
+    assert_eq!(version, 57);
 }
 
 #[tokio::test]
@@ -2091,7 +2091,7 @@ async fn migration_v41_drops_cost_usd_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 56);
+    assert_eq!(version, 57);
     // task_usage dropped entirely by v56
     let table_count: i64 = conn
         .query_row(
@@ -2205,7 +2205,7 @@ async fn test_migrate_v43_proposed_to_approved() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 56);
+    assert_eq!(version, 57);
 }
 
 #[tokio::test]
@@ -2446,4 +2446,233 @@ async fn migrate_v56_drops_task_usage_table() {
         .await
         .unwrap();
     assert_eq!(count, 0, "task_usage should be dropped by v56");
+}
+
+// ---------------------------------------------------------------------------
+// v57 — epic project consistency triggers + data fix
+// ---------------------------------------------------------------------------
+
+#[test]
+fn migrate_v57_fixes_sub_epic_project_id_violations() {
+    use rusqlite::Connection as RawConn;
+    let conn = RawConn::open_in_memory().unwrap();
+    // Minimal pre-v57 schema: two projects, parent epic in project 2, sub-epic mistakenly in project 1.
+    conn.execute_batch(
+        "PRAGMA foreign_keys=OFF;
+         CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, is_default INTEGER NOT NULL DEFAULT 0);
+         INSERT INTO projects VALUES (1, 'Default', 0, 1);
+         INSERT INTO projects VALUES (2, 'Work', 1, 0);
+         CREATE TABLE epics (
+             id INTEGER PRIMARY KEY,
+             title TEXT NOT NULL,
+             description TEXT NOT NULL DEFAULT '',
+             repo_path TEXT NOT NULL DEFAULT '',
+             status TEXT NOT NULL DEFAULT 'backlog',
+             plan_path TEXT,
+             sort_order INTEGER,
+             auto_dispatch BOOLEAN NOT NULL DEFAULT 1,
+             parent_epic_id INTEGER,
+             feed_command TEXT,
+             feed_interval_secs INTEGER,
+             project_id INTEGER NOT NULL DEFAULT 1,
+             created_at TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         CREATE TABLE tasks (
+             id INTEGER PRIMARY KEY,
+             title TEXT NOT NULL,
+             description TEXT NOT NULL DEFAULT '',
+             repo_path TEXT NOT NULL DEFAULT '',
+             status TEXT NOT NULL DEFAULT 'backlog',
+             sub_status TEXT NOT NULL DEFAULT 'none',
+             base_branch TEXT NOT NULL DEFAULT 'main',
+             epic_id INTEGER,
+             project_id INTEGER NOT NULL DEFAULT 1,
+             created_at TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         -- parent epic in project 2
+         INSERT INTO epics (id, title, project_id) VALUES (1, 'Parent', 2);
+         -- sub-epic in wrong project (1 instead of 2)
+         INSERT INTO epics (id, title, project_id, parent_epic_id) VALUES (2, 'Sub', 1, 1);
+         -- grandchild also wrong
+         INSERT INTO epics (id, title, project_id, parent_epic_id) VALUES (3, 'Grandchild', 1, 2);
+         -- task under sub-epic in wrong project
+         INSERT INTO tasks (id, title, epic_id, project_id) VALUES (1, 'Task', 2, 1);
+         PRAGMA user_version = 56;",
+    )
+    .unwrap();
+
+    crate::db::migrations::migrate_v57_enforce_epic_project_consistency(&conn).unwrap();
+
+    let sub_pid: i64 = conn
+        .query_row("SELECT project_id FROM epics WHERE id = 2", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(
+        sub_pid, 2,
+        "sub-epic project_id must be fixed to match parent"
+    );
+
+    let grandchild_pid: i64 = conn
+        .query_row("SELECT project_id FROM epics WHERE id = 3", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(
+        grandchild_pid, 2,
+        "grandchild project_id must be fixed (multi-level)"
+    );
+
+    let task_pid: i64 = conn
+        .query_row("SELECT project_id FROM tasks WHERE id = 1", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(task_pid, 2, "task project_id must be fixed to match epic");
+}
+
+#[tokio::test]
+async fn migrate_v57_trigger_rejects_sub_epic_with_wrong_project() {
+    let db = in_memory_db().await;
+
+    let result = db
+        .db_call(|conn| {
+            // Insert a parent epic in project 2 (project 2 created by default in in-memory DB? No — use project 1)
+            conn.execute(
+                "INSERT INTO epics (title, description, repo_path, project_id) VALUES ('Parent', '', '/r', 1)",
+                [],
+            )?;
+            let parent_id = conn.last_insert_rowid();
+            // Try inserting a sub-epic with wrong project_id (2 instead of 1)
+            conn.execute(
+                "INSERT INTO projects (name, sort_order) VALUES ('P2', 1)",
+                [],
+            )?;
+            conn.execute(
+                &format!(
+                    "INSERT INTO epics (title, description, repo_path, parent_epic_id, project_id) \
+                     VALUES ('Sub', '', '/r', {parent_id}, 2)"
+                ),
+                [],
+            )
+            .map(|_| ())
+            .map_err(anyhow::Error::from)
+        })
+        .await;
+
+    assert!(
+        result.is_err(),
+        "trigger must reject sub-epic with mismatched project_id"
+    );
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("project_id"),
+        "error must mention project_id: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn migrate_v57_trigger_rejects_task_with_wrong_project() {
+    let db = in_memory_db().await;
+
+    let result = db
+        .db_call(|conn| {
+            conn.execute(
+                "INSERT INTO epics (title, description, repo_path, project_id) VALUES ('Epic', '', '/r', 1)",
+                [],
+            )?;
+            let epic_id = conn.last_insert_rowid();
+            conn.execute(
+                "INSERT INTO projects (name, sort_order) VALUES ('P2', 1)",
+                [],
+            )?;
+            // Insert task linked to epic but with wrong project_id (2 instead of 1)
+            conn.execute(
+                &format!(
+                    "INSERT INTO tasks \
+                     (title, description, repo_path, status, sub_status, base_branch, epic_id, project_id) \
+                     VALUES ('T', '', '/r', 'backlog', 'none', 'main', {epic_id}, 2)"
+                ),
+                [],
+            )
+            .map(|_| ())
+            .map_err(anyhow::Error::from)
+        })
+        .await;
+
+    assert!(
+        result.is_err(),
+        "trigger must reject task with mismatched project_id"
+    );
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("project_id"),
+        "error must mention project_id: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn migrate_v57_trigger_allows_consistent_sub_epic() {
+    let db = in_memory_db().await;
+    // Verify the trigger does NOT block correct inserts.
+    db.db_call(|conn| {
+        conn.execute(
+            "INSERT INTO epics (title, description, repo_path, project_id) VALUES ('Parent', '', '/r', 1)",
+            [],
+        )?;
+        let parent_id = conn.last_insert_rowid();
+        conn.execute(
+            &format!(
+                "INSERT INTO epics (title, description, repo_path, parent_epic_id, project_id) \
+                 VALUES ('Sub', '', '/r', {parent_id}, 1)"
+            ),
+            [],
+        )
+        .map(|_| ())
+        .map_err(anyhow::Error::from)
+    })
+    .await
+    .expect("trigger must allow sub-epic with matching project_id");
+}
+
+#[tokio::test]
+async fn migrate_v57_trigger_blocks_update_that_breaks_consistency() {
+    let db = in_memory_db().await;
+
+    let result = db
+        .db_call(|conn| {
+            conn.execute(
+                "INSERT INTO epics (title, description, repo_path, project_id) VALUES ('Parent', '', '/r', 1)",
+                [],
+            )?;
+            let parent_id = conn.last_insert_rowid();
+            // Create sub-epic in correct project
+            conn.execute(
+                &format!(
+                    "INSERT INTO epics (title, description, repo_path, parent_epic_id, project_id) \
+                     VALUES ('Sub', '', '/r', {parent_id}, 1)"
+                ),
+                [],
+            )?;
+            let sub_id = conn.last_insert_rowid();
+            conn.execute(
+                "INSERT INTO projects (name, sort_order) VALUES ('P2', 1)",
+                [],
+            )?;
+            // Try updating sub-epic's project_id to mismatch parent
+            conn.execute(
+                &format!("UPDATE epics SET project_id = 2 WHERE id = {sub_id}"),
+                [],
+            )
+            .map(|_| ())
+            .map_err(anyhow::Error::from)
+        })
+        .await;
+
+    assert!(
+        result.is_err(),
+        "trigger must block UPDATE that creates project_id mismatch"
+    );
 }

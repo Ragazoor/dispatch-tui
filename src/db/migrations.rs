@@ -79,6 +79,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (54, migrate_v54_add_group_by_repo),
     (55, migrate_v55_add_learning_embedding),
     (56, migrate_v56_drop_task_usage),
+    (57, migrate_v57_enforce_epic_project_consistency),
 ];
 
 fn migrate_v53_add_wrap_up_mode(conn: &Connection) -> Result<()> {
@@ -1187,4 +1188,87 @@ fn migrate_v55_add_learning_embedding(conn: &Connection) -> Result<()> {
 fn migrate_v56_drop_task_usage(conn: &Connection) -> Result<()> {
     conn.execute_batch("DROP TABLE IF EXISTS task_usage;")
         .context("Failed to drop task_usage table (migration v56)")
+}
+
+pub(super) fn migrate_v57_enforce_epic_project_consistency(conn: &Connection) -> Result<()> {
+    let epics_has_parent = column_exists(conn, "epics", "parent_epic_id");
+    let epics_has_project = column_exists(conn, "epics", "project_id");
+    let tasks_has_epic = column_exists(conn, "tasks", "epic_id");
+    let tasks_has_project = column_exists(conn, "tasks", "project_id");
+
+    // Fix existing sub-epics with mismatched project_id (loop handles multi-level nesting).
+    if epics_has_parent && epics_has_project {
+        loop {
+            let fixed = conn
+                .execute(
+                    "UPDATE epics
+                     SET project_id = (SELECT p.project_id FROM epics p WHERE p.id = epics.parent_epic_id)
+                     WHERE parent_epic_id IS NOT NULL
+                       AND project_id != (SELECT p.project_id FROM epics p WHERE p.id = epics.parent_epic_id)",
+                    [],
+                )
+                .context("Failed to fix sub-epic project_id violations")?;
+            if fixed == 0 {
+                break;
+            }
+        }
+    }
+
+    // Fix existing tasks whose project_id doesn't match their epic's.
+    if tasks_has_epic && tasks_has_project && epics_has_project {
+        conn.execute(
+            "UPDATE tasks
+             SET project_id = (SELECT e.project_id FROM epics e WHERE e.id = tasks.epic_id)
+             WHERE epic_id IS NOT NULL
+               AND project_id != (SELECT e.project_id FROM epics e WHERE e.id = tasks.epic_id)",
+            [],
+        )
+        .context("Failed to fix task project_id violations")?;
+    }
+
+    // Create triggers that reject any future insert or update violating the rule.
+    // Guard against minimal test schemas that lack the required columns.
+    if epics_has_parent && epics_has_project {
+        conn.execute_batch(
+            "CREATE TRIGGER IF NOT EXISTS enforce_sub_epic_project_insert
+             BEFORE INSERT ON epics
+             WHEN NEW.parent_epic_id IS NOT NULL
+             BEGIN
+               SELECT RAISE(ABORT, 'sub-epic project_id must match parent epic project_id')
+               WHERE (SELECT project_id FROM epics WHERE id = NEW.parent_epic_id) != NEW.project_id;
+             END;
+
+             CREATE TRIGGER IF NOT EXISTS enforce_sub_epic_project_update
+             BEFORE UPDATE ON epics
+             WHEN NEW.parent_epic_id IS NOT NULL
+             BEGIN
+               SELECT RAISE(ABORT, 'sub-epic project_id must match parent epic project_id')
+               WHERE (SELECT project_id FROM epics WHERE id = NEW.parent_epic_id) != NEW.project_id;
+             END;",
+        )
+        .context("Failed to create sub-epic project consistency triggers")?;
+    }
+
+    if tasks_has_epic && tasks_has_project && epics_has_project {
+        conn.execute_batch(
+            "CREATE TRIGGER IF NOT EXISTS enforce_task_epic_project_insert
+             BEFORE INSERT ON tasks
+             WHEN NEW.epic_id IS NOT NULL
+             BEGIN
+               SELECT RAISE(ABORT, 'task project_id must match epic project_id')
+               WHERE (SELECT project_id FROM epics WHERE id = NEW.epic_id) != NEW.project_id;
+             END;
+
+             CREATE TRIGGER IF NOT EXISTS enforce_task_epic_project_update
+             BEFORE UPDATE ON tasks
+             WHEN NEW.epic_id IS NOT NULL
+             BEGIN
+               SELECT RAISE(ABORT, 'task project_id must match epic project_id')
+               WHERE (SELECT project_id FROM epics WHERE id = NEW.epic_id) != NEW.project_id;
+             END;",
+        )
+        .context("Failed to create task epic project consistency triggers")?;
+    }
+
+    Ok(())
 }

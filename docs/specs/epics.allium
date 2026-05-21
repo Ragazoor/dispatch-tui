@@ -619,15 +619,18 @@ rule ToggleGroupByRepo {
     -- All tasks directly owned by an epic share the epic's project_id.
     -- All sub-epics of an epic share their parent's project_id.
     --
-    -- Enforcement (service layer, not DB):
+    -- Enforcement (DB triggers + service layer):
+    --   DB triggers (migration v57) fire BEFORE INSERT/UPDATE on epics and tasks
+    --     and abort with an error when a write would violate the invariant.
     --   create_epic: when parent_epic_id is set, project_id is coerced to the
-    --     parent's project_id regardless of the value passed by the caller.
+    --     parent's project_id so DB triggers always pass.
     --   create_task: when epic_id is set, project_id is coerced to the
-    --     epic's project_id regardless of the value passed by the caller.
+    --     epic's project_id so DB triggers always pass.
     --   update_task: when epic_id changes, project_id is coerced to the
     --     target epic's project_id.
     --   update_epic: when project_id is changed, cascades to all direct
-    --     sub-epics (recursively) and all direct subtasks.
+    --     sub-epics (recursively) and all direct subtasks; parent is updated
+    --     before children so triggers pass during the cascade.
     --
     -- Rationale: without this invariant an epic appears different across
     -- project views because some of its children carry a different project_id.
