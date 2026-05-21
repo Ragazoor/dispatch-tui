@@ -2,7 +2,7 @@
 use std::sync::Arc;
 
 use super::{ClaimTaskParams, CreateTaskParams, ListTasksFilter, TaskService, UpdateTaskParams};
-use crate::db::{self, Database, ProjectCrud, TaskCrud};
+use crate::db::{self, Database, EpicCrud, ProjectCrud, TaskCrud};
 use crate::models::{EpicId, HookEventKind, ProjectId, SubStatus, TaskId, TaskStatus, TaskTag};
 use crate::service::epics::{CreateEpicParams, EpicService, UpdateEpicParams};
 use crate::service::{FieldUpdate, ServiceError};
@@ -2854,4 +2854,65 @@ async fn update_task_pr_finalisation_false_with_empty_pr_url() {
         .unwrap();
 
     assert!(!result.was_pr_finalisation);
+}
+
+#[tokio::test]
+async fn update_task_propagates_db_error_on_prior_task_read() {
+    // When update_task needs to read the prior task state (epic_id is set, so
+    // needs_prior=true) and the DB returns an error when reading the task back,
+    // the error should propagate rather than being silently swallowed as None.
+    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let svc = TaskService::new(db.clone() as Arc<dyn db::TaskAndEpicStore>);
+
+    // Create a task that we'll corrupt so get_task fails
+    let id = svc
+        .create_task(CreateTaskParams {
+            title: "T".into(),
+            description: "".into(),
+            repo_path: "/repo".into(),
+            plan_path: None,
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            base_branch: None,
+            project_id: ProjectId(1),
+            wrap_up_mode: None,
+        })
+        .await
+        .unwrap();
+
+    // Corrupt the task's tag to an unknown value so that get_task returns an error.
+    // tag has no CHECK constraint so the UPDATE succeeds, but parse_tag() will fail
+    // when the row is read back.
+    let raw_id = id.0;
+    db.db_call(move |conn| {
+        conn.execute(
+            "UPDATE tasks SET tag = 'invalid_unknown_tag' WHERE id = ?1",
+            rusqlite::params![raw_id],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+
+    // Create an epic so we can link to it (epic_id triggers needs_prior=true)
+    let epic = db
+        .create_epic("E", "D", "/repo", None, ProjectId(1))
+        .await
+        .unwrap();
+
+    // update_task with epic_id → needs_prior=true → get_task fails → should propagate
+    let result = svc
+        .update_task(UpdateTaskParams::for_task(id).epic_id(epic.id))
+        .await;
+
+    assert!(
+        result.is_err(),
+        "DB error on prior-task read should propagate, not be silently ignored"
+    );
+    let err = result.unwrap_err();
+    assert!(
+        matches!(err, ServiceError::Internal(_)),
+        "error should be ServiceError::Internal, got: {err:?}"
+    );
 }

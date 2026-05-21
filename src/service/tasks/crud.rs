@@ -90,7 +90,10 @@ impl TaskService {
                     Some(FieldUpdate::Set(s)) if !s.is_empty()
                 ));
         let prior = if needs_prior {
-            self.db.get_task(task_id).await.ok().flatten()
+            self.db
+                .get_task(task_id)
+                .await
+                .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?
         } else {
             None
         };
