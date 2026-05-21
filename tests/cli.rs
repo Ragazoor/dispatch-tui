@@ -12,7 +12,6 @@ use tempfile::NamedTempFile;
 
 use dispatch_tui::db::{CreateTaskRequest, Database, ProjectCrud, TaskCrud, TaskPatch};
 use dispatch_tui::models::{SubStatus, TaskId, TaskStatus};
-use serde_json;
 
 fn binary() -> Command {
     Command::new(env!("CARGO_BIN_EXE_dispatch"))

@@ -265,7 +265,7 @@ fn render_archive_column(
                 epic,
                 false,
                 app,
-                &epic_stats,
+                epic_stats,
                 TaskStatus::Archived,
                 area.width,
             )

@@ -488,9 +488,7 @@ async fn main() -> Result<()> {
                                             task.id,
                                             &db::TaskPatch::new().tmux_window(None),
                                         )
-                                        .await
-                                        .map_err(anyhow::Error::from)
-                                    } else {
+                                        .await} else {
                                         eprintln!(
                                             "repair skipped for {}: no matching task found",
                                             f.target
@@ -513,9 +511,7 @@ async fn main() -> Result<()> {
                                             task.id,
                                             &db::TaskPatch::new().worktree(None).tmux_window(None),
                                         )
-                                        .await
-                                        .map_err(anyhow::Error::from)
-                                    } else {
+                                        .await} else {
                                         eprintln!(
                                             "repair skipped for {}: no matching task found",
                                             f.target
