@@ -62,9 +62,19 @@ impl TaskService {
         let expanded_repo_path = params.repo_path.as_deref().map(crate::models::expand_tilde);
         let validated_sub_status = self.validate_sub_status(task_id, &params).await?;
 
-        // When linking to a new epic, coerce project_id to match the epic's project.
+        // When linking to a new epic, project_id must agree with the epic's project.
+        // If the caller omitted project_id, derive it from the epic automatically.
         let epic_project_id = if let Some(eid) = params.epic_id {
-            Some(self.resolve_epic_project_id(eid).await?)
+            let epic_pid = self.resolve_epic_project_id(eid).await?;
+            if let Some(explicit_pid) = params.project_id {
+                if explicit_pid != epic_pid {
+                    return Err(ServiceError::Validation(format!(
+                        "task project_id ({}) must match epic project_id ({})",
+                        explicit_pid.0, epic_pid.0
+                    )));
+                }
+            }
+            Some(epic_pid)
         } else {
             None
         };
@@ -262,12 +272,16 @@ impl TaskService {
     ) -> Result<Task, ServiceError> {
         let repo_path = crate::models::expand_tilde(&params.repo_path);
 
-        // When linking to an epic, coerce project_id to match the epic's project.
-        let project_id = if let Some(eid) = params.epic_id {
-            self.resolve_epic_project_id(eid).await?
-        } else {
-            params.project_id
-        };
+        if let Some(eid) = params.epic_id {
+            let epic_pid = self.resolve_epic_project_id(eid).await?;
+            if params.project_id != epic_pid {
+                return Err(ServiceError::Validation(format!(
+                    "task project_id ({}) must match epic project_id ({})",
+                    params.project_id.0, epic_pid.0
+                )));
+            }
+        }
+        let project_id = params.project_id;
 
         let plan = params.plan_path.as_deref().map(|p| {
             std::fs::canonicalize(p)

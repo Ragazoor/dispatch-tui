@@ -104,10 +104,9 @@ impl EpicService {
     pub async fn create_epic(&self, params: CreateEpicParams) -> Result<Epic, ServiceError> {
         let repo_path = crate::models::expand_tilde(&params.repo_path);
 
-        // When creating a sub-epic, coerce project_id to match the parent's.
-        let project_id = if let Some(parent_id) = params.parent_epic_id {
-            match self.db.get_epic(parent_id).await {
-                Ok(Some(parent)) => parent.project_id,
+        if let Some(parent_id) = params.parent_epic_id {
+            let parent = match self.db.get_epic(parent_id).await {
+                Ok(Some(p)) => p,
                 Ok(None) => {
                     return Err(ServiceError::NotFound(format!(
                         "Parent epic {} not found",
@@ -119,10 +118,14 @@ impl EpicService {
                         "Database error looking up parent epic: {e}"
                     )))
                 }
+            };
+            if params.project_id != parent.project_id {
+                return Err(ServiceError::Validation(format!(
+                    "sub-epic project_id ({}) must match parent epic project_id ({})",
+                    params.project_id.0, parent.project_id.0
+                )));
             }
-        } else {
-            params.project_id
-        };
+        }
 
         let epic = self
             .db
@@ -131,7 +134,7 @@ impl EpicService {
                 &params.description,
                 &repo_path,
                 params.parent_epic_id,
-                project_id,
+                params.project_id,
             )
             .await
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
@@ -583,7 +586,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_sub_epic_inherits_parent_project_id() {
+    async fn create_sub_epic_with_mismatched_project_id_returns_error() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let svc = EpicService::new(db.clone());
 
@@ -591,11 +594,9 @@ mod tests {
             .create_epic("Parent", "", "/r", None, ProjectId(1))
             .await
             .unwrap();
-        assert_eq!(parent.project_id, ProjectId(1));
-
         let proj2 = db.create_project("P2", 2).await.unwrap();
 
-        let sub = svc
+        let result = svc
             .create_epic(CreateEpicParams {
                 title: "Sub".into(),
                 description: "".into(),
@@ -606,14 +607,39 @@ mod tests {
                 feed_interval_secs: None,
                 project_id: proj2.id,
             })
+            .await;
+
+        assert!(
+            matches!(result, Err(ServiceError::Validation(_))),
+            "expected Validation error for mismatched project_id, got: {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn create_sub_epic_with_correct_project_id_succeeds() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let svc = EpicService::new(db.clone());
+
+        let parent = db
+            .create_epic("Parent", "", "/r", None, ProjectId(1))
             .await
             .unwrap();
 
-        assert_eq!(
-            sub.project_id,
-            ProjectId(1),
-            "sub-epic project_id must match parent's"
-        );
+        let sub = svc
+            .create_epic(CreateEpicParams {
+                title: "Sub".into(),
+                description: "".into(),
+                repo_path: "/r".into(),
+                sort_order: None,
+                parent_epic_id: Some(parent.id),
+                feed_command: None,
+                feed_interval_secs: None,
+                project_id: ProjectId(1),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(sub.project_id, ProjectId(1));
         assert_eq!(sub.parent_epic_id, Some(parent.id));
     }
 

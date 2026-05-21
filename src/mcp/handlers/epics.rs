@@ -80,10 +80,22 @@ pub(super) async fn handle_create_epic(
     };
     tracing::info!(title = %parsed.title, "MCP create_epic");
 
-    let project_id = match resolve_project_id(&id, parsed.project_id, &*state.db).await {
-        Ok(pid) => pid,
-        Err(resp) => return resp,
-    };
+    // When creating a sub-epic and project_id is omitted, inherit from the parent
+    // rather than the default project, so the caller doesn't have to know which
+    // project the parent belongs to.
+    let project_id =
+        if let (Some(parent_id), None) = (parsed.parent_epic_id, parsed.project_id) {
+            let svc = EpicService::new(state.db.clone());
+            match svc.get_epic(EpicId(parent_id)).await {
+                Ok(parent) => parent.project_id,
+                Err(e) => return service_err_to_response(id, e),
+            }
+        } else {
+            match resolve_project_id(&id, parsed.project_id, &*state.db).await {
+                Ok(pid) => pid,
+                Err(resp) => return resp,
+            }
+        };
 
     let svc = EpicService::new(state.db.clone());
     match svc

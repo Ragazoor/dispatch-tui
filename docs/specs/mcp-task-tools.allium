@@ -64,6 +64,11 @@ rule UpdateTaskViaMcp {
                 task.pr_url = pr_url
     ensures:
         if tag != null: task.tag = tag
+    -- When both epic_id and project_id are provided, they must agree.
+    requires:
+        if epic_id != null and project_id != null:
+            project_id = core/Epic.find(epic_id).project_id
+
     ensures:
         if epic_id != null: task.epic = core/Epic.find(epic_id)
     ensures:
@@ -124,6 +129,11 @@ rule CreateTaskViaMcp {
     -- existing epic.
     requires:
         if epic_id != null: core/Epic.exists(epic_id)
+
+    -- When both epic_id and an effective project_id are present, they must agree.
+    requires:
+        if epic_id != null and effective_project_id != null:
+            effective_project_id = core/Epic.find(epic_id).project_id
 
     ensures: core/Task.created(
         title: title,

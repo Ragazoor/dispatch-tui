@@ -2352,7 +2352,7 @@ async fn record_hook_event_unknown_task_returns_not_found() {
 // -- Project consistency enforcement ----------------------------------------
 
 #[tokio::test]
-async fn create_task_with_epic_inherits_epic_project_id() {
+async fn create_task_with_epic_and_wrong_project_id_returns_error() {
     let db = test_db().await;
     let svc = task_svc(&db);
     let esvc = epic_svc(&db);
@@ -2373,7 +2373,7 @@ async fn create_task_with_epic_inherits_epic_project_id() {
 
     let proj2 = db.create_project("P2", 2).await.unwrap();
 
-    let task_id = svc
+    let result = svc
         .create_task(CreateTaskParams {
             title: "T".into(),
             description: "".into(),
@@ -2386,20 +2386,16 @@ async fn create_task_with_epic_inherits_epic_project_id() {
             project_id: proj2.id,
             wrap_up_mode: None,
         })
-        .await
-        .unwrap();
+        .await;
 
-    let task = svc.get_task(task_id).await.unwrap();
-    assert_eq!(
-        task.project_id,
-        ProjectId(1),
-        "task project_id must match epic's"
+    assert!(
+        matches!(result, Err(ServiceError::Validation(_))),
+        "expected Validation error for mismatched project_id, got: {result:?}"
     );
-    assert_eq!(task.epic_id, Some(epic.id));
 }
 
 #[tokio::test]
-async fn update_task_epic_id_coerces_project_id() {
+async fn update_task_epic_id_without_project_id_derives_from_epic() {
     let db = test_db().await;
     let svc = task_svc(&db);
     let esvc = epic_svc(&db);
@@ -2526,4 +2522,149 @@ mod property_tests {
             );
         }
     }
+}
+
+// -- EpicProjectConsistency validation ------------------------------------
+
+#[tokio::test]
+async fn create_task_with_epic_id_wrong_project_id_returns_error() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let esvc = epic_svc(&db);
+
+    let epic = esvc
+        .create_epic(CreateEpicParams {
+            title: "E".into(),
+            description: "".into(),
+            repo_path: "/r".into(),
+            sort_order: None,
+            parent_epic_id: None,
+            feed_command: None,
+            feed_interval_secs: None,
+            project_id: ProjectId(1),
+        })
+        .await
+        .unwrap();
+
+    let proj2 = db.create_project("P2", 2).await.unwrap();
+
+    let result = svc
+        .create_task(CreateTaskParams {
+            title: "T".into(),
+            description: "".into(),
+            repo_path: "/r".into(),
+            plan_path: None,
+            epic_id: Some(epic.id),
+            sort_order: None,
+            tag: None,
+            base_branch: None,
+            project_id: proj2.id,
+            wrap_up_mode: None,
+        })
+        .await;
+
+    assert!(
+        matches!(result, Err(ServiceError::Validation(_))),
+        "expected Validation error for mismatched project_id, got: {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn update_task_with_new_epic_id_and_wrong_project_id_returns_error() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let esvc = epic_svc(&db);
+
+    let epic = esvc
+        .create_epic(CreateEpicParams {
+            title: "E".into(),
+            description: "".into(),
+            repo_path: "/r".into(),
+            sort_order: None,
+            parent_epic_id: None,
+            feed_command: None,
+            feed_interval_secs: None,
+            project_id: ProjectId(1),
+        })
+        .await
+        .unwrap();
+
+    let proj2 = db.create_project("P2", 2).await.unwrap();
+
+    let id = svc
+        .create_task(CreateTaskParams {
+            title: "T".into(),
+            description: "".into(),
+            repo_path: "/r".into(),
+            plan_path: None,
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            base_branch: None,
+            project_id: ProjectId(1),
+            wrap_up_mode: None,
+        })
+        .await
+        .unwrap();
+
+    let result = svc
+        .update_task(
+            UpdateTaskParams::for_task(id)
+                .epic_id(epic.id)
+                .project_id(proj2.id),
+        )
+        .await;
+
+    assert!(
+        matches!(result, Err(ServiceError::Validation(_))),
+        "expected Validation error for mismatched project_id on update, got: {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn update_task_changing_epic_id_without_project_id_derives_project() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let esvc = epic_svc(&db);
+
+    let proj2 = db.create_project("P2", 2).await.unwrap();
+
+    let epic = esvc
+        .create_epic(CreateEpicParams {
+            title: "E".into(),
+            description: "".into(),
+            repo_path: "/r".into(),
+            sort_order: None,
+            parent_epic_id: None,
+            feed_command: None,
+            feed_interval_secs: None,
+            project_id: proj2.id,
+        })
+        .await
+        .unwrap();
+
+    let id = svc
+        .create_task(CreateTaskParams {
+            title: "T".into(),
+            description: "".into(),
+            repo_path: "/r".into(),
+            plan_path: None,
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            base_branch: None,
+            project_id: ProjectId(1),
+            wrap_up_mode: None,
+        })
+        .await
+        .unwrap();
+
+    // Change epic_id without passing project_id — project should follow the epic.
+    svc.update_task(UpdateTaskParams::for_task(id).epic_id(epic.id))
+        .await
+        .unwrap();
+
+    let task = svc.get_task(id).await.unwrap();
+    assert_eq!(task.epic_id, Some(epic.id));
+    assert_eq!(task.project_id, proj2.id, "project_id must follow epic");
 }

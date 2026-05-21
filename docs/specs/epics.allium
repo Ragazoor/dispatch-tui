@@ -356,6 +356,11 @@ rule CreateEpicViaMcp {
     requires:
         if project_id != null: core/Project.exists(project_id)
 
+    -- When parent_epic_id is given, project_id (when supplied) must match the parent's
+    requires:
+        if parent_epic_id != null and project_id != null:
+            project_id = core/Epic.get(parent_epic_id).project_id
+
     ensures: core/Epic.created(
         title: title,
         description: description,
@@ -373,9 +378,10 @@ rule CreateEpicViaMcp {
         -- create_epic tool. When omitted, the handler resolves the
         -- default project and assigns it to the new epic. An unknown
         -- project_id returns a -32602 validation error.
-        -- When parent_epic_id is provided, project_id is always coerced
-        -- to match the parent's project_id, ignoring the caller-supplied
-        -- value (see EpicProjectConsistency invariant).
+        -- When parent_epic_id is provided and project_id is also supplied,
+        -- they must agree — a mismatch returns a -32602 validation error.
+        -- When parent_epic_id is provided but project_id is omitted,
+        -- the parent's project_id is used automatically.
         -- feed_command and feed_interval_secs are NOT exposed by the
         -- MCP create_epic tool — even though the underlying service
         -- accepts them, the handler hardcodes them to null. Feeds are
@@ -622,12 +628,14 @@ rule ToggleGroupByRepo {
     -- Enforcement (DB triggers + service layer):
     --   DB triggers (migration v57) fire BEFORE INSERT/UPDATE on epics and tasks
     --     and abort with an error when a write would violate the invariant.
-    --   create_epic: when parent_epic_id is set, project_id is coerced to the
-    --     parent's project_id so DB triggers always pass.
-    --   create_task: when epic_id is set, project_id is coerced to the
-    --     epic's project_id so DB triggers always pass.
-    --   update_task: when epic_id changes, project_id is coerced to the
-    --     target epic's project_id.
+    --   create_epic: when parent_epic_id is set and project_id is given,
+    --     they must agree — mismatch returns a Validation error.
+    --     When project_id is omitted, it is derived from the parent.
+    --   create_task: when epic_id is set and project_id is given,
+    --     they must agree — mismatch returns a Validation error.
+    --   update_task: when epic_id changes and an explicit project_id is also
+    --     given, they must agree — mismatch returns a Validation error.
+    --     When project_id is omitted, it follows the new epic automatically.
     --   update_epic: when project_id is changed, cascades to all direct
     --     sub-epics (recursively) and all direct subtasks; parent is updated
     --     before children so triggers pass during the cascade.
