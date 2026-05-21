@@ -169,6 +169,50 @@ pub fn check_sessions(
     findings
 }
 
+/// Check hooks: verify git config core.hooksPath = ".githooks" for each known repo.
+pub fn check_hooks(
+    repo_paths: &[String],
+    runner: &dyn crate::process::ProcessRunner,
+) -> Vec<Finding> {
+    let mut findings = Vec::new();
+
+    for repo in repo_paths {
+        let expanded = crate::models::expand_tilde(repo);
+        let result = runner.run("git", &["-C", &expanded, "config", "--get", "core.hooksPath"]);
+        let current_value = match result {
+            Ok(ref output) if output.status.success() => {
+                String::from_utf8_lossy(&output.stdout).trim().to_string()
+            }
+            _ => String::new(),
+        };
+
+        if current_value == ".githooks" {
+            findings.push(Finding {
+                check: "hooks",
+                status: FindingStatus::Ok,
+                target: repo.clone(),
+                message: "core.hooksPath = .githooks".to_string(),
+                repair_available: false,
+            });
+        } else {
+            let detail = if current_value.is_empty() {
+                "core.hooksPath is not set".to_string()
+            } else {
+                format!("core.hooksPath = '{current_value}', expected '.githooks'")
+            };
+            findings.push(Finding {
+                check: "hooks",
+                status: FindingStatus::Warn,
+                target: repo.clone(),
+                message: format!("{detail}; pre-push hook will not run"),
+                repair_available: true,
+            });
+        }
+    }
+
+    findings
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
@@ -446,6 +490,72 @@ mod tests {
             task.worktree = None;
             let findings = check_worktrees(&[task], &[]);
             assert!(findings.is_empty());
+        }
+    }
+
+    mod hooks_tests {
+        use super::*;
+        use crate::process::MockProcessRunner;
+
+        #[test]
+        fn ok_when_hooks_path_is_githooks() {
+            let mock = MockProcessRunner::new(vec![
+                MockProcessRunner::ok_with_stdout(b".githooks\n"),
+            ]);
+            let findings = check_hooks(&["/repo".to_string()], &mock);
+            assert_eq!(findings.len(), 1);
+            assert_eq!(findings[0].status, FindingStatus::Ok);
+            assert!(!findings[0].repair_available);
+        }
+
+        #[test]
+        fn warn_when_hooks_path_is_different() {
+            let mock = MockProcessRunner::new(vec![
+                MockProcessRunner::ok_with_stdout(b".husky\n"),
+            ]);
+            let findings = check_hooks(&["/repo".to_string()], &mock);
+            assert_eq!(findings.len(), 1);
+            assert_eq!(findings[0].status, FindingStatus::Warn);
+            assert!(findings[0].repair_available);
+        }
+
+        #[test]
+        fn warn_when_hooks_path_not_set() {
+            let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("")]);
+            let findings = check_hooks(&["/repo".to_string()], &mock);
+            assert_eq!(findings.len(), 1);
+            assert_eq!(findings[0].status, FindingStatus::Warn);
+            assert!(findings[0].repair_available);
+        }
+
+        #[test]
+        fn issues_correct_git_args() {
+            let mock = MockProcessRunner::new(vec![
+                MockProcessRunner::ok_with_stdout(b".githooks\n"),
+            ]);
+            let _ = check_hooks(&["/my/repo".to_string()], &mock);
+            let calls = mock.recorded_calls();
+            assert_eq!(calls.len(), 1);
+            assert_eq!(calls[0].0, "git");
+            assert_eq!(
+                calls[0].1,
+                vec!["-C", "/my/repo", "config", "--get", "core.hooksPath"]
+            );
+        }
+
+        #[test]
+        fn checks_each_repo_independently() {
+            let mock = MockProcessRunner::new(vec![
+                MockProcessRunner::ok_with_stdout(b".githooks\n"),
+                MockProcessRunner::fail(""),
+            ]);
+            let findings = check_hooks(
+                &["/repo-a".to_string(), "/repo-b".to_string()],
+                &mock,
+            );
+            assert_eq!(findings.len(), 2);
+            assert_eq!(findings[0].status, FindingStatus::Ok);
+            assert_eq!(findings[1].status, FindingStatus::Warn);
         }
     }
 }
