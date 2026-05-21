@@ -37,7 +37,7 @@ raw=$(gh search prs \
   --state=open \
   --review-requested=@me \
   "${owner_flags[@]}" \
-  --json number,title,body,url,repository,isDraft,updatedAt \
+  --json number,title,body,url,repository,isDraft,updatedAt,author \
   --limit 100 2>&1) || {
   echo "fetch-reviews: gh search prs failed: $raw" >&2
   echo "[]"
@@ -47,6 +47,7 @@ raw=$(gh search prs \
 printf '%s' "$raw" | jq '[
   .[] |
   select(.isDraft == false) |
+  select(.author.login != "dependabot[bot]") |
   {
     external_id: ("review:" + .repository.nameWithOwner + "#" + (.number | tostring)),
     title: ("#" + (.number | tostring) + " " + .title),
