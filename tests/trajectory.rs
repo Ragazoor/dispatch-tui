@@ -9,18 +9,13 @@ use dispatch_tui::db::{self, CreateTaskRequest};
 use dispatch_tui::mcp::identity::{HEADER_KIND, HEADER_TASK_ID};
 use dispatch_tui::models::{ProjectId, TaskId, TaskStatus};
 
-/// Happy path: a task-identity call with a worktree set should write one
-/// JSONL entry to `<worktree>/.dispatch/trajectory.jsonl`.
+/// Happy path: a task-identity call writes one JSONL entry to
+/// `<data_dir>/trajectories/<task_id>.jsonl`.
 #[tokio::test]
-async fn task_identity_with_worktree_writes_trajectory_entry() {
-    let tmp = tempfile::tempdir().unwrap();
-    tokio::fs::create_dir_all(tmp.path().join(".dispatch"))
-        .await
-        .unwrap();
+async fn task_identity_writes_trajectory_entry() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let (router, db) = common::test_router_with_data_dir(data_dir.path()).await;
 
-    let (router, db) = common::test_router().await;
-
-    // Create a task and set its worktree to the temp dir.
     let task_id: TaskId = db
         .create_task(CreateTaskRequest {
             title: "trajectory-test-task",
@@ -38,15 +33,6 @@ async fn task_identity_with_worktree_writes_trajectory_entry() {
         .await
         .unwrap();
 
-    let worktree_path = tmp.path().to_str().unwrap().to_string();
-    db.patch_task(
-        task_id,
-        &db::TaskPatch::new().worktree(Some(&worktree_path)),
-    )
-    .await
-    .unwrap();
-
-    // Call list_tasks via MCP with the task's identity header.
     let _resp = common::post_mcp(
         router,
         &[(HEADER_TASK_ID, &task_id.0.to_string())],
@@ -61,10 +47,14 @@ async fn task_identity_with_worktree_writes_trajectory_entry() {
     // Give the fire-and-forget spawn time to flush.
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-    let trajectory_path = tmp.path().join(".dispatch").join("trajectory.jsonl");
+    let trajectory_path = data_dir
+        .path()
+        .join("trajectories")
+        .join(format!("{}.jsonl", task_id.0));
     assert!(
         trajectory_path.exists(),
-        "trajectory.jsonl should exist after a task-identity tools/call"
+        "trajectory file should exist at {}",
+        trajectory_path.display()
     );
 
     let content = tokio::fs::read_to_string(&trajectory_path).await.unwrap();
@@ -75,11 +65,9 @@ async fn task_identity_with_worktree_writes_trajectory_entry() {
         "expected exactly 1 trajectory line, got: {lines:?}"
     );
 
-    let parsed: Value = serde_json::from_str(lines[0]).expect("trajectory line must be valid JSON");
-    assert_eq!(
-        parsed["task_id"], task_id.0,
-        "task_id field mismatch: {parsed}"
-    );
+    let parsed: Value =
+        serde_json::from_str(lines[0]).expect("trajectory line must be valid JSON");
+    assert_eq!(parsed["task_id"], task_id.0, "task_id field mismatch: {parsed}");
     assert_eq!(
         parsed["method"].as_str(),
         Some("list_tasks"),
@@ -100,11 +88,12 @@ async fn task_identity_with_worktree_writes_trajectory_entry() {
     );
 }
 
-/// A task-identity call where the task has NO worktree should not write any
-/// file. (No worktree path → nothing to write to.)
+/// A task-identity call where the task has NO worktree must still write
+/// a trajectory entry — the worktree field is no longer a gate.
 #[tokio::test]
-async fn task_identity_without_worktree_writes_no_file() {
-    let (router, db) = common::test_router().await;
+async fn task_identity_without_worktree_still_writes_trajectory() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let (router, db) = common::test_router_with_data_dir(data_dir.path()).await;
 
     let task_id: TaskId = db
         .create_task(CreateTaskRequest {
@@ -138,30 +127,26 @@ async fn task_identity_without_worktree_writes_no_file() {
 
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-    // The call itself must succeed (no protocol error).
     assert!(
         resp.get("error").is_none(),
         "expected no protocol error for task-identity call without worktree, got: {resp}"
     );
 
-    // The task still has no worktree in DB.
-    let task = db.get_task(task_id).await.unwrap().unwrap();
+    let trajectory_path = data_dir
+        .path()
+        .join("trajectories")
+        .join(format!("{}.jsonl", task_id.0));
     assert!(
-        task.worktree.is_none(),
-        "task worktree should still be None, got: {:?}",
-        task.worktree
+        trajectory_path.exists(),
+        "trajectory file should be written even when task has no worktree"
     );
 }
 
 /// A session-identity call should never write a trajectory file.
 #[tokio::test]
 async fn session_identity_writes_no_trajectory_file() {
-    let tmp = tempfile::tempdir().unwrap();
-    tokio::fs::create_dir_all(tmp.path().join(".dispatch"))
-        .await
-        .unwrap();
-
-    let (router, _db) = common::test_router().await;
+    let data_dir = tempfile::tempdir().unwrap();
+    let (router, _db) = common::test_router_with_data_dir(data_dir.path()).await;
 
     let _resp = common::post_mcp(
         router,
@@ -176,9 +161,9 @@ async fn session_identity_writes_no_trajectory_file() {
 
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-    let trajectory_path = tmp.path().join(".dispatch").join("trajectory.jsonl");
+    let trajectories_dir = data_dir.path().join("trajectories");
     assert!(
-        !trajectory_path.exists(),
-        "trajectory.jsonl must NOT be written for session-identity calls"
+        !trajectories_dir.exists(),
+        "trajectories/ must NOT be created for session-identity calls"
     );
 }
