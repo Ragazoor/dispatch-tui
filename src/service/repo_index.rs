@@ -190,6 +190,7 @@ impl RepoIndexService {
             let repo_path = repo_path.clone();
             move || -> Result<DiffResult> {
                 let conn = open_rag_db(&repo_path)?;
+                ensure_dispatch_dir_and_gitignore(&repo_path)?;
                 let on_disk = walk_md_files(&repo_path)?;
 
                 let in_db: std::collections::HashMap<String, String> = {
@@ -253,27 +254,27 @@ impl RepoIndexService {
 
         let files_indexed = embedded.len();
 
-        // Phase 3 (blocking): write to DB and update .gitignore.
+        // Phase 3 (blocking): write to DB.
         let chunks_total = tokio::task::spawn_blocking({
             let repo_path = repo_path.clone();
             move || -> Result<usize> {
-                ensure_dispatch_dir_and_gitignore(&repo_path)?;
-                let conn = open_rag_db(&repo_path)?;
+                let mut conn = open_rag_db(&repo_path)?;
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs() as i64;
 
+                let tx = conn.transaction()?;
                 for path in &to_delete {
-                    conn.execute("DELETE FROM rag_files WHERE file_path = ?1", [path])?;
+                    tx.execute("DELETE FROM rag_files WHERE file_path = ?1", [path])?;
                 }
 
                 for file in &embedded {
-                    conn.execute(
+                    tx.execute(
                         "DELETE FROM rag_files WHERE file_path = ?1",
                         [&file.path],
                     )?;
-                    conn.execute(
+                    tx.execute(
                         "INSERT INTO rag_files (file_path, content_hash, indexed_at) \
                          VALUES (?1, ?2, ?3)",
                         rusqlite::params![file.path, file.hash, now],
@@ -282,7 +283,7 @@ impl RepoIndexService {
                         file.chunks.iter().zip(file.embeddings.iter()).enumerate()
                     {
                         let blob = serialize_embedding(emb);
-                        conn.execute(
+                        tx.execute(
                             "INSERT INTO rag_chunks \
                              (file_path, chunk_index, chunk_text, embedding) \
                              VALUES (?1, ?2, ?3, ?4)",
@@ -292,7 +293,8 @@ impl RepoIndexService {
                 }
 
                 let existing_count: i64 =
-                    conn.query_row("SELECT COUNT(*) FROM rag_chunks", [], |r| r.get(0))?;
+                    tx.query_row("SELECT COUNT(*) FROM rag_chunks", [], |r| r.get(0))?;
+                tx.commit()?;
 
                 Ok(existing_count as usize)
             }
@@ -326,7 +328,7 @@ impl RepoIndexService {
                 let conn = open_rag_db(&repo_path)?;
                 let mut stmt = conn.prepare(
                     "SELECT file_path, chunk_index, chunk_text, embedding \
-                     FROM rag_chunks",
+                     FROM rag_chunks LIMIT 1000",
                 )?;
                 let rows = stmt.query_map([], |r| {
                     Ok((
@@ -665,7 +667,7 @@ mod tests {
         svc.index_repo(dir.path()).await.unwrap();
 
         let results = svc.search_docs(dir.path(), "query", 2).await.unwrap();
-        assert!(results.len() <= 2);
+        assert_eq!(results.len(), 2);
     }
 
     #[tokio::test]
