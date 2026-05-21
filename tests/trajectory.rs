@@ -5,7 +5,7 @@ mod common;
 
 use serde_json::{json, Value};
 
-use dispatch_tui::db::{self, CreateTaskRequest};
+use dispatch_tui::db::CreateTaskRequest;
 use dispatch_tui::mcp::identity::{HEADER_KIND, HEADER_TASK_ID};
 use dispatch_tui::mcp::trajectory::TRAJECTORIES_SUBDIR;
 use dispatch_tui::models::{ProjectId, TaskId, TaskStatus};

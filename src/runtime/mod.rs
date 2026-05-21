@@ -96,7 +96,7 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
 
     // 3. Backfill embeddings for any learnings that were created before the model was available.
     // Fire-and-forget: partial work is retried on next startup.
-    let _ = tokio::spawn({
+    tokio::spawn({
         let db = database.clone();
         let emb = emb_svc.clone();
         async move {

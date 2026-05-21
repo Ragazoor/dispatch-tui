@@ -865,7 +865,7 @@ pub(super) async fn handle_exit_session(
     // Token errors are checked before the window check so a closed session yields the right
     // error when both the token and the window are gone simultaneously.
     let already_reflected = {
-        let mut map = state.exit_tokens.write().unwrap();
+        let mut map = state.exit_tokens.write().unwrap_or_else(|e| e.into_inner());
         let reflected = match map.get(&task_id) {
             None => return JsonRpcResponse::err(id, -32602, ERR_NO_TOKEN),
             Some(et) if et.token != token => {
@@ -882,8 +882,8 @@ pub(super) async fn handle_exit_session(
         }
         if reflected {
             map.remove(&task_id);
-        } else {
-            map.get_mut(&task_id).unwrap().reflected = true;
+        } else if let Some(entry) = map.get_mut(&task_id) {
+            entry.reflected = true;
         }
         reflected
     };
@@ -997,7 +997,7 @@ fn do_dispatch(
     injected: &[crate::models::Learning],
     verify_command: Option<String>,
 ) -> anyhow::Result<crate::models::DispatchResult> {
-    let injections = dispatch::LearningInjections::from(&*injected);
+    let injections = dispatch::LearningInjections::from(injected);
     match DispatchMode::for_task(task) {
         DispatchMode::Dispatch => dispatch::dispatch_agent(
             task,

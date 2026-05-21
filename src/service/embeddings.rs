@@ -197,7 +197,7 @@ pub fn scope_multiplier_for(
 }
 
 pub fn upvote_boost(upvote_count: i64) -> f32 {
-    (upvote_count.max(0).min(10) as f32) * 0.005
+    (upvote_count.clamp(0, 10) as f32) * 0.005
 }
 
 /// Minimum cosine similarity for a learning to be a RAG candidate.
@@ -216,34 +216,39 @@ struct ScoredLearning<'a> {
     score: f32,
 }
 
+pub struct RagRankParams<'a> {
+    pub query_vec: &'a [f32],
+    pub task_epic_id: Option<&'a str>,
+    pub task_repo: Option<&'a str>,
+    pub task_project: Option<&'a str>,
+    pub threshold: f32,
+    pub tag_filter: &'a [String],
+    pub limit: usize,
+}
+
 /// Rank candidate learnings by RAG score.
 ///
 /// `candidates` must contain only approved learnings (status filtering is the caller's responsibility).
 /// Returns sorted vec (highest score first), filtered by threshold and limited to `limit`.
 pub fn rag_rank_learnings<'a>(
     candidates: &'a [(Learning, Vec<f32>)],
-    query_vec: &[f32],
-    task_epic_id: Option<&str>,
-    task_repo: Option<&str>,
-    task_project: Option<&str>,
-    threshold: f32,
-    tag_filter: &[String],
-    limit: usize,
+    params: &RagRankParams<'_>,
 ) -> Vec<&'a Learning> {
-    let tag_set: std::collections::HashSet<&str> = tag_filter.iter().map(|s| s.as_str()).collect();
+    let tag_set: std::collections::HashSet<&str> =
+        params.tag_filter.iter().map(|s| s.as_str()).collect();
     let mut scored: Vec<ScoredLearning<'_>> = candidates
         .iter()
         .filter_map(|(learning, emb)| {
-            let cosine = cosine_similarity(query_vec, emb);
-            if cosine < threshold {
+            let cosine = cosine_similarity(params.query_vec, emb);
+            if cosine < params.threshold {
                 return None;
             }
             let scope_mul = scope_multiplier_for(
                 learning.scope,
                 learning.scope_ref.as_deref(),
-                task_epic_id,
-                task_repo,
-                task_project,
+                params.task_epic_id,
+                params.task_repo,
+                params.task_project,
             );
             let tag_boost = if tag_set.is_empty() {
                 0.0
@@ -266,11 +271,12 @@ pub fn rag_rank_learnings<'a>(
             .partial_cmp(&a.score)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    scored.into_iter().take(limit).map(|s| s.learning).collect()
+    scored.into_iter().take(params.limit).map(|s| s.learning).collect()
 }
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
 
     #[tokio::test]
@@ -396,13 +402,15 @@ mod tests {
         ];
         let results = rag_rank_learnings(
             &candidates,
-            &query,
-            None,
-            Some("my-repo"),
-            None,
-            0.0,
-            &[],
-            10,
+            &RagRankParams {
+                query_vec: &query,
+                task_epic_id: None,
+                task_repo: Some("my-repo"),
+                task_project: None,
+                threshold: 0.0,
+                tag_filter: &[],
+                limit: 10,
+            },
         );
         // high_sim: cosine=1.0, User scope_mul=0.10 → score=1.0*(1.10)=1.10
         // low_sim: cosine≈0.26, Repo+match scope_mul=0.20 → score≈0.26*(1.20)≈0.31

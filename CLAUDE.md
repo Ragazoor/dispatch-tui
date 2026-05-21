@@ -29,7 +29,7 @@ Point git at the repo's hooks directory so the pre-push hook runs:
 git config core.hooksPath .githooks
 ```
 
-The pre-push hook runs `cargo fmt` (auto-formats), `cargo clippy --all-targets --fix -- -D warnings`, and `./scripts/check-doc-paths.sh` (validates doc links). Run `cargo test` separately before pushing.
+The pre-push hook runs `cargo fmt` (auto-formats), `cargo clippy --all-targets -- -D warnings`, and `./scripts/check-doc-paths.sh` (validates doc links). Run `cargo test` separately before pushing.
 
 ### Running tests
 

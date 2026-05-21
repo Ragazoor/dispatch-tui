@@ -824,6 +824,7 @@ mod activity_tests {
 
 #[cfg(test)]
 mod wrap_up_mode_tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
 
     #[test]

@@ -7,7 +7,8 @@ use crate::mcp::McpState;
 use crate::models::{LearningId, LearningKind, LearningScope, LearningStatus, RetrievalSource};
 
 use crate::service::embeddings::{
-    deserialize_candidate_rows, embed_text_for_query, rag_rank_learnings, RAG_SIMILARITY_THRESHOLD,
+    deserialize_candidate_rows, embed_text_for_query, rag_rank_learnings, RagRankParams,
+    RAG_SIMILARITY_THRESHOLD,
 };
 use crate::service::LearningService;
 
@@ -210,13 +211,15 @@ pub(super) async fn handle_query_learnings(
     let project_id_str = task.project_id.0.to_string();
     let ranked = rag_rank_learnings(
         &candidates,
-        &query_vec,
-        epic_id_str.as_deref(),
-        Some(task.repo_path.as_str()),
-        Some(project_id_str.as_str()),
-        RAG_SIMILARITY_THRESHOLD,
-        &tag_filter,
-        limit,
+        &RagRankParams {
+            query_vec: &query_vec,
+            task_epic_id: epic_id_str.as_deref(),
+            task_repo: Some(task.repo_path.as_str()),
+            task_project: Some(project_id_str.as_str()),
+            threshold: RAG_SIMILARITY_THRESHOLD,
+            tag_filter: &tag_filter,
+            limit,
+        },
     );
 
     for l in &ranked {

@@ -4,6 +4,7 @@ use crate::db;
 use crate::models::{EpicId, Learning, ProjectId, RetrievalSource, Task, TaskId, TaskTag};
 use crate::service::embeddings::{
     deserialize_candidate_rows, embed_text_for_query, rag_rank_learnings, EmbeddingService,
+    RagRankParams,
 };
 
 /// Plugin dir flag added to all Claude agent invocations so dispatched agents
@@ -558,13 +559,15 @@ pub async fn list_learnings_for_dispatch_rag(
     let project_id_str = task.project_id.0.to_string();
     let all_ranked = rag_rank_learnings(
         &candidates,
-        &query_vec,
-        epic_id_str.as_deref(),
-        Some(task.repo_path.as_str()),
-        Some(project_id_str.as_str()),
-        threshold,
-        &[],
-        DISPATCH_INJECTION_CAP,
+        &RagRankParams {
+            query_vec: &query_vec,
+            task_epic_id: epic_id_str.as_deref(),
+            task_repo: Some(task.repo_path.as_str()),
+            task_project: Some(project_id_str.as_str()),
+            threshold,
+            tag_filter: &[],
+            limit: DISPATCH_INJECTION_CAP,
+        },
     );
 
     all_ranked.into_iter().cloned().collect()
