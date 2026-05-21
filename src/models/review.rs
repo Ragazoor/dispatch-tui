@@ -135,3 +135,64 @@ pub fn url_label(url: &str) -> String {
 
     "Link".to_string()
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn review_decision_as_str_waiting_for_response() {
+        assert_eq!(
+            ReviewDecision::WaitingForResponse.as_str(),
+            "Waiting for Response"
+        );
+    }
+
+    #[test]
+    fn review_decision_from_db_str_unknown_returns_none() {
+        assert_eq!(ReviewDecision::from_db_str(""), None);
+        assert_eq!(ReviewDecision::from_db_str("bogus"), None);
+        // DB strings are PascalCase; lowercase must not match
+        assert_eq!(ReviewDecision::from_db_str("review_required"), None);
+        assert_eq!(ReviewDecision::from_db_str("approved"), None);
+    }
+
+    #[test]
+    fn review_decision_parse_rejects_unknown_and_derived_values() {
+        assert_eq!(ReviewDecision::parse(""), None);
+        assert_eq!(ReviewDecision::parse("bogus"), None);
+        // GitHub values are SCREAMING_SNAKE_CASE; mixed case must not match
+        assert_eq!(ReviewDecision::parse("Review_Required"), None);
+        // WaitingForResponse is derived client-side; the GitHub API never emits this
+        assert_eq!(ReviewDecision::parse("WAITING_FOR_RESPONSE"), None);
+    }
+
+    #[test]
+    fn url_type_identifies_pull_requests() {
+        assert_eq!(url_type("https://github.com/org/repo/pull/42"), "PR");
+    }
+
+    #[test]
+    fn url_type_identifies_issues() {
+        assert_eq!(url_type("https://github.com/org/repo/issues/7"), "Issue");
+    }
+
+    #[test]
+    fn url_type_returns_link_for_other_urls() {
+        assert_eq!(url_type("https://jira.example.com/PROJ-123"), "Link");
+        assert_eq!(url_type(""), "Link");
+    }
+
+    #[test]
+    fn url_type_strips_query_and_fragment_before_matching() {
+        assert_eq!(
+            url_type("https://github.com/org/repo/pull/42?diff=split"),
+            "PR"
+        );
+        assert_eq!(
+            url_type("https://github.com/org/repo/issues/7#comment"),
+            "Issue"
+        );
+    }
+}

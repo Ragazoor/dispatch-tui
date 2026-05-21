@@ -165,3 +165,204 @@ pub fn descendant_task_ids(root: EpicId, epics: &[Epic], tasks: &[Task]) -> Hash
         .map(|t| t.id)
         .collect()
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+    use crate::models::{ProjectId, SubStatus, Task, TaskId, TaskStatus};
+    use chrono::Utc;
+
+    fn make_epic(id: i64, status: TaskStatus, plan_path: Option<&str>, parent: Option<i64>) -> Epic {
+        Epic {
+            id: EpicId(id),
+            title: format!("Epic {id}"),
+            description: String::new(),
+            repo_path: "/repo".to_string(),
+            status,
+            plan_path: plan_path.map(String::from),
+            sort_order: None,
+            auto_dispatch: false,
+            parent_epic_id: parent.map(EpicId),
+            feed_command: None,
+            feed_interval_secs: None,
+            group_by_repo: false,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            project_id: ProjectId(1),
+        }
+    }
+
+    fn make_task(id: i64, status: TaskStatus, sub_status: SubStatus, epic: Option<i64>) -> Task {
+        Task {
+            id: TaskId(id),
+            title: format!("Task {id}"),
+            description: String::new(),
+            repo_path: "/repo".to_string(),
+            status,
+            sub_status,
+            worktree: None,
+            tmux_window: None,
+            plan_path: None,
+            epic_id: epic.map(EpicId),
+            pr_url: None,
+            tag: None,
+            sort_order: None,
+            base_branch: "main".to_string(),
+            external_id: None,
+            labels: Vec::new(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            project_id: ProjectId(1),
+            last_pre_tool_use_at: None,
+            last_notification_at: None,
+            wrap_up_mode: None,
+        }
+    }
+
+    #[test]
+    fn epic_substatus_label_all_variants() {
+        assert_eq!(EpicSubstatus::Unplanned.label(), "unplanned");
+        assert_eq!(EpicSubstatus::Planned.label(), "planned");
+        assert_eq!(EpicSubstatus::Active.label(), "active");
+        assert_eq!(EpicSubstatus::Blocked(1).label(), "1 blocked");
+        assert_eq!(EpicSubstatus::Blocked(5).label(), "5 blocked");
+        assert_eq!(EpicSubstatus::InReview.label(), "in review");
+        assert_eq!(EpicSubstatus::WrappingUp.label(), "wrapping up");
+        assert_eq!(EpicSubstatus::Done.label(), "done");
+    }
+
+    #[test]
+    fn epic_substatus_header_label_active_states() {
+        assert_eq!(EpicSubstatus::Blocked(2).header_label(), "needs input");
+        assert_eq!(EpicSubstatus::Active.header_label(), "active");
+        assert_eq!(EpicSubstatus::InReview.header_label(), "awaiting review");
+        assert_eq!(EpicSubstatus::WrappingUp.header_label(), "approved");
+    }
+
+    #[test]
+    fn epic_substatus_header_label_terminal_states_are_empty() {
+        assert_eq!(EpicSubstatus::Unplanned.header_label(), "");
+        assert_eq!(EpicSubstatus::Planned.header_label(), "");
+        assert_eq!(EpicSubstatus::Done.header_label(), "");
+    }
+
+    #[test]
+    fn epic_substatus_column_priority_aligns_with_substatus() {
+        assert_eq!(
+            EpicSubstatus::Blocked(1).column_priority(),
+            SubStatus::NeedsInput.column_priority()
+        );
+        assert_eq!(
+            EpicSubstatus::Active.column_priority(),
+            SubStatus::Active.column_priority()
+        );
+        assert_eq!(
+            EpicSubstatus::WrappingUp.column_priority(),
+            SubStatus::Approved.column_priority()
+        );
+        assert_eq!(
+            EpicSubstatus::InReview.column_priority(),
+            SubStatus::AwaitingReview.column_priority()
+        );
+        assert_eq!(
+            EpicSubstatus::Unplanned.column_priority(),
+            SubStatus::None.column_priority()
+        );
+        assert_eq!(
+            EpicSubstatus::Done.column_priority(),
+            SubStatus::None.column_priority()
+        );
+    }
+
+    #[test]
+    fn epic_substatus_archived_yields_done() {
+        let epic = make_epic(1, TaskStatus::Archived, None, None);
+        assert_eq!(epic_substatus(&epic, &[], None), EpicSubstatus::Done);
+    }
+
+    #[test]
+    fn epic_substatus_blocked_counts_conflict_and_crashed() {
+        for sub in [SubStatus::Conflict, SubStatus::Crashed] {
+            let epic = make_epic(1, TaskStatus::Running, None, None);
+            let subtasks = vec![make_task(1, TaskStatus::Running, sub, None)];
+            assert_eq!(
+                epic_substatus(&epic, &subtasks, None),
+                EpicSubstatus::Blocked(1),
+                "{sub:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn epic_substatus_wrapping_up_requires_matching_epic_id() {
+        // active_merge_epic is a DIFFERENT epic → InReview, not WrappingUp
+        let epic = make_epic(1, TaskStatus::Review, None, None);
+        assert_eq!(
+            epic_substatus(&epic, &[], Some(EpicId(99))),
+            EpicSubstatus::InReview
+        );
+    }
+
+    #[test]
+    fn descendant_epic_ids_includes_root_itself() {
+        let epics = vec![make_epic(1, TaskStatus::Backlog, None, None)];
+        let ids = descendant_epic_ids(EpicId(1), &epics);
+        assert!(ids.contains(&EpicId(1)));
+        assert_eq!(ids.len(), 1);
+    }
+
+    #[test]
+    fn descendant_epic_ids_includes_direct_children() {
+        let epics = vec![
+            make_epic(1, TaskStatus::Backlog, None, None),
+            make_epic(2, TaskStatus::Backlog, None, Some(1)),
+            make_epic(3, TaskStatus::Backlog, None, Some(1)),
+        ];
+        let ids = descendant_epic_ids(EpicId(1), &epics);
+        assert!(ids.contains(&EpicId(1)));
+        assert!(ids.contains(&EpicId(2)));
+        assert!(ids.contains(&EpicId(3)));
+        assert_eq!(ids.len(), 3);
+    }
+
+    #[test]
+    fn descendant_epic_ids_is_recursive() {
+        // root(1) → child(2) → grandchild(3)
+        let epics = vec![
+            make_epic(1, TaskStatus::Backlog, None, None),
+            make_epic(2, TaskStatus::Backlog, None, Some(1)),
+            make_epic(3, TaskStatus::Backlog, None, Some(2)),
+        ];
+        let ids = descendant_epic_ids(EpicId(1), &epics);
+        assert!(ids.contains(&EpicId(1)));
+        assert!(ids.contains(&EpicId(2)));
+        assert!(ids.contains(&EpicId(3)));
+        assert_eq!(ids.len(), 3);
+    }
+
+    #[test]
+    fn descendant_epic_ids_excludes_unrelated_subtree() {
+        let epics = vec![
+            make_epic(1, TaskStatus::Backlog, None, None),
+            make_epic(2, TaskStatus::Backlog, None, None),
+            make_epic(3, TaskStatus::Backlog, None, Some(2)),
+        ];
+        let ids = descendant_epic_ids(EpicId(1), &epics);
+        assert!(ids.contains(&EpicId(1)));
+        assert!(!ids.contains(&EpicId(2)));
+        assert!(!ids.contains(&EpicId(3)));
+    }
+
+    #[test]
+    fn descendant_epic_ids_is_cycle_safe() {
+        // Malformed: epic 1 → parent 2, epic 2 → parent 1
+        let epics = vec![
+            make_epic(1, TaskStatus::Backlog, None, Some(2)),
+            make_epic(2, TaskStatus::Backlog, None, Some(1)),
+        ];
+        let ids = descendant_epic_ids(EpicId(1), &epics);
+        assert!(ids.contains(&EpicId(1)));
+        assert!(ids.contains(&EpicId(2)));
+    }
+}
