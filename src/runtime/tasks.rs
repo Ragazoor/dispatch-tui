@@ -371,11 +371,21 @@ impl TuiRuntime {
         worktree: String,
         tmux_window: Option<String>,
     ) {
-        let shared = self
+        let shared = match self
             .database
             .has_other_tasks_with_worktree(&worktree, id)
             .await
-            .unwrap_or(false);
+        {
+            Ok(v) => v,
+            Err(e) => {
+                let _ = self.msg_tx.send(Message::System(
+                    crate::tui::messages::SystemMessage::Error(format!(
+                        "Cleanup check failed: {e:#}"
+                    )),
+                ));
+                return;
+            }
+        };
 
         if shared {
             // Other active tasks share this worktree — just detach this task
@@ -422,11 +432,21 @@ impl TuiRuntime {
         worktree: String,
         tmux_window: Option<String>,
     ) {
-        let shared = self
+        let shared = match self
             .database
             .has_other_tasks_with_worktree(&worktree, id)
             .await
-            .unwrap_or(false);
+        {
+            Ok(v) => v,
+            Err(e) => {
+                let _ = self.msg_tx.send(Message::System(
+                    crate::tui::messages::SystemMessage::Error(format!(
+                        "Finish check failed: {e:#}"
+                    )),
+                ));
+                return;
+            }
+        };
 
         if shared {
             tracing::info!(
