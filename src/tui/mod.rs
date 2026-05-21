@@ -119,6 +119,13 @@ pub(in crate::tui) fn filtered_repos(paths: &[String], query: &str) -> Vec<Strin
         .collect()
 }
 
+/// Returns true when the buffer should be offered as a selectable "new path"
+/// entry: the buffer is non-empty and is not already an exact member of
+/// `filtered` (the user is typing a path that doesn't exist in the saved list).
+pub(in crate::tui) fn has_new_repo_option(buffer: &str, filtered: &[String]) -> bool {
+    !buffer.is_empty() && !filtered.iter().any(|p| p == buffer)
+}
+
 impl App {
     pub fn new(tasks: Vec<Task>, default_project_id: ProjectId) -> Self {
         let mut app = App {

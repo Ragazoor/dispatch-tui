@@ -1388,14 +1388,68 @@ fn quick_dispatch_enter_selects_from_filtered_list() {
 }
 
 #[test]
-fn quick_dispatch_enter_with_empty_filter_is_noop() {
+fn quick_dispatch_enter_uses_buffer_as_new_repo_when_no_match() {
+    // When the typed path matches no existing repos, Enter should dispatch
+    // to the literal buffer value as a brand-new repo path.
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1));
     app.board.repo_paths = vec!["/api-service".to_string(), "/backend".to_string()];
     app.input.mode = InputMode::QuickDispatch;
-    app.input.buffer = "zzz".to_string(); // matches nothing
+    app.input.buffer = "/home/user/brand-new-project".to_string();
     let cmds = app.handle_key(make_key(KeyCode::Enter));
-    assert!(cmds.is_empty());
-    assert_eq!(app.input.mode, InputMode::QuickDispatch);
+    assert_eq!(cmds.len(), 1);
+    assert!(
+        matches!(&cmds[0], Command::Task(crate::tui::commands::TaskCommand::QuickDispatch { ref draft, .. })
+            if draft.repo_path == "/home/user/brand-new-project")
+    );
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn quick_dispatch_enter_uses_buffer_when_cursor_on_new_entry() {
+    // When the buffer fuzzy-matches an existing repo but the cursor is on the
+    // trailing "new path" entry, Enter dispatches with the raw buffer value.
+    // repos = ["/home/code/project-work"]; buffer = "/home/code/work"
+    // filtered = ["/home/code/project-work"] (fuzzy match), new entry at idx 1
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1));
+    app.board.repo_paths = vec!["/home/code/project-work".to_string()];
+    app.input.mode = InputMode::QuickDispatch;
+    app.input.buffer = "/home/code/work".to_string();
+    app.input.repo_cursor = 1; // cursor on new entry (past the 1 filtered result)
+    let cmds = app.handle_key(make_key(KeyCode::Enter));
+    assert_eq!(cmds.len(), 1);
+    assert!(
+        matches!(&cmds[0], Command::Task(crate::tui::commands::TaskCommand::QuickDispatch { ref draft, .. })
+            if draft.repo_path == "/home/code/work")
+    );
+}
+
+#[test]
+fn quick_dispatch_cursor_navigates_to_new_entry() {
+    // Down arrow should be able to move the cursor past the filtered list to
+    // the new-path entry when the buffer is non-empty and not an exact match.
+    let mut app = App::new(vec![], ProjectId(1));
+    app.board.repo_paths = vec!["/home/code/project-work".to_string()];
+    app.input.mode = InputMode::QuickDispatch;
+    app.input.buffer = "/home/code/work".to_string(); // fuzzy-matches repo, but not exact
+    app.input.repo_cursor = 0;
+    app.handle_key(make_key(KeyCode::Down));
+    // Should have moved to index 1 (the new-path entry)
+    assert_eq!(app.input.repo_cursor, 1);
+}
+
+#[test]
+fn quick_dispatch_no_new_entry_when_buffer_exactly_matches_repo() {
+    // When the buffer is an exact match for an existing repo path, there
+    // is no new-entry slot, so Down wraps within the filtered list.
+    let mut app = App::new(vec![], ProjectId(1));
+    app.board.repo_paths = vec!["/repo/a".to_string(), "/repo/b".to_string()];
+    app.input.mode = InputMode::QuickDispatch;
+    app.input.buffer = "/repo/a".to_string(); // exact match → no new entry
+    // filtered = ["/repo/a"] only (only exact match on the query chars)
+    app.input.repo_cursor = 0;
+    app.handle_key(make_key(KeyCode::Down));
+    // filtered has 1 item, no new entry → wraps back to 0
+    assert_eq!(app.input.repo_cursor, 0);
 }
 
 #[test]

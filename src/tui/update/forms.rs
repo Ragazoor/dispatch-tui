@@ -3,7 +3,7 @@
 use crate::models::{TaskTag, WrapUpMode};
 
 use super::super::types::*;
-use super::super::{filtered_repos, truncate_title, App, TITLE_DISPLAY_LENGTH};
+use super::super::{filtered_repos, has_new_repo_option, truncate_title, App, TITLE_DISPLAY_LENGTH};
 
 impl App {
     pub(in crate::tui) fn handle_copy_task(&mut self) -> Vec<Command> {
@@ -218,16 +218,18 @@ impl App {
 
     pub(in crate::tui) fn handle_select_quick_dispatch_repo(&mut self, idx: usize) -> Vec<Command> {
         let repos = filtered_repos(&self.board.repo_paths, &self.input.buffer);
-        if idx < repos.len() {
-            let repo_path = repos[idx].clone();
-            let epic_id = self.input.pending_epic_id.take();
-            self.input.mode = InputMode::Normal;
-            self.input.buffer.clear();
-            self.clear_status();
-            self.handle_quick_dispatch(repo_path, epic_id)
+        let repo_path = if idx < repos.len() {
+            repos[idx].clone()
+        } else if has_new_repo_option(&self.input.buffer, &repos) {
+            self.input.buffer.clone()
         } else {
-            vec![]
-        }
+            return vec![];
+        };
+        let epic_id = self.input.pending_epic_id.take();
+        self.input.mode = InputMode::Normal;
+        self.input.buffer.clear();
+        self.clear_status();
+        self.handle_quick_dispatch(repo_path, epic_id)
     }
 
     pub(in crate::tui) fn handle_cancel_retry(&mut self) -> Vec<Command> {

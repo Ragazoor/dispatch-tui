@@ -94,6 +94,19 @@ fn snapshot_quick_dispatch_form() {
 }
 
 #[test]
+fn snapshot_quick_dispatch_new_entry() {
+    // Renders the picker with a non-empty buffer that fuzzy-matches an existing
+    // repo and also shows the "+ new path" entry at the bottom.
+    use super::super::types::InputMode;
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/home/code/project-work".to_string()];
+    app.input.mode = InputMode::QuickDispatch;
+    app.input.buffer = "/home/code/work".to_string(); // fuzzy-matches existing, new entry shown
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
 fn snapshot_confirm_retry_form() {
     use super::super::types::InputMode;
     use crate::models::TaskId;

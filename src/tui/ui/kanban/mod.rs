@@ -96,7 +96,17 @@ fn input_panel_height(app: &App, area_height: u16) -> u16 {
     let overhead: u16 = 9;
     let max_height = area_height.saturating_sub(overhead).max(8);
     match &app.input.mode {
-        InputMode::QuickDispatch | InputMode::MainSessionDir => {
+        InputMode::QuickDispatch => {
+            // header(1) + blank(1) + filter(1) + repos(N) + new_entry(0|1) + blank(1) + hint(1) + borders(2)
+            let filtered =
+                crate::tui::filtered_repos(&app.board.repo_paths, &app.input.buffer);
+            let new_entry =
+                crate::tui::has_new_repo_option(&app.input.buffer, &filtered);
+            let n = filtered.len() + new_entry as usize;
+            let rows = n as u16 + 7;
+            rows.clamp(8, max_height)
+        }
+        InputMode::MainSessionDir => {
             // header(1) + blank(1) + filter(1) + repos(N) + blank(1) + hint(1) + borders(2) = N + 7
             let n = app
                 .board

@@ -319,15 +319,56 @@ pub(in crate::tui) fn quick_dispatch_lines<'a>(
     active: Style,
     hint: Style,
 ) -> Vec<Line<'a>> {
-    repo_picker_lines(
-        app,
-        area,
-        "  Quick Dispatch — select repo:",
-        "Filter",
+    let filtered = crate::tui::filtered_repos(&app.board.repo_paths, &app.input.buffer);
+    let show_new = crate::tui::has_new_repo_option(&app.input.buffer, &filtered);
+    let cursor = app.input.repo_cursor;
+
+    // Prevent the existing-repo list from scrolling past its last item when the
+    // virtual new-path row (index filtered.len()) is selected.
+    let scroll_cursor = if show_new && !filtered.is_empty() && cursor == filtered.len() {
+        filtered.len() - 1
+    } else {
+        cursor
+    };
+
+    let mut lines = vec![
+        Line::from(Span::styled("  Quick Dispatch — select repo:", active)),
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("  Filter: {}_ ", app.input.buffer),
+            active,
+        )),
+    ];
+
+    if !filtered.is_empty() {
+        append_repo_path_list(&mut lines, &filtered, scroll_cursor, 7, area.height, hint);
+    }
+
+    if show_new {
+        let cursor_style = Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD);
+        let is_selected = cursor == filtered.len();
+        if is_selected {
+            lines.push(Line::from(vec![
+                Span::styled("  ► ", cursor_style),
+                Span::styled(app.input.buffer.clone(), cursor_style),
+                Span::styled("  (new)", hint),
+            ]));
+        } else {
+            lines.push(Line::from(Span::styled(
+                format!("    + {}", app.input.buffer),
+                hint,
+            )));
+        }
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
         "  Type to filter · [↑/↓] navigate · [Enter] select · [Esc] cancel",
-        active,
         hint,
-    )
+    )));
+    lines
 }
 
 pub(in crate::tui) fn confirm_retry_lines(app: &App, id: TaskId) -> Vec<Line<'static>> {

@@ -280,9 +280,16 @@ surface RepoPathPicker {
     -- Empty query matches all saved paths.
     let filtered = saved where fuzzy_subsequence(lowercase(query), lowercase(path))
 
+    -- When query is non-empty and is not an exact match for any item
+    -- in filtered, an additional NewPath(query) entry is appended.
+    -- This lets the user dispatch to a brand-new repo path even when
+    -- the query fuzzy-matches existing paths.
+    let new_entry = query != "" and not (exists p in filtered where p.path = query)
+    let effective = if new_entry: filtered + {NewPath(query)} else: filtered
+
     exposes:
         query
-        filtered
+        effective
         cursor
 
     provides:
@@ -297,28 +304,27 @@ surface RepoPathPicker {
             ensures: query = remove_last(query)
             ensures: cursor = 0
 
-        -- Up/Down arrows move the cursor within the filtered list
-        -- (wrapping). No printable character is a navigation alias —
-        -- letters such as j/k are typed into query, not interpreted as
-        -- nav commands.
+        -- Up/Down arrows move the cursor within effective (wrapping).
+        -- effective = filtered + optional NewPath(query) entry at end.
+        -- No printable character is a navigation alias — letters such as
+        -- j/k are typed into query, not interpreted as nav commands.
         CursorDown(user)
-            when filtered.count > 0
-            ensures: cursor = (cursor + 1) mod filtered.count
+            when effective.count > 0
+            ensures: cursor = (cursor + 1) mod effective.count
 
         CursorUp(user)
-            when filtered.count > 0
-            ensures: cursor = (cursor - 1 + filtered.count) mod filtered.count
+            when effective.count > 0
+            ensures: cursor = (cursor - 1 + effective.count) mod effective.count
 
-        -- Enter: select filtered[cursor] if filtered is non-empty,
-        -- otherwise use literal query as the path. (For pickers that do
-        -- not allow free-form paths, e.g. the QuickDispatch picker
-        -- variant, the empty-filtered branch is a no-op.)
+        -- Enter: select effective[cursor].path.
+        -- When cursor points to the NewPath(query) entry, the typed
+        -- query is dispatched as a new (unsaved) repo path.
+        -- When effective is empty (query is empty and no repos are
+        -- saved), Confirm is a no-op.
         Confirm(user)
             ensures:
-                if filtered.count > 0:
-                    SelectedPath(filtered[cursor].path)
-                else:
-                    SelectedPath(query)
+                if effective.count > 0:
+                    SelectedPath(effective[cursor].path)
 
         -- Escape dismisses the picker without selecting
         Dismiss(user)

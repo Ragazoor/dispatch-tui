@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use super::super::types::*;
-use super::super::{filtered_repos, App};
+use super::super::{filtered_repos, has_new_repo_option, App};
 
 impl App {
     pub(in crate::tui) fn handle_start_repo_filter(&mut self) -> Vec<Command> {
@@ -18,6 +18,10 @@ impl App {
             InputMode::InputRepoPath | InputMode::InputEpicRepoPath | InputMode::MainSessionDir
         ) {
             filtered_repos(&self.board.repo_paths, &self.input.buffer).len()
+        } else if matches!(self.input.mode, InputMode::QuickDispatch) {
+            let filtered = filtered_repos(&self.board.repo_paths, &self.input.buffer);
+            let extra = has_new_repo_option(&self.input.buffer, &filtered) as usize;
+            filtered.len() + extra
         } else if matches!(self.input.mode, InputMode::RepoFilter) {
             self.board.repo_paths.len() + 1 // +1 for the "Active sessions only" toggle at cursor 0
         } else {
