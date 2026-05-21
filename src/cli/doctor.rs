@@ -213,6 +213,53 @@ pub fn check_hooks(
     findings
 }
 
+/// Repair: set core.hooksPath = .githooks for a repo.
+pub fn repair_hooks_set_path(
+    repo_path: &str,
+    runner: &dyn crate::process::ProcessRunner,
+) -> anyhow::Result<()> {
+    let expanded = crate::models::expand_tilde(repo_path);
+    let output = runner.run(
+        "git",
+        &["-C", &expanded, "config", "--local", "core.hooksPath", ".githooks"],
+    )?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("git config failed: {}", stderr.trim());
+    }
+    Ok(())
+}
+
+/// Repair: kill a stale tmux window.
+pub fn repair_sessions_kill_window(
+    window: &str,
+    runner: &dyn crate::process::ProcessRunner,
+) -> anyhow::Result<()> {
+    crate::tmux::kill_window(window, runner)
+}
+
+/// Repair: remove an orphaned worktree directory from disk.
+///
+/// `repo_path` is the root of the git repo; `worktree_path` is the absolute
+/// path to the `.worktrees/task-N` directory. Both are tilde-expanded before use.
+pub fn repair_worktrees_remove(
+    repo_path: &str,
+    worktree_path: &str,
+    runner: &dyn crate::process::ProcessRunner,
+) -> anyhow::Result<()> {
+    let expanded_repo = crate::models::expand_tilde(repo_path);
+    let expanded_wt = crate::models::expand_tilde(worktree_path);
+    let output = runner.run(
+        "git",
+        &["-C", &expanded_repo, "worktree", "remove", "--force", &expanded_wt],
+    )?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("git worktree remove failed: {}", stderr.trim());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
@@ -556,6 +603,47 @@ mod tests {
             assert_eq!(findings.len(), 2);
             assert_eq!(findings[0].status, FindingStatus::Ok);
             assert_eq!(findings[1].status, FindingStatus::Warn);
+        }
+    }
+
+    mod repair_tests {
+        use super::*;
+        use crate::process::MockProcessRunner;
+
+        #[test]
+        fn repair_hooks_issues_correct_git_config_command() {
+            let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+            repair_hooks_set_path("/my/repo", &mock).unwrap();
+            let calls = mock.recorded_calls();
+            assert_eq!(calls.len(), 1);
+            assert_eq!(calls[0].0, "git");
+            assert_eq!(
+                calls[0].1,
+                vec!["-C", "/my/repo", "config", "--local", "core.hooksPath", ".githooks"]
+            );
+        }
+
+        #[test]
+        fn repair_sessions_kill_window_issues_correct_tmux_command() {
+            let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+            repair_sessions_kill_window("task-42", &mock).unwrap();
+            let calls = mock.recorded_calls();
+            assert_eq!(calls.len(), 1);
+            assert_eq!(calls[0].0, "tmux");
+            assert_eq!(calls[0].1, vec!["kill-window", "-t", "task-42"]);
+        }
+
+        #[test]
+        fn repair_worktrees_remove_issues_correct_git_worktree_command() {
+            let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+            repair_worktrees_remove("/repo", "/repo/.worktrees/task-5", &mock).unwrap();
+            let calls = mock.recorded_calls();
+            assert_eq!(calls.len(), 1);
+            assert_eq!(calls[0].0, "git");
+            assert_eq!(
+                calls[0].1,
+                vec!["-C", "/repo", "worktree", "remove", "--force", "/repo/.worktrees/task-5"]
+            );
         }
     }
 }
