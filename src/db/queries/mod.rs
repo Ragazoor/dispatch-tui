@@ -59,10 +59,10 @@ pub(super) fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         external_id: row.get::<_, Option<String>>("external_id").unwrap_or(None),
         project_id: ProjectId(row.get::<_, i64>("project_id")?),
         labels: read_json_string_vec(row, "labels")?,
-        created_at: parse_datetime(&created_str),
-        updated_at: parse_datetime(&updated_str),
-        last_pre_tool_use_at: read_optional_datetime(row, "last_pre_tool_use_at"),
-        last_notification_at: read_optional_datetime(row, "last_notification_at"),
+        created_at: parse_datetime(&created_str)?,
+        updated_at: parse_datetime(&updated_str)?,
+        last_pre_tool_use_at: read_optional_datetime(row, "last_pre_tool_use_at")?,
+        last_notification_at: read_optional_datetime(row, "last_notification_at")?,
         wrap_up_mode: parse_wrap_up_mode(
             row.get::<_, Option<String>>("wrap_up_mode").unwrap_or(None),
         )?,
@@ -94,8 +94,8 @@ pub(super) fn row_to_epic(row: &rusqlite::Row<'_>) -> rusqlite::Result<Epic> {
             .unwrap_or(None),
         group_by_repo: row.get::<_, bool>("group_by_repo")?,
         project_id: ProjectId(row.get::<_, i64>("project_id")?),
-        created_at: parse_datetime(&created_str),
-        updated_at: parse_datetime(&updated_str),
+        created_at: parse_datetime(&created_str)?,
+        updated_at: parse_datetime(&updated_str)?,
     })
 }
 
@@ -149,11 +149,14 @@ pub(super) fn write_json_string_vec(values: &[String]) -> Result<String> {
 }
 
 /// Parse SQLite `datetime('now')` output: "YYYY-MM-DD HH:MM:SS"
-pub(super) fn parse_datetime(s: &str) -> DateTime<Utc> {
+pub(super) fn parse_datetime(s: &str) -> rusqlite::Result<DateTime<Utc>> {
     NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
-        .ok()
         .map(|ndt| Utc.from_utc_datetime(&ndt))
-        .unwrap_or_else(Utc::now)
+        .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
+            0,
+            rusqlite::types::Type::Text,
+            format!("invalid datetime {s:?}: {e}").into(),
+        ))
 }
 
 /// Format a `DateTime<Utc>` for storage in TEXT timestamp columns.
@@ -163,11 +166,15 @@ pub(super) fn format_datetime(dt: DateTime<Utc>) -> String {
 }
 
 /// Read a nullable TEXT timestamp column.
-pub(super) fn read_optional_datetime(row: &rusqlite::Row<'_>, col: &str) -> Option<DateTime<Utc>> {
-    row.get::<_, Option<String>>(col)
-        .ok()
-        .flatten()
-        .map(|s| parse_datetime(&s))
+pub(super) fn read_optional_datetime(
+    row: &rusqlite::Row<'_>,
+    col: &str,
+) -> rusqlite::Result<Option<DateTime<Utc>>> {
+    let s: Option<String> = row.get::<_, Option<String>>(col).ok().flatten();
+    match s {
+        None => Ok(None),
+        Some(s) => parse_datetime(&s).map(Some),
+    }
 }
 
 pub(super) fn get_tips_state(
@@ -188,7 +195,7 @@ pub(super) fn get_tips_state(
         Ok((seen_up_to, show_mode_str)) => {
             let show_mode = show_mode_str
                 .parse::<TipsShowMode>()
-                .unwrap_or(TipsShowMode::Always);
+                .map_err(|e| anyhow::anyhow!("unrecognised tips show_mode {:?}: {}", show_mode_str, e))?;
             Ok((seen_up_to, show_mode))
         }
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok((0, TipsShowMode::Always)),

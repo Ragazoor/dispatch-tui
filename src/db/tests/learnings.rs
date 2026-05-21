@@ -769,3 +769,35 @@ async fn patch_learning_can_set_embedding() {
     let missing_after = db.list_learnings_missing_embedding().await.unwrap();
     assert!(!missing_after.iter().any(|l| l.id == id));
 }
+
+#[tokio::test]
+async fn get_learning_errors_on_unknown_kind() {
+    use crate::db::CreateLearningRow;
+    use crate::models::{LearningKind, LearningScope};
+    let db = in_memory_db().await;
+    let id = db
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Convention,
+            summary: "test",
+            detail: None,
+            scope: LearningScope::User,
+            scope_ref: None,
+            tags: &[],
+            source_task_id: None,
+            embedding: None,
+        })
+        .await
+        .unwrap();
+    let learning_id = id.0;
+    db.db_call(move |conn| {
+        conn.execute(
+            "UPDATE learnings SET kind = 'xyzzy_unknown' WHERE id = ?1",
+            rusqlite::params![learning_id],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let result = db.get_learning(id).await;
+    assert!(result.is_err(), "expected Err on unknown kind, got {:?}", result);
+}

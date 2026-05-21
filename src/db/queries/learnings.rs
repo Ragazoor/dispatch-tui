@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use anyhow::{Context, Result};
-use chrono::{NaiveDateTime, TimeZone, Utc};
+use chrono::{DateTime, Utc};
 use rusqlite::{params, OptionalExtension};
 
 use crate::models::{
@@ -10,7 +10,7 @@ use crate::models::{
 };
 
 use super::super::{CreateLearningRow, Database, LearningFilter, LearningPatch};
-use super::{read_json_string_vec, write_json_string_vec};
+use super::{parse_datetime, read_json_string_vec, write_json_string_vec};
 
 const LEARNING_COLUMNS: &str =
     "id, kind, summary, detail, scope, scope_ref, tags, status, source_task_id, \
@@ -26,26 +26,38 @@ fn row_to_learning(row: &rusqlite::Row<'_>) -> rusqlite::Result<Learning> {
 
     let tags = read_json_string_vec(row, "tags")?;
 
-    let parse_dt = |s: &str| -> chrono::DateTime<Utc> {
-        NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
-            .map(|ndt| Utc.from_utc_datetime(&ndt))
-            .unwrap_or_else(|_| Utc::now())
-    };
+    let kind = LearningKind::parse(&kind_str).ok_or_else(|| {
+        rusqlite::Error::FromSqlConversionFailure(
+            0,
+            rusqlite::types::Type::Text,
+            format!("unrecognised learning kind: {kind_str:?}").into(),
+        )
+    })?;
+    let scope = LearningScope::parse(&scope_str).ok_or_else(|| {
+        rusqlite::Error::FromSqlConversionFailure(
+            0,
+            rusqlite::types::Type::Text,
+            format!("unrecognised learning scope: {scope_str:?}").into(),
+        )
+    })?;
+    let status = LearningStatus::parse(&status_str).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, e.into())
+    })?;
 
     Ok(Learning {
         id: LearningId(row.get::<_, i64>(0)?),
-        kind: LearningKind::parse(&kind_str).unwrap_or(LearningKind::Convention),
+        kind,
         summary: row.get(2)?,
         detail: row.get(3)?,
-        scope: LearningScope::parse(&scope_str).unwrap_or(LearningScope::User),
+        scope,
         scope_ref: row.get(5)?,
         tags,
-        status: LearningStatus::parse(&status_str).unwrap_or(LearningStatus::Approved),
+        status,
         source_task_id: row.get::<_, Option<i64>>(8)?.map(crate::models::TaskId),
         upvote_count: row.get(9)?,
-        last_upvoted_at: last_upvoted_str.as_deref().map(parse_dt),
-        created_at: parse_dt(&created_str),
-        updated_at: parse_dt(&updated_str),
+        last_upvoted_at: last_upvoted_str.as_deref().map(parse_datetime).transpose()?,
+        created_at: parse_datetime(&created_str)?,
+        updated_at: parse_datetime(&updated_str)?,
     })
 }
 
@@ -370,11 +382,6 @@ impl super::super::LearningRetrievalStore for Database {
 
     async fn list_retrievals_for_task(&self, task_id: TaskId) -> Result<Vec<LearningRetrieval>> {
         self.db_call(move |conn| {
-            let parse_dt = |s: &str| -> chrono::DateTime<Utc> {
-                NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
-                    .map(|ndt| Utc.from_utc_datetime(&ndt))
-                    .unwrap_or_else(|_| Utc::now())
-            };
             let mut stmt = conn
                 .prepare(
                     "SELECT id, task_id, learning_id, source, retrieved_at
@@ -399,7 +406,7 @@ impl super::super::LearningRetrievalStore for Database {
                         task_id: TaskId(row.get(1)?),
                         learning_id: LearningId(row.get(2)?),
                         source,
-                        retrieved_at: parse_dt(&retrieved_str),
+                        retrieved_at: parse_datetime(&retrieved_str)?,
                     })
                 })
                 .context("Failed to query learning retrievals")?
