@@ -372,11 +372,11 @@ impl TuiRuntime {
         {
             Ok(v) => v,
             Err(e) => {
-                let _ = self.msg_tx.send(Message::System(
-                    crate::tui::messages::SystemMessage::Error(format!(
-                        "Cleanup check failed: {e:#}"
-                    )),
-                ));
+                let _ =
+                    self.msg_tx
+                        .send(Message::System(crate::tui::messages::SystemMessage::Error(
+                            format!("Cleanup check failed: {e:#}"),
+                        )));
                 return;
             }
         };
@@ -433,11 +433,11 @@ impl TuiRuntime {
         {
             Ok(v) => v,
             Err(e) => {
-                let _ = self.msg_tx.send(Message::System(
-                    crate::tui::messages::SystemMessage::Error(format!(
-                        "Finish check failed: {e:#}"
-                    )),
-                ));
+                let _ =
+                    self.msg_tx
+                        .send(Message::System(crate::tui::messages::SystemMessage::Error(
+                            format!("Finish check failed: {e:#}"),
+                        )));
                 return;
             }
         };

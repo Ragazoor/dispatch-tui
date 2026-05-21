@@ -85,11 +85,10 @@ mod tests {
         let dir = tempdir().unwrap();
         let entry = make_entry("update_task");
         append_entry(dir.path(), &entry).await;
-        let content = tokio::fs::read_to_string(
-            dir.path().join(TRAJECTORIES_SUBDIR).join("42.jsonl"),
-        )
-        .await
-        .unwrap();
+        let content =
+            tokio::fs::read_to_string(dir.path().join(TRAJECTORIES_SUBDIR).join("42.jsonl"))
+                .await
+                .unwrap();
         assert!(!content.is_empty());
         let parsed: Value = serde_json::from_str(content.trim()).unwrap();
         assert_eq!(parsed["schema_version"], "1.0.0");
@@ -103,11 +102,10 @@ mod tests {
         let dir = tempdir().unwrap();
         append_entry(dir.path(), &make_entry("get_task")).await;
         append_entry(dir.path(), &make_entry("list_tasks")).await;
-        let content = tokio::fs::read_to_string(
-            dir.path().join(TRAJECTORIES_SUBDIR).join("42.jsonl"),
-        )
-        .await
-        .unwrap();
+        let content =
+            tokio::fs::read_to_string(dir.path().join(TRAJECTORIES_SUBDIR).join("42.jsonl"))
+                .await
+                .unwrap();
         let lines: Vec<&str> = content.lines().collect();
         assert_eq!(lines.len(), 2);
         let _: Value = serde_json::from_str(lines[0]).unwrap();
@@ -160,11 +158,10 @@ mod tests {
         let entry = make_entry("get_task");
         let expected_ts = entry.timestamp;
         append_entry(dir.path(), &entry).await;
-        let content = tokio::fs::read_to_string(
-            dir.path().join(TRAJECTORIES_SUBDIR).join("42.jsonl"),
-        )
-        .await
-        .unwrap();
+        let content =
+            tokio::fs::read_to_string(dir.path().join(TRAJECTORIES_SUBDIR).join("42.jsonl"))
+                .await
+                .unwrap();
         let parsed: Value = serde_json::from_str(content.trim()).unwrap();
         assert_eq!(parsed["schema_version"], SCHEMA_VERSION);
         assert_eq!(parsed["task_id"], 42);

@@ -97,7 +97,11 @@ fn remove_stale_recursive(
             }
         } else {
             let relative = path.strip_prefix(base).with_context(|| {
-                format!("path {} is not under base {}", path.display(), base.display())
+                format!(
+                    "path {} is not under base {}",
+                    path.display(),
+                    base.display()
+                )
             })?;
             if !embedded.contains(relative) {
                 fs::remove_file(&path)
@@ -175,7 +179,11 @@ fn has_stale_recursive(
             }
         } else {
             let relative = path.strip_prefix(base).with_context(|| {
-                format!("path {} is not under base {}", path.display(), base.display())
+                format!(
+                    "path {} is not under base {}",
+                    path.display(),
+                    base.display()
+                )
             })?;
             if !embedded.contains(relative) {
                 return Ok(true);
@@ -617,7 +625,10 @@ mod tests {
         let changed = install_plugin_in(dir.path()).unwrap();
 
         assert!(changed, "removing a stale file must count as a change");
-        assert!(!stale_file.exists(), "stale file must be removed after install");
+        assert!(
+            !stale_file.exists(),
+            "stale file must be removed after install"
+        );
     }
 
     #[test]
@@ -646,6 +657,9 @@ mod tests {
 
         install_plugin_in(dir.path()).unwrap();
         let changed = install_plugin_in(dir.path()).unwrap();
-        assert!(!changed, "second install with nothing to change must be idempotent");
+        assert!(
+            !changed,
+            "second install with nothing to change must be idempotent"
+        );
     }
 }

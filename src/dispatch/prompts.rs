@@ -580,7 +580,10 @@ pub async fn build_and_record_injections(
 ) -> Vec<Learning> {
     let all = list_learnings_for_dispatch_rag(db, task, emb_svc, DISPATCH_RAG_THRESHOLD).await;
     for l in &all {
-        if let Err(e) = db.record_retrieval(task.id, l.id, RetrievalSource::PromptInjection).await {
+        if let Err(e) = db
+            .record_retrieval(task.id, l.id, RetrievalSource::PromptInjection)
+            .await
+        {
             tracing::warn!(
                 task_id = task.id.0,
                 learning_id = l.id.0,
@@ -1087,7 +1090,10 @@ mod rag_dispatch_tests {
         assert!(!results.is_empty(), "should return at least one learning");
         // Procedural learnings are still included — just not artificially first.
         let ids: Vec<_> = results.iter().map(|l| l.id).collect();
-        assert!(ids.contains(&proc_id), "procedural learning must be in results");
+        assert!(
+            ids.contains(&proc_id),
+            "procedural learning must be in results"
+        );
     }
 
     #[tokio::test]

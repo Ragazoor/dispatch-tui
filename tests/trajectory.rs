@@ -66,9 +66,11 @@ async fn task_identity_writes_trajectory_entry() {
         "expected exactly 1 trajectory line, got: {lines:?}"
     );
 
-    let parsed: Value =
-        serde_json::from_str(lines[0]).expect("trajectory line must be valid JSON");
-    assert_eq!(parsed["task_id"], task_id.0, "task_id field mismatch: {parsed}");
+    let parsed: Value = serde_json::from_str(lines[0]).expect("trajectory line must be valid JSON");
+    assert_eq!(
+        parsed["task_id"], task_id.0,
+        "task_id field mismatch: {parsed}"
+    );
     assert_eq!(
         parsed["method"].as_str(),
         Some("list_tasks"),

@@ -97,10 +97,7 @@ mod tests {
 
     #[test]
     fn usage_actor_roundtrip() {
-        for (actor, s) in [
-            (UsageActor::Human, "human"),
-            (UsageActor::Agent, "agent"),
-        ] {
+        for (actor, s) in [(UsageActor::Human, "human"), (UsageActor::Agent, "agent")] {
             assert_eq!(actor.as_str(), s);
             assert_eq!(actor.to_string(), s);
             assert_eq!(UsageActor::parse(s), Some(actor));

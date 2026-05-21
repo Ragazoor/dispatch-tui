@@ -799,5 +799,9 @@ async fn get_learning_errors_on_unknown_kind() {
     .await
     .unwrap();
     let result = db.get_learning(id).await;
-    assert!(result.is_err(), "expected Err on unknown kind, got {:?}", result);
+    assert!(
+        result.is_err(),
+        "expected Err on unknown kind, got {:?}",
+        result
+    );
 }

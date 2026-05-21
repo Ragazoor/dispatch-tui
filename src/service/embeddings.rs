@@ -271,7 +271,11 @@ pub fn rag_rank_learnings<'a>(
             .partial_cmp(&a.score)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    scored.into_iter().take(params.limit).map(|s| s.learning).collect()
+    scored
+        .into_iter()
+        .take(params.limit)
+        .map(|s| s.learning)
+        .collect()
 }
 
 #[cfg(test)]

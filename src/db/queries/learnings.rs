@@ -25,8 +25,8 @@ fn row_to_learning(row: &rusqlite::Row<'_>) -> rusqlite::Result<Learning> {
 
     let tags = read_json_string_vec(row, "tags")?;
 
-    let kind = LearningKind::parse(&kind_str)
-        .ok_or_else(|| unknown_enum("learning_kind", &kind_str))?;
+    let kind =
+        LearningKind::parse(&kind_str).ok_or_else(|| unknown_enum("learning_kind", &kind_str))?;
     let scope = LearningScope::parse(&scope_str)
         .ok_or_else(|| unknown_enum("learning_scope", &scope_str))?;
     let status = LearningStatus::parse(&status_str).map_err(|e| {
@@ -44,7 +44,10 @@ fn row_to_learning(row: &rusqlite::Row<'_>) -> rusqlite::Result<Learning> {
         status,
         source_task_id: row.get::<_, Option<i64>>(8)?.map(crate::models::TaskId),
         upvote_count: row.get(9)?,
-        last_upvoted_at: last_upvoted_str.as_deref().map(parse_datetime).transpose()?,
+        last_upvoted_at: last_upvoted_str
+            .as_deref()
+            .map(parse_datetime)
+            .transpose()?,
         created_at: parse_datetime(&created_str)?,
         updated_at: parse_datetime(&updated_str)?,
     })

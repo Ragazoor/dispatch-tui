@@ -30,8 +30,8 @@ pub(super) const TASK_COLUMNS: &str =
 
 pub(super) fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     let status_str: String = row.get("status")?;
-    let status = TaskStatus::parse(&status_str)
-        .ok_or_else(|| unknown_enum("task_status", &status_str))?;
+    let status =
+        TaskStatus::parse(&status_str).ok_or_else(|| unknown_enum("task_status", &status_str))?;
 
     let created_str: String = row.get("created_at")?;
     let updated_str: String = row.get("updated_at")?;
@@ -137,11 +137,13 @@ pub(super) fn write_json_string_vec(values: &[String]) -> Result<String> {
 pub(super) fn parse_datetime(s: &str) -> rusqlite::Result<DateTime<Utc>> {
     NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
         .map(|ndt| Utc.from_utc_datetime(&ndt))
-        .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
-            0,
-            rusqlite::types::Type::Text,
-            format!("invalid datetime {s:?}: {e}").into(),
-        ))
+        .map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Text,
+                format!("invalid datetime {s:?}: {e}").into(),
+            )
+        })
 }
 
 /// Format a `DateTime<Utc>` for storage in TEXT timestamp columns.
@@ -178,9 +180,9 @@ pub(super) fn get_tips_state(
 
     match result {
         Ok((seen_up_to, show_mode_str)) => {
-            let show_mode = show_mode_str
-                .parse::<TipsShowMode>()
-                .map_err(|e| anyhow::anyhow!("unrecognised tips show_mode {:?}: {}", show_mode_str, e))?;
+            let show_mode = show_mode_str.parse::<TipsShowMode>().map_err(|e| {
+                anyhow::anyhow!("unrecognised tips show_mode {:?}: {}", show_mode_str, e)
+            })?;
             Ok((seen_up_to, show_mode))
         }
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok((0, TipsShowMode::Always)),

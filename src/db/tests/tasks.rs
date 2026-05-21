@@ -2651,7 +2651,11 @@ async fn get_task_errors_on_unknown_tag() {
     .await
     .unwrap();
     let result = db.get_task(id).await;
-    assert!(result.is_err(), "expected Err on unknown tag, got {:?}", result);
+    assert!(
+        result.is_err(),
+        "expected Err on unknown tag, got {:?}",
+        result
+    );
 }
 
 #[tokio::test]

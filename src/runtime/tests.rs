@@ -567,7 +567,10 @@ async fn exec_check_window_sends_nothing_when_present() {
     rt.exec_check_window(TaskId(1), "task-1".to_string());
 
     tokio::time::sleep(Duration::from_millis(100)).await;
-    assert!(rx.try_recv().is_err(), "Expected no message but received one");
+    assert!(
+        rx.try_recv().is_err(),
+        "Expected no message but received one"
+    );
 }
 
 #[tokio::test]

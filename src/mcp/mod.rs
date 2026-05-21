@@ -106,13 +106,16 @@ impl McpState {
     /// Returns the token string to embed in the response.
     pub fn issue_exit_token(&self, task_id: TaskId) -> String {
         let token = Uuid::new_v4().to_string();
-        self.exit_tokens.write().unwrap_or_else(|e| e.into_inner()).insert(
-            task_id,
-            ExitToken {
-                token: token.clone(),
-                reflected: false,
-            },
-        );
+        self.exit_tokens
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(
+                task_id,
+                ExitToken {
+                    token: token.clone(),
+                    reflected: false,
+                },
+            );
         token
     }
 
@@ -128,7 +131,13 @@ pub fn router(
     embedding_service: Arc<EmbeddingService>,
     data_dir: std::path::PathBuf,
 ) -> Router {
-    let state = Arc::new(McpState::new(db, notify_tx, runner, embedding_service, data_dir));
+    let state = Arc::new(McpState::new(
+        db,
+        notify_tx,
+        runner,
+        embedding_service,
+        data_dir,
+    ));
     Router::new()
         .route("/mcp", post(handlers::handle_mcp))
         .layer(axum::middleware::from_fn(

@@ -119,8 +119,15 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
     let (mcp_notify_tx, mut mcp_notify_rx) = mpsc::unbounded_channel::<mcp::McpEvent>();
     let feed_notify_tx = mcp_notify_tx.clone();
     tokio::spawn(async move {
-        if let Err(e) =
-            mcp::serve(mcp_db, port, mcp_notify_tx, mcp_runner, mcp_emb_svc, data_dir).await
+        if let Err(e) = mcp::serve(
+            mcp_db,
+            port,
+            mcp_notify_tx,
+            mcp_runner,
+            mcp_emb_svc,
+            data_dir,
+        )
+        .await
         {
             eprintln!("MCP server error: {e}");
         }
