@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
 use rusqlite::{params, OptionalExtension};
 
 use crate::models::{
