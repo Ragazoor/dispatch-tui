@@ -588,12 +588,16 @@ rule ToggleGroupByRepo {
     -- "Children" means active_children: the union of active_subtasks (Task)
     -- and active_sub_epics (Epic). Each child contributes its .status value.
     --
-    -- Derivation logic (checked in priority order):
-    --   no active children            => backlog
-    --   all active children done      => done
-    --   any active child in review    => review
-    --   any active child running      => running
-    --   otherwise                     => backlog
+    -- Derivation logic:
+    --   all active children done (≥1 active child) => done
+    --   epic is done AND has active non-done children => backlog  (regression)
+    --   otherwise => no change (epic stays in current status)
+    --
+    --   The "no active children" case does not auto-set to backlog — the epic
+    --   keeps its current status. A freshly-created epic starts as backlog via
+    --   the CreateEpic rule, so no information is lost.
+    --   The running and review statuses are never set automatically; they are
+    --   only reachable via manual MoveEpicForward / MoveEpicBackward actions.
     --
     -- The derived status is compared to the current epic.status; it is
     -- applied whenever the derived status differs from the current status.
