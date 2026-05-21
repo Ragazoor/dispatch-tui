@@ -373,6 +373,7 @@ mod tests {
             "skills/decompose-review/SKILL.md",
             "skills/decompose-review/references/plan-template.md",
             "skills/learnings/SKILL.md",
+            "skills/summarize/SKILL.md",
             "commands/queue-plan.md",
         ];
         for path in required {
