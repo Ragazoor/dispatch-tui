@@ -520,11 +520,17 @@ async fn main() -> Result<()> {
                                     }
                                 }
                                 FindingStatus::Warn => {
-                                    let repo = all_repos
+                                    let Some(repo) = all_repos
                                         .iter()
                                         .find(|r| f.target.starts_with(r.as_str()))
                                         .cloned()
-                                        .unwrap_or_default();
+                                    else {
+                                        eprintln!(
+                                            "repair skipped for {}: no matching repo found",
+                                            f.target
+                                        );
+                                        continue;
+                                    };
                                     repair_worktrees_remove(&repo, &f.target, &runner)
                                 }
                                 FindingStatus::Ok => Ok(()),

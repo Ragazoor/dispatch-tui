@@ -61,10 +61,10 @@ pub fn has_problems(findings: &[Finding]) -> bool {
 pub fn check_worktrees(tasks: &[crate::models::Task], repo_paths: &[String]) -> Vec<Finding> {
     let mut findings = Vec::new();
 
-    // Collect set of all worktree paths known to the DB.
+    // Collect set of all worktree paths known to the DB (tilde-expanded for comparison).
     let db_worktrees: std::collections::HashSet<String> = tasks
         .iter()
-        .filter_map(|t| t.worktree.clone())
+        .filter_map(|t| t.worktree.as_ref().map(|w| crate::models::expand_tilde(w)))
         .collect();
 
     // DB orphans: task.worktree set but path doesn't exist on disk.
@@ -454,7 +454,7 @@ mod tests {
         }
 
         #[test]
-        fn no_findings_when_tmux_not_running() {
+        fn stale_db_claim_is_error_when_tmux_absent() {
             let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no server")]);
             let findings = check_sessions(&[running_task(1, "task-1")], &mock);
             assert_eq!(findings.len(), 1);
