@@ -21,6 +21,12 @@ impl UsageCategory {
     }
 }
 
+impl std::fmt::Display for UsageCategory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UsageActor {
     Human,
@@ -41,6 +47,12 @@ impl UsageActor {
             "agent" => Some(Self::Agent),
             _ => None,
         }
+    }
+}
+
+impl std::fmt::Display for UsageActor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 
@@ -77,8 +89,10 @@ mod tests {
             (UsageCategory::McpTool, "mcp_tool"),
         ] {
             assert_eq!(cat.as_str(), s);
+            assert_eq!(cat.to_string(), s);
             assert_eq!(UsageCategory::parse(s), Some(cat));
         }
+        assert_eq!(UsageCategory::parse("nonsense"), None);
     }
 
     #[test]
@@ -88,7 +102,9 @@ mod tests {
             (UsageActor::Agent, "agent"),
         ] {
             assert_eq!(actor.as_str(), s);
+            assert_eq!(actor.to_string(), s);
             assert_eq!(UsageActor::parse(s), Some(actor));
         }
+        assert_eq!(UsageActor::parse("nonsense"), None);
     }
 }
