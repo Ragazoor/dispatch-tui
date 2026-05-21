@@ -130,6 +130,25 @@ enum RetrievalSource { prompt_injection | procedural | query_learnings }
 enum WrapUpMode { rebase | pr | done }
 
 ------------------------------------------------------------
+-- Storage Boundary Validation
+------------------------------------------------------------
+
+-- Any entity read from storage whose enum fields contain an unrecognised
+-- string value must fail the read operation with an error rather than
+-- silently defaulting to a fallback variant.
+--
+-- Rationale: silent defaults mask data-integrity bugs (corrupt migrations,
+-- manual DB edits, schema drift) and produce subtly wrong in-memory state
+-- that is hard to trace back to the real cause. A hard read error surfaces
+-- the problem immediately. The TUI and MCP error-display paths already
+-- handle DB errors gracefully, so a hard error is safe.
+--
+-- This applies to all enum columns: TaskStatus, SubStatus, TaskTag,
+-- WrapUpMode, LearningKind, LearningScope, LearningStatus, TipsShowMode.
+-- It also applies to JSON-encoded columns (e.g. labels, tags): malformed
+-- JSON must return an error rather than an empty list.
+
+------------------------------------------------------------
 -- Entities and Variants
 ------------------------------------------------------------
 
