@@ -565,7 +565,7 @@ impl App {
             .map(|e| {
                 (
                     e.id,
-                    SubtaskStats::for_epic(e, &self.board.tasks, active_merge),
+                    SubtaskStats::for_epic(e, &self.board.tasks, &self.board.epics, active_merge),
                 )
             })
             .collect()

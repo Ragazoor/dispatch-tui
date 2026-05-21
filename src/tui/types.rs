@@ -896,11 +896,21 @@ pub struct SubtaskStats {
 }
 
 impl SubtaskStats {
-    /// Compute stats for a single epic from its non-archived subtasks.
-    pub fn for_epic(epic: &Epic, all_tasks: &[Task], active_merge_epic: Option<EpicId>) -> Self {
+    /// Compute stats for a single epic from its non-archived subtasks,
+    /// including tasks owned by any descendant sub-epics.
+    pub fn for_epic(
+        epic: &Epic,
+        all_tasks: &[Task],
+        all_epics: &[Epic],
+        active_merge_epic: Option<EpicId>,
+    ) -> Self {
+        let epic_ids = crate::models::descendant_epic_ids(epic.id, all_epics);
         let subtasks: Vec<&Task> = all_tasks
             .iter()
-            .filter(|t| t.epic_id == Some(epic.id) && t.status != TaskStatus::Archived)
+            .filter(|t| {
+                matches!(t.epic_id, Some(eid) if epic_ids.contains(&eid))
+                    && t.status != TaskStatus::Archived
+            })
             .collect();
 
         let mut backlog = 0;
@@ -943,6 +953,110 @@ pub type EpicStatsMap = HashMap<EpicId, SubtaskStats>;
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
+    use crate::models::{ProjectId, SubStatus, TaskId};
+    use chrono::Utc;
+
+    fn make_test_epic(id: i64, parent: Option<i64>) -> Epic {
+        Epic {
+            id: EpicId(id),
+            title: format!("Epic {id}"),
+            description: String::new(),
+            repo_path: "/repo".to_string(),
+            status: TaskStatus::Running,
+            plan_path: None,
+            sort_order: None,
+            auto_dispatch: false,
+            parent_epic_id: parent.map(EpicId),
+            feed_command: None,
+            feed_interval_secs: None,
+            group_by_repo: false,
+            project_id: ProjectId(1),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    fn make_test_task(id: i64, status: TaskStatus, epic: Option<i64>) -> Task {
+        Task {
+            id: TaskId(id),
+            title: format!("Task {id}"),
+            description: String::new(),
+            repo_path: "/repo".to_string(),
+            status,
+            sub_status: SubStatus::None,
+            worktree: None,
+            tmux_window: None,
+            plan_path: None,
+            epic_id: epic.map(EpicId),
+            pr_url: None,
+            tag: None,
+            sort_order: None,
+            base_branch: "main".to_string(),
+            external_id: None,
+            labels: Vec::new(),
+            project_id: ProjectId(1),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            last_pre_tool_use_at: None,
+            last_notification_at: None,
+            wrap_up_mode: None,
+        }
+    }
+
+    // -- SubtaskStats --
+
+    #[test]
+    fn subtask_stats_counts_direct_tasks_only_without_nested_epics() {
+        let epics = vec![make_test_epic(1, None)];
+        let tasks = vec![
+            make_test_task(1, TaskStatus::Running, Some(1)),
+            make_test_task(2, TaskStatus::Done, Some(1)),
+        ];
+        let stats = SubtaskStats::for_epic(&epics[0], &tasks, &epics, None);
+        assert_eq!(stats.running, 1);
+        assert_eq!(stats.done, 1);
+        assert_eq!(stats.total, 2);
+    }
+
+    #[test]
+    fn subtask_stats_includes_tasks_from_nested_sub_epics() {
+        let epics = vec![make_test_epic(1, None), make_test_epic(2, Some(1))];
+        let tasks = vec![
+            make_test_task(1, TaskStatus::Backlog, Some(1)),
+            make_test_task(2, TaskStatus::Running, Some(2)),
+            make_test_task(3, TaskStatus::Done, Some(2)),
+        ];
+        let stats = SubtaskStats::for_epic(&epics[0], &tasks, &epics, None);
+        assert_eq!(stats.backlog, 1);
+        assert_eq!(stats.running, 1);
+        assert_eq!(stats.done, 1);
+        assert_eq!(stats.total, 3);
+    }
+
+    #[test]
+    fn subtask_stats_includes_tasks_from_deeply_nested_epics() {
+        let epics = vec![
+            make_test_epic(1, None),
+            make_test_epic(2, Some(1)),
+            make_test_epic(3, Some(2)),
+        ];
+        let tasks = vec![make_test_task(1, TaskStatus::Running, Some(3))];
+        let stats = SubtaskStats::for_epic(&epics[0], &tasks, &epics, None);
+        assert_eq!(stats.running, 1);
+        assert_eq!(stats.total, 1);
+    }
+
+    #[test]
+    fn subtask_stats_excludes_archived_tasks_from_nested_epics() {
+        let epics = vec![make_test_epic(1, None), make_test_epic(2, Some(1))];
+        let tasks = vec![
+            make_test_task(1, TaskStatus::Running, Some(1)),
+            make_test_task(2, TaskStatus::Archived, Some(2)),
+        ];
+        let stats = SubtaskStats::for_epic(&epics[0], &tasks, &epics, None);
+        assert_eq!(stats.running, 1);
+        assert_eq!(stats.total, 1);
+    }
 
     // -- RepoFilterMode --
 
