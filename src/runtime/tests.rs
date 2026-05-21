@@ -2945,6 +2945,118 @@ async fn exec_save_tips_state_persists_to_db() {
 }
 
 // ---------------------------------------------------------------------------
+// exec_insert_task / exec_quick_dispatch — project_id defaults
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn exec_insert_task_with_epic_uses_epic_project_id() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let proj2 = db.create_project("Project 2", 2).await.unwrap();
+    let epic = db
+        .create_epic("My Epic", "", "/repo", None, proj2.id)
+        .await
+        .unwrap();
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+    let rt = make_runtime(db.clone(), tx, runner);
+    let mut app = App::new(vec![], ProjectId(1));
+    rt.exec_refresh_epics_from_db(&mut app).await;
+
+    rt.exec_insert_task(
+        &mut app,
+        tui::TaskDraft {
+            title: "Cross-project task".into(),
+            description: String::new(),
+            repo_path: "/repo".into(),
+            ..Default::default()
+        },
+        Some(epic.id),
+    )
+    .await;
+
+    let tasks = db.list_all().await.unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(
+        tasks[0].project_id, proj2.id,
+        "task should inherit project_id from the epic, not the active project"
+    );
+}
+
+#[tokio::test]
+async fn exec_insert_task_without_epic_uses_active_project() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let proj2 = db.create_project("Project 2", 2).await.unwrap();
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+    let rt = make_runtime(db.clone(), tx, runner);
+    let mut app = App::new(vec![], proj2.id);
+
+    rt.exec_insert_task(
+        &mut app,
+        tui::TaskDraft {
+            title: "Active project task".into(),
+            description: String::new(),
+            repo_path: "/repo".into(),
+            ..Default::default()
+        },
+        None,
+    )
+    .await;
+
+    let tasks = db.list_all().await.unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(
+        tasks[0].project_id, proj2.id,
+        "task should use the TUI active project when no epic is provided"
+    );
+}
+
+#[tokio::test]
+async fn exec_quick_dispatch_with_epic_uses_epic_project_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().to_str().unwrap();
+    std::fs::create_dir_all(format!("{repo}/.worktrees/1-cross-project-task")).unwrap();
+
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let proj2 = db.create_project("Project 2", 2).await.unwrap();
+    let epic = db
+        .create_epic("Cross-project Epic", "", repo, None, proj2.id)
+        .await
+        .unwrap();
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let mock = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"),
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(), // tmux set-hook
+        MockProcessRunner::ok(), // tmux send-keys -l
+        MockProcessRunner::ok(), // tmux send-keys Enter
+    ]));
+    let rt = make_runtime(db.clone(), tx, mock);
+    let mut app = App::new(vec![], ProjectId(1));
+    rt.exec_refresh_epics_from_db(&mut app).await;
+
+    rt.exec_quick_dispatch(
+        &mut app,
+        tui::TaskDraft {
+            title: "Quick task".into(),
+            description: String::new(),
+            repo_path: repo.to_string(),
+            ..Default::default()
+        },
+        Some(epic.id),
+    )
+    .await;
+
+    let tasks = db.list_all().await.unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(
+        tasks[0].project_id, proj2.id,
+        "quick dispatch should inherit project_id from the epic, not the active project"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // exec_check_pr_status — closed PR sends no message
 // ---------------------------------------------------------------------------
 

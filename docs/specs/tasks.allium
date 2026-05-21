@@ -33,6 +33,7 @@ rule CreateTask {
         sort_order: sort_order,
         base_branch: base_branch ?? config.default_branch,
         wrap_up_mode: wrap_up_mode,
+        project_id: effective_project_id,
         created_at: now,
         updated_at: now
     )
@@ -46,6 +47,10 @@ rule CreateTask {
         -- When null, the wrap-up path is decided at wrap-up time.
         -- When invoked from the epic view, epic is set to the
         -- current epic, auto-linking the new task as a subtask.
+        -- effective_project_id derivation (TUI):
+        --   if epic != null: epic.project_id
+        --   else:            TUI active project
+        -- Implemented in src/runtime/tasks.rs exec_insert_task.
 }
 
 rule SetWrapUpMode {
@@ -76,6 +81,7 @@ rule CreateQuickTask {
             sub_status: core/SubStatus.default_for(backlog),
             epic: if epic_id != null then core/Epic.find(epic_id) else null,
             base_branch: detect_default_branch(repo_path),
+            project_id: effective_project_id,
             created_at: now,
             updated_at: now
         )
@@ -103,6 +109,10 @@ rule CreateQuickTask {
         -- AgentLaunched fires immediately after creation; the task
         -- transitions through the same dispatch path as DispatchTask
         -- (Backlog -> Running, worktree and tmux window provisioned).
+        -- effective_project_id derivation (TUI):
+        --   if epic_id != null: core/Epic.find(epic_id).project_id
+        --   else:               TUI active project
+        -- Implemented in src/runtime/tasks.rs exec_quick_dispatch.
 }
 
 -- == Status Movement ==

@@ -9,6 +9,10 @@ impl TuiRuntime {
         epic_id: Option<models::EpicId>,
     ) {
         use crate::service::CreateTaskParams;
+        let project_id = epic_id
+            .and_then(|eid| app.epics().iter().find(|e| e.id == eid))
+            .map(|e| e.project_id)
+            .unwrap_or_else(|| app.active_project());
         let params = CreateTaskParams {
             title: draft.title,
             description: draft.description,
@@ -18,7 +22,7 @@ impl TuiRuntime {
             sort_order: None,
             tag: draft.tag,
             base_branch: Some(draft.base_branch),
-            project_id: app.active_project(),
+            project_id,
             wrap_up_mode: draft.wrap_up_mode,
         };
         if let Some(task) = self.create_task(app, params).await {
@@ -40,6 +44,10 @@ impl TuiRuntime {
         // detect_default_branch falls back to "main" when origin/HEAD is
         // unavailable, so dispatch doesn't fail on repos whose default isn't main.
         let base_branch = crate::git::detect_default_branch(&expanded, &*self.runner);
+        let project_id = epic_id
+            .and_then(|eid| app.epics().iter().find(|e| e.id == eid))
+            .map(|e| e.project_id)
+            .unwrap_or_else(|| app.active_project());
         let Some(task) = self
             .create_task(
                 app,
@@ -52,7 +60,7 @@ impl TuiRuntime {
                     sort_order: None,
                     tag: None,
                     base_branch: Some(base_branch),
-                    project_id: app.active_project(),
+                    project_id,
                     wrap_up_mode: None,
                 },
             )
