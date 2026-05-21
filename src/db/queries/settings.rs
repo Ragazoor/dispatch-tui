@@ -54,7 +54,8 @@ impl super::super::SettingsStore for Database {
                 rows
             };
             for (name, json) in presets {
-                let paths: Vec<String> = serde_json::from_str(&json).unwrap_or_default();
+                let paths: Vec<String> = serde_json::from_str(&json)
+                    .with_context(|| format!("corrupt filter_preset JSON for preset {name:?}"))?;
                 let filtered: Vec<String> = paths.into_iter().filter(|p| p != &path).collect();
                 if filtered.is_empty() {
                     conn.execute("DELETE FROM filter_presets WHERE name = ?1", params![name])?;
@@ -173,13 +174,14 @@ impl super::super::SettingsStore for Database {
             let raw: Vec<(String, String, String)> = rows
                 .collect::<Result<Vec<_>, _>>()
                 .context("Failed to list filter presets")?;
-            Ok(raw
-                .into_iter()
+            raw.into_iter()
                 .map(|(name, json, mode)| {
-                    let paths: Vec<String> = serde_json::from_str(&json).unwrap_or_default();
-                    (name, paths, mode)
+                    let paths: Vec<String> = serde_json::from_str(&json).with_context(|| {
+                        format!("corrupt filter_preset JSON for preset {name:?}")
+                    })?;
+                    Ok((name, paths, mode))
                 })
-                .collect())
+                .collect()
         })
         .await
     }

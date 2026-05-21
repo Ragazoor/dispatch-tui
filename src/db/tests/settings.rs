@@ -325,3 +325,43 @@ async fn verify_command_get_unknown_path_is_none() {
         None
     );
 }
+
+#[tokio::test]
+async fn list_filter_presets_errors_on_corrupt_json() {
+    let db = in_memory_db().await;
+    db.db_call(move |conn| {
+        conn.execute(
+            "INSERT INTO filter_presets (name, repo_paths, mode) VALUES (?1, ?2, ?3)",
+            rusqlite::params!["bad_preset", "{not json", "all"],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let result = db.list_filter_presets().await;
+    assert!(
+        result.is_err(),
+        "expected Err on corrupt filter preset JSON, got {:?}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn delete_repo_path_errors_on_corrupt_preset_json() {
+    let db = in_memory_db().await;
+    db.save_repo_path("/repo").await.unwrap();
+    db.db_call(move |conn| {
+        conn.execute(
+            "INSERT INTO filter_presets (name, repo_paths, mode) VALUES (?1, ?2, ?3)",
+            rusqlite::params!["bad_preset", "{not json", "all"],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let result = db.delete_repo_path("/repo").await;
+    assert!(
+        result.is_err(),
+        "expected Err when corrupt preset JSON is encountered during delete"
+    );
+}
