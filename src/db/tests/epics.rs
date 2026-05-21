@@ -326,7 +326,7 @@ async fn patch_epic_repo_path() {
 }
 
 #[tokio::test]
-async fn recalculate_epic_status_advances_to_running() {
+async fn recalculate_epic_status_running_task_leaves_epic_in_backlog() {
     let db = in_memory_db().await;
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
@@ -344,11 +344,11 @@ async fn recalculate_epic_status_advances_to_running() {
 
     db.recalculate_epic_status(epic.id).await.unwrap();
     let epic = db.get_epic(epic.id).await.unwrap().unwrap();
-    assert_eq!(epic.status, TaskStatus::Running);
+    assert_eq!(epic.status, TaskStatus::Backlog); // running task does not auto-advance epic
 }
 
 #[tokio::test]
-async fn recalculate_epic_status_moves_backward_from_review_to_running() {
+async fn recalculate_epic_status_running_task_leaves_review_epic_unchanged() {
     let db = in_memory_db().await;
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
@@ -368,11 +368,11 @@ async fn recalculate_epic_status_moves_backward_from_review_to_running() {
 
     db.recalculate_epic_status(epic.id).await.unwrap();
     let epic = db.get_epic(epic.id).await.unwrap().unwrap();
-    assert_eq!(epic.status, TaskStatus::Running);
+    assert_eq!(epic.status, TaskStatus::Review); // manual placement preserved
 }
 
 #[tokio::test]
-async fn recalculate_epic_status_moves_backward_from_review_to_backlog() {
+async fn recalculate_epic_status_backlog_task_leaves_review_epic_unchanged() {
     let db = in_memory_db().await;
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
@@ -389,11 +389,11 @@ async fn recalculate_epic_status_moves_backward_from_review_to_backlog() {
 
     db.recalculate_epic_status(epic.id).await.unwrap();
     let epic = db.get_epic(epic.id).await.unwrap().unwrap();
-    assert_eq!(epic.status, TaskStatus::Backlog);
+    assert_eq!(epic.status, TaskStatus::Review); // manual placement preserved
 }
 
 #[tokio::test]
-async fn recalculate_epic_status_moves_backward_when_review_subtask_completes() {
+async fn recalculate_epic_status_review_epic_stays_when_one_task_done_one_running() {
     let db = in_memory_db().await;
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
@@ -416,15 +416,14 @@ async fn recalculate_epic_status_moves_backward_when_review_subtask_completes() 
         .await
         .unwrap();
 
-    // Manually set epic to Review (simulating a subtask that was in review and then moved to done)
     db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Review))
         .await
         .unwrap();
 
     db.recalculate_epic_status(epic.id).await.unwrap();
     let epic = db.get_epic(epic.id).await.unwrap().unwrap();
-    // Should drop back to Running since no subtask is in review but one is running
-    assert_eq!(epic.status, TaskStatus::Running);
+    // t1 still running, t2 done — not all done, not done-regression → no change
+    assert_eq!(epic.status, TaskStatus::Review);
 }
 
 #[tokio::test]
@@ -456,7 +455,7 @@ async fn recalculate_epic_status_all_done() {
 }
 
 #[tokio::test]
-async fn recalculate_epic_status_all_review_or_done() {
+async fn recalculate_epic_status_mixed_review_done_leaves_epic_in_backlog() {
     let db = in_memory_db().await;
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
@@ -480,11 +479,11 @@ async fn recalculate_epic_status_all_review_or_done() {
 
     db.recalculate_epic_status(epic.id).await.unwrap();
     let epic = db.get_epic(epic.id).await.unwrap().unwrap();
-    assert_eq!(epic.status, TaskStatus::Review);
+    assert_eq!(epic.status, TaskStatus::Backlog); // not all done → no auto-advance
 }
 
 #[tokio::test]
-async fn recalculate_epic_status_review_beats_running() {
+async fn recalculate_epic_status_mixed_review_running_leaves_epic_in_backlog() {
     let db = in_memory_db().await;
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
@@ -515,11 +514,11 @@ async fn recalculate_epic_status_review_beats_running() {
 
     db.recalculate_epic_status(epic.id).await.unwrap();
     let epic = db.get_epic(epic.id).await.unwrap().unwrap();
-    assert_eq!(epic.status, TaskStatus::Review);
+    assert_eq!(epic.status, TaskStatus::Backlog);
 }
 
 #[tokio::test]
-async fn cli_update_conditional_sets_epic_to_review() {
+async fn cli_update_conditional_task_to_review_leaves_epic_in_backlog() {
     use crate::service::TaskService;
 
     let db = std::sync::Arc::new(in_memory_db().await);
@@ -531,9 +530,7 @@ async fn cli_update_conditional_sets_epic_to_review() {
         .await
         .unwrap();
     db.set_task_epic_id(task.id, Some(epic.id)).await.unwrap();
-    db.recalculate_epic_status(epic.id).await.unwrap();
 
-    // Simulate hook: dispatch update <id> review --only-if running
     let svc = TaskService::new(db.clone());
     let updated = svc
         .cli_update_task(task.id, TaskStatus::Review, Some(TaskStatus::Running), None)
@@ -542,11 +539,11 @@ async fn cli_update_conditional_sets_epic_to_review() {
     assert!(updated);
 
     let epic = db.get_epic(epic.id).await.unwrap().unwrap();
-    assert_eq!(epic.status, TaskStatus::Review);
+    assert_eq!(epic.status, TaskStatus::Backlog);
 }
 
 #[tokio::test]
-async fn cli_update_unconditional_sets_epic_to_running() {
+async fn cli_update_unconditional_task_to_running_leaves_epic_in_backlog() {
     use crate::service::TaskService;
 
     let db = std::sync::Arc::new(in_memory_db().await);
@@ -559,7 +556,6 @@ async fn cli_update_unconditional_sets_epic_to_running() {
         .unwrap();
     db.set_task_epic_id(task.id, Some(epic.id)).await.unwrap();
 
-    // Simulate: dispatch update <id> running (no --only-if)
     let svc = TaskService::new(db.clone());
     let updated = svc
         .cli_update_task(task.id, TaskStatus::Running, None, None)
@@ -568,11 +564,11 @@ async fn cli_update_unconditional_sets_epic_to_running() {
     assert!(updated);
 
     let epic = db.get_epic(epic.id).await.unwrap().unwrap();
-    assert_eq!(epic.status, TaskStatus::Running);
+    assert_eq!(epic.status, TaskStatus::Backlog);
 }
 
 #[tokio::test]
-async fn cli_update_epic_drops_back_when_review_task_done() {
+async fn cli_update_epic_stays_backlog_when_review_task_completes() {
     use crate::service::TaskService;
 
     let db = std::sync::Arc::new(in_memory_db().await);
@@ -592,21 +588,20 @@ async fn cli_update_epic_drops_back_when_review_task_done() {
     db.recalculate_epic_status(epic.id).await.unwrap();
     assert_eq!(
         db.get_epic(epic.id).await.unwrap().unwrap().status,
-        TaskStatus::Review
+        TaskStatus::Backlog // running+review tasks → no auto-advance
     );
 
-    // t2 moves to done — epic should drop to Running (t1 still running)
     let svc = TaskService::new(db.clone());
     svc.cli_update_task(t2.id, TaskStatus::Done, Some(TaskStatus::Review), None)
         .await
         .unwrap();
 
     let epic = db.get_epic(epic.id).await.unwrap().unwrap();
-    assert_eq!(epic.status, TaskStatus::Running);
+    assert_eq!(epic.status, TaskStatus::Backlog); // t1 still running → not all done
 }
 
 #[tokio::test]
-async fn cli_update_with_substatus_keeps_running_and_recalculates_epic() {
+async fn cli_update_with_substatus_keeps_task_running_and_epic_in_backlog() {
     use crate::service::TaskService;
 
     let db = std::sync::Arc::new(in_memory_db().await);
@@ -620,8 +615,6 @@ async fn cli_update_with_substatus_keeps_running_and_recalculates_epic() {
     db.set_task_epic_id(task.id, Some(epic.id)).await.unwrap();
     db.recalculate_epic_status(epic.id).await.unwrap();
 
-    // Hook sets needs_input while staying running:
-    // dispatch update <id> running --only-if running --sub-status needs_input
     let svc = TaskService::new(db.clone());
     svc.cli_update_task(
         task.id,
@@ -632,11 +625,9 @@ async fn cli_update_with_substatus_keeps_running_and_recalculates_epic() {
     .await
     .unwrap();
 
-    // Epic should still be Running
     let epic = db.get_epic(epic.id).await.unwrap().unwrap();
-    assert_eq!(epic.status, TaskStatus::Running);
+    assert_eq!(epic.status, TaskStatus::Backlog); // running task → epic stays in backlog
 
-    // Task sub_status should be NeedsInput
     let task = db.get_task(task.id).await.unwrap().unwrap();
     assert_eq!(task.sub_status, SubStatus::NeedsInput);
 }
@@ -728,7 +719,79 @@ async fn recalculate_epic_status_ignores_archived_subtasks() {
 }
 
 #[tokio::test]
-async fn recalculate_epic_status_no_subtasks_stays_backlog() {
+async fn recalculate_epic_status_done_regresses_to_backlog_when_running_task_added() {
+    let db = in_memory_db().await;
+    let epic = db
+        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .await
+        .unwrap();
+    db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Done))
+        .await
+        .unwrap();
+
+    let task = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Backlog)
+        .await
+        .unwrap();
+    db.set_task_epic_id(task.id, Some(epic.id)).await.unwrap();
+    db.patch_task(task.id, &TaskPatch::new().status(TaskStatus::Running))
+        .await
+        .unwrap();
+
+    db.recalculate_epic_status(epic.id).await.unwrap();
+    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
+    // Done epic with active non-done child → regression to backlog
+    assert_eq!(epic.status, TaskStatus::Backlog);
+}
+
+#[tokio::test]
+async fn recalculate_epic_status_no_active_children_leaves_status_unchanged() {
+    let db = in_memory_db().await;
+    let epic = db
+        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .await
+        .unwrap();
+    // Manually push to running to test that recalc with no tasks doesn't reset it
+    db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Running))
+        .await
+        .unwrap();
+
+    db.recalculate_epic_status(epic.id).await.unwrap();
+    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
+    assert_eq!(epic.status, TaskStatus::Running); // no children → status unchanged
+}
+
+#[tokio::test]
+async fn recalculate_epic_status_done_epic_stays_done_when_all_tasks_archived() {
+    let db = in_memory_db().await;
+    let epic = db
+        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .await
+        .unwrap();
+
+    let task = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Backlog)
+        .await
+        .unwrap();
+    db.set_task_epic_id(task.id, Some(epic.id)).await.unwrap();
+    db.patch_task(task.id, &TaskPatch::new().status(TaskStatus::Done))
+        .await
+        .unwrap();
+    db.recalculate_epic_status(epic.id).await.unwrap();
+    assert_eq!(
+        db.get_epic(epic.id).await.unwrap().unwrap().status,
+        TaskStatus::Done
+    );
+
+    // Archive the task — epic has no active children now
+    db.patch_task(task.id, &TaskPatch::new().status(TaskStatus::Archived))
+        .await
+        .unwrap();
+    db.recalculate_epic_status(epic.id).await.unwrap();
+    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
+    assert_eq!(epic.status, TaskStatus::Done); // already done, no active children → stay done
+}
+
+#[tokio::test]
+async fn recalculate_epic_status_no_subtasks_stays_running() {
     let db = in_memory_db().await;
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
@@ -740,7 +803,7 @@ async fn recalculate_epic_status_no_subtasks_stays_backlog() {
 
     db.recalculate_epic_status(epic.id).await.unwrap();
     let epic = db.get_epic(epic.id).await.unwrap().unwrap();
-    assert_eq!(epic.status, TaskStatus::Backlog);
+    assert_eq!(epic.status, TaskStatus::Running); // no children → status unchanged
 }
 
 #[tokio::test]
@@ -986,14 +1049,15 @@ async fn recalculate_parent_status_from_sub_epic() {
     .await
     .unwrap();
 
-    // Recalculating the sub-epic should also propagate up to the parent
+    // Recalculating the sub-epic should also propagate up to the parent.
+    // Running tasks do not auto-advance epics — both stay in backlog.
     db.recalculate_epic_status(child.id).await.unwrap();
 
     let updated_child = db.get_epic(child.id).await.unwrap().unwrap();
-    assert_eq!(updated_child.status, TaskStatus::Running);
+    assert_eq!(updated_child.status, TaskStatus::Backlog);
 
     let updated_parent = db.get_epic(parent.id).await.unwrap().unwrap();
-    assert_eq!(updated_parent.status, TaskStatus::Running);
+    assert_eq!(updated_parent.status, TaskStatus::Backlog);
 }
 
 #[tokio::test]

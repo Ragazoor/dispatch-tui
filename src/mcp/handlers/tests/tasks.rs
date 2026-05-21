@@ -3458,9 +3458,9 @@ async fn update_task_status_recalculates_epic_status() {
         resp.error
     );
 
-    // Epic should auto-advance to Running
+    // Epic stays in backlog (running tasks do not auto-advance)
     let epic = state.db.get_epic(epic.id).await.unwrap().unwrap();
-    assert_eq!(epic.status, TaskStatus::Running);
+    assert_eq!(epic.status, TaskStatus::Backlog);
 }
 
 // ---------------------------------------------------------------------------

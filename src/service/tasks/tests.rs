@@ -473,8 +473,8 @@ async fn update_task_with_epic_linkage() {
 
 #[tokio::test]
 async fn update_task_status_recalculates_parent_epic() {
-    // Status-change branch of recalculate_epic_for_task: an epic that
-    // contains a single task should follow the task's status.
+    // recalculate_epic_for_task: epic with running task stays in backlog
+    // (running and review tasks do not auto-advance epic status)
     let db = test_db().await;
     let task_svc = task_svc(&db);
     let epic_svc = epic_svc(&db);
@@ -515,14 +515,14 @@ async fn update_task_status_recalculates_parent_epic() {
         .unwrap();
 
     let refreshed = epic_svc.get_epic(epic.id).await.unwrap();
-    assert_eq!(refreshed.status, TaskStatus::Running);
+    assert_eq!(refreshed.status, TaskStatus::Backlog); // running task → epic stays backlog
 }
 
 #[tokio::test]
 async fn update_task_relink_recalculates_old_and_new_epic() {
     // Linkage-change branch of recalculate_epic_for_task: moving a Running
-    // task between two epics should leave the old epic empty (Backlog) and
-    // the new epic Running.
+    // task between two epics. Both epics stay in Backlog because running
+    // tasks do not auto-advance epic status.
     let db = test_db().await;
     let task_svc = task_svc(&db);
     let epic_svc = epic_svc(&db);
@@ -574,10 +574,10 @@ async fn update_task_relink_recalculates_old_and_new_epic() {
         .await
         .unwrap();
 
-    // Sanity: epic A is now Running.
+    // Sanity: epic A stays in Backlog (running task doesn't auto-advance).
     assert_eq!(
         epic_svc.get_epic(epic_a.id).await.unwrap().status,
-        TaskStatus::Running
+        TaskStatus::Backlog
     );
 
     task_svc
@@ -585,13 +585,14 @@ async fn update_task_relink_recalculates_old_and_new_epic() {
         .await
         .unwrap();
 
+    // After relinking, both epics stay in Backlog (running task doesn't auto-advance)
     assert_eq!(
         epic_svc.get_epic(epic_a.id).await.unwrap().status,
         TaskStatus::Backlog
     );
     assert_eq!(
         epic_svc.get_epic(epic_b.id).await.unwrap().status,
-        TaskStatus::Running
+        TaskStatus::Backlog
     );
 }
 
