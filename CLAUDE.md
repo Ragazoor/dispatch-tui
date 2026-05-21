@@ -29,7 +29,7 @@ Point git at the repo's hooks directory so the pre-push hook runs:
 git config core.hooksPath .githooks
 ```
 
-The pre-push hook runs `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test` before each push.
+The pre-push hook runs `cargo fmt` (auto-formats), `cargo clippy --all-targets --fix -- -D warnings`, and `./scripts/check-doc-paths.sh` (validates doc links). Run `cargo test` separately before pushing.
 
 ### Running tests
 
@@ -70,6 +70,8 @@ rm src/tui/tests/snapshots/*.snap.new                # always clean up
 | Domain-type invariants | inline in the owning module |
 
 Property tests live alongside unit tests in a nested `mod property_tests` block.
+
+Inline test modules (`mod tests`, `mod property_tests`) must have `#[allow(clippy::unwrap_used, clippy::expect_used)]` at the top — the workspace `-D warnings` policy otherwise rejects bare `unwrap()`/`expect()` calls. See `src/db/tests/mod.rs` for the canonical pattern.
 
 ### Coverage
 
@@ -112,6 +114,8 @@ Tags (`TaskTag` in `src/models/tasks.rs`: `Bug`, `Feature`, `Chore`, `PrReview`,
 ## Documentation
 
 This file is intentionally slim — it is loaded into every agent's context. Read these on demand:
+
+> **Key pattern**: `FieldUpdate` / `TaskPatch` is the most-touched pattern in the codebase (nullable field mutations). Read [docs/conventions.md](docs/conventions.md) before writing any update handler.
 
 - [docs/architecture.md](docs/architecture.md) — Message→Command, ProcessRunner, command queue draining, editor session invariant, review/security agent state machine, error handling, quick dispatch
 - [docs/conventions.md](docs/conventions.md) — `FieldUpdate`, `TaskPatch`/`EpicPatch` double-Option, DB trait narrowing, `conn()`, inline-mutation boundary, `let _`, dead code, sub-status TOCTOU, immutable `parent_epic_id`, Clippy, visibility, performance footguns (`column_items_for_status` test-only; no `std::fs` in async)
