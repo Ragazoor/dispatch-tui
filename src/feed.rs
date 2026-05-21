@@ -85,6 +85,11 @@ async fn sync_grouped_feed(
         }
     };
 
+    let active_sub_epics: Vec<_> = existing_sub_epics
+        .iter()
+        .filter(|e| e.status != crate::models::TaskStatus::Archived)
+        .collect();
+
     let mut sub_epic_ids: Vec<crate::models::EpicId> = Vec::new();
 
     for (repo_name, group) in &groups {
@@ -93,7 +98,7 @@ async fn sync_grouped_feed(
         let group_base_branches: Vec<_> = group.iter().map(|(_, _, bb)| bb.clone()).collect();
 
         let sub_epic_id =
-            if let Some(existing) = existing_sub_epics.iter().find(|e| e.title == *repo_name) {
+            if let Some(existing) = active_sub_epics.iter().find(|e| e.title == *repo_name) {
                 existing.id
             } else {
                 match db
@@ -728,6 +733,72 @@ mod tests {
         let sub_epics = db.list_sub_epics(epic.id).await.unwrap();
         assert_eq!(sub_epics.len(), 1);
         assert_eq!(sub_epics[0].title, "other");
+    }
+
+    #[tokio::test]
+    async fn tick_grouped_creates_fresh_sub_epic_when_existing_one_is_archived() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let feed_cmd = r#"echo '[{"external_id":"1","title":"A","description":"","url":"https://github.com/org/repo-a/pull/1","status":"backlog","tag":"pr-review"}]'"#;
+
+        let epic = db
+            .create_epic("Reviews", "", "", None, ProjectId(1))
+            .await
+            .unwrap();
+        db.patch_epic(
+            epic.id,
+            &EpicPatch::new()
+                .feed_command(Some(feed_cmd))
+                .group_by_repo(true),
+        )
+        .await
+        .unwrap();
+
+        // First run: creates sub-epic for repo-a
+        let (mut runner, mut rx) = make_runner(db.clone());
+        runner.tick().await;
+        tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("timed out")
+            .expect("channel closed");
+
+        let sub_epics = db.list_sub_epics(epic.id).await.unwrap();
+        assert_eq!(sub_epics.len(), 1);
+        let archived_id = sub_epics[0].id;
+
+        // User archives the sub-epic
+        db.patch_epic(
+            archived_id,
+            &EpicPatch::new().status(crate::models::TaskStatus::Archived),
+        )
+        .await
+        .unwrap();
+
+        // Second run: must create a NEW active sub-epic, not reuse the archived one
+        let (mut runner2, mut rx2) = make_runner(db.clone());
+        runner2.tick().await;
+        tokio::time::timeout(Duration::from_secs(5), rx2.recv())
+            .await
+            .expect("timed out")
+            .expect("channel closed");
+
+        let all_sub_epics = db.list_sub_epics(epic.id).await.unwrap();
+        let active: Vec<_> = all_sub_epics
+            .iter()
+            .filter(|e| e.status != crate::models::TaskStatus::Archived)
+            .collect();
+        assert_eq!(
+            active.len(),
+            1,
+            "expected a fresh active sub-epic after archiving; got sub-epics: {:?}",
+            all_sub_epics
+                .iter()
+                .map(|e| (&e.title, &e.status))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(active[0].title, "repo-a");
+        assert_ne!(active[0].id, archived_id, "must be a new sub-epic, not the archived one");
+        let tasks = db.list_tasks_for_epic(active[0].id).await.unwrap();
+        assert_eq!(tasks.len(), 1, "new sub-epic should have the feed task");
     }
 
     #[tokio::test]
