@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 /// Full `Command` match dispatch — one entry per variant, in `Command` enum order.
 ///
 /// Returns any follow-on commands that should be added to the execution queue.
@@ -133,6 +135,13 @@ pub(super) async fn dispatch(
         }
         Learning(cmd) => {
             dispatch_learning(rt, app, cmd).await;
+            vec![]
+        }
+        RecordUsageEvent(event) => {
+            let db = Arc::clone(&rt.database);
+            tokio::spawn(async move {
+                let _ = db.record_usage_event(&event).await;
+            });
             vec![]
         }
     }

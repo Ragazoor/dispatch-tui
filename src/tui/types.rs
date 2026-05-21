@@ -308,6 +308,9 @@ pub enum Command {
     /// Knowledge-base overlay side-effect commands — see
     /// [`crate::tui::commands::LearningCommand`].
     Learning(crate::tui::commands::LearningCommand),
+    /// Append-only telemetry: record a feature-usage event. The runtime spawns
+    /// a fire-and-forget DB write; failures are intentionally swallowed.
+    RecordUsageEvent(crate::models::UsageEvent),
 }
 
 // ---------------------------------------------------------------------------
