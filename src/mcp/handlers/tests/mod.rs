@@ -2,6 +2,7 @@
 mod epics;
 mod learnings;
 mod projects;
+mod repo_rag;
 mod tasks;
 
 use std::sync::Arc;
@@ -608,6 +609,18 @@ async fn tool_schemas_match_arg_structs() {
             BTreeSet::from(["task_id", "token"]),
             json!({"task_id": 1, "token": "tok"}),
         ),
+        (
+            "index_repo",
+            BTreeSet::from(["task_id", "repo_path"]),
+            BTreeSet::from(["task_id"]),
+            json!({"task_id": 1, "repo_path": "/some/path"}),
+        ),
+        (
+            "search_docs",
+            BTreeSet::from(["task_id", "query", "repo_path", "limit"]),
+            BTreeSet::from(["task_id", "query"]),
+            json!({"task_id": 1, "query": "escalation patterns"}),
+        ),
     ];
 
     // Verify we cover exactly the tools that exist
@@ -686,6 +699,12 @@ async fn tool_schemas_match_arg_structs() {
             }
             "exit_session" => {
                 serde_json::from_value::<ExitSessionArgs>(payload.clone()).unwrap();
+            }
+            "index_repo" => {
+                serde_json::from_value::<super::repo_rag::IndexRepoArgs>(payload.clone()).unwrap();
+            }
+            "search_docs" => {
+                serde_json::from_value::<super::repo_rag::SearchDocsArgs>(payload.clone()).unwrap();
             }
             other => panic!("No deserialization check for tool: {other}"),
         }

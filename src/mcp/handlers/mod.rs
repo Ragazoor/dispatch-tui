@@ -1,6 +1,7 @@
 mod dispatch;
 mod epics;
 mod learnings;
+mod repo_rag;
 mod tasks;
 mod types;
 
