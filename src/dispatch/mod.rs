@@ -79,6 +79,7 @@ pub fn check_pr_status(pr_url: &str, runner: &dyn ProcessRunner) -> Result<PrSta
         .next()
         .ok_or_else(|| anyhow::anyhow!("gh pr view: no output"))?
         .to_uppercase();
+    // review_decision is optional — repos without branch-protection rules omit it.
     let review_str = lines.next().unwrap_or("").to_uppercase();
 
     let state = match state_str.as_str() {
