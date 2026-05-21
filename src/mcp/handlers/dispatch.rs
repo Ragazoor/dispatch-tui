@@ -472,6 +472,25 @@ PR polling drives the task to Done on merge.",
             "required": ["learning_id", "task_id"]
         };
 
+    async "set_verify_command" => tasks::handle_set_verify_command,
+        "Set or clear the verify command for a repository path. \
+The command is injected into future agent prompts as a mandatory pre-completion check. \
+Pass command=null to clear it.",
+        {
+            "type": "object",
+            "properties": {
+                "repo_path": {
+                    "type": "string",
+                    "description": "Absolute path to the repository root (e.g. the task's repo_path)"
+                },
+                "command": {
+                    "type": "string",
+                    "description": "Single-line shell command to run for verification. Omit or pass null to clear."
+                }
+            },
+            "required": ["repo_path"]
+        };
+
     async "exit_session" => tasks::handle_exit_session,
         "Close your agent session. Two-phase: first call returns a reflection prompt asking you to call \
 record_learning for any pitfalls/conventions/tips you found; the second call (with the same token) closes \

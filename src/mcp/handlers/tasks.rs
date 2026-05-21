@@ -142,6 +142,12 @@ pub(super) struct ExitSessionArgs {
 }
 
 #[derive(Deserialize)]
+pub(super) struct SetVerifyCommandArgs {
+    pub(super) repo_path: String,
+    pub(super) command: Option<String>,
+}
+
+#[derive(Deserialize)]
 pub(super) struct SendMessageArgs {
     #[serde(deserialize_with = "deserialize_flexible_i64")]
     pub(super) from_task_id: i64,
@@ -620,6 +626,15 @@ pub(super) async fn handle_claim_task(
     }
 }
 
+async fn wrap_up_verify_line(db: &dyn crate::db::TaskStore, repo_path: &str) -> String {
+    match dispatch::fetch_verify_command(db, repo_path).await {
+        Some(cmd) => format!(
+            " **Verify before exiting**: run `{cmd}` in your worktree and confirm it passes."
+        ),
+        None => String::new(),
+    }
+}
+
 async fn reflection_nudge(db: &dyn crate::db::TaskStore) -> &'static str {
     let enabled = db
         .get_setting_bool("learning_reflection_enabled")
@@ -709,13 +724,7 @@ pub(super) async fn handle_wrap_up(
                 return JsonRpcResponse::err(id, -32603, format!("wrap_up done failed: {e}"));
             }
             state.notify_task_changed(task_id);
-            let verify_command = dispatch::fetch_verify_command(&*state.db, &task.repo_path).await;
-            let verify_line = match verify_command {
-                Some(cmd) => format!(
-                    " **Verify before exiting**: run `{cmd}` in your worktree and confirm it passes."
-                ),
-                None => String::new(),
-            };
+            let verify_line = wrap_up_verify_line(&*state.db, &task.repo_path).await;
             let token = state.issue_exit_token(task_id);
             JsonRpcResponse::ok(
                 id,
@@ -758,14 +767,7 @@ pub(super) async fn handle_wrap_up(
             match rebase_result {
                 Ok(()) => {
                     state.notify_task_changed(task_id);
-                    let verify_command =
-                        dispatch::fetch_verify_command(&*state.db, &task.repo_path).await;
-                    let verify_line = match verify_command {
-                        Some(cmd) => format!(
-                            " **Verify before exiting**: run `{cmd}` in your worktree and confirm it passes."
-                        ),
-                        None => String::new(),
-                    };
+                    let verify_line = wrap_up_verify_line(&*state.db, &task.repo_path).await;
                     let token = state.issue_exit_token(task_id);
                     JsonRpcResponse::ok(
                         id,
@@ -886,9 +888,21 @@ pub(super) async fn handle_exit_session(
     };
 
     if !already_reflected {
+        // Intentionally inline (not via wrap_up_verify_line): this branch has a
+        // non-empty nudge when no command is set, and the text differs from wrap_up's phrasing.
+        let verify_line =
+            match dispatch::fetch_verify_command(&*state.db, &task.repo_path).await {
+                Some(cmd) => format!(
+                    "\n\nThis repo's verify command is `{cmd}` — run it before closing."
+                ),
+                None => "\n\nNo verify command is set for this repo. \
+                         If you ran a command to validate your work, \
+                         record it with `set_verify_command`."
+                    .to_string(),
+            };
         return JsonRpcResponse::ok(
             id,
-            json!({"content": [{"type": "text", "text": "\
+            json!({"content": [{"type": "text", "text": format!("\
 Reflect on this session before closing.\n\
 \n\
 If you encountered any of the following, call record_learning for each one now:\n\
@@ -896,7 +910,7 @@ If you encountered any of the following, call record_learning for each one now:\
   \u{2022} A convention \u{2014} a pattern worth following consistently\n\
   \u{2022} A tool tip or preference\n\
 \n\
-Then call exit_session again (with the same token) to close the session."}]}),
+Then call exit_session again (with the same token) to close the session.{verify_line}")}]}),
         );
     }
 
@@ -935,6 +949,44 @@ Then call exit_session again (with the same token) to close the session."}]}),
         id,
         json!({"content": [{"type": "text", "text": "Session closed."}]}),
     )
+}
+
+pub(super) async fn handle_set_verify_command(
+    state: &McpState,
+    id: Option<Value>,
+    _identity: &CallerIdentity,
+    args: Value,
+) -> JsonRpcResponse {
+    let parsed = match parse_args::<SetVerifyCommandArgs>(&id, args) {
+        Ok(a) => a,
+        Err(resp) => return resp,
+    };
+    tracing::info!(repo_path = %parsed.repo_path, "MCP set_verify_command");
+    // Newline guard returns -32602 (invalid params) for a user-input error; the DB layer
+    // would surface the same constraint as -32603 (internal error), so we validate here.
+    // Blank/whitespace commands are intentionally not rejected — the DB normalises them to
+    // None (clear), which matches the trait contract.
+    if parsed
+        .command
+        .as_deref()
+        .is_some_and(|c| c.contains('\n') || c.contains('\r'))
+    {
+        return JsonRpcResponse::err(id, -32602, "command must be a single line");
+    }
+    match state
+        .db
+        .set_verify_command(&parsed.repo_path, parsed.command.as_deref())
+        .await
+    {
+        Ok(()) => {
+            let msg = match &parsed.command {
+                Some(cmd) => format!("Verify command set for `{}`: `{cmd}`", parsed.repo_path),
+                None => format!("Verify command cleared for `{}`", parsed.repo_path),
+            };
+            JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": msg}]}))
+        }
+        Err(e) => JsonRpcResponse::err(id, -32603, format!("failed to set verify command: {e}")),
+    }
 }
 
 fn do_dispatch(

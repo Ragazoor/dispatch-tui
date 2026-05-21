@@ -590,6 +590,12 @@ async fn tool_schemas_match_arg_structs() {
             json!({"learning_id": 1, "task_id": 1}),
         ),
         (
+            "set_verify_command",
+            BTreeSet::from(["repo_path", "command"]),
+            BTreeSet::from(["repo_path"]),
+            json!({"repo_path": "/repo"}),
+        ),
+        (
             "exit_session",
             BTreeSet::from(["task_id", "token"]),
             BTreeSet::from(["task_id", "token"]),
@@ -665,6 +671,10 @@ async fn tool_schemas_match_arg_structs() {
             }
             "upvote_learning" => {
                 serde_json::from_value::<super::learnings::UpvoteLearningArgs>(payload.clone())
+                    .unwrap();
+            }
+            "set_verify_command" => {
+                serde_json::from_value::<super::tasks::SetVerifyCommandArgs>(payload.clone())
                     .unwrap();
             }
             "exit_session" => {
