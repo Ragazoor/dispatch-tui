@@ -12,7 +12,7 @@ use crate::models::{
 };
 
 /// Build a `FromSqlConversionFailure` error for an unrecognised enum string.
-fn unknown_enum(field: &'static str, raw: &str) -> rusqlite::Error {
+pub(super) fn unknown_enum(field: &'static str, raw: &str) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(
         0,
         rusqlite::types::Type::Text,
@@ -105,7 +105,7 @@ pub(super) fn read_json_string_vec(
     row: &rusqlite::Row<'_>,
     column: &str,
 ) -> rusqlite::Result<Vec<String>> {
-    let raw: Option<String> = row.get::<_, Option<String>>(column).ok().flatten();
+    let raw: Option<String> = row.get::<_, Option<String>>(column)?;
     match raw {
         None => Ok(Vec::new()),
         Some(s) => serde_json::from_str::<Vec<String>>(&s).map_err(|e| {
@@ -170,7 +170,7 @@ pub(super) fn read_optional_datetime(
     row: &rusqlite::Row<'_>,
     col: &str,
 ) -> rusqlite::Result<Option<DateTime<Utc>>> {
-    let s: Option<String> = row.get::<_, Option<String>>(col).ok().flatten();
+    let s: Option<String> = row.get::<_, Option<String>>(col)?;
     match s {
         None => Ok(None),
         Some(s) => parse_datetime(&s).map(Some),

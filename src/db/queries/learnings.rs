@@ -9,7 +9,7 @@ use crate::models::{
 };
 
 use super::super::{CreateLearningRow, Database, LearningFilter, LearningPatch};
-use super::{parse_datetime, read_json_string_vec, write_json_string_vec};
+use super::{parse_datetime, read_json_string_vec, unknown_enum, write_json_string_vec};
 
 const LEARNING_COLUMNS: &str =
     "id, kind, summary, detail, scope, scope_ref, tags, status, source_task_id, \
@@ -25,20 +25,10 @@ fn row_to_learning(row: &rusqlite::Row<'_>) -> rusqlite::Result<Learning> {
 
     let tags = read_json_string_vec(row, "tags")?;
 
-    let kind = LearningKind::parse(&kind_str).ok_or_else(|| {
-        rusqlite::Error::FromSqlConversionFailure(
-            0,
-            rusqlite::types::Type::Text,
-            format!("unrecognised learning kind: {kind_str:?}").into(),
-        )
-    })?;
-    let scope = LearningScope::parse(&scope_str).ok_or_else(|| {
-        rusqlite::Error::FromSqlConversionFailure(
-            0,
-            rusqlite::types::Type::Text,
-            format!("unrecognised learning scope: {scope_str:?}").into(),
-        )
-    })?;
+    let kind = LearningKind::parse(&kind_str)
+        .ok_or_else(|| unknown_enum("learning_kind", &kind_str))?;
+    let scope = LearningScope::parse(&scope_str)
+        .ok_or_else(|| unknown_enum("learning_scope", &scope_str))?;
     let status = LearningStatus::parse(&status_str).map_err(|e| {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, e.into())
     })?;
