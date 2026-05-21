@@ -2130,6 +2130,7 @@ async fn wrap_up_accepts_running_blocked_task() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
 
     let task_id = db
@@ -2189,6 +2190,7 @@ async fn wrap_up_accepts_running_active_task() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
 
     let task_id = db
@@ -2249,6 +2251,7 @@ async fn wrap_up_rebase_response_demands_exit_session_imperatively() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
 
     let task_id = db
@@ -2401,6 +2404,7 @@ async fn wrap_up_rebase_returns_started() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
 
     let task_id = db
@@ -2457,6 +2461,7 @@ async fn wrap_up_rebase_returns_exit_token() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
     let task_id = create_wrappable_task(&db).await;
 
@@ -2497,6 +2502,7 @@ async fn wrap_up_done_returns_exit_token() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
 
     let task_id = db
@@ -2739,6 +2745,7 @@ async fn make_state_with_runner(
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
     (state, db)
 }
@@ -3302,6 +3309,7 @@ async fn wrap_up_rebase_conflict_returns_error() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
 
     let task_id = db
@@ -3358,6 +3366,7 @@ async fn wrap_up_rebase_not_on_main_returns_error() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
 
     let task_id = db
@@ -3473,6 +3482,7 @@ async fn send_message_writes_file_and_sends_keys() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
 
     // Create sender and receiver tasks
@@ -3760,6 +3770,7 @@ async fn test_state_with_notify() -> (
         Some(tx),
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
     (state, rx)
 }
@@ -4307,6 +4318,7 @@ async fn wrap_up_rebase_does_not_change_status() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
 
     let task_id = db
@@ -4366,6 +4378,7 @@ async fn wrap_up_rebase_does_not_recalculate_epic_status() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
 
     let epic = db
@@ -4430,6 +4443,7 @@ async fn wrap_up_accepts_string_task_id() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
 
     let task_id = db
@@ -4888,6 +4902,7 @@ async fn dispatch_next_picks_first_backlog_subtask() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
 
     let epic = db
@@ -4990,6 +5005,7 @@ async fn dispatch_next_respects_sort_order() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
 
     let epic = db
@@ -5085,6 +5101,7 @@ async fn dispatch_next_respects_tag_routing() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
 
     let epic = db
@@ -5162,6 +5179,7 @@ async fn wrap_up_rebase_preserves_tmux_window() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
 
     let task_id = db
@@ -5231,6 +5249,7 @@ async fn wrap_up_rebase_conflict_sets_conflict_substatus() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
 
     let task_id = db
@@ -5298,6 +5317,7 @@ async fn wrap_up_rebase_clears_conflict_substatus_on_non_conflict_error() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
 
     let task_id = db
@@ -5596,6 +5616,7 @@ async fn dispatch_task_dispatches_backlog_task() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
 
     let task_id = db
@@ -5726,6 +5747,7 @@ async fn dispatch_task_respects_tag_routing() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
 
     // Feature-tagged task with no plan → should route to Plan mode
@@ -5803,6 +5825,7 @@ async fn dispatch_task_dependabot_tag_routes_through_dispatch_agent() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
 
     let task_id = db
@@ -5893,6 +5916,7 @@ async fn dispatch_task_returns_error_when_dispatch_fails() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
 
     let task_id = db
@@ -5947,6 +5971,7 @@ async fn create_task_with_project_id_assigns_correctly() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
 
     let resp = call(
@@ -5983,6 +6008,7 @@ async fn create_epic_without_project_id_assigns_to_default() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
 
     let resp = call(
@@ -6015,6 +6041,7 @@ async fn create_epic_with_project_id_assigns_correctly() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
 
     let resp = call(
@@ -6052,6 +6079,7 @@ async fn list_projects_returns_all_projects() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
 
     let resp = call(
@@ -6088,6 +6116,7 @@ async fn update_task_project_id_moves_task() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
 
     let task_id = create_task_fixture(&state).await;
@@ -6141,6 +6170,7 @@ async fn update_epic_project_id_moves_epic() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
 
     let epic = db
@@ -6181,6 +6211,7 @@ async fn update_epic_invalid_project_id_returns_error() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
 
     let epic = db
@@ -7095,6 +7126,7 @@ async fn make_rebase_state() -> (Arc<dyn db::TaskStore>, Arc<McpState>) {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
     (db, state)
 }
@@ -7601,6 +7633,7 @@ async fn exit_session_full_flow_rebase() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
     let task_id = create_wrappable_task(&db).await;
     db.patch_task(task_id, &db::TaskPatch::new().tmux_window(Some("task-1")))
@@ -7675,6 +7708,7 @@ async fn wrap_up_second_call_overwrites_token() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
     let task_id = create_wrappable_task(&db).await;
     db.patch_task(task_id, &db::TaskPatch::new().tmux_window(Some("task-1")))
@@ -8259,6 +8293,7 @@ async fn wrap_up_then_exit_session_end_to_end() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
 
     let epic = db
@@ -8671,6 +8706,7 @@ async fn wrap_up_done_marks_task_done_without_git_ops() {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
 
     let task_id = db

@@ -39,6 +39,7 @@ async fn test_state() -> Arc<McpState> {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ))
 }
 
@@ -50,6 +51,7 @@ async fn test_state_with_db() -> (Arc<McpState>, Arc<dyn db::TaskStore>) {
         None,
         runner,
         EmbeddingService::new_test(),
+        std::env::temp_dir(),
     ));
     (state, db)
 }

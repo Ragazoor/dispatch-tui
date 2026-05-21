@@ -50,6 +50,9 @@ pub struct McpState {
     pub embedding_service: Arc<EmbeddingService>,
     /// In-memory tokens issued by wrap_up, consumed by exit_session.
     pub(crate) exit_tokens: Arc<RwLock<HashMap<TaskId, ExitToken>>>,
+    /// Dispatch data directory (parent of the SQLite DB). Trajectory files are
+    /// written here under `trajectories/<task_id>.jsonl`.
+    pub data_dir: std::path::PathBuf,
 }
 
 impl McpState {
@@ -58,6 +61,7 @@ impl McpState {
         notify_tx: Option<mpsc::UnboundedSender<McpEvent>>,
         runner: Arc<dyn ProcessRunner>,
         embedding_service: Arc<EmbeddingService>,
+        data_dir: std::path::PathBuf,
     ) -> Self {
         Self {
             db,
@@ -65,6 +69,7 @@ impl McpState {
             runner,
             embedding_service,
             exit_tokens: Arc::new(RwLock::new(HashMap::new())),
+            data_dir,
         }
     }
 
@@ -121,8 +126,9 @@ pub fn router(
     notify_tx: Option<mpsc::UnboundedSender<McpEvent>>,
     runner: Arc<dyn ProcessRunner>,
     embedding_service: Arc<EmbeddingService>,
+    data_dir: std::path::PathBuf,
 ) -> Router {
-    let state = Arc::new(McpState::new(db, notify_tx, runner, embedding_service));
+    let state = Arc::new(McpState::new(db, notify_tx, runner, embedding_service, data_dir));
     Router::new()
         .route("/mcp", post(handlers::handle_mcp))
         .layer(axum::middleware::from_fn(
@@ -137,8 +143,9 @@ pub async fn serve(
     notify_tx: mpsc::UnboundedSender<McpEvent>,
     runner: Arc<dyn ProcessRunner>,
     embedding_service: Arc<EmbeddingService>,
+    data_dir: std::path::PathBuf,
 ) -> anyhow::Result<()> {
-    let app = router(db, Some(notify_tx), runner, embedding_service);
+    let app = router(db, Some(notify_tx), runner, embedding_service, data_dir);
     let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{port}")).await?;
     axum::serve(listener, app).await?;
     Ok(())

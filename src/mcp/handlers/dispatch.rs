@@ -653,26 +653,19 @@ pub async fn handle_mcp(
                         Some(err) => serde_json::json!({"error": err.message}),
                         None => resp.result.clone().unwrap_or(Value::Null),
                     };
-                    let worktree = state
-                        .db
-                        .get_task(*task_id)
-                        .await
-                        .ok()
-                        .flatten()
-                        .and_then(|t| t.worktree);
-                    if let Some(worktree) = worktree {
-                        let entry = trajectory::TrajectoryEntry {
-                            timestamp: start_utc,
-                            task_id: task_id.0,
-                            method: tool_name.to_string(),
-                            args,
-                            result: result_value,
-                            duration_ms,
-                        };
-                        let _ = tokio::spawn(async move {
-                            trajectory::append_entry(std::path::Path::new(&worktree), &entry).await;
-                        });
-                    }
+                    let entry = trajectory::TrajectoryEntry {
+                        timestamp: start_utc,
+                        task_id: task_id.0,
+                        method: tool_name.to_string(),
+                        args,
+                        result: result_value,
+                        duration_ms,
+                    };
+                    let data_dir = state.data_dir.clone();
+                    let tid = task_id.0;
+                    let _ = tokio::spawn(async move {
+                        trajectory::append_entry(&data_dir, tid, &entry).await;
+                    });
                 }
 
                 // Per MCP spec, tool-execution failures belong in `result` with
