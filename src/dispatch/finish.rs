@@ -120,3 +120,124 @@ pub fn finish_task(
 
     Ok(())
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+    use crate::process::MockProcessRunner;
+    use std::process::Output;
+
+    fn exit_fail() -> std::process::ExitStatus {
+        // UNIX only, but tests only run on Linux/macOS anyway.
+        use std::os::unix::process::ExitStatusExt;
+        std::process::ExitStatus::from_raw(1)
+    }
+
+    // The has_window path when tmux itself can't be executed (runner returns
+    // Err).  finish_task should warn and still return Ok(()) — a missing tmux
+    // window is not a fatal error at this stage.
+    #[test]
+    fn finish_task_has_window_runner_error_warns_and_succeeds() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"main\n"), // rev-parse HEAD
+            MockProcessRunner::fail(""),                  // remote get-url (no remote)
+            MockProcessRunner::ok(),                      // git rebase main
+            MockProcessRunner::ok(),                      // git merge --ff-only
+            Err(anyhow::anyhow!("tmux: command not found")), // tmux list-windows (has_window Err)
+        ]);
+
+        finish_task(
+            "/repo",
+            "/repo/.worktrees/42-fix-bug",
+            "42-fix-bug",
+            "main",
+            Some("task-42"),
+            &mock,
+        )
+        .expect("should succeed despite has_window runner error");
+    }
+
+    // Pull runner returns Err (process could not be spawned) rather than a
+    // non-zero exit — maps to FinishError::Other via map_err.
+    #[test]
+    fn finish_task_pull_runner_error_returns_other() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"main\n"), // rev-parse HEAD
+            MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // remote get-url
+            Err(anyhow::anyhow!("git: command not found")),                      // git pull
+        ]);
+
+        let err = finish_task(
+            "/repo",
+            "/repo/.worktrees/42-fix-bug",
+            "42-fix-bug",
+            "main",
+            None,
+            &mock,
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(err, FinishError::Other(ref m) if m.contains("Failed to pull")),
+            "pull runner error should map to FinishError::Other, got: {err}"
+        );
+    }
+
+    // FF-only runner returns Err (process could not be spawned) — maps to
+    // FinishError::Other via map_err with "Failed to fast-forward" prefix.
+    #[test]
+    fn finish_task_ff_only_runner_error_returns_other() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"main\n"), // rev-parse HEAD
+            MockProcessRunner::fail(""),                  // remote get-url (no remote)
+            MockProcessRunner::ok(),                      // git rebase
+            Err(anyhow::anyhow!("git: command not found")), // git merge --ff-only
+        ]);
+
+        let err = finish_task(
+            "/repo",
+            "/repo/.worktrees/42-fix-bug",
+            "42-fix-bug",
+            "main",
+            None,
+            &mock,
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(err, FinishError::Other(ref m) if m.contains("Failed to fast-forward")),
+            "ff-only runner error should map to FinishError::Other, got: {err}"
+        );
+    }
+
+    // Rebase detects conflict via stdout CONFLICT marker (stderr is empty).
+    #[test]
+    fn finish_task_rebase_conflict_in_stdout_returns_rebase_conflict() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"main\n"), // rev-parse HEAD
+            MockProcessRunner::fail(""),                  // remote get-url (no remote)
+            Ok(Output {
+                status: exit_fail(),
+                stdout: b"CONFLICT (content): Merge conflict in lib.rs\n".to_vec(),
+                stderr: vec![],
+            }),
+            MockProcessRunner::ok(), // git rebase --abort
+        ]);
+
+        let err = finish_task(
+            "/repo",
+            "/repo/.worktrees/42-fix-bug",
+            "42-fix-bug",
+            "main",
+            None,
+            &mock,
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(err, FinishError::RebaseConflict(_)),
+            "CONFLICT in stdout should still map to RebaseConflict, got: {err}"
+        );
+    }
+}
