@@ -220,6 +220,7 @@ impl std::str::FromStr for LearningVerdict {
 #[serde(rename_all = "snake_case")]
 pub enum RetrievalSource {
     PromptInjection,
+    /// Legacy — no longer produced; kept for existing DB records.
     Procedural,
     QueryLearnings,
 }

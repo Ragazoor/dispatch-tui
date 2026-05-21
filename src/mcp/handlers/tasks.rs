@@ -993,14 +993,10 @@ fn do_dispatch(
     runner: &dyn crate::process::ProcessRunner,
     project_ctx: dispatch::ProjectContext,
     epic_ctx: Option<dispatch::EpicContext>,
-    procedural: &[crate::models::Learning],
-    tiered: &[crate::models::Learning],
+    injected: &[crate::models::Learning],
     verify_command: Option<String>,
 ) -> anyhow::Result<crate::models::DispatchResult> {
-    let injections = dispatch::LearningInjections {
-        procedural: procedural.iter().collect(),
-        tiered: tiered.iter().collect(),
-    };
+    let injections = dispatch::LearningInjections::from(&*injected);
     match DispatchMode::for_task(task) {
         DispatchMode::Dispatch => dispatch::dispatch_agent(
             task,
@@ -1084,7 +1080,7 @@ pub(super) async fn handle_dispatch_next(
     let runner = state.runner.clone();
     let notify_tx = state.notify_tx.clone();
 
-    let (procedural, tiered) =
+    let injected =
         dispatch::build_and_record_injections(&*db, &next_task, &state.embedding_service).await;
     let verify_command = dispatch::fetch_verify_command(&*db, &next_task.repo_path).await;
 
@@ -1096,8 +1092,7 @@ pub(super) async fn handle_dispatch_next(
                 &*runner,
                 project_ctx,
                 epic_ctx,
-                &procedural,
-                &tiered,
+                &injected,
                 verify_command,
             )
         })
@@ -1198,7 +1193,7 @@ pub(super) async fn handle_dispatch_task(
     let notify_tx = state.notify_tx.clone();
     let epic_id = task.epic_id;
 
-    let (procedural, tiered) =
+    let injected =
         dispatch::build_and_record_injections(&*db, &task, &state.embedding_service).await;
     let verify_command = dispatch::fetch_verify_command(&*db, &task.repo_path).await;
     let result = tokio::task::spawn_blocking(move || {
@@ -1207,8 +1202,7 @@ pub(super) async fn handle_dispatch_task(
             &*runner,
             project_ctx,
             epic_ctx,
-            &procedural,
-            &tiered,
+            &injected,
             verify_command,
         )
     })

@@ -2404,19 +2404,18 @@ async fn build_learning_injections_partitions_and_records_retrievals() {
         .unwrap();
 
     let emb_svc = EmbeddingService::new_test();
-    let (procedural, tiered) =
+    let injected =
         crate::dispatch::build_and_record_injections(&*rt.database, &task, &emb_svc).await;
-    assert_eq!(procedural.len(), 1);
-    assert_eq!(procedural[0].id, proc_id);
-    assert_eq!(tiered.len(), 1);
-    assert_eq!(tiered[0].id, repo_id);
+    assert_eq!(injected.len(), 2);
+    let ids: Vec<_> = injected.iter().map(|l| l.id).collect();
+    assert!(ids.contains(&proc_id));
+    assert!(ids.contains(&repo_id));
 
     let rows = rt.database.list_retrievals_for_task(task.id).await.unwrap();
     assert_eq!(rows.len(), 2);
-    let proc_row = rows.iter().find(|r| r.learning_id == proc_id).unwrap();
-    assert!(matches!(proc_row.source, RetrievalSource::Procedural));
-    let tier_row = rows.iter().find(|r| r.learning_id == repo_id).unwrap();
-    assert!(matches!(tier_row.source, RetrievalSource::PromptInjection));
+    assert!(rows
+        .iter()
+        .all(|r| matches!(r.source, RetrievalSource::PromptInjection)));
 }
 
 // ---------------------------------------------------------------------------

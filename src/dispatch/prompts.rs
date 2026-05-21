@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::db;
-use crate::models::{EpicId, Learning, LearningKind, ProjectId, Task, TaskId, TaskTag};
+use crate::models::{EpicId, Learning, ProjectId, RetrievalSource, Task, TaskId, TaskTag};
 use crate::service::embeddings::{
     deserialize_candidate_rows, embed_text_for_query, rag_rank_learnings, EmbeddingService,
 };
@@ -198,25 +198,6 @@ pub(super) fn trailing_block() -> String {
     )
 }
 
-/// Render procedural-kind learnings as verbatim prompt-prefix instructions.
-/// `procedurals` is expected to already be ordered by scope priority then
-/// `upvote_count DESC`.
-pub(super) fn render_procedural_prefix(procedurals: &[&Learning]) -> String {
-    if procedurals.is_empty() {
-        return String::new();
-    }
-    let mut out = String::new();
-    for l in procedurals {
-        let body = l.detail.as_deref().unwrap_or(l.summary.as_str());
-        out.push_str(body);
-        if !body.ends_with('\n') {
-            out.push('\n');
-        }
-        out.push('\n');
-    }
-    out
-}
-
 /// Render the verification section injected before the mode-specific addendum.
 /// Returns an empty string when `cmd` is `None` so prompts are byte-identical
 /// when no verify command is configured.
@@ -283,8 +264,7 @@ then ask: 'Shall I proceed with implementation?' Wait for confirmation before \
 making any changes."
         ),
     };
-    let proc_prefix = render_procedural_prefix(&ctx.learnings.procedural);
-    let knowledge = render_validated_knowledge_block(&ctx.learnings.tiered);
+    let knowledge = render_validated_knowledge_block(&ctx.learnings.ranked);
     let trailing = if is_dependabot {
         format!(
             "{mcp}\n\
@@ -299,7 +279,7 @@ making any changes."
     let verify = render_verification(ctx.verify_command.as_deref());
 
     format!(
-        "{proc_prefix}Your task is:\n\
+        "Your task is:\n\
 {block}\n\
 \n\
 {knowledge}{verify}{addendum}\n\
@@ -390,12 +370,11 @@ Then write a focused plan before making any changes:\n\
 {attach}",
         attach = plan_and_attach_instruction(),
     );
-    let proc_prefix = render_procedural_prefix(&ctx.learnings.procedural);
-    let knowledge = render_validated_knowledge_block(&ctx.learnings.tiered);
+    let knowledge = render_validated_knowledge_block(&ctx.learnings.ranked);
     let verify = render_verification(ctx.verify_command.as_deref());
 
     format!(
-        "{proc_prefix}You are working interactively with the user.\n\
+        "You are working interactively with the user.\n\
 \n\
 {block}\n\
 \n\
@@ -493,10 +472,15 @@ pub const DISPATCH_INJECTION_CAP: usize = 5;
 /// Push-injection groups for a dispatch prompt.
 #[derive(Default, Clone)]
 pub struct LearningInjections<'a> {
-    /// Procedural-kind learnings, rendered verbatim near the top of the prompt.
-    pub procedural: Vec<&'a Learning>,
-    /// Non-procedural learnings ranked by the RAG pipeline.
-    pub tiered: Vec<&'a Learning>,
+    pub ranked: Vec<&'a Learning>,
+}
+
+impl<'a> From<&'a [Learning]> for LearningInjections<'a> {
+    fn from(v: &'a [Learning]) -> Self {
+        Self {
+            ranked: v.iter().collect(),
+        }
+    }
 }
 
 /// Bundle of all push-injected context for a dispatch prompt. Threaded through
@@ -532,8 +516,8 @@ pub use crate::service::embeddings::RAG_SIMILARITY_THRESHOLD as DISPATCH_RAG_THR
 /// 1. Embeds the task title + description to form a query vector.
 /// 2. Fetches all approved non-task-scoped learnings with embeddings from the DB.
 /// 3. Ranks them by cosine similarity + scope/upvote boost (via `rag_rank_learnings`).
-/// 4. Procedural-kind results are placed first, then everything else.
-/// 5. Returns at most `DISPATCH_INJECTION_CAP` results total.
+/// 4. Returns at most `DISPATCH_INJECTION_CAP` results; all go into the
+///    validated-knowledge block regardless of `LearningKind`.
 ///
 /// On embedding failure the function falls back to an empty list so a single
 /// model error never blocks dispatch.
@@ -572,7 +556,6 @@ pub async fn list_learnings_for_dispatch_rag(
 
     let epic_id_str = task.epic_id.map(|e| e.0.to_string());
     let project_id_str = task.project_id.0.to_string();
-    // Pass candidates.len() so the cap is applied after the procedural partition below.
     let all_ranked = rag_rank_learnings(
         &candidates,
         &query_vec,
@@ -581,33 +564,20 @@ pub async fn list_learnings_for_dispatch_rag(
         Some(project_id_str.as_str()),
         threshold,
         &[],
-        candidates.len(),
+        DISPATCH_INJECTION_CAP,
     );
 
-    let (procedurals, others): (Vec<&Learning>, Vec<&Learning>) = all_ranked
-        .into_iter()
-        .partition(|l| l.kind == LearningKind::Procedural);
-
-    let remaining = DISPATCH_INJECTION_CAP.saturating_sub(procedurals.len());
-    let mut result: Vec<&Learning> = procedurals;
-    result.extend(others.into_iter().take(remaining));
-    result.into_iter().cloned().collect()
+    all_ranked.into_iter().cloned().collect()
 }
 
 pub async fn build_and_record_injections(
     db: &dyn crate::db::TaskStore,
     task: &crate::models::Task,
     emb_svc: &Arc<EmbeddingService>,
-) -> (Vec<Learning>, Vec<Learning>) {
-    use crate::models::RetrievalSource;
+) -> Vec<Learning> {
     let all = list_learnings_for_dispatch_rag(db, task, emb_svc, DISPATCH_RAG_THRESHOLD).await;
     for l in &all {
-        let source = if l.kind == LearningKind::Procedural {
-            RetrievalSource::Procedural
-        } else {
-            RetrievalSource::PromptInjection
-        };
-        if let Err(e) = db.record_retrieval(task.id, l.id, source).await {
+        if let Err(e) = db.record_retrieval(task.id, l.id, RetrievalSource::PromptInjection).await {
             tracing::warn!(
                 task_id = task.id.0,
                 learning_id = l.id.0,
@@ -616,15 +586,14 @@ pub async fn build_and_record_injections(
             );
         }
     }
-    all.into_iter()
-        .partition(|l| l.kind == LearningKind::Procedural)
+    all
 }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
-    use crate::models::LearningScope;
+    use crate::models::{LearningKind, LearningScope};
 
     #[test]
     fn learning_instruction_references_learnings_skill() {
@@ -819,19 +788,6 @@ mod tests {
     }
 
     #[test]
-    fn render_procedural_prefix_omits_when_empty() {
-        assert_eq!(render_procedural_prefix(&[]), String::new());
-    }
-
-    #[test]
-    fn render_procedural_prefix_emits_summary_when_no_detail() {
-        let l = seed(1, LearningScope::User, 0);
-        let out = render_procedural_prefix(&[&l]);
-        assert!(out.contains("learning 1"));
-        assert!(out.ends_with("\n\n"));
-    }
-
-    #[test]
     fn build_prompt_default_injections_unchanged() {
         // Regression: when no learnings are injected the prompt must not gain
         // any leading whitespace or knowledge-block headers.
@@ -850,16 +806,15 @@ mod tests {
 
     #[test]
     fn build_prompt_with_injections_includes_knowledge_block() {
-        let proc_l = {
+        let procedural_l = {
             let mut l = seed(10, LearningScope::User, 0);
             l.kind = LearningKind::Procedural;
             l.detail = Some("Always run tests before committing.".into());
             l
         };
-        let tier_l = seed(11, LearningScope::Repo, 2);
+        let convention_l = seed(11, LearningScope::Repo, 2);
         let injections = LearningInjections {
-            procedural: vec![&proc_l],
-            tiered: vec![&tier_l],
+            ranked: vec![&procedural_l, &convention_l],
         };
         let ctx = PromptContext {
             learnings: injections,
@@ -867,8 +822,12 @@ mod tests {
             verify_command: None,
         };
         let text = build_prompt(TaskId(1), "title", "desc", None, None, None, &ctx);
-        assert!(text.starts_with("Always run tests before committing."));
+        // Procedural learnings no longer appear as a verbatim prefix — prompt
+        // always starts with the task block.
+        assert!(text.starts_with("Your task is:"));
         assert!(text.contains("## Validated knowledge for this task"));
+        // Both learnings appear in the validated-knowledge block.
+        assert!(text.contains("[#10 user, \u{2191}0]"));
         assert!(text.contains("[#11 repo, \u{2191}2]"));
     }
 
@@ -1084,7 +1043,7 @@ mod rag_dispatch_tests {
     }
 
     #[tokio::test]
-    async fn dispatch_injection_returns_procedurals_first() {
+    async fn dispatch_injection_includes_procedural_learnings_without_prioritizing_them() {
         let db = seed_db().await;
         let task = make_task(&db).await;
         let emb = fake_emb_bytes();
@@ -1123,15 +1082,9 @@ mod rag_dispatch_tests {
         let results = list_learnings_for_dispatch_rag(&*db, &task, &emb_svc, 0.0).await;
 
         assert!(!results.is_empty(), "should return at least one learning");
-        assert_eq!(
-            results[0].id, proc_id,
-            "procedural learning should be first"
-        );
-        assert_eq!(
-            results[0].kind,
-            LearningKind::Procedural,
-            "first result must be procedural"
-        );
+        // Procedural learnings are still included — just not artificially first.
+        let ids: Vec<_> = results.iter().map(|l| l.id).collect();
+        assert!(ids.contains(&proc_id), "procedural learning must be in results");
     }
 
     #[tokio::test]
@@ -1244,7 +1197,7 @@ mod rag_dispatch_tests {
     }
 
     #[tokio::test]
-    async fn build_and_record_injections_partitions_and_records() {
+    async fn build_and_record_injections_records_all_as_prompt_injection() {
         let db = seed_db().await;
         let task = make_task(&db).await;
         let emb = fake_emb_bytes();
@@ -1278,24 +1231,18 @@ mod rag_dispatch_tests {
             .unwrap();
 
         let emb_svc = EmbeddingService::new_test();
-        let (procedural, tiered) = build_and_record_injections(&*db, &task, &emb_svc).await;
+        let injected = build_and_record_injections(&*db, &task, &emb_svc).await;
 
-        assert_eq!(procedural.len(), 1);
-        assert_eq!(procedural[0].id, proc_id);
-        assert_eq!(tiered.len(), 1);
-        assert_eq!(tiered[0].id, conv_id);
+        assert_eq!(injected.len(), 2);
+        let ids: Vec<_> = injected.iter().map(|l| l.id).collect();
+        assert!(ids.contains(&proc_id));
+        assert!(ids.contains(&conv_id));
 
+        // All retrievals recorded as PromptInjection regardless of kind.
         let rows = db.list_retrievals_for_task(task.id).await.unwrap();
         assert_eq!(rows.len(), 2);
-        let proc_row = rows.iter().find(|r| r.learning_id == proc_id).unwrap();
-        assert!(matches!(
-            proc_row.source,
-            crate::models::RetrievalSource::Procedural
-        ));
-        let tier_row = rows.iter().find(|r| r.learning_id == conv_id).unwrap();
-        assert!(matches!(
-            tier_row.source,
-            crate::models::RetrievalSource::PromptInjection
-        ));
+        assert!(rows
+            .iter()
+            .all(|r| matches!(r.source, crate::models::RetrievalSource::PromptInjection)));
     }
 }
