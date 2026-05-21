@@ -159,3 +159,79 @@ async fn soft_archive_epic_does_not_violate_foreign_keys() {
     let archived_epic = db.get_epic(epic.id).await.unwrap().unwrap();
     assert_eq!(archived_epic.status, TaskStatus::Archived);
 }
+
+/// Verifies the new epic placement behavior: epic stays in backlog while tasks
+/// run/review and auto-moves to done only when all tasks complete.
+#[tokio::test]
+async fn epic_stays_in_backlog_while_tasks_active_auto_moves_to_done() {
+    let db = Database::open_in_memory().await.unwrap();
+
+    let epic = db
+        .create_epic("Feature X", "desc", "/repo", None, ProjectId(1))
+        .await
+        .unwrap();
+    assert_eq!(epic.status, TaskStatus::Backlog);
+
+    let req = |title: &'static str| CreateTaskRequest {
+        title,
+        description: "desc",
+        repo_path: "/repo",
+        plan: None,
+        status: TaskStatus::Backlog,
+        base_branch: "main",
+        epic_id: None,
+        sort_order: None,
+        tag: None,
+        project_id: ProjectId(1),
+        wrap_up_mode: None,
+    };
+
+    let t1 = db.create_task(req("Task 1")).await.unwrap();
+    let t2 = db.create_task(req("Task 2")).await.unwrap();
+    db.set_task_epic_id(t1, Some(epic.id)).await.unwrap();
+    db.set_task_epic_id(t2, Some(epic.id)).await.unwrap();
+
+    // Tasks dispatched → epic stays backlog
+    db.patch_task(t1, &TaskPatch::new().status(TaskStatus::Running))
+        .await
+        .unwrap();
+    db.recalculate_epic_status(epic.id).await.unwrap();
+    assert_eq!(
+        db.get_epic(epic.id).await.unwrap().unwrap().status,
+        TaskStatus::Backlog,
+        "epic should stay backlog while t1 is running"
+    );
+
+    // t1 moves to review → epic still backlog
+    db.patch_task(t1, &TaskPatch::new().status(TaskStatus::Review))
+        .await
+        .unwrap();
+    db.recalculate_epic_status(epic.id).await.unwrap();
+    assert_eq!(
+        db.get_epic(epic.id).await.unwrap().unwrap().status,
+        TaskStatus::Backlog,
+        "epic should stay backlog while t1 is in review"
+    );
+
+    // t1 done, t2 still backlog → epic still backlog
+    db.patch_task(t1, &TaskPatch::new().status(TaskStatus::Done))
+        .await
+        .unwrap();
+    db.recalculate_epic_status(epic.id).await.unwrap();
+    assert_eq!(
+        db.get_epic(epic.id).await.unwrap().unwrap().status,
+        TaskStatus::Backlog,
+        "epic should stay backlog while t2 is still backlog"
+    );
+
+    // All tasks done → epic auto-moves to done
+    db.patch_task(t2, &TaskPatch::new().status(TaskStatus::Done))
+        .await
+        .unwrap();
+    db.recalculate_epic_status(epic.id).await.unwrap();
+    assert_eq!(
+        db.get_epic(epic.id).await.unwrap().unwrap().status,
+        TaskStatus::Done,
+        "epic should auto-move to done when all tasks are done"
+    );
+}
