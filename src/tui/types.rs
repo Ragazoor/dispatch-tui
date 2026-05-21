@@ -897,7 +897,9 @@ pub struct SubtaskStats {
 
 impl SubtaskStats {
     /// Compute stats for a single epic from its non-archived subtasks,
-    /// including tasks owned by any descendant sub-epics.
+    /// including tasks owned by any descendant sub-epics. The `substatus`
+    /// field also reflects the full subtree: a blocked task anywhere in the
+    /// descendant hierarchy contributes to the `Blocked(N)` indicator.
     pub fn for_epic(
         epic: &Epic,
         all_tasks: &[Task],
@@ -905,30 +907,29 @@ impl SubtaskStats {
         active_merge_epic: Option<EpicId>,
     ) -> Self {
         let epic_ids = crate::models::descendant_epic_ids(epic.id, all_epics);
-        let subtasks: Vec<&Task> = all_tasks
-            .iter()
-            .filter(|t| {
-                matches!(t.epic_id, Some(eid) if epic_ids.contains(&eid))
-                    && t.status != TaskStatus::Archived
-            })
-            .collect();
 
         let mut backlog = 0;
         let mut running = 0;
         let mut review = 0;
         let mut done = 0;
-        for t in &subtasks {
-            match t.status {
-                TaskStatus::Backlog => backlog += 1,
-                TaskStatus::Running => running += 1,
-                TaskStatus::Review => review += 1,
-                TaskStatus::Done => done += 1,
-                TaskStatus::Archived => {}
+        let mut owned: Vec<Task> = Vec::new();
+
+        for t in all_tasks {
+            if t.status == TaskStatus::Archived {
+                continue;
+            }
+            if matches!(t.epic_id, Some(eid) if epic_ids.contains(&eid)) {
+                match t.status {
+                    TaskStatus::Backlog => backlog += 1,
+                    TaskStatus::Running => running += 1,
+                    TaskStatus::Review => review += 1,
+                    TaskStatus::Done => done += 1,
+                    TaskStatus::Archived => {}
+                }
+                owned.push(t.clone());
             }
         }
 
-        // epic_substatus needs owned tasks — collect only the refs we already have
-        let owned: Vec<Task> = subtasks.iter().map(|t| (*t).clone()).collect();
         let substatus = crate::models::epic_substatus(epic, &owned, active_merge_epic);
 
         SubtaskStats {
@@ -1058,6 +1059,36 @@ mod tests {
         let stats = SubtaskStats::for_epic(&epics[0], &tasks, &epics, None);
         assert_eq!(stats.running, 1);
         assert_eq!(stats.total, 1);
+    }
+
+    #[test]
+    fn subtask_stats_ignores_tasks_with_no_epic_id() {
+        let epics = vec![make_test_epic(1, None)];
+        let tasks = vec![
+            make_test_task(1, TaskStatus::Running, Some(1)),
+            make_test_task(2, TaskStatus::Running, None), // unowned — must not count
+        ];
+        let stats = SubtaskStats::for_epic(&epics[0], &tasks, &epics, None);
+        assert_eq!(stats.running, 1);
+        assert_eq!(stats.total, 1);
+    }
+
+    #[test]
+    fn subtask_stats_blocked_substatus_includes_nested_blocked_tasks() {
+        use crate::models::{EpicSubstatus, SubStatus};
+
+        let mut parent = make_test_epic(1, None);
+        parent.status = TaskStatus::Running;
+        let child_epic = make_test_epic(2, Some(1));
+        let epics = vec![parent.clone(), child_epic];
+
+        // A blocked task lives on the child epic, not directly on parent.
+        let mut blocked_task = make_test_task(1, TaskStatus::Running, Some(2));
+        blocked_task.sub_status = SubStatus::Crashed;
+        let tasks = vec![blocked_task];
+
+        let stats = SubtaskStats::for_epic(&parent, &tasks, &epics, None);
+        assert_eq!(stats.substatus, EpicSubstatus::Blocked(1));
     }
 
     // -- RepoFilterMode --
