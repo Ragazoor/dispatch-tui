@@ -3,6 +3,7 @@ mod learnings;
 mod projects;
 mod settings;
 mod tasks;
+mod usage;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};

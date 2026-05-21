@@ -387,16 +387,58 @@ pub trait LearningRetrievalStore: Send + Sync {
 }
 
 // ---------------------------------------------------------------------------
+// UsageStore — narrow sub-trait for the usage_events table
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Default)]
+pub struct UsageQuery {
+    pub category: Option<String>,
+    pub actor: Option<String>,
+    pub since: Option<chrono::DateTime<chrono::Utc>>,
+    pub limit: Option<usize>,
+}
+
+/// Maximum number of events to keep in `usage_events`. Older rows are deleted
+/// when the table exceeds this cap.
+#[derive(Debug, Clone, Copy)]
+pub struct UsageCap(pub u64);
+
+impl Default for UsageCap {
+    fn default() -> Self {
+        Self(100_000)
+    }
+}
+
+#[async_trait::async_trait]
+pub trait UsageStore: Send + Sync {
+    async fn record_usage_event(&self, event: &crate::models::UsageEvent) -> Result<()> {
+        self.record_usage_event_with_cap(event, UsageCap::default())
+            .await
+    }
+    async fn record_usage_event_with_cap(
+        &self,
+        event: &crate::models::UsageEvent,
+        cap: UsageCap,
+    ) -> Result<()>;
+    async fn query_usage(&self, query: &UsageQuery) -> Result<Vec<crate::models::UsageSummary>>;
+}
+
+// ---------------------------------------------------------------------------
 // TaskStore — supertrait combining all sub-traits
 // ---------------------------------------------------------------------------
 
 pub trait TaskStore:
-    TaskAndEpicStore + SettingsStore + ProjectCrud + LearningStore + LearningRetrievalStore
+    TaskAndEpicStore + SettingsStore + ProjectCrud + LearningStore + LearningRetrievalStore + UsageStore
 {
 }
 
 impl<
-        T: TaskAndEpicStore + SettingsStore + ProjectCrud + LearningStore + LearningRetrievalStore,
+        T: TaskAndEpicStore
+            + SettingsStore
+            + ProjectCrud
+            + LearningStore
+            + LearningRetrievalStore
+            + UsageStore,
     > TaskStore for T
 {
 }
