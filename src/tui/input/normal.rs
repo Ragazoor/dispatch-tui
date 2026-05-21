@@ -8,6 +8,15 @@ use super::super::messages::LearningMessage;
 use super::super::types::*;
 use super::super::App;
 
+fn key_event(action: &str, key: char) -> Command {
+    Command::RecordUsageEvent(crate::models::UsageEvent {
+        category: crate::models::UsageCategory::Keybinding,
+        action: action.to_string(),
+        detail: Some(key.to_string()),
+        actor: crate::models::UsageActor::Human,
+    })
+}
+
 /// Extract the learning id of the currently-selected node in the tree view.
 ///
 /// Leaf node identifiers are encoded as `"learning:<id>"`. Returns `None` when
@@ -46,34 +55,51 @@ impl App {
         };
 
         match key.code {
-            KeyCode::Tab => self.update(Message::Learning(LearningMessage::ToggleView)),
+            KeyCode::Tab => {
+                let mut cmds = self.update(Message::Learning(LearningMessage::ToggleView));
+                cmds.push(Command::RecordUsageEvent(crate::models::UsageEvent {
+                    category: crate::models::UsageCategory::Keybinding,
+                    action: "toggle_learnings_view".to_string(),
+                    detail: Some("Tab".to_string()),
+                    actor: crate::models::UsageActor::Human,
+                }));
+                cmds
+            }
             KeyCode::Char('q') | KeyCode::Esc => {
                 self.update(Message::Learning(LearningMessage::Close))
             }
             KeyCode::Char('e') => {
                 if let Some(id) = selected_id {
-                    self.update(Message::Learning(LearningMessage::Edit(id)))
+                    let mut cmds = self.update(Message::Learning(LearningMessage::Edit(id)));
+                    cmds.push(key_event("edit_learning", 'e'));
+                    cmds
                 } else {
                     vec![]
                 }
             }
             KeyCode::Char('a') => {
                 if let Some(id) = selected_id {
-                    self.update(Message::Learning(LearningMessage::Approve(id)))
+                    let mut cmds = self.update(Message::Learning(LearningMessage::Approve(id)));
+                    cmds.push(key_event("approve_learning", 'a'));
+                    cmds
                 } else {
                     vec![]
                 }
             }
             KeyCode::Char('x') => {
                 if let Some(id) = selected_id {
-                    self.update(Message::Learning(LearningMessage::Reject(id)))
+                    let mut cmds = self.update(Message::Learning(LearningMessage::Reject(id)));
+                    cmds.push(key_event("reject_learning", 'x'));
+                    cmds
                 } else {
                     vec![]
                 }
             }
             KeyCode::Char('A') => {
                 if let Some(id) = selected_id {
-                    self.update(Message::Learning(LearningMessage::Archive(id)))
+                    let mut cmds = self.update(Message::Learning(LearningMessage::Archive(id)));
+                    cmds.push(key_event("archive_learning", 'A'));
+                    cmds
                 } else {
                     vec![]
                 }
@@ -138,54 +164,96 @@ impl App {
             KeyCode::Char('l') | KeyCode::Right => self.update(Message::NavigateColumn(1)),
             KeyCode::Char('j') | KeyCode::Down => self.update(Message::NavigateRow(1)),
             KeyCode::Char('k') | KeyCode::Up => self.update(Message::NavigateRow(-1)),
-            KeyCode::Char('J') => self.update(Message::Task(
-                crate::tui::messages::TaskMessage::ReorderItem(1),
-            )),
-            KeyCode::Char('K') => self.update(Message::Task(
-                crate::tui::messages::TaskMessage::ReorderItem(-1),
-            )),
+            KeyCode::Char('J') => {
+                let mut cmds = self.update(Message::Task(
+                    crate::tui::messages::TaskMessage::ReorderItem(1),
+                ));
+                cmds.push(key_event("reorder_task_down", 'J'));
+                cmds
+            }
+            KeyCode::Char('K') => {
+                let mut cmds = self.update(Message::Task(
+                    crate::tui::messages::TaskMessage::ReorderItem(-1),
+                ));
+                cmds.push(key_event("reorder_task_up", 'K'));
+                cmds
+            }
 
-            KeyCode::Char('n') => self.update(Message::Input(
-                crate::tui::messages::InputMessage::StartNewTask,
-            )),
+            KeyCode::Char('n') => {
+                let mut cmds = self.update(Message::Input(
+                    crate::tui::messages::InputMessage::StartNewTask,
+                ));
+                cmds.push(key_event("create_task", 'n'));
+                cmds
+            }
             KeyCode::Char('c') => {
-                self.update(Message::Input(crate::tui::messages::InputMessage::CopyTask))
+                let mut cmds =
+                    self.update(Message::Input(crate::tui::messages::InputMessage::CopyTask));
+                cmds.push(key_event("copy_task", 'c'));
+                cmds
             }
-            KeyCode::Char('N') => self.update(Message::System(
-                crate::tui::messages::SystemMessage::ToggleNotifications,
-            )),
+            KeyCode::Char('N') => {
+                let mut cmds = self.update(Message::System(
+                    crate::tui::messages::SystemMessage::ToggleNotifications,
+                ));
+                cmds.push(key_event("toggle_notifications", 'N'));
+                cmds
+            }
             KeyCode::Char('E') => {
-                self.update(Message::Epic(crate::tui::messages::EpicMessage::StartNew))
+                let mut cmds =
+                    self.update(Message::Epic(crate::tui::messages::EpicMessage::StartNew));
+                cmds.push(key_event("create_epic", 'E'));
+                cmds
             }
-            KeyCode::Char('d') => self.handle_key_dispatch(),
-            KeyCode::Char('f') => self.update(Message::StartRepoFilter),
-            KeyCode::Char('W') => self.dispatch_selection(
-                |s, id| {
-                    s.update(Message::WrapUp(crate::tui::messages::WrapUpMessage::Start(
-                        id,
-                    )))
-                },
-                |s, id| {
-                    s.update(Message::WrapUp(
-                        crate::tui::messages::WrapUpMessage::EpicStart(id),
-                    ))
-                },
-            ),
+            KeyCode::Char('d') => {
+                let mut cmds = self.handle_key_dispatch();
+                cmds.push(key_event("dispatch_task", 'd'));
+                cmds
+            }
+            KeyCode::Char('f') => {
+                let mut cmds = self.update(Message::StartRepoFilter);
+                cmds.push(key_event("filter_repos", 'f'));
+                cmds
+            }
+            KeyCode::Char('W') => {
+                let mut cmds = self.dispatch_selection(
+                    |s, id| {
+                        s.update(Message::WrapUp(crate::tui::messages::WrapUpMessage::Start(
+                            id,
+                        )))
+                    },
+                    |s, id| {
+                        s.update(Message::WrapUp(
+                            crate::tui::messages::WrapUpMessage::EpicStart(id),
+                        ))
+                    },
+                );
+                cmds.push(key_event("wrap_up", 'W'));
+                cmds
+            }
             KeyCode::Char('L') => {
                 if let Some(id) = self.selected_epic_id() {
-                    return self.update(Message::Epic(
+                    let mut cmds = self.update(Message::Epic(
                         crate::tui::messages::EpicMessage::MoveStatus(id, MoveDirection::Forward),
                     ));
+                    cmds.push(key_event("move_task_forward", 'L'));
+                    return cmds;
                 }
-                self.handle_key_move(MoveDirection::Forward)
+                let mut cmds = self.handle_key_move(MoveDirection::Forward);
+                cmds.push(key_event("move_task_forward", 'L'));
+                cmds
             }
             KeyCode::Char('H') => {
                 if let Some(id) = self.selected_epic_id() {
-                    return self.update(Message::Epic(
+                    let mut cmds = self.update(Message::Epic(
                         crate::tui::messages::EpicMessage::MoveStatus(id, MoveDirection::Backward),
                     ));
+                    cmds.push(key_event("move_task_backward", 'H'));
+                    return cmds;
                 }
-                self.handle_key_move(MoveDirection::Backward)
+                let mut cmds = self.handle_key_move(MoveDirection::Backward);
+                cmds.push(key_event("move_task_backward", 'H'));
+                cmds
             }
 
             KeyCode::Char(':') => {
@@ -194,9 +262,12 @@ impl App {
                     self.set_status(
                         "Type to filter · ↑/↓ navigate · Enter select · Esc cancel".to_string(),
                     );
-                    vec![]
+                    vec![key_event("open_main_session", ':')]
                 } else {
-                    vec![Command::OpenMainSession]
+                    vec![
+                        Command::OpenMainSession,
+                        key_event("open_main_session", ':'),
+                    ]
                 }
             }
 
@@ -206,15 +277,19 @@ impl App {
                     // exists as a standalone window — focus the pane directly instead.
                     if self.board.split.active && self.board.split.pinned_task_id == Some(task.id) {
                         if let Some(pane_id) = self.board.split.right_pane_id.clone() {
-                            return vec![Command::FocusSplitPane { pane_id }];
+                            return vec![
+                                Command::FocusSplitPane { pane_id },
+                                key_event("jump_to_tmux", 'g'),
+                            ];
                         }
                     }
                     if let Some(window) = &task.tmux_window {
-                        vec![Command::Task(
-                            crate::tui::commands::TaskCommand::JumpToTmux {
+                        vec![
+                            Command::Task(crate::tui::commands::TaskCommand::JumpToTmux {
                                 window: window.clone(),
-                            },
-                        )]
+                            }),
+                            key_event("jump_to_tmux", 'g'),
+                        ]
                     } else {
                         self.update(Message::System(
                             crate::tui::messages::SystemMessage::StatusInfo(
@@ -233,7 +308,9 @@ impl App {
                 if let Some(task) = self.selected_task() {
                     if self.board.split.active {
                         let id = task.id;
-                        self.update(Message::SwapSplitPane(id))
+                        let mut cmds = self.update(Message::SwapSplitPane(id));
+                        cmds.push(key_event("swap_split_pane", 'G'));
+                        cmds
                     } else {
                         vec![]
                     }
@@ -264,9 +341,10 @@ impl App {
                         .and_then(|t| t.tmux_window.clone());
 
                     if let Some(window) = window {
-                        vec![Command::Task(
-                            crate::tui::commands::TaskCommand::JumpToTmux { window },
-                        )]
+                        vec![
+                            Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }),
+                            key_event("jump_to_tmux", 'G'),
+                        ]
                     } else {
                         self.update(Message::System(
                             crate::tui::messages::SystemMessage::StatusInfo(
@@ -282,9 +360,12 @@ impl App {
             KeyCode::Char('p') => {
                 if let Some(task) = self.selected_task() {
                     if let Some(url) = &task.pr_url {
-                        vec![Command::System(
-                            crate::tui::commands::SystemCommand::OpenInBrowser { url: url.clone() },
-                        )]
+                        vec![
+                            Command::System(crate::tui::commands::SystemCommand::OpenInBrowser {
+                                url: url.clone(),
+                            }),
+                            key_event("open_pr_url", 'p'),
+                        ]
                     } else {
                         self.update(Message::System(
                             crate::tui::messages::SystemMessage::StatusInfo(
@@ -296,24 +377,38 @@ impl App {
                     vec![]
                 }
             }
-            KeyCode::Char('P') => self.with_selected_task(|s, id| {
-                s.update(Message::Pr(crate::tui::messages::PrMessage::StartMerge(id)))
-            }),
+            KeyCode::Char('P') => {
+                let mut cmds = self.with_selected_task(|s, id| {
+                    s.update(Message::Pr(crate::tui::messages::PrMessage::StartMerge(id)))
+                });
+                if !cmds.is_empty() {
+                    cmds.push(key_event("merge_pr", 'P'));
+                }
+                cmds
+            }
 
-            KeyCode::Char('a') => self.update(Message::SelectAllColumn),
+            KeyCode::Char('a') => {
+                let mut cmds = self.update(Message::SelectAllColumn);
+                cmds.push(key_event("select_all", 'a'));
+                cmds
+            }
 
-            KeyCode::Char(' ') => self.dispatch_selection(
-                |s, id| {
-                    s.update(Message::Task(
-                        crate::tui::messages::TaskMessage::ToggleSelect(id),
-                    ))
-                },
-                |s, id| {
-                    s.update(Message::Epic(
-                        crate::tui::messages::EpicMessage::ToggleSelect(id),
-                    ))
-                },
-            ),
+            KeyCode::Char(' ') => {
+                let mut cmds = self.dispatch_selection(
+                    |s, id| {
+                        s.update(Message::Task(
+                            crate::tui::messages::TaskMessage::ToggleSelect(id),
+                        ))
+                    },
+                    |s, id| {
+                        s.update(Message::Epic(
+                            crate::tui::messages::EpicMessage::ToggleSelect(id),
+                        ))
+                    },
+                );
+                cmds.push(key_event("toggle_select", ' '));
+                cmds
+            }
 
             KeyCode::Enter => {
                 if self.selection().on_select_all {
@@ -321,9 +416,16 @@ impl App {
                 }
                 if let Some(task) = self.selected_task() {
                     let id = task.id;
-                    return self.update(Message::Task(
+                    let mut cmds = self.update(Message::Task(
                         crate::tui::messages::TaskMessage::OpenDetail(id),
                     ));
+                    cmds.push(Command::RecordUsageEvent(crate::models::UsageEvent {
+                        category: crate::models::UsageCategory::Keybinding,
+                        action: "open_task_detail".to_string(),
+                        detail: Some("Enter".to_string()),
+                        actor: crate::models::UsageActor::Human,
+                    }));
+                    return cmds;
                 }
                 vec![]
             }
@@ -333,17 +435,23 @@ impl App {
                     let title = super::super::truncate_title(&task.title, 30);
                     self.input.mode = InputMode::ConfirmEditTask(task.id);
                     self.set_status(format!("Edit {title}? [y/n]"));
-                    vec![]
+                    vec![key_event("edit_task", 'e')]
                 }
                 Some(ColumnItem::Epic(epic)) => {
                     let id = epic.id;
-                    self.update(Message::Epic(crate::tui::messages::EpicMessage::Edit(id)))
+                    let mut cmds =
+                        self.update(Message::Epic(crate::tui::messages::EpicMessage::Edit(id)));
+                    cmds.push(key_event("edit_task", 'e'));
+                    cmds
                 }
                 Some(ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_)) => vec![],
                 None => {
                     if let ViewMode::Epic { epic_id, .. } = &self.board.view_mode {
                         let id = *epic_id;
-                        self.update(Message::Epic(crate::tui::messages::EpicMessage::Edit(id)))
+                        let mut cmds =
+                            self.update(Message::Epic(crate::tui::messages::EpicMessage::Edit(id)));
+                        cmds.push(key_event("edit_task", 'e'));
+                        cmds
                     } else {
                         vec![]
                     }
@@ -355,19 +463,25 @@ impl App {
                     let count = self.select.tasks.len() + self.select.epics.len();
                     self.input.mode = InputMode::ConfirmArchive(None);
                     self.set_status(format!("Archive {} items? [y/n]", count));
-                    vec![]
+                    vec![key_event("archive_task", 'x')]
                 } else {
                     match self.selected_column_item() {
-                        Some(ColumnItem::Epic(_)) => self.update(Message::Epic(
-                            crate::tui::messages::EpicMessage::ConfirmArchive,
-                        )),
+                        Some(ColumnItem::Epic(_)) => {
+                            let mut cmds = self.update(Message::Epic(
+                                crate::tui::messages::EpicMessage::ConfirmArchive,
+                            ));
+                            cmds.push(key_event("archive_task", 'x'));
+                            cmds
+                        }
                         _ => {
                             if let Some(task) = self.selected_task() {
                                 let id = task.id;
                                 self.input.mode = InputMode::ConfirmArchive(Some(id));
                                 self.set_status("Archive task? [y/n]".to_string());
+                                vec![key_event("archive_task", 'x')]
+                            } else {
+                                vec![]
                             }
-                            vec![]
                         }
                     }
                 }
@@ -380,7 +494,7 @@ impl App {
                     None
                 };
                 self.input.pending_epic_id = epic_id;
-                match self.board.repo_paths.len() {
+                let mut cmds = match self.board.repo_paths.len() {
                     0 => self.update(Message::System(
                         crate::tui::messages::SystemMessage::StatusInfo(
                             "No saved repo paths — create a task first".to_string(),
@@ -395,15 +509,19 @@ impl App {
                     _ => self.update(Message::Input(
                         crate::tui::messages::InputMessage::StartQuickDispatchSelection,
                     )),
-                }
+                };
+                cmds.push(key_event("quick_dispatch", 'D'));
+                cmds
             }
 
             KeyCode::Char('U') => {
                 if let ViewMode::Epic { epic_id, .. } = &self.board.view_mode {
                     let id = *epic_id;
-                    self.update(Message::Epic(
+                    let mut cmds = self.update(Message::Epic(
                         crate::tui::messages::EpicMessage::ToggleAutoDispatch(id),
-                    ))
+                    ));
+                    cmds.push(key_event("toggle_auto_dispatch", 'U'));
+                    cmds
                 } else {
                     vec![]
                 }
@@ -412,38 +530,60 @@ impl App {
             KeyCode::Char('R') => {
                 if let ViewMode::Epic { epic_id, .. } = &self.board.view_mode {
                     let id = *epic_id;
-                    self.update(Message::Epic(
+                    let mut cmds = self.update(Message::Epic(
                         crate::tui::messages::EpicMessage::ToggleGroupByRepo(id),
-                    ))
+                    ));
+                    cmds.push(key_event("toggle_group_by_repo", 'R'));
+                    cmds
                 } else {
                     vec![]
                 }
             }
 
-            KeyCode::Char('F') => self.update(Message::Task(
-                crate::tui::messages::TaskMessage::ToggleFlattened,
-            )),
+            KeyCode::Char('F') => {
+                let mut cmds = self.update(Message::Task(
+                    crate::tui::messages::TaskMessage::ToggleFlattened,
+                ));
+                cmds.push(key_event("toggle_flattened", 'F'));
+                cmds
+            }
 
-            KeyCode::Char('I') => self.update(Message::Learning(LearningMessage::Open)),
+            KeyCode::Char('I') => {
+                let mut cmds = self.update(Message::Learning(LearningMessage::Open));
+                cmds.push(key_event("open_learnings", 'I'));
+                cmds
+            }
 
-            KeyCode::Char('?') => self.update(Message::System(
-                crate::tui::messages::SystemMessage::ToggleHelp,
-            )),
+            KeyCode::Char('?') => {
+                let mut cmds = self.update(Message::System(
+                    crate::tui::messages::SystemMessage::ToggleHelp,
+                ));
+                cmds.push(key_event("toggle_help", '?'));
+                cmds
+            }
 
-            KeyCode::Char('S') => self.update(Message::ToggleSplitMode),
+            KeyCode::Char('S') => {
+                let mut cmds = self.update(Message::ToggleSplitMode);
+                cmds.push(key_event("toggle_split_mode", 'S'));
+                cmds
+            }
 
             KeyCode::Char('T') => {
                 if !self.select.tasks.is_empty() {
                     let ids: Vec<_> = self.select.tasks.iter().copied().collect();
-                    self.update(Message::Task(
+                    let mut cmds = self.update(Message::Task(
                         crate::tui::messages::TaskMessage::BatchDetachTmux(ids),
-                    ))
+                    ));
+                    cmds.push(key_event("detach_tmux", 'T'));
+                    cmds
                 } else if let Some(task) = self.selected_task() {
                     if task.tmux_window.is_some() {
                         let id = task.id;
-                        self.update(Message::Task(
+                        let mut cmds = self.update(Message::Task(
                             crate::tui::messages::TaskMessage::DetachTmux(id),
-                        ))
+                        ));
+                        cmds.push(key_event("detach_tmux", 'T'));
+                        cmds
                     } else {
                         vec![]
                     }
@@ -468,9 +608,11 @@ impl App {
                     }
                 });
                 if let Some(id) = feed_epic_id {
-                    self.update(Message::Feed(
+                    let mut cmds = self.update(Message::Feed(
                         crate::tui::messages::FeedMessage::TriggerEpic(id),
-                    ))
+                    ));
+                    cmds.push(key_event("refresh_feed", 'r'));
+                    cmds
                 } else {
                     vec![]
                 }
