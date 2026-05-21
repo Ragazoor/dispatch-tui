@@ -14,7 +14,7 @@ pub use agents::{
 };
 pub use finish::{finish_task, FinishError};
 pub use prompts::{build_and_record_injections, EpicContext, LearningInjections, ProjectContext};
-pub(crate) use worktree::DISPATCH_DIR;
+pub(crate) use worktree::{ensure_dispatch_dir_and_gitignore, DISPATCH_DIR};
 pub use worktree::{branch_from_worktree, cleanup_task, validate_repo_path};
 
 /// Extract stderr from a process `Output` as a trimmed `String`.

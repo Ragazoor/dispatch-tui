@@ -18,7 +18,7 @@ const DISPATCH_GITIGNORE_LINE: &str = ".dispatch/";
 
 /// Ensure `<worktree>/.dispatch/` exists and that `<worktree>/.gitignore`
 /// contains an entry for it. Idempotent: safe to call repeatedly.
-fn ensure_dispatch_dir_and_gitignore(worktree: &Path) -> Result<()> {
+pub(crate) fn ensure_dispatch_dir_and_gitignore(worktree: &Path) -> Result<()> {
     let dispatch_dir = worktree.join(DISPATCH_DIR);
     fs::create_dir_all(&dispatch_dir)
         .with_context(|| format!("failed to create {}", dispatch_dir.display()))?;

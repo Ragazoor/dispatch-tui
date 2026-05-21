@@ -114,12 +114,19 @@ async fn call_notification(
 
 /// Create a task with sensible defaults, returning the TaskId.
 async fn create_task_fixture(state: &Arc<McpState>) -> crate::models::TaskId {
+    create_task_fixture_at(state, "/repo").await
+}
+
+async fn create_task_fixture_at(
+    state: &Arc<McpState>,
+    repo_path: &str,
+) -> crate::models::TaskId {
     state
         .db
         .create_task(CreateTaskRequest {
             title: "Test Task",
             description: "test description",
-            repo_path: "/repo",
+            repo_path,
             plan: None,
             status: TaskStatus::Backlog,
             base_branch: "main",
