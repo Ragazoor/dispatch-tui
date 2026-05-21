@@ -4,7 +4,7 @@ use rusqlite::params;
 use crate::models::{UsageEvent, UsageSummary};
 
 use super::super::{Database, UsageCap, UsageQuery};
-use super::parse_datetime;
+use super::{format_datetime, parse_datetime};
 
 #[async_trait::async_trait]
 impl crate::db::UsageStore for Database {
@@ -37,6 +37,8 @@ impl crate::db::UsageStore for Database {
         .await
     }
 
+    // Results are ordered by count ASC so the rarest features surface first —
+    // the primary use case is identifying candidates for pruning.
     async fn query_usage(&self, q: &UsageQuery) -> Result<Vec<UsageSummary>> {
         let category = q.category.clone();
         let actor = q.actor.clone();
@@ -44,58 +46,46 @@ impl crate::db::UsageStore for Database {
         let limit = q.limit.unwrap_or(50).min(500) as i64;
 
         self.db_call(move |conn| {
-            let mut sql = String::from(
+            let mut conditions: Vec<String> = Vec::new();
+            let mut bind: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+            if let Some(cat) = category {
+                conditions.push(format!("category = ?{}", bind.len() + 1));
+                bind.push(Box::new(cat));
+            }
+            if let Some(act) = actor {
+                conditions.push(format!("actor = ?{}", bind.len() + 1));
+                bind.push(Box::new(act));
+            }
+            if let Some(since_dt) = since {
+                conditions.push(format!("recorded_at >= ?{}", bind.len() + 1));
+                bind.push(Box::new(format_datetime(since_dt)));
+            }
+
+            let where_clause = if conditions.is_empty() {
+                String::new()
+            } else {
+                format!("WHERE {}", conditions.join(" AND "))
+            };
+
+            bind.push(Box::new(limit));
+            let sql = format!(
                 "SELECT category, action, detail, actor,
                         COUNT(*) AS count,
                         MAX(recorded_at) AS last_used
                  FROM usage_events
-                 WHERE 1=1",
-            );
-            let mut param_idx = 1usize;
-            let mut bind_category: Option<String> = None;
-            let mut bind_actor: Option<String> = None;
-            let mut bind_since: Option<String> = None;
-
-            if let Some(ref cat) = category {
-                sql.push_str(&format!(" AND category = ?{param_idx}"));
-                bind_category = Some(cat.clone());
-                param_idx += 1;
-            }
-            if let Some(ref act) = actor {
-                sql.push_str(&format!(" AND actor = ?{param_idx}"));
-                bind_actor = Some(act.clone());
-                param_idx += 1;
-            }
-            if let Some(since_dt) = since {
-                sql.push_str(&format!(" AND recorded_at >= ?{param_idx}"));
-                bind_since = Some(since_dt.format("%Y-%m-%d %H:%M:%S").to_string());
-                param_idx += 1;
-            }
-
-            sql.push_str(&format!(
-                " GROUP BY category, action, detail, actor
+                 {where_clause}
+                 GROUP BY category, action, detail, actor
                  ORDER BY count ASC
-                 LIMIT ?{param_idx}"
-            ));
+                 LIMIT ?{}",
+                bind.len()
+            );
 
             let mut stmt = conn
                 .prepare(&sql)
                 .context("Failed to prepare query_usage")?;
 
-            let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-            if let Some(c) = bind_category {
-                params_vec.push(Box::new(c));
-            }
-            if let Some(a) = bind_actor {
-                params_vec.push(Box::new(a));
-            }
-            if let Some(s) = bind_since {
-                params_vec.push(Box::new(s));
-            }
-            params_vec.push(Box::new(limit));
-
-            let params_refs: Vec<&dyn rusqlite::ToSql> =
-                params_vec.iter().map(|b| b.as_ref()).collect();
+            let params_refs: Vec<&dyn rusqlite::ToSql> = bind.iter().map(|b| b.as_ref()).collect();
 
             let rows = stmt
                 .query_map(params_refs.as_slice(), |row| {
@@ -105,26 +95,21 @@ impl crate::db::UsageStore for Database {
                     let actor: String = row.get(3)?;
                     let count: i64 = row.get(4)?;
                     let last_used_str: String = row.get(5)?;
-                    Ok((category, action, detail, actor, count, last_used_str))
+                    let last_used = parse_datetime(&last_used_str)?;
+                    Ok(UsageSummary {
+                        category,
+                        action,
+                        detail,
+                        actor,
+                        count,
+                        last_used,
+                    })
                 })
-                .context("Failed to execute query_usage")?;
+                .context("Failed to execute query_usage")?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .context("Failed to collect usage_summary rows")?;
 
-            let mut results = Vec::new();
-            for row in rows {
-                let (category, action, detail, actor, count, last_used_str) =
-                    row.context("Failed to read usage_summary row")?;
-                let last_used =
-                    parse_datetime(&last_used_str).map_err(|e| anyhow::anyhow!("{e}"))?;
-                results.push(UsageSummary {
-                    category,
-                    action,
-                    detail,
-                    actor,
-                    count,
-                    last_used,
-                });
-            }
-            Ok(results)
+            Ok(rows)
         })
         .await
     }

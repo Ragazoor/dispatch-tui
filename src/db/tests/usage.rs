@@ -96,3 +96,55 @@ async fn test_usage_cap_enforcement() {
         .unwrap();
     assert_eq!(count, 3);
 }
+
+#[tokio::test]
+async fn test_query_usage_filters_by_category_and_actor() {
+    use crate::db::{UsageQuery, UsageStore};
+    use crate::models::{UsageActor, UsageCategory, UsageEvent};
+
+    let db = in_memory_db().await;
+
+    for ev in [
+        UsageEvent {
+            category: UsageCategory::Keybinding,
+            action: "a".into(),
+            detail: None,
+            actor: UsageActor::Human,
+        },
+        UsageEvent {
+            category: UsageCategory::McpTool,
+            action: "b".into(),
+            detail: None,
+            actor: UsageActor::Agent,
+        },
+        UsageEvent {
+            category: UsageCategory::McpTool,
+            action: "c".into(),
+            detail: None,
+            actor: UsageActor::Agent,
+        },
+    ] {
+        db.record_usage_event(&ev).await.unwrap();
+    }
+
+    let only_mcp = db
+        .query_usage(&UsageQuery {
+            category: Some("mcp_tool".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(only_mcp.len(), 2);
+    assert!(only_mcp.iter().all(|r| r.category == "mcp_tool"));
+
+    let only_human = db
+        .query_usage(&UsageQuery {
+            actor: Some("human".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(only_human.len(), 1);
+    assert_eq!(only_human[0].action, "a");
+    assert_eq!(only_human[0].actor, "human");
+}
