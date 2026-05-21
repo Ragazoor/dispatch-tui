@@ -102,6 +102,9 @@ pub use tasks::*;
 pub mod epics;
 pub use epics::*;
 
+pub mod usage;
+pub use usage::*;
+
 // ---------------------------------------------------------------------------
 // VisualColumn — the 8 visual columns for the kanban board
 // ---------------------------------------------------------------------------
