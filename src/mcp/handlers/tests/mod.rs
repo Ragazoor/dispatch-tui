@@ -4,6 +4,7 @@ mod learnings;
 mod projects;
 mod repo_rag;
 mod tasks;
+mod usage;
 
 use std::sync::Arc;
 
@@ -622,6 +623,12 @@ async fn tool_schemas_match_arg_structs() {
             BTreeSet::from(["task_id", "query"]),
             json!({"task_id": 1, "query": "escalation patterns"}),
         ),
+        (
+            "query_usage",
+            BTreeSet::from(["category", "actor", "since", "limit"]),
+            BTreeSet::new(),
+            json!({"category": "mcp_tool", "actor": "human", "since": "2026-01-01T00:00:00Z", "limit": 25}),
+        ),
     ];
 
     // Verify we cover exactly the tools that exist
@@ -706,6 +713,9 @@ async fn tool_schemas_match_arg_structs() {
             }
             "search_docs" => {
                 serde_json::from_value::<super::repo_rag::SearchDocsArgs>(payload.clone()).unwrap();
+            }
+            "query_usage" => {
+                serde_json::from_value::<super::tasks::QueryUsageArgs>(payload.clone()).unwrap();
             }
             other => panic!("No deserialization check for tool: {other}"),
         }

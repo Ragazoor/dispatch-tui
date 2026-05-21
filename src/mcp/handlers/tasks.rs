@@ -1323,3 +1323,76 @@ pub(super) async fn handle_send_message(
         )}]}),
     )
 }
+
+// ---------------------------------------------------------------------------
+// query_usage
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub(super) struct QueryUsageArgs {
+    #[serde(default)]
+    pub(super) category: Option<String>,
+    #[serde(default)]
+    pub(super) actor: Option<String>,
+    #[serde(default)]
+    pub(super) since: Option<String>,
+    #[serde(default)]
+    pub(super) limit: Option<i64>,
+}
+
+pub(super) async fn handle_query_usage(
+    state: &McpState,
+    id: Option<Value>,
+    _identity: &CallerIdentity,
+    args: Value,
+) -> JsonRpcResponse {
+    let args: QueryUsageArgs = match parse_args(&id, args) {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+
+    let since = args.since.as_deref().and_then(|s| {
+        chrono::DateTime::parse_from_rfc3339(s)
+            .ok()
+            .map(|dt| dt.with_timezone(&chrono::Utc))
+            .or_else(|| {
+                chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
+                    .ok()
+                    .map(|ndt| chrono::TimeZone::from_utc_datetime(&chrono::Utc, &ndt))
+            })
+    });
+
+    let query = crate::db::UsageQuery {
+        category: args.category,
+        actor: args.actor,
+        since,
+        limit: args.limit.map(|l| l.clamp(1, 500) as usize),
+    };
+
+    match state.db.query_usage(&query).await {
+        Ok(summaries) => {
+            let json_rows: Vec<Value> = summaries
+                .into_iter()
+                .map(|s| {
+                    serde_json::json!({
+                        "category": s.category,
+                        "action": s.action,
+                        "detail": s.detail,
+                        "actor": s.actor,
+                        "count": s.count,
+                        "last_used": s.last_used.to_rfc3339(),
+                    })
+                })
+                .collect();
+            let text =
+                serde_json::to_string_pretty(&json_rows).unwrap_or_else(|_| "[]".to_string());
+            JsonRpcResponse::ok(
+                id,
+                serde_json::json!({
+                    "content": [{ "type": "text", "text": text }]
+                }),
+            )
+        }
+        Err(e) => service_err_to_response(id, ServiceError::Internal(e.to_string())),
+    }
+}

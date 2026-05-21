@@ -561,6 +561,32 @@ the session.",
                 }
             },
             "required": ["task_id", "query"]
+        };
+
+    async "query_usage" => tasks::handle_query_usage,
+        "Query aggregated feature usage counts. Returns events grouped by category/action/actor, ordered by count ascending (least-used first). Useful for identifying unused keybindings or MCP tools.",
+        {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "description": "Filter by category: 'keybinding' or 'mcp_tool'",
+                    "enum": ["keybinding", "mcp_tool"]
+                },
+                "actor": {
+                    "type": "string",
+                    "description": "Filter by actor: 'human' or 'agent'",
+                    "enum": ["human", "agent"]
+                },
+                "since": {
+                    "type": "string",
+                    "description": "ISO 8601 datetime lower bound, e.g. '2026-01-01T00:00:00Z'"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results (default 50, max 500)"
+                }
+            }
         }
 }
 
@@ -674,6 +700,27 @@ pub async fn handle_mcp(
                     let data_dir = state.data_dir.clone();
                     let _ = tokio::spawn(async move {
                         trajectory::append_entry(&data_dir, &entry).await;
+                    });
+                }
+
+                // Fire-and-forget usage recording. Skipped when no tool name was
+                // resolved (e.g. malformed request) to avoid recording empty rows.
+                let actor = match identity {
+                    CallerIdentity::Task(_) => crate::models::UsageActor::Agent,
+                    CallerIdentity::Session => crate::models::UsageActor::Human,
+                };
+                if !tool_name.is_empty() {
+                    let db = Arc::clone(&state.db);
+                    let tool = tool_name.to_string();
+                    tokio::spawn(async move {
+                        let _ = db
+                            .record_usage_event(&crate::models::UsageEvent {
+                                category: crate::models::UsageCategory::McpTool,
+                                action: tool.clone(),
+                                detail: Some(tool),
+                                actor,
+                            })
+                            .await;
                     });
                 }
 
