@@ -2686,3 +2686,49 @@ async fn list_all_errors_on_unknown_wrap_up_mode() {
     let result = db.list_all().await;
     assert!(result.is_err(), "expected Err on unknown wrap_up_mode");
 }
+
+#[tokio::test]
+async fn row_to_task_sub_status_none_string_maps_to_none_variant() {
+    let db = in_memory_db().await;
+    let id = db
+        .create_task(CreateTaskRequest {
+            title: "t",
+            description: "d",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+            wrap_up_mode: None,
+        })
+        .await
+        .unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
+    assert_eq!(task.sub_status, SubStatus::None);
+}
+
+#[tokio::test]
+async fn row_to_task_base_branch_defaults_to_main() {
+    let db = in_memory_db().await;
+    let id = db
+        .create_task(CreateTaskRequest {
+            title: "t",
+            description: "d",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            project_id: ProjectId(1),
+            wrap_up_mode: None,
+        })
+        .await
+        .unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
+    assert_eq!(task.base_branch, "main");
+}

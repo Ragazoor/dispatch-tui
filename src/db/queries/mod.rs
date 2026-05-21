@@ -45,28 +45,20 @@ pub(super) fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         worktree: row.get("worktree")?,
         tmux_window: row.get("tmux_window")?,
         plan_path: row.get("plan_path")?,
-        epic_id: row
-            .get::<_, Option<i64>>("epic_id")
-            .unwrap_or(None)
-            .map(EpicId),
-        sub_status: parse_sub_status(row.get::<_, String>("sub_status").ok())?,
-        pr_url: row.get::<_, Option<String>>("pr_url").unwrap_or(None),
-        tag: parse_tag(row.get::<_, Option<String>>("tag").unwrap_or(None))?,
-        sort_order: row.get::<_, Option<i64>>("sort_order").unwrap_or(None),
-        base_branch: row
-            .get::<_, Option<String>>("base_branch")
-            .unwrap_or(None)
-            .unwrap_or_else(|| "main".to_string()),
-        external_id: row.get::<_, Option<String>>("external_id").unwrap_or(None),
+        epic_id: row.get::<_, Option<i64>>("epic_id")?.map(EpicId),
+        sub_status: parse_sub_status(&row.get::<_, String>("sub_status")?)?,
+        pr_url: row.get("pr_url")?,
+        tag: parse_tag(row.get("tag")?)?,
+        sort_order: row.get("sort_order")?,
+        base_branch: row.get("base_branch")?,
+        external_id: row.get("external_id")?,
         project_id: ProjectId(row.get::<_, i64>("project_id")?),
         labels: read_json_string_vec(row, "labels")?,
         created_at: parse_datetime(&created_str)?,
         updated_at: parse_datetime(&updated_str)?,
         last_pre_tool_use_at: read_optional_datetime(row, "last_pre_tool_use_at")?,
         last_notification_at: read_optional_datetime(row, "last_notification_at")?,
-        wrap_up_mode: parse_wrap_up_mode(
-            row.get::<_, Option<String>>("wrap_up_mode").unwrap_or(None),
-        )?,
+        wrap_up_mode: parse_wrap_up_mode(row.get("wrap_up_mode")?)?,
     })
 }
 
@@ -119,11 +111,8 @@ pub(super) fn read_json_string_vec(
     }
 }
 
-fn parse_sub_status(raw: Option<String>) -> rusqlite::Result<SubStatus> {
-    match raw {
-        None => Ok(SubStatus::None),
-        Some(s) => SubStatus::parse(&s).ok_or_else(|| unknown_enum("sub_status", &s)),
-    }
+fn parse_sub_status(raw: &str) -> rusqlite::Result<SubStatus> {
+    SubStatus::parse(raw).ok_or_else(|| unknown_enum("sub_status", raw))
 }
 
 fn parse_wrap_up_mode(raw: Option<String>) -> rusqlite::Result<Option<WrapUpMode>> {
