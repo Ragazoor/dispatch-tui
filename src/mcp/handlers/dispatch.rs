@@ -705,19 +705,19 @@ pub async fn handle_mcp(
 
                 // Fire-and-forget usage recording. Skipped when no tool name was
                 // resolved (e.g. malformed request) to avoid recording empty rows.
-                let actor = match identity {
-                    CallerIdentity::Task(_) => crate::models::UsageActor::Agent,
-                    CallerIdentity::Session => crate::models::UsageActor::Human,
-                };
                 if !tool_name.is_empty() {
+                    let actor = match identity {
+                        CallerIdentity::Task(_) => crate::models::UsageActor::Agent,
+                        CallerIdentity::Session => crate::models::UsageActor::Human,
+                    };
                     let db = Arc::clone(&state.db);
                     let tool = tool_name.to_string();
                     tokio::spawn(async move {
                         let _ = db
                             .record_usage_event(&crate::models::UsageEvent {
                                 category: crate::models::UsageCategory::McpTool,
-                                action: tool.clone(),
-                                detail: Some(tool),
+                                action: tool,
+                                detail: None,
                                 actor,
                             })
                             .await;

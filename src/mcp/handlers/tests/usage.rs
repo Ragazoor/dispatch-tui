@@ -30,27 +30,14 @@ async fn query_usage_mcp_tool_returns_aggregated_counts() {
     use crate::models::{UsageActor, UsageCategory, UsageEvent};
 
     let state = test_state().await;
-
-    state
-        .db
-        .record_usage_event(&UsageEvent {
-            category: UsageCategory::Keybinding,
-            action: "dispatch_task".to_string(),
-            detail: Some("d".to_string()),
-            actor: UsageActor::Human,
-        })
-        .await
-        .unwrap();
-    state
-        .db
-        .record_usage_event(&UsageEvent {
-            category: UsageCategory::Keybinding,
-            action: "dispatch_task".to_string(),
-            detail: Some("d".to_string()),
-            actor: UsageActor::Human,
-        })
-        .await
-        .unwrap();
+    let event = UsageEvent {
+        category: UsageCategory::Keybinding,
+        action: "dispatch_task".to_string(),
+        detail: Some("d".to_string()),
+        actor: UsageActor::Human,
+    };
+    state.db.record_usage_event(&event).await.unwrap();
+    state.db.record_usage_event(&event).await.unwrap();
 
     let resp = call(
         &state,

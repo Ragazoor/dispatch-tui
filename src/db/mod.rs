@@ -401,7 +401,18 @@ pub struct UsageQuery {
 /// Maximum number of events to keep in `usage_events`. Older rows are deleted
 /// when the table exceeds this cap.
 #[derive(Debug, Clone, Copy)]
-pub struct UsageCap(pub u64);
+pub struct UsageCap(u64);
+
+impl UsageCap {
+    pub fn new(n: u64) -> Self {
+        assert!(n > 0, "UsageCap must be > 0");
+        Self(n)
+    }
+
+    pub fn value(self) -> u64 {
+        self.0
+    }
+}
 
 impl Default for UsageCap {
     fn default() -> Self {
@@ -420,6 +431,8 @@ pub trait UsageStore: Send + Sync {
         event: &crate::models::UsageEvent,
         cap: UsageCap,
     ) -> Result<()>;
+    /// Aggregated rows ordered by count ASC so the rarest features surface
+    /// first — the primary use case is identifying candidates for pruning.
     async fn query_usage(&self, query: &UsageQuery) -> Result<Vec<crate::models::UsageSummary>>;
 }
 

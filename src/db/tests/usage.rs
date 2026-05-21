@@ -71,7 +71,7 @@ async fn test_usage_cap_enforcement() {
     use crate::models::{UsageActor, UsageCategory, UsageEvent};
 
     let db = in_memory_db().await;
-    let small_cap = UsageCap(3);
+    let small_cap = UsageCap::new(3);
 
     for i in 0..5u32 {
         db.record_usage_event_with_cap(

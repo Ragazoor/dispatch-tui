@@ -1328,6 +1328,17 @@ pub(super) async fn handle_send_message(
 // query_usage
 // ---------------------------------------------------------------------------
 
+fn parse_usage_since(s: &str) -> std::result::Result<chrono::DateTime<chrono::Utc>, String> {
+    use chrono::TimeZone;
+    chrono::DateTime::parse_from_rfc3339(s)
+        .map(|dt| dt.with_timezone(&chrono::Utc))
+        .or_else(|_| {
+            chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
+                .map(|ndt| chrono::Utc.from_utc_datetime(&ndt))
+        })
+        .map_err(|_| format!("invalid `since` datetime: {s}"))
+}
+
 #[derive(Deserialize)]
 pub(super) struct QueryUsageArgs {
     #[serde(default)]
@@ -1351,22 +1362,30 @@ pub(super) async fn handle_query_usage(
         Err(e) => return e,
     };
 
-    let since = args.since.as_deref().and_then(|s| {
-        chrono::DateTime::parse_from_rfc3339(s)
-            .ok()
-            .map(|dt| dt.with_timezone(&chrono::Utc))
-            .or_else(|| {
-                chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
-                    .ok()
-                    .map(|ndt| chrono::TimeZone::from_utc_datetime(&chrono::Utc, &ndt))
-            })
-    });
+    // Reject unknown enum strings up front rather than silently returning an
+    // empty result set when the caller mistypes a filter.
+    if let Some(ref c) = args.category {
+        if crate::models::UsageCategory::parse(c).is_none() {
+            return JsonRpcResponse::err(id, -32602, format!("unknown category: {c}"));
+        }
+    }
+    if let Some(ref a) = args.actor {
+        if crate::models::UsageActor::parse(a).is_none() {
+            return JsonRpcResponse::err(id, -32602, format!("unknown actor: {a}"));
+        }
+    }
+
+    let since = match args.since.as_deref().map(parse_usage_since) {
+        Some(Ok(dt)) => Some(dt),
+        Some(Err(msg)) => return JsonRpcResponse::err(id, -32602, msg),
+        None => None,
+    };
 
     let query = crate::db::UsageQuery {
         category: args.category,
         actor: args.actor,
         since,
-        limit: args.limit.map(|l| l.clamp(1, 500) as usize),
+        limit: args.limit.map(|l| l as usize),
     };
 
     match state.db.query_usage(&query).await {

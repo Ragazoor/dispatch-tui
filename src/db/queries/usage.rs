@@ -9,10 +9,10 @@ use super::{format_datetime, parse_datetime};
 #[async_trait::async_trait]
 impl crate::db::UsageStore for Database {
     async fn record_usage_event_with_cap(&self, event: &UsageEvent, cap: UsageCap) -> Result<()> {
-        let category = event.category.as_str().to_string();
+        let category: &'static str = event.category.as_str();
         let action = event.action.clone();
         let detail = event.detail.clone();
-        let actor = event.actor.as_str().to_string();
+        let actor: &'static str = event.actor.as_str();
         self.db_call(move |conn| {
             conn.execute(
                 "INSERT INTO usage_events (category, action, detail, actor)
@@ -21,14 +21,14 @@ impl crate::db::UsageStore for Database {
             )
             .context("Failed to insert usage_event")?;
 
+            // Cap enforcement: MAX(id) on the autoincrement PK is O(1) (last
+            // B-tree page), unlike OFFSET which would walk `cap` index entries
+            // on every insert. Below cap, MAX(id) - cap is non-positive and
+            // the DELETE is a no-op.
             conn.execute(
                 "DELETE FROM usage_events
-                 WHERE id <= (
-                     SELECT id FROM usage_events
-                     ORDER BY id DESC
-                     LIMIT 1 OFFSET ?1
-                 )",
-                params![cap.0 as i64],
+                 WHERE id <= (SELECT MAX(id) FROM usage_events) - ?1",
+                params![cap.value() as i64],
             )
             .context("Failed to enforce usage_events cap")?;
 
@@ -37,13 +37,11 @@ impl crate::db::UsageStore for Database {
         .await
     }
 
-    // Results are ordered by count ASC so the rarest features surface first —
-    // the primary use case is identifying candidates for pruning.
     async fn query_usage(&self, q: &UsageQuery) -> Result<Vec<UsageSummary>> {
         let category = q.category.clone();
         let actor = q.actor.clone();
         let since = q.since;
-        let limit = q.limit.unwrap_or(50).min(500) as i64;
+        let limit = q.limit.unwrap_or(50).clamp(1, 500) as i64;
 
         self.db_call(move |conn| {
             let mut conditions: Vec<String> = Vec::new();
