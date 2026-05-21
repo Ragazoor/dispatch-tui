@@ -21,6 +21,21 @@ fn epic_svc(db: &Arc<dyn db::TaskStore>) -> EpicService {
     EpicService::new(d)
 }
 
+fn make_task_params(repo_path: &str) -> CreateTaskParams {
+    CreateTaskParams {
+        title: "T".into(),
+        description: "".into(),
+        repo_path: repo_path.into(),
+        plan_path: None,
+        epic_id: None,
+        sort_order: None,
+        tag: None,
+        base_branch: None,
+        project_id: ProjectId(1),
+        wrap_up_mode: None,
+    }
+}
+
 // -- TaskService ----------------------------------------------------------
 
 #[tokio::test]
@@ -2212,21 +2227,7 @@ async fn update_task_sub_status_validated_against_persisted_status() {
 /// sub_status. Used by the hook-event tests to set up scenarios where a
 /// hook arrives at a Running task already in NeedsInput / Active.
 async fn create_running_task(svc: &TaskService, sub_status: SubStatus) -> TaskId {
-    let id = svc
-        .create_task(CreateTaskParams {
-            title: "T".into(),
-            description: "".into(),
-            repo_path: "/repo".into(),
-            plan_path: None,
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            project_id: ProjectId(1),
-            wrap_up_mode: None,
-        })
-        .await
-        .unwrap();
+    let id = svc.create_task(make_task_params("/repo")).await.unwrap();
     svc.update_task(
         UpdateTaskParams::for_task(id)
             .status(TaskStatus::Running)
@@ -2568,4 +2569,285 @@ async fn update_task_changing_epic_id_without_project_id_derives_project() {
     let task = svc.get_task(id).await.unwrap();
     assert_eq!(task.epic_id, Some(epic.id));
     assert_eq!(task.project_id, proj2.id, "project_id must follow epic");
+}
+
+// -- cli_update_task -------------------------------------------------------
+
+#[tokio::test]
+async fn cli_update_task_updates_status_unconditionally() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let id = svc.create_task(make_task_params("/repo")).await.unwrap();
+
+    let updated = svc
+        .cli_update_task(id, TaskStatus::Running, None, None)
+        .await
+        .unwrap();
+
+    assert!(updated);
+    assert_eq!(svc.get_task(id).await.unwrap().status, TaskStatus::Running);
+}
+
+#[tokio::test]
+async fn cli_update_task_with_only_if_matching_returns_true_and_updates() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let id = svc.create_task(make_task_params("/repo")).await.unwrap();
+
+    let updated = svc
+        .cli_update_task(id, TaskStatus::Running, Some(TaskStatus::Backlog), None)
+        .await
+        .unwrap();
+
+    assert!(updated);
+    assert_eq!(svc.get_task(id).await.unwrap().status, TaskStatus::Running);
+}
+
+#[tokio::test]
+async fn cli_update_task_with_only_if_not_matching_returns_false_and_preserves_status() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let id = svc.create_task(make_task_params("/repo")).await.unwrap();
+
+    let updated = svc
+        .cli_update_task(id, TaskStatus::Done, Some(TaskStatus::Running), None)
+        .await
+        .unwrap();
+
+    assert!(!updated);
+    assert_eq!(svc.get_task(id).await.unwrap().status, TaskStatus::Backlog);
+}
+
+#[tokio::test]
+async fn cli_update_task_unconditional_sets_sub_status() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let id = svc.create_task(make_task_params("/repo")).await.unwrap();
+
+    svc.cli_update_task(id, TaskStatus::Running, None, Some(SubStatus::Active))
+        .await
+        .unwrap();
+
+    let task = svc.get_task(id).await.unwrap();
+    assert_eq!(task.status, TaskStatus::Running);
+    assert_eq!(task.sub_status, SubStatus::Active);
+}
+
+#[tokio::test]
+async fn cli_update_task_conditional_sets_sub_status_when_matching() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let id = svc.create_task(make_task_params("/repo")).await.unwrap();
+
+    svc.cli_update_task(
+        id,
+        TaskStatus::Running,
+        Some(TaskStatus::Backlog),
+        Some(SubStatus::Active),
+    )
+    .await
+    .unwrap();
+
+    let task = svc.get_task(id).await.unwrap();
+    assert_eq!(task.status, TaskStatus::Running);
+    assert_eq!(task.sub_status, SubStatus::Active);
+}
+
+#[tokio::test]
+async fn cli_update_task_conditional_does_not_apply_sub_status_when_not_matching() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let id = svc.create_task(make_task_params("/repo")).await.unwrap();
+
+    svc.cli_update_task(
+        id,
+        TaskStatus::Done,
+        Some(TaskStatus::Running),
+        Some(SubStatus::Active),
+    )
+    .await
+    .unwrap();
+
+    let task = svc.get_task(id).await.unwrap();
+    assert_eq!(task.status, TaskStatus::Backlog);
+    assert_eq!(task.sub_status, SubStatus::None);
+}
+
+#[tokio::test]
+async fn cli_update_task_recalculates_parent_epic() {
+    let db = test_db().await;
+    let tsvc = task_svc(&db);
+    let esvc = epic_svc(&db);
+
+    let epic = esvc
+        .create_epic(CreateEpicParams {
+            title: "E".into(),
+            description: "".into(),
+            repo_path: "/repo".into(),
+            sort_order: None,
+            parent_epic_id: None,
+            feed_command: None,
+            feed_interval_secs: None,
+            project_id: ProjectId(1),
+        })
+        .await
+        .unwrap();
+
+    let id = tsvc
+        .create_task(CreateTaskParams {
+            epic_id: Some(epic.id),
+            ..make_task_params("/repo")
+        })
+        .await
+        .unwrap();
+
+    tsvc.cli_update_task(id, TaskStatus::Done, None, None)
+        .await
+        .unwrap();
+
+    assert_eq!(esvc.get_epic(epic.id).await.unwrap().status, TaskStatus::Done);
+}
+
+// -- validate_wrap_up ------------------------------------------------------
+
+#[tokio::test]
+async fn validate_wrap_up_running_with_worktree_succeeds() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let id = svc.create_task(make_task_params("/repo")).await.unwrap();
+
+    svc.update_task(
+        UpdateTaskParams::for_task(id)
+            .status(TaskStatus::Running)
+            .worktree(FieldUpdate::Set("/repo/.worktrees/feat".into())),
+    )
+    .await
+    .unwrap();
+
+    let task = svc.validate_wrap_up(id).await.unwrap();
+    assert_eq!(task.status, TaskStatus::Running);
+}
+
+#[tokio::test]
+async fn validate_wrap_up_review_with_worktree_succeeds() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let id = svc.create_task(make_task_params("/repo")).await.unwrap();
+
+    svc.update_task(
+        UpdateTaskParams::for_task(id)
+            .status(TaskStatus::Review)
+            .worktree(FieldUpdate::Set("/repo/.worktrees/feat".into())),
+    )
+    .await
+    .unwrap();
+
+    let task = svc.validate_wrap_up(id).await.unwrap();
+    assert_eq!(task.status, TaskStatus::Review);
+}
+
+#[tokio::test]
+async fn validate_wrap_up_backlog_task_fails() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let id = svc.create_task(make_task_params("/repo")).await.unwrap();
+
+    let err = svc.validate_wrap_up(id).await.unwrap_err();
+    assert!(matches!(err, ServiceError::Validation(_)));
+}
+
+#[tokio::test]
+async fn validate_wrap_up_running_without_worktree_fails() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let id = svc.create_task(make_task_params("/repo")).await.unwrap();
+
+    svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Running))
+        .await
+        .unwrap();
+
+    let err = svc.validate_wrap_up(id).await.unwrap_err();
+    assert!(matches!(err, ServiceError::Validation(_)));
+}
+
+// -- was_pr_finalisation ---------------------------------------------------
+
+#[tokio::test]
+async fn update_task_pr_finalisation_true_when_first_pr_and_review_status() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let id = svc.create_task(make_task_params("/repo")).await.unwrap();
+
+    let result = svc
+        .update_task(
+            UpdateTaskParams::for_task(id)
+                .status(TaskStatus::Review)
+                .pr_url(FieldUpdate::Set(
+                    "https://github.com/org/repo/pull/1".into(),
+                )),
+        )
+        .await
+        .unwrap();
+
+    assert!(result.was_pr_finalisation);
+}
+
+#[tokio::test]
+async fn update_task_pr_finalisation_false_when_pr_already_existed() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let id = svc.create_task(make_task_params("/repo")).await.unwrap();
+
+    svc.update_task(UpdateTaskParams::for_task(id).pr_url(FieldUpdate::Set(
+        "https://github.com/org/repo/pull/1".into(),
+    )))
+    .await
+    .unwrap();
+
+    let result = svc
+        .update_task(
+            UpdateTaskParams::for_task(id)
+                .status(TaskStatus::Review)
+                .pr_url(FieldUpdate::Set(
+                    "https://github.com/org/repo/pull/1".into(),
+                )),
+        )
+        .await
+        .unwrap();
+
+    assert!(!result.was_pr_finalisation);
+}
+
+#[tokio::test]
+async fn update_task_pr_finalisation_false_when_not_moving_to_review() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let id = svc.create_task(make_task_params("/repo")).await.unwrap();
+
+    let result = svc
+        .update_task(UpdateTaskParams::for_task(id).pr_url(FieldUpdate::Set(
+            "https://github.com/org/repo/pull/1".into(),
+        )))
+        .await
+        .unwrap();
+
+    assert!(!result.was_pr_finalisation);
+}
+
+#[tokio::test]
+async fn update_task_pr_finalisation_false_with_empty_pr_url() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let id = svc.create_task(make_task_params("/repo")).await.unwrap();
+
+    let result = svc
+        .update_task(
+            UpdateTaskParams::for_task(id)
+                .status(TaskStatus::Review)
+                .pr_url(FieldUpdate::Set(String::new())),
+        )
+        .await
+        .unwrap();
+
+    assert!(!result.was_pr_finalisation);
 }

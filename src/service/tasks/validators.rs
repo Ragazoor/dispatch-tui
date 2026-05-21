@@ -76,3 +76,134 @@ pub(super) fn build_task_patch<'a>(
     }
     patch
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::build_task_patch;
+    use super::super::params::UpdateTaskParams;
+    use crate::models::{ProjectId, SubStatus, TaskId, TaskStatus, TaskTag, WrapUpMode};
+
+    #[test]
+    fn all_none_produces_empty_patch() {
+        let params = UpdateTaskParams::for_task(TaskId(1));
+        let patch = build_task_patch(&params, None, None);
+        assert!(!patch.has_changes());
+    }
+
+    #[test]
+    fn status_mapped_to_plain_field() {
+        let params = UpdateTaskParams::for_task(TaskId(1)).status(TaskStatus::Running);
+        let patch = build_task_patch(&params, None, None);
+        assert_eq!(patch.status, Some(TaskStatus::Running));
+    }
+
+    #[test]
+    fn plan_path_set_as_nullable_some() {
+        let params =
+            UpdateTaskParams::for_task(TaskId(1)).plan_path(Some("docs/plans/foo.md".to_string()));
+        let patch = build_task_patch(&params, None, None);
+        assert_eq!(patch.plan_path, Some(Some("docs/plans/foo.md")));
+    }
+
+    #[test]
+    fn title_and_description_mapped_to_plain_fields() {
+        let params = UpdateTaskParams::for_task(TaskId(1))
+            .title("New title".to_string())
+            .description("New desc".to_string());
+        let patch = build_task_patch(&params, None, None);
+        assert_eq!(patch.title, Some("New title"));
+        assert_eq!(patch.description, Some("New desc"));
+    }
+
+    #[test]
+    fn repo_path_comes_from_expanded_param_not_params_field() {
+        let params =
+            UpdateTaskParams::for_task(TaskId(1)).repo_path("/unexpanded/~/path".to_string());
+        let patch = build_task_patch(&params, Some("/expanded/path"), None);
+        assert_eq!(patch.repo_path, Some("/expanded/path"));
+    }
+
+    #[test]
+    fn repo_path_not_set_when_expanded_is_none() {
+        let params =
+            UpdateTaskParams::for_task(TaskId(1)).repo_path("/some/path".to_string());
+        let patch = build_task_patch(&params, None, None);
+        assert_eq!(patch.repo_path, None);
+    }
+
+    #[test]
+    fn sort_order_set_as_nullable_some() {
+        let params = UpdateTaskParams::for_task(TaskId(1)).sort_order(42);
+        let patch = build_task_patch(&params, None, None);
+        assert_eq!(patch.sort_order, Some(Some(42)));
+    }
+
+    #[test]
+    fn tag_set_as_nullable_some() {
+        let params = UpdateTaskParams::for_task(TaskId(1)).tag(Some(TaskTag::Bug));
+        let patch = build_task_patch(&params, None, None);
+        assert_eq!(patch.tag, Some(Some(TaskTag::Bug)));
+    }
+
+    #[test]
+    fn base_branch_mapped_to_plain_field() {
+        let params =
+            UpdateTaskParams::for_task(TaskId(1)).base_branch(Some("develop".to_string()));
+        let patch = build_task_patch(&params, None, None);
+        assert_eq!(patch.base_branch, Some("develop"));
+    }
+
+    #[test]
+    fn sub_status_comes_from_parameter_not_params_field() {
+        // The sub_status argument to build_task_patch is the pre-validated value;
+        // params.sub_status is not read directly.
+        let params = UpdateTaskParams::for_task(TaskId(1));
+        let patch = build_task_patch(&params, None, Some(SubStatus::Active));
+        assert_eq!(patch.sub_status, Some(SubStatus::Active));
+    }
+
+    #[test]
+    fn sub_status_not_set_when_parameter_is_none() {
+        let params = UpdateTaskParams::for_task(TaskId(1));
+        let patch = build_task_patch(&params, None, None);
+        assert_eq!(patch.sub_status, None);
+    }
+
+    #[test]
+    fn project_id_mapped_to_plain_field() {
+        let params = UpdateTaskParams::for_task(TaskId(1)).project_id(ProjectId(42));
+        let patch = build_task_patch(&params, None, None);
+        assert_eq!(patch.project_id, Some(ProjectId(42)));
+    }
+
+    #[test]
+    fn last_pre_tool_use_at_set_when_some_provided() {
+        let ts = chrono::Utc::now();
+        let params = UpdateTaskParams::for_task(TaskId(1)).last_pre_tool_use_at(Some(ts));
+        let patch = build_task_patch(&params, None, None);
+        assert_eq!(patch.last_pre_tool_use_at, Some(Some(ts)));
+    }
+
+    #[test]
+    fn last_pre_tool_use_at_cleared_when_none_provided() {
+        let params = UpdateTaskParams::for_task(TaskId(1)).last_pre_tool_use_at(None);
+        let patch = build_task_patch(&params, None, None);
+        assert_eq!(patch.last_pre_tool_use_at, Some(None));
+    }
+
+    #[test]
+    fn wrap_up_mode_set_when_some_provided() {
+        let params =
+            UpdateTaskParams::for_task(TaskId(1)).wrap_up_mode(Some(WrapUpMode::Rebase));
+        let patch = build_task_patch(&params, None, None);
+        assert_eq!(patch.wrap_up_mode, Some(Some(WrapUpMode::Rebase)));
+    }
+
+    #[test]
+    fn wrap_up_mode_cleared_when_none_provided() {
+        let params = UpdateTaskParams::for_task(TaskId(1)).wrap_up_mode(None);
+        let patch = build_task_patch(&params, None, None);
+        assert_eq!(patch.wrap_up_mode, Some(None));
+    }
+}
