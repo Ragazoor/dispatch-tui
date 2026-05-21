@@ -29,9 +29,13 @@ fn is_executable(path: &std::path::Path) -> bool {
 }
 
 pub fn install_plugin() -> Result<bool> {
-    let plugin_dir = plugin_dir()?;
+    install_plugin_in(&plugin_dir()?)
+}
+
+pub(super) fn install_plugin_in(base: &Path) -> Result<bool> {
     let mut changed = false;
-    install_dir_recursive(&PLUGIN_DIR, &plugin_dir, &mut changed)?;
+    install_dir_recursive(&PLUGIN_DIR, base, &mut changed)?;
+    remove_stale_files(base, &mut changed)?;
     Ok(changed)
 }
 
@@ -49,6 +53,58 @@ fn install_dir_recursive(dir: &Dir, base: &std::path::Path, changed: &mut bool) 
     }
     for subdir in dir.dirs() {
         install_dir_recursive(subdir, base, changed)?;
+    }
+    Ok(())
+}
+
+fn embedded_path_set() -> std::collections::HashSet<PathBuf> {
+    fn collect(dir: &Dir, paths: &mut std::collections::HashSet<PathBuf>) {
+        for file in dir.files() {
+            paths.insert(file.path().to_path_buf());
+        }
+        for subdir in dir.dirs() {
+            collect(subdir, paths);
+        }
+    }
+    let mut paths = std::collections::HashSet::new();
+    collect(&PLUGIN_DIR, &mut paths);
+    paths
+}
+
+fn remove_stale_files(base: &Path, changed: &mut bool) -> Result<()> {
+    if !base.exists() {
+        return Ok(());
+    }
+    let embedded = embedded_path_set();
+    remove_stale_recursive(base, base, &embedded, changed)
+}
+
+fn remove_stale_recursive(
+    base: &Path,
+    dir: &Path,
+    embedded: &std::collections::HashSet<PathBuf>,
+    changed: &mut bool,
+) -> Result<()> {
+    for entry in fs::read_dir(dir).with_context(|| format!("Failed to read {}", dir.display()))? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            remove_stale_recursive(base, &path, embedded, changed)?;
+            if fs::read_dir(&path)?.next().is_none() {
+                fs::remove_dir(&path)
+                    .with_context(|| format!("Failed to remove {}", path.display()))?;
+                *changed = true;
+            }
+        } else {
+            let relative = path.strip_prefix(base).with_context(|| {
+                format!("path {} is not under base {}", path.display(), base.display())
+            })?;
+            if !embedded.contains(relative) {
+                fs::remove_file(&path)
+                    .with_context(|| format!("Failed to remove {}", path.display()))?;
+                *changed = true;
+            }
+        }
     }
     Ok(())
 }
@@ -74,7 +130,10 @@ pub(super) fn plugin_needs_update() -> Result<bool> {
 }
 
 fn plugin_needs_update_in(base: &std::path::Path) -> Result<bool> {
-    needs_update_recursive(&PLUGIN_DIR, base)
+    if needs_update_recursive(&PLUGIN_DIR, base)? {
+        return Ok(true);
+    }
+    has_stale_files(base)
 }
 
 fn needs_update_recursive(dir: &Dir, base: &std::path::Path) -> Result<bool> {
@@ -89,6 +148,38 @@ fn needs_update_recursive(dir: &Dir, base: &std::path::Path) -> Result<bool> {
     for subdir in dir.dirs() {
         if needs_update_recursive(subdir, base)? {
             return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn has_stale_files(base: &Path) -> Result<bool> {
+    if !base.exists() {
+        return Ok(false);
+    }
+    let embedded = embedded_path_set();
+    has_stale_recursive(base, base, &embedded)
+}
+
+fn has_stale_recursive(
+    base: &Path,
+    dir: &Path,
+    embedded: &std::collections::HashSet<PathBuf>,
+) -> Result<bool> {
+    for entry in fs::read_dir(dir).with_context(|| format!("Failed to read {}", dir.display()))? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            if has_stale_recursive(base, &path, embedded)? {
+                return Ok(true);
+            }
+        } else {
+            let relative = path.strip_prefix(base).with_context(|| {
+                format!("path {} is not under base {}", path.display(), base.display())
+            })?;
+            if !embedded.contains(relative) {
+                return Ok(true);
+            }
         }
     }
     Ok(false)
@@ -497,5 +588,64 @@ mod tests {
         // Corrupt one file
         fs::write(dir.path().join(".claude-plugin/plugin.json"), "corrupted").unwrap();
         assert!(plugin_needs_update_in(dir.path()).unwrap());
+    }
+
+    #[test]
+    fn plugin_needs_update_true_when_stale_file_present() {
+        let dir = tempfile::tempdir().unwrap();
+        write_all_plugin_files(dir.path());
+        // Add a file that is no longer in the embedded plugin
+        let stale_dir = dir.path().join("skills").join("old-removed-skill");
+        fs::create_dir_all(&stale_dir).unwrap();
+        fs::write(stale_dir.join("SKILL.md"), "# Old skill").unwrap();
+        assert!(
+            plugin_needs_update_in(dir.path()).unwrap(),
+            "stale on-disk file should trigger update"
+        );
+    }
+
+    #[test]
+    fn install_removes_stale_files() {
+        let dir = tempfile::tempdir().unwrap();
+        write_all_plugin_files(dir.path());
+        // Plant a stale skill that is no longer embedded
+        let stale_dir = dir.path().join("skills").join("old-removed-skill");
+        fs::create_dir_all(&stale_dir).unwrap();
+        let stale_file = stale_dir.join("SKILL.md");
+        fs::write(&stale_file, "# Old skill").unwrap();
+
+        let changed = install_plugin_in(dir.path()).unwrap();
+
+        assert!(changed, "removing a stale file must count as a change");
+        assert!(!stale_file.exists(), "stale file must be removed after install");
+    }
+
+    #[test]
+    fn install_removes_empty_dirs_after_stale_file_pruned() {
+        let dir = tempfile::tempdir().unwrap();
+        write_all_plugin_files(dir.path());
+        let stale_dir = dir.path().join("skills").join("old-removed-skill");
+        fs::create_dir_all(&stale_dir).unwrap();
+        fs::write(stale_dir.join("SKILL.md"), "# Old skill").unwrap();
+
+        install_plugin_in(dir.path()).unwrap();
+
+        assert!(
+            !stale_dir.exists(),
+            "empty stale directory must be removed after pruning its files"
+        );
+    }
+
+    #[test]
+    fn install_is_idempotent_after_pruning() {
+        let dir = tempfile::tempdir().unwrap();
+        write_all_plugin_files(dir.path());
+        let stale_dir = dir.path().join("skills").join("old-removed-skill");
+        fs::create_dir_all(&stale_dir).unwrap();
+        fs::write(stale_dir.join("SKILL.md"), "# Old skill").unwrap();
+
+        install_plugin_in(dir.path()).unwrap();
+        let changed = install_plugin_in(dir.path()).unwrap();
+        assert!(!changed, "second install with nothing to change must be idempotent");
     }
 }
