@@ -197,8 +197,8 @@ async fn dispatch_task(
                 .await;
             vec![]
         }
-        CaptureTmux { id, window } => {
-            rt.exec_capture_tmux(id, window);
+        CheckWindow { id, window } => {
+            rt.exec_check_window(id, window);
             vec![]
         }
         Resume { task } => {

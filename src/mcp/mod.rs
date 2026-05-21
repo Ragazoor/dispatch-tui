@@ -49,7 +49,7 @@ pub struct McpState {
     /// embeddings when a learning is recorded via MCP.
     pub embedding_service: Arc<EmbeddingService>,
     /// In-memory tokens issued by wrap_up, consumed by exit_session.
-    pub exit_tokens: Arc<RwLock<HashMap<TaskId, ExitToken>>>,
+    pub(crate) exit_tokens: Arc<RwLock<HashMap<TaskId, ExitToken>>>,
 }
 
 impl McpState {

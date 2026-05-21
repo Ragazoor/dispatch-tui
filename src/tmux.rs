@@ -54,20 +54,6 @@ pub fn send_keys(window: &str, keys: &str, runner: &dyn ProcessRunner) -> Result
     Ok(())
 }
 
-/// Capture the last `lines` lines of output from a tmux pane, returned trimmed.
-pub fn capture_pane(window: &str, lines: usize, runner: &dyn ProcessRunner) -> Result<String> {
-    let lines_arg = format!("-{lines}");
-    let output = runner.run(
-        "tmux",
-        &["capture-pane", "-t", window, "-p", "-S", &lines_arg],
-    )?;
-    if !output.status.success() {
-        bail!("tmux capture-pane failed with status {}", output.status);
-    }
-    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    Ok(text)
-}
-
 /// Return true if a tmux window with the given name currently exists.
 pub fn has_window(window: &str, runner: &dyn ProcessRunner) -> Result<bool> {
     let output = runner
@@ -97,24 +83,6 @@ pub fn list_all_window_names(runner: &dyn ProcessRunner) -> Result<Vec<String>> 
         .filter(|l| !l.is_empty())
         .collect();
     Ok(names)
-}
-
-/// Return the Unix timestamp of the last activity in a tmux window.
-///
-/// Uses `tmux display-message` with the `#{window_activity}` format variable,
-/// which reports a per-second resolution timestamp updated on any pane I/O.
-pub fn window_activity(window: &str, runner: &dyn ProcessRunner) -> Result<u64> {
-    let output = runner.run(
-        "tmux",
-        &["display-message", "-p", "-t", window, "#{window_activity}"],
-    )?;
-    if !output.status.success() {
-        bail!("tmux display-message failed with status {}", output.status);
-    }
-    let text = String::from_utf8_lossy(&output.stdout);
-    text.trim()
-        .parse::<u64>()
-        .with_context(|| format!("failed to parse window_activity timestamp: {text:?}"))
 }
 
 /// Kill the tmux window with the given name.
@@ -481,29 +449,6 @@ fn new_window_args(name: &str, working_dir: &str) -> Vec<String> {
 }
 
 #[cfg(test)]
-fn capture_pane_args(window: &str, lines: usize) -> Vec<String> {
-    vec![
-        "capture-pane".to_string(),
-        "-t".to_string(),
-        window.to_string(),
-        "-p".to_string(),
-        "-S".to_string(),
-        format!("-{lines}"),
-    ]
-}
-
-#[cfg(test)]
-fn window_activity_args(window: &str) -> Vec<String> {
-    vec![
-        "display-message".to_string(),
-        "-p".to_string(),
-        "-t".to_string(),
-        window.to_string(),
-        "#{window_activity}".to_string(),
-    ]
-}
-
-#[cfg(test)]
 fn set_window_dispatch_dir_args(window: &str, working_dir: &str) -> Vec<String> {
     vec![
         "set-option".to_string(),
@@ -570,21 +515,6 @@ mod tests {
             args,
             vec!["new-window", "-d", "-n", "task-42", "-c", "/some/path"]
         );
-    }
-
-    #[test]
-    fn capture_pane_args_correct() {
-        let args = capture_pane_args("task-42", 5);
-        assert_eq!(
-            args,
-            vec!["capture-pane", "-t", "task-42", "-p", "-S", "-5"]
-        );
-    }
-
-    #[test]
-    fn capture_pane_args_different_line_count() {
-        let args = capture_pane_args("my-window", 100);
-        assert_eq!(args[5], "-100");
     }
 
     #[test]
@@ -693,47 +623,10 @@ mod tests {
     }
 
     #[test]
-    fn capture_pane_returns_trimmed_stdout() {
-        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(
-            b"  hello from tmux  \n",
-        )]);
-        let result = capture_pane("task-42", 5, &mock).unwrap();
-        assert_eq!(result, "hello from tmux");
-    }
-
-    #[test]
     fn has_window_returns_false_on_nonzero_exit() {
         let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no sessions")]);
         let result = has_window("task-42", &mock).unwrap();
         assert!(!result);
-    }
-
-    #[test]
-    fn window_activity_args_correct() {
-        let args = window_activity_args("task-42");
-        assert_eq!(
-            args,
-            vec![
-                "display-message",
-                "-p",
-                "-t",
-                "task-42",
-                "#{window_activity}"
-            ]
-        );
-    }
-
-    #[test]
-    fn window_activity_parses_timestamp() {
-        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"1711700000\n")]);
-        let result = window_activity("task-42", &mock).unwrap();
-        assert_eq!(result, 1711700000);
-    }
-
-    #[test]
-    fn window_activity_fails_on_nonzero_exit() {
-        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no window")]);
-        assert!(window_activity("task-42", &mock).is_err());
     }
 
     #[test]

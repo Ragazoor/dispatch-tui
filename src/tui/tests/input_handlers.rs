@@ -1379,10 +1379,6 @@ fn confirm_detach_tmux_clears_window() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Review)], ProjectId(1));
     app.board.tasks[0].tmux_window = Some("task-1".to_string());
     app.board.tasks[0].sub_status = SubStatus::Stale;
-    app.agents
-        .tmux_outputs
-        .insert(TaskId(1), "some output".to_string());
-
     app.update(Message::Task(
         crate::tui::messages::TaskMessage::DetachTmux(TaskId(1)),
     ));
@@ -1399,10 +1395,6 @@ fn confirm_detach_tmux_clears_window() {
         app.find_task(TaskId(1)).unwrap().sub_status,
         SubStatus::Stale,
         "stale tracking should be cleared"
-    );
-    assert!(
-        !app.agents.tmux_outputs.contains_key(&TaskId(1)),
-        "tmux output should be cleared"
     );
     assert!(
         cmds.iter()

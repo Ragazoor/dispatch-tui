@@ -37,11 +37,6 @@ fn dispatch_task(app: &mut App, msg: TaskMessage) -> Vec<Command> {
         TaskMessage::OpenDetail(task_id) => app.handle_open_task_detail(task_id),
         TaskMessage::CloseDetail => app.handle_close_task_detail(),
         TaskMessage::ToggleFlattened => app.handle_toggle_flattened(),
-        TaskMessage::TmuxOutput {
-            id,
-            output,
-            activity_ts,
-        } => app.handle_tmux_output(id, output, activity_ts),
         TaskMessage::WindowGone(id) => app.handle_window_gone(id),
         TaskMessage::Refresh(tasks) => app.handle_refresh_tasks(tasks),
         TaskMessage::Updated(task) => app.handle_task_updated(task),

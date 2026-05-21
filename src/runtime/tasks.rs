@@ -228,7 +228,7 @@ impl TuiRuntime {
         );
     }
 
-    pub(super) fn exec_capture_tmux(&self, id: TaskId, window: String) {
+    pub(super) fn exec_check_window(&self, id: TaskId, window: String) {
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
 
@@ -237,28 +237,6 @@ impl TuiRuntime {
                 let _ = tx.send(Message::Task(
                     crate::tui::messages::TaskMessage::WindowGone(id),
                 ));
-                return;
-            }
-
-            // Activity timestamp for staleness detection (fall back to 0 on error
-            // so we never falsely mark an agent as stale).
-            let activity_ts = tmux::window_activity(&window, &*runner).unwrap_or(0);
-
-            match tmux::capture_pane(&window, 5, &*runner) {
-                Ok(output) => {
-                    let _ = tx.send(Message::Task(
-                        crate::tui::messages::TaskMessage::TmuxOutput {
-                            id,
-                            output,
-                            activity_ts,
-                        },
-                    ));
-                }
-                Err(e) => {
-                    let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
-                        format!("tmux capture failed for window {window}: {e}"),
-                    )));
-                }
             }
         });
     }

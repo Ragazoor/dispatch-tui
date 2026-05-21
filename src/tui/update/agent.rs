@@ -11,16 +11,6 @@ use super::super::{
 };
 
 impl App {
-    pub(in crate::tui) fn handle_tmux_output(
-        &mut self,
-        id: TaskId,
-        output: String,
-        _activity_ts: u64,
-    ) -> Vec<Command> {
-        self.agents.tmux_outputs.insert(id, output);
-        Vec::new()
-    }
-
     pub(in crate::tui) fn handle_window_gone(&mut self, id: TaskId) -> Vec<Command> {
         // Ignore WindowGone for the split-pinned task — its window is joined as
         // a pane and isn't missing, just not a standalone window right now.
@@ -51,7 +41,6 @@ impl App {
             cmds.extend(self.detect_task_transition_notifications(new_task));
         }
 
-        // Merge DB state into in-memory state, preserving tmux_outputs
         // Prune selections for tasks that no longer exist
         let valid_ids: HashSet<TaskId> = new_tasks.iter().map(|t| t.id).collect();
         self.select.tasks.retain(|id| valid_ids.contains(id));
@@ -187,7 +176,7 @@ impl App {
             .filter(|t| Some(t.id) != split_pinned)
             .filter_map(|t| {
                 t.tmux_window.clone().map(|window| {
-                    Command::Task(crate::tui::commands::TaskCommand::CaptureTmux {
+                    Command::Task(crate::tui::commands::TaskCommand::CheckWindow {
                         id: t.id,
                         window,
                     })
@@ -272,13 +261,6 @@ impl App {
             return vec![];
         }
 
-        // Capture last tmux output as crash context
-        if let Some(output) = self.agents.tmux_outputs.get(&id) {
-            if !output.is_empty() {
-                self.agents.last_error.insert(id, output.clone());
-            }
-        }
-
         let mut cmds = Vec::new();
 
         if let Some(task) = self.find_task_mut(id) {
@@ -340,7 +322,6 @@ impl App {
             let seed_at = chrono::Utc::now();
             task.last_pre_tool_use_at = Some(seed_at);
             let task_clone = task.clone();
-            self.agents.last_error.remove(&id);
             self.sync_board_selection();
             self.set_status(format!("Task {id} resumed"));
             vec![

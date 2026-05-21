@@ -37,7 +37,7 @@ fn dispatch_only_backlog_tasks() {
 }
 
 #[test]
-fn tick_captures_review_task_with_live_window() {
+fn tick_checks_window_for_review_task_with_live_window() {
     let mut task = make_task(5, TaskStatus::Review);
     task.tmux_window = Some("task-5".to_string());
     let mut app = App::new(vec![task], ProjectId(1));
@@ -46,7 +46,7 @@ fn tick_captures_review_task_with_live_window() {
 
     assert!(cmds.iter().any(|c| matches!(
         c,
-        Command::Task(crate::tui::commands::TaskCommand::CaptureTmux { id: TaskId(5), .. })
+        Command::Task(crate::tui::commands::TaskCommand::CheckWindow { id: TaskId(5), .. })
     )));
 }
 
@@ -309,7 +309,7 @@ fn stale_agent_detected_when_last_pre_tool_use_old() {
     assert!(app.is_stale(TaskId(4)));
     assert!(cmds.iter().any(|c| matches!(
         c,
-        Command::Task(crate::tui::commands::TaskCommand::CaptureTmux { id: TaskId(4), .. })
+        Command::Task(crate::tui::commands::TaskCommand::CheckWindow { id: TaskId(4), .. })
     )));
     assert!(cmds
         .iter()
@@ -429,40 +429,6 @@ fn dispatched_unknown_id_is_noop() {
 }
 
 #[test]
-fn tmux_output_stores_in_map() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Running)], ProjectId(1));
-    let cmds = app.update(Message::Task(
-        crate::tui::messages::TaskMessage::TmuxOutput {
-            id: TaskId(1),
-            output: "hello".to_string(),
-            activity_ts: 1000,
-        },
-    ));
-    assert_eq!(app.agents.tmux_outputs.get(&TaskId(1)).unwrap(), "hello");
-    assert!(cmds.is_empty());
-}
-
-#[test]
-fn tmux_output_overwrites_previous() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Running)], ProjectId(1));
-    app.update(Message::Task(
-        crate::tui::messages::TaskMessage::TmuxOutput {
-            id: TaskId(1),
-            output: "first".to_string(),
-            activity_ts: 1000,
-        },
-    ));
-    app.update(Message::Task(
-        crate::tui::messages::TaskMessage::TmuxOutput {
-            id: TaskId(1),
-            output: "second".to_string(),
-            activity_ts: 1001,
-        },
-    ));
-    assert_eq!(app.agents.tmux_outputs.get(&TaskId(1)).unwrap(), "second");
-}
-
-#[test]
 fn d_key_on_review_with_window_shows_warning() {
     let mut task = make_task(5, TaskStatus::Review);
     task.tmux_window = Some("task-5".to_string());
@@ -518,13 +484,6 @@ fn d_key_on_empty_column_is_noop() {
     assert!(cmds.is_empty());
 }
 
-#[test]
-fn new_app_has_empty_agent_tracking() {
-    let app = App::new(vec![], ProjectId(1));
-    // stale/crashed state is now on the task's sub_status field, not in AgentTracking
-    assert!(app.agents.tmux_outputs.is_empty());
-    assert!(app.agents.last_error.is_empty());
-}
 
 #[test]
 fn kill_and_retry_enters_confirm_mode() {
@@ -1602,42 +1561,6 @@ fn window_gone_ignored_for_split_pinned_task() {
         !app.is_crashed(TaskId(4)),
         "split-pinned task should not be marked as crashed"
     );
-}
-
-#[test]
-fn agent_crashed_stores_last_error_from_tmux_output() {
-    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], ProjectId(1));
-    app.board.tasks[0].tmux_window = Some("task-4".to_string());
-    app.agents.tmux_outputs.insert(
-        TaskId(4),
-        "Error: connection refused\npanicked at main.rs:42".to_string(),
-    );
-
-    app.update(Message::Task(
-        crate::tui::messages::TaskMessage::AgentCrashed(TaskId(4)),
-    ));
-
-    assert_eq!(
-        app.agents.last_error.get(&TaskId(4)).map(|s| s.as_str()),
-        Some("Error: connection refused\npanicked at main.rs:42"),
-    );
-}
-
-#[test]
-fn retry_fresh_clears_last_error() {
-    let mut task = make_task(4, TaskStatus::Running);
-    task.worktree = Some("/repo/.worktrees/4-task-4".to_string());
-    let mut app = App::new(vec![task], ProjectId(1));
-    app.agents
-        .last_error
-        .insert(TaskId(4), "some crash".to_string());
-    app.input.mode = InputMode::ConfirmRetry(TaskId(4));
-
-    app.update(Message::Task(
-        crate::tui::messages::TaskMessage::RetryFresh(TaskId(4)),
-    ));
-
-    assert!(!app.agents.last_error.contains_key(&TaskId(4)));
 }
 
 // ---------------------------------------------------------------------------

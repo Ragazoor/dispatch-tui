@@ -151,18 +151,23 @@ fn archive_clears_agent_tracking() {
     task.tmux_window = Some("dev:1-test".to_string());
     task.sub_status = SubStatus::Stale;
     let mut app = App::new(vec![task], ProjectId(1));
+    app.agents.notified_review.insert(TaskId(1));
+    app.agents.notified_needs_input.insert(TaskId(1));
     app.agents
-        .tmux_outputs
-        .insert(TaskId(1), "output".to_string());
-    app.agents.last_error.insert(TaskId(1), "boom".to_string());
+        .message_flash
+        .insert(TaskId(1), std::time::Instant::now());
+    app.agents
+        .last_pr_poll
+        .insert(TaskId(1), std::time::Instant::now());
 
     app.update(Message::Task(crate::tui::messages::TaskMessage::Archive(
         TaskId(1),
     )));
 
-    // stale/crashed state is now on the task's sub_status field
-    assert!(!app.agents.tmux_outputs.contains_key(&TaskId(1)));
-    assert!(!app.agents.last_error.contains_key(&TaskId(1)));
+    assert!(!app.agents.notified_review.contains(&TaskId(1)));
+    assert!(!app.agents.notified_needs_input.contains(&TaskId(1)));
+    assert!(!app.agents.message_flash.contains_key(&TaskId(1)));
+    assert!(!app.agents.last_pr_poll.contains_key(&TaskId(1)));
 }
 
 #[test]

@@ -220,17 +220,11 @@ impl App {
     pub fn split_pinned_task_id(&self) -> Option<TaskId> {
         self.board.split.pinned_task_id
     }
-    pub fn tmux_outputs(&self) -> &std::collections::HashMap<TaskId, String> {
-        &self.agents.tmux_outputs
-    }
     pub fn status_message(&self) -> Option<&str> {
         self.status.message.as_deref()
     }
     pub fn error_popup(&self) -> Option<&str> {
         self.status.error_popup.as_deref()
-    }
-    pub fn last_error(&self, id: TaskId) -> Option<&str> {
-        self.agents.last_error.get(&id).map(|s| s.as_str())
     }
     pub fn repo_paths(&self) -> &[String] {
         &self.board.repo_paths

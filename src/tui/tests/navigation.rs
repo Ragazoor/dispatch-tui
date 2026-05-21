@@ -1227,27 +1227,6 @@ fn w_key_on_non_review_task_is_noop() {
     assert_eq!(app.input.mode, InputMode::Normal);
 }
 
-#[test]
-fn active_task_output_does_not_emit_persist() {
-    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], ProjectId(1));
-    app.board.tasks[0].sub_status = SubStatus::Active;
-    app.board.tasks[0].tmux_window = Some("win-3".to_string());
-
-    let cmds = app.update(Message::Task(
-        crate::tui::messages::TaskMessage::TmuxOutput {
-            id: TaskId(3),
-            output: "output".to_string(),
-            activity_ts: 1,
-        },
-    ));
-    let task = app.find_task(TaskId(3)).unwrap();
-    assert_eq!(task.sub_status, SubStatus::Active); // unchanged
-                                                    // No PersistTask since sub_status didn't change
-    assert!(!cmds.iter().any(|c| matches!(
-        c,
-        Command::Task(crate::tui::commands::TaskCommand::Persist(_))
-    )));
-}
 
 #[test]
 fn tick_skips_already_stale_tasks() {
@@ -1257,7 +1236,7 @@ fn tick_skips_already_stale_tasks() {
 
     let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
     // Tick should NOT re-emit PersistTask for already-stale tasks
-    // (only CaptureTmux and RefreshFromDb expected)
+    // (only CheckWindow and RefreshFromDb expected)
     assert!(!cmds.iter().any(|c| matches!(
         c,
         Command::Task(crate::tui::commands::TaskCommand::Persist(_))
@@ -1604,31 +1583,14 @@ fn tick_skips_capture_for_split_pinned_task() {
 
     let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
 
-    // Should NOT emit CaptureTmux for the pinned task (its window is a pane now)
+    // Should NOT emit CheckWindow for the pinned task (its window is a pane now)
     assert!(
         !cmds.iter().any(|c| matches!(
             c,
-            Command::Task(crate::tui::commands::TaskCommand::CaptureTmux { id: TaskId(4), .. })
+            Command::Task(crate::tui::commands::TaskCommand::CheckWindow { id: TaskId(4), .. })
         )),
-        "split-pinned task should be excluded from CaptureTmux"
+        "split-pinned task should be excluded from CheckWindow"
     );
-}
-
-#[test]
-fn resumed_clears_last_error() {
-    let mut task = make_task(4, TaskStatus::Running);
-    task.worktree = Some("/wt".to_string());
-    let mut app = App::new(vec![task], ProjectId(1));
-    app.agents
-        .last_error
-        .insert(TaskId(4), "some crash".to_string());
-
-    app.update(Message::Task(crate::tui::messages::TaskMessage::Resumed {
-        id: TaskId(4),
-        tmux_window: "win-4".to_string(),
-    }));
-
-    assert!(!app.agents.last_error.contains_key(&TaskId(4)));
 }
 
 #[test]

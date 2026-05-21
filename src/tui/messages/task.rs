@@ -30,11 +30,6 @@ pub enum TaskMessage {
     OpenDetail(TaskId),
     CloseDetail,
     ToggleFlattened,
-    TmuxOutput {
-        id: TaskId,
-        output: String,
-        activity_ts: u64,
-    },
     WindowGone(TaskId),
     Refresh(Vec<Task>),
     /// Splice a single fresh task into `app.board.tasks`.

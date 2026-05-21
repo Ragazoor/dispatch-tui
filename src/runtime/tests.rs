@@ -530,40 +530,7 @@ async fn exec_dispatch_sends_error_on_failure() {
 }
 
 #[tokio::test]
-async fn exec_capture_tmux_sends_output() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let mock = Arc::new(MockProcessRunner::new(vec![
-        // has_window: list-windows returns the window name
-        MockProcessRunner::ok_with_stdout(b"test-window\n"),
-        // window_activity: display-message returns a timestamp
-        MockProcessRunner::ok_with_stdout(b"1711700000\n"),
-        // capture-pane
-        MockProcessRunner::ok_with_stdout(b"Hello from tmux\n"),
-    ]));
-    let rt = make_runtime(db.clone(), tx, mock);
-
-    rt.exec_capture_tmux(TaskId(1), "test-window".to_string());
-
-    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    let Message::Task(crate::tui::messages::TaskMessage::TmuxOutput {
-        id,
-        output,
-        activity_ts,
-    }) = msg
-    else {
-        panic!("Expected TmuxOutput, got: {msg:?}");
-    };
-    assert_eq!(id, TaskId(1));
-    assert!(output.contains("Hello from tmux"));
-    assert_eq!(activity_ts, 1711700000);
-}
-
-#[tokio::test]
-async fn exec_capture_tmux_window_gone() {
+async fn exec_check_window_sends_window_gone_when_absent() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
@@ -572,7 +539,7 @@ async fn exec_capture_tmux_window_gone() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock);
 
-    rt.exec_capture_tmux(TaskId(1), "gone-window".to_string());
+    rt.exec_check_window(TaskId(1), "gone-window".to_string());
 
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
@@ -585,6 +552,22 @@ async fn exec_capture_tmux_window_gone() {
         ),
         "Expected WindowGone, got: {msg:?}"
     );
+}
+
+#[tokio::test]
+async fn exec_check_window_sends_nothing_when_present() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mock = Arc::new(MockProcessRunner::new(vec![
+        // has_window: list-windows returns our window
+        MockProcessRunner::ok_with_stdout(b"task-1\n"),
+    ]));
+    let rt = make_runtime(db.clone(), tx, mock);
+
+    rt.exec_check_window(TaskId(1), "task-1".to_string());
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(rx.try_recv().is_err(), "Expected no message but received one");
 }
 
 #[tokio::test]

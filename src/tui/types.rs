@@ -424,23 +424,20 @@ pub struct StatusState {
 }
 
 // ---------------------------------------------------------------------------
-// AgentTracking — tmux output and health state for dispatched agents
+// AgentTracking — agent health state for dispatched agents
 // ---------------------------------------------------------------------------
 
-/// Per-agent tmux output and health tracking for dispatched agents. Stale
-/// detection is now derived from `task.last_pre_tool_use_at` by
-/// `ClassifyAgentActivity` on each tick; this struct only retains state that
-/// the classifier cannot reconstruct from the database — captured tmux output,
-/// notification de-duplication, PR poll cadence, message-flash decay, and
-/// last-error context.
+/// Per-agent health tracking for dispatched agents. Stale detection is derived
+/// from `task.last_pre_tool_use_at` by `ClassifyAgentActivity` on each tick;
+/// this struct retains state the classifier cannot reconstruct from the
+/// database — notification de-duplication, PR poll cadence, and message-flash
+/// decay.
 #[derive(Debug, Default)]
 pub struct AgentTracking {
-    pub tmux_outputs: HashMap<TaskId, String>,
     pub notified_review: HashSet<TaskId>,
     pub notified_needs_input: HashSet<TaskId>,
     pub last_pr_poll: HashMap<TaskId, Instant>,
     pub message_flash: HashMap<TaskId, Instant>,
-    pub last_error: HashMap<TaskId, String>,
 }
 
 impl AgentTracking {
@@ -450,12 +447,10 @@ impl AgentTracking {
 
     /// Remove all tracking state for a task.
     pub fn clear(&mut self, id: TaskId) {
-        self.tmux_outputs.remove(&id);
         self.notified_review.remove(&id);
         self.notified_needs_input.remove(&id);
         self.last_pr_poll.remove(&id);
         self.message_flash.remove(&id);
-        self.last_error.remove(&id);
     }
 }
 

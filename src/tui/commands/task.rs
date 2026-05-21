@@ -34,7 +34,7 @@ pub enum TaskCommand {
         worktree: String,
         tmux_window: Option<String>,
     },
-    CaptureTmux {
+    CheckWindow {
         id: TaskId,
         window: String,
     },

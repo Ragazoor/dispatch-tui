@@ -229,7 +229,7 @@ fn split_pane_closed_resets_state() {
 }
 
 #[test]
-fn tick_captures_non_pinned_tasks_in_split_mode() {
+fn tick_checks_window_for_non_pinned_tasks_in_split_mode() {
     let mut task3 = make_task(3, TaskStatus::Running);
     task3.tmux_window = Some("task-3".to_string());
     let mut task4 = make_task(4, TaskStatus::Running);
@@ -243,15 +243,15 @@ fn tick_captures_non_pinned_tasks_in_split_mode() {
 
     let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
 
-    // Task 3 (not pinned) should still get captured
+    // Task 3 (not pinned) should still be checked
     assert!(cmds.iter().any(|c| matches!(
         c,
-        Command::Task(crate::tui::commands::TaskCommand::CaptureTmux { id: TaskId(3), .. })
+        Command::Task(crate::tui::commands::TaskCommand::CheckWindow { id: TaskId(3), .. })
     )));
     // Task 4 (pinned in split) should NOT
     assert!(!cmds.iter().any(|c| matches!(
         c,
-        Command::Task(crate::tui::commands::TaskCommand::CaptureTmux { id: TaskId(4), .. })
+        Command::Task(crate::tui::commands::TaskCommand::CheckWindow { id: TaskId(4), .. })
     )));
 }
 
