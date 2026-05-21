@@ -36,6 +36,14 @@ pub(in crate::tui) fn make_key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
 }
 
+/// Strip telemetry `RecordUsageEvent` entries from a `cmds` vec. Used by tests
+/// that assert exact command counts and don't care about usage telemetry.
+pub(in crate::tui) fn without_usage(cmds: Vec<Command>) -> Vec<Command> {
+    cmds.into_iter()
+        .filter(|c| !matches!(c, Command::RecordUsageEvent(_)))
+        .collect()
+}
+
 pub(in crate::tui) fn make_task(id: i64, status: TaskStatus) -> Task {
     let now = chrono::Utc::now();
     Task {

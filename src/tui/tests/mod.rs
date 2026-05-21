@@ -16,6 +16,7 @@ mod split_pane;
 mod targeted_refresh;
 mod task_detail;
 mod tips_and_status;
+mod usage;
 mod wrap_up;
 
 // Re-exports: child test modules access these via `super::<item>`.

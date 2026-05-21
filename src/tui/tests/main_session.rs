@@ -12,7 +12,7 @@ fn make_app() -> App {
 #[test]
 fn colon_without_dir_enters_main_session_dir_mode() {
     let mut app = make_app();
-    let cmds = app.handle_key(make_key(KeyCode::Char(':')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char(':'))));
     assert!(cmds.is_empty());
     assert_eq!(app.mode(), &InputMode::MainSessionDir);
 }

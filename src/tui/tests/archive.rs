@@ -7,7 +7,7 @@ use crossterm::event::KeyCode;
 fn x_key_enters_confirm_archive_mode() {
     let mut app = make_app();
     // make_app() starts at Backlog (nav col 1) — no need to set_column.
-    let cmds = app.handle_key(make_key(KeyCode::Char('x')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('x'))));
     assert!(cmds.is_empty());
     assert!(matches!(app.input.mode, InputMode::ConfirmArchive(Some(_))));
     assert_eq!(app.status.message.as_deref(), Some("Archive task? [y/n]"));
@@ -395,7 +395,7 @@ fn render_archive_overlay_shows_archived_tasks() {
 #[test]
 fn x_key_on_epic_enters_confirm_archive_epic() {
     let mut app = make_app_with_epic_selected();
-    let cmds = app.handle_key(make_key(KeyCode::Char('x')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('x'))));
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::ConfirmArchiveEpic);
     assert!(app
@@ -430,7 +430,7 @@ fn x_key_on_epic_with_non_done_subtasks_rejects_archive() {
     // Epic is the only item in Running column → row 0.
     app.selection_mut().set_column(2);
     app.selection_mut().set_row(2, 0);
-    let cmds = app.handle_key(make_key(KeyCode::Char('x')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('x'))));
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(app
@@ -475,7 +475,7 @@ fn x_key_on_epic_with_mixed_subtasks_rejects_archive_with_count() {
     // 2 Done + 1 Running → epic status Running (nav col 2). Epic is only item → row 0.
     app.selection_mut().set_column(2);
     app.selection_mut().set_row(2, 0);
-    let cmds = app.handle_key(make_key(KeyCode::Char('x')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('x'))));
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(app
@@ -502,7 +502,7 @@ fn x_key_on_epic_with_all_done_subtasks_allows_archive() {
     // All done → epic status Done (nav col 4). Epic is only item → row 0.
     app.selection_mut().set_column(4);
     app.selection_mut().set_row(4, 0);
-    let cmds = app.handle_key(make_key(KeyCode::Char('x')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('x'))));
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::ConfirmArchiveEpic);
     assert!(app

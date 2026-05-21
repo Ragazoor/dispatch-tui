@@ -184,7 +184,7 @@ fn repo_paths_updated_replaces_paths() {
 #[test]
 fn n_key_enters_title_mode() {
     let mut app = make_app();
-    let cmds = app.handle_key(make_key(KeyCode::Char('n')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('n'))));
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::InputTitle);
     assert!(app.input.buffer.is_empty());
@@ -452,7 +452,7 @@ fn e_key_on_empty_column_is_noop() {
 fn e_key_enters_confirm_edit_mode() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1));
     app.selection_mut().set_column(1);
-    let cmds = app.handle_key(make_key(KeyCode::Char('e')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('e'))));
     assert!(cmds.is_empty());
     assert!(matches!(
         app.input.mode,
@@ -1288,7 +1288,7 @@ fn handle_key_normal_dispatch_running_task_with_window_shows_info() {
         .unwrap();
     task_3.tmux_window = Some("main:task-3".to_string());
 
-    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('d'))));
     // Should just show status info, no dispatch
     assert!(cmds.is_empty());
 }
@@ -1918,7 +1918,7 @@ fn handle_key_confirm_detach_tmux_non_matching_mode_is_noop() {
 fn handle_key_normal_board_known_keys_produce_effects() {
     let mut app = make_app();
     // 'n' starts new task (switches to InputTitle mode)
-    let cmds = app.handle_key(make_key(KeyCode::Char('n')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('n'))));
     assert!(cmds.is_empty()); // inline mutation, no commands
     assert_eq!(app.input.mode, InputMode::InputTitle);
 }

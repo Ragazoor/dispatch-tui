@@ -167,7 +167,7 @@ fn batch_move_with_review_tasks_enters_confirm_done() {
         crate::tui::messages::TaskMessage::ToggleSelect(TaskId(2)),
     ));
 
-    let cmds = app.handle_key(make_key(KeyCode::Char('L')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('L'))));
     assert!(cmds.is_empty());
     assert!(app.status.message.as_deref().unwrap().contains("2 tasks"));
     assert!(app.status.message.as_deref().unwrap().contains("Done"));
@@ -835,7 +835,7 @@ fn handle_key_normal_wrap_up_on_empty_is_noop() {
     let mut app = make_app();
     // Navigate to an empty column (Review has no tasks by default)
     app.selection_mut().set_column(3);
-    let cmds = app.handle_key(make_key(KeyCode::Char('W')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('W'))));
     assert!(cmds.is_empty());
 }
 

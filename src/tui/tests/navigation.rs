@@ -624,7 +624,7 @@ fn refresh_tasks_prunes_stale_selections() {
 #[test]
 fn e_on_task_enters_confirm_then_edits() {
     let mut app = make_app();
-    let cmds = app.handle_key(make_key(KeyCode::Char('e')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('e'))));
     assert!(cmds.is_empty());
     assert!(matches!(app.input.mode, InputMode::ConfirmEditTask(_)));
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
@@ -723,7 +723,7 @@ fn move_review_to_done_enters_confirm_mode() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Review)], ProjectId(1));
     app.selection_mut().set_column(3); // Review = nav col 3
 
-    let cmds = app.handle_key(make_key(KeyCode::Char('L')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('L'))));
     assert!(cmds.is_empty());
     assert!(matches!(app.input.mode, InputMode::ConfirmDone(TaskId(1))));
     assert!(app.status.message.as_deref().unwrap().contains("Done"));
@@ -1226,7 +1226,6 @@ fn w_key_on_non_review_task_is_noop() {
     app.handle_key(make_key(KeyCode::Char('W')));
     assert_eq!(app.input.mode, InputMode::Normal);
 }
-
 
 #[test]
 fn tick_skips_already_stale_tasks() {

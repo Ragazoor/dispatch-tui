@@ -503,7 +503,7 @@ fn shift_l_key_on_epic_moves_status_forward() {
 #[test]
 fn shift_h_key_on_backlog_epic_stays_backlog() {
     let mut app = make_app_with_epic_selected();
-    let cmds = app.handle_key(make_key(KeyCode::Char('H')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('H'))));
     // Already at Backlog, can't go backward
     assert_eq!(app.board.epics[0].status, TaskStatus::Backlog);
     assert!(cmds.is_empty());
@@ -540,7 +540,7 @@ fn shift_h_on_done_epic_moves_to_review() {
 #[test]
 fn shift_e_key_starts_new_epic() {
     let mut app = make_app();
-    let cmds = app.handle_key(make_key(KeyCode::Char('E')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('E'))));
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::InputEpicTitle);
 }
@@ -567,7 +567,7 @@ fn e_key_in_epic_view_edits_epic() {
         selection: BoardSelection::new_for_epic(),
         parent: Box::new(ViewMode::Board(BoardSelection::new())),
     };
-    let cmds = app.handle_key(make_key(KeyCode::Char('e')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('e'))));
     assert_eq!(cmds.len(), 1);
     assert!(
         matches!(&cmds[0], Command::Editor(crate::tui::commands::EditorCommand::PopOut(EditKind::EpicEdit(e))) if e.id == EpicId(10))
@@ -589,7 +589,7 @@ fn e_key_on_task_in_epic_view_edits_task_not_epic() {
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 0);
 
-    let cmds = app.handle_key(make_key(KeyCode::Char('e')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('e'))));
     assert!(cmds.is_empty());
     assert!(matches!(
         app.input.mode,

@@ -96,7 +96,7 @@ fn d_key_on_running_with_window_shows_warning() {
     task.worktree = Some("/repo/.worktrees/4-task-4".to_string());
     let mut app = App::new(vec![task], ProjectId(1));
     app.selection_mut().set_column(2); // Running column
-    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('d'))));
     assert!(cmds.is_empty());
     assert!(app
         .status
@@ -126,7 +126,7 @@ fn d_key_on_backlog_dispatches() {
     task.tag = Some(TaskTag::Feature);
     let mut app = App::new(vec![task], ProjectId(1));
     app.selection_mut().set_column(1); // Backlog column
-    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('d'))));
     assert_eq!(cmds.len(), 1);
     assert!(
         matches!(&cmds[0], Command::Task(crate::tui::commands::TaskCommand::DispatchAgent { task, mode: DispatchMode::Dispatch }) if task.id == TaskId(1))
@@ -137,7 +137,7 @@ fn d_key_on_backlog_dispatches() {
 fn d_key_on_done_shows_warning() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Done)], ProjectId(1));
     app.selection_mut().set_column(4); // Done column
-    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('d'))));
     assert!(cmds.is_empty());
     assert!(app.status.message.is_some());
 }
@@ -149,7 +149,7 @@ fn d_key_on_running_no_worktree_no_window_shows_warning() {
     task.tmux_window = None;
     let mut app = App::new(vec![task], ProjectId(1));
     app.selection_mut().set_column(2); // Running column
-    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('d'))));
     assert!(cmds.is_empty());
     assert!(app
         .status
@@ -163,7 +163,7 @@ fn d_key_on_running_no_worktree_no_window_shows_warning() {
 fn shift_d_with_one_repo_emits_quick_dispatch() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1));
     app.board.repo_paths = vec!["/repo".to_string()];
-    let cmds = app.handle_key(make_shift_key(KeyCode::Char('D')));
+    let cmds = without_usage(app.handle_key(make_shift_key(KeyCode::Char('D'))));
     assert_eq!(cmds.len(), 1);
     assert!(
         matches!(&cmds[0], Command::Task(crate::tui::commands::TaskCommand::QuickDispatch { ref draft, epic_id: None }) if draft.repo_path == "/repo")
@@ -175,7 +175,7 @@ fn shift_d_with_one_repo_emits_quick_dispatch() {
 fn shift_d_with_no_repos_shows_error() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1));
     app.board.repo_paths = vec![];
-    let cmds = app.handle_key(make_shift_key(KeyCode::Char('D')));
+    let cmds = without_usage(app.handle_key(make_shift_key(KeyCode::Char('D'))));
     assert!(cmds.is_empty());
     assert!(app.status.message.is_some());
     assert_eq!(app.input.mode, InputMode::Normal);
@@ -185,7 +185,7 @@ fn shift_d_with_no_repos_shows_error() {
 fn shift_d_with_multiple_repos_enters_quick_dispatch_mode() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1));
     app.board.repo_paths = vec!["/repo1".to_string(), "/repo2".to_string()];
-    let cmds = app.handle_key(make_shift_key(KeyCode::Char('D')));
+    let cmds = without_usage(app.handle_key(make_shift_key(KeyCode::Char('D'))));
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::QuickDispatch);
 }
@@ -249,7 +249,7 @@ fn shift_d_in_epic_view_quick_dispatches_subtask_single_repo() {
         selection: BoardSelection::new_for_epic(),
         parent: Box::new(ViewMode::Board(BoardSelection::new())),
     };
-    let cmds = app.handle_key(make_shift_key(KeyCode::Char('D')));
+    let cmds = without_usage(app.handle_key(make_shift_key(KeyCode::Char('D'))));
     assert_eq!(cmds.len(), 1);
     assert!(matches!(&cmds[0],
         Command::Task(crate::tui::commands::TaskCommand::QuickDispatch { ref draft, epic_id: Some(EpicId(10)) })
@@ -268,7 +268,7 @@ fn shift_d_in_epic_view_shows_repo_selection_with_multiple_repos() {
         selection: BoardSelection::new_for_epic(),
         parent: Box::new(ViewMode::Board(BoardSelection::new())),
     };
-    let cmds = app.handle_key(make_shift_key(KeyCode::Char('D')));
+    let cmds = without_usage(app.handle_key(make_shift_key(KeyCode::Char('D'))));
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::QuickDispatch);
     assert_eq!(app.input.pending_epic_id, Some(EpicId(10)));
@@ -435,7 +435,7 @@ fn d_key_on_review_with_window_shows_warning() {
     task.worktree = Some("/repo/.worktrees/5-task-5".to_string());
     let mut app = App::new(vec![task], ProjectId(1));
     app.selection_mut().set_column(3); // Review column
-    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('d'))));
     assert!(cmds.is_empty());
     assert!(app
         .status
@@ -466,7 +466,7 @@ fn d_key_on_review_no_worktree_no_window_shows_warning() {
     task.tmux_window = None;
     let mut app = App::new(vec![task], ProjectId(1));
     app.selection_mut().set_column(3); // Review column
-    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('d'))));
     assert!(cmds.is_empty());
     assert!(app
         .status
@@ -480,10 +480,9 @@ fn d_key_on_review_no_worktree_no_window_shows_warning() {
 fn d_key_on_empty_column_is_noop() {
     let mut app = App::new(vec![], ProjectId(1));
     app.selection_mut().set_column(1);
-    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('d'))));
     assert!(cmds.is_empty());
 }
-
 
 #[test]
 fn kill_and_retry_enters_confirm_mode() {
@@ -611,7 +610,7 @@ fn crashed_card_with_no_window_shows_detached_not_crashed() {
 #[test]
 fn d_key_on_backlog_epic_dispatches_epic() {
     let mut app = make_app_with_epic_selected(); // epic at row 1 in Backlog
-    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('d'))));
     assert_eq!(cmds.len(), 1);
     assert!(
         matches!(cmds[0], Command::Epic(crate::tui::commands::EpicCommand::Dispatch { ref epic }) if epic.id == EpicId(10))
@@ -858,7 +857,7 @@ fn conflict_flag_clears_on_move_backward() {
 fn dispatch_is_noop_when_on_select_all() {
     let mut app = make_app();
     app.handle_key(make_key(KeyCode::Char('k')));
-    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('d'))));
     assert!(cmds.is_empty());
 }
 
