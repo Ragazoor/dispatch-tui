@@ -111,6 +111,64 @@ pub fn check_worktrees(tasks: &[crate::models::Task], repo_paths: &[String]) -> 
     findings
 }
 
+/// Check sessions: compare tasks.tmux_window against live tmux windows.
+///
+/// - Task has `tmux_window` set with status running/review but window is gone → error
+/// - Task has `tmux_window` set with status done/archived and window still exists → warn
+pub fn check_sessions(
+    tasks: &[crate::models::Task],
+    runner: &dyn crate::process::ProcessRunner,
+) -> Vec<Finding> {
+    use crate::models::TaskStatus;
+
+    let live_windows: std::collections::HashSet<String> =
+        crate::tmux::list_all_window_names(runner)
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+
+    let mut findings = Vec::new();
+
+    for task in tasks {
+        let Some(ref window) = task.tmux_window else {
+            continue;
+        };
+        let window_alive = live_windows.contains(window.as_str());
+        let task_active = matches!(task.status, TaskStatus::Running | TaskStatus::Review);
+        let task_terminal = matches!(task.status, TaskStatus::Done | TaskStatus::Archived);
+
+        if task_active && !window_alive {
+            findings.push(Finding {
+                check: "sessions",
+                status: FindingStatus::Error,
+                target: window.clone(),
+                message: format!(
+                    "task #{} ({}) claims window '{}' but it no longer exists",
+                    task.id.0,
+                    task.status,
+                    window
+                ),
+                repair_available: true,
+            });
+        } else if task_terminal && window_alive {
+            findings.push(Finding {
+                check: "sessions",
+                status: FindingStatus::Warn,
+                target: window.clone(),
+                message: format!(
+                    "tmux window '{}' is still alive but task #{} is {}",
+                    window,
+                    task.id.0,
+                    task.status
+                ),
+                repair_available: true,
+            });
+        }
+    }
+
+    findings
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
@@ -195,6 +253,122 @@ mod tests {
     #[test]
     fn has_problems_empty_slice_is_false() {
         assert!(!has_problems(&[]));
+    }
+
+    mod sessions_tests {
+        use super::*;
+        use crate::process::MockProcessRunner;
+
+        fn running_task(id: i64, window: &str) -> crate::models::Task {
+            crate::models::Task {
+                id: crate::models::TaskId(id),
+                title: format!("task {id}"),
+                description: String::new(),
+                repo_path: "/repo".to_string(),
+                status: crate::models::TaskStatus::Running,
+                worktree: Some(format!("/repo/.worktrees/task-{id}")),
+                tmux_window: Some(window.to_string()),
+                plan_path: None,
+                epic_id: None,
+                sub_status: crate::models::SubStatus::Active,
+                pr_url: None,
+                tag: None,
+                sort_order: None,
+                base_branch: "main".to_string(),
+                external_id: None,
+                project_id: crate::models::ProjectId(1),
+                labels: vec![],
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+                last_pre_tool_use_at: None,
+                last_notification_at: None,
+                wrap_up_mode: None,
+            }
+        }
+
+        fn done_task(id: i64) -> crate::models::Task {
+            let mut t = running_task(id, &format!("task-{id}"));
+            t.status = crate::models::TaskStatus::Done;
+            t.sub_status = crate::models::SubStatus::None;
+            t
+        }
+
+        fn archived_task(id: i64) -> crate::models::Task {
+            let mut t = running_task(id, &format!("task-{id}"));
+            t.status = crate::models::TaskStatus::Archived;
+            t.sub_status = crate::models::SubStatus::None;
+            t
+        }
+
+        #[test]
+        fn stale_db_claim_when_window_missing() {
+            let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"dispatch\n")]);
+            let findings = check_sessions(&[running_task(10, "task-10")], &mock);
+            assert_eq!(findings.len(), 1);
+            assert_eq!(findings[0].status, FindingStatus::Error);
+            assert_eq!(findings[0].check, "sessions");
+            assert!(findings[0].repair_available);
+            assert!(findings[0].target.contains("task-10"));
+        }
+
+        #[test]
+        fn ok_when_window_exists() {
+            let mock = MockProcessRunner::new(vec![
+                MockProcessRunner::ok_with_stdout(b"dispatch\ntask-7\n"),
+            ]);
+            let findings = check_sessions(&[running_task(7, "task-7")], &mock);
+            let errors: Vec<_> = findings.iter().filter(|f| f.status == FindingStatus::Error).collect();
+            assert!(errors.is_empty(), "expected no errors when window exists: {errors:?}");
+        }
+
+        #[test]
+        fn stale_live_window_for_done_task() {
+            let mock = MockProcessRunner::new(vec![
+                MockProcessRunner::ok_with_stdout(b"dispatch\ntask-3\n"),
+            ]);
+            let findings = check_sessions(&[done_task(3)], &mock);
+            let warns: Vec<_> = findings.iter().filter(|f| f.status == FindingStatus::Warn).collect();
+            assert_eq!(warns.len(), 1, "expected one warn for stale live window, got: {findings:?}");
+            assert!(warns[0].repair_available);
+        }
+
+        #[test]
+        fn stale_live_window_for_archived_task() {
+            let mock = MockProcessRunner::new(vec![
+                MockProcessRunner::ok_with_stdout(b"task-8\n"),
+            ]);
+            let findings = check_sessions(&[archived_task(8)], &mock);
+            let warns: Vec<_> = findings.iter().filter(|f| f.status == FindingStatus::Warn).collect();
+            assert_eq!(warns.len(), 1, "expected one warn for archived task with live window: {findings:?}");
+        }
+
+        #[test]
+        fn no_stale_window_warn_for_backlog_task_without_window() {
+            let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"dispatch\n")]);
+            let mut task = running_task(6, "task-6");
+            task.status = crate::models::TaskStatus::Backlog;
+            task.sub_status = crate::models::SubStatus::None;
+            task.tmux_window = None;
+            let findings = check_sessions(&[task], &mock);
+            assert!(findings.is_empty(), "expected no findings for backlog task without window: {findings:?}");
+        }
+
+        #[test]
+        fn no_findings_for_task_without_tmux_window() {
+            let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"dispatch\n")]);
+            let mut task = running_task(5, "task-5");
+            task.tmux_window = None;
+            let findings = check_sessions(&[task], &mock);
+            assert!(findings.is_empty());
+        }
+
+        #[test]
+        fn no_findings_when_tmux_not_running() {
+            let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no server")]);
+            let findings = check_sessions(&[running_task(1, "task-1")], &mock);
+            assert_eq!(findings.len(), 1);
+            assert_eq!(findings[0].status, FindingStatus::Error);
+        }
     }
 
     mod worktrees_tests {
