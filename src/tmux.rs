@@ -1026,7 +1026,10 @@ mod tests {
     fn list_all_window_names_empty_when_no_sessions() {
         let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no server running")]);
         let names = list_all_window_names(&mock).unwrap();
-        assert!(names.is_empty(), "expected empty vec when tmux not running, got: {names:?}");
+        assert!(
+            names.is_empty(),
+            "expected empty vec when tmux not running, got: {names:?}"
+        );
     }
 
     #[test]

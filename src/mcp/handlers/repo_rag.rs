@@ -62,11 +62,10 @@ pub(super) async fn handle_index_repo(
         Err(e) => return e,
     };
 
-    let repo_path =
-        match resolve_repo_path(&id, parsed.task_id, parsed.repo_path, state).await {
-            Ok(p) => p,
-            Err(e) => return e,
-        };
+    let repo_path = match resolve_repo_path(&id, parsed.task_id, parsed.repo_path, state).await {
+        Ok(p) => p,
+        Err(e) => return e,
+    };
 
     let svc = RepoIndexService::new(state.embedding_service.clone());
     match svc.index_repo(&repo_path).await {
@@ -102,11 +101,10 @@ pub(super) async fn handle_search_docs(
         Err(e) => return e,
     };
 
-    let repo_path =
-        match resolve_repo_path(&id, parsed.task_id, parsed.repo_path, state).await {
-            Ok(p) => p,
-            Err(e) => return e,
-        };
+    let repo_path = match resolve_repo_path(&id, parsed.task_id, parsed.repo_path, state).await {
+        Ok(p) => p,
+        Err(e) => return e,
+    };
 
     let limit = parsed.limit.unwrap_or(5).min(20);
     let svc = RepoIndexService::new(state.embedding_service.clone());

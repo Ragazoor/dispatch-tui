@@ -175,7 +175,12 @@ mod tests {
     use crate::models::{ProjectId, SubStatus, Task, TaskId, TaskStatus};
     use chrono::Utc;
 
-    fn make_epic(id: i64, status: TaskStatus, plan_path: Option<&str>, parent: Option<i64>) -> Epic {
+    fn make_epic(
+        id: i64,
+        status: TaskStatus,
+        plan_path: Option<&str>,
+        parent: Option<i64>,
+    ) -> Epic {
         Epic {
             id: EpicId(id),
             title: format!("Epic {id}"),

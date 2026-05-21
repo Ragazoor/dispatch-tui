@@ -796,7 +796,10 @@ mod tests {
                 .collect::<Vec<_>>()
         );
         assert_eq!(active[0].title, "repo-a");
-        assert_ne!(active[0].id, archived_id, "must be a new sub-epic, not the archived one");
+        assert_ne!(
+            active[0].id, archived_id,
+            "must be a new sub-epic, not the archived one"
+        );
         let tasks = db.list_tasks_for_epic(active[0].id).await.unwrap();
         assert_eq!(tasks.len(), 1, "new sub-epic should have the feed task");
     }

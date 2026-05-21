@@ -2705,7 +2705,10 @@ async fn cli_update_task_recalculates_parent_epic() {
         .await
         .unwrap();
 
-    assert_eq!(esvc.get_epic(epic.id).await.unwrap().status, TaskStatus::Done);
+    assert_eq!(
+        esvc.get_epic(epic.id).await.unwrap().status,
+        TaskStatus::Done
+    );
 }
 
 // -- validate_wrap_up ------------------------------------------------------

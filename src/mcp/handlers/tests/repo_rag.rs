@@ -134,7 +134,11 @@ async fn search_docs_on_unindexed_repo_returns_empty() {
         error_message(&resp)
     );
     let text = extract_response_text(&resp);
-    assert_eq!(parse_count(&text), Some(0), "expected 0 results, got: {text}");
+    assert_eq!(
+        parse_count(&text),
+        Some(0),
+        "expected 0 results, got: {text}"
+    );
 }
 
 #[tokio::test]

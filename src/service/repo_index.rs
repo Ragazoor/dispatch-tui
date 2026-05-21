@@ -172,11 +172,9 @@ impl RepoIndexService {
                 let on_disk = walk_md_files(&repo_path)?;
 
                 let in_db: std::collections::HashMap<String, String> = {
-                    let mut stmt =
-                        conn.prepare("SELECT file_path, content_hash FROM rag_files")?;
-                    let rows = stmt.query_map([], |r| {
-                        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-                    })?;
+                    let mut stmt = conn.prepare("SELECT file_path, content_hash FROM rag_files")?;
+                    let rows = stmt
+                        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
                     rows.collect::<rusqlite::Result<_>>()?
                 };
 
@@ -267,10 +265,7 @@ impl RepoIndexService {
                 }
 
                 for file in &embedded {
-                    tx.execute(
-                        "DELETE FROM rag_files WHERE file_path = ?1",
-                        [&file.path],
-                    )?;
+                    tx.execute("DELETE FROM rag_files WHERE file_path = ?1", [&file.path])?;
                     tx.execute(
                         "INSERT INTO rag_files (file_path, content_hash, indexed_at) \
                          VALUES (?1, ?2, ?3)",
@@ -336,9 +331,7 @@ impl RepoIndexService {
                 })?;
                 rows.map(|row| {
                     row.map_err(anyhow::Error::from)
-                        .map(|(path, text, blob)| {
-                            (path, text, deserialize_embedding(&blob))
-                        })
+                        .map(|(path, text, blob)| (path, text, deserialize_embedding(&blob)))
                 })
                 .collect()
             }
@@ -610,8 +603,7 @@ mod tests {
         std::fs::write(dir.path().join("note.md"), "# Note").unwrap();
         let svc = RepoIndexService::new(EmbeddingService::new_test());
         svc.index_repo(dir.path()).await.unwrap();
-        let content =
-            std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
+        let content = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
         assert!(content.contains(".dispatch/"));
     }
 
@@ -637,10 +629,7 @@ mod tests {
         let svc = RepoIndexService::new(EmbeddingService::new_test());
         svc.index_repo(dir.path()).await.unwrap();
 
-        let results = svc
-            .search_docs(dir.path(), "escalation", 5)
-            .await
-            .unwrap();
+        let results = svc.search_docs(dir.path(), "escalation", 5).await.unwrap();
         assert!(!results.is_empty());
         assert!(results[0].score > RAG_SIMILARITY_THRESHOLD);
     }

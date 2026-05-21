@@ -14,8 +14,8 @@ pub use agents::{
 };
 pub use finish::{finish_task, FinishError};
 pub use prompts::{build_and_record_injections, EpicContext, LearningInjections, ProjectContext};
-pub(crate) use worktree::{ensure_dispatch_dir_and_gitignore, DISPATCH_DIR};
 pub use worktree::{branch_from_worktree, cleanup_task, validate_repo_path};
+pub(crate) use worktree::{ensure_dispatch_dir_and_gitignore, DISPATCH_DIR};
 
 /// Extract stderr from a process `Output` as a trimmed `String`.
 pub(super) fn stderr_str(output: &std::process::Output) -> String {

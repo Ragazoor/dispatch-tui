@@ -118,10 +118,7 @@ async fn create_task_fixture(state: &Arc<McpState>) -> crate::models::TaskId {
     create_task_fixture_at(state, "/repo").await
 }
 
-async fn create_task_fixture_at(
-    state: &Arc<McpState>,
-    repo_path: &str,
-) -> crate::models::TaskId {
+async fn create_task_fixture_at(state: &Arc<McpState>, repo_path: &str) -> crate::models::TaskId {
     state
         .db
         .create_task(CreateTaskRequest {

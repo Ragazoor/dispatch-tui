@@ -1,7 +1,7 @@
-pub mod repo_index;
 pub mod embeddings;
 pub mod epics;
 pub mod learnings;
+pub mod repo_index;
 pub mod tasks;
 
 pub use epics::{CreateEpicParams, EpicService, UpdateEpicParams};

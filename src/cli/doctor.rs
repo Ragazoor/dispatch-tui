@@ -58,7 +58,13 @@ pub fn format_human(findings: &[Finding]) -> String {
                 FindingStatus::Warn => "warn ",
                 FindingStatus::Error => "error",
             };
-            format!("{}  {}  {}  {}", status, f.check.as_str(), f.target, f.message)
+            format!(
+                "{}  {}  {}  {}",
+                status,
+                f.check.as_str(),
+                f.target,
+                f.message
+            )
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -87,14 +93,19 @@ pub fn check_worktrees(tasks: &[crate::models::Task], repo_paths: &[String]) -> 
 
     // DB orphans: task.worktree set but path doesn't exist on disk.
     for task in tasks {
-        let Some(ref wt) = task.worktree else { continue };
+        let Some(ref wt) = task.worktree else {
+            continue;
+        };
         let path = crate::models::expand_tilde(wt);
         if !std::path::Path::new(&path).exists() {
             findings.push(Finding {
                 check: CheckKind::Worktrees,
                 status: FindingStatus::Error,
                 target: wt.clone(),
-                message: format!("task #{} claims worktree but path does not exist", task.id.0),
+                message: format!(
+                    "task #{} claims worktree but path does not exist",
+                    task.id.0
+                ),
                 repair_available: true,
             });
         }
@@ -162,9 +173,7 @@ pub fn check_sessions(
                 target: window.clone(),
                 message: format!(
                     "task #{} ({}) claims window '{}' but it no longer exists",
-                    task.id.0,
-                    task.status,
-                    window
+                    task.id.0, task.status, window
                 ),
                 repair_available: true,
             });
@@ -175,9 +184,7 @@ pub fn check_sessions(
                 target: window.clone(),
                 message: format!(
                     "tmux window '{}' is still alive but task #{} is {}",
-                    window,
-                    task.id.0,
-                    task.status
+                    window, task.id.0, task.status
                 ),
                 repair_available: true,
             });
@@ -196,7 +203,10 @@ pub fn check_hooks(
 
     for repo in repo_paths {
         let expanded = crate::models::expand_tilde(repo);
-        let result = runner.run("git", &["-C", &expanded, "config", "--get", "core.hooksPath"]);
+        let result = runner.run(
+            "git",
+            &["-C", &expanded, "config", "--get", "core.hooksPath"],
+        );
         let current_value = match result {
             Ok(ref output) if output.status.success() => {
                 String::from_utf8_lossy(&output.stdout).trim().to_string()
@@ -239,7 +249,14 @@ pub fn repair_hooks_set_path(
     let expanded = crate::models::expand_tilde(repo_path);
     let output = runner.run(
         "git",
-        &["-C", &expanded, "config", "--local", "core.hooksPath", ".githooks"],
+        &[
+            "-C",
+            &expanded,
+            "config",
+            "--local",
+            "core.hooksPath",
+            ".githooks",
+        ],
     )?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -261,7 +278,14 @@ pub fn repair_worktrees_remove(
     let expanded_wt = crate::models::expand_tilde(worktree_path);
     let output = runner.run(
         "git",
-        &["-C", &expanded_repo, "worktree", "remove", "--force", &expanded_wt],
+        &[
+            "-C",
+            &expanded_repo,
+            "worktree",
+            "remove",
+            "--force",
+            &expanded_wt,
+        ],
     )?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -312,7 +336,10 @@ mod tests {
     #[test]
     fn format_human_ok_line() {
         let out = format_human(&[ok_finding()]);
-        assert!(out.starts_with("ok   "), "expected 'ok   ' prefix, got: {out}");
+        assert!(
+            out.starts_with("ok   "),
+            "expected 'ok   ' prefix, got: {out}"
+        );
         assert!(out.contains("hooks"), "expected check name, got: {out}");
         assert!(out.contains("/repo"), "expected target, got: {out}");
     }
@@ -320,7 +347,10 @@ mod tests {
     #[test]
     fn format_human_warn_line() {
         let out = format_human(&[warn_finding()]);
-        assert!(out.starts_with("warn "), "expected 'warn ' prefix, got: {out}");
+        assert!(
+            out.starts_with("warn "),
+            "expected 'warn ' prefix, got: {out}"
+        );
     }
 
     #[test]
@@ -403,7 +433,8 @@ mod tests {
 
         #[test]
         fn stale_db_claim_when_window_missing() {
-            let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"dispatch\n")]);
+            let mock =
+                MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"dispatch\n")]);
             let findings = check_sessions(&[running_task(10, "task-10")], &mock);
             assert_eq!(findings.len(), 1);
             assert_eq!(findings[0].status, FindingStatus::Error);
@@ -414,49 +445,72 @@ mod tests {
 
         #[test]
         fn ok_when_window_exists() {
-            let mock = MockProcessRunner::new(vec![
-                MockProcessRunner::ok_with_stdout(b"dispatch\ntask-7\n"),
-            ]);
+            let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(
+                b"dispatch\ntask-7\n",
+            )]);
             let findings = check_sessions(&[running_task(7, "task-7")], &mock);
-            let errors: Vec<_> = findings.iter().filter(|f| f.status == FindingStatus::Error).collect();
-            assert!(errors.is_empty(), "expected no errors when window exists: {errors:?}");
+            let errors: Vec<_> = findings
+                .iter()
+                .filter(|f| f.status == FindingStatus::Error)
+                .collect();
+            assert!(
+                errors.is_empty(),
+                "expected no errors when window exists: {errors:?}"
+            );
         }
 
         #[test]
         fn stale_live_window_for_done_task() {
-            let mock = MockProcessRunner::new(vec![
-                MockProcessRunner::ok_with_stdout(b"dispatch\ntask-3\n"),
-            ]);
+            let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(
+                b"dispatch\ntask-3\n",
+            )]);
             let findings = check_sessions(&[done_task(3)], &mock);
-            let warns: Vec<_> = findings.iter().filter(|f| f.status == FindingStatus::Warn).collect();
-            assert_eq!(warns.len(), 1, "expected one warn for stale live window, got: {findings:?}");
+            let warns: Vec<_> = findings
+                .iter()
+                .filter(|f| f.status == FindingStatus::Warn)
+                .collect();
+            assert_eq!(
+                warns.len(),
+                1,
+                "expected one warn for stale live window, got: {findings:?}"
+            );
             assert!(warns[0].repair_available);
         }
 
         #[test]
         fn stale_live_window_for_archived_task() {
-            let mock = MockProcessRunner::new(vec![
-                MockProcessRunner::ok_with_stdout(b"task-8\n"),
-            ]);
+            let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"task-8\n")]);
             let findings = check_sessions(&[archived_task(8)], &mock);
-            let warns: Vec<_> = findings.iter().filter(|f| f.status == FindingStatus::Warn).collect();
-            assert_eq!(warns.len(), 1, "expected one warn for archived task with live window: {findings:?}");
+            let warns: Vec<_> = findings
+                .iter()
+                .filter(|f| f.status == FindingStatus::Warn)
+                .collect();
+            assert_eq!(
+                warns.len(),
+                1,
+                "expected one warn for archived task with live window: {findings:?}"
+            );
         }
 
         #[test]
         fn no_stale_window_warn_for_backlog_task_without_window() {
-            let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"dispatch\n")]);
+            let mock =
+                MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"dispatch\n")]);
             let mut task = running_task(6, "task-6");
             task.status = crate::models::TaskStatus::Backlog;
             task.sub_status = crate::models::SubStatus::None;
             task.tmux_window = None;
             let findings = check_sessions(&[task], &mock);
-            assert!(findings.is_empty(), "expected no findings for backlog task without window: {findings:?}");
+            assert!(
+                findings.is_empty(),
+                "expected no findings for backlog task without window: {findings:?}"
+            );
         }
 
         #[test]
         fn no_findings_for_task_without_tmux_window() {
-            let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"dispatch\n")]);
+            let mock =
+                MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"dispatch\n")]);
             let mut task = running_task(5, "task-5");
             task.tmux_window = None;
             let findings = check_sessions(&[task], &mock);
@@ -522,8 +576,14 @@ mod tests {
             let path = dir.path().to_str().unwrap().to_string();
             let task = task_with_worktree(2, &path);
             let findings = check_worktrees(&[task], &["/repo".to_string()]);
-            let errors: Vec<_> = findings.iter().filter(|f| f.status == FindingStatus::Error).collect();
-            assert!(errors.is_empty(), "expected no errors for existing path, got: {errors:?}");
+            let errors: Vec<_> = findings
+                .iter()
+                .filter(|f| f.status == FindingStatus::Error)
+                .collect();
+            assert!(
+                errors.is_empty(),
+                "expected no errors for existing path, got: {errors:?}"
+            );
         }
 
         #[test]
@@ -556,9 +616,8 @@ mod tests {
 
         #[test]
         fn ok_when_hooks_path_is_githooks() {
-            let mock = MockProcessRunner::new(vec![
-                MockProcessRunner::ok_with_stdout(b".githooks\n"),
-            ]);
+            let mock =
+                MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b".githooks\n")]);
             let findings = check_hooks(&["/repo".to_string()], &mock);
             assert_eq!(findings.len(), 1);
             assert_eq!(findings[0].status, FindingStatus::Ok);
@@ -567,9 +626,7 @@ mod tests {
 
         #[test]
         fn warn_when_hooks_path_is_different() {
-            let mock = MockProcessRunner::new(vec![
-                MockProcessRunner::ok_with_stdout(b".husky\n"),
-            ]);
+            let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b".husky\n")]);
             let findings = check_hooks(&["/repo".to_string()], &mock);
             assert_eq!(findings.len(), 1);
             assert_eq!(findings[0].status, FindingStatus::Warn);
@@ -587,9 +644,8 @@ mod tests {
 
         #[test]
         fn issues_correct_git_args() {
-            let mock = MockProcessRunner::new(vec![
-                MockProcessRunner::ok_with_stdout(b".githooks\n"),
-            ]);
+            let mock =
+                MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b".githooks\n")]);
             let _ = check_hooks(&["/my/repo".to_string()], &mock);
             let calls = mock.recorded_calls();
             assert_eq!(calls.len(), 1);
@@ -606,10 +662,7 @@ mod tests {
                 MockProcessRunner::ok_with_stdout(b".githooks\n"),
                 MockProcessRunner::fail(""),
             ]);
-            let findings = check_hooks(
-                &["/repo-a".to_string(), "/repo-b".to_string()],
-                &mock,
-            );
+            let findings = check_hooks(&["/repo-a".to_string(), "/repo-b".to_string()], &mock);
             assert_eq!(findings.len(), 2);
             assert_eq!(findings[0].status, FindingStatus::Ok);
             assert_eq!(findings[1].status, FindingStatus::Warn);
@@ -629,7 +682,14 @@ mod tests {
             assert_eq!(calls[0].0, "git");
             assert_eq!(
                 calls[0].1,
-                vec!["-C", "/my/repo", "config", "--local", "core.hooksPath", ".githooks"]
+                vec![
+                    "-C",
+                    "/my/repo",
+                    "config",
+                    "--local",
+                    "core.hooksPath",
+                    ".githooks"
+                ]
             );
         }
 
@@ -642,7 +702,14 @@ mod tests {
             assert_eq!(calls[0].0, "git");
             assert_eq!(
                 calls[0].1,
-                vec!["-C", "/repo", "worktree", "remove", "--force", "/repo/.worktrees/task-5"]
+                vec![
+                    "-C",
+                    "/repo",
+                    "worktree",
+                    "remove",
+                    "--force",
+                    "/repo/.worktrees/task-5"
+                ]
             );
         }
     }

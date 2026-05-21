@@ -860,14 +860,7 @@ async fn doctor_repair_without_force_emits_json() {
     drop(conn);
 
     let out = binary()
-        .args([
-            "--db",
-            db_path,
-            "doctor",
-            "worktrees",
-            "--repair",
-            "--json",
-        ])
+        .args(["--db", db_path, "doctor", "worktrees", "--repair", "--json"])
         .output()
         .unwrap();
 
@@ -901,7 +894,14 @@ async fn doctor_repair_force_clears_db_orphan_worktree() {
     drop(conn);
 
     let out = binary()
-        .args(["--db", db_path, "doctor", "worktrees", "--repair", "--force"])
+        .args([
+            "--db",
+            db_path,
+            "doctor",
+            "worktrees",
+            "--repair",
+            "--force",
+        ])
         .output()
         .unwrap();
     assert!(

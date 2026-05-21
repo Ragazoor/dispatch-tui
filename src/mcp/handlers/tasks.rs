@@ -890,16 +890,15 @@ pub(super) async fn handle_exit_session(
     if !already_reflected {
         // Intentionally inline (not via wrap_up_verify_line): this branch has a
         // non-empty nudge when no command is set, and the text differs from wrap_up's phrasing.
-        let verify_line =
-            match dispatch::fetch_verify_command(&*state.db, &task.repo_path).await {
-                Some(cmd) => format!(
-                    "\n\nThis repo's verify command is `{cmd}` — run it before closing."
-                ),
-                None => "\n\nNo verify command is set for this repo. \
+        let verify_line = match dispatch::fetch_verify_command(&*state.db, &task.repo_path).await {
+            Some(cmd) => {
+                format!("\n\nThis repo's verify command is `{cmd}` — run it before closing.")
+            }
+            None => "\n\nNo verify command is set for this repo. \
                          If you ran a command to validate your work, \
                          record it with `set_verify_command`."
-                    .to_string(),
-            };
+                .to_string(),
+        };
         return JsonRpcResponse::ok(
             id,
             json!({"content": [{"type": "text", "text": format!("\

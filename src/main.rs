@@ -430,7 +430,11 @@ async fn main() -> Result<()> {
                 }
             };
             // --dry-run always overrides --repair/--force
-            let (repair, force) = if dry_run { (false, false) } else { (repair, force) };
+            let (repair, force) = if dry_run {
+                (false, false)
+            } else {
+                (repair, force)
+            };
 
             if run_worktrees {
                 findings.extend(check_worktrees(&tasks, &all_repos));
@@ -460,7 +464,9 @@ async fn main() -> Result<()> {
                         for f in &repairable {
                             eprintln!(
                                 "  would repair: {} {}  —  {}",
-                                f.check.as_str(), f.target, f.message
+                                f.check.as_str(),
+                                f.target,
+                                f.message
                             );
                         }
                         std::process::exit(1);
@@ -499,9 +505,10 @@ async fn main() -> Result<()> {
                             },
                             CheckKind::Worktrees => match f.status {
                                 FindingStatus::Error => {
-                                    if let Some(task) = tasks.iter().find(|t| {
-                                        t.worktree.as_deref() == Some(f.target.as_str())
-                                    }) {
+                                    if let Some(task) = tasks
+                                        .iter()
+                                        .find(|t| t.worktree.as_deref() == Some(f.target.as_str()))
+                                    {
                                         db.patch_task(
                                             task.id,
                                             &db::TaskPatch::new().worktree(None).tmux_window(None),
@@ -538,7 +545,9 @@ async fn main() -> Result<()> {
                                 eprintln!("repair failed for {}: {e}", f.target);
                                 any_repair_failed = true;
                             }
-                            Ok(()) if !json => println!("repaired: {} {}", f.check.as_str(), f.target),
+                            Ok(()) if !json => {
+                                println!("repaired: {} {}", f.check.as_str(), f.target)
+                            }
                             Ok(()) => {}
                         }
                     }

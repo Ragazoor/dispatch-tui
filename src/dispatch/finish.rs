@@ -165,7 +165,7 @@ mod tests {
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"main\n"), // rev-parse HEAD
             MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // remote get-url
-            Err(anyhow::anyhow!("git: command not found")),                      // git pull
+            Err(anyhow::anyhow!("git: command not found")), // git pull
         ]);
 
         let err = finish_task(

@@ -1,8 +1,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
 use crate::models::{
-    DispatchMode, EpicId, ProjectId, SubStatus, TaskId, TaskStatus, TaskTag,
-    ACTIVE_THRESHOLD, DEFAULT_QUICK_TASK_TITLE,
+    DispatchMode, EpicId, ProjectId, SubStatus, TaskId, TaskStatus, TaskTag, ACTIVE_THRESHOLD,
+    DEFAULT_QUICK_TASK_TITLE,
 };
 use crossterm::event::KeyCode;
 use std::time::{Duration, Instant};

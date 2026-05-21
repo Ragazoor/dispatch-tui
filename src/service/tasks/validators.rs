@@ -80,8 +80,8 @@ pub(super) fn build_task_patch<'a>(
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use super::build_task_patch;
     use super::super::params::UpdateTaskParams;
+    use super::build_task_patch;
     use crate::models::{ProjectId, SubStatus, TaskId, TaskStatus, TaskTag, WrapUpMode};
 
     #[test]
@@ -126,8 +126,7 @@ mod tests {
 
     #[test]
     fn repo_path_not_set_when_expanded_is_none() {
-        let params =
-            UpdateTaskParams::for_task(TaskId(1)).repo_path("/some/path".to_string());
+        let params = UpdateTaskParams::for_task(TaskId(1)).repo_path("/some/path".to_string());
         let patch = build_task_patch(&params, None, None);
         assert_eq!(patch.repo_path, None);
     }
@@ -148,8 +147,7 @@ mod tests {
 
     #[test]
     fn base_branch_mapped_to_plain_field() {
-        let params =
-            UpdateTaskParams::for_task(TaskId(1)).base_branch(Some("develop".to_string()));
+        let params = UpdateTaskParams::for_task(TaskId(1)).base_branch(Some("develop".to_string()));
         let patch = build_task_patch(&params, None, None);
         assert_eq!(patch.base_branch, Some("develop"));
     }
@@ -194,8 +192,7 @@ mod tests {
 
     #[test]
     fn wrap_up_mode_set_when_some_provided() {
-        let params =
-            UpdateTaskParams::for_task(TaskId(1)).wrap_up_mode(Some(WrapUpMode::Rebase));
+        let params = UpdateTaskParams::for_task(TaskId(1)).wrap_up_mode(Some(WrapUpMode::Rebase));
         let patch = build_task_patch(&params, None, None);
         assert_eq!(patch.wrap_up_mode, Some(Some(WrapUpMode::Rebase)));
     }

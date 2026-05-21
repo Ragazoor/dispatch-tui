@@ -81,18 +81,17 @@ pub(super) async fn handle_create_epic(
     tracing::info!(title = %parsed.title, "MCP create_epic");
 
     let svc = EpicService::new(state.db.clone());
-    let project_id =
-        if let (Some(parent_id), None) = (parsed.parent_epic_id, parsed.project_id) {
-            match svc.get_epic(EpicId(parent_id)).await {
-                Ok(parent) => parent.project_id,
-                Err(e) => return service_err_to_response(id, e),
-            }
-        } else {
-            match resolve_project_id(&id, parsed.project_id, &*state.db).await {
-                Ok(pid) => pid,
-                Err(resp) => return resp,
-            }
-        };
+    let project_id = if let (Some(parent_id), None) = (parsed.parent_epic_id, parsed.project_id) {
+        match svc.get_epic(EpicId(parent_id)).await {
+            Ok(parent) => parent.project_id,
+            Err(e) => return service_err_to_response(id, e),
+        }
+    } else {
+        match resolve_project_id(&id, parsed.project_id, &*state.db).await {
+            Ok(pid) => pid,
+            Err(resp) => return resp,
+        }
+    };
     match svc
         .create_epic(CreateEpicParams {
             title: parsed.title,
