@@ -82,6 +82,23 @@ pub fn has_window(window: &str, runner: &dyn ProcessRunner) -> Result<bool> {
     Ok(text.lines().any(|line| line.trim() == window))
 }
 
+/// List the names of all tmux windows across all sessions.
+///
+/// Uses `-a` so the query works whether the caller is inside or outside tmux.
+/// Returns an empty vec (not an error) when no tmux server is running.
+pub fn list_all_window_names(runner: &dyn ProcessRunner) -> Result<Vec<String>> {
+    let output = runner.run("tmux", &["list-windows", "-a", "-F", "#{window_name}"])?;
+    if !output.status.success() {
+        return Ok(vec![]);
+    }
+    let names = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
+    Ok(names)
+}
+
 /// Return the Unix timestamp of the last activity in a tmux window.
 ///
 /// Uses `tmux display-message` with the `#{window_activity}` format variable,
@@ -993,6 +1010,35 @@ mod tests {
             content.matches("focus-events on").count(),
             1,
             "should not duplicate the line"
+        );
+    }
+
+    #[test]
+    fn list_all_window_names_parses_output() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(
+            b"dispatch\ntask-42\ntask-99\n",
+        )]);
+        let names = list_all_window_names(&mock).unwrap();
+        assert_eq!(names, vec!["dispatch", "task-42", "task-99"]);
+    }
+
+    #[test]
+    fn list_all_window_names_empty_when_no_sessions() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no server running")]);
+        let names = list_all_window_names(&mock).unwrap();
+        assert!(names.is_empty(), "expected empty vec when tmux not running, got: {names:?}");
+    }
+
+    #[test]
+    fn list_all_window_names_issues_correct_args() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"dispatch\n")]);
+        let _ = list_all_window_names(&mock).unwrap();
+        let calls = mock.recorded_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "tmux");
+        assert_eq!(
+            calls[0].1,
+            vec!["list-windows", "-a", "-F", "#{window_name}"]
         );
     }
 }
