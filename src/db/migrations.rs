@@ -1196,7 +1196,6 @@ pub(super) fn migrate_v57_enforce_epic_project_consistency(conn: &Connection) ->
     let tasks_has_epic = column_exists(conn, "tasks", "epic_id");
     let tasks_has_project = column_exists(conn, "tasks", "project_id");
 
-    // Fix existing sub-epics with mismatched project_id (loop handles multi-level nesting).
     if epics_has_parent && epics_has_project {
         loop {
             let fixed = conn
@@ -1212,21 +1211,6 @@ pub(super) fn migrate_v57_enforce_epic_project_consistency(conn: &Connection) ->
                 break;
             }
         }
-    }
-
-    if tasks_has_epic && tasks_has_project && epics_has_project {
-        conn.execute(
-            "UPDATE tasks
-             SET project_id = (SELECT e.project_id FROM epics e WHERE e.id = tasks.epic_id)
-             WHERE epic_id IS NOT NULL
-               AND project_id != (SELECT e.project_id FROM epics e WHERE e.id = tasks.epic_id)",
-            [],
-        )
-        .context("Failed to fix task project_id violations")?;
-    }
-
-    // Guard against minimal test schemas that lack the required columns.
-    if epics_has_parent && epics_has_project {
         conn.execute_batch(
             "CREATE TRIGGER IF NOT EXISTS enforce_sub_epic_project_insert
              BEFORE INSERT ON epics
@@ -1248,6 +1232,14 @@ pub(super) fn migrate_v57_enforce_epic_project_consistency(conn: &Connection) ->
     }
 
     if tasks_has_epic && tasks_has_project && epics_has_project {
+        conn.execute(
+            "UPDATE tasks
+             SET project_id = (SELECT e.project_id FROM epics e WHERE e.id = tasks.epic_id)
+             WHERE epic_id IS NOT NULL
+               AND project_id != (SELECT e.project_id FROM epics e WHERE e.id = tasks.epic_id)",
+            [],
+        )
+        .context("Failed to fix task project_id violations")?;
         conn.execute_batch(
             "CREATE TRIGGER IF NOT EXISTS enforce_task_epic_project_insert
              BEFORE INSERT ON tasks

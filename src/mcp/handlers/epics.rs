@@ -81,8 +81,6 @@ pub(super) async fn handle_create_epic(
     tracing::info!(title = %parsed.title, "MCP create_epic");
 
     let svc = EpicService::new(state.db.clone());
-    // When project_id is omitted for a sub-epic, derive it from the parent so
-    // callers don't need to know which project the parent belongs to.
     let project_id =
         if let (Some(parent_id), None) = (parsed.parent_epic_id, parsed.project_id) {
             match svc.get_epic(EpicId(parent_id)).await {
