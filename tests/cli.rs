@@ -841,6 +841,47 @@ fn doctor_worktrees_json_trailing_flag() {
 }
 
 #[tokio::test]
+async fn doctor_repair_without_force_emits_json() {
+    let db = NamedTempFile::new().unwrap();
+    let db_path = db.path().to_str().unwrap();
+
+    let task_id = seed_task(db.path(), "Repair JSON Test").await;
+    let conn = Database::open(db.path()).await.unwrap();
+    conn.patch_task(
+        task_id,
+        &TaskPatch::new()
+            .status(TaskStatus::Running)
+            .sub_status(SubStatus::Active)
+            .worktree(Some("/nonexistent/worktree/path-repair-json-test"))
+            .tmux_window(Some("task-repair-json")),
+    )
+    .await
+    .unwrap();
+    drop(conn);
+
+    let out = binary()
+        .args([
+            "--db",
+            db_path,
+            "doctor",
+            "worktrees",
+            "--repair",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let _: Vec<serde_json::Value> = serde_json::from_str(stdout.trim()).unwrap_or_else(|e| {
+        panic!("expected valid JSON array on stdout, got: {stdout} — error: {e}")
+    });
+    assert!(
+        !out.status.success(),
+        "expected non-zero exit when repairable findings exist (--repair without --force)"
+    );
+}
+
+#[tokio::test]
 async fn doctor_repair_force_clears_db_orphan_worktree() {
     let db = NamedTempFile::new().unwrap();
     let db_path = db.path().to_str().unwrap();
@@ -859,10 +900,15 @@ async fn doctor_repair_force_clears_db_orphan_worktree() {
     .unwrap();
     drop(conn);
 
-    let _out = binary()
+    let out = binary()
         .args(["--db", db_path, "doctor", "worktrees", "--repair", "--force"])
         .output()
         .unwrap();
+    assert!(
+        out.status.success(),
+        "expected exit 0 after repair, stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 
     let conn = Database::open(db.path()).await.unwrap();
     let task = conn.get_task(task_id).await.unwrap().unwrap();

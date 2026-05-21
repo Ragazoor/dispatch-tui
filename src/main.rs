@@ -109,7 +109,7 @@ enum Commands {
         /// Emit structured JSON instead of human-readable lines.
         #[arg(long)]
         json: bool,
-        /// Dry-run mode (default; detection only, no repairs applied).
+        /// Explicitly request detection-only mode; overrides --repair if both are set.
         #[arg(long)]
         dry_run: bool,
     },
@@ -386,7 +386,7 @@ async fn main() -> Result<()> {
         Commands::Doctor {
             check,
             json,
-            dry_run: _,
+            dry_run,
         } => {
             use dispatch_tui::cli::doctor::{
                 check_hooks, check_sessions, check_worktrees, format_human, format_json,
@@ -431,6 +431,8 @@ async fn main() -> Result<()> {
                     (false, false, true, *repair, *force)
                 }
             };
+            // --dry-run always overrides --repair/--force
+            let (repair, force) = if dry_run { (false, false) } else { (repair, force) };
 
             if run_worktrees {
                 findings.extend(check_worktrees(&tasks, &all_repos));
@@ -448,6 +450,12 @@ async fn main() -> Result<()> {
                     let repairable: Vec<_> =
                         findings.iter().filter(|f| f.repair_available).collect();
                     if !repairable.is_empty() {
+                        // Always emit findings to stdout first (JSON or human).
+                        if json {
+                            println!("{}", format_json(&findings));
+                        } else {
+                            println!("{}", format_human(&findings));
+                        }
                         eprintln!(
                             "The following repairs would be applied (re-run with --force to apply):"
                         );
@@ -461,6 +469,7 @@ async fn main() -> Result<()> {
                     }
                 } else {
                     // --repair --force: apply all available repairs.
+                    let mut any_repair_failed = false;
                     for f in &findings {
                         if !f.repair_available {
                             continue;
@@ -479,7 +488,11 @@ async fn main() -> Result<()> {
                                         .await
                                         .map_err(anyhow::Error::from)
                                     } else {
-                                        Ok(())
+                                        eprintln!(
+                                            "repair skipped for {}: no matching task found",
+                                            f.target
+                                        );
+                                        continue;
                                     }
                                 }
                                 FindingStatus::Warn => {
@@ -499,7 +512,11 @@ async fn main() -> Result<()> {
                                         .await
                                         .map_err(anyhow::Error::from)
                                     } else {
-                                        Ok(())
+                                        eprintln!(
+                                            "repair skipped for {}: no matching task found",
+                                            f.target
+                                        );
+                                        continue;
                                     }
                                 }
                                 FindingStatus::Warn => {
@@ -515,11 +532,20 @@ async fn main() -> Result<()> {
                             _ => Ok(()),
                         };
                         match result {
-                            Err(e) => eprintln!("repair failed for {}: {e}", f.target),
+                            Err(e) => {
+                                eprintln!("repair failed for {}: {e}", f.target);
+                                any_repair_failed = true;
+                            }
                             Ok(()) if !json => println!("repaired: {} {}", f.check, f.target),
                             Ok(()) => {}
                         }
                     }
+                    // After applying repairs, exit based on whether any repair failed
+                    // rather than the pre-repair findings (which would always show problems).
+                    if any_repair_failed {
+                        std::process::exit(1);
+                    }
+                    return Ok(());
                 }
             }
 
