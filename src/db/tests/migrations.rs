@@ -2539,7 +2539,6 @@ async fn migrate_v57_trigger_rejects_sub_epic_with_wrong_project() {
 
     let result = db
         .db_call(|conn| {
-            // Insert a parent epic in project 2 (project 2 created by default in in-memory DB? No — use project 1)
             conn.execute(
                 "INSERT INTO epics (title, description, repo_path, project_id) VALUES ('Parent', '', '/r', 1)",
                 [],
@@ -2551,14 +2550,11 @@ async fn migrate_v57_trigger_rejects_sub_epic_with_wrong_project() {
                 [],
             )?;
             conn.execute(
-                &format!(
-                    "INSERT INTO epics (title, description, repo_path, parent_epic_id, project_id) \
-                     VALUES ('Sub', '', '/r', {parent_id}, 2)"
-                ),
-                [],
-            )
-            .map(|_| ())
-            .map_err(anyhow::Error::from)
+                "INSERT INTO epics (title, description, repo_path, parent_epic_id, project_id) \
+                 VALUES ('Sub', '', '/r', ?1, 2)",
+                rusqlite::params![parent_id],
+            )?;
+            Ok(())
         })
         .await;
 
@@ -2590,15 +2586,12 @@ async fn migrate_v57_trigger_rejects_task_with_wrong_project() {
             )?;
             // Insert task linked to epic but with wrong project_id (2 instead of 1)
             conn.execute(
-                &format!(
-                    "INSERT INTO tasks \
-                     (title, description, repo_path, status, sub_status, base_branch, epic_id, project_id) \
-                     VALUES ('T', '', '/r', 'backlog', 'none', 'main', {epic_id}, 2)"
-                ),
-                [],
-            )
-            .map(|_| ())
-            .map_err(anyhow::Error::from)
+                "INSERT INTO tasks \
+                 (title, description, repo_path, status, sub_status, base_branch, epic_id, project_id) \
+                 VALUES ('T', '', '/r', 'backlog', 'none', 'main', ?1, 2)",
+                rusqlite::params![epic_id],
+            )?;
+            Ok(())
         })
         .await;
 
@@ -2624,14 +2617,11 @@ async fn migrate_v57_trigger_allows_consistent_sub_epic() {
         )?;
         let parent_id = conn.last_insert_rowid();
         conn.execute(
-            &format!(
-                "INSERT INTO epics (title, description, repo_path, parent_epic_id, project_id) \
-                 VALUES ('Sub', '', '/r', {parent_id}, 1)"
-            ),
-            [],
-        )
-        .map(|_| ())
-        .map_err(anyhow::Error::from)
+            "INSERT INTO epics (title, description, repo_path, parent_epic_id, project_id) \
+             VALUES ('Sub', '', '/r', ?1, 1)",
+            rusqlite::params![parent_id],
+        )?;
+        Ok(())
     })
     .await
     .expect("trigger must allow sub-epic with matching project_id");
@@ -2650,11 +2640,9 @@ async fn migrate_v57_trigger_blocks_update_that_breaks_consistency() {
             let parent_id = conn.last_insert_rowid();
             // Create sub-epic in correct project
             conn.execute(
-                &format!(
-                    "INSERT INTO epics (title, description, repo_path, parent_epic_id, project_id) \
-                     VALUES ('Sub', '', '/r', {parent_id}, 1)"
-                ),
-                [],
+                "INSERT INTO epics (title, description, repo_path, parent_epic_id, project_id) \
+                 VALUES ('Sub', '', '/r', ?1, 1)",
+                rusqlite::params![parent_id],
             )?;
             let sub_id = conn.last_insert_rowid();
             conn.execute(
@@ -2663,11 +2651,10 @@ async fn migrate_v57_trigger_blocks_update_that_breaks_consistency() {
             )?;
             // Try updating sub-epic's project_id to mismatch parent
             conn.execute(
-                &format!("UPDATE epics SET project_id = 2 WHERE id = {sub_id}"),
-                [],
-            )
-            .map(|_| ())
-            .map_err(anyhow::Error::from)
+                "UPDATE epics SET project_id = 2 WHERE id = ?1",
+                rusqlite::params![sub_id],
+            )?;
+            Ok(())
         })
         .await;
 
