@@ -3,7 +3,7 @@
 --
 -- Scope: Trajectory persistence — per-task audit log of MCP tool calls.
 -- Includes: TrajectoryEntry value type, append-on-each-MCP-call rule,
---           fire-and-forget error handling, gitignore guarantee.
+--           fire-and-forget error handling.
 -- Excludes: tmux pane capture, Claude lifecycle hooks (PreToolUse, Stop —
 --           see agent-health.allium), dispatch-internal commands, reader UIs,
 --           replay tooling.
@@ -14,9 +14,13 @@ use "./core.allium" as core
 -- Value Types
 ------------------------------------------------------------
 
--- A single line in <worktree>/.dispatch/trajectory.jsonl. Each MCP tool call
--- from a dispatched-agent caller becomes one TrajectoryEntry, serialised as
--- a single JSON object on its own line.
+-- A single line in <dispatch_data_dir>/trajectories/<task_id>.jsonl.
+-- Each MCP tool call from a dispatched-agent caller becomes one
+-- TrajectoryEntry, serialised as a single JSON object on its own line.
+-- Entries for a given task accumulate in a single per-task file named
+-- by the task's integer ID. The centralized data dir (parent of the
+-- SQLite database) holds all trajectory files so they outlive worktree
+-- cleanup and remain queryable in a single location.
 --
 -- args and result are stored as opaque JSON strings to keep this spec free
 -- of MCP payload shape; the schema_version field lets readers detect format
@@ -38,7 +42,8 @@ value TrajectoryEntry {
 
 config {
     trajectory_schema_version: String = "1.0.0"
-    trajectory_relative_path: String = ".dispatch/trajectory.jsonl"
+    -- Subdirectory name within the dispatch data dir that holds trajectory files.
+    trajectory_subdir: String = "trajectories"
 }
 
 ------------------------------------------------------------
@@ -49,22 +54,22 @@ config {
 
 rule TrajectoryAppend {
     -- After every dispatched-agent MCP tool call, append a TrajectoryEntry
-    -- to the per-task trajectory file. Session callers and tasks without a
-    -- worktree produce no entry.
+    -- to the per-task trajectory file in the centralized dispatch data dir.
+    -- Session callers produce no entry.
     when: McpToolCall(caller_identity, method, args, result, duration_ms)
 
     -- Only Task-kind callers are logged. Session callers are silently dropped.
     requires: caller_identity.kind = task
 
-    -- The caller's task must exist and have a worktree. When the worktree is
-    -- absent (e.g. backlog tasks invoking MCP before dispatch) the entry is
-    -- silently dropped.
+    -- The caller's task must exist in the DB. Entries are written regardless
+    -- of whether the task has a worktree — the write path is independent of
+    -- the worktree field.
     requires: core/Task.exists(caller_identity.task_id)
-    requires: core/Task.find(caller_identity.task_id).worktree != null
 
     ensures: append_jsonl(
-        path: core/Task.find(caller_identity.task_id).worktree.path
-              + "/" + config.trajectory_relative_path,
+        path: dispatch_data_dir
+              + "/" + config.trajectory_subdir
+              + "/" + str(caller_identity.task_id) + ".jsonl",
         entry: TrajectoryEntry {
             schema_version: config.trajectory_schema_version,
             timestamp: now,
@@ -77,13 +82,14 @@ rule TrajectoryAppend {
     )
 
     @guidance
-        -- append_jsonl is a black-box: it opens the file in append mode
-        -- (O_APPEND | O_CREAT), writes one JSON-encoded TrajectoryEntry
-        -- followed by "\n", and closes the file.
-        -- The parent `.dispatch/` directory must already exist — append_jsonl
-        -- does NOT create parent directories. If `.dispatch/` is absent the
-        -- file open fails, the error is swallowed via tracing::warn, and no
-        -- entry is written (noop).
+        -- dispatch_data_dir is the parent directory of the SQLite database
+        -- (e.g. ~/.local/share/dispatch/). It is not task-specific.
+        -- append_jsonl opens the file in append mode (O_APPEND | O_CREAT),
+        -- writes one JSON-encoded TrajectoryEntry followed by "\n", and closes
+        -- the file. The trajectories/ subdirectory is created with
+        -- create_dir_all if absent — unlike the old worktree-relative path,
+        -- the parent directory is auto-created so there is no noop-on-missing-
+        -- dir behaviour.
         -- Implementation lives behind the MCP handler dispatch boundary so
         -- that every tool call (create_task, update_task, query_learnings,
         -- propose_learning, report_usage, send_message, claim, dispatch,
@@ -102,8 +108,8 @@ rule TrajectoryAppend {
 
 rule TrajectoryWriteFailureIsSilent {
     -- Trajectory writes are best-effort. File I/O errors (permission denied,
-    -- disk full, missing parent directory after racy removal, …) must not
-    -- propagate to the calling MCP handler or affect the handler's response.
+    -- disk full, …) must not propagate to the calling MCP handler or affect
+    -- the handler's response.
     when: TrajectoryWriteFailed(task_id, error)
 
     ensures: TrajectoryWriteWarning(task_id: task_id, error: error)
@@ -116,27 +122,6 @@ rule TrajectoryWriteFailureIsSilent {
         -- dead-letter file.
         -- TrajectoryWriteWarning is observable via the standard tracing
         -- subscriber; it has no entity representation in this spec.
-}
-
--- == Gitignore guarantee ==
-
-rule TrajectoryNotGitTracked {
-    -- Trajectory files live under <worktree>/.dispatch/, which must be
-    -- gitignored inside the worktree so trajectory output never leaks into
-    -- commits or PRs.
-    when: WorktreeProvisioned(task, worktree)
-
-    ensures: WorktreeGitignoreContains(
-        worktree: worktree,
-        entry: ".dispatch/"
-    )
-
-    @guidance
-        -- Enforced at worktree provisioning time: after `git worktree add`,
-        -- the dispatch code appends ".dispatch/" to <worktree>/.gitignore
-        -- (creating the file if absent, deduplicating if already present).
-        -- The .gitignore entry is local to the worktree and not committed
-        -- back to the base branch.
 }
 
 ------------------------------------------------------------
@@ -163,7 +148,7 @@ invariant TrajectoryEntryReferencesRealTask {
 -- Open Questions
 ------------------------------------------------------------
 
-open question "Retention: trajectory.jsonl grows unbounded for long-lived tasks. Should there be a size cap, rotation policy, or a wrap-up-time truncation? Currently the file is left untouched for the life of the worktree."
+open question "Retention: <dispatch_data_dir>/trajectories/<task_id>.jsonl grows unbounded for long-lived tasks. Should there be a size cap, rotation policy, or a wrap-up-time truncation? Currently the file is left untouched for the life of the dispatch installation."
 
 open question "Replay: should a future reader tool reconstruct task state from trajectory.jsonl, or is it write-only audit? The schema_version field is forward-looking but no reader is specified."
 
