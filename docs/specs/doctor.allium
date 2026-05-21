@@ -1,0 +1,97 @@
+-- allium: 3
+-- doctor.allium
+--
+-- Scope: `dispatch doctor` self-diagnosis CLI surface
+-- Covers: findings model, check surfaces, flag conventions, output contract
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+enum FindingStatus { ok | warn | error }
+
+------------------------------------------------------------
+-- Entities
+------------------------------------------------------------
+
+-- A Finding is one detected condition from a single check run.
+-- status drives exit code: any warn or error → exit 1.
+entity Finding {
+    check:            String     -- which check produced this finding: "worktrees" | "sessions" | "hooks"
+    status:           FindingStatus
+    target:           String     -- the specific path/window/repo being described
+    message:          String     -- human-readable one-line description
+    repair_available: Boolean
+}
+
+------------------------------------------------------------
+-- CLI Surface
+------------------------------------------------------------
+
+-- `dispatch doctor [SUBCOMMAND] [FLAGS]`
+--
+-- Subcommands (all default to --dry-run):
+--   worktrees   compare .worktrees/ dirs against tasks.worktree in the DB
+--   sessions    compare tasks.tmux_window against live tmux windows
+--   hooks       verify git config core.hooksPath = .githooks in each known repo
+--   (none)      run all three checks in sequence
+--
+-- Flags (apply to every subcommand):
+--   --dry-run   (default) detect and report; never mutate
+--   --repair    opt-in: apply available repairs; prints what changed
+--   --force     with --repair, skip confirmation prompts
+--   --json      emit a JSON array of Finding records; one per check result
+
+------------------------------------------------------------
+-- Worktrees check
+------------------------------------------------------------
+
+-- DB orphan: task.worktree is set but the path does not exist on disk
+--   status: error, repair_available: true
+--   repair: patch task to clear worktree and tmux_window columns
+
+-- Disk orphan: a directory under {repo_path}/.worktrees/ exists on disk
+--              but no task row has a matching worktree path
+--   status: warn, repair_available: true
+--   repair: git worktree remove --force <path>
+
+-- Consistent: task.worktree is set and path exists, or task has no worktree
+--   status: ok, repair_available: false
+
+------------------------------------------------------------
+-- Sessions check
+------------------------------------------------------------
+
+-- Stale DB claim: task has tmux_window set and status in {running, review}
+--                 but that window no longer exists in any tmux session
+--   status: error, repair_available: true
+--   repair: patch task to clear tmux_window column
+
+-- Stale live window: a tmux window named "task-{id}" exists but the
+--                    corresponding task has status done or archived
+--   status: warn, repair_available: true
+--   repair: tmux kill-window -t <window>
+
+------------------------------------------------------------
+-- Hooks check
+------------------------------------------------------------
+
+-- Missing hooks config: git config core.hooksPath in repo != ".githooks"
+--   status: warn, repair_available: true
+--   repair: git config --local core.hooksPath .githooks (in the repo dir)
+
+-- Hooks configured correctly:
+--   status: ok, repair_available: false
+
+------------------------------------------------------------
+-- Output contract
+------------------------------------------------------------
+
+-- Default (human) output: one line per Finding
+--   "{status}  {check}  {target}  {message}"
+--   where status is padded to 5 chars: "ok   " | "warn " | "error"
+--
+-- --json output: a flat JSON array; one object per Finding
+--   [{"check":"...","status":"...","target":"...","message":"...","repair_available":...}]
+--
+-- Exit code: 0 when all findings are ok; 1 when any finding is warn or error.
