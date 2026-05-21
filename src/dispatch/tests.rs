@@ -1483,6 +1483,32 @@ fn quick_dispatch_sends_rename_prompt() {
     );
 }
 
+// --- check_pr_status error-path tests ---
+
+#[test]
+fn check_pr_status_unknown_state_returns_error() {
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(
+        b"FUNKY_NEW_STATE\n",
+    )]);
+    let result = check_pr_status("https://github.com/org/repo/pull/42", &mock);
+    assert!(result.is_err(), "unknown PR state should return an error");
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("FUNKY_NEW_STATE"),
+        "error should include the unknown state, got: {msg}"
+    );
+}
+
+#[test]
+fn check_pr_status_empty_output_returns_error() {
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"")]);
+    let result = check_pr_status("https://github.com/org/repo/pull/42", &mock);
+    assert!(
+        result.is_err(),
+        "empty output from gh pr view should return an error"
+    );
+}
+
 // --- finish_task tests ---
 
 #[test]

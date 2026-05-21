@@ -75,13 +75,17 @@ pub fn check_pr_status(pr_url: &str, runner: &dyn ProcessRunner) -> Result<PrSta
 
     let stdout = stdout_str(&output);
     let mut lines = stdout.lines();
-    let state_str = lines.next().unwrap_or("").to_uppercase();
+    let state_str = lines
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("gh pr view: no output"))?
+        .to_uppercase();
     let review_str = lines.next().unwrap_or("").to_uppercase();
 
     let state = match state_str.as_str() {
+        "OPEN" => PrState::Open,
         "MERGED" => PrState::Merged,
         "CLOSED" => PrState::Closed,
-        _ => PrState::Open,
+        other => anyhow::bail!("gh pr view: unknown PR state {:?}", other),
     };
 
     let review_decision = ReviewDecision::parse(&review_str);
