@@ -1,10 +1,8 @@
 ---
 name: summarize
 description: >-
-  Summarize what the AI agent accomplished in this session. Produces a structured
-  account of the work done — task goal, commits, files changed, and outcome. Use
-  when asked to "summarize", "recap the session", "what did you do", or "session
-  summary". Also useful before wrap-up to draft PR bodies.
+  Summarize what the agent did in this session — goal, commits, files changed,
+  outcome. Use when asked to "summarize", "recap", or "what did you do".
 ---
 
 # Summarize Session
