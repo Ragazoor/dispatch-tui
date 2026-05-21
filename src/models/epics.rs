@@ -133,20 +133,22 @@ pub fn epic_substatus(
 
 /// Collect all descendant epic IDs of `root`, inclusive of `root` itself.
 ///
-/// Walks `parent_epic_id` links iteratively and is cycle-safe: if two epics
-/// form a malformed cycle, each is visited at most once.
+/// Uses a DFS stack over a children map for O(N) traversal. Cycle-safe: each
+/// node is visited at most once via the `out` visited set.
 pub fn descendant_epic_ids(root: EpicId, epics: &[Epic]) -> HashSet<EpicId> {
+    let mut children: std::collections::HashMap<EpicId, Vec<EpicId>> =
+        std::collections::HashMap::new();
+    for epic in epics {
+        if let Some(parent) = epic.parent_epic_id {
+            children.entry(parent).or_default().push(epic.id);
+        }
+    }
     let mut out = HashSet::new();
-    out.insert(root);
-    let mut changed = true;
-    while changed {
-        changed = false;
-        for epic in epics {
-            if let Some(parent) = epic.parent_epic_id {
-                if out.contains(&parent) && !out.contains(&epic.id) {
-                    out.insert(epic.id);
-                    changed = true;
-                }
+    let mut stack = vec![root];
+    while let Some(id) = stack.pop() {
+        if out.insert(id) {
+            if let Some(kids) = children.get(&id) {
+                stack.extend_from_slice(kids);
             }
         }
     }

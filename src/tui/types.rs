@@ -957,12 +957,13 @@ mod tests {
     use chrono::Utc;
 
     fn make_test_epic(id: i64, parent: Option<i64>) -> Epic {
+        let now = Utc::now();
         Epic {
             id: EpicId(id),
             title: format!("Epic {id}"),
             description: String::new(),
             repo_path: "/repo".to_string(),
-            status: TaskStatus::Running,
+            status: TaskStatus::Backlog,
             plan_path: None,
             sort_order: None,
             auto_dispatch: false,
@@ -971,12 +972,13 @@ mod tests {
             feed_interval_secs: None,
             group_by_repo: false,
             project_id: ProjectId(1),
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
+            created_at: now,
+            updated_at: now,
         }
     }
 
     fn make_test_task(id: i64, status: TaskStatus, epic: Option<i64>) -> Task {
+        let now = Utc::now();
         Task {
             id: TaskId(id),
             title: format!("Task {id}"),
@@ -995,8 +997,8 @@ mod tests {
             external_id: None,
             labels: Vec::new(),
             project_id: ProjectId(1),
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
+            created_at: now,
+            updated_at: now,
             last_pre_tool_use_at: None,
             last_notification_at: None,
             wrap_up_mode: None,

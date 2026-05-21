@@ -111,7 +111,7 @@ pub(super) fn render_columns(
     }
 
     if sel == TaskStatus::COLUMN_COUNT + 1 {
-        render_archive_column(frame, app, content_areas[content_idx], now);
+        render_archive_column(frame, app, content_areas[content_idx], now, epic_stats);
     }
 }
 
@@ -244,7 +244,13 @@ fn render_task_column(
     );
 }
 
-fn render_archive_column(frame: &mut Frame, app: &mut App, area: Rect, now: DateTime<Utc>) {
+fn render_archive_column(
+    frame: &mut Frame,
+    app: &mut App,
+    area: Rect,
+    now: DateTime<Utc>,
+    epic_stats: &EpicStatsMap,
+) {
     let archived_epics = app.archived_epics();
     let archived_tasks = app.archived_tasks();
     let sel_row = app.selected_archive_row();
@@ -252,10 +258,6 @@ fn render_archive_column(frame: &mut Frame, app: &mut App, area: Rect, now: Date
 
     let bg_block = Block::default().style(Style::default().bg(ARCHIVE_COL_BG));
     frame.render_widget(bg_block, area);
-
-    // Render epics first, then tasks. Selection still indexes archived tasks
-    // (epics are non-interactive in the archive column for now).
-    let epic_stats = app.compute_epic_stats();
     let mut items: Vec<ListItem> = archived_epics
         .iter()
         .map(|epic| {
