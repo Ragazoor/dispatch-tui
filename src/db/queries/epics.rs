@@ -372,7 +372,7 @@ fn recalculate_epic_status_inner(
         if epic.status != TaskStatus::Done {
             Some(TaskStatus::Done)
         } else {
-            None
+            None // already done — no-op
         }
     } else if epic.status == TaskStatus::Done {
         Some(TaskStatus::Backlog) // regression: done epic has active non-done children

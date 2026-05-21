@@ -791,19 +791,23 @@ async fn recalculate_epic_status_done_epic_stays_done_when_all_tasks_archived() 
 }
 
 #[tokio::test]
-async fn recalculate_epic_status_no_subtasks_stays_running() {
+async fn recalculate_epic_status_all_done_stays_done_when_already_done() {
     let db = in_memory_db().await;
     let epic = db
         .create_epic("E", "", "/repo", None, ProjectId(1))
         .await
         .unwrap();
-    db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Running))
+    let task = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Done)
+        .await
+        .unwrap();
+    db.set_task_epic_id(task.id, Some(epic.id)).await.unwrap();
+    db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Done))
         .await
         .unwrap();
 
     db.recalculate_epic_status(epic.id).await.unwrap();
     let epic = db.get_epic(epic.id).await.unwrap().unwrap();
-    assert_eq!(epic.status, TaskStatus::Running); // no children → status unchanged
+    assert_eq!(epic.status, TaskStatus::Done); // already done, all children done → no-op
 }
 
 #[tokio::test]
