@@ -71,7 +71,7 @@ pub(super) struct UpdateEpicArgs {
 pub(super) async fn handle_create_epic(
     state: &McpState,
     id: Option<Value>,
-    _identity: &CallerIdentity,
+    identity: &CallerIdentity,
     args: Value,
 ) -> JsonRpcResponse {
     let parsed = match parse_args::<CreateEpicArgs>(&id, args) {
@@ -82,12 +82,30 @@ pub(super) async fn handle_create_epic(
 
     let svc = EpicService::new(state.db.clone());
     let project_id = if let (Some(parent_id), None) = (parsed.parent_epic_id, parsed.project_id) {
+        // parent_epic_id provided without explicit project_id: inherit parent's project
         match svc.get_epic(EpicId(parent_id)).await {
             Ok(parent) => parent.project_id,
             Err(e) => return service_err_to_response(id, e),
         }
+    } else if let Some(pid) = parsed.project_id {
+        // explicit project_id wins
+        ProjectId(pid)
+    } else if let CallerIdentity::Task(caller_id) = identity {
+        // no explicit project_id, no parent: inherit caller task's project
+        match state.db.get_task(*caller_id).await {
+            Ok(Some(caller)) => caller.project_id,
+            Ok(None) => {
+                return JsonRpcResponse::err(
+                    id,
+                    -32602,
+                    format!("Unknown caller task {}", caller_id.0),
+                )
+            }
+            Err(e) => return JsonRpcResponse::err(id, -32603, format!("Database error: {e}")),
+        }
     } else {
-        match resolve_project_id(&id, parsed.project_id, &*state.db).await {
+        // session caller, no project_id: fall back to default project
+        match resolve_project_id(&id, None, &*state.db).await {
             Ok(pid) => pid,
             Err(resp) => return resp,
         }

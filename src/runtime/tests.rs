@@ -1481,6 +1481,44 @@ async fn exec_insert_epic_creates_in_db_and_app() {
 }
 
 #[tokio::test]
+async fn exec_insert_epic_with_parent_uses_parent_project_id() {
+    let (rt, mut app) = test_runtime().await;
+    // Create a second project and a parent epic in that project
+    let project2 = rt.database.create_project("Project Two", 10).await.unwrap();
+    let parent = rt
+        .database
+        .create_epic("Parent", "", "/repo", None, project2.id)
+        .await
+        .unwrap();
+    assert_eq!(
+        parent.project_id, project2.id,
+        "parent epic must belong to project2"
+    );
+    // app.active_project() returns ProjectId(1), which differs from project2
+    assert_ne!(app.active_project(), project2.id);
+
+    rt.exec_insert_epic(
+        &mut app,
+        "Sub Epic".into(),
+        "".into(),
+        "/repo".into(),
+        Some(parent.id),
+    )
+    .await;
+
+    let epics = rt.database.list_epics().await.unwrap();
+    let sub = epics
+        .iter()
+        .find(|e| e.title == "Sub Epic")
+        .expect("sub epic should be created");
+    assert_eq!(
+        sub.project_id, project2.id,
+        "sub epic should inherit parent epic's project_id, not app.active_project()"
+    );
+    assert!(app.error_popup().is_none());
+}
+
+#[tokio::test]
 async fn exec_delete_epic_removes_from_db() {
     let (rt, mut app) = test_runtime().await;
     let epic = rt
