@@ -128,7 +128,7 @@ pub(crate) fn chunk_rust(content: &str) -> Vec<String> {
 #[allow(dead_code)]
 pub(crate) fn chunk_allium(content: &str) -> Vec<String> {
     const ALLIUM_KEYWORDS: &[&str] = &[
-        "entity ", "rule ", "surface ", "config", "enum ",
+        "entity ", "rule ", "surface ", "config ", "enum ",
         "concept ", "external ", "invariant ",
     ];
     chunk_by_declarations(content, ALLIUM_KEYWORDS, |line| line.starts_with("-- "))
