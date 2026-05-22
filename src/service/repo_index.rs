@@ -32,7 +32,6 @@ struct EmbeddedFile {
 }
 
 /// Strips leading visibility modifiers from a line.
-#[allow(dead_code)]
 fn strip_vis(s: &str) -> &str {
     if let Some(rest) = s.strip_prefix("pub(crate) ") {
         return rest;
@@ -50,7 +49,6 @@ fn strip_vis(s: &str) -> &str {
 ///
 /// Visibility (`pub`, `pub(crate)`, `pub(super)`) and async/unsafe modifiers
 /// are stripped before checking against `keywords`.
-#[allow(dead_code)]
 fn is_decl_boundary(line: &str, keywords: &[&str]) -> bool {
     let s = strip_vis(line);
     let s = s.strip_prefix("async ").unwrap_or(s);
@@ -64,7 +62,6 @@ fn is_decl_boundary(line: &str, keywords: &[&str]) -> bool {
 /// - `main_current`: non-attribute body lines for the current chunk.
 /// - `attr_buffer`: pending attribute/doc lines at column 0 that belong to
 ///   the NEXT chunk when a declaration boundary arrives.
-#[allow(dead_code)]
 fn chunk_by_declarations(
     content: &str,
     decl_keywords: &[&str],
@@ -200,7 +197,6 @@ pub(crate) fn chunk_markdown(content: &str) -> Vec<String> {
     }
 }
 
-#[allow(dead_code)]
 pub(crate) fn chunk_for_extension(content: &str, ext: &str) -> Vec<String> {
     match ext {
         "md" => chunk_markdown(content),
@@ -242,10 +238,8 @@ fn open_rag_db(repo_path: &Path) -> Result<rusqlite::Connection> {
     Ok(conn)
 }
 
-#[allow(dead_code)]
 const INDEXABLE_EXTENSIONS: &[&str] = &["md", "rs", "allium"];
 
-#[allow(dead_code)]
 fn walk_indexable_files(repo_path: &Path) -> Result<Vec<std::path::PathBuf>> {
     let dispatch_dir = repo_path.join(DISPATCH_DIR);
     let mut files = Vec::new();
@@ -265,23 +259,6 @@ fn walk_indexable_files(repo_path: &Path) -> Result<Vec<std::path::PathBuf>> {
     Ok(files)
 }
 
-fn walk_md_files(repo_path: &Path) -> Result<Vec<std::path::PathBuf>> {
-    let dispatch_dir = repo_path.join(DISPATCH_DIR);
-    let mut files = Vec::new();
-    for entry in ignore::WalkBuilder::new(repo_path).hidden(false).build() {
-        let entry = entry?;
-        let path = entry.path();
-        if path.starts_with(&dispatch_dir) {
-            continue;
-        }
-        if entry.file_type().is_some_and(|ft| ft.is_file())
-            && path.extension().and_then(|e| e.to_str()) == Some("md")
-        {
-            files.push(path.to_owned());
-        }
-    }
-    Ok(files)
-}
 
 fn hash_file(path: &Path) -> Result<String> {
     let bytes = std::fs::read(path)?;
@@ -310,7 +287,7 @@ impl RepoIndexService {
             move || -> Result<DiffResult> {
                 let conn = open_rag_db(&repo_path)?;
                 ensure_dispatch_dir_and_gitignore(&repo_path)?;
-                let on_disk = walk_md_files(&repo_path)?;
+                let on_disk = walk_indexable_files(&repo_path)?;
 
                 let in_db: std::collections::HashMap<String, String> = {
                     let mut stmt = conn.prepare("SELECT file_path, content_hash FROM rag_files")?;
@@ -349,7 +326,8 @@ impl RepoIndexService {
         let mut file_chunks: Vec<(String, String, Vec<String>)> = Vec::new();
         for (path, hash) in to_index {
             let content = tokio::fs::read_to_string(&path).await?;
-            let chunks = chunk_markdown(&content);
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            let chunks = chunk_for_extension(&content, ext);
             let path_str = path
                 .to_str()
                 .ok_or_else(|| anyhow::anyhow!("non-UTF-8 path: {:?}", path))?
@@ -945,29 +923,6 @@ mod tests {
         assert_eq!(count, 0);
     }
 
-    // --- walk_md_files ---
-
-    #[test]
-    fn walk_md_finds_markdown_files() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("a.md"), "# A").unwrap();
-        std::fs::write(dir.path().join("b.md"), "# B").unwrap();
-        std::fs::write(dir.path().join("c.txt"), "text").unwrap();
-        let found = walk_md_files(dir.path()).unwrap();
-        assert_eq!(found.len(), 2);
-    }
-
-    #[test]
-    fn walk_md_skips_dispatch_dir() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir(dir.path().join(".dispatch")).unwrap();
-        std::fs::write(dir.path().join(".dispatch").join("something.md"), "# X").unwrap();
-        std::fs::write(dir.path().join("real.md"), "# Real").unwrap();
-        let found = walk_md_files(dir.path()).unwrap();
-        assert_eq!(found.len(), 1);
-        assert!(found[0].ends_with("real.md"));
-    }
-
     // --- walk_indexable_files ---
 
     #[test]
@@ -1164,5 +1119,61 @@ mod tests {
         assert!(r.file_path.ends_with("my-note.md"));
         assert!(!r.chunk_text.is_empty());
         assert!(r.score >= 0.0 && r.score <= 1.0);
+    }
+
+    #[tokio::test]
+    async fn index_repo_indexes_rs_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("lib.rs"),
+            "/// Adds two numbers.\npub fn add(a: i32, b: i32) -> i32 { a + b }\n\npub fn sub(a: i32, b: i32) -> i32 { a - b }",
+        )
+        .unwrap();
+
+        let svc = RepoIndexService::new(EmbeddingService::new_test());
+        let result = svc.index_repo(dir.path()).await.unwrap();
+
+        assert_eq!(result.files_indexed, 1);
+        assert_eq!(result.files_skipped, 0);
+        assert!(result.chunks_total >= 1);
+
+        let conn = open_rag_db(dir.path()).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM rag_chunks", [], |r| r.get(0))
+            .unwrap();
+        assert!(count >= 1);
+    }
+
+    #[tokio::test]
+    async fn index_repo_indexes_allium_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("spec.allium"),
+            "entity Task {\n    id: TaskId\n}\n\nrule CreateTask {\n    when: foo\n}",
+        )
+        .unwrap();
+
+        let svc = RepoIndexService::new(EmbeddingService::new_test());
+        let result = svc.index_repo(dir.path()).await.unwrap();
+
+        assert_eq!(result.files_indexed, 1);
+        assert!(result.chunks_total >= 1);
+    }
+
+    #[tokio::test]
+    async fn search_docs_finds_results_in_rs_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("lib.rs"),
+            "/// Computes the sum of two integers.\npub fn add(a: i32, b: i32) -> i32 { a + b }",
+        )
+        .unwrap();
+
+        let svc = RepoIndexService::new(EmbeddingService::new_test());
+        svc.index_repo(dir.path()).await.unwrap();
+
+        let results = svc.search_docs(dir.path(), "add integers", 5).await.unwrap();
+        assert!(!results.is_empty(), "expected at least one result");
+        assert!(results[0].file_path.ends_with("lib.rs"));
     }
 }
