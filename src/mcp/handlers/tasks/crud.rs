@@ -64,12 +64,6 @@ pub(crate) async fn handle_update_task(
     if let Some(epic_id) = parsed.epic_id {
         params = params.epic_id(EpicId(epic_id));
     }
-    if let Some(project_id) = parsed.project_id {
-        if let Err(resp) = super::validate_project_id(state, &id, project_id).await {
-            return resp;
-        }
-        params = params.project_id(ProjectId(project_id));
-    }
     if let Some(mode) = parsed.wrap_up_mode {
         params = params.wrap_up_mode(mode);
     }
@@ -106,7 +100,6 @@ pub(crate) async fn handle_create_task(
     tracing::info!(
         title = %parsed.title,
         epic_id = ?parsed.epic_id,
-        project_id = ?parsed.project_id,
         identity = ?identity,
         "MCP create_task"
     );
@@ -117,7 +110,7 @@ pub(crate) async fn handle_create_task(
                 Ok(t) => t,
                 Err(resp) => return resp,
             };
-            let pid = parsed.project_id.unwrap_or(caller.project_id.0);
+            let pid = caller.project_id.0;
             let eid = match parsed.epic_id {
                 Some(inner) => inner.map(EpicId),
                 None => caller.epic_id,
@@ -125,21 +118,10 @@ pub(crate) async fn handle_create_task(
             (pid, eid)
         }
         CallerIdentity::Session => {
-            let Some(pid) = parsed.project_id else {
-                return JsonRpcResponse::err(
-                    id,
-                    -32602,
-                    "project_id is required when calling from a non-dispatched session".to_string(),
-                );
-            };
             let eid = parsed.epic_id.and_then(|inner| inner.map(EpicId));
-            (pid, eid)
+            (1_i64, eid)
         }
     };
-
-    if let Err(resp) = super::validate_project_id(state, &id, effective_project_id).await {
-        return resp;
-    }
 
     let svc = state.task_service();
     match svc
@@ -205,36 +187,27 @@ pub(crate) async fn handle_list_tasks(
 
     let status_filter: Option<Vec<TaskStatus>> = parsed.status.map(StatusFilter::into_vec);
 
-    let (derived_epic_id, derived_project_id, exclude_task_id) = match identity {
+    let (derived_epic_id, exclude_task_id) = match identity {
         CallerIdentity::Task(caller_id) => {
             let caller = match fetch_caller_task(&*state.db, &id, *caller_id).await {
                 Ok(t) => t,
                 Err(resp) => return resp,
             };
-            let has_explicit_scope = parsed.epic_id.is_some()
-                || parsed.project_id.is_some()
-                || parsed.repo_paths.is_some();
-            let (epic, proj) = if has_explicit_scope {
-                (None, None)
-            } else if let Some(eid) = caller.epic_id {
-                (Some(eid), None)
-            } else {
-                (None, Some(caller.project_id))
-            };
-            (epic, proj, Some(caller.id))
+            let has_explicit_scope = parsed.epic_id.is_some() || parsed.repo_paths.is_some();
+            let epic = if has_explicit_scope { None } else { caller.epic_id };
+            (epic, Some(caller.id))
         }
-        CallerIdentity::Session => (None, None, None),
+        CallerIdentity::Session => (None, None),
     };
 
     let epic_id = parsed.epic_id.map(EpicId).or(derived_epic_id);
-    let project_id = parsed.project_id.map(ProjectId).or(derived_project_id);
 
     let svc = state.task_service();
     match svc
         .list_tasks(ListTasksFilter {
             statuses: status_filter,
             epic_id,
-            project_id,
+            project_id: None,
             repo_paths: parsed.repo_paths,
             exclude_task_id,
         })
