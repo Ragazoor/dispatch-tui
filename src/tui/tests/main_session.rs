@@ -22,7 +22,7 @@ fn colon_with_dir_configured_emits_open_main_session() {
     let mut app = make_app();
     app.set_main_session_dir(Some("/home/user".to_string()));
     let cmds = app.handle_key(make_key(KeyCode::Char(':')));
-    assert!(cmds.iter().any(|c| matches!(c, Command::OpenMainSession)));
+    assert!(cmds.iter().any(|c| matches!(c, Command::MainSession(crate::tui::commands::MainSessionCommand::Open))));
 }
 
 #[test]
@@ -31,7 +31,7 @@ fn colon_with_dir_and_active_session_emits_open_main_session() {
     app.set_main_session_dir(Some("/home/user".to_string()));
     app.set_main_session(Some("dispatch-main".to_string()));
     let cmds = app.handle_key(make_key(KeyCode::Char(':')));
-    assert!(cmds.iter().any(|c| matches!(c, Command::OpenMainSession)));
+    assert!(cmds.iter().any(|c| matches!(c, Command::MainSession(crate::tui::commands::MainSessionCommand::Open))));
 }
 
 // ── text input in MainSessionDir mode ──
@@ -55,7 +55,7 @@ fn enter_in_main_session_dir_mode_emits_submit_message() {
     assert!(cmds.iter().any(
         |c| matches!(c, Command::PersistStringSetting { key, .. } if key == "main_session.dir")
     ));
-    assert!(cmds.iter().any(|c| matches!(c, Command::OpenMainSession)));
+    assert!(cmds.iter().any(|c| matches!(c, Command::MainSession(crate::tui::commands::MainSessionCommand::Open))));
 }
 
 #[test]
@@ -83,14 +83,14 @@ fn esc_in_main_session_dir_mode_returns_to_normal() {
 #[test]
 fn submit_main_session_dir_sets_dir_on_app() {
     let mut app = make_app();
-    app.update(Message::SubmitMainSessionDir("/home/user".to_string()));
+    app.update(Message::MainSession(crate::tui::messages::MainSessionMessage::SubmitDir("/home/user".to_string())));
     assert_eq!(app.main_session_dir(), Some("/home/user"));
 }
 
 #[test]
 fn submit_main_session_dir_expands_tilde() {
     let mut app = make_app();
-    app.update(Message::SubmitMainSessionDir("~/code".to_string()));
+    app.update(Message::MainSession(crate::tui::messages::MainSessionMessage::SubmitDir("~/code".to_string())));
     let dir = app.main_session_dir().unwrap();
     assert!(
         !dir.starts_with('~'),
@@ -101,32 +101,32 @@ fn submit_main_session_dir_expands_tilde() {
 #[test]
 fn submit_main_session_dir_returns_persist_and_open_commands() {
     let mut app = make_app();
-    let cmds = app.update(Message::SubmitMainSessionDir("/home/user".to_string()));
+    let cmds = app.update(Message::MainSession(crate::tui::messages::MainSessionMessage::SubmitDir("/home/user".to_string())));
     assert!(cmds.iter().any(
         |c| matches!(c, Command::PersistStringSetting { key, .. } if key == "main_session.dir")
     ));
-    assert!(cmds.iter().any(|c| matches!(c, Command::OpenMainSession)));
+    assert!(cmds.iter().any(|c| matches!(c, Command::MainSession(crate::tui::commands::MainSessionCommand::Open))));
 }
 
 #[test]
 fn submit_main_session_dir_resets_input_mode() {
     let mut app = make_app();
     app.input.mode = InputMode::MainSessionDir;
-    app.update(Message::SubmitMainSessionDir("/home/user".to_string()));
+    app.update(Message::MainSession(crate::tui::messages::MainSessionMessage::SubmitDir("/home/user".to_string())));
     assert_eq!(app.mode(), &InputMode::Normal);
 }
 
 #[test]
 fn main_session_created_sets_window_on_app() {
     let mut app = make_app();
-    app.update(Message::MainSessionCreated("dispatch-main".to_string()));
+    app.update(Message::MainSession(crate::tui::messages::MainSessionMessage::Created("dispatch-main".to_string())));
     assert_eq!(app.main_session(), Some("dispatch-main"));
 }
 
 #[test]
 fn main_session_created_returns_persist_command() {
     let mut app = make_app();
-    let cmds = app.update(Message::MainSessionCreated("dispatch-main".to_string()));
+    let cmds = app.update(Message::MainSession(crate::tui::messages::MainSessionMessage::Created("dispatch-main".to_string())));
     assert!(cmds
         .iter()
         .any(|c| matches!(c, Command::PersistStringSetting { key, value }
@@ -173,7 +173,7 @@ fn enter_with_fuzzy_match_submits_filtered_selection_in_main_session_dir() {
         if key == "main_session.dir" && value == "/a/bar")),
         "expected persist of /a/bar from filtered match, got: {cmds:?}"
     );
-    assert!(cmds.iter().any(|c| matches!(c, Command::OpenMainSession)));
+    assert!(cmds.iter().any(|c| matches!(c, Command::MainSession(crate::tui::commands::MainSessionCommand::Open))));
 }
 
 #[test]

@@ -6,8 +6,9 @@
 //! `update/*.rs`.
 
 use crate::tui::messages::{
-    EditorMessage, EpicMessage, FeedMessage, InputMessage, LearningMessage, PrMessage,
-    SystemMessage, TaskMessage, WrapUpMessage,
+    EditorMessage, EpicMessage, FeedMessage, InputMessage, LearningMessage, MainSessionMessage,
+    PrMessage, ProjectMessage, RepoFilterMessage, SplitMessage, SystemMessage, TaskMessage,
+    TipsMessage, WrapUpMessage,
 };
 use crate::tui::types::{Command, Message};
 use crate::tui::App;
@@ -177,6 +178,51 @@ fn dispatch_wrap_up(app: &mut App, msg: WrapUpMessage) -> Vec<Command> {
     }
 }
 
+/// Per-domain dispatcher for [`ProjectMessage`] variants.
+fn dispatch_project(app: &mut App, msg: ProjectMessage) -> Vec<Command> {
+    match msg {
+        ProjectMessage::Updated(projects) => app.handle_projects_updated(projects),
+        ProjectMessage::Select(project_id) => app.handle_select_project(project_id),
+        ProjectMessage::Follow(project_id) => app.handle_follow_project(project_id),
+    }
+}
+
+/// Per-domain dispatcher for [`SplitMessage`] variants.
+fn dispatch_split(app: &mut App, msg: SplitMessage) -> Vec<Command> {
+    match msg {
+        SplitMessage::Toggle => app.handle_toggle_split_mode(),
+        SplitMessage::Swap(task_id) => app.handle_swap_split_pane(task_id),
+        SplitMessage::PaneOpened { pane_id, task_id } => {
+            app.handle_split_pane_opened(pane_id, task_id)
+        }
+        SplitMessage::PaneClosed => app.handle_split_pane_closed(),
+    }
+}
+
+/// Per-domain dispatcher for [`MainSessionMessage`] variants.
+fn dispatch_main_session(app: &mut App, msg: MainSessionMessage) -> Vec<Command> {
+    match msg {
+        MainSessionMessage::SubmitDir(dir) => app.handle_submit_main_session_dir(dir),
+        MainSessionMessage::Created(window) => app.handle_main_session_created(window),
+    }
+}
+
+/// Per-domain dispatcher for [`TipsMessage`] variants.
+fn dispatch_tips(app: &mut App, msg: TipsMessage) -> Vec<Command> {
+    match msg {
+        TipsMessage::Show {
+            tips,
+            starting_index,
+            max_seen_id,
+            show_mode,
+        } => app.handle_show_tips(tips, starting_index, max_seen_id, show_mode),
+        TipsMessage::Next => app.handle_next_tip(),
+        TipsMessage::Prev => app.handle_prev_tip(),
+        TipsMessage::SetMode(mode) => app.handle_set_tips_mode(mode),
+        TipsMessage::Close => app.handle_close_tips(),
+    }
+}
+
 /// Per-domain dispatcher for [`LearningMessage`] variants.
 fn dispatch_learning(app: &mut App, msg: LearningMessage) -> Vec<Command> {
     use crate::tui::commands::LearningCommand;
@@ -208,12 +254,7 @@ pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
         Message::Task(tm) => dispatch_task(app, tm),
         Message::NavigateColumn(delta) => app.handle_navigate_column(delta),
         Message::NavigateRow(delta) => app.handle_navigate_row(delta),
-        Message::ToggleSplitMode => app.handle_toggle_split_mode(),
-        Message::SwapSplitPane(task_id) => app.handle_swap_split_pane(task_id),
-        Message::SplitPaneOpened { pane_id, task_id } => {
-            app.handle_split_pane_opened(pane_id, task_id)
-        }
-        Message::SplitPaneClosed => app.handle_split_pane_closed(),
+        Message::Split(sm) => dispatch_split(app, sm),
         Message::RepoPathsUpdated(paths) => app.handle_repo_paths_updated(paths),
 
         // ── Task wrap-up ──
@@ -232,44 +273,40 @@ pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
         Message::Pr(pm) => dispatch_pr(app, pm),
 
         // ── Task repo filters and filter presets ──
-        Message::StartRepoFilter => app.handle_start_repo_filter(),
-        Message::CloseRepoFilter => app.handle_close_repo_filter(),
-        Message::ToggleRepoFilter(path) => app.handle_toggle_repo_filter(path),
-        Message::ToggleAllRepoFilter => app.handle_toggle_all_repo_filter(),
-        Message::ToggleRepoFilterMode => app.handle_toggle_repo_filter_mode(),
-        Message::ToggleOnlyActive => app.handle_toggle_only_active(),
-        Message::MoveRepoCursor(delta) => app.handle_move_repo_cursor(delta),
-        Message::StartSavePreset => app.handle_start_save_preset(),
-        Message::SaveFilterPreset(name) => app.handle_save_filter_preset(name),
-        Message::LoadFilterPreset(name) => app.handle_load_filter_preset(name),
-        Message::StartDeletePreset => app.handle_start_delete_preset(),
-        Message::DeleteFilterPreset(name) => app.handle_delete_filter_preset(name),
-        Message::StartDeleteRepoPath => app.handle_start_delete_repo_path(),
-        Message::DeleteRepoPath(path) => app.handle_delete_repo_path(path),
-        Message::CancelPresetInput => app.handle_cancel_preset_input(),
-        Message::FilterPresetsLoaded(presets) => app.handle_filter_presets_loaded(presets),
+        Message::RepoFilter(rfm) => dispatch_repo_filter(app, rfm),
 
         // ── Tips overlay ──
-        Message::ShowTips {
-            tips,
-            starting_index,
-            max_seen_id,
-            show_mode,
-        } => app.handle_show_tips(tips, starting_index, max_seen_id, show_mode),
-        Message::NextTip => app.handle_next_tip(),
-        Message::PrevTip => app.handle_prev_tip(),
-        Message::SetTipsMode(mode) => app.handle_set_tips_mode(mode),
-        Message::CloseTips => app.handle_close_tips(),
+        Message::Tips(tm) => dispatch_tips(app, tm),
 
         // ── Project messages ──
-        Message::ProjectsUpdated(projects) => app.handle_projects_updated(projects),
-        Message::SelectProject(project_id) => app.handle_select_project(project_id),
-        Message::FollowProject(project_id) => app.handle_follow_project(project_id),
+        Message::Project(pm) => dispatch_project(app, pm),
         Message::Feed(fm) => dispatch_feed(app, fm),
         Message::Learning(lm) => dispatch_learning(app, lm),
 
         // ── Main session ──
-        Message::SubmitMainSessionDir(dir) => app.handle_submit_main_session_dir(dir),
-        Message::MainSessionCreated(window) => app.handle_main_session_created(window),
+        Message::MainSession(mm) => dispatch_main_session(app, mm),
+    }
+}
+
+/// Per-domain dispatcher for [`RepoFilterMessage`] variants.
+fn dispatch_repo_filter(app: &mut App, msg: RepoFilterMessage) -> Vec<Command> {
+    use crate::tui::messages::RepoFilterMessage::*;
+    match msg {
+        Start => app.handle_start_repo_filter(),
+        Close => app.handle_close_repo_filter(),
+        Toggle(path) => app.handle_toggle_repo_filter(path),
+        ToggleAll => app.handle_toggle_all_repo_filter(),
+        ToggleMode => app.handle_toggle_repo_filter_mode(),
+        ToggleOnlyActive => app.handle_toggle_only_active(),
+        MoveCursor(delta) => app.handle_move_repo_cursor(delta),
+        StartSavePreset => app.handle_start_save_preset(),
+        SavePreset(name) => app.handle_save_filter_preset(name),
+        LoadPreset(name) => app.handle_load_filter_preset(name),
+        StartDeletePreset => app.handle_start_delete_preset(),
+        DeletePreset(name) => app.handle_delete_filter_preset(name),
+        StartDeleteRepoPath => app.handle_start_delete_repo_path(),
+        DeleteRepoPath(path) => app.handle_delete_repo_path(path),
+        CancelPresetInput => app.handle_cancel_preset_input(),
+        PresetsLoaded(presets) => app.handle_filter_presets_loaded(presets),
     }
 }

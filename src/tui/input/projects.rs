@@ -19,7 +19,7 @@ impl App {
                     self.selection_mut().set_row(0, next);
                     self.projects_panel.list_state.select(Some(next));
                     if let Some(id) = self.selected_project().map(|p| p.id) {
-                        return self.update(Message::SelectProject(id));
+                        return self.update(Message::Project(crate::tui::messages::ProjectMessage::Select(id)));
                     }
                 }
                 vec![]
@@ -32,7 +32,7 @@ impl App {
                 self.selection_mut().set_row(0, prev);
                 self.projects_panel.list_state.select(Some(prev));
                 if let Some(id) = self.selected_project().map(|p| p.id) {
-                    return self.update(Message::SelectProject(id));
+                    return self.update(Message::Project(crate::tui::messages::ProjectMessage::Select(id)));
                 }
                 vec![]
             }
@@ -71,13 +71,13 @@ impl App {
             }
             KeyCode::Char('J') => {
                 if let Some(id) = self.selected_project().map(|p| p.id) {
-                    return vec![Command::ReorderProject { id, delta: 1 }];
+                    return vec![Command::Project(crate::tui::commands::ProjectCommand::Reorder { id, delta: 1 })];
                 }
                 vec![]
             }
             KeyCode::Char('K') => {
                 if let Some(id) = self.selected_project().map(|p| p.id) {
-                    return vec![Command::ReorderProject { id, delta: -1 }];
+                    return vec![Command::Project(crate::tui::commands::ProjectCommand::Reorder { id, delta: -1 })];
                 }
                 vec![]
             }
@@ -102,8 +102,8 @@ impl App {
                     return vec![];
                 }
                 match editing_id {
-                    None => vec![Command::CreateProject { name }],
-                    Some(id) => vec![Command::RenameProject { id, name }],
+                    None => vec![Command::Project(crate::tui::commands::ProjectCommand::Create { name })],
+                    Some(id) => vec![Command::Project(crate::tui::commands::ProjectCommand::Rename { id, name })],
                 }
             }
             KeyCode::Esc => {
@@ -164,7 +164,7 @@ impl App {
                 self.input.mode = InputMode::Normal;
                 // Navigate away from Projects panel (col 0) to Backlog (col 1)
                 let nav = self.update(Message::NavigateColumn(1));
-                let mut cmds = vec![Command::DeleteProject { id }];
+                let mut cmds = vec![Command::Project(crate::tui::commands::ProjectCommand::Delete { id })];
                 cmds.extend(nav);
                 cmds
             }

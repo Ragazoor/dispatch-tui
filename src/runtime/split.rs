@@ -44,7 +44,9 @@ impl TuiRuntime {
 
         match dispatch::create_main_session(&dir, &*self.runner) {
             Ok(window) => {
-                app.update(Message::MainSessionCreated(window.clone()));
+                app.update(Message::MainSession(
+                    crate::tui::messages::MainSessionMessage::Created(window.clone()),
+                ));
                 if let Err(e) = tmux::select_window(&window, &*self.runner) {
                     app.update(Message::System(crate::tui::messages::SystemMessage::Error(
                         format!("Main session created but jump failed: {e:#}"),
@@ -73,10 +75,12 @@ impl TuiRuntime {
         };
         match tmux::split_window_horizontal(&dispatch_pane, &*self.runner) {
             Ok(pane_id) => {
-                app.update(Message::SplitPaneOpened {
-                    pane_id,
-                    task_id: None,
-                });
+                app.update(Message::Split(
+                    crate::tui::messages::SplitMessage::PaneOpened {
+                        pane_id,
+                        task_id: None,
+                    },
+                ));
             }
             Err(e) => {
                 app.update(Message::System(crate::tui::messages::SystemMessage::Error(
@@ -105,10 +109,12 @@ impl TuiRuntime {
         };
         match tmux::join_pane(window, &dispatch_pane, &*self.runner) {
             Ok(pane_id) => {
-                app.update(Message::SplitPaneOpened {
-                    pane_id,
-                    task_id: Some(task_id),
-                });
+                app.update(Message::Split(
+                    crate::tui::messages::SplitMessage::PaneOpened {
+                        pane_id,
+                        task_id: Some(task_id),
+                    },
+                ));
             }
             Err(e) => {
                 app.update(Message::System(crate::tui::messages::SystemMessage::Error(
@@ -137,7 +143,7 @@ impl TuiRuntime {
             )));
             return;
         }
-        app.update(Message::SplitPaneClosed);
+        app.update(Message::Split(crate::tui::messages::SplitMessage::PaneClosed));
     }
 
     pub(super) fn exec_swap_split_pane(
@@ -193,26 +199,28 @@ impl TuiRuntime {
             }
         }
 
-        app.update(Message::SplitPaneOpened {
-            pane_id: new_pane_id.clone(),
-            task_id: Some(task_id),
-        });
+        app.update(Message::Split(
+            crate::tui::messages::SplitMessage::PaneOpened {
+                pane_id: new_pane_id.clone(),
+                task_id: Some(task_id),
+            },
+        ));
     }
 
     pub(super) fn exec_check_split_pane(&self, app: &mut App, pane_id: &str) {
         if !tmux::pane_exists(pane_id, &*self.runner) {
-            app.update(Message::SplitPaneClosed);
+            app.update(Message::Split(crate::tui::messages::SplitMessage::PaneClosed));
         }
     }
 
     pub(super) fn exec_respawn_split_pane(&self, app: &mut App, pane_id: &str) {
         if !tmux::pane_exists(pane_id, &*self.runner) {
-            app.update(Message::SplitPaneClosed);
+            app.update(Message::Split(crate::tui::messages::SplitMessage::PaneClosed));
             return;
         }
         if let Err(e) = tmux::respawn_pane(pane_id, &*self.runner) {
             tracing::warn!("respawn-pane failed: {e:#}");
-            app.update(Message::SplitPaneClosed);
+            app.update(Message::Split(crate::tui::messages::SplitMessage::PaneClosed));
         }
     }
 

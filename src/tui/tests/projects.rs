@@ -32,7 +32,7 @@ fn project_matches_hides_tasks_from_other_project() {
 
     // Switch to project 2 → only t2
     let mut app = app;
-    app.update(Message::SelectProject(ProjectId(2)));
+    app.update(Message::Project(crate::tui::messages::ProjectMessage::Select(ProjectId(2))));
     let visible = app.column_items_for_status(TaskStatus::Backlog);
     assert_eq!(
         visible.len(),
@@ -66,7 +66,7 @@ fn select_project_clamps_cursor() {
     app.selection_mut().set_row(1, 2);
     app.update_anchor_from_current();
 
-    app.update(Message::SelectProject(ProjectId(2)));
+    app.update(Message::Project(crate::tui::messages::ProjectMessage::Select(ProjectId(2))));
 
     let row = app.selected_row()[0];
     assert_eq!(
@@ -81,7 +81,7 @@ fn select_project_clamps_cursor() {
 
 fn two_project_app() -> App {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1));
-    app.update(Message::ProjectsUpdated(vec![
+    app.update(Message::Project(crate::tui::messages::ProjectMessage::Updated(vec![
         Project {
             id: ProjectId(1),
             name: "Default".to_string(),
@@ -94,7 +94,7 @@ fn two_project_app() -> App {
             sort_order: 1,
             is_default: false,
         },
-    ]));
+    ])));
     app
 }
 
@@ -324,7 +324,7 @@ fn input_project_name_enter_creates_project() {
     assert!(matches!(app.mode(), InputMode::Normal));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::CreateProject { name } if name == "MyProj")));
+        .any(|c| matches!(c, Command::Project(crate::tui::commands::ProjectCommand::Create { name }) if name == "MyProj")));
 }
 
 #[test]
@@ -343,7 +343,7 @@ fn input_project_name_enter_renames_project() {
     let cmds = app.handle_key(make_key(KeyCode::Enter));
     assert!(matches!(app.mode(), InputMode::Normal));
     assert!(cmds.iter().any(
-        |c| matches!(c, Command::RenameProject { id: ProjectId(1), name } if name == "Renamed")
+        |c| matches!(c, Command::Project(crate::tui::commands::ProjectCommand::Rename { id: ProjectId(1), name }) if name == "Renamed")
     ));
 }
 
@@ -366,7 +366,7 @@ fn input_project_name_empty_enter_does_not_create() {
     assert!(matches!(app.mode(), InputMode::Normal));
     assert!(!cmds
         .iter()
-        .any(|c| matches!(c, Command::CreateProject { .. })));
+        .any(|c| matches!(c, Command::Project(crate::tui::commands::ProjectCommand::Create { .. }))));
 }
 
 #[test]
@@ -407,7 +407,7 @@ fn confirm_delete_project2_y_emits_delete_command() {
     assert!(!app.projects_panel_visible());
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::DeleteProject { id: ProjectId(2) })));
+        .any(|c| matches!(c, Command::Project(crate::tui::commands::ProjectCommand::Delete { id: ProjectId(2) }))));
 }
 
 #[test]
@@ -431,7 +431,7 @@ fn shift_j_cursor_follows_moved_project_down() {
         "precondition: cursor at row 0 (Default)"
     );
 
-    app.update(Message::ProjectsUpdated(vec![
+    app.update(Message::Project(crate::tui::messages::ProjectMessage::Updated(vec![
         Project {
             id: ProjectId(2),
             name: "Backend".to_string(),
@@ -444,8 +444,8 @@ fn shift_j_cursor_follows_moved_project_down() {
             sort_order: 1,
             is_default: true,
         },
-    ]));
-    app.update(Message::FollowProject(ProjectId(1)));
+    ])));
+    app.update(Message::Project(crate::tui::messages::ProjectMessage::Follow(ProjectId(1))));
 
     assert_eq!(
         app.selected_project_row(),
@@ -461,7 +461,7 @@ fn shift_k_cursor_follows_moved_project_up() {
     app.handle_key(make_key(KeyCode::Char('j')));
     assert_eq!(app.selected_project_row(), 1);
 
-    app.update(Message::ProjectsUpdated(vec![
+    app.update(Message::Project(crate::tui::messages::ProjectMessage::Updated(vec![
         Project {
             id: ProjectId(2),
             name: "Backend".to_string(),
@@ -474,8 +474,8 @@ fn shift_k_cursor_follows_moved_project_up() {
             sort_order: 1,
             is_default: true,
         },
-    ]));
-    app.update(Message::FollowProject(ProjectId(2)));
+    ])));
+    app.update(Message::Project(crate::tui::messages::ProjectMessage::Follow(ProjectId(2))));
 
     assert_eq!(
         app.selected_project_row(),
@@ -487,7 +487,7 @@ fn shift_k_cursor_follows_moved_project_up() {
 #[test]
 fn follow_project_unknown_id_does_not_panic() {
     let mut app = two_project_app();
-    app.update(Message::FollowProject(ProjectId(99)));
+    app.update(Message::Project(crate::tui::messages::ProjectMessage::Follow(ProjectId(99))));
     assert_eq!(app.selected_project_row(), 0);
 }
 
@@ -496,7 +496,7 @@ fn follow_project_at_boundary_does_not_move_cursor() {
     let mut app = two_project_app();
     app.handle_key(make_key(KeyCode::Char('h')));
     assert_eq!(app.selected_project_row(), 0);
-    app.update(Message::FollowProject(ProjectId(1)));
+    app.update(Message::Project(crate::tui::messages::ProjectMessage::Follow(ProjectId(1))));
     assert_eq!(app.selected_project_row(), 0, "cursor should stay at 0");
 }
 
@@ -504,7 +504,7 @@ fn follow_project_at_boundary_does_not_move_cursor() {
 fn follow_project_updates_list_state_and_selection_in_sync() {
     let mut app = two_project_app();
     app.handle_key(make_key(KeyCode::Char('h')));
-    app.update(Message::ProjectsUpdated(vec![
+    app.update(Message::Project(crate::tui::messages::ProjectMessage::Updated(vec![
         Project {
             id: ProjectId(2),
             name: "Backend".to_string(),
@@ -517,8 +517,8 @@ fn follow_project_updates_list_state_and_selection_in_sync() {
             sort_order: 1,
             is_default: true,
         },
-    ]));
-    app.update(Message::FollowProject(ProjectId(2)));
+    ])));
+    app.update(Message::Project(crate::tui::messages::ProjectMessage::Follow(ProjectId(2))));
 
     assert_eq!(app.selected_project_row(), 0, "selection row should be 0");
     assert_eq!(
@@ -546,7 +546,7 @@ fn g_closes_projects_panel() {
 #[test]
 fn g_in_empty_projects_panel_closes_panel() {
     let mut app = App::new(vec![], ProjectId(1));
-    app.update(Message::ProjectsUpdated(vec![]));
+    app.update(Message::Project(crate::tui::messages::ProjectMessage::Updated(vec![])));
     app.update(Message::NavigateColumn(-1));
     assert!(app.projects_panel_visible(), "precondition: panel open");
     app.handle_key(make_key(KeyCode::Char('g')));
@@ -564,10 +564,10 @@ fn shift_j_emits_reorder_project_down() {
     let cmds = app.handle_key(KeyEvent::new(KeyCode::Char('J'), KeyModifiers::NONE));
     assert!(cmds.iter().any(|c| matches!(
         c,
-        Command::ReorderProject {
+        Command::Project(crate::tui::commands::ProjectCommand::Reorder {
             id: ProjectId(1),
             delta: 1
-        }
+        })
     )));
 }
 
@@ -580,10 +580,10 @@ fn shift_k_emits_reorder_project_up() {
     let cmds = app.handle_key(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::NONE));
     assert!(cmds.iter().any(|c| matches!(
         c,
-        Command::ReorderProject {
+        Command::Project(crate::tui::commands::ProjectCommand::Reorder {
             id: ProjectId(2),
             delta: -1
-        }
+        })
     )));
 }
 
@@ -633,7 +633,7 @@ fn selecting_project_keeps_focus_in_col_0() {
     app.update(Message::NavigateColumn(-1));
     assert_eq!(app.selected_column(), 0);
     let project_id = app.projects()[0].id;
-    app.update(Message::SelectProject(project_id));
+    app.update(Message::Project(crate::tui::messages::ProjectMessage::Select(project_id)));
     assert_eq!(
         app.selected_column(),
         0,
@@ -702,7 +702,7 @@ fn refresh_preserves_archive_column() {
 #[test]
 fn select_project_emits_persist_string_setting() {
     let mut app = two_project_app();
-    let cmds = app.update(Message::SelectProject(ProjectId(2)));
+    let cmds = app.update(Message::Project(crate::tui::messages::ProjectMessage::Select(ProjectId(2))));
     assert!(
         cmds.iter().any(|c| matches!(
             c,
@@ -748,7 +748,7 @@ fn app_with_default_and_custom_projects() -> App {
     let t1 = make_task_with_project(1, TaskStatus::Backlog, ProjectId(1)); // Default
     let t2 = make_task_with_project(2, TaskStatus::Backlog, ProjectId(2)); // Custom
     let mut app = App::new(vec![t1, t2], ProjectId(1));
-    app.update(Message::ProjectsUpdated(vec![
+    app.update(Message::Project(crate::tui::messages::ProjectMessage::Updated(vec![
         Project {
             id: ProjectId(1),
             name: "Default".to_string(),
@@ -761,7 +761,7 @@ fn app_with_default_and_custom_projects() -> App {
             sort_order: 1,
             is_default: false,
         },
-    ]));
+    ])));
     app
 }
 
@@ -780,7 +780,7 @@ fn default_project_shows_all_tasks() {
 #[test]
 fn non_default_project_shows_only_its_own_tasks() {
     let mut app = app_with_default_and_custom_projects();
-    app.update(Message::SelectProject(ProjectId(2)));
+    app.update(Message::Project(crate::tui::messages::ProjectMessage::Select(ProjectId(2))));
     let visible = app.column_items_for_status(TaskStatus::Backlog);
     assert_eq!(
         visible.len(),
@@ -893,7 +893,7 @@ fn opening_projects_panel_first_time_with_non_default_active_project() {
     // SelectProject updates active_project and list_state but not projects_row,
     // so the cursor is stale until the panel is opened.
     let mut app = two_project_app();
-    app.update(Message::SelectProject(ProjectId(2))); // Backend, idx=1; projects_row stays 0
+    app.update(Message::Project(crate::tui::messages::ProjectMessage::Select(ProjectId(2)))); // Backend, idx=1; projects_row stays 0
 
     app.handle_key(make_key(KeyCode::Char('h')));
     assert_eq!(

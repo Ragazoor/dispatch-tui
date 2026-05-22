@@ -354,7 +354,7 @@ impl TuiRuntime {
         if let Ok(raw) = self.database.list_filter_presets().await {
             let known: HashSet<String> = app.repo_paths().iter().cloned().collect();
             let presets = parse_raw_presets(raw, Some(&known));
-            app.update(Message::FilterPresetsLoaded(presets));
+            app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::PresetsLoaded(presets)));
         }
     }
 
@@ -502,7 +502,7 @@ impl TuiRuntime {
     pub(super) async fn exec_refresh_projects_from_db(&self, app: &mut App) {
         match self.database.list_projects().await {
             Ok(projects) => {
-                app.update(Message::ProjectsUpdated(projects));
+                app.update(Message::Project(crate::tui::messages::ProjectMessage::Updated(projects)));
             }
             Err(e) => {
                 app.update(Message::System(crate::tui::messages::SystemMessage::Error(
@@ -566,7 +566,7 @@ impl TuiRuntime {
             return;
         }
         if app.active_project() == id {
-            app.update(Message::SelectProject(default_id));
+            app.update(Message::Project(crate::tui::messages::ProjectMessage::Select(default_id)));
         }
         self.exec_refresh_projects_from_db(app).await;
     }
@@ -597,7 +597,7 @@ impl TuiRuntime {
             .reorder_project(projects[neighbor_idx].id, current_order)
             .await;
         self.exec_refresh_projects_from_db(app).await;
-        app.update(Message::FollowProject(id));
+        app.update(Message::Project(crate::tui::messages::ProjectMessage::Follow(id)));
     }
 
     pub(super) fn exec_resume(&self, task: models::Task) {

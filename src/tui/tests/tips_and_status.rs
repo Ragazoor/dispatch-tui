@@ -131,14 +131,14 @@ fn save_filter_preset_stores_mode() {
     app.filter.mode = RepoFilterMode::Exclude;
     app.input.mode = InputMode::InputPresetName;
 
-    let cmds = app.update(Message::SaveFilterPreset("excl-preset".to_string()));
+    let cmds = app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::SavePreset("excl-preset".to_string())));
     assert_eq!(app.filter.presets[0].2, RepoFilterMode::Exclude);
     assert!(cmds.iter().any(|c| matches!(
         c,
-        Command::PersistFilterPreset {
+        Command::RepoFilter(crate::tui::commands::RepoFilterCommand::PersistFilterPreset {
             mode: RepoFilterMode::Exclude,
             ..
-        }
+        })
     )));
 }
 
@@ -149,7 +149,7 @@ fn load_filter_preset_restores_mode() {
     let repos: HashSet<String> = ["/repo-a".to_string()].into_iter().collect();
     app.filter.presets = vec![("excl".to_string(), repos, RepoFilterMode::Exclude)];
 
-    app.update(Message::LoadFilterPreset("excl".to_string()));
+    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::LoadPreset("excl".to_string())));
     assert_eq!(app.filter.mode, RepoFilterMode::Exclude);
     assert!(app.filter.repos.contains("/repo-a"));
 }
@@ -161,24 +161,24 @@ fn save_filter_preset_stores_and_persists() {
     app.filter.repos.insert("/repo-a".to_string());
     app.input.mode = InputMode::RepoFilter;
 
-    app.update(Message::StartSavePreset);
+    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::StartSavePreset));
     assert_eq!(app.input.mode, InputMode::InputPresetName);
 
-    let cmds = app.update(Message::SaveFilterPreset("frontend".to_string()));
+    let cmds = app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::SavePreset("frontend".to_string())));
     assert_eq!(app.input.mode, InputMode::RepoFilter);
     assert_eq!(app.filter.presets.len(), 1);
     assert_eq!(app.filter.presets[0].0, "frontend");
     assert!(app.filter.presets[0].1.contains("/repo-a"));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::PersistFilterPreset { .. })));
+        .any(|c| matches!(c, Command::RepoFilter(crate::tui::commands::RepoFilterCommand::PersistFilterPreset { .. }))));
 }
 
 #[test]
 fn save_filter_preset_empty_name_cancels() {
     let mut app = make_app();
     app.input.mode = InputMode::InputPresetName;
-    app.update(Message::SaveFilterPreset("  ".to_string()));
+    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::SavePreset("  ".to_string())));
     assert_eq!(app.input.mode, InputMode::RepoFilter);
     assert!(app.filter.presets.is_empty());
 }
@@ -191,7 +191,7 @@ fn save_filter_preset_overwrites_existing() {
     app.filter.presets = vec![("frontend".to_string(), old, RepoFilterMode::Include)];
 
     app.filter.repos.insert("/repo-b".to_string());
-    app.update(Message::SaveFilterPreset("frontend".to_string()));
+    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::SavePreset("frontend".to_string())));
     assert_eq!(app.filter.presets.len(), 1);
     assert!(app.filter.presets[0].1.contains("/repo-b"));
 }
@@ -203,23 +203,23 @@ fn delete_filter_preset_removes_and_returns_command() {
     app.filter.presets = vec![("frontend".to_string(), repos, RepoFilterMode::Include)];
     app.input.mode = InputMode::ConfirmDeletePreset;
 
-    let cmds = app.update(Message::DeleteFilterPreset("frontend".to_string()));
+    let cmds = app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::DeletePreset("frontend".to_string())));
     assert!(app.filter.presets.is_empty());
     assert_eq!(app.input.mode, InputMode::RepoFilter);
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::DeleteFilterPreset(_))));
+        .any(|c| matches!(c, Command::RepoFilter(crate::tui::commands::RepoFilterCommand::DeleteFilterPreset(_)))));
 }
 
 #[test]
 fn filter_presets_loaded_sets_state() {
     let mut app = make_app();
     let repos: HashSet<String> = ["/repo-a".to_string()].into_iter().collect();
-    app.update(Message::FilterPresetsLoaded(vec![(
+    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::PresetsLoaded(vec![(
         "frontend".to_string(),
         repos.clone(),
         RepoFilterMode::Include,
-    )]));
+    )])));
     assert_eq!(app.filter.presets.len(), 1);
     assert_eq!(app.filter.presets[0].0, "frontend");
 }
@@ -228,7 +228,7 @@ fn filter_presets_loaded_sets_state() {
 fn load_filter_preset_unknown_name_is_noop() {
     let mut app = make_app();
     app.filter.repos.insert("/repo-a".to_string());
-    app.update(Message::LoadFilterPreset("nonexistent".to_string()));
+    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::LoadPreset("nonexistent".to_string())));
     assert!(app.filter.repos.contains("/repo-a"));
 }
 
@@ -242,7 +242,7 @@ fn load_filter_preset_skips_stale_paths() {
         .collect();
     app.filter.presets = vec![("stale".to_string(), preset_repos, RepoFilterMode::Include)];
 
-    app.update(Message::LoadFilterPreset("stale".to_string()));
+    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::LoadPreset("stale".to_string())));
     assert!(app.filter.repos.contains("/repo-a"));
     assert!(
         !app.filter.repos.contains("/gone"),
@@ -254,7 +254,7 @@ fn load_filter_preset_skips_stale_paths() {
 fn start_delete_preset_with_no_presets_is_noop() {
     let mut app = make_app();
     app.input.mode = InputMode::RepoFilter;
-    app.update(Message::StartDeletePreset);
+    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::StartDeletePreset));
     assert_eq!(app.input.mode, InputMode::RepoFilter);
 }
 
@@ -270,7 +270,7 @@ fn input_preset_name_enter_saves() {
     assert_eq!(app.filter.presets.len(), 1);
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::PersistFilterPreset { .. })));
+        .any(|c| matches!(c, Command::RepoFilter(crate::tui::commands::RepoFilterCommand::PersistFilterPreset { .. }))));
 }
 
 #[test]
@@ -304,7 +304,7 @@ fn confirm_delete_preset_letter_deletes() {
     assert_eq!(app.input.mode, InputMode::RepoFilter);
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::DeleteFilterPreset(_))));
+        .any(|c| matches!(c, Command::RepoFilter(crate::tui::commands::RepoFilterCommand::DeleteFilterPreset(_)))));
 }
 
 #[test]
@@ -363,7 +363,7 @@ fn handle_key_input_preset_name_enter_saves() {
     let cmds = app.handle_key(make_key(KeyCode::Enter));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::PersistFilterPreset { .. })));
+        .any(|c| matches!(c, Command::RepoFilter(crate::tui::commands::RepoFilterCommand::PersistFilterPreset { .. }))));
 }
 
 #[test]
@@ -387,7 +387,7 @@ fn handle_key_confirm_delete_preset_selects() {
     let cmds = app.handle_key(make_key(KeyCode::Char('A')));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::DeleteFilterPreset(_))));
+        .any(|c| matches!(c, Command::RepoFilter(crate::tui::commands::RepoFilterCommand::DeleteFilterPreset(_)))));
 }
 
 #[test]
@@ -802,12 +802,12 @@ fn terminal_resized_returns_no_commands() {
 fn show_tips_sets_overlay() {
     let mut app = App::new(vec![], ProjectId(1));
     let tips = make_tips();
-    app.update(Message::ShowTips {
+    app.update(Message::Tips(crate::tui::messages::TipsMessage::Show {
         tips: tips.clone(),
         starting_index: 1,
         max_seen_id: 0,
         show_mode: crate::models::TipsShowMode::Always,
-    });
+    }));
     let overlay = app.tips.as_ref().expect("tips overlay should be set");
     assert_eq!(overlay.index, 1);
     assert_eq!(overlay.tips.len(), 3);
@@ -816,65 +816,65 @@ fn show_tips_sets_overlay() {
 #[test]
 fn next_tip_increments_index() {
     let mut app = App::new(vec![], ProjectId(1));
-    app.update(Message::ShowTips {
+    app.update(Message::Tips(crate::tui::messages::TipsMessage::Show {
         tips: make_tips(),
         starting_index: 0,
         max_seen_id: 0,
         show_mode: crate::models::TipsShowMode::Always,
-    });
-    app.update(Message::NextTip);
+    }));
+    app.update(Message::Tips(crate::tui::messages::TipsMessage::Next));
     assert_eq!(app.tips.as_ref().unwrap().index, 1);
 }
 
 #[test]
 fn next_tip_wraps_at_end() {
     let mut app = App::new(vec![], ProjectId(1));
-    app.update(Message::ShowTips {
+    app.update(Message::Tips(crate::tui::messages::TipsMessage::Show {
         tips: make_tips(),
         starting_index: 2,
         max_seen_id: 0,
         show_mode: crate::models::TipsShowMode::Always,
-    });
-    app.update(Message::NextTip);
+    }));
+    app.update(Message::Tips(crate::tui::messages::TipsMessage::Next));
     assert_eq!(app.tips.as_ref().unwrap().index, 0);
 }
 
 #[test]
 fn prev_tip_decrements_index() {
     let mut app = App::new(vec![], ProjectId(1));
-    app.update(Message::ShowTips {
+    app.update(Message::Tips(crate::tui::messages::TipsMessage::Show {
         tips: make_tips(),
         starting_index: 2,
         max_seen_id: 0,
         show_mode: crate::models::TipsShowMode::Always,
-    });
-    app.update(Message::PrevTip);
+    }));
+    app.update(Message::Tips(crate::tui::messages::TipsMessage::Prev));
     assert_eq!(app.tips.as_ref().unwrap().index, 1);
 }
 
 #[test]
 fn prev_tip_wraps_at_start() {
     let mut app = App::new(vec![], ProjectId(1));
-    app.update(Message::ShowTips {
+    app.update(Message::Tips(crate::tui::messages::TipsMessage::Show {
         tips: make_tips(),
         starting_index: 0,
         max_seen_id: 0,
         show_mode: crate::models::TipsShowMode::Always,
-    });
-    app.update(Message::PrevTip);
+    }));
+    app.update(Message::Tips(crate::tui::messages::TipsMessage::Prev));
     assert_eq!(app.tips.as_ref().unwrap().index, 2);
 }
 
 #[test]
 fn set_tips_mode_updates_show_mode() {
     let mut app = App::new(vec![], ProjectId(1));
-    app.update(Message::ShowTips {
+    app.update(Message::Tips(crate::tui::messages::TipsMessage::Show {
         tips: make_tips(),
         starting_index: 0,
         max_seen_id: 0,
         show_mode: crate::models::TipsShowMode::Always,
-    });
-    app.update(Message::SetTipsMode(crate::models::TipsShowMode::NewOnly));
+    }));
+    app.update(Message::Tips(crate::tui::messages::TipsMessage::SetMode(crate::models::TipsShowMode::NewOnly)));
     assert_eq!(
         app.tips.as_ref().unwrap().show_mode,
         crate::models::TipsShowMode::NewOnly
@@ -884,19 +884,19 @@ fn set_tips_mode_updates_show_mode() {
 #[test]
 fn close_tips_clears_overlay_and_returns_save_command() {
     let mut app = App::new(vec![], ProjectId(1));
-    app.update(Message::ShowTips {
+    app.update(Message::Tips(crate::tui::messages::TipsMessage::Show {
         tips: make_tips(),
         starting_index: 1, // tip id=2
         max_seen_id: 0,
         show_mode: crate::models::TipsShowMode::Always,
-    });
-    let cmds = app.update(Message::CloseTips);
+    }));
+    let cmds = app.update(Message::Tips(crate::tui::messages::TipsMessage::Close));
     assert!(app.tips.is_none());
     let save_cmd = cmds.iter().find_map(|c| {
-        if let Command::SaveTipsState {
+        if let Command::Tips(crate::tui::commands::TipsCommand::SaveState {
             seen_up_to,
             show_mode,
-        } = c
+        }) = c
         {
             Some((*seen_up_to, *show_mode))
         } else {
@@ -905,7 +905,7 @@ fn close_tips_clears_overlay_and_returns_save_command() {
     });
     assert!(
         save_cmd.is_some(),
-        "CloseTips should return SaveTipsState command"
+        "CloseTips should return Tips(SaveState) command"
     );
     let (seen_up_to, _) = save_cmd.unwrap();
     assert_eq!(
@@ -917,15 +917,15 @@ fn close_tips_clears_overlay_and_returns_save_command() {
 #[test]
 fn close_tips_seen_up_to_respects_max_seen_id() {
     let mut app = App::new(vec![], ProjectId(1));
-    app.update(Message::ShowTips {
+    app.update(Message::Tips(crate::tui::messages::TipsMessage::Show {
         tips: make_tips(),
         starting_index: 0, // tip id=1
         max_seen_id: 5,    // already saw tip 5 previously
         show_mode: crate::models::TipsShowMode::Always,
-    });
-    let cmds = app.update(Message::CloseTips);
+    }));
+    let cmds = app.update(Message::Tips(crate::tui::messages::TipsMessage::Close));
     let seen_up_to = cmds.iter().find_map(|c| {
-        if let Command::SaveTipsState { seen_up_to, .. } = c {
+        if let Command::Tips(crate::tui::commands::TipsCommand::SaveState { seen_up_to, .. }) = c {
             Some(*seen_up_to)
         } else {
             None
@@ -936,12 +936,12 @@ fn close_tips_seen_up_to_respects_max_seen_id() {
 
 fn app_with_tips() -> App {
     let mut app = App::new(vec![], ProjectId(1));
-    app.update(Message::ShowTips {
+    app.update(Message::Tips(crate::tui::messages::TipsMessage::Show {
         tips: make_tips(),
         starting_index: 1,
         max_seen_id: 0,
         show_mode: crate::models::TipsShowMode::Always,
-    });
+    }));
     app
 }
 

@@ -162,61 +162,27 @@ pub enum Message {
     /// Pop-out `$EDITOR` flow messages — see
     /// [`crate::tui::messages::EditorMessage`].
     Editor(crate::tui::messages::EditorMessage),
-    // Split mode messages
-    ToggleSplitMode,
-    SwapSplitPane(TaskId),
-    SplitPaneOpened {
-        pane_id: String,
-        task_id: Option<TaskId>,
-    },
-    SplitPaneClosed,
+    /// Split-pane mode messages — see [`crate::tui::messages::SplitMessage`].
+    Split(crate::tui::messages::SplitMessage),
     /// Epic-domain messages — see [`crate::tui::messages::EpicMessage`].
     Epic(crate::tui::messages::EpicMessage),
     /// PR flow messages — see [`crate::tui::messages::PrMessage`].
     Pr(crate::tui::messages::PrMessage),
-    // Repo filter
-    StartRepoFilter,
-    CloseRepoFilter,
-    ToggleRepoFilter(String),
-    ToggleAllRepoFilter,
-    ToggleRepoFilterMode,
-    MoveRepoCursor(isize),
-    // Filter presets
-    StartSavePreset,
-    SaveFilterPreset(String),
-    LoadFilterPreset(String),
-    StartDeletePreset,
-    DeleteFilterPreset(String),
-    StartDeleteRepoPath,
-    DeleteRepoPath(String),
-    CancelPresetInput,
-    ToggleOnlyActive,
-    FilterPresetsLoaded(Vec<(String, HashSet<String>, RepoFilterMode)>),
+    /// Repo-filter overlay messages — see [`crate::tui::messages::RepoFilterMessage`].
+    RepoFilter(crate::tui::messages::RepoFilterMessage),
     /// Wrap-up flow messages (rebase only — PR creation is agent-driven via the
     /// `/wrap-up` skill). See [`crate::tui::messages::WrapUpMessage`].
     WrapUp(crate::tui::messages::WrapUpMessage),
-    // Tips overlay
-    ShowTips {
-        tips: Vec<crate::tips::Tip>,
-        starting_index: usize,
-        max_seen_id: u32,
-        show_mode: TipsShowMode,
-    },
-    NextTip,
-    PrevTip,
-    SetTipsMode(TipsShowMode),
-    CloseTips,
+    /// Tips overlay messages — see [`crate::tui::messages::TipsMessage`].
+    Tips(crate::tui::messages::TipsMessage),
     /// Knowledge-base overlay messages — see [`crate::tui::messages::LearningMessage`].
     Learning(crate::tui::messages::LearningMessage),
-    // Project messages
-    ProjectsUpdated(Vec<Project>),
-    SelectProject(ProjectId),
-    FollowProject(ProjectId),
+    /// Project management messages — see [`crate::tui::messages::ProjectMessage`].
+    Project(crate::tui::messages::ProjectMessage),
     /// Feed-epic refresh messages — see [`crate::tui::messages::FeedMessage`].
     Feed(crate::tui::messages::FeedMessage),
-    // Main session messages
-    SubmitMainSessionDir(String),
-    MainSessionCreated(String),
+    /// Main session setup messages — see [`crate::tui::messages::MainSessionMessage`].
+    MainSession(crate::tui::messages::MainSessionMessage),
 }
 
 // ---------------------------------------------------------------------------
@@ -228,31 +194,8 @@ pub enum Command {
     /// Task-domain side-effect commands — see
     /// [`crate::tui::commands::TaskCommand`].
     Task(crate::tui::commands::TaskCommand),
-    // Split mode commands
-    EnterSplitMode,
-    EnterSplitModeWithTask {
-        task_id: TaskId,
-        window: String,
-    },
-    ExitSplitMode {
-        pane_id: String,
-        restore_window: Option<String>,
-    },
-    SwapSplitPane {
-        task_id: TaskId,
-        new_window: String,
-        old_pane_id: Option<String>,
-        old_window: Option<String>,
-    },
-    FocusSplitPane {
-        pane_id: String,
-    },
-    CheckSplitPaneExists {
-        pane_id: String,
-    },
-    RespawnSplitPane {
-        pane_id: String,
-    },
+    /// Split-pane mode side-effect commands — see [`crate::tui::commands::SplitCommand`].
+    Split(crate::tui::commands::SplitCommand),
     /// Pop-out `$EDITOR` flow side-effect commands — see
     /// [`crate::tui::commands::EditorCommand`].
     Editor(crate::tui::commands::EditorCommand),
@@ -274,37 +217,16 @@ pub enum Command {
         key: String,
         value: String,
     },
-    PersistFilterPreset {
-        name: String,
-        repo_paths: Vec<String>,
-        mode: RepoFilterMode,
-    },
-    DeleteFilterPreset(String),
-    DeleteRepoPath(String),
+    /// Repo-filter overlay side-effect commands — see [`crate::tui::commands::RepoFilterCommand`].
+    RepoFilter(crate::tui::commands::RepoFilterCommand),
     /// PR flow side-effect commands — see [`crate::tui::commands::PrCommand`].
     Pr(crate::tui::commands::PrCommand),
-    // Tips persistence
-    SaveTipsState {
-        seen_up_to: u32,
-        show_mode: TipsShowMode,
-    },
-    // Project commands
-    CreateProject {
-        name: String,
-    },
-    RenameProject {
-        id: ProjectId,
-        name: String,
-    },
-    DeleteProject {
-        id: ProjectId,
-    },
-    /// +1 = move down (higher sort_order), -1 = move up (lower sort_order)
-    ReorderProject {
-        id: ProjectId,
-        delta: i8,
-    },
-    OpenMainSession,
+    /// Tips persistence commands — see [`crate::tui::commands::TipsCommand`].
+    Tips(crate::tui::commands::TipsCommand),
+    /// Project management side-effect commands — see [`crate::tui::commands::ProjectCommand`].
+    Project(crate::tui::commands::ProjectCommand),
+    /// Main session side-effect commands — see [`crate::tui::commands::MainSessionCommand`].
+    MainSession(crate::tui::commands::MainSessionCommand),
     /// Knowledge-base overlay side-effect commands — see
     /// [`crate::tui::commands::LearningCommand`].
     Learning(crate::tui::commands::LearningCommand),

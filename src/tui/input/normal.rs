@@ -206,7 +206,7 @@ impl App {
                 cmds
             }
             KeyCode::Char('f') => {
-                let mut cmds = self.update(Message::StartRepoFilter);
+                let mut cmds = self.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::Start));
                 cmds.push(key_event("filter_repos", "f"));
                 cmds
             }
@@ -260,7 +260,9 @@ impl App {
                     vec![key_event("open_main_session", ":")]
                 } else {
                     vec![
-                        Command::OpenMainSession,
+                        Command::MainSession(
+                            crate::tui::commands::MainSessionCommand::Open,
+                        ),
                         key_event("open_main_session", ":"),
                     ]
                 }
@@ -273,7 +275,7 @@ impl App {
                     if self.board.split.active && self.board.split.pinned_task_id == Some(task.id) {
                         if let Some(pane_id) = self.board.split.right_pane_id.clone() {
                             return vec![
-                                Command::FocusSplitPane { pane_id },
+                                Command::Split(crate::tui::commands::SplitCommand::FocusPane { pane_id }),
                                 key_event("jump_to_tmux", "g"),
                             ];
                         }
@@ -303,7 +305,7 @@ impl App {
                 if let Some(task) = self.selected_task() {
                     if self.board.split.active {
                         let id = task.id;
-                        let mut cmds = self.update(Message::SwapSplitPane(id));
+                        let mut cmds = self.update(Message::Split(crate::tui::messages::SplitMessage::Swap(id)));
                         cmds.push(key_event("swap_split_pane", "G"));
                         cmds
                     } else {
@@ -553,7 +555,7 @@ impl App {
             }
 
             KeyCode::Char('S') => {
-                let mut cmds = self.update(Message::ToggleSplitMode);
+                let mut cmds = self.update(Message::Split(crate::tui::messages::SplitMessage::Toggle));
                 cmds.push(key_event("toggle_split_mode", "S"));
                 cmds
             }

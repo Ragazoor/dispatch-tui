@@ -1556,7 +1556,7 @@ fn tick_with_active_split_checks_pane() {
     let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
     assert!(cmds.iter().any(|c| matches!(
         c,
-        Command::CheckSplitPaneExists { pane_id } if pane_id == "%42"
+        Command::Split(crate::tui::commands::SplitCommand::CheckPaneExists { pane_id }) if pane_id == "%42"
     )));
 }
 
@@ -1566,7 +1566,7 @@ fn tick_without_split_does_not_check_pane() {
     let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
     assert!(!cmds
         .iter()
-        .any(|c| matches!(c, Command::CheckSplitPaneExists { .. })));
+        .any(|c| matches!(c, Command::Split(crate::tui::commands::SplitCommand::CheckPaneExists { .. }))));
 }
 
 #[test]

@@ -142,7 +142,7 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
         .flatten();
     let initial_project_id = resolve_initial_project(&projects, saved_project);
     let mut app = App::new(tasks, initial_project_id);
-    app.update(Message::ProjectsUpdated(projects));
+    app.update(Message::Project(crate::tui::messages::ProjectMessage::Updated(projects)));
     let paths = database.list_repo_paths().await.unwrap_or_default();
     app.update(Message::RepoPathsUpdated(paths));
     load_notifications_pref(&*database, &mut app).await;
@@ -165,12 +165,12 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
         .await
         .unwrap_or((0, crate::models::TipsShowMode::Always));
     if let Some(starting_index) = tips_starting_index(&tips, seen_up_to, show_mode) {
-        app.update(Message::ShowTips {
+        app.update(Message::Tips(crate::tui::messages::TipsMessage::Show {
             tips,
             starting_index,
             max_seen_id: seen_up_to,
             show_mode,
-        });
+        }));
     }
 
     // 4. Set up terminal
@@ -660,7 +660,7 @@ async fn migrate_legacy_global_filter(
 async fn load_filter_presets(db: &dyn db::SettingsStore, app: &mut App) -> Option<Message> {
     match db.list_filter_presets().await {
         Ok(raw) => {
-            let _ = app.update(Message::FilterPresetsLoaded(parse_raw_presets(raw, None)));
+            let _ = app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::PresetsLoaded(parse_raw_presets(raw, None))));
             None
         }
         Err(e) => Some(Message::System(

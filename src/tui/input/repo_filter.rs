@@ -9,18 +9,28 @@ impl App {
     pub(in crate::tui) fn handle_key_repo_filter(&mut self, key: KeyEvent) -> Vec<Command> {
         match key.code {
             KeyCode::Enter | KeyCode::Esc | KeyCode::Char('q') => {
-                self.update(Message::CloseRepoFilter)
+                self.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::Close))
             }
-            KeyCode::Char('a') => self.update(Message::ToggleAllRepoFilter),
-            KeyCode::Char('j') | KeyCode::Down => self.update(Message::MoveRepoCursor(1)),
-            KeyCode::Char('k') | KeyCode::Up => self.update(Message::MoveRepoCursor(-1)),
+            KeyCode::Char('a') => self.update(Message::RepoFilter(
+                crate::tui::messages::RepoFilterMessage::ToggleAll,
+            )),
+            KeyCode::Char('j') | KeyCode::Down => self.update(Message::RepoFilter(
+                crate::tui::messages::RepoFilterMessage::MoveCursor(1),
+            )),
+            KeyCode::Char('k') | KeyCode::Up => self.update(Message::RepoFilter(
+                crate::tui::messages::RepoFilterMessage::MoveCursor(-1),
+            )),
             KeyCode::Char(' ') => {
                 let idx = self.input.repo_cursor;
                 if idx == 0 {
-                    self.update(Message::ToggleOnlyActive)
+                    self.update(Message::RepoFilter(
+                        crate::tui::messages::RepoFilterMessage::ToggleOnlyActive,
+                    ))
                 } else if idx <= self.board.repo_paths.len() {
                     let path = self.board.repo_paths[idx - 1].clone();
-                    self.update(Message::ToggleRepoFilter(path))
+                    self.update(Message::RepoFilter(
+                        crate::tui::messages::RepoFilterMessage::Toggle(path),
+                    ))
                 } else {
                     vec![]
                 }
@@ -29,26 +39,38 @@ impl App {
                 let idx = (c as usize) - ('1' as usize);
                 if idx < self.board.repo_paths.len() {
                     let path = self.board.repo_paths[idx].clone();
-                    self.update(Message::ToggleRepoFilter(path))
+                    self.update(Message::RepoFilter(
+                        crate::tui::messages::RepoFilterMessage::Toggle(path),
+                    ))
                 } else {
                     vec![]
                 }
             }
-            KeyCode::Tab => self.update(Message::ToggleRepoFilterMode),
+            KeyCode::Tab => self.update(Message::RepoFilter(
+                crate::tui::messages::RepoFilterMessage::ToggleMode,
+            )),
             KeyCode::Backspace | KeyCode::Delete => {
                 if self.input.repo_cursor > 0 {
-                    self.update(Message::StartDeleteRepoPath)
+                    self.update(Message::RepoFilter(
+                        crate::tui::messages::RepoFilterMessage::StartDeleteRepoPath,
+                    ))
                 } else {
                     vec![]
                 }
             }
-            KeyCode::Char('s') => self.update(Message::StartSavePreset),
-            KeyCode::Char('x') => self.update(Message::StartDeletePreset),
+            KeyCode::Char('s') => self.update(Message::RepoFilter(
+                crate::tui::messages::RepoFilterMessage::StartSavePreset,
+            )),
+            KeyCode::Char('x') => self.update(Message::RepoFilter(
+                crate::tui::messages::RepoFilterMessage::StartDeletePreset,
+            )),
             KeyCode::Char(c @ 'A'..='Z') => {
                 let idx = (c as usize) - ('A' as usize);
                 if idx < self.filter.presets.len() {
                     let name = self.filter.presets[idx].0.clone();
-                    self.update(Message::LoadFilterPreset(name))
+                    self.update(Message::RepoFilter(
+                        crate::tui::messages::RepoFilterMessage::LoadPreset(name),
+                    ))
                 } else {
                     vec![]
                 }
@@ -61,9 +83,13 @@ impl App {
         match key.code {
             KeyCode::Enter => {
                 let name = self.input.buffer.clone();
-                self.update(Message::SaveFilterPreset(name))
+                self.update(Message::RepoFilter(
+                    crate::tui::messages::RepoFilterMessage::SavePreset(name),
+                ))
             }
-            KeyCode::Esc => self.update(Message::CancelPresetInput),
+            KeyCode::Esc => self.update(Message::RepoFilter(
+                crate::tui::messages::RepoFilterMessage::CancelPresetInput,
+            )),
             KeyCode::Backspace => self.update(Message::Input(
                 crate::tui::messages::InputMessage::InputBackspace,
             )),
@@ -83,12 +109,16 @@ impl App {
                 let idx = (c as usize) - ('A' as usize);
                 if idx < self.filter.presets.len() {
                     let name = self.filter.presets[idx].0.clone();
-                    self.update(Message::DeleteFilterPreset(name))
+                    self.update(Message::RepoFilter(
+                        crate::tui::messages::RepoFilterMessage::DeletePreset(name),
+                    ))
                 } else {
                     vec![]
                 }
             }
-            KeyCode::Esc => self.update(Message::CancelPresetInput),
+            KeyCode::Esc => self.update(Message::RepoFilter(
+                crate::tui::messages::RepoFilterMessage::CancelPresetInput,
+            )),
             _ => vec![],
         }
     }
@@ -102,7 +132,9 @@ impl App {
                 let idx = self.input.repo_cursor;
                 if idx > 0 && idx <= self.board.repo_paths.len() {
                     let path = self.board.repo_paths[idx - 1].clone();
-                    self.update(Message::DeleteRepoPath(path))
+                    self.update(Message::RepoFilter(
+                        crate::tui::messages::RepoFilterMessage::DeleteRepoPath(path),
+                    ))
                 } else {
                     self.input.mode = InputMode::RepoFilter;
                     vec![]

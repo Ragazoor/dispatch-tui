@@ -20,7 +20,7 @@ impl App {
                 key: "main_session.dir".to_string(),
                 value: expanded,
             },
-            Command::OpenMainSession,
+            Command::MainSession(crate::tui::commands::MainSessionCommand::Open),
         ]
     }
 

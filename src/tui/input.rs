@@ -67,8 +67,12 @@ impl App {
 
     pub(in crate::tui) fn handle_key_tips(&mut self, key: KeyEvent) -> Vec<Command> {
         match key.code {
-            KeyCode::Char('l') | KeyCode::Right => self.update(Message::NextTip),
-            KeyCode::Char('h') | KeyCode::Left => self.update(Message::PrevTip),
+            KeyCode::Char('l') | KeyCode::Right => {
+                self.update(Message::Tips(crate::tui::messages::TipsMessage::Next))
+            }
+            KeyCode::Char('h') | KeyCode::Left => {
+                self.update(Message::Tips(crate::tui::messages::TipsMessage::Prev))
+            }
             KeyCode::Char('n') => {
                 let current_mode = self.tips.as_ref().map(|t| t.show_mode);
                 let new_mode = match current_mode {
@@ -82,14 +86,18 @@ impl App {
                         unreachable!("n key only toggles between Always and NewOnly")
                     }
                 };
-                let mut cmds = self.update(Message::SetTipsMode(new_mode));
+                let mut cmds = self.update(Message::Tips(
+                    crate::tui::messages::TipsMessage::SetMode(new_mode),
+                ));
                 cmds.extend(self.update(Message::System(
                     crate::tui::messages::SystemMessage::StatusInfo(label.to_string()),
                 )));
                 cmds
             }
             KeyCode::Char('x') => {
-                let mut cmds = self.update(Message::SetTipsMode(TipsShowMode::Never));
+                let mut cmds = self.update(Message::Tips(
+                    crate::tui::messages::TipsMessage::SetMode(TipsShowMode::Never),
+                ));
                 cmds.extend(self.update(Message::System(
                     crate::tui::messages::SystemMessage::StatusInfo(
                         "Tips: disabled on startup".to_string(),
@@ -97,7 +105,9 @@ impl App {
                 )));
                 cmds
             }
-            KeyCode::Char('q') | KeyCode::Esc => self.update(Message::CloseTips),
+            KeyCode::Char('q') | KeyCode::Esc => {
+                self.update(Message::Tips(crate::tui::messages::TipsMessage::Close))
+            }
             _ => vec![],
         }
     }
@@ -286,8 +296,8 @@ impl App {
         );
         if is_repo_mode {
             match key.code {
-                KeyCode::Down => return self.update(Message::MoveRepoCursor(1)),
-                KeyCode::Up => return self.update(Message::MoveRepoCursor(-1)),
+                KeyCode::Down => return self.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::MoveCursor(1))),
+                KeyCode::Up => return self.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::MoveCursor(-1))),
                 _ => {}
             }
         }
@@ -308,7 +318,9 @@ impl App {
                             InputMode::InputEpicRepoPath => Message::Epic(
                                 crate::tui::messages::EpicMessage::SubmitRepoPath(path),
                             ),
-                            InputMode::MainSessionDir => Message::SubmitMainSessionDir(path),
+                            InputMode::MainSessionDir => Message::MainSession(
+                                crate::tui::messages::MainSessionMessage::SubmitDir(path),
+                            ),
                             _ => Message::Input(
                                 crate::tui::messages::InputMessage::SubmitRepoPath(path),
                             ),
@@ -340,7 +352,9 @@ impl App {
                     InputMode::InputBaseBranch => self.update(Message::Input(
                         crate::tui::messages::InputMessage::SubmitBaseBranch(value),
                     )),
-                    InputMode::MainSessionDir => self.update(Message::SubmitMainSessionDir(value)),
+                    InputMode::MainSessionDir => self.update(Message::MainSession(
+                        crate::tui::messages::MainSessionMessage::SubmitDir(value),
+                    )),
                     _ => vec![],
                 }
             }
@@ -412,8 +426,8 @@ impl App {
             KeyCode::Esc => self.update(Message::Input(
                 crate::tui::messages::InputMessage::CancelInput,
             )),
-            KeyCode::Down => self.update(Message::MoveRepoCursor(1)),
-            KeyCode::Up => self.update(Message::MoveRepoCursor(-1)),
+            KeyCode::Down => self.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::MoveCursor(1))),
+            KeyCode::Up => self.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::MoveCursor(-1))),
             KeyCode::Enter => {
                 let idx = self.input.repo_cursor;
                 self.update(Message::Input(

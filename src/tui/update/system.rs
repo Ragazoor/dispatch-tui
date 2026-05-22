@@ -89,10 +89,10 @@ impl App {
             .pinned_task_id
             .and_then(|id| self.find_task(id))
             .and_then(|t| t.tmux_window.clone());
-        vec![Command::ExitSplitMode {
+        vec![Command::Split(crate::tui::commands::SplitCommand::Exit {
             pane_id,
             restore_window,
-        }]
+        })]
     }
 
     pub(in crate::tui) fn finish_task_creation(&mut self, repo_path: String) -> Vec<Command> {

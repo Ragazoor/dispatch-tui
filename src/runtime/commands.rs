@@ -21,8 +21,8 @@ pub(super) async fn dispatch(
             rt.exec_save_repo_path(app, path).await;
             vec![]
         }
-        OpenMainSession => {
-            rt.exec_open_main_session(app).await;
+        MainSession(cmd) => {
+            dispatch_main_session(rt, app, cmd).await;
             vec![]
         }
         // Epic commands
@@ -43,21 +43,8 @@ pub(super) async fn dispatch(
             rt.exec_persist_string_setting(app, &key, &value).await;
             vec![]
         }
-        PersistFilterPreset {
-            name,
-            repo_paths,
-            mode,
-        } => {
-            rt.exec_persist_filter_preset(app, &name, &repo_paths, mode.as_str())
-                .await;
-            vec![]
-        }
-        DeleteFilterPreset(name) => {
-            rt.exec_delete_filter_preset(app, &name).await;
-            vec![]
-        }
-        DeleteRepoPath(path) => {
-            rt.exec_delete_repo_path(app, &path).await;
+        RepoFilter(cmd) => {
+            dispatch_repo_filter(rt, app, cmd).await;
             vec![]
         }
         // PR commands (creation is agent-driven via the /wrap-up skill)
@@ -66,71 +53,18 @@ pub(super) async fn dispatch(
             vec![]
         }
         // Split mode
-        EnterSplitMode => {
-            rt.exec_enter_split_mode(app);
-            vec![]
-        }
-        EnterSplitModeWithTask { task_id, window } => {
-            rt.exec_enter_split_mode_with_task(app, task_id, &window);
-            vec![]
-        }
-        ExitSplitMode {
-            pane_id,
-            restore_window,
-        } => {
-            rt.exec_exit_split_mode(app, &pane_id, restore_window.as_deref());
-            vec![]
-        }
-        SwapSplitPane {
-            task_id,
-            new_window,
-            old_pane_id,
-            old_window,
-        } => {
-            rt.exec_swap_split_pane(
-                app,
-                task_id,
-                &new_window,
-                old_pane_id.as_deref(),
-                old_window.as_deref(),
-            );
-            vec![]
-        }
-        FocusSplitPane { pane_id } => {
-            rt.exec_focus_split_pane(pane_id);
-            vec![]
-        }
-        CheckSplitPaneExists { pane_id } => {
-            rt.exec_check_split_pane(app, &pane_id);
-            vec![]
-        }
-        RespawnSplitPane { pane_id } => {
-            rt.exec_respawn_split_pane(app, &pane_id);
+        Split(cmd) => {
+            dispatch_split(rt, app, cmd);
             vec![]
         }
         // Tips
-        SaveTipsState {
-            seen_up_to,
-            show_mode,
-        } => {
-            rt.exec_save_tips_state(seen_up_to, show_mode).await;
+        Tips(cmd) => {
+            dispatch_tips(rt, cmd).await;
             vec![]
         }
         // Project commands
-        CreateProject { name } => {
-            rt.exec_create_project(app, name).await;
-            vec![]
-        }
-        RenameProject { id, name } => {
-            rt.exec_rename_project(app, id, name).await;
-            vec![]
-        }
-        DeleteProject { id } => {
-            rt.exec_delete_project(app, id).await;
-            vec![]
-        }
-        ReorderProject { id, delta } => {
-            rt.exec_reorder_project(app, id, delta).await;
+        Project(cmd) => {
+            dispatch_project(rt, app, cmd).await;
             vec![]
         }
         Learning(cmd) => {
@@ -144,6 +78,65 @@ pub(super) async fn dispatch(
             });
             vec![]
         }
+    }
+}
+
+async fn dispatch_project(
+    rt: &super::TuiRuntime,
+    app: &mut super::App,
+    cmd: crate::tui::commands::ProjectCommand,
+) {
+    use crate::tui::commands::ProjectCommand::*;
+    match cmd {
+        Create { name } => rt.exec_create_project(app, name).await,
+        Rename { id, name } => rt.exec_rename_project(app, id, name).await,
+        Delete { id } => rt.exec_delete_project(app, id).await,
+        Reorder { id, delta } => rt.exec_reorder_project(app, id, delta).await,
+    }
+}
+
+fn dispatch_split(
+    rt: &super::TuiRuntime,
+    app: &mut super::App,
+    cmd: crate::tui::commands::SplitCommand,
+) {
+    use crate::tui::commands::SplitCommand::*;
+    match cmd {
+        Enter => rt.exec_enter_split_mode(app),
+        EnterWithTask { task_id, window } => rt.exec_enter_split_mode_with_task(app, task_id, &window),
+        Exit { pane_id, restore_window } => {
+            rt.exec_exit_split_mode(app, &pane_id, restore_window.as_deref())
+        }
+        Swap { task_id, new_window, old_pane_id, old_window } => {
+            rt.exec_swap_split_pane(
+                app,
+                task_id,
+                &new_window,
+                old_pane_id.as_deref(),
+                old_window.as_deref(),
+            )
+        }
+        FocusPane { pane_id } => rt.exec_focus_split_pane(pane_id),
+        CheckPaneExists { pane_id } => rt.exec_check_split_pane(app, &pane_id),
+        RespawnPane { pane_id } => rt.exec_respawn_split_pane(app, &pane_id),
+    }
+}
+
+async fn dispatch_main_session(
+    rt: &super::TuiRuntime,
+    app: &mut super::App,
+    cmd: crate::tui::commands::MainSessionCommand,
+) {
+    use crate::tui::commands::MainSessionCommand::*;
+    match cmd {
+        Open => rt.exec_open_main_session(app).await,
+    }
+}
+
+async fn dispatch_tips(rt: &super::TuiRuntime, cmd: crate::tui::commands::TipsCommand) {
+    use crate::tui::commands::TipsCommand::*;
+    match cmd {
+        SaveState { seen_up_to, show_mode } => rt.exec_save_tips_state(seen_up_to, show_mode).await,
     }
 }
 
@@ -306,6 +299,23 @@ fn dispatch_feed(rt: &super::TuiRuntime, cmd: crate::tui::commands::FeedCommand)
             epic_title,
             feed_command,
         } => rt.exec_trigger_epic_feed(epic_id, epic_title, feed_command),
+    }
+}
+
+/// Per-domain dispatcher for [`crate::tui::commands::RepoFilterCommand`] variants.
+async fn dispatch_repo_filter(
+    rt: &super::TuiRuntime,
+    app: &mut super::App,
+    cmd: crate::tui::commands::RepoFilterCommand,
+) {
+    use crate::tui::commands::RepoFilterCommand::*;
+    match cmd {
+        PersistFilterPreset { name, repo_paths, mode } => {
+            rt.exec_persist_filter_preset(app, &name, &repo_paths, mode.as_str())
+                .await
+        }
+        DeleteFilterPreset(name) => rt.exec_delete_filter_preset(app, &name).await,
+        DeleteRepoPath(path) => rt.exec_delete_repo_path(app, &path).await,
     }
 }
 

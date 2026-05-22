@@ -1857,7 +1857,7 @@ async fn load_notifications_pref_sets_true_when_enabled() {
 
 fn make_app_with_two_projects() -> App {
     let mut app = App::new(vec![], ProjectId(1));
-    app.update(Message::ProjectsUpdated(vec![
+    app.update(Message::Project(crate::tui::messages::ProjectMessage::Updated(vec![
         crate::models::Project {
             id: ProjectId(1),
             name: "Default".into(),
@@ -1870,7 +1870,7 @@ fn make_app_with_two_projects() -> App {
             sort_order: 1,
             is_default: false,
         },
-    ]));
+    ])));
     app
 }
 
@@ -1927,7 +1927,7 @@ async fn load_per_project_repo_filters_holds_other_project_filter_in_map() {
     assert!(app.has_per_project_filter(ProjectId(2)));
 
     // Switching to project 2 restores its filter.
-    app.update(Message::SelectProject(ProjectId(2)));
+    app.update(Message::Project(crate::tui::messages::ProjectMessage::Select(ProjectId(2))));
     assert_eq!(app.repo_filter(), &HashSet::from(["/repo/b".to_string()]));
 }
 
@@ -2802,7 +2802,7 @@ async fn exec_delete_project_switches_active_project_when_deleted_is_active() {
     let (rt, mut app) = test_runtime().await;
     let extra = rt.database.create_project("Extra", 10).await.unwrap();
     rt.exec_refresh_projects_from_db(&mut app).await;
-    app.update(Message::SelectProject(extra.id));
+    app.update(Message::Project(crate::tui::messages::ProjectMessage::Select(extra.id)));
     assert_eq!(app.active_project(), extra.id);
 
     rt.exec_delete_project(&mut app, extra.id).await;
