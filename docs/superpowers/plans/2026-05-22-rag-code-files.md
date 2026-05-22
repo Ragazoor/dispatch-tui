@@ -133,6 +133,25 @@ fn chunk_by_decls_async_prefix_triggers_split() {
     );
     assert_eq!(result.len(), 2);
 }
+
+#[test]
+fn chunk_by_decls_attr_before_first_decl_stays_in_first_chunk() {
+    // attr_buffer is flushed into the first chunk (not lost) when the first declaration arrives.
+    let content = "#[derive(Debug)]\nstruct Foo {}";
+    let result = chunk_by_declarations(content, &["struct "], |l| l.starts_with("#["));
+    assert_eq!(result.len(), 1);
+    assert!(result[0].contains("#[derive(Debug)]"), "got: {}", result[0]);
+    assert!(result[0].contains("struct Foo"), "got: {}", result[0]);
+}
+
+#[test]
+fn chunk_by_decls_trailing_attr_absorbed_into_last_chunk() {
+    // An attr at the very end of a file (after the last declaration body) stays in that chunk.
+    let content = "fn foo() {}\n#[orphan_at_eof]";
+    let result = chunk_by_declarations(content, &["fn "], |l| l.starts_with("#["));
+    assert_eq!(result.len(), 1);
+    assert!(result[0].contains("#[orphan_at_eof]"), "got: {}", result[0]);
+}
 ```
 
 - [ ] **Step 1.2: Run to verify compilation failure**
@@ -228,7 +247,7 @@ fn chunk_by_declarations(
 cargo test "repo_index::tests::chunk_by_decls" 2>&1 | tail -15
 ```
 
-Expected: all 9 `chunk_by_decls_*` tests pass. No regressions in other tests.
+Expected: all 11 `chunk_by_decls_*` tests pass. No regressions in other tests.
 
 - [ ] **Step 1.5: Commit**
 
@@ -338,6 +357,35 @@ fn chunk_rust_doc_comment_stays_with_fn() {
     );
 }
 
+#[test]
+fn chunk_rust_struct_splits() {
+    let chunks = chunk_rust("struct Foo { x: i32 }\n\nstruct Bar { y: i32 }");
+    assert_eq!(chunks.len(), 2);
+    assert!(chunks[0].contains("struct Foo"));
+    assert!(chunks[1].contains("struct Bar"));
+}
+
+#[test]
+fn chunk_rust_trait_splits() {
+    let chunks = chunk_rust("struct Foo {}\n\ntrait Greet {\n    fn hello(&self);\n}");
+    assert_eq!(chunks.len(), 2);
+    assert!(chunks[1].contains("trait Greet"));
+}
+
+#[test]
+fn chunk_rust_const_splits() {
+    let chunks = chunk_rust("fn foo() {}\n\nconst MAX: usize = 100;");
+    assert_eq!(chunks.len(), 2);
+    assert!(chunks[1].contains("const MAX"));
+}
+
+#[test]
+fn chunk_rust_mod_splits() {
+    let chunks = chunk_rust("fn foo() {}\n\nmod utils {\n    pub fn helper() {}\n}");
+    assert_eq!(chunks.len(), 2);
+    assert!(chunks[1].contains("mod utils"));
+}
+
 // --- chunk_allium ---
 
 #[test]
@@ -380,6 +428,14 @@ fn chunk_allium_enum_splits() {
     let chunks = chunk_allium(content);
     assert_eq!(chunks.len(), 2);
     assert!(chunks[1].contains("enum Status"));
+}
+
+#[test]
+fn chunk_allium_surface_splits() {
+    let content = "entity Task {}\n\nsurface KanbanBoard {\n    shows: Task\n}";
+    let chunks = chunk_allium(content);
+    assert_eq!(chunks.len(), 2);
+    assert!(chunks[1].contains("surface KanbanBoard"));
 }
 ```
 
