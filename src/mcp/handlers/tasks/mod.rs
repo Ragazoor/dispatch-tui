@@ -4,7 +4,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::mcp::McpState;
-use crate::models::{EpicId, LearningVerdict, ProjectId, SubStatus, Task, TaskStatus, TaskTag, WrapUpMode};
+use crate::models::{EpicId, LearningVerdict, SubStatus, Task, TaskStatus, TaskTag, WrapUpMode};
 
 // Promoted to pub(super) so sub-modules can `use super::{parse_args, ...}`
 pub(super) use super::types::{
@@ -57,8 +57,6 @@ pub(super) struct UpdateTaskArgs {
     pub(super) epic_id: Option<i64>,
     #[serde(default)]
     pub(super) base_branch: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
-    pub(super) project_id: Option<i64>,
     #[serde(default, deserialize_with = "deserialize_nullable_wrap_up_mode")]
     pub(super) wrap_up_mode: Option<Option<WrapUpMode>>,
 }
@@ -75,8 +73,6 @@ pub(super) struct ListTasksArgs {
     pub(super) status: Option<StatusFilter>,
     #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
     pub(super) epic_id: Option<i64>,
-    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
-    pub(super) project_id: Option<i64>,
     #[serde(default)]
     pub(super) repo_paths: Option<Vec<String>>,
 }
@@ -93,8 +89,6 @@ pub(super) struct ClaimTaskArgs {
 pub(super) struct CreateTaskWithEpicArgs {
     pub(super) title: String,
     pub(super) repo_path: String,
-    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
-    pub(super) project_id: Option<i64>,
     #[serde(default)]
     pub(super) description: String,
     pub(super) plan_path: Option<String>,
@@ -308,27 +302,6 @@ fn format_task_line(t: &Task, epic_titles: &HashMap<EpicId, String>, goal: &str)
 // ---------------------------------------------------------------------------
 // Task tool handlers (thin wrappers over TaskService)
 // ---------------------------------------------------------------------------
-
-async fn validate_project_id(
-    state: &McpState,
-    id: &Option<Value>,
-    project_id: i64,
-) -> Result<(), JsonRpcResponse> {
-    if state
-        .db
-        .list_projects()
-        .await
-        .unwrap_or_default()
-        .iter()
-        .any(|p| p.id == ProjectId(project_id))
-    {
-        return Ok(());
-    }
-    Err(service_err_to_response(
-        id.clone(),
-        crate::service::ServiceError::Validation(format!("project {project_id} does not exist")),
-    ))
-}
 
 async fn reflection_nudge(db: &dyn crate::db::TaskStore) -> &'static str {
     let enabled = db
