@@ -144,10 +144,6 @@ mcp_tools! {
                     "type": "string",
                     "description": "The base branch for rebase and PR operations (e.g. 'main', 'develop'). Defaults to 'main' if not specified."
                 },
-                "project_id": {
-                    "type": "integer",
-                    "description": "Move the task to a different project. Use list_projects to look up IDs."
-                },
                 "wrap_up_mode": {
                     "type": ["string", "null"],
                     "description": "Pre-set the wrap-up action for this task: 'rebase' (rebase onto base_branch), 'pr' (create a PR), or 'done' (mark done immediately). Pass null to clear.",
@@ -171,7 +167,7 @@ mcp_tools! {
         };
 
     async "create_task" => tasks::handle_create_task,
-        "Create a new task on the kanban board. Tasks always start in 'backlog' status. Caller identity is provided by the dispatch HTTP transport (X-Caller-Task-Id for dispatched agents, X-Caller-Kind: session for non-dispatched sessions) — you do NOT pass a caller_task_id argument. Dispatched agents: the new task inherits project_id and epic_id from your task; pass project_id or epic_id explicitly to override (epic_id: null clears epic). Non-dispatched sessions: project_id is required.",
+        "Create a new task on the kanban board. Tasks always start in 'backlog' status. Caller identity is provided by the dispatch HTTP transport (X-Caller-Task-Id for dispatched agents, X-Caller-Kind: session for non-dispatched sessions) — you do NOT pass a caller_task_id argument. Dispatched agents: the new task inherits epic_id from your task; pass epic_id explicitly to override (epic_id: null clears epic).",
         {
             "type": "object",
             "properties": {
@@ -208,10 +204,6 @@ mcp_tools! {
                     "type": "string",
                     "description": "The base branch for rebase and PR operations (e.g. 'main', 'develop'). Defaults to 'main' if not specified."
                 },
-                "project_id": {
-                    "type": "integer",
-                    "description": "Override the inherited project. Omit to inherit from the caller's task (when the caller is a dispatched agent). Required when the caller is a non-dispatched session."
-                },
                 "wrap_up_mode": {
                     "type": "string",
                     "description": "Pre-set the wrap-up action for this task: 'rebase' (rebase onto base_branch), 'pr' (create a PR), or 'done' (mark done immediately).",
@@ -222,7 +214,7 @@ mcp_tools! {
         };
 
     async "list_tasks" => tasks::handle_list_tasks,
-        "List tasks on the kanban board. Filters are ANDed. When called by a dispatched agent, results auto-scope to the agent's epic (or project if it has no epic) and exclude the agent's own task; passing explicit epic_id/project_id/repo_paths disables auto-scoping. When called from a non-dispatched session, no auto-scoping. Output includes PR URL and plan goal when available.",
+        "List tasks on the kanban board. Filters are ANDed. When called by a dispatched agent, results auto-scope to the agent's epic and exclude the agent's own task; passing explicit epic_id/repo_paths disables auto-scoping. When called from a non-dispatched session, no auto-scoping. Output includes PR URL and plan goal when available.",
         {
             "type": "object",
             "properties": {
@@ -236,10 +228,6 @@ mcp_tools! {
                 "epic_id": {
                     "type": "integer",
                     "description": "Filter to only tasks belonging to this epic."
-                },
-                "project_id": {
-                    "type": "integer",
-                    "description": "Filter to only tasks in this project."
                 },
                 "repo_paths": {
                     "type": "array",
@@ -279,8 +267,7 @@ mcp_tools! {
                 "repo_path": { "type": "string", "description": "Repository path" },
                 "description": { "type": "string", "description": "Epic description" },
                 "sort_order": { "type": "integer", "description": "Display order within column (lower values appear first)" },
-                "parent_epic_id": { "type": "integer", "description": "Optional parent epic ID. When set, this epic becomes a sub-epic of the specified parent. Cannot be set to the epic's own ID (self-referential cycles are rejected by the database)." },
-                "project_id": { "type": "integer", "description": "Project to assign the epic to. Omit to use the Default project." }
+                "parent_epic_id": { "type": "integer", "description": "Optional parent epic ID. When set, this epic becomes a sub-epic of the specified parent. Cannot be set to the epic's own ID (self-referential cycles are rejected by the database)." }
             },
             "required": ["title", "repo_path"]
         };
@@ -300,7 +287,7 @@ mcp_tools! {
         { "type": "object", "properties": {} };
 
     async "update_epic" => epics::handle_update_epic,
-        "Update an epic's title, description, status, plan, sort order, repo path, project, feed configuration, or parent epic.",
+        "Update an epic's title, description, status, plan, sort order, repo path, feed configuration, or parent epic.",
         {
             "type": "object",
             "properties": {
@@ -311,7 +298,6 @@ mcp_tools! {
                 "plan_path": { "type": "string", "description": "Path to the plan file" },
                 "sort_order": { "type": "integer", "description": "Display order within column (lower values appear first)" },
                 "repo_path": { "type": "string", "description": "Repository path for the epic" },
-                "project_id": { "type": "integer", "description": "Move the epic to a different project. Use list_projects to look up IDs." },
                 "feed_command": { "type": ["string", "null"], "description": "Shell command that emits JSON FeedItems to populate tasks. Pass null to clear." },
                 "feed_interval_secs": { "type": ["integer", "null"], "description": "Polling interval in seconds (overrides the default). Pass null to clear." },
                 "group_by_repo": { "type": "boolean", "description": "When true, group feed tasks by repository path in the TUI. Pass false to disable grouping." },
@@ -395,10 +381,6 @@ PR polling drives the task to Done on merge.",
             },
             "required": ["from_task_id", "to_task_id", "body"]
         };
-
-    async "list_projects" => handle_list_projects,
-        "List all projects on the board so you can look up a project_id by name.",
-        { "type": "object", "properties": {} };
 
     async "record_learning" => learnings::handle_record_learning,
         "Record a new entry in the shared knowledge base. The entry is immediately active and will be injected into future dispatch prompts for agents working in the matching scope. Omit scope_ref to auto-derive it from the calling task (recommended in most cases).",
@@ -588,35 +570,6 @@ the session.",
                 }
             }
         }
-}
-
-// ---------------------------------------------------------------------------
-// list_projects handler
-// ---------------------------------------------------------------------------
-
-async fn handle_list_projects(
-    state: &McpState,
-    id: Option<Value>,
-    _identity: &CallerIdentity,
-    _args: Value,
-) -> JsonRpcResponse {
-    match state.db.list_projects().await {
-        Ok(projects) => {
-            let text = projects
-                .iter()
-                .map(|p| {
-                    if p.is_default {
-                        format!("- [{}] {} (default)", p.id, p.name)
-                    } else {
-                        format!("- [{}] {}", p.id, p.name)
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
-        }
-        Err(e) => JsonRpcResponse::err(id, -32603, format!("Failed to list projects: {e}")),
-    }
 }
 
 // ---------------------------------------------------------------------------
