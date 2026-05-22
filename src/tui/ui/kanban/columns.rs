@@ -19,6 +19,24 @@ use super::cards::{
 use super::projects_panel::render_projects_column;
 use super::{board_column_constraints, column_bg_color, column_color, render_column_separator};
 
+fn render_orphan_separator(col_width: u16, is_first: bool) -> ListItem<'static> {
+    // ╌╌ · ╌╌╌╌╌╌╌╌╌╌╌ — dashed rule with centre dot, all muted.
+    // Visually distinct from: epic headers (purple + named), card rules (solid ─).
+    const DASH: &str = "\u{254C}"; // ╌ BOX DRAWINGS LIGHT DOUBLE DASH HORIZONTAL
+    let prefix = format!("{}{} \u{00B7} ", DASH.repeat(2), ""); // "╌╌ · "
+    let prefix_chars = prefix.chars().count();
+    let fill_count = (col_width as usize).saturating_sub(prefix_chars);
+    let line = ratatui::text::Line::from(ratatui::text::Span::styled(
+        format!("{}{}", prefix, DASH.repeat(fill_count)),
+        Style::default().fg(MUTED),
+    ));
+    if is_first {
+        ListItem::new(vec![line])
+    } else {
+        ListItem::new(vec![ratatui::text::Line::raw(""), line])
+    }
+}
+
 pub(super) fn render_columns(
     frame: &mut Frame,
     app: &mut App,
@@ -144,22 +162,25 @@ fn render_task_column(
     let mut current_priority: Option<u8> = None;
 
     let mut selectable_idx: usize = 0;
+    let mut last_was_separator = false;
     for item in column_items.iter() {
         // EpicHeader items are decorative — render immediately, don't affect
         // substatus grouping or cursor selection.
         if let ColumnItem::EpicHeader(epic) = item {
             list_items.push(render_epic_header_item(epic, col_area.width));
+            last_was_separator = true;
             continue;
         }
 
         if let ColumnItem::SubstatusLabel(label) = item {
             list_items.push(render_substatus_header(label, list_items.is_empty()));
+            last_was_separator = true;
             continue;
         }
 
         if matches!(item, ColumnItem::OrphanSeparator) {
-            // Rendering will be wired in Task 4; this guard prevents the
-            // unreachable!() arms below from panicking once Task 2 starts emitting it.
+            list_items.push(render_orphan_separator(col_area.width, list_items.is_empty()));
+            last_was_separator = true;
             continue;
         }
 
@@ -188,6 +209,7 @@ fn render_task_column(
                     ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) | ColumnItem::OrphanSeparator => unreachable!(),
                 };
                 list_items.push(render_substatus_header(&label, list_items.is_empty()));
+                last_was_separator = true;
             }
         }
 
@@ -200,13 +222,14 @@ fn render_task_column(
 
         list_items.push(match item {
             ColumnItem::Task(task) => {
-                build_task_list_item(task, status, app, now, is_cursor, color, col_area.width, false)
+                build_task_list_item(task, status, app, now, is_cursor, color, col_area.width, last_was_separator)
             }
             ColumnItem::Epic(epic) => {
-                render_epic_item(epic, is_cursor, app, epic_stats, status, col_area.width, false)
+                render_epic_item(epic, is_cursor, app, epic_stats, status, col_area.width, last_was_separator)
             }
             ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) | ColumnItem::OrphanSeparator => unreachable!(),
         });
+        last_was_separator = false;
     }
 
     if !column_items.is_empty() {
