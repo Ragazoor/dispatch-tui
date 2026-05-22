@@ -51,9 +51,15 @@
 | `src/setup/{config,plugins,hooks}.rs` | MCP config merging, plugin installation, git hook installation |
 | `src/mcp/mod.rs` | MCP server bootstrap (Axum router), `McpState`, `McpEvent` notification enum |
 | `src/mcp/handlers/dispatch.rs` | JSON-RPC entry point (`handle_mcp`), tool definitions, method routing |
-| `src/mcp/handlers/tasks.rs` | Task tool handlers (thin wrappers): parse JSON-RPC args → call `TaskService` → format response |
+| `src/mcp/handlers/tasks/mod.rs` | Task arg structs, shared response helpers, re-exports; epic/learning/project tests |
+| `src/mcp/handlers/tasks/crud.rs` | CRUD task handlers: `update_task`, `create_task`, `get_task`, `list_tasks`, `query_usage` |
+| `src/mcp/handlers/tasks/dispatch.rs` | Dispatch handlers: `claim_task`, `dispatch_next`, `dispatch_task`, `send_message` |
+| `src/mcp/handlers/tasks/wrap_up.rs` | Wrap-up handlers: `wrap_up`, `exit_session` |
+| `src/mcp/handlers/tasks/verify.rs` | Verify handler: `set_verify_command` |
 | `src/mcp/handlers/epics.rs` | Epic tool handlers (thin wrappers): parse JSON-RPC args → call `EpicService` → format response |
 | `src/mcp/handlers/learnings.rs` | Knowledge base tool handlers |
 | `src/mcp/handlers/types.rs` | JSON-RPC request/response types, flexible integer deserializer |
 | `src/mcp/handlers/tests/mod.rs` | MCP handler integration tests entry point |
-| `src/mcp/handlers/tests/{tasks,epics,learnings,projects}.rs` | MCP handler tests per domain |
+| `src/mcp/handlers/tests/tasks/mod.rs` | Task test entry point: module declarations, epic/learning/project tests |
+| `src/mcp/handlers/tests/tasks/{crud,dispatch,wrap_up,verify}.rs` | Task handler tests per sub-domain |
+| `src/mcp/handlers/tests/{epics,learnings,projects}.rs` | MCP handler tests per domain |
