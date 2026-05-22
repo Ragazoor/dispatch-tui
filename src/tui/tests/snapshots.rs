@@ -610,6 +610,26 @@ fn flat_view_epic_headers() {
 }
 
 #[test]
+fn flat_view_orphan_separator() {
+    use crate::models::EpicId;
+    use crate::tui::tests::make_epic_with_title;
+
+    let mut app = App::new(vec![], ProjectId(1));
+    let epic = make_epic_with_title(10, "My Feature");
+    app.board.epics = vec![epic];
+    let mut t1 = make_task(1, TaskStatus::Backlog);
+    t1.epic_id = Some(EpicId(10));
+    let mut t2 = make_task(2, TaskStatus::Backlog);
+    t2.epic_id = None; // orphan — should trigger OrphanSeparator
+    app.board.tasks = vec![t1, t2];
+    app.board.flattened = true;
+    app.selection_mut().set_column(1);
+
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
 fn flat_view_substatus_indicators_above_epic_headers() {
     use crate::models::{EpicId, SubStatus};
     use crate::tui::tests::make_epic_with_title;
