@@ -91,6 +91,11 @@ fn chunk_by_declarations(
         } else if is_attr_line(line) {
             attr_buffer.push_str(line);
             attr_buffer.push('\n');
+        } else if line.trim().is_empty() && !attr_buffer.is_empty() {
+            // Blank line inside an attr run: keep it in the buffer so it
+            // travels with the attribute to the next declaration.
+            attr_buffer.push_str(line);
+            attr_buffer.push('\n');
         } else {
             // Flush attr_buffer into body (attr was orphaned — not followed by a decl)
             main_current.push_str(&attr_buffer);
@@ -107,6 +112,26 @@ fn chunk_by_declarations(
     }
 
     chunks
+}
+
+#[allow(dead_code)]
+pub(crate) fn chunk_rust(content: &str) -> Vec<String> {
+    const RUST_KEYWORDS: &[&str] = &[
+        "fn ", "impl ", "impl<", "struct ", "enum ", "trait ",
+        "type ", "mod ", "const ", "static ",
+    ];
+    chunk_by_declarations(content, RUST_KEYWORDS, |line| {
+        line.starts_with("#[") || line.starts_with("///")
+    })
+}
+
+#[allow(dead_code)]
+pub(crate) fn chunk_allium(content: &str) -> Vec<String> {
+    const ALLIUM_KEYWORDS: &[&str] = &[
+        "entity ", "rule ", "surface ", "config", "enum ",
+        "concept ", "external ", "invariant ",
+    ];
+    chunk_by_declarations(content, ALLIUM_KEYWORDS, |line| line.starts_with("-- "))
 }
 
 /// Returns `(None, content)` if no valid frontmatter fence is found.
@@ -630,6 +655,174 @@ mod tests {
         let result = chunk_by_declarations(content, &["fn "], |l| l.starts_with("#["));
         assert_eq!(result.len(), 1);
         assert!(result[0].contains("#[orphan_at_eof]"), "got: {}", result[0]);
+    }
+
+    // --- chunk_rust ---
+
+    #[test]
+    fn chunk_rust_fn_at_col0_splits() {
+        let chunks = chunk_rust("fn foo() {}\n\nfn bar() {}");
+        assert_eq!(chunks.len(), 2);
+        assert!(chunks[0].contains("fn foo()"));
+        assert!(chunks[1].contains("fn bar()"));
+    }
+
+    #[test]
+    fn chunk_rust_pub_fn_splits() {
+        let chunks = chunk_rust("pub fn foo() {}\n\npub fn bar() {}");
+        assert_eq!(chunks.len(), 2);
+    }
+
+    #[test]
+    fn chunk_rust_async_fn_splits() {
+        let chunks = chunk_rust("async fn foo() {}\n\nfn bar() {}");
+        assert_eq!(chunks.len(), 2);
+    }
+
+    #[test]
+    fn chunk_rust_pub_async_fn_splits() {
+        let chunks = chunk_rust("pub async fn foo() {}\n\nfn bar() {}");
+        assert_eq!(chunks.len(), 2);
+    }
+
+    #[test]
+    fn chunk_rust_indented_fn_does_not_split() {
+        let content = "impl Foo {\n    fn method(&self) {}\n    fn other(&self) {}\n}";
+        let chunks = chunk_rust(content);
+        assert_eq!(chunks.len(), 1, "indented fn should not split: {:?}", chunks);
+    }
+
+    #[test]
+    fn chunk_rust_impl_splits() {
+        let content = "struct Foo {}\n\nimpl Foo {\n    fn foo(&self) {}\n}";
+        let chunks = chunk_rust(content);
+        assert_eq!(chunks.len(), 2);
+        assert!(chunks[0].contains("struct Foo"));
+        assert!(chunks[1].contains("impl Foo"));
+    }
+
+    #[test]
+    fn chunk_rust_impl_generic_splits() {
+        let content = "struct Foo<T>(T);\n\nimpl<T: std::fmt::Debug> Foo<T> {\n    fn foo(&self) {}\n}";
+        let chunks = chunk_rust(content);
+        assert_eq!(chunks.len(), 2);
+        assert!(chunks[1].contains("impl<T:"), "got: {}", chunks[1]);
+    }
+
+    #[test]
+    fn chunk_rust_derive_attr_stays_with_item() {
+        let content = "struct Foo { x: i32 }\n\n#[derive(Debug)]\npub enum Bar { A }";
+        let chunks = chunk_rust(content);
+        assert_eq!(chunks.len(), 2);
+        assert!(
+            !chunks[0].contains("#[derive"),
+            "derive must not be in Foo chunk: {}",
+            chunks[0]
+        );
+        assert!(
+            chunks[1].contains("#[derive"),
+            "derive must be in Bar chunk: {}",
+            chunks[1]
+        );
+        assert!(chunks[1].contains("pub enum Bar"));
+    }
+
+    #[test]
+    fn chunk_rust_doc_comment_stays_with_fn() {
+        let content = "fn foo() {}\n\n/// Does bar.\nfn bar() {}";
+        let chunks = chunk_rust(content);
+        assert_eq!(chunks.len(), 2);
+        assert!(
+            !chunks[0].contains("/// Does bar."),
+            "doc must not be in foo chunk: {}",
+            chunks[0]
+        );
+        assert!(
+            chunks[1].contains("/// Does bar."),
+            "doc must be in bar chunk: {}",
+            chunks[1]
+        );
+    }
+
+    #[test]
+    fn chunk_rust_struct_splits() {
+        let chunks = chunk_rust("struct Foo { x: i32 }\n\nstruct Bar { y: i32 }");
+        assert_eq!(chunks.len(), 2);
+        assert!(chunks[0].contains("struct Foo"));
+        assert!(chunks[1].contains("struct Bar"));
+    }
+
+    #[test]
+    fn chunk_rust_trait_splits() {
+        let chunks = chunk_rust("struct Foo {}\n\ntrait Greet {\n    fn hello(&self);\n}");
+        assert_eq!(chunks.len(), 2);
+        assert!(chunks[1].contains("trait Greet"));
+    }
+
+    #[test]
+    fn chunk_rust_const_splits() {
+        let chunks = chunk_rust("fn foo() {}\n\nconst MAX: usize = 100;");
+        assert_eq!(chunks.len(), 2);
+        assert!(chunks[1].contains("const MAX"));
+    }
+
+    #[test]
+    fn chunk_rust_mod_splits() {
+        let chunks = chunk_rust("fn foo() {}\n\nmod utils {\n    pub fn helper() {}\n}");
+        assert_eq!(chunks.len(), 2);
+        assert!(chunks[1].contains("mod utils"));
+    }
+
+    // --- chunk_allium ---
+
+    #[test]
+    fn chunk_allium_entity_and_rule_produce_two_chunks() {
+        let content = "entity Task {\n    id: TaskId\n}\n\nrule CreateTask {\n    when: foo\n}";
+        let chunks = chunk_allium(content);
+        assert_eq!(chunks.len(), 2);
+        assert!(chunks[0].contains("entity Task"));
+        assert!(chunks[1].contains("rule CreateTask"));
+    }
+
+    #[test]
+    fn chunk_allium_section_comment_stays_with_rule() {
+        let content = "entity Task {}\n\n-- == Creation ==\n\nrule CreateTask {}";
+        let chunks = chunk_allium(content);
+        assert_eq!(chunks.len(), 2);
+        assert!(
+            !chunks[0].contains("-- == Creation =="),
+            "comment should not be in entity chunk: {}",
+            chunks[0]
+        );
+        assert!(
+            chunks[1].contains("-- == Creation =="),
+            "comment should be in rule chunk: {}",
+            chunks[1]
+        );
+    }
+
+    #[test]
+    fn chunk_allium_config_block_splits() {
+        let content = "entity Task {}\n\nconfig {\n    key: value\n}";
+        let chunks = chunk_allium(content);
+        assert_eq!(chunks.len(), 2);
+        assert!(chunks[1].contains("config {"));
+    }
+
+    #[test]
+    fn chunk_allium_enum_splits() {
+        let content = "entity Task {}\n\nenum Status { active | done }";
+        let chunks = chunk_allium(content);
+        assert_eq!(chunks.len(), 2);
+        assert!(chunks[1].contains("enum Status"));
+    }
+
+    #[test]
+    fn chunk_allium_surface_splits() {
+        let content = "entity Task {}\n\nsurface KanbanBoard {\n    shows: Task\n}";
+        let chunks = chunk_allium(content);
+        assert_eq!(chunks.len(), 2);
+        assert!(chunks[1].contains("surface KanbanBoard"));
     }
 
     // --- open_rag_db ---
