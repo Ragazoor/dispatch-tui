@@ -55,6 +55,6 @@ printf '%s' "$raw" | jq '[
     url: .url,
     status: "backlog",
     tag: "pr-review",
-    labels: [.repository.name]
+    labels: ((if .author.login then ["@\(.author.login)"] else [] end) + [.repository.name])
   }
 ]'
