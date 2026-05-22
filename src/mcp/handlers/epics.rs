@@ -8,8 +8,7 @@ use crate::service::{CreateEpicParams, EpicService, ServiceError, UpdateEpicPara
 
 use super::types::{
     deserialize_flexible_i64, deserialize_nullable_flexible_i64, deserialize_nullable_string,
-    deserialize_optional_flexible_i64, fetch_caller_task, parse_args, resolve_project_id,
-    service_err_to_response, JsonRpcResponse,
+    deserialize_optional_flexible_i64, parse_args, service_err_to_response, JsonRpcResponse,
 };
 
 // ---------------------------------------------------------------------------
@@ -26,8 +25,6 @@ pub(super) struct CreateEpicArgs {
     pub(super) sort_order: Option<i64>,
     #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
     pub(super) parent_epic_id: Option<i64>,
-    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
-    pub(super) project_id: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -52,8 +49,6 @@ pub(super) struct UpdateEpicArgs {
     pub(super) sort_order: Option<i64>,
     #[serde(default)]
     pub(super) repo_path: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
-    pub(super) project_id: Option<i64>,
     #[serde(default, deserialize_with = "deserialize_nullable_string")]
     pub(super) feed_command: Option<Option<String>>,
     #[serde(default, deserialize_with = "deserialize_nullable_flexible_i64")]
@@ -71,7 +66,7 @@ pub(super) struct UpdateEpicArgs {
 pub(super) async fn handle_create_epic(
     state: &McpState,
     id: Option<Value>,
-    identity: &CallerIdentity,
+    _identity: &CallerIdentity,
     args: Value,
 ) -> JsonRpcResponse {
     let parsed = match parse_args::<CreateEpicArgs>(&id, args) {
@@ -81,28 +76,7 @@ pub(super) async fn handle_create_epic(
     tracing::info!(title = %parsed.title, "MCP create_epic");
 
     let svc = EpicService::new(state.db.clone());
-    let project_id = if let (Some(parent_id), None) = (parsed.parent_epic_id, parsed.project_id) {
-        // parent_epic_id provided without explicit project_id: inherit parent's project
-        match svc.get_epic(EpicId(parent_id)).await {
-            Ok(parent) => parent.project_id,
-            Err(e) => return service_err_to_response(id, e),
-        }
-    } else if let Some(pid) = parsed.project_id {
-        // explicit project_id wins
-        ProjectId(pid)
-    } else if let CallerIdentity::Task(caller_id) = identity {
-        // no explicit project_id, no parent: inherit caller task's project
-        match fetch_caller_task(&*state.db, &id, *caller_id).await {
-            Ok(caller) => caller.project_id,
-            Err(resp) => return resp,
-        }
-    } else {
-        // session caller, no project_id: fall back to default project
-        match resolve_project_id(&id, None, &*state.db).await {
-            Ok(pid) => pid,
-            Err(resp) => return resp,
-        }
-    };
+    let project_id = ProjectId(1);
     match svc
         .create_epic(CreateEpicParams {
             title: parsed.title,
@@ -245,22 +219,6 @@ pub(super) async fn handle_update_epic(
         );
     }
 
-    if let Some(project_id) = parsed.project_id {
-        if !state
-            .db
-            .list_projects()
-            .await
-            .unwrap_or_default()
-            .iter()
-            .any(|p| p.id == ProjectId(project_id))
-        {
-            return service_err_to_response(
-                id,
-                ServiceError::Validation(format!("project {project_id} does not exist")),
-            );
-        }
-    }
-
     let params = UpdateEpicParams {
         epic_id: EpicId(parsed.epic_id),
         title: parsed.title,
@@ -275,7 +233,7 @@ pub(super) async fn handle_update_epic(
             None => crate::service::FieldUpdate::Clear,
         }),
         feed_interval_secs: parsed.feed_interval_secs,
-        project_id: parsed.project_id.map(ProjectId),
+        project_id: None,
         group_by_repo: parsed.group_by_repo,
         parent_epic_id: parsed.parent_epic_id.map(|o| o.map(EpicId)),
     };
