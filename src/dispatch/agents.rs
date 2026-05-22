@@ -8,7 +8,7 @@ use crate::tmux;
 
 use super::prompts::{
     build_epic_planning_prompt, build_prompt, build_quick_dispatch_prompt, build_research_prompt,
-    build_tmux_window_name, rebase_preamble, EpicContext, LearningInjections, ProjectContext,
+    build_tmux_window_name, rebase_preamble, EpicContext, LearningInjections,
     PromptContext, DISPATCH_PLUGIN_DIR,
 };
 use super::worktree::provision_worktree;
@@ -85,7 +85,6 @@ pub fn dispatch_agent(
     task: &Task,
     runner: &dyn ProcessRunner,
     epic: Option<&EpicContext>,
-    project: Option<&ProjectContext>,
     injections: &LearningInjections<'_>,
     verify_command: Option<&str>,
 ) -> Result<DispatchResult> {
@@ -101,7 +100,6 @@ pub fn dispatch_agent(
                 &task.description,
                 task.plan_path.as_deref(),
                 epic,
-                project,
                 &ctx,
             )
         },
@@ -115,14 +113,13 @@ pub fn research_agent(
     task: &Task,
     runner: &dyn ProcessRunner,
     epic: Option<&EpicContext>,
-    project: Option<&ProjectContext>,
     verify_command: Option<&str>,
 ) -> Result<DispatchResult> {
     dispatch_with_prompt(
         task,
         || {
             let ctx = PromptContext::default().with_verify(verify_command);
-            build_research_prompt(task.id, &task.title, &task.description, epic, project, &ctx)
+            build_research_prompt(task.id, &task.title, &task.description, epic, &ctx)
         },
         runner,
         Some(&task.base_branch),
@@ -134,7 +131,6 @@ pub fn quick_dispatch_agent(
     task: &Task,
     runner: &dyn ProcessRunner,
     epic: Option<&EpicContext>,
-    project: Option<&ProjectContext>,
     injections: &LearningInjections<'_>,
     verify_command: Option<&str>,
 ) -> Result<DispatchResult> {
@@ -147,7 +143,6 @@ pub fn quick_dispatch_agent(
                 &task.title,
                 &task.description,
                 epic,
-                project,
                 &ctx,
             )
         },
@@ -161,7 +156,6 @@ pub fn epic_planning_agent(
     task: &Task,
     epic_id: EpicId,
     epic_title: &str,
-    project: &ProjectContext,
     runner: &dyn ProcessRunner,
 ) -> Result<DispatchResult> {
     let epic = EpicContext {
@@ -170,7 +164,7 @@ pub fn epic_planning_agent(
     };
     dispatch_with_prompt(
         task,
-        || build_epic_planning_prompt(task.id, &task.title, &task.description, &epic, project),
+        || build_epic_planning_prompt(task.id, &task.title, &task.description, &epic),
         runner,
         Some(&task.base_branch),
         None,
