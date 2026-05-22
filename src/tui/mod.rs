@@ -629,6 +629,12 @@ impl App {
                     }
                 }
 
+                // Emit OrphanSeparator when transitioning from an epic group to no-epic tasks.
+                if t.epic_id.is_none() && current_epic_id.is_some() {
+                    items.push(ColumnItem::OrphanSeparator);
+                    current_epic_id = None;
+                }
+
                 if let Some(eid) = t.epic_id {
                     if let Some(&epic) = epic_lookup.get(&eid) {
                         if Some(eid) != current_epic_id {

@@ -2403,10 +2403,12 @@ fn flat_view_standalone_task_interleaves_by_sort_order() {
     app.board.flattened = true;
 
     let items = app.column_items_for_status(TaskStatus::Backlog);
-    // epic group comes first, orphan (no epic in board) sorts last with epic_sk = i64::MAX
+    // epic group comes first, orphan (no epic in board) sorts last with epic_sk = i64::MAX.
+    // An OrphanSeparator is emitted between the epic group and the orphan task.
     assert!(matches!(items[0], ColumnItem::EpicHeader(_)));
     assert!(matches!(items[1], ColumnItem::Task(t) if t.id == TaskId(2)));
-    assert!(matches!(items[2], ColumnItem::Task(t) if t.id == TaskId(1)));
+    assert!(matches!(items[2], ColumnItem::OrphanSeparator));
+    assert!(matches!(items[3], ColumnItem::Task(t) if t.id == TaskId(1)));
 }
 
 #[test]
@@ -2721,4 +2723,81 @@ fn epic_view_header_does_not_show_group_indicator_for_non_feed_epic() {
         !buffer_contains(&buf, "group:"),
         "Expected no 'group:' indicator in header for non-feed epic"
     );
+}
+
+#[test]
+fn flat_view_emits_orphan_separator_between_epic_and_orphan_tasks() {
+    use crate::models::EpicId;
+    use crate::tui::tests::helpers::make_epic_with_title;
+
+    let mut app = App::new(vec![], ProjectId(1));
+    app.board.epics = vec![make_epic_with_title(10, "Epic A")];
+    let mut t1 = make_task(1, TaskStatus::Backlog);
+    t1.epic_id = Some(EpicId(10));
+    let mut t2 = make_task(2, TaskStatus::Backlog);
+    t2.epic_id = None; // orphan
+    app.board.tasks = vec![t1, t2];
+    app.board.flattened = true;
+
+    let items = app.column_items_for_status(TaskStatus::Backlog);
+
+    // Expected order: EpicHeader, Task(epic), OrphanSeparator, Task(orphan)
+    assert_eq!(items.len(), 4, "expected 4 items: header + epic-task + separator + orphan");
+    assert!(matches!(items[0], ColumnItem::EpicHeader(_)));
+    assert!(matches!(items[1], ColumnItem::Task(_)));
+    assert!(matches!(items[2], ColumnItem::OrphanSeparator));
+    assert!(matches!(items[3], ColumnItem::Task(_)));
+}
+
+#[test]
+fn flat_view_no_orphan_separator_when_only_orphan_tasks() {
+    let mut app = App::new(vec![], ProjectId(1));
+    let t1 = make_task(1, TaskStatus::Backlog);
+    let t2 = make_task(2, TaskStatus::Backlog);
+    // both tasks have epic_id = None (make_task default)
+    app.board.tasks = vec![t1, t2];
+    app.board.flattened = true;
+
+    let items = app.column_items_for_status(TaskStatus::Backlog);
+
+    assert!(
+        !items.iter().any(|i| matches!(i, ColumnItem::OrphanSeparator)),
+        "no separator when no epic tasks precede orphans"
+    );
+}
+
+#[test]
+fn flat_view_orphan_separator_resets_on_substatus_boundary() {
+    // Running column: epic task (NeedsInput priority), orphan (NeedsInput),
+    // then orphan (Active priority). OrphanSeparator appears once at the
+    // NeedsInput epic→orphan transition; the Active band starts fresh
+    // (current_epic_id reset to None), so no second separator.
+    use crate::models::{EpicId, SubStatus};
+    use crate::tui::tests::helpers::make_epic_with_title;
+
+    let mut app = App::new(vec![], ProjectId(1));
+    app.board.epics = vec![make_epic_with_title(10, "Epic A")];
+
+    let mut t1 = make_task(1, TaskStatus::Running);
+    t1.epic_id = Some(EpicId(10));
+    t1.sub_status = SubStatus::NeedsInput;
+
+    let mut t2 = make_task(2, TaskStatus::Running);
+    t2.epic_id = None;
+    t2.sub_status = SubStatus::NeedsInput;
+
+    let mut t3 = make_task(3, TaskStatus::Running);
+    t3.epic_id = None;
+    t3.sub_status = SubStatus::Active;
+
+    app.board.tasks = vec![t1, t2, t3];
+    app.board.flattened = true;
+
+    let items = app.column_items_for_status(TaskStatus::Running);
+
+    let separator_count = items
+        .iter()
+        .filter(|i| matches!(i, ColumnItem::OrphanSeparator))
+        .count();
+    assert_eq!(separator_count, 1, "exactly one separator at the NeedsInput epic→orphan transition");
 }
