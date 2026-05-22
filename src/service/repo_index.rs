@@ -114,7 +114,6 @@ fn chunk_by_declarations(
     chunks
 }
 
-#[allow(dead_code)]
 pub(crate) fn chunk_rust(content: &str) -> Vec<String> {
     const RUST_KEYWORDS: &[&str] = &[
         "fn ", "impl ", "impl<", "struct ", "enum ", "trait ",
@@ -125,7 +124,6 @@ pub(crate) fn chunk_rust(content: &str) -> Vec<String> {
     })
 }
 
-#[allow(dead_code)]
 pub(crate) fn chunk_allium(content: &str) -> Vec<String> {
     const ALLIUM_KEYWORDS: &[&str] = &[
         "entity ", "rule ", "surface ", "config ", "enum ",
@@ -161,7 +159,7 @@ fn split_frontmatter(content: &str) -> (Option<&str>, &str) {
 /// - The frontmatter block (if present) is prepended to every chunk.
 /// - Files with no H2 headers are one chunk (the whole body).
 /// - Files that are empty or contain only frontmatter produce no chunks.
-pub(crate) fn chunk_file(content: &str) -> Vec<String> {
+pub(crate) fn chunk_markdown(content: &str) -> Vec<String> {
     let (fm, body) = split_frontmatter(content);
 
     if body.trim().is_empty() {
@@ -199,6 +197,23 @@ pub(crate) fn chunk_file(content: &str) -> Vec<String> {
     match prefix {
         Some(pfx) => raw_chunks.iter().map(|c| format!("{pfx}{c}")).collect(),
         None => raw_chunks,
+    }
+}
+
+#[allow(dead_code)]
+pub(crate) fn chunk_for_extension(content: &str, ext: &str) -> Vec<String> {
+    match ext {
+        "md" => chunk_markdown(content),
+        "rs" => chunk_rust(content),
+        "allium" => chunk_allium(content),
+        _ => {
+            let trimmed = content.trim();
+            if trimmed.is_empty() {
+                vec![]
+            } else {
+                vec![trimmed.to_string()]
+            }
+        }
     }
 }
 
@@ -311,7 +326,7 @@ impl RepoIndexService {
         let mut file_chunks: Vec<(String, String, Vec<String>)> = Vec::new();
         for (path, hash) in to_index {
             let content = tokio::fs::read_to_string(&path).await?;
-            let chunks = chunk_file(&content);
+            let chunks = chunk_markdown(&content);
             let path_str = path
                 .to_str()
                 .ok_or_else(|| anyhow::anyhow!("non-UTF-8 path: {:?}", path))?
@@ -474,17 +489,17 @@ mod tests {
     // --- chunker ---
 
     #[test]
-    fn chunk_file_no_h2_returns_single_chunk() {
+    fn chunk_markdown_no_h2_returns_single_chunk() {
         let content = "# Title\n\nSome body text.";
-        let chunks = chunk_file(content);
+        let chunks = chunk_markdown(content);
         assert_eq!(chunks.len(), 1);
         assert!(chunks[0].contains("Some body text."));
     }
 
     #[test]
-    fn chunk_file_two_h2s_returns_two_chunks() {
+    fn chunk_markdown_two_h2s_returns_two_chunks() {
         let content = "# Title\n\n## Section A\n\nText A.\n\n## Section B\n\nText B.";
-        let chunks = chunk_file(content);
+        let chunks = chunk_markdown(content);
         assert_eq!(chunks.len(), 2);
         assert!(chunks[0].contains("Section A"));
         assert!(chunks[0].contains("Text A."));
@@ -493,10 +508,10 @@ mod tests {
     }
 
     #[test]
-    fn chunk_file_with_frontmatter_prepends_to_each_chunk() {
+    fn chunk_markdown_with_frontmatter_prepends_to_each_chunk() {
         let content =
             "---\ntags: [foo, bar]\n---\n\n## Section A\n\nText A.\n\n## Section B\n\nText B.";
-        let chunks = chunk_file(content);
+        let chunks = chunk_markdown(content);
         assert_eq!(chunks.len(), 2);
         for chunk in &chunks {
             assert!(
@@ -507,31 +522,31 @@ mod tests {
     }
 
     #[test]
-    fn chunk_file_no_h2_with_frontmatter_is_one_chunk_with_prefix() {
+    fn chunk_markdown_no_h2_with_frontmatter_is_one_chunk_with_prefix() {
         let content = "---\ninterviewee: Gustaf\n---\n\n# Title\n\nBody text.";
-        let chunks = chunk_file(content);
+        let chunks = chunk_markdown(content);
         assert_eq!(chunks.len(), 1);
         assert!(chunks[0].contains("interviewee: Gustaf"));
         assert!(chunks[0].contains("Body text."));
     }
 
     #[test]
-    fn chunk_file_empty_body_returns_no_chunks() {
+    fn chunk_markdown_empty_body_returns_no_chunks() {
         let content = "---\ntags: [foo]\n---\n";
-        let chunks = chunk_file(content);
+        let chunks = chunk_markdown(content);
         assert!(chunks.is_empty());
     }
 
     #[test]
-    fn chunk_file_empty_string_returns_no_chunks() {
-        let chunks = chunk_file("");
+    fn chunk_markdown_empty_string_returns_no_chunks() {
+        let chunks = chunk_markdown("");
         assert!(chunks.is_empty());
     }
 
     #[test]
-    fn chunk_file_h2_at_start_of_body() {
+    fn chunk_markdown_h2_at_start_of_body() {
         let content = "## Only Section\n\nContent here.";
-        let chunks = chunk_file(content);
+        let chunks = chunk_markdown(content);
         assert_eq!(chunks.len(), 1);
         assert!(chunks[0].contains("Only Section"));
     }
@@ -823,6 +838,42 @@ mod tests {
         let chunks = chunk_allium(content);
         assert_eq!(chunks.len(), 2);
         assert!(chunks[1].contains("surface KanbanBoard"));
+    }
+
+    // --- chunk_for_extension ---
+
+    #[test]
+    fn chunk_for_extension_md_uses_h2_splitting() {
+        let content = "## Section A\n\nText A.\n\n## Section B\n\nText B.";
+        let chunks = chunk_for_extension(content, "md");
+        assert_eq!(chunks.len(), 2);
+        assert!(chunks[0].contains("Section A"));
+        assert!(chunks[1].contains("Section B"));
+    }
+
+    #[test]
+    fn chunk_for_extension_rs_uses_declaration_splitting() {
+        let chunks = chunk_for_extension("fn foo() {}\n\nfn bar() {}", "rs");
+        assert_eq!(chunks.len(), 2);
+    }
+
+    #[test]
+    fn chunk_for_extension_allium_uses_allium_splitting() {
+        let chunks = chunk_for_extension("entity Task {}\n\nrule CreateTask {}", "allium");
+        assert_eq!(chunks.len(), 2);
+    }
+
+    #[test]
+    fn chunk_for_extension_unknown_ext_returns_single_chunk() {
+        let chunks = chunk_for_extension("some content", "txt");
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0], "some content");
+    }
+
+    #[test]
+    fn chunk_for_extension_unknown_ext_empty_returns_no_chunks() {
+        let chunks = chunk_for_extension("", "txt");
+        assert!(chunks.is_empty());
     }
 
     // --- open_rag_db ---
