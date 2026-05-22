@@ -43,4 +43,20 @@ mod tests {
             "malformed JSON must fail"
         );
     }
+
+    #[test]
+    fn author_label_at_prefix_preserved() {
+        let json = br##"[{
+            "external_id": "review:org/repo#7",
+            "title": "#7 My PR",
+            "description": "",
+            "url": "https://github.com/org/repo/pull/7",
+            "status": "backlog",
+            "tag": "pr-review",
+            "labels": ["@johndoe", "repo"]
+        }]"##;
+        let items = parse_feed_items(json).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].labels, vec!["@johndoe".to_string(), "repo".to_string()]);
+    }
 }
