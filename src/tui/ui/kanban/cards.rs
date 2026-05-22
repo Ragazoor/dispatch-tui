@@ -240,6 +240,7 @@ pub(super) fn build_task_list_item<'a>(
     is_cursor: bool,
     col_color: Color,
     col_width: u16,
+    suppress_top_rule: bool,
 ) -> ListItem<'a> {
     let is_batch_selected = app.selected_tasks().contains(&task.id);
     let select_prefix = if is_batch_selected { "* " } else { "  " };
@@ -292,8 +293,12 @@ pub(super) fn build_task_list_item<'a>(
     } else {
         MUTED
     };
-    let rule_line = card_rule_line(rule_color, col_width);
-    let mut item = ListItem::new(vec![rule_line, line1, line2]);
+    let lines: Vec<Line<'static>> = if suppress_top_rule {
+        vec![line1, line2]
+    } else {
+        vec![card_rule_line(rule_color, col_width), line1, line2]
+    };
+    let mut item = ListItem::new(lines);
 
     // Flash bg takes priority over cursor — it's transient (3s) and meant to grab attention
     if has_message_flash {
@@ -332,6 +337,7 @@ pub(super) fn render_epic_item(
     epic_stats: &EpicStatsMap,
     status: TaskStatus,
     col_width: u16,
+    suppress_top_rule: bool,
 ) -> ListItem<'static> {
     let stats = epic_stats.get(&epic.id);
 
@@ -390,8 +396,12 @@ pub(super) fn render_epic_item(
     };
 
     let rule_color = if is_cursor { PURPLE } else { MUTED };
-    let rule_line = card_rule_line(rule_color, col_width);
-    let mut item = ListItem::new(vec![rule_line, line1, line2]);
+    let lines: Vec<Line<'static>> = if suppress_top_rule {
+        vec![line1, line2]
+    } else {
+        vec![card_rule_line(rule_color, col_width), line1, line2]
+    };
+    let mut item = ListItem::new(lines);
 
     if is_cursor {
         item = item.style(

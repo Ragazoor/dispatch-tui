@@ -200,10 +200,10 @@ fn render_task_column(
 
         list_items.push(match item {
             ColumnItem::Task(task) => {
-                build_task_list_item(task, status, app, now, is_cursor, color, col_area.width)
+                build_task_list_item(task, status, app, now, is_cursor, color, col_area.width, false)
             }
             ColumnItem::Epic(epic) => {
-                render_epic_item(epic, is_cursor, app, epic_stats, status, col_area.width)
+                render_epic_item(epic, is_cursor, app, epic_stats, status, col_area.width, false)
             }
             ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) | ColumnItem::OrphanSeparator => unreachable!(),
         });
@@ -274,6 +274,7 @@ fn render_archive_column(
                 epic_stats,
                 TaskStatus::Archived,
                 area.width,
+                false,
             )
         })
         .collect();
@@ -288,6 +289,7 @@ fn render_archive_column(
             is_cursor,
             color,
             area.width,
+            false,
         )
     }));
 
