@@ -62,11 +62,6 @@ pub(super) async fn dispatch(
             dispatch_tips(rt, cmd).await;
             vec![]
         }
-        // Project commands
-        Project(cmd) => {
-            dispatch_project(rt, app, cmd).await;
-            vec![]
-        }
         Learning(cmd) => {
             dispatch_learning(rt, app, cmd).await;
             vec![]
@@ -78,20 +73,6 @@ pub(super) async fn dispatch(
             });
             vec![]
         }
-    }
-}
-
-async fn dispatch_project(
-    rt: &super::TuiRuntime,
-    app: &mut super::App,
-    cmd: crate::tui::commands::ProjectCommand,
-) {
-    use crate::tui::commands::ProjectCommand::*;
-    match cmd {
-        Create { name } => rt.exec_create_project(app, name).await,
-        Rename { id, name } => rt.exec_rename_project(app, id, name).await,
-        Delete { id } => rt.exec_delete_project(app, id).await,
-        Reorder { id, delta } => rt.exec_reorder_project(app, id, delta).await,
     }
 }
 

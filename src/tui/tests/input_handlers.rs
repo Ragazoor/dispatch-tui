@@ -1026,29 +1026,6 @@ fn handle_key_normal_navigation() {
     assert_eq!(app.selection().row(1), 0);
 }
 
-#[test]
-fn handle_key_normal_q_opens_projects_panel() {
-    let mut app = make_app();
-    app.handle_key(make_key(KeyCode::Char('q')));
-    assert!(
-        app.projects_panel_visible(),
-        "q should open projects panel, not quit"
-    );
-    assert!(!app.should_quit());
-}
-
-#[test]
-fn handle_key_q_from_running_jumps_directly_to_projects() {
-    let mut app = make_app();
-    app.update(Message::NavigateColumn(1));
-    assert_eq!(app.selection().column(), 2, "should be in Running column");
-    app.handle_key(make_key(KeyCode::Char('q')));
-    assert!(
-        app.projects_panel_visible(),
-        "q from Running should jump directly to Projects panel, not just one column left"
-    );
-    assert!(!app.should_quit());
-}
 
 #[test]
 fn confirm_quit_y_quits() {

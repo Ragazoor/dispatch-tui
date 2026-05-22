@@ -100,9 +100,7 @@ pub(in crate::tui::ui::kanban) fn render_help_overlay(frame: &mut Frame, app: &A
             Span::styled("(epic: jump to subtask tmux)", note),
         ]),
         Line::from(vec![
-            Span::styled("  [h/\u{2190}]", key),
-            Span::styled(" Projects  ", desc),
-            Span::styled("[l/\u{2192}]", key),
+            Span::styled("  [l/\u{2192}]", key),
             Span::styled(" Archive   ", desc),
             Span::styled("[a]", key),
             Span::styled(" select all", desc),

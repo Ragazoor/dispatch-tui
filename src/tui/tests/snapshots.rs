@@ -300,25 +300,6 @@ fn snapshot_tab_bar_with_feed_epics_feed_active() {
 }
 
 #[test]
-fn snapshot_kanban_with_projects_focused() {
-    use super::super::types::Message;
-    use super::make_app;
-    let mut app = make_app();
-    // Add a project so the Projects column has content
-    app.board.projects.push(crate::models::Project {
-        id: ProjectId(1),
-        name: "Default".to_string(),
-        is_default: true,
-        sort_order: 0,
-    });
-    // Navigate to Projects (col 0) — make_app starts at col 1 (Backlog)
-    app.update(Message::NavigateColumn(-1));
-    assert_eq!(app.selected_column(), 0);
-    let rendered = render_to_string(&mut app, 120, 40);
-    insta::assert_snapshot!(rendered);
-}
-
-#[test]
 fn snapshot_kanban_with_archive_focused() {
     use super::super::types::Message;
     use super::make_app_with_archived_task;
@@ -381,49 +362,6 @@ fn snapshot_task_detail_overlay_empty_optional_fields() {
     app.update(Message::Task(
         crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
     ));
-    let rendered = render_to_string(&mut app, 120, 40);
-    insta::assert_snapshot!(rendered);
-}
-
-#[test]
-fn snapshot_input_project_name_create() {
-    use super::super::types::InputMode;
-    let mut app = make_app();
-    app.input.mode = InputMode::InputProjectName { editing_id: None };
-    app.input.buffer = "My Project".to_string();
-    let rendered = render_to_string(&mut app, 120, 40);
-    insta::assert_snapshot!(rendered);
-}
-
-#[test]
-fn snapshot_input_project_name_rename() {
-    use super::super::types::InputMode;
-    let mut app = make_app();
-    app.input.mode = InputMode::InputProjectName {
-        editing_id: Some(ProjectId(1)),
-    };
-    app.input.buffer = "Renamed Project".to_string();
-    let rendered = render_to_string(&mut app, 120, 40);
-    insta::assert_snapshot!(rendered);
-}
-
-#[test]
-fn snapshot_confirm_delete_project1() {
-    use super::super::types::InputMode;
-    let mut app = make_app();
-    app.input.mode = InputMode::ConfirmDeleteProject1 { id: ProjectId(2) };
-    let rendered = render_to_string(&mut app, 120, 40);
-    insta::assert_snapshot!(rendered);
-}
-
-#[test]
-fn snapshot_confirm_delete_project2() {
-    use super::super::types::InputMode;
-    let mut app = make_app();
-    app.input.mode = InputMode::ConfirmDeleteProject2 {
-        id: ProjectId(2),
-        item_count: 3,
-    };
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);
 }

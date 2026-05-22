@@ -1,5 +1,5 @@
 use super::*;
-use crate::models::{Epic, EpicId, Project, ProjectId, TaskId, TaskStatus};
+use crate::models::{Epic, EpicId, ProjectId, TaskId, TaskStatus};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[test]
@@ -293,119 +293,6 @@ fn close_repo_filter_persists_mode() {
     )));
 }
 
-// ---------------------------------------------------------------------------
-// Per-project repo filter tests (Task 555)
-// ---------------------------------------------------------------------------
-
-#[test]
-fn repo_filter_does_not_bleed_across_projects() {
-    // Default project (1) and Project B (2). Set a filter while Default is active.
-    // Switching to Project B should clear the active repo filter.
-    let mut app = App::new(vec![], ProjectId(1));
-    app.update(Message::Project(crate::tui::messages::ProjectMessage::Updated(vec![
-        Project {
-            id: ProjectId(1),
-            name: "Default".to_string(),
-            sort_order: 0,
-            is_default: true,
-        },
-        Project {
-            id: ProjectId(2),
-            name: "Backend".to_string(),
-            sort_order: 1,
-            is_default: false,
-        },
-    ])));
-
-    // Set filter while Default active.
-    app.filter.repos.insert("/repo-a".to_string());
-    app.filter.mode = RepoFilterMode::Include;
-
-    // Switch to Project B → filter should be empty for B.
-    app.update(Message::Project(crate::tui::messages::ProjectMessage::Select(ProjectId(2))));
-    assert!(
-        app.filter.repos.is_empty(),
-        "Project B should start with an empty filter, got {:?}",
-        app.filter.repos
-    );
-
-    // Switch back to Default → original filter should be restored.
-    app.update(Message::Project(crate::tui::messages::ProjectMessage::Select(ProjectId(1))));
-    assert!(
-        app.filter.repos.contains("/repo-a"),
-        "Default project's filter should be restored on switch-back"
-    );
-}
-
-#[test]
-fn setting_filter_in_project_b_does_not_affect_default() {
-    let mut app = App::new(vec![], ProjectId(1));
-    app.update(Message::Project(crate::tui::messages::ProjectMessage::Updated(vec![
-        Project {
-            id: ProjectId(1),
-            name: "Default".to_string(),
-            sort_order: 0,
-            is_default: true,
-        },
-        Project {
-            id: ProjectId(2),
-            name: "Backend".to_string(),
-            sort_order: 1,
-            is_default: false,
-        },
-    ])));
-
-    // Switch to Project B and set a filter there.
-    app.update(Message::Project(crate::tui::messages::ProjectMessage::Select(ProjectId(2))));
-    app.filter.repos.insert("/repo-b".to_string());
-
-    // Switch back to Default → its filter should still be empty (never set).
-    app.update(Message::Project(crate::tui::messages::ProjectMessage::Select(ProjectId(1))));
-    assert!(
-        app.filter.repos.is_empty(),
-        "Default's filter should be empty (B's filter must not bleed in)"
-    );
-}
-
-#[test]
-fn filter_state_round_trips_across_project_switches() {
-    let mut app = App::new(vec![], ProjectId(1));
-    app.update(Message::Project(crate::tui::messages::ProjectMessage::Updated(vec![
-        Project {
-            id: ProjectId(1),
-            name: "Default".to_string(),
-            sort_order: 0,
-            is_default: true,
-        },
-        Project {
-            id: ProjectId(2),
-            name: "B".to_string(),
-            sort_order: 1,
-            is_default: false,
-        },
-    ])));
-
-    // Set filter on Default.
-    app.filter.repos.insert("/repo-default".to_string());
-    app.filter.mode = RepoFilterMode::Include;
-
-    // Switch to B and set a different filter.
-    app.update(Message::Project(crate::tui::messages::ProjectMessage::Select(ProjectId(2))));
-    app.filter.repos.insert("/repo-b".to_string());
-    app.filter.mode = RepoFilterMode::Exclude;
-
-    // Back to Default → original filter intact.
-    app.update(Message::Project(crate::tui::messages::ProjectMessage::Select(ProjectId(1))));
-    assert!(app.filter.repos.contains("/repo-default"));
-    assert!(!app.filter.repos.contains("/repo-b"));
-    assert_eq!(app.filter.mode, RepoFilterMode::Include);
-
-    // Back to B → its filter intact.
-    app.update(Message::Project(crate::tui::messages::ProjectMessage::Select(ProjectId(2))));
-    assert!(app.filter.repos.contains("/repo-b"));
-    assert!(!app.filter.repos.contains("/repo-default"));
-    assert_eq!(app.filter.mode, RepoFilterMode::Exclude);
-}
 
 #[test]
 fn close_repo_filter_persists_per_project_keys() {

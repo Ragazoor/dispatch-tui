@@ -2,7 +2,7 @@
 source: src/tui/tests/snapshots.rs
 expression: rendered
 ---
-[Default]   Tasks                                                                                                 🔕  [N]
+ Tasks                                                                                                            🔕  [N]
         ▸ backlog 1 [ ]                 ◦ running 0                   ◦ review 0                     ◦ done 0
 ──────────────────────────────│───────────────────────────│──────────────────────────────│──────────────────────────────
 ──────────────────────────────│                           │                              │
@@ -41,4 +41,4 @@ expression: rendered
 │                                                                                                                      │
 │                                                                                                                      │
 └ j/k scroll · z zoom · q/Esc/Enter close ─────────────────────────────────────────────────────────────────────────────┘
-[d] brainstorm  [e]dit  [L] move  [x] archive  [h] projects  [p] open PR  [Enter] detail  [c]opy  [a] select all  [n]ew
+[d] brainstorm  [e]dit  [L] move  [x] archive  [p] open PR  [Enter] detail  [c]opy  [a] select all  [n]ew  [E]pic  [D] q

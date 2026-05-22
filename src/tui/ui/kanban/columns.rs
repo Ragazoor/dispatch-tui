@@ -17,7 +17,6 @@ use super::super::shared::{render_substatus_header, truncate};
 use super::cards::{
     build_task_list_item, card_rule_line, render_epic_header_item, render_epic_item,
 };
-use super::projects_panel::render_projects_column;
 use super::{board_column_constraints, column_bg_color, column_color, render_column_separator};
 
 fn render_orphan_separator(col_width: u16, is_first: bool) -> ListItem<'static> {
@@ -109,11 +108,6 @@ pub(super) fn render_columns(
         .map(|i| all_areas[i])
         .collect();
     let mut content_idx = 0usize;
-
-    if sel == 0 {
-        render_projects_column(frame, app, content_areas[content_idx]);
-        content_idx += 1;
-    }
 
     for (task_col_idx, &status) in TaskStatus::ALL.iter().enumerate() {
         let nav_col = task_col_idx + 1;

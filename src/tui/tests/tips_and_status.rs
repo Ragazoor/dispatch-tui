@@ -48,7 +48,7 @@ fn batch_move_multiple_steps() {
 fn render_status_bar_shows_keybindings() {
     let mut app = App::new(vec![], ProjectId(1));
     let buf = render_to_buffer(&mut app, 200, 20);
-    assert!(buffer_contains(&buf, "projects"));
+    assert!(buffer_contains(&buf, "[n]"));
 }
 
 #[test]
@@ -61,17 +61,8 @@ fn render_status_bar_uses_bracket_format() {
         "status bar should use [key] bracket format"
     );
     assert!(
-        buffer_contains(&buf, "[q]"),
-        "status bar should use [key] bracket format"
-    );
-    // Should also contain the action words (embedded format: [n]ew, [q] projects)
-    assert!(
         buffer_contains(&buf, "[n]ew"),
         "status bar should show 'new' hint"
-    );
-    assert!(
-        buffer_contains(&buf, "[q] projects"),
-        "status bar should show 'projects' hint"
     );
 }
 

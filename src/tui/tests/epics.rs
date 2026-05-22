@@ -31,7 +31,6 @@ fn epic_action_hints_not_done() {
     assert!(keys.contains(&"[L]"), "epic shows status forward");
     assert!(keys.contains(&"[H]"), "epic shows status backward");
     assert!(keys.contains(&"[x]"), "epic shows archive");
-    assert!(keys.contains(&"[q]"), "epic shows quit");
 }
 
 #[test]

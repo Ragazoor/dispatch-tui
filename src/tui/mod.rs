@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 #[cfg(test)]
 use crate::models::ReviewDecision;
 use crate::models::{
-    epic_substatus, Epic, EpicId, EpicSubstatus, Project, ProjectId, SubStatus, Task, TaskId,
+    epic_substatus, Epic, EpicId, EpicSubstatus, ProjectId, SubStatus, Task, TaskId,
     TaskStatus, VisualColumn,
 };
 
@@ -39,10 +39,10 @@ pub(in crate::tui) const DISPATCH_WATCHDOG_TIMEOUT: Duration = Duration::from_se
 /// Must match the length of `DISPATCHING_SPINNER` in `kanban.rs`.
 pub(in crate::tui) const DISPATCH_SPINNER_FRAMES: u8 = 10;
 
-/// Returns true for the two edge navigation columns (Projects=0 and Archive=5) that
-/// don't hold regular task data and must be excluded from task-operation hotkeys.
+/// Returns true for the Archive edge column that doesn't hold regular task data
+/// and must be excluded from task-operation hotkeys.
 pub(in crate::tui) fn is_edge_column(col: usize) -> bool {
-    col == 0 || col == TaskStatus::COLUMN_COUNT + 1
+    col == TaskStatus::COLUMN_COUNT + 1
 }
 
 // ---------------------------------------------------------------------------
@@ -57,16 +57,9 @@ pub struct App {
     pub(in crate::tui) input: InputState,
     pub(in crate::tui) agents: AgentTracking,
     pub(in crate::tui) archive: ArchiveState,
-    pub(in crate::tui) projects_panel: ProjectsPanelState,
     pub(in crate::tui) active_project: ProjectId,
-    pub(in crate::tui) active_is_default: bool,
     pub(in crate::tui) select: SelectionState,
     pub(in crate::tui) filter: FilterState,
-    /// Snapshot of (repos, mode) for projects other than the active one.
-    /// On project switch, the outgoing project's tuple is stashed here and
-    /// the incoming project's tuple is restored into `filter`. Only `repos`
-    /// and `mode` swap — presets stay on `filter` and are global.
-    pub(in crate::tui) per_project_filter: HashMap<ProjectId, (HashSet<String>, RepoFilterMode)>,
     pub(in crate::tui) merge_queue: Option<MergeQueue>,
     /// Task IDs with an in-flight dispatch, mapped to their start time.
     /// Membership prevents duplicate dispatches; start times drive the 60-second watchdog.
@@ -132,7 +125,6 @@ impl App {
             board: BoardState {
                 tasks,
                 epics: Vec::new(),
-                projects: Vec::new(),
                 view_mode: ViewMode::default(),
                 repo_paths: Vec::new(),
                 split: SplitState::default(),
@@ -144,12 +136,9 @@ impl App {
             input: InputState::default(),
             agents: AgentTracking::new(),
             archive: ArchiveState::default(),
-            projects_panel: ProjectsPanelState::default(),
             active_project: default_project_id,
-            active_is_default: false,
             select: SelectionState::default(),
             filter: FilterState::default(),
-            per_project_filter: HashMap::new(),
             merge_queue: None,
             dispatching: HashMap::new(),
             spinner_tick: 0,
@@ -249,18 +238,6 @@ impl App {
     pub fn active_project(&self) -> ProjectId {
         self.active_project
     }
-    pub fn projects(&self) -> &[Project] {
-        &self.board.projects
-    }
-    pub fn projects_panel_visible(&self) -> bool {
-        self.selection().column() == 0
-    }
-    pub fn selected_project_row(&self) -> usize {
-        self.selection().row(0)
-    }
-    pub(in crate::tui) fn selected_project(&self) -> Option<&Project> {
-        self.board.projects.get(self.selection().row(0))
-    }
     pub fn selected_tasks(&self) -> &HashSet<TaskId> {
         &self.select.tasks
     }
@@ -332,33 +309,6 @@ impl App {
     pub fn set_repo_filter_mode(&mut self, mode: RepoFilterMode) {
         self.filter.mode = mode;
         self.sync_board_selection();
-    }
-
-    /// Insert a saved filter snapshot for `project_id` into the per-project
-    /// map. Used by the runtime loader to restore per-project filters at
-    /// startup. Bootstrap-only carve-out from the Message-only convention;
-    /// after bootstrap, filters are mutated via Messages.
-    pub(crate) fn set_per_project_filter(
-        &mut self,
-        project_id: ProjectId,
-        repos: HashSet<String>,
-        mode: RepoFilterMode,
-    ) {
-        self.per_project_filter.insert(project_id, (repos, mode));
-    }
-
-    pub(crate) fn has_per_project_filter(&self, project_id: ProjectId) -> bool {
-        self.per_project_filter.contains_key(&project_id)
-    }
-
-    /// Copy the active project's saved filter from `per_project_filter` into
-    /// `self.filter`. No-op if there is no entry for the active project.
-    pub(crate) fn activate_filter_for_active_project(&mut self) {
-        if let Some((repos, mode)) = self.per_project_filter.get(&self.active_project) {
-            self.filter.repos = repos.clone();
-            self.filter.mode = *mode;
-            self.sync_board_selection();
-        }
     }
 
     /// Set a transient status message with auto-clear timestamp.
@@ -453,8 +403,8 @@ impl App {
         self.filter.matches(repo_path)
     }
 
-    pub(in crate::tui) fn project_matches(&self, project_id: ProjectId) -> bool {
-        self.active_is_default || project_id == self.active_project
+    pub(in crate::tui) fn project_matches(&self, _project_id: ProjectId) -> bool {
+        true
     }
 
     pub(in crate::tui) fn epic_matches(&self, epic_id: EpicId) -> bool {
@@ -868,7 +818,7 @@ impl App {
             return None;
         }
         let col = self.selection().column();
-        if is_edge_column(col) {
+        if col == 0 || is_edge_column(col) {
             return None;
         }
         let status = TaskStatus::from_column_index(col - 1)?;
@@ -892,15 +842,6 @@ impl App {
         match self.selected_column_item() {
             Some(ColumnItem::Task(task)) => Some(task),
             _ => None,
-        }
-    }
-
-    /// Move the projects-panel cursor to the row of `project_id`. No-op if
-    /// the project is not in the list.
-    pub(in crate::tui) fn sync_project_cursor(&mut self, project_id: ProjectId) {
-        if let Some(idx) = self.board.projects.iter().position(|p| p.id == project_id) {
-            self.selection_mut().set_row(0, idx);
-            self.projects_panel.list_state.select(Some(idx));
         }
     }
 
@@ -930,7 +871,7 @@ impl App {
             return;
         }
         let col = self.selection().column();
-        if col == 0 || col > TaskStatus::COLUMN_COUNT {
+        if col > TaskStatus::COLUMN_COUNT {
             return;
         }
         let row = self.selection().row(col);
@@ -958,24 +899,15 @@ impl App {
     pub fn sync_board_selection(&mut self) {
         let current_col = self.selection().column();
 
-        // If the cursor is on an edge column (Projects=0 or Archive=COLUMN_COUNT+1),
-        // preserve the column and only clamp rows — don't jump to the task anchor.
-        if current_col == 0 || current_col == TaskStatus::COLUMN_COUNT + 1 {
+        // If the cursor is on the Archive edge column, preserve the column and only clamp rows.
+        if current_col == TaskStatus::COLUMN_COUNT + 1 {
             self.clamp_selection();
-            if current_col == 0 {
-                let len = self.board.projects.len();
-                let row = self.selection().row(0);
-                let clamped = if len == 0 { 0 } else { row.min(len - 1) };
-                self.selection_mut().set_row(0, clamped);
-                self.projects_panel.list_state.select(Some(clamped));
-            } else {
-                let count = self.archived_tasks().len();
-                let archive_col = TaskStatus::COLUMN_COUNT + 1;
-                let row = self.selection().row(archive_col);
-                let clamped = if count == 0 { 0 } else { row.min(count - 1) };
-                self.selection_mut().set_row(archive_col, clamped);
-                self.archive.list_state.select(Some(clamped));
-            }
+            let count = self.archived_tasks().len();
+            let archive_col = TaskStatus::COLUMN_COUNT + 1;
+            let row = self.selection().row(archive_col);
+            let clamped = if count == 0 { 0 } else { row.min(count - 1) };
+            self.selection_mut().set_row(archive_col, clamped);
+            self.archive.list_state.select(Some(clamped));
             return;
         }
 

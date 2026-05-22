@@ -5,7 +5,6 @@
 mod cards;
 mod columns;
 mod popups;
-mod projects_panel;
 mod status_bar;
 
 #[cfg(test)]
@@ -258,16 +257,6 @@ fn render_summary(frame: &mut Frame, app: &App, epic_stats: &EpicStatsMap, area:
 fn build_summary_segments(app: &App, layout: &ColumnLayout, sel: usize) -> Vec<SummarySegment> {
     let mut segments: Vec<SummarySegment> = Vec::new();
 
-    if sel == 0 {
-        let count = app.projects().len();
-        segments.push(SummarySegment {
-            label: format!("\u{25b8} Projects {}", count),
-            color: PURPLE,
-            is_focused: true,
-            checkbox: CheckboxInfo::None,
-        });
-    }
-
     for (idx, &status) in TaskStatus::ALL.iter().enumerate() {
         let is_focused = sel == idx + 1;
         segments.push(task_column_segment(app, layout, status, is_focused));
@@ -452,7 +441,7 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
 /// Returns styled spans showing available actions for the selected task.
 pub(in crate::tui) fn action_hints(
     task: Option<&Task>,
-    selected_column: usize,
+    _selected_column: usize,
     key_color: Color,
 ) -> Vec<Span<'static>> {
     let label_style = Style::default().fg(MUTED);
@@ -475,7 +464,6 @@ pub(in crate::tui) fn action_hints(
                 push_hint("e", "edit");
                 push_hint("L", "move");
                 push_hint("x", "archive");
-                push_hint("h", "projects");
             }
             TaskStatus::Running => {
                 if task.tmux_window.is_some() {
@@ -522,9 +510,6 @@ pub(in crate::tui) fn action_hints(
         push_hint("Enter", "detail");
         push_hint("c", "copy");
     }
-    if task.is_none() && selected_column == 0 {
-        push_hint("h", "projects");
-    }
     push_hint("a", "select all");
     push_hint("n", "new");
     push_hint("E", "epic");
@@ -534,11 +519,6 @@ pub(in crate::tui) fn action_hints(
     push_hint("f", "filter");
     push_hint("I", "learnings");
     push_hint("?", "help");
-    if selected_column == 0 {
-        push_hint("q", "quit");
-    } else {
-        push_hint("q", "projects");
-    }
 
     spans
 }
@@ -578,7 +558,6 @@ pub(in crate::tui) fn epic_action_hints(epic: &Epic, key_color: Color) -> Vec<Sp
     push_hint("F", "flat");
     push_hint("f", "filter");
     push_hint("?", "help");
-    push_hint("q", "projects");
 
     spans
 }

@@ -1,6 +1,5 @@
 mod confirm;
 mod normal;
-mod projects;
 mod repo_filter;
 
 use crossterm::event::{KeyCode, KeyEvent};
@@ -52,15 +51,6 @@ impl App {
             InputMode::ConfirmDeletePreset => self.handle_key_confirm_delete_preset(key),
             InputMode::ConfirmDeleteRepoPath => self.handle_key_confirm_delete_repo_path(key),
             InputMode::ConfirmQuit => self.handle_key_confirm_quit(key),
-            InputMode::InputProjectName { editing_id } => {
-                self.handle_key_input_project_name(key, editing_id)
-            }
-            InputMode::ConfirmDeleteProject1 { id } => {
-                self.handle_key_confirm_delete_project1(key, id)
-            }
-            InputMode::ConfirmDeleteProject2 { id, item_count } => {
-                self.handle_key_confirm_delete_project2(key, id, item_count)
-            }
             InputMode::InputWrapUpMode => self.handle_key_wrap_up_mode(key),
         }
     }

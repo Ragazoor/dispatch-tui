@@ -830,15 +830,6 @@ fn confirm_archive_esc_cancels() {
     assert_eq!(task.status, TaskStatus::Backlog); // unchanged
 }
 
-#[test]
-fn d_key_on_archived_shows_warning() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Archived)], ProjectId(1));
-    // Archived tasks don't appear in columns, but test dispatch routing directly
-    app.selection_mut().set_column(0);
-    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
-    // No task selected (archived tasks hidden from kanban) → noop
-    assert!(cmds.is_empty());
-}
 
 #[test]
 fn repo_filter_applies_to_archived_tasks() {

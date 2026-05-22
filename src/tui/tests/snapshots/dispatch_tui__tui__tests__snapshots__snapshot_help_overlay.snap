@@ -2,7 +2,7 @@
 source: src/tui/tests/snapshots.rs
 expression: rendered
 ---
-[Default]   ▸ Tasks                                                                                               🔕  [N]
+ ▸ Tasks                                                                                                          🔕  [N]
         ▸ backlog 2 [ ]                 ◦ running 1                   ◦ review 0                     ◦ done 1
 ──────────────────────────────│───────────────────────────│──────────────────────────────│──────────────────────────────
 ──────────────────────────────│  ── active                │                              │──────────────────────────────
@@ -19,7 +19,7 @@ expression: rendered
                         ║  [d] dispatch*  [H/L] move task/epic backward/forward                ║
                         ║  [x] archive    [D] quick dsp  [g] session/board                     ║
                         ║  [G] session    (epic: jump to subtask tmux)                         ║
-                        ║  [h/←] Projects  [l/→] Archive   [a] select all                      ║
+                        ║  [l/→] Archive   [a] select all                                      ║
                         ║  [Space] select  [f] filter repos  [W] wrap up  (task/epic)          ║
                         ║  [T] detach tmux panel  (any task with a tmux window, supports batch)║
                         ║  [S] toggle split mode  (side-by-side with agent)                    ║

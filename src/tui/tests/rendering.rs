@@ -23,7 +23,6 @@ async fn action_hints_backlog_task() {
     assert!(!keys.contains(&"[H]"), "backlog has no back movement");
     assert!(keys.contains(&"[x]"), "should have archive hint");
     assert!(keys.contains(&"[n]"), "should have new hint");
-    assert!(keys.contains(&"[q]"), "should have quit hint");
     let text: String = hints.iter().map(|s| s.content.as_ref()).collect();
     assert!(
         text.contains("brainstorm"),
@@ -140,7 +139,6 @@ async fn action_hints_no_task() {
         .map(|s| s.content.as_ref())
         .collect();
     assert!(keys.contains(&"[n]"), "no-task shows new");
-    assert!(keys.contains(&"[q]"), "no-task shows quit");
     assert!(!keys.contains(&"[d]"), "no-task has no dispatch");
     assert!(!keys.contains(&"[e]"), "no-task has no edit");
 }
@@ -1491,27 +1489,6 @@ async fn test_on_select_all_preserved_on_refresh() {
     assert_eq!(app.selection().anchor, None);
 }
 
-#[tokio::test]
-async fn summary_shows_five_columns_when_projects_focused() {
-    let mut app = make_app();
-    // Navigate left from Backlog (col 1) to Projects (col 0)
-    app.update(Message::NavigateColumn(-1));
-    assert_eq!(app.selected_column(), 0);
-    let buf = render_to_buffer(&mut app, 120, 40);
-    // The summary row (y=1) should contain "Projects" as a column header.
-    // Row 0 is the tab bar, row 1 is the summary line.
-    let summary_row: String = (0..120u16)
-        .map(|x| buf[(x, 1)].symbol().to_string())
-        .collect();
-    assert!(
-        summary_row.contains("Projects"),
-        "summary row should show Projects header when col 0 focused; got: {summary_row:?}"
-    );
-    assert!(
-        summary_row.contains("backlog"),
-        "summary row should still show backlog header; got: {summary_row:?}"
-    );
-}
 
 #[tokio::test]
 async fn summary_shows_four_columns_when_backlog_focused() {

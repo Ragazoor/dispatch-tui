@@ -77,10 +77,10 @@ fn quit_enters_confirm_mode() {
 #[test]
 fn navigate_column_clamps() {
     let mut app = make_app();
-    // Projects column (0) is the leftmost; can't go further left.
-    app.selection_mut().set_column(0);
+    // Backlog column (1) is the leftmost; navigating further left is a no-op.
+    app.selection_mut().set_column(1);
     app.update(Message::NavigateColumn(-1));
-    assert_eq!(app.selection().column(), 0); // can't go below 0
+    assert_eq!(app.selection().column(), 1); // can't go below Backlog
 
     // From archive column (COLUMN_COUNT+1 = 5), pressing right stays clamped.
     app.selection_mut().set_column(TaskStatus::COLUMN_COUNT + 1);
@@ -389,29 +389,6 @@ fn refresh_tasks_empty_clamps_all_rows_to_zero() {
     assert!(app.selection().selected_row.iter().all(|&r| r == 0));
 }
 
-#[test]
-fn g_key_on_empty_column_is_noop() {
-    let mut app = App::new(vec![], ProjectId(1));
-    app.selection_mut().set_column(0);
-    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
-    assert!(cmds.is_empty());
-}
-
-#[test]
-fn shift_l_key_on_empty_column_is_noop() {
-    let mut app = App::new(vec![], ProjectId(1));
-    app.selection_mut().set_column(0);
-    let cmds = app.handle_key(make_key(KeyCode::Char('L')));
-    assert!(cmds.is_empty());
-}
-
-#[test]
-fn shift_h_key_on_empty_column_is_noop() {
-    let mut app = App::new(vec![], ProjectId(1));
-    app.selection_mut().set_column(0);
-    let cmds = app.handle_key(make_key(KeyCode::Char('H')));
-    assert!(cmds.is_empty());
-}
 
 #[test]
 fn dismiss_error_clears_popup() {
@@ -2067,13 +2044,6 @@ fn navigate_left_from_done_does_not_show_archive() {
     assert!(!app.show_archived());
 }
 
-#[test]
-fn board_selection_projects_row_roundtrip() {
-    let mut sel = BoardSelection::new();
-    assert_eq!(sel.row(0), 0); // projects_row starts at 0
-    sel.set_row(0, 3);
-    assert_eq!(sel.row(0), 3);
-}
 
 #[test]
 fn board_selection_archive_row_roundtrip() {
@@ -2092,16 +2062,7 @@ fn board_selection_task_col_row_uses_offset() {
     assert_eq!(sel.row(4), 5);
 }
 
-// --- New [0,5] column-range navigation tests ---
-
-#[test]
-fn navigate_left_from_backlog_enters_projects() {
-    let mut app = make_app();
-    // Board starts at Backlog (col 1).
-    assert_eq!(app.selected_column(), 1);
-    app.update(Message::NavigateColumn(-1)); // col 1 → col 0 (Projects)
-    assert_eq!(app.selected_column(), 0);
-}
+// --- [1,5] column-range navigation tests ---
 
 #[test]
 fn navigate_right_from_done_enters_archive() {
@@ -2116,13 +2077,12 @@ fn navigate_right_from_done_enters_archive() {
 }
 
 #[test]
-fn navigate_left_at_projects_is_noop() {
+fn navigate_left_at_backlog_is_noop() {
     let mut app = make_app();
-    // Board starts at Backlog (col 1). Go to Projects (col 0) first.
-    app.update(Message::NavigateColumn(-1));
-    assert_eq!(app.selected_column(), 0);
-    app.update(Message::NavigateColumn(-1)); // clamp at 0
-    assert_eq!(app.selected_column(), 0);
+    // Board starts at Backlog (col 1), which is now the leftmost column.
+    assert_eq!(app.selected_column(), 1);
+    app.update(Message::NavigateColumn(-1)); // clamp at 1
+    assert_eq!(app.selected_column(), 1);
 }
 
 #[test]

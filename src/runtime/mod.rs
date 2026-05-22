@@ -27,7 +27,7 @@ const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// Name used for the TUI's tmux window (visible in tmux status bar).
 const TUI_WINDOW_NAME: &str = "TUI";
 
-use crate::db::{ProjectCrud, SettingsStore, TaskCrud};
+use crate::db::{SettingsStore, TaskCrud};
 use crate::models::TaskId;
 use crate::process::{ProcessRunner, RealProcessRunner};
 use crate::service::embeddings::EmbeddingService;
@@ -134,20 +134,11 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
     });
 
     // 3. Create App and load saved repo paths
-    let projects = database.list_projects().await?;
-    let saved_project = database
-        .get_setting_string("last_project")
-        .await
-        .ok()
-        .flatten();
-    let initial_project_id = resolve_initial_project(&projects, saved_project);
-    let mut app = App::new(tasks, initial_project_id);
-    app.update(Message::Project(crate::tui::messages::ProjectMessage::Updated(projects)));
+    let mut app = App::new(tasks, crate::models::ProjectId(1));
     let paths = database.list_repo_paths().await.unwrap_or_default();
     app.update(Message::RepoPathsUpdated(paths));
     load_notifications_pref(&*database, &mut app).await;
     load_main_session(&*database, &*runner, &mut app).await;
-    load_per_project_repo_filters(&*database, &mut app).await;
     for msg in [
         load_filter_presets(&*database, &mut app).await,
         apply_tmux_focus_warning(&*runner),
@@ -549,113 +540,6 @@ async fn load_notifications_pref(db: &dyn db::SettingsStore, app: &mut App) {
     app.set_notifications_enabled(enabled);
 }
 
-fn parse_filter_setting(
-    raw_repos: Option<String>,
-    raw_mode: Option<String>,
-    known: &HashSet<String>,
-) -> (HashSet<String>, RepoFilterMode) {
-    (
-        parse_repo_filter_repos(raw_repos.as_deref(), known),
-        parse_repo_filter_mode(raw_mode.as_deref()),
-    )
-}
-
-fn parse_repo_filter_repos(raw: Option<&str>, known: &HashSet<String>) -> HashSet<String> {
-    let Some(s) = raw else {
-        return HashSet::new();
-    };
-    match serde_json::from_str::<Vec<String>>(s) {
-        Ok(v) => v.into_iter().filter(|p| known.contains(p)).collect(),
-        Err(e) => {
-            tracing::warn!(
-                raw = %s,
-                error = %e,
-                "failed to parse repo_filter setting as JSON, defaulting to empty"
-            );
-            HashSet::new()
-        }
-    }
-}
-
-fn parse_repo_filter_mode(raw: Option<&str>) -> RepoFilterMode {
-    let Some(s) = raw else {
-        return RepoFilterMode::default();
-    };
-    match s.parse::<RepoFilterMode>() {
-        Ok(m) => m,
-        Err(e) => {
-            tracing::warn!(
-                raw = %s,
-                error = %e,
-                "failed to parse repo_filter_mode setting, defaulting"
-            );
-            RepoFilterMode::default()
-        }
-    }
-}
-
-/// Load each known project's saved repo filter (settings keyed
-/// `repo_filter:<project_id>` and `repo_filter_mode:<project_id>`) into the
-/// app's `per_project_filter` map, then restore the active project's slot
-/// into `App.filter`.
-///
-/// Legacy migration: if the old global `repo_filter` / `repo_filter_mode`
-/// keys exist and the seeded default project has no per-project entry yet,
-/// copy them into the default project's slot. Legacy keys are left in place.
-pub(super) async fn load_per_project_repo_filters(
-    db: &(dyn db::SettingsStore + Sync),
-    app: &mut App,
-) {
-    let known_repos: HashSet<String> = app.repo_paths().iter().cloned().collect();
-
-    // Per-project saved filters. Cloning the project list is required because
-    // the loop body mutably borrows `app` via `set_per_project_filter`.
-    for project in app.projects().to_vec() {
-        let pid = project.id;
-        let raw_repos = db
-            .get_setting_string(&format!("repo_filter:{}", pid.0))
-            .await
-            .unwrap_or(None);
-        let raw_mode = db
-            .get_setting_string(&format!("repo_filter_mode:{}", pid.0))
-            .await
-            .unwrap_or(None);
-        if raw_repos.is_none() && raw_mode.is_none() {
-            continue;
-        }
-        let (repos, mode) = parse_filter_setting(raw_repos, raw_mode, &known_repos);
-        app.set_per_project_filter(pid, repos, mode);
-    }
-
-    migrate_legacy_global_filter(db, app, &known_repos).await;
-    app.activate_filter_for_active_project();
-}
-
-/// Fold the pre-555 global `repo_filter` / `repo_filter_mode` keys into the
-/// default project's slot, but only when no per-project entry exists yet
-/// (so a subsequent save under the new keying always wins).
-async fn migrate_legacy_global_filter(
-    db: &dyn db::SettingsStore,
-    app: &mut App,
-    known_repos: &HashSet<String>,
-) {
-    let legacy_repos = db.get_setting_string("repo_filter").await.unwrap_or(None);
-    let legacy_mode = db
-        .get_setting_string("repo_filter_mode")
-        .await
-        .unwrap_or(None);
-    if legacy_repos.is_none() && legacy_mode.is_none() {
-        return;
-    }
-    let Some(default_id) = app.projects().iter().find(|p| p.is_default).map(|p| p.id) else {
-        return;
-    };
-    if app.has_per_project_filter(default_id) {
-        return;
-    }
-    let (repos, mode) = parse_filter_setting(legacy_repos, legacy_mode, known_repos);
-    app.set_per_project_filter(default_id, repos, mode);
-}
 
 async fn load_filter_presets(db: &dyn db::SettingsStore, app: &mut App) -> Option<Message> {
     match db.list_filter_presets().await {
@@ -735,28 +619,3 @@ pub fn tips_starting_index(
     }
 }
 
-/// Returns the project id to open at startup.
-/// Prefers the saved `last_project` setting; falls back to the default project.
-#[allow(clippy::expect_used)] // DB invariant: a default project must always exist (migration v39)
-fn resolve_initial_project(
-    projects: &[crate::models::Project],
-    saved: Option<String>,
-) -> crate::models::ProjectId {
-    let default_id = projects
-        .iter()
-        .find(|p| p.is_default)
-        .map(|p| p.id)
-        .expect("no default project — database invariant violated");
-
-    let Some(raw) = saved else {
-        return default_id;
-    };
-    let Ok(id) = raw.parse::<crate::models::ProjectId>() else {
-        return default_id;
-    };
-    if projects.iter().any(|p| p.id == id) {
-        id
-    } else {
-        default_id
-    }
-}

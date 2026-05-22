@@ -12,12 +12,12 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_navigate_column(&mut self, delta: isize) -> Vec<Command> {
-        // Column range [0, 5]: 0=Projects, 1=Backlog, 2=Running, 3=Review, 4=Done, 5=Archive.
-        // In Epic view, Projects and Archive are not shown; clamp to [1, COLUMN_COUNT].
+        // Column range [1, 5]: 1=Backlog, 2=Running, 3=Review, 4=Done, 5=Archive.
+        // In Epic view, Archive is not shown; clamp to [1, COLUMN_COUNT].
         let (min_col, max_col) = if matches!(self.effective_view_mode(), ViewMode::Epic { .. }) {
             (1isize, TaskStatus::COLUMN_COUNT as isize) // [1, 4] in epic view
         } else {
-            (0isize, TaskStatus::COLUMN_COUNT as isize + 1) // [0, 5] on main board
+            (1isize, TaskStatus::COLUMN_COUNT as isize + 1) // [1, 5] on main board
         };
         let new_col = (self.selection().column() as isize + delta).clamp(min_col, max_col) as usize;
         self.selection_mut().set_column(new_col);
@@ -29,11 +29,6 @@ impl App {
             *self.archive.list_state.selected_mut() = Some(0);
         }
 
-        // Sync projects panel cursor to the active project when entering it.
-        if new_col == 0 {
-            self.sync_project_cursor(self.active_project);
-        }
-
         self.clamp_selection();
         self.update_anchor_from_current();
         vec![]
@@ -42,17 +37,6 @@ impl App {
     pub(in crate::tui) fn handle_navigate_row(&mut self, delta: isize) -> Vec<Command> {
         let col = self.selection().column();
 
-        if col == 0 {
-            let count = self.board.projects.len();
-            if count == 0 {
-                return vec![];
-            }
-            let new_row =
-                (self.selection().row(0) as isize + delta).clamp(0, count as isize - 1) as usize;
-            self.selection_mut().set_row(0, new_row);
-            self.projects_panel.list_state.select(Some(new_row));
-            return vec![];
-        }
         if col == TaskStatus::COLUMN_COUNT + 1 {
             let count = self.archived_tasks().len();
             if count == 0 {

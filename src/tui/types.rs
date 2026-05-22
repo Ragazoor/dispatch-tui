@@ -4,7 +4,7 @@ use std::time::Instant;
 use ratatui::widgets::ListState;
 
 use crate::models::{
-    Epic, EpicId, EpicSubstatus, Project, ProjectId, Task, TaskId, TaskStatus, TaskTag,
+    Epic, EpicId, EpicSubstatus, Task, TaskId, TaskStatus, TaskTag,
     TipsShowMode, WrapUpMode, DEFAULT_BASE_BRANCH,
 };
 
@@ -177,8 +177,6 @@ pub enum Message {
     Tips(crate::tui::messages::TipsMessage),
     /// Knowledge-base overlay messages — see [`crate::tui::messages::LearningMessage`].
     Learning(crate::tui::messages::LearningMessage),
-    /// Project management messages — see [`crate::tui::messages::ProjectMessage`].
-    Project(crate::tui::messages::ProjectMessage),
     /// Feed-epic refresh messages — see [`crate::tui::messages::FeedMessage`].
     Feed(crate::tui::messages::FeedMessage),
     /// Main session setup messages — see [`crate::tui::messages::MainSessionMessage`].
@@ -223,8 +221,6 @@ pub enum Command {
     Pr(crate::tui::commands::PrCommand),
     /// Tips persistence commands — see [`crate::tui::commands::TipsCommand`].
     Tips(crate::tui::commands::TipsCommand),
-    /// Project management side-effect commands — see [`crate::tui::commands::ProjectCommand`].
-    Project(crate::tui::commands::ProjectCommand),
     /// Main session side-effect commands — see [`crate::tui::commands::MainSessionCommand`].
     MainSession(crate::tui::commands::MainSessionCommand),
     /// Knowledge-base overlay side-effect commands — see
@@ -273,18 +269,6 @@ pub enum InputMode {
     ConfirmQuit,
     InputBaseBranch,
     InputWrapUpMode,
-    // Project panel input modes
-    InputProjectName {
-        /// None = create new project, Some(id) = rename existing
-        editing_id: Option<ProjectId>,
-    },
-    ConfirmDeleteProject1 {
-        id: ProjectId,
-    },
-    ConfirmDeleteProject2 {
-        id: ProjectId,
-        item_count: u64,
-    },
     MainSessionDir,
 }
 
@@ -322,7 +306,6 @@ impl Default for TaskDraft {
 pub struct BoardState {
     pub(in crate::tui) tasks: Vec<Task>,
     pub(in crate::tui) epics: Vec<Epic>,
-    pub(in crate::tui) projects: Vec<Project>,
     pub(in crate::tui) view_mode: ViewMode,
     pub(in crate::tui) repo_paths: Vec<String>,
     pub(in crate::tui) split: SplitState,
@@ -413,15 +396,6 @@ impl Default for InputState {
 
 #[derive(Debug, Clone, Default)]
 pub struct ArchiveState {
-    pub list_state: ListState,
-}
-
-// ---------------------------------------------------------------------------
-// ProjectsPanelState — projects panel (leftmost hidden column)
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Default)]
-pub struct ProjectsPanelState {
     pub list_state: ListState,
 }
 
@@ -527,36 +501,27 @@ pub struct BoardSelection {
     pub(in crate::tui) on_select_all: bool,
     pub(in crate::tui) list_states: [ListState; TaskStatus::COLUMN_COUNT],
     pub(in crate::tui) anchor: Option<ColumnAnchor>,
-    pub(in crate::tui) projects_row: usize,
     pub(in crate::tui) archive_row: usize,
 }
 
 impl BoardSelection {
     pub fn new() -> Self {
         Self {
-            selected_column: 0,
+            selected_column: 1,
             selected_row: [0; TaskStatus::COLUMN_COUNT],
             on_select_all: false,
             list_states: std::array::from_fn(|_| ListState::default()),
             anchor: None,
-            projects_row: 0,
             archive_row: 0,
         }
     }
 
-    /// Main board starts at Backlog (nav col 1), to the right of the Projects edge column.
     pub fn new_for_board() -> Self {
-        Self {
-            selected_column: 1,
-            ..Self::new()
-        }
+        Self::new()
     }
 
     pub fn new_for_epic() -> Self {
-        Self {
-            selected_column: 1,
-            ..Self::new()
-        }
+        Self::new()
     }
 
     pub fn column(&self) -> usize {
@@ -564,10 +529,9 @@ impl BoardSelection {
     }
 
     /// Row cursor for the given navigation column.
-    /// nav col 0 → projects_row, nav col 1–4 → selected_row[nav_col-1], nav col 5 → archive_row.
+    /// nav col 1–4 → selected_row[nav_col-1], nav col 5 → archive_row.
     pub fn row(&self, col: usize) -> usize {
         match col {
-            0 => self.projects_row,
             1..=4 => self.selected_row[col - 1],
             5 => self.archive_row,
             _ => 0,
@@ -580,7 +544,6 @@ impl BoardSelection {
 
     pub fn set_row(&mut self, col: usize, row: usize) {
         match col {
-            0 => self.projects_row = row,
             1..=4 => self.selected_row[col - 1] = row,
             5 => self.archive_row = row,
             _ => {}

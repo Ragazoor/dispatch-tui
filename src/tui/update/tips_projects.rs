@@ -1,6 +1,4 @@
-//! Tips overlay and project-message handlers.
-
-use crate::models::{Project, ProjectId};
+//! Tips overlay handlers.
 
 use super::super::types::*;
 use super::super::App;
@@ -67,53 +65,4 @@ impl App {
         }
     }
 
-    pub(in crate::tui) fn handle_projects_updated(
-        &mut self,
-        projects: Vec<Project>,
-    ) -> Vec<Command> {
-        self.board.projects = projects;
-        self.active_is_default = self
-            .board
-            .projects
-            .iter()
-            .any(|p| p.id == self.active_project && p.is_default);
-        vec![]
-    }
-
-    pub(in crate::tui) fn handle_select_project(&mut self, project_id: ProjectId) -> Vec<Command> {
-        if project_id != self.active_project {
-            let outgoing = self.active_project;
-            let outgoing_repos = std::mem::take(&mut self.filter.repos);
-            self.per_project_filter
-                .insert(outgoing, (outgoing_repos, self.filter.mode));
-            match self.per_project_filter.get(&project_id) {
-                Some((repos, mode)) => {
-                    self.filter.repos = repos.clone();
-                    self.filter.mode = *mode;
-                }
-                None => {
-                    self.filter.mode = RepoFilterMode::default();
-                }
-            }
-        }
-        self.active_project = project_id;
-        self.active_is_default = self
-            .board
-            .projects
-            .iter()
-            .any(|p| p.id == project_id && p.is_default);
-        self.clamp_selection();
-        if let Some(idx) = self.board.projects.iter().position(|p| p.id == project_id) {
-            self.projects_panel.list_state.select(Some(idx));
-        }
-        vec![Command::PersistStringSetting {
-            key: "last_project".into(),
-            value: project_id.to_string(),
-        }]
-    }
-
-    pub(in crate::tui) fn handle_follow_project(&mut self, project_id: ProjectId) -> Vec<Command> {
-        self.sync_project_cursor(project_id);
-        vec![]
-    }
 }

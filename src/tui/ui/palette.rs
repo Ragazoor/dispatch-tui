@@ -18,6 +18,3 @@ pub(super) const RED: Color = Color::Rgb(247, 118, 142);
 pub(super) const ARCHIVE_STRIPE: Color = Color::Rgb(72, 82, 120);
 // Archive column background tint
 pub(super) const ARCHIVE_COL_BG: Color = Color::Rgb(26, 28, 40);
-// Projects column background tints (purple family)
-pub(super) const PROJECTS_COL_BG: Color = Color::Rgb(30, 26, 42);
-pub(super) const PROJECTS_CURSOR_BG: Color = Color::Rgb(50, 34, 66);

@@ -138,19 +138,11 @@ impl App {
             return self.handle_key_archive(key);
         }
 
-        // Projects panel intercepts all input when visible (except in Epic view).
-        if self.projects_panel_visible() {
-            return self.handle_key_projects_panel(key);
-        }
-
         match key.code {
             KeyCode::Char('q') => {
                 if matches!(self.board.view_mode, ViewMode::Epic { .. }) {
                     self.update(Message::Epic(crate::tui::messages::EpicMessage::Exit))
                 } else {
-                    self.selection_mut().set_column(0);
-                    self.clamp_selection();
-                    self.update_anchor_from_current();
                     vec![]
                 }
             }

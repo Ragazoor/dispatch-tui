@@ -7,7 +7,7 @@
 
 use crate::tui::messages::{
     EditorMessage, EpicMessage, FeedMessage, InputMessage, LearningMessage, MainSessionMessage,
-    PrMessage, ProjectMessage, RepoFilterMessage, SplitMessage, SystemMessage, TaskMessage,
+    PrMessage, RepoFilterMessage, SplitMessage, SystemMessage, TaskMessage,
     TipsMessage, WrapUpMessage,
 };
 use crate::tui::types::{Command, Message};
@@ -178,15 +178,6 @@ fn dispatch_wrap_up(app: &mut App, msg: WrapUpMessage) -> Vec<Command> {
     }
 }
 
-/// Per-domain dispatcher for [`ProjectMessage`] variants.
-fn dispatch_project(app: &mut App, msg: ProjectMessage) -> Vec<Command> {
-    match msg {
-        ProjectMessage::Updated(projects) => app.handle_projects_updated(projects),
-        ProjectMessage::Select(project_id) => app.handle_select_project(project_id),
-        ProjectMessage::Follow(project_id) => app.handle_follow_project(project_id),
-    }
-}
-
 /// Per-domain dispatcher for [`SplitMessage`] variants.
 fn dispatch_split(app: &mut App, msg: SplitMessage) -> Vec<Command> {
     match msg {
@@ -278,8 +269,6 @@ pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
         // ── Tips overlay ──
         Message::Tips(tm) => dispatch_tips(app, tm),
 
-        // ── Project messages ──
-        Message::Project(pm) => dispatch_project(app, pm),
         Message::Feed(fm) => dispatch_feed(app, fm),
         Message::Learning(lm) => dispatch_learning(app, lm),
 

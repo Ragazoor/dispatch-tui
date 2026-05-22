@@ -364,11 +364,6 @@ pub fn build_learning_tree(
         .iter()
         .map(|e| (e.id.0, e.title.clone()))
         .collect();
-    let proj_label_map: HashMap<ProjectId, String> = app
-        .projects()
-        .iter()
-        .map(|p| (p.id, p.name.clone()))
-        .collect();
 
     let mut roots: Vec<tui_tree_widget::TreeItem<'static, String>> = Vec::new();
 
@@ -419,10 +414,7 @@ pub fn build_learning_tree(
     project_ids.sort_by_key(|p| p.0);
 
     for pid in project_ids {
-        let proj_label = proj_label_map
-            .get(&pid)
-            .cloned()
-            .unwrap_or_else(|| format!("Project {}", pid.0));
+        let proj_label = format!("Project {}", pid.0);
         let mut children: Vec<tui_tree_widget::TreeItem<'static, String>> = Vec::new();
 
         // Direct project-scoped leaves
