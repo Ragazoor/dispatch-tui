@@ -50,6 +50,9 @@ impl App {
             return vec![];
         }
 
+        if col == 0 {
+            return vec![];
+        }
         let status = match TaskStatus::from_column_index(col - 1) {
             Some(s) => s,
             None => return vec![],
@@ -85,7 +88,7 @@ impl App {
 
     pub(in crate::tui) fn handle_reorder_item(&mut self, direction: isize) -> Vec<Command> {
         let col = self.selection().column();
-        if is_edge_column(col) {
+        if col == 0 || is_edge_column(col) {
             return vec![];
         }
         let Some(status) = TaskStatus::from_column_index(col - 1) else {

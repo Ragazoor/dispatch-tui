@@ -871,7 +871,7 @@ impl App {
             return;
         }
         let col = self.selection().column();
-        if col > TaskStatus::COLUMN_COUNT {
+        if col == 0 || col > TaskStatus::COLUMN_COUNT {
             return;
         }
         let row = self.selection().row(col);

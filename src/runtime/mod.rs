@@ -138,6 +138,7 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
     let paths = database.list_repo_paths().await.unwrap_or_default();
     app.update(Message::RepoPathsUpdated(paths));
     load_notifications_pref(&*database, &mut app).await;
+    load_repo_filter(&*database, &mut app).await;
     load_main_session(&*database, &*runner, &mut app).await;
     for msg in [
         load_filter_presets(&*database, &mut app).await,
@@ -540,6 +541,19 @@ async fn load_notifications_pref(db: &dyn db::SettingsStore, app: &mut App) {
     app.set_notifications_enabled(enabled);
 }
 
+async fn load_repo_filter(db: &dyn db::SettingsStore, app: &mut App) {
+    let pid = app.active_project().0;
+    if let Ok(Some(val)) = db.get_setting_string(&format!("repo_filter:{pid}")).await {
+        if let Ok(paths) = serde_json::from_str::<Vec<String>>(&val) {
+            app.set_repo_filter(paths.into_iter().collect());
+        }
+    }
+    if let Ok(Some(mode_str)) = db.get_setting_string(&format!("repo_filter_mode:{pid}")).await {
+        if let Ok(mode) = mode_str.parse::<RepoFilterMode>() {
+            app.set_repo_filter_mode(mode);
+        }
+    }
+}
 
 async fn load_filter_presets(db: &dyn db::SettingsStore, app: &mut App) -> Option<Message> {
     match db.list_filter_presets().await {
