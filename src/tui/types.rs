@@ -733,7 +733,7 @@ pub enum ColumnItem<'a> {
 
 impl ColumnItem<'_> {
     /// Returns `true` for `Task` and `Epic` items that can hold the cursor.
-    /// `EpicHeader` and `SubstatusLabel` are decorative and non-selectable.
+    /// `EpicHeader`, `SubstatusLabel`, and `OrphanSeparator` are decorative and non-selectable.
     pub fn is_selectable(&self) -> bool {
         matches!(self, ColumnItem::Task(_) | ColumnItem::Epic(_))
     }

@@ -157,6 +157,12 @@ fn render_task_column(
             continue;
         }
 
+        if matches!(item, ColumnItem::OrphanSeparator) {
+            // Rendering will be wired in Task 4; this guard prevents the
+            // unreachable!() arms below from panicking once Task 2 starts emitting it.
+            continue;
+        }
+
         // Substatus grouping headers (Running / Review columns only).
         if show_headers {
             let priority = match item {
