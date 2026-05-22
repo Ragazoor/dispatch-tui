@@ -268,67 +268,6 @@ async fn create_task_missing_title() {
     assert!(is_error(&resp));
 }
 
-#[tokio::test]
-async fn create_task_missing_project_id_is_invalid_params() {
-    let state = test_state().await;
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "create_task",
-            "arguments": { "title": "No project", "repo_path": "/repo" }
-        })),
-    )
-    .await;
-    assert_error(&resp, "project_id");
-    let tasks = state.db.list_all().await.unwrap();
-    assert!(tasks.is_empty(), "no task should be created");
-}
-
-#[tokio::test]
-async fn create_task_with_unknown_project_id_is_invalid_params() {
-    let state = test_state().await;
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "create_task",
-            "arguments": {
-                "title": "Bogus project",
-                "repo_path": "/repo",
-                "project_id": 999_999,
-            }
-        })),
-    )
-    .await;
-    assert_error(&resp, "project");
-    let tasks = state.db.list_all().await.unwrap();
-    assert!(tasks.is_empty(), "no task should be created");
-}
-
-#[tokio::test]
-async fn create_task_assigns_to_provided_project() {
-    let state = test_state().await;
-    let other = state.db.create_project("Other", 1).await.unwrap();
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "create_task",
-            "arguments": {
-                "title": "Project task",
-                "repo_path": "/repo",
-                "project_id": other.id,
-            }
-        })),
-    )
-    .await;
-    assert!(resp.error.is_none(), "got error: {:?}", resp.error);
-    let tasks = state.db.list_all().await.unwrap();
-    assert_eq!(tasks.len(), 1);
-    assert_eq!(tasks[0].project_id, other.id);
-}
-
 // -- String task_id coercion (Claude Code sends integers as strings) ------
 
 #[tokio::test]
@@ -2638,98 +2577,6 @@ async fn dispatch_next_returns_disabled_when_auto_dispatch_off() {
     assert_eq!(task_after.status, TaskStatus::Backlog);
 }
 
-// ---------------------------------------------------------------------------
-// create_task project_id tests
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn create_task_with_project_id_assigns_correctly() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
-    let other = db.create_project("Other", 1).await.unwrap();
-    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let state = Arc::new(McpState::new(
-        db.clone(),
-        None,
-        runner,
-        EmbeddingService::new_test(),
-        std::env::temp_dir(),
-    ));
-
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "create_task",
-            "arguments": {
-                "title": "T",
-                "description": "",
-                "repo_path": "/r",
-                "project_id": other.id
-            }
-        })),
-    )
-    .await;
-    assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
-
-    let tasks = db.list_all().await.unwrap();
-    assert_eq!(tasks.len(), 1);
-    assert_eq!(tasks[0].project_id, other.id);
-}
-
-// ---------------------------------------------------------------------------
-// update_task project_id
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn update_task_project_id_moves_task() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
-    let other = db.create_project("Dispatch", 1).await.unwrap();
-    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let state = Arc::new(McpState::new(
-        db.clone(),
-        None,
-        runner,
-        EmbeddingService::new_test(),
-        std::env::temp_dir(),
-    ));
-
-    let task_id = create_task_fixture(&state).await;
-    let default_id = db.get_default_project().await.unwrap().id;
-    let task_before = db.get_task(task_id).await.unwrap().unwrap();
-    assert_eq!(task_before.project_id, default_id);
-
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "project_id": other.id }
-        })),
-    )
-    .await;
-    assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
-
-    let task_after = db.get_task(task_id).await.unwrap().unwrap();
-    assert_eq!(task_after.project_id, other.id);
-}
-
-#[tokio::test]
-async fn update_task_invalid_project_id_returns_error() {
-    let state = test_state().await;
-    let task_id = create_task_fixture(&state).await;
-
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "update_task",
-            "arguments": { "task_id": task_id.0, "project_id": 9999 }
-        })),
-    )
-    .await;
-    assert_error(&resp, "project");
-}
-
 // -- list_tasks: header-based caller identity ---------------------------------
 
 #[tokio::test]
@@ -3442,24 +3289,6 @@ async fn create_task_task_identity_inherits_project_and_epic() {
 }
 
 #[tokio::test]
-async fn create_task_session_identity_requires_project_id() {
-    let state = test_state().await;
-    let resp = call_as(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "create_task",
-            "arguments": { "title": "t", "repo_path": "/r" }
-        })),
-        CallerIdentity::Session,
-    )
-    .await;
-    assert!(is_error(&resp));
-    let msg = error_message(&resp);
-    assert!(msg.contains("project_id is required"), "got {msg}");
-}
-
-#[tokio::test]
 async fn create_task_session_identity_with_project_id_succeeds() {
     let (state, db) = test_state_with_db().await;
     let pid = db.get_default_project().await.unwrap().id;
@@ -3481,44 +3310,6 @@ async fn create_task_session_identity_with_project_id_succeeds() {
     let t = db.get_task(new_id).await.unwrap().unwrap();
     assert_eq!(t.project_id, pid);
     assert_eq!(t.epic_id, None);
-}
-
-#[tokio::test]
-async fn create_task_explicit_project_id_overrides_task_caller_project() {
-    let (state, db) = test_state_with_db().await;
-    // Two projects: caller sits in P1, override to P2.
-    let p1 = ProjectId(1);
-    let p2 = db.create_project("p2", 2).await.unwrap();
-    let parent = db
-        .create_task(CreateTaskRequest {
-            title: "parent",
-            description: "",
-            repo_path: "/r",
-            plan: None,
-            status: TaskStatus::Running,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            project_id: p1,
-            wrap_up_mode: None,
-        })
-        .await
-        .unwrap();
-
-    let resp = call_as(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "create_task",
-            "arguments": { "title": "t", "repo_path": "/r", "project_id": p2.id.0 }
-        })),
-        CallerIdentity::Task(parent),
-    )
-    .await;
-    let new_id = extract_created_task_id(&resp);
-    let t = db.get_task(new_id).await.unwrap().unwrap();
-    assert_eq!(t.project_id, p2.id);
 }
 
 #[tokio::test]

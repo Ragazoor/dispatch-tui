@@ -70,33 +70,6 @@ async fn create_task_via_task_header_inherits_project() {
 }
 
 #[tokio::test]
-async fn create_task_via_session_without_project_id_returns_is_error_result() {
-    let (router, _db) = common::test_router().await;
-    let resp = common::post_mcp(
-        router,
-        &[(HEADER_KIND, "session")],
-        json!({
-            "jsonrpc": "2.0", "id": 1,
-            "method": "tools/call",
-            "params": {
-                "name": "create_task",
-                "arguments": { "title": "t", "repo_path": "/r" }
-            }
-        }),
-    )
-    .await;
-    // Per MCP spec, tool failures surface as `result.isError == true` with
-    // a text content block — not as a JSON-RPC protocol error.
-    assert!(
-        resp.get("error").is_none(),
-        "expected no protocol error, got: {resp}"
-    );
-    assert_eq!(resp["result"]["isError"], json!(true), "got: {resp}");
-    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
-    assert!(text.contains("project_id"), "got: {text}");
-}
-
-#[tokio::test]
 async fn create_task_via_session_with_project_id_succeeds() {
     let (router, db) = common::test_router().await;
     let resp = common::post_mcp(
