@@ -10,7 +10,7 @@
 #   3. Set feed_command on your Reviews epic to the absolute path of the local copy.
 #
 # Output format (FeedItem):
-#   [{"external_id":"review:org/repo#42","title":"#42 PR title","description":"...","url":"...","status":"backlog","tag":"pr-review","labels":["repo"]}]
+#   [{"external_id":"review:org/repo#42","title":"#42 PR title","description":"...","url":"...","status":"backlog","tag":"pr-review","labels":["@author","repo"]}]
 #
 # Note: review-requested:@me includes team review requests when you are a member
 # of the requested team — no separate per-team query needed.
