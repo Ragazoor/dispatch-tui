@@ -242,6 +242,29 @@ fn open_rag_db(repo_path: &Path) -> Result<rusqlite::Connection> {
     Ok(conn)
 }
 
+#[allow(dead_code)]
+const INDEXABLE_EXTENSIONS: &[&str] = &["md", "rs", "allium"];
+
+#[allow(dead_code)]
+fn walk_indexable_files(repo_path: &Path) -> Result<Vec<std::path::PathBuf>> {
+    let dispatch_dir = repo_path.join(DISPATCH_DIR);
+    let mut files = Vec::new();
+    for entry in ignore::WalkBuilder::new(repo_path).hidden(false).build() {
+        let entry = entry?;
+        let path = entry.path();
+        if path.starts_with(&dispatch_dir) {
+            continue;
+        }
+        if entry.file_type().is_some_and(|ft| ft.is_file()) {
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            if INDEXABLE_EXTENSIONS.contains(&ext) {
+                files.push(path.to_owned());
+            }
+        }
+    }
+    Ok(files)
+}
+
 fn walk_md_files(repo_path: &Path) -> Result<Vec<std::path::PathBuf>> {
     let dispatch_dir = repo_path.join(DISPATCH_DIR);
     let mut files = Vec::new();
@@ -943,6 +966,40 @@ mod tests {
         let found = walk_md_files(dir.path()).unwrap();
         assert_eq!(found.len(), 1);
         assert!(found[0].ends_with("real.md"));
+    }
+
+    // --- walk_indexable_files ---
+
+    #[test]
+    fn walk_indexable_finds_md_rs_and_allium() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("note.md"), "# Note").unwrap();
+        std::fs::write(dir.path().join("lib.rs"), "fn foo() {}").unwrap();
+        std::fs::write(dir.path().join("spec.allium"), "entity Task {}").unwrap();
+        std::fs::write(dir.path().join("config.txt"), "text").unwrap();
+        let found = walk_indexable_files(dir.path()).unwrap();
+        assert_eq!(found.len(), 3, "should find .md, .rs, .allium but not .txt");
+    }
+
+    #[test]
+    fn walk_indexable_skips_dispatch_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".dispatch")).unwrap();
+        std::fs::write(dir.path().join(".dispatch").join("ignored.rs"), "fn x() {}").unwrap();
+        std::fs::write(dir.path().join("real.rs"), "fn y() {}").unwrap();
+        let found = walk_indexable_files(dir.path()).unwrap();
+        assert_eq!(found.len(), 1);
+        assert!(found[0].ends_with("real.rs"));
+    }
+
+    #[test]
+    fn walk_indexable_ignores_unsupported_extensions() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("script.py"), "def foo(): pass").unwrap();
+        std::fs::write(dir.path().join("data.json"), "{}").unwrap();
+        std::fs::write(dir.path().join("lib.rs"), "fn foo() {}").unwrap();
+        let found = walk_indexable_files(dir.path()).unwrap();
+        assert_eq!(found.len(), 1, "only .rs should be found");
     }
 
     // --- hash_file ---
