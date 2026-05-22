@@ -86,7 +86,7 @@ fn chunk_by_declarations(
                 main_current.push_str(line);
                 main_current.push('\n');
             }
-            attr_buffer = String::new();
+            attr_buffer.clear();
             has_seen_decl = true;
         } else if is_attr_line(line) {
             attr_buffer.push_str(line);
@@ -96,7 +96,7 @@ fn chunk_by_declarations(
             main_current.push_str(&attr_buffer);
             main_current.push_str(line);
             main_current.push('\n');
-            attr_buffer = String::new();
+            attr_buffer.clear();
         }
     }
 
@@ -104,14 +104,6 @@ fn chunk_by_declarations(
     let remaining = format!("{main_current}{attr_buffer}");
     if !remaining.trim().is_empty() {
         chunks.push(remaining.trim_end().to_string());
-    }
-
-    if chunks.is_empty() {
-        let trimmed = content.trim();
-        if !trimmed.is_empty() {
-            return vec![trimmed.to_string()];
-        }
-        return vec![];
     }
 
     chunks
