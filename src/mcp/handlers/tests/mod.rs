@@ -721,3 +721,43 @@ async fn tool_schemas_match_arg_structs() {
         }
     }
 }
+
+#[tokio::test]
+async fn list_projects_tool_is_removed() {
+    let state = test_state().await;
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "list_projects", "arguments": {} })),
+    )
+    .await;
+    // Per MCP spec, unknown tools surface as isError: true
+    let result = resp.result.expect("expected isError result");
+    assert_eq!(result["isError"], json!(true));
+    let text = result["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("Unknown tool"), "got: {text}");
+}
+
+#[tokio::test]
+async fn create_task_from_session_without_project_id_uses_default() {
+    let (state, db) = test_state_with_db().await;
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "create_task",
+            "arguments": { "title": "T", "repo_path": "/r" }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
+    let result = resp.result.as_ref().expect("expected result");
+    assert!(
+        result.get("isError").is_none() || result["isError"] != json!(true),
+        "unexpected isError: {:?}",
+        resp.result
+    );
+    let tasks = db.list_all().await.unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].project_id, crate::models::ProjectId(1));
+}
