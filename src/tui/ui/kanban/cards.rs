@@ -232,6 +232,7 @@ pub(super) fn render_epic_header_item(epic: &Epic, col_width: u16) -> ListItem<'
 /// Build a styled two-line ListItem for a task card in a kanban column.
 /// Line 1: stripe + title
 /// Line 2: status icon + age/activity metadata
+#[allow(clippy::too_many_arguments)]
 pub(super) fn build_task_list_item<'a>(
     task: &Task,
     status: TaskStatus,
