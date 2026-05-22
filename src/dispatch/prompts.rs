@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::db;
-use crate::models::{EpicId, Learning, ProjectId, RetrievalSource, Task, TaskId, TaskTag};
+use crate::models::{EpicId, Learning, RetrievalSource, Task, TaskId, TaskTag};
 use crate::service::embeddings::{
     deserialize_candidate_rows, embed_text_for_query, rag_rank_learnings, EmbeddingService,
     RagRankParams,
@@ -38,50 +38,6 @@ impl EpicContext {
     }
 }
 
-/// Project context passed to prompt builders so agents know which project to
-/// assign sub-tasks to. The MCP `create_task` tool requires `project_id`; the
-/// agent reads it from the `ProjectId:` line in the task block.
-pub struct ProjectContext {
-    pub project_id: ProjectId,
-    pub project_name: String,
-}
-
-impl ProjectContext {
-    /// Build project context for a task. Looks up the task's project_id; falls
-    /// back to a synthetic name if the project record is missing (should not
-    /// happen in practice — every task is FK-bound to a real project).
-    pub async fn from_db(task: &Task, db: &dyn db::TaskStore) -> Self {
-        let lookup = db
-            .list_projects()
-            .await
-            .ok()
-            .and_then(|projects| projects.into_iter().find(|p| p.id == task.project_id));
-        match lookup {
-            Some(p) => ProjectContext {
-                project_id: p.id,
-                project_name: p.name,
-            },
-            None => ProjectContext {
-                project_id: task.project_id,
-                project_name: format!("project #{}", task.project_id),
-            },
-        }
-    }
-
-    pub(super) fn prompt_section(&self) -> String {
-        format!(
-            "\n\nThis task is in project #{}: {}.\n\
-            Sub-tasks created via the create_task MCP tool inherit the \
-            project (and epic, if any) from this task automatically — \
-            caller identity is established by the dispatch HTTP transport, \
-            not a tool argument. Pass project_id or epic_id explicitly only \
-            to override the inherited values; pass epic_id: null to create \
-            a task with no epic.",
-            self.project_id, self.project_name,
-        )
-    }
-}
-
 pub(super) fn build_tmux_window_name(task_id: TaskId) -> String {
     format!("task-{task_id}")
 }
@@ -102,28 +58,17 @@ pub(super) fn epic_preamble(epic: Option<&EpicContext>) -> (String, String) {
     (id_line, section)
 }
 
-/// Returns `(project_id_line, project_section)` for embedding in agent prompts.
-pub(super) fn project_preamble(project: Option<&ProjectContext>) -> (String, String) {
-    let id_line = project.map_or(String::new(), |p| {
-        format!("\n  ProjectId: {}", p.project_id)
-    });
-    let section = project.map_or(String::new(), |p| p.prompt_section());
-    (id_line, section)
-}
-
 /// Standard task identification block shared by all task agent prompts.
 pub(super) fn task_block(
     task_id: TaskId,
     title: &str,
     description: &str,
     epic: Option<&EpicContext>,
-    project: Option<&ProjectContext>,
 ) -> String {
     let (epic_id_line, epic_section) = epic_preamble(epic);
-    let (project_id_line, project_section) = project_preamble(project);
     format!(
         "Task:\n  ID: {task_id}\n  Title: {title}\n  Description: {description}\
-         {project_id_line}{epic_id_line}{epic_section}{project_section}"
+         {epic_id_line}{epic_section}"
     )
 }
 
@@ -248,10 +193,9 @@ pub(super) fn build_prompt(
     description: &str,
     plan: Option<&str>,
     epic: Option<&EpicContext>,
-    project: Option<&ProjectContext>,
     ctx: &PromptContext<'_>,
 ) -> String {
-    let block = task_block(task_id, title, description, epic, project);
+    let block = task_block(task_id, title, description, epic);
     let is_dependabot = matches!(ctx.tag, Some(TaskTag::Dependabot));
     let addendum = match (is_dependabot, plan) {
         (true, _) => dependabot_review_addendum(task_id),
@@ -357,10 +301,9 @@ pub(super) fn build_quick_dispatch_prompt(
     title: &str,
     description: &str,
     epic: Option<&EpicContext>,
-    project: Option<&ProjectContext>,
     ctx: &PromptContext<'_>,
 ) -> String {
-    let block = task_block(task_id, title, description, epic, project);
+    let block = task_block(task_id, title, description, epic);
     let addendum = format!(
         "This is a quick-dispatched task with a placeholder title. Start by asking the user \
 what they want to achieve. Once you understand the goal, call `update_task` with a \
@@ -391,10 +334,9 @@ pub(super) fn build_research_prompt(
     title: &str,
     description: &str,
     epic: Option<&EpicContext>,
-    project: Option<&ProjectContext>,
     ctx: &PromptContext<'_>,
 ) -> String {
-    let block = task_block(task_id, title, description, epic, project);
+    let block = task_block(task_id, title, description, epic);
     let verify = render_verification(ctx.verify_command.as_deref());
 
     format!(
@@ -422,14 +364,12 @@ pub(super) fn build_epic_planning_prompt(
     task_title: &str,
     task_description: &str,
     epic: &EpicContext,
-    project: &ProjectContext,
 ) -> String {
     let block = task_block(
         task_id,
         task_title,
         task_description,
         Some(epic),
-        Some(project),
     );
     let addendum = format!(
         "Your goal is to explore the codebase, write an implementation plan, and break \
@@ -442,7 +382,6 @@ Steps:\n\
 3. Create work packages from the plan using `create_task`. Work packages are kanban \
 tasks — do not confuse them with subtasks inside the plan document itself:\n\
    - Set `epic_id={epic_id}` on every work package\n\
-   - Set `project_id={project_id}` on every work package\n\
    - Use `sort_order` to control execution order (1, 2, 3, \u{2026})\n\
    - Work packages at the same sort_order in different repositories run in parallel\n\
    - Work packages in the same repository must have different sort_order values\n\
@@ -452,7 +391,6 @@ After creating the work packages, confirm with the user before doing anything fu
 \n\
 IMPORTANT: Do NOT start implementing. Your job ends after creating the work packages.",
         epic_id = epic.epic_id,
-        project_id = project.project_id,
     );
 
     format!(
@@ -639,7 +577,6 @@ mod tests {
             "Research async runtimes",
             "Compare tokio vs async-std",
             None,
-            None,
             &PromptContext::default(),
         );
         assert!(
@@ -675,7 +612,6 @@ mod tests {
             "desc",
             Some("/path/to/plan.md"),
             None,
-            None,
             &PromptContext::default(),
         );
         assert!(
@@ -692,7 +628,6 @@ mod tests {
             "desc",
             None,
             None,
-            None,
             &PromptContext::default(),
         );
         assert!(
@@ -707,7 +642,6 @@ mod tests {
             TaskId(1),
             "title",
             "desc",
-            None,
             None,
             &PromptContext::default(),
         );
@@ -736,7 +670,6 @@ mod tests {
             TaskId(7),
             "Research async runtimes",
             "Compare tokio vs async-std",
-            None,
             None,
             &PromptContext::default(),
         );
@@ -827,7 +760,7 @@ mod tests {
             tag: None,
             verify_command: None,
         };
-        let text = build_prompt(TaskId(1), "title", "desc", None, None, None, &ctx);
+        let text = build_prompt(TaskId(1), "title", "desc", None, None, &ctx);
         // Procedural learnings no longer appear as a verbatim prefix — prompt
         // always starts with the task block.
         assert!(text.starts_with("Your task is:"));
@@ -843,7 +776,6 @@ mod tests {
             TaskId(1),
             "title",
             "desc",
-            None,
             None,
             &PromptContext::default(),
         );
@@ -861,7 +793,6 @@ mod tests {
             TaskId(42),
             "Bump serde from 1.0.0 to 1.0.1",
             "https://github.com/example/repo/pull/7",
-            None,
             None,
             None,
             &ctx,
@@ -912,7 +843,6 @@ mod tests {
             "desc",
             None,
             None,
-            None,
             &PromptContext::default(),
         );
         assert!(!text.contains("Dependabot PR review"));
@@ -925,7 +855,7 @@ mod tests {
             verify_command: Some("cargo test".to_string()),
             ..PromptContext::default()
         };
-        let text = build_prompt(TaskId(1), "t", "d", None, None, None, &ctx);
+        let text = build_prompt(TaskId(1), "t", "d", None, None, &ctx);
 
         let header_idx = text
             .find("## Verification")
@@ -949,7 +879,7 @@ mod tests {
     #[test]
     fn build_prompt_omits_verification_section_when_none() {
         let ctx = PromptContext::default();
-        let text = build_prompt(TaskId(1), "t", "d", None, None, None, &ctx);
+        let text = build_prompt(TaskId(1), "t", "d", None, None, &ctx);
         assert!(!text.contains("## Verification"));
         assert!(!text.contains("Before declaring work complete"));
     }
@@ -960,7 +890,7 @@ mod tests {
             verify_command: Some("cargo test".to_string()),
             ..PromptContext::default()
         };
-        let text = build_prompt(TaskId(1), "t", "d", None, None, None, &ctx);
+        let text = build_prompt(TaskId(1), "t", "d", None, None, &ctx);
         let task_idx = text.find("Your task is:").unwrap();
         let verify_idx = text.find("## Verification").unwrap();
         assert!(
@@ -975,7 +905,7 @@ mod tests {
             verify_command: Some("cargo test".to_string()),
             ..PromptContext::default()
         };
-        let text = build_quick_dispatch_prompt(TaskId(1), "t", "d", None, None, &ctx);
+        let text = build_quick_dispatch_prompt(TaskId(1), "t", "d", None, &ctx);
         assert!(
             text.contains("## Verification"),
             "quick dispatch prompt must include verification section when verify_command is set"
@@ -993,7 +923,7 @@ mod tests {
     #[test]
     fn build_quick_dispatch_prompt_omits_verification_section_when_none() {
         let ctx = PromptContext::default();
-        let text = build_quick_dispatch_prompt(TaskId(1), "t", "d", None, None, &ctx);
+        let text = build_quick_dispatch_prompt(TaskId(1), "t", "d", None, &ctx);
         assert!(
             !text.contains("## Verification"),
             "quick dispatch prompt must not include verification section when verify_command is None"
