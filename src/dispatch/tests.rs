@@ -3,7 +3,7 @@ use super::prompts::{
     allium_instruction, build_epic_planning_prompt, build_prompt, build_quick_dispatch_prompt,
     build_tmux_window_name, epic_preamble, mcp_tools_instruction, plan_and_attach_instruction,
     rebase_preamble, task_block, tdd_instruction, wrap_up_instruction, EpicContext,
-    LearningInjections, ProjectContext, PromptContext,
+    LearningInjections, PromptContext,
 };
 use super::worktree::provision_worktree;
 use super::*;
@@ -19,7 +19,7 @@ use std::process::Output;
 
 #[test]
 fn task_block_contains_id_title_description() {
-    let block = task_block(TaskId(5), "My title", "My description", None, None);
+    let block = task_block(TaskId(5), "My title", "My description", None);
     assert!(block.contains("5"));
     assert!(block.contains("My title"));
     assert!(block.contains("My description"));
@@ -31,44 +31,9 @@ fn task_block_includes_epic_section_when_present() {
         epic_id: EpicId(3),
         epic_title: "Big Epic".to_string(),
     };
-    let block = task_block(TaskId(1), "T", "D", Some(&ctx), None);
+    let block = task_block(TaskId(1), "T", "D", Some(&ctx));
     assert!(block.contains("EpicId: 3"));
     assert!(block.contains("Big Epic"));
-}
-
-#[test]
-fn task_block_includes_project_section_when_present() {
-    let ctx = ProjectContext {
-        project_id: ProjectId(42),
-        project_name: "My Project".to_string(),
-    };
-    let block = task_block(TaskId(1), "T", "D", None, Some(&ctx));
-    assert!(block.contains("ProjectId: 42"), "block was: {block}");
-    assert!(block.contains("My Project"), "block was: {block}");
-    assert!(
-        !block.contains("caller_task_id"),
-        "prompt should no longer mention caller_task_id — identity is in the \
-         MCP HTTP transport, not a tool argument. Block was: {block}"
-    );
-}
-
-#[test]
-fn build_prompt_includes_project_context() {
-    let ctx = ProjectContext {
-        project_id: ProjectId(7),
-        project_name: "Dispatch".to_string(),
-    };
-    let prompt = build_prompt(
-        TaskId(1),
-        "Task",
-        "Desc",
-        None,
-        None,
-        Some(&ctx),
-        &PromptContext::default(),
-    );
-    assert!(prompt.contains("ProjectId: 7"));
-    assert!(prompt.contains("Dispatch"));
 }
 
 #[test]
@@ -636,13 +601,6 @@ const SHARED_TRAILING_LINES: &[&str] = &[
     "/wrap-up",                      // wrap_up_instruction (universal)
 ];
 
-fn project_ctx() -> ProjectContext {
-    ProjectContext {
-        project_id: ProjectId(1),
-        project_name: "Default".to_string(),
-    }
-}
-
 fn epic_ctx() -> EpicContext {
     EpicContext {
         epic_id: EpicId(7),
@@ -651,7 +609,6 @@ fn epic_ctx() -> EpicContext {
 }
 
 fn all_aligned_prompts() -> [(&'static str, String); 4] {
-    let project = project_ctx();
     let epic = epic_ctx();
     [
         (
@@ -660,7 +617,6 @@ fn all_aligned_prompts() -> [(&'static str, String); 4] {
                 TaskId(1),
                 "Task",
                 "Desc",
-                None,
                 None,
                 None,
                 &PromptContext::default(),
@@ -674,7 +630,6 @@ fn all_aligned_prompts() -> [(&'static str, String); 4] {
                 "Desc",
                 Some("docs/plans/p.md"),
                 None,
-                None,
                 &PromptContext::default(),
             ),
         ),
@@ -684,7 +639,6 @@ fn all_aligned_prompts() -> [(&'static str, String); 4] {
                 TaskId(1),
                 "Quick task",
                 "",
-                None,
                 None,
                 &PromptContext::default(),
             ),
@@ -696,7 +650,6 @@ fn all_aligned_prompts() -> [(&'static str, String); 4] {
                 "Plan: My Epic",
                 "Planning subtask for epic",
                 &epic,
-                &project,
             ),
         ),
     ]
@@ -735,14 +688,12 @@ fn every_prompt_uses_task_block_format() {
 
 #[test]
 fn epic_planning_prompt_uses_task_block_not_epic_header() {
-    let project = project_ctx();
     let epic = epic_ctx();
     let prompt = build_epic_planning_prompt(
         TaskId(42),
         "Plan: My Epic",
         "Planning subtask",
         &epic,
-        &project,
     );
     assert!(
         prompt.starts_with("You are planning an epic."),
@@ -769,9 +720,8 @@ fn epic_planning_prompt_uses_task_block_not_epic_header() {
 
 #[test]
 fn epic_planning_prompt_includes_work_package_steps_and_no_implement_guard() {
-    let project = project_ctx();
     let epic = epic_ctx();
-    let prompt = build_epic_planning_prompt(TaskId(1), "Plan", "Desc", &epic, &project);
+    let prompt = build_epic_planning_prompt(TaskId(1), "Plan", "Desc", &epic);
     assert!(prompt.contains("create_task"), "should mention create_task");
     assert!(prompt.contains("update_epic"), "should mention update_epic");
     assert!(prompt.contains("sort_order"), "should mention sort_order");
@@ -788,7 +738,6 @@ fn quick_dispatch_uses_unconditional_plan_and_attach_instruction() {
         TaskId(1),
         "Quick task",
         "",
-        None,
         None,
         &PromptContext::default(),
     );
@@ -1035,11 +984,7 @@ fn epic_planning_agent_uses_default_permission_mode() {
     ]);
 
     let task = make_task(&repo_path);
-    let project = ProjectContext {
-        project_id: ProjectId(1),
-        project_name: "Dispatch".to_string(),
-    };
-    epic_planning_agent(&task, EpicId(7), "Big Epic", &project, &mock).unwrap();
+    epic_planning_agent(&task, EpicId(7), "Big Epic", &mock).unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, 3, "claude");
@@ -1513,10 +1458,6 @@ fn check_pr_status_empty_output_returns_error() {
 
 #[test]
 fn epic_planning_prompt_contains_epic_context() {
-    let project = ProjectContext {
-        project_id: ProjectId(3),
-        project_name: "My Project".to_string(),
-    };
     let epic = EpicContext {
         epic_id: EpicId(42),
         epic_title: "Redesign auth".to_string(),
@@ -1526,7 +1467,6 @@ fn epic_planning_prompt_contains_epic_context() {
         "Plan: Redesign auth",
         "Rework the login flow",
         &epic,
-        &project,
     );
     assert!(prompt.contains("EpicId: 42"));
     assert!(prompt.contains("Redesign auth"));
@@ -1560,14 +1500,6 @@ fn epic_planning_prompt_contains_epic_context() {
     assert!(
         prompt.contains("work package"),
         "prompt should use 'work package' terminology"
-    );
-    assert!(
-        prompt.contains("ProjectId: 3"),
-        "prompt should include the ProjectId line"
-    );
-    assert!(
-        prompt.contains("project_id=3"),
-        "prompt should tell agent to set project_id on work packages"
     );
 }
 

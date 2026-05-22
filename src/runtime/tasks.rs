@@ -79,7 +79,6 @@ impl TuiRuntime {
         let paths = self.database.list_repo_paths().await.unwrap_or_default();
         app.update(Message::RepoPathsUpdated(paths));
         let epic_ctx = dispatch::EpicContext::from_db(&task, &*self.database).await;
-        let project_ctx = dispatch::ProjectContext::from_db(&task, &*self.database).await;
         let injected =
             dispatch::build_and_record_injections(&*self.database, &task, &self.emb_svc).await;
         let verify_command = dispatch::fetch_verify_command(&*self.database, &task.repo_path).await;
@@ -92,7 +91,6 @@ impl TuiRuntime {
                 &task,
                 &*runner,
                 epic_ctx.as_ref(),
-                Some(&project_ctx),
                 &injections,
                 verify_command.as_deref(),
             ) {
@@ -191,7 +189,6 @@ impl TuiRuntime {
 
     pub(super) async fn exec_dispatch_agent(&self, task: models::Task, mode: models::DispatchMode) {
         let epic_ctx = dispatch::EpicContext::from_db(&task, &*self.database).await;
-        let project_ctx = dispatch::ProjectContext::from_db(&task, &*self.database).await;
         let injected =
             dispatch::build_and_record_injections(&*self.database, &task, &self.emb_svc).await;
         let verify_command = dispatch::fetch_verify_command(&*self.database, &task.repo_path).await;
@@ -205,7 +202,6 @@ impl TuiRuntime {
                         t,
                         r,
                         epic_ctx.as_ref(),
-                        Some(&project_ctx),
                         &injections,
                         verify_command.as_deref(),
                     ),
@@ -213,7 +209,6 @@ impl TuiRuntime {
                         t,
                         r,
                         epic_ctx.as_ref(),
-                        Some(&project_ctx),
                         verify_command.as_deref(),
                     ),
                 }

@@ -216,8 +216,6 @@ impl TuiRuntime {
             task: task.clone(),
         }));
 
-        let project_ctx = dispatch::ProjectContext::from_db(&task, &*self.database).await;
-
         // Dispatch the planning subtask asynchronously
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
@@ -231,7 +229,7 @@ impl TuiRuntime {
                 epic_id = epic_id.0,
                 "dispatching epic planning agent"
             );
-            match dispatch::epic_planning_agent(&task, epic_id, &epic_title, &project_ctx, &*runner)
+            match dispatch::epic_planning_agent(&task, epic_id, &epic_title, &*runner)
             {
                 Ok(result) => {
                     let _ = tx.send(Message::Task(

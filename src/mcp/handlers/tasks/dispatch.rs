@@ -15,7 +15,6 @@ use crate::service::ClaimTaskParams;
 fn do_dispatch(
     task: &crate::models::Task,
     runner: &dyn crate::process::ProcessRunner,
-    project_ctx: dispatch::ProjectContext,
     epic_ctx: Option<dispatch::EpicContext>,
     injected: &[crate::models::Learning],
     verify_command: Option<String>,
@@ -26,7 +25,6 @@ fn do_dispatch(
             task,
             runner,
             epic_ctx.as_ref(),
-            Some(&project_ctx),
             &injections,
             verify_command.as_deref(),
         ),
@@ -34,7 +32,6 @@ fn do_dispatch(
             task,
             runner,
             epic_ctx.as_ref(),
-            Some(&project_ctx),
             verify_command.as_deref(),
         ),
     }
@@ -130,7 +127,6 @@ pub(crate) async fn handle_dispatch_next(
     let next_id = next_task.id;
     let next_title = next_task.title.clone();
     let next_epic_id = next_task.epic_id;
-    let project_ctx = dispatch::ProjectContext::from_db(&next_task, &*state.db).await;
     let epic_ctx = dispatch::EpicContext::from_db(&next_task, &*state.db).await;
     let db = state.db.clone();
     let runner = state.runner.clone();
@@ -146,7 +142,6 @@ pub(crate) async fn handle_dispatch_next(
             do_dispatch(
                 &next_task_for_blocking,
                 &*runner,
-                project_ctx,
                 epic_ctx,
                 &injected,
                 verify_command,
@@ -242,7 +237,6 @@ pub(crate) async fn handle_dispatch_task(
         );
     }
 
-    let project_ctx = dispatch::ProjectContext::from_db(&task, &*state.db).await;
     let epic_ctx = dispatch::EpicContext::from_db(&task, &*state.db).await;
     let db = state.db.clone();
     let runner = state.runner.clone();
@@ -256,7 +250,6 @@ pub(crate) async fn handle_dispatch_task(
         do_dispatch(
             &task,
             &*runner,
-            project_ctx,
             epic_ctx,
             &injected,
             verify_command,

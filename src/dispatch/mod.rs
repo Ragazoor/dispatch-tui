@@ -13,7 +13,7 @@ pub use agents::{
     quick_dispatch_agent, research_agent, resume_agent,
 };
 pub use finish::{finish_task, FinishError};
-pub use prompts::{build_and_record_injections, EpicContext, LearningInjections, ProjectContext};
+pub use prompts::{build_and_record_injections, EpicContext, LearningInjections};
 pub use worktree::{branch_from_worktree, cleanup_task, validate_repo_path};
 pub(crate) use worktree::{ensure_dispatch_dir_and_gitignore, DISPATCH_DIR};
 
