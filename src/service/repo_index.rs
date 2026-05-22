@@ -74,6 +74,7 @@ fn chunk_by_declarations(
 
     for line in content.lines() {
         if is_decl_boundary(line, decl_keywords) {
+            // main_current is non-empty whenever has_seen_decl is true, but guard is kept for clarity.
             if has_seen_decl && !main_current.is_empty() {
                 chunks.push(main_current.trim_end().to_string());
                 main_current = format!("{attr_buffer}{line}\n");
@@ -124,7 +125,7 @@ pub(crate) fn chunk_rust(content: &str) -> Vec<String> {
 pub(crate) fn chunk_allium(content: &str) -> Vec<String> {
     const ALLIUM_KEYWORDS: &[&str] = &[
         "entity ", "rule ", "surface ", "config ", "enum ",
-        "concept ", "external ", "invariant ",
+        "concept ", "external ", "invariant ", "value ",
     ];
     chunk_by_declarations(content, ALLIUM_KEYWORDS, |line| line.starts_with("-- "))
 }
@@ -673,6 +674,12 @@ mod tests {
         assert!(result[0].contains("#[orphan_at_eof]"), "got: {}", result[0]);
     }
 
+    #[test]
+    fn chunk_by_decls_adjacent_decls_no_blank_line_produce_two_chunks() {
+        let result = chunk_by_declarations("fn foo() {}\nfn bar() {}", &["fn "], |_| false);
+        assert_eq!(result.len(), 2, "adjacent decls should each be their own chunk: {:?}", result);
+    }
+
     // --- chunk_rust ---
 
     #[test]
@@ -839,6 +846,14 @@ mod tests {
         let chunks = chunk_allium(content);
         assert_eq!(chunks.len(), 2);
         assert!(chunks[1].contains("surface KanbanBoard"));
+    }
+
+    #[test]
+    fn chunk_allium_value_splits() {
+        let content = "entity Task {}\n\nvalue TrajectoryEntry {\n    id: u64\n}";
+        let chunks = chunk_allium(content);
+        assert_eq!(chunks.len(), 2);
+        assert!(chunks[1].contains("value TrajectoryEntry"));
     }
 
     // --- chunk_for_extension ---
