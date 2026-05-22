@@ -725,6 +725,10 @@ pub enum ColumnItem<'a> {
     /// Running and Review columns. The renderer must not also inject its own
     /// substatus header for the same group transition.
     SubstatusLabel(&'static str),
+    /// Non-selectable separator inserted in flat view between the last epic-grouped
+    /// task and the first orphan task (a task with no epic). Signals the visual
+    /// boundary so the renderer can draw a divider line.
+    OrphanSeparator,
 }
 
 impl ColumnItem<'_> {

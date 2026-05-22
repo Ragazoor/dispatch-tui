@@ -249,7 +249,7 @@ impl App {
                     )),
                 }
             }
-            Some(ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_)) => vec![],
+            Some(ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) | ColumnItem::OrphanSeparator) => vec![],
             None => {
                 if let ViewMode::Epic { epic_id, .. } = self.board.view_mode {
                     self.update(Message::Epic(crate::tui::messages::EpicMessage::Dispatch(
@@ -475,7 +475,7 @@ impl App {
                 let id = epic.id;
                 on_epic(self, id)
             }
-            Some(ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_)) => vec![],
+            Some(ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) | ColumnItem::OrphanSeparator) => vec![],
             None => vec![],
         }
     }

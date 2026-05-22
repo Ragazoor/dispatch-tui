@@ -304,7 +304,7 @@ fn task_column_segment(
             let selected = match item {
                 ColumnItem::Task(t) => app.selected_tasks().contains(&t.id),
                 ColumnItem::Epic(e) => app.selected_epics().contains(&e.id),
-                ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) => unreachable!(),
+                ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) | ColumnItem::OrphanSeparator => unreachable!(),
             };
             (n + 1, all && selected)
         });

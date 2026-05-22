@@ -165,7 +165,7 @@ fn render_task_column(
                     .get(&e.id)
                     .map(|s| s.substatus.column_priority())
                     .unwrap_or(0),
-                ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) => unreachable!(),
+                ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) | ColumnItem::OrphanSeparator => unreachable!(),
             };
             if Some(priority) != current_priority {
                 current_priority = Some(priority);
@@ -179,7 +179,7 @@ fn render_task_column(
                         .map(|s| s.substatus.header_label())
                         .unwrap_or_default()
                         .to_string(),
-                    ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) => unreachable!(),
+                    ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) | ColumnItem::OrphanSeparator => unreachable!(),
                 };
                 list_items.push(render_substatus_header(&label, list_items.is_empty()));
             }
@@ -199,7 +199,7 @@ fn render_task_column(
             ColumnItem::Epic(epic) => {
                 render_epic_item(epic, is_cursor, app, epic_stats, status, col_area.width)
             }
-            ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) => unreachable!(),
+            ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) | ColumnItem::OrphanSeparator => unreachable!(),
         });
     }
 

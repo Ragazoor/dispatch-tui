@@ -710,8 +710,8 @@ impl App {
                 };
                 (priority, e.sort_order.unwrap_or(e.id.0), e.id.0)
             }
-            ColumnItem::EpicHeader(_) => {
-                unreachable!("EpicHeader never produced in non-flat mode")
+            ColumnItem::EpicHeader(_) | ColumnItem::OrphanSeparator => {
+                unreachable!("EpicHeader/OrphanSeparator never produced in non-flat mode")
             }
             ColumnItem::SubstatusLabel(_) => {
                 unreachable!("SubstatusLabel never produced in non-flat mode")
@@ -837,8 +837,8 @@ impl App {
             let (sort_order, id) = match item {
                 ColumnItem::Task(t) => (t.sort_order, t.id.0),
                 ColumnItem::Epic(e) => (e.sort_order, e.id.0),
-                ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) => {
-                    unreachable!("EpicHeader/SubstatusLabel never produced by column_items_for_visual_column")
+                ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) | ColumnItem::OrphanSeparator => {
+                    unreachable!("EpicHeader/SubstatusLabel/OrphanSeparator never produced by column_items_for_visual_column")
                 }
             };
             (sort_order.unwrap_or(i64::MAX), id)
@@ -940,7 +940,7 @@ impl App {
             .map(|item| match item {
                 ColumnItem::Task(t) => ColumnAnchor::Task(t.id),
                 ColumnItem::Epic(e) => ColumnAnchor::Epic(e.id),
-                ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) => unreachable!(),
+                ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) | ColumnItem::OrphanSeparator => unreachable!(),
             });
         self.selection_mut().anchor = new_anchor;
     }
@@ -995,7 +995,7 @@ impl App {
                 let item_anchor = match item {
                     ColumnItem::Task(t) => ColumnAnchor::Task(t.id),
                     ColumnItem::Epic(e) => ColumnAnchor::Epic(e.id),
-                    ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) => continue,
+                    ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) | ColumnItem::OrphanSeparator => continue,
                 };
                 if item_anchor == anchor {
                     found = Some((nav_col, selectable_row));
