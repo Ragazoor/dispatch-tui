@@ -325,6 +325,33 @@ pub(super) async fn resolve_project_id(
 }
 
 // ---------------------------------------------------------------------------
+// Caller task lookup helper
+// ---------------------------------------------------------------------------
+
+/// Fetch the task identified by `caller_id` from the DB, mapping errors to
+/// JSON-RPC responses. Used by handlers that resolve the caller task for
+/// context inheritance (project_id, epic_id, etc.).
+pub(super) async fn fetch_caller_task(
+    db: &dyn crate::db::TaskStore,
+    id: &Option<serde_json::Value>,
+    caller_id: crate::models::TaskId,
+) -> Result<crate::models::Task, JsonRpcResponse> {
+    match db.get_task(caller_id).await {
+        Ok(Some(task)) => Ok(task),
+        Ok(None) => Err(JsonRpcResponse::err(
+            id.clone(),
+            -32602,
+            format!("Unknown caller task {}", caller_id.0),
+        )),
+        Err(e) => Err(JsonRpcResponse::err(
+            id.clone(),
+            -32603,
+            format!("Database error: {e}"),
+        )),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // ServiceError → JsonRpcResponse conversion
 // ---------------------------------------------------------------------------
 
@@ -474,5 +501,51 @@ mod flexible_i64_tests {
         assert_eq!(null_case.v, None);
         let absent_case: OptWrap = serde_json::from_str(r#"{}"#).unwrap();
         assert_eq!(absent_case.v, None);
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod fetch_caller_task_tests {
+    use super::fetch_caller_task;
+    use crate::db::{CreateTaskRequest, Database, TaskCrud};
+    use crate::models::{ProjectId, TaskId, TaskStatus};
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn returns_task_when_found() {
+        let db = Database::open_in_memory().await.unwrap();
+        let task_id = db
+            .create_task(CreateTaskRequest {
+                title: "caller",
+                description: "",
+                repo_path: "/repo",
+                plan: None,
+                status: TaskStatus::Running,
+                base_branch: "main",
+                epic_id: None,
+                sort_order: None,
+                tag: None,
+                project_id: ProjectId(1),
+                wrap_up_mode: None,
+            })
+            .await
+            .unwrap();
+
+        let result = fetch_caller_task(&db, &Some(json!(1)), task_id).await;
+        let task = result.unwrap();
+        assert_eq!(task.id, task_id);
+        assert_eq!(task.title, "caller");
+    }
+
+    #[tokio::test]
+    async fn returns_invalid_params_error_when_not_found() {
+        let db = Database::open_in_memory().await.unwrap();
+
+        let result = fetch_caller_task(&db, &Some(json!(1)), TaskId(99999)).await;
+        let err_resp = result.unwrap_err();
+        let err = err_resp.error.unwrap();
+        assert_eq!(err.code, -32602);
+        assert!(err.message.contains("99999"), "got: {}", err.message);
     }
 }

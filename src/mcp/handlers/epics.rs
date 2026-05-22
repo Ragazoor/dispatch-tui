@@ -8,8 +8,8 @@ use crate::service::{CreateEpicParams, EpicService, ServiceError, UpdateEpicPara
 
 use super::types::{
     deserialize_flexible_i64, deserialize_nullable_flexible_i64, deserialize_nullable_string,
-    deserialize_optional_flexible_i64, parse_args, resolve_project_id, service_err_to_response,
-    JsonRpcResponse,
+    deserialize_optional_flexible_i64, fetch_caller_task, parse_args, resolve_project_id,
+    service_err_to_response, JsonRpcResponse,
 };
 
 // ---------------------------------------------------------------------------
@@ -92,16 +92,9 @@ pub(super) async fn handle_create_epic(
         ProjectId(pid)
     } else if let CallerIdentity::Task(caller_id) = identity {
         // no explicit project_id, no parent: inherit caller task's project
-        match state.db.get_task(*caller_id).await {
-            Ok(Some(caller)) => caller.project_id,
-            Ok(None) => {
-                return JsonRpcResponse::err(
-                    id,
-                    -32602,
-                    format!("Unknown caller task {}", caller_id.0),
-                )
-            }
-            Err(e) => return JsonRpcResponse::err(id, -32603, format!("Database error: {e}")),
+        match fetch_caller_task(&*state.db, &id, *caller_id).await {
+            Ok(caller) => caller.project_id,
+            Err(resp) => return resp,
         }
     } else {
         // session caller, no project_id: fall back to default project

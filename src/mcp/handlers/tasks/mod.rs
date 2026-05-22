@@ -9,8 +9,8 @@ use crate::models::{EpicId, LearningVerdict, ProjectId, SubStatus, Task, TaskSta
 // Promoted to pub(super) so sub-modules can `use super::{parse_args, ...}`
 pub(super) use super::types::{
     deserialize_flexible_i64, deserialize_nullable_flexible_i64, deserialize_nullable_wrap_up_mode,
-    deserialize_optional_flexible_i64, parse_args, service_err_to_response, JsonRpcResponse,
-    StatusFilter,
+    deserialize_optional_flexible_i64, fetch_caller_task, parse_args, service_err_to_response,
+    JsonRpcResponse, StatusFilter,
 };
 
 mod crud;

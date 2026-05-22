@@ -8,7 +8,7 @@ use crate::models::{EpicId, ProjectId, TaskId, TaskStatus};
 use crate::service::{CreateTaskParams, FieldUpdate, ListTasksFilter, ServiceError, UpdateTaskParams};
 
 use super::{
-    parse_args, service_err_to_response, JsonRpcResponse, StatusFilter,
+    fetch_caller_task, parse_args, service_err_to_response, JsonRpcResponse, StatusFilter,
     CreateTaskWithEpicArgs, GetTaskArgs, ListTasksArgs, QueryUsageArgs, UpdateTaskArgs,
 };
 
@@ -113,16 +113,9 @@ pub(crate) async fn handle_create_task(
 
     let (effective_project_id, effective_epic_id) = match identity {
         CallerIdentity::Task(caller_id) => {
-            let caller = match state.db.get_task(*caller_id).await {
-                Ok(Some(t)) => t,
-                Ok(None) => {
-                    return JsonRpcResponse::err(
-                        id,
-                        -32602,
-                        format!("Unknown caller task {}", caller_id.0),
-                    )
-                }
-                Err(e) => return JsonRpcResponse::err(id, -32603, format!("Database error: {e}")),
+            let caller = match fetch_caller_task(&*state.db, &id, *caller_id).await {
+                Ok(t) => t,
+                Err(resp) => return resp,
             };
             let pid = parsed.project_id.unwrap_or(caller.project_id.0);
             let eid = match parsed.epic_id {
@@ -214,16 +207,9 @@ pub(crate) async fn handle_list_tasks(
 
     let (derived_epic_id, derived_project_id, exclude_task_id) = match identity {
         CallerIdentity::Task(caller_id) => {
-            let caller = match state.db.get_task(*caller_id).await {
-                Ok(Some(t)) => t,
-                Ok(None) => {
-                    return JsonRpcResponse::err(
-                        id,
-                        -32602,
-                        format!("Unknown caller task {}", caller_id.0),
-                    )
-                }
-                Err(e) => return JsonRpcResponse::err(id, -32603, format!("Database error: {e}")),
+            let caller = match fetch_caller_task(&*state.db, &id, *caller_id).await {
+                Ok(t) => t,
+                Err(resp) => return resp,
             };
             let has_explicit_scope = parsed.epic_id.is_some()
                 || parsed.project_id.is_some()
