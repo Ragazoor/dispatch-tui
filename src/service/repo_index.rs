@@ -31,6 +31,92 @@ struct EmbeddedFile {
     embeddings: Vec<Vec<f32>>,
 }
 
+/// Strips leading visibility modifiers from a line.
+#[allow(dead_code)]
+fn strip_vis(s: &str) -> &str {
+    if let Some(rest) = s.strip_prefix("pub(crate) ") {
+        return rest;
+    }
+    if let Some(rest) = s.strip_prefix("pub(super) ") {
+        return rest;
+    }
+    if let Some(rest) = s.strip_prefix("pub ") {
+        return rest;
+    }
+    s
+}
+
+/// Returns true if `line` (at column 0) starts a declaration boundary.
+///
+/// Visibility (`pub`, `pub(crate)`, `pub(super)`) and async/unsafe modifiers
+/// are stripped before checking against `keywords`.
+#[allow(dead_code)]
+fn is_decl_boundary(line: &str, keywords: &[&str]) -> bool {
+    let s = strip_vis(line);
+    let s = s.strip_prefix("async ").unwrap_or(s);
+    let s = s.strip_prefix("unsafe ").unwrap_or(s);
+    keywords.iter().any(|kw| s.starts_with(kw))
+}
+
+/// Split `content` into chunks at declaration boundaries.
+///
+/// Uses a two-buffer algorithm:
+/// - `main_current`: non-attribute body lines for the current chunk.
+/// - `attr_buffer`: pending attribute/doc lines at column 0 that belong to
+///   the NEXT chunk when a declaration boundary arrives.
+#[allow(dead_code)]
+fn chunk_by_declarations(
+    content: &str,
+    decl_keywords: &[&str],
+    is_attr_line: impl Fn(&str) -> bool,
+) -> Vec<String> {
+    let mut chunks: Vec<String> = Vec::new();
+    let mut main_current = String::new();
+    let mut attr_buffer = String::new();
+    let mut has_seen_decl = false;
+
+    for line in content.lines() {
+        if is_decl_boundary(line, decl_keywords) {
+            if has_seen_decl && !main_current.is_empty() {
+                chunks.push(main_current.trim_end().to_string());
+                main_current = format!("{attr_buffer}{line}\n");
+            } else {
+                // First declaration: absorb preamble + pending attrs
+                main_current.push_str(&attr_buffer);
+                main_current.push_str(line);
+                main_current.push('\n');
+            }
+            attr_buffer = String::new();
+            has_seen_decl = true;
+        } else if is_attr_line(line) {
+            attr_buffer.push_str(line);
+            attr_buffer.push('\n');
+        } else {
+            // Flush attr_buffer into body (attr was orphaned — not followed by a decl)
+            main_current.push_str(&attr_buffer);
+            main_current.push_str(line);
+            main_current.push('\n');
+            attr_buffer = String::new();
+        }
+    }
+
+    // Append any remaining attr_buffer to the last chunk
+    let remaining = format!("{main_current}{attr_buffer}");
+    if !remaining.trim().is_empty() {
+        chunks.push(remaining.trim_end().to_string());
+    }
+
+    if chunks.is_empty() {
+        let trimmed = content.trim();
+        if !trimmed.is_empty() {
+            return vec![trimmed.to_string()];
+        }
+        return vec![];
+    }
+
+    chunks
+}
+
 /// Returns `(None, content)` if no valid frontmatter fence is found.
 fn split_frontmatter(content: &str) -> (Option<&str>, &str) {
     let s = content.trim_start();
@@ -431,6 +517,127 @@ mod tests {
         let chunks = chunk_file(content);
         assert_eq!(chunks.len(), 1);
         assert!(chunks[0].contains("Only Section"));
+    }
+
+    // --- chunk_by_declarations ---
+
+    #[test]
+    fn chunk_by_decls_empty_returns_no_chunks() {
+        let result = chunk_by_declarations("", &["fn "], |_| false);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn chunk_by_decls_whitespace_only_returns_no_chunks() {
+        let result = chunk_by_declarations("   \n\n  ", &["fn "], |_| false);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn chunk_by_decls_no_keyword_match_returns_single_chunk() {
+        let content = "use std::fmt;\n\nsome text";
+        let result = chunk_by_declarations(content, &["fn "], |_| false);
+        assert_eq!(result.len(), 1);
+        assert!(result[0].contains("some text"));
+    }
+
+    #[test]
+    fn chunk_by_decls_two_declarations_produce_two_chunks() {
+        let content = "fn foo() {}\n\nfn bar() {}";
+        let result = chunk_by_declarations(content, &["fn "], |_| false);
+        assert_eq!(result.len(), 2);
+        assert!(result[0].contains("fn foo()"), "got: {}", result[0]);
+        assert!(result[1].contains("fn bar()"), "got: {}", result[1]);
+    }
+
+    #[test]
+    fn chunk_by_decls_preamble_merges_into_first_chunk() {
+        let content = "use std::fmt;\n\nfn foo() {}";
+        let result = chunk_by_declarations(content, &["fn "], |_| false);
+        assert_eq!(result.len(), 1);
+        assert!(result[0].contains("use std::fmt;"), "got: {}", result[0]);
+        assert!(result[0].contains("fn foo()"), "got: {}", result[0]);
+    }
+
+    #[test]
+    fn chunk_by_decls_attr_before_second_decl_lands_in_new_chunk() {
+        let content = "fn foo() {}\n\n#[attr]\nfn bar() {}";
+        let result = chunk_by_declarations(content, &["fn "], |line| line.starts_with("#["));
+        assert_eq!(result.len(), 2);
+        assert!(
+            !result[0].contains("#[attr]"),
+            "attr should NOT be in foo chunk: {}",
+            result[0]
+        );
+        assert!(
+            result[1].contains("#[attr]"),
+            "attr should be in bar chunk: {}",
+            result[1]
+        );
+        assert!(result[1].contains("fn bar()"));
+    }
+
+    #[test]
+    fn chunk_by_decls_non_attr_line_flushes_attr_buffer_into_body() {
+        // An attr line followed by a non-attr non-boundary line gets absorbed into the body.
+        let content = "fn foo() {}\n#[orphan]\nbody line\nfn bar() {}";
+        let result = chunk_by_declarations(content, &["fn "], |line| line.starts_with("#["));
+        assert_eq!(result.len(), 2);
+        assert!(
+            result[0].contains("#[orphan]"),
+            "orphaned attr flushed into foo chunk: {}",
+            result[0]
+        );
+        assert!(result[1].contains("fn bar()"));
+    }
+
+    #[test]
+    fn chunk_by_decls_pub_prefix_triggers_split() {
+        let result = chunk_by_declarations(
+            "pub fn foo() {}\n\npub fn bar() {}",
+            &["fn "],
+            |_| false,
+        );
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn chunk_by_decls_pub_crate_prefix_triggers_split() {
+        let result = chunk_by_declarations(
+            "pub(crate) fn foo() {}\n\npub(crate) fn bar() {}",
+            &["fn "],
+            |_| false,
+        );
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn chunk_by_decls_async_prefix_triggers_split() {
+        let result = chunk_by_declarations(
+            "async fn foo() {}\n\nasync fn bar() {}",
+            &["fn "],
+            |_| false,
+        );
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn chunk_by_decls_attr_before_first_decl_stays_in_first_chunk() {
+        // attr_buffer is flushed into the first chunk (not lost) when the first declaration arrives.
+        let content = "#[derive(Debug)]\nstruct Foo {}";
+        let result = chunk_by_declarations(content, &["struct "], |l| l.starts_with("#["));
+        assert_eq!(result.len(), 1);
+        assert!(result[0].contains("#[derive(Debug)]"), "got: {}", result[0]);
+        assert!(result[0].contains("struct Foo"), "got: {}", result[0]);
+    }
+
+    #[test]
+    fn chunk_by_decls_trailing_attr_absorbed_into_last_chunk() {
+        // An attr at the very end of a file (after the last declaration body) stays in that chunk.
+        let content = "fn foo() {}\n#[orphan_at_eof]";
+        let result = chunk_by_declarations(content, &["fn "], |l| l.starts_with("#["));
+        assert_eq!(result.len(), 1);
+        assert!(result[0].contains("#[orphan_at_eof]"), "got: {}", result[0]);
     }
 
     // --- open_rag_db ---
