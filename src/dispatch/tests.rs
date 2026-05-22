@@ -190,7 +190,6 @@ fn build_prompt_contains_task_info() {
         "A nasty crash",
         None,
         None,
-        None,
         &PromptContext::default(),
     );
     assert!(prompt.contains("42"));
@@ -207,7 +206,6 @@ fn build_prompt_mentions_tdd() {
         "Desc",
         None,
         None,
-        None,
         &PromptContext::default(),
     );
     assert!(prompt.contains("TDD"));
@@ -221,7 +219,6 @@ fn build_prompt_mentions_wrap_up_skill() {
         "Title",
         "Desc",
         Some("docs/plans/p.md"),
-        None,
         None,
         &PromptContext::default(),
     );
@@ -246,7 +243,6 @@ fn build_prompt_without_plan_includes_wrap_up_universally() {
         "Desc",
         None,
         None,
-        None,
         &PromptContext::default(),
     );
     assert!(
@@ -261,7 +257,6 @@ fn build_prompt_without_plan_includes_planning_instruction() {
         TaskId(1),
         "Task",
         "Desc",
-        None,
         None,
         None,
         &PromptContext::default(),
@@ -288,7 +283,6 @@ fn build_prompt_without_plan_mentions_brainstorm_if_vague() {
         "Desc",
         None,
         None,
-        None,
         &PromptContext::default(),
     );
     assert!(
@@ -309,7 +303,6 @@ fn build_prompt_without_plan_mentions_direct_plan_alternative() {
         "Desc",
         None,
         None,
-        None,
         &PromptContext::default(),
     );
     assert!(
@@ -325,7 +318,6 @@ fn build_prompt_with_plan_asks_permission_before_implementing() {
         "Task",
         "Desc",
         Some("docs/plans/plan.md"),
-        None,
         None,
         &PromptContext::default(),
     );
@@ -348,7 +340,6 @@ fn build_prompt_mentions_mcp_tools() {
         TaskId(1),
         "Task",
         "Desc",
-        None,
         None,
         None,
         &PromptContext::default(),
@@ -432,7 +423,6 @@ fn build_prompt_includes_plan_path() {
         "Desc",
         Some("docs/plans/my-plan.md"),
         None,
-        None,
         &PromptContext::default(),
     );
     assert!(prompt.contains("Plan: docs/plans/my-plan.md"));
@@ -446,7 +436,6 @@ fn build_prompt_without_plan_omits_plan_section() {
         "Desc",
         None,
         None,
-        None,
         &PromptContext::default(),
     );
     assert!(!prompt.contains("Plan:"));
@@ -458,7 +447,6 @@ fn build_quick_dispatch_prompt_includes_planning_instruction() {
         TaskId(42),
         "Quick task",
         "",
-        None,
         None,
         &PromptContext::default(),
     );
@@ -479,7 +467,6 @@ fn build_quick_dispatch_prompt_contains_rename_instruction() {
         "Quick task",
         "",
         None,
-        None,
         &PromptContext::default(),
     );
     assert!(prompt.contains("42"));
@@ -496,7 +483,6 @@ fn build_quick_dispatch_prompt_mentions_mcp() {
         "Quick task",
         "",
         None,
-        None,
         &PromptContext::default(),
     );
     assert!(prompt.contains("dispatch MCP tools"));
@@ -512,14 +498,12 @@ fn build_quick_dispatch_prompt_differs_from_regular() {
         "Desc",
         None,
         None,
-        None,
         &PromptContext::default(),
     );
     let quick = build_quick_dispatch_prompt(
         TaskId(1),
         "Task",
         "Desc",
-        None,
         None,
         &PromptContext::default(),
     );
@@ -538,7 +522,6 @@ fn build_quick_dispatch_prompt_includes_epic_context() {
         "Quick task",
         "",
         Some(&ctx),
-        None,
         &PromptContext::default(),
     );
     assert!(prompt.contains("EpicId: 7"), "should include epic ID");
@@ -555,7 +538,6 @@ fn rebase_preamble_prepended_to_all_prompts() {
         TaskId(1),
         "Task",
         "Desc",
-        None,
         None,
         None,
         &PromptContext::default(),
@@ -580,11 +562,10 @@ fn no_plan_prompts_reference_brainstorming_skill() {
         "D",
         None,
         None,
-        None,
         &PromptContext::default(),
     );
     let quick =
-        build_quick_dispatch_prompt(TaskId(1), "T", "D", None, None, &PromptContext::default());
+        build_quick_dispatch_prompt(TaskId(1), "T", "D", None, &PromptContext::default());
 
     for (name, prompt) in [("standard-no-plan", standard), ("quick", quick)] {
         assert!(
@@ -828,7 +809,6 @@ fn dispatch_reuses_existing_worktree() {
         &task,
         &mock,
         None,
-        None,
         &LearningInjections::default(),
         None,
     )
@@ -867,7 +847,6 @@ fn dispatch_sends_claude_command() {
         &task,
         &mock,
         None,
-        None,
         &LearningInjections::default(),
         None,
     )
@@ -903,7 +882,6 @@ fn dispatch_agent_uses_default_permission_mode() {
         &task,
         &mock,
         None,
-        None,
         &LearningInjections::default(),
         None,
     )
@@ -930,7 +908,7 @@ fn research_agent_uses_plan_permission_mode() {
     ]);
 
     let task = make_task(&repo_path);
-    research_agent(&task, &mock, None, None, None).unwrap();
+    research_agent(&task, &mock, None, None).unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, 3, "claude");
@@ -956,7 +934,6 @@ fn quick_dispatch_agent_uses_default_permission_mode() {
     quick_dispatch_agent(
         &task,
         &mock,
-        None,
         None,
         &LearningInjections::default(),
         None,
@@ -1310,7 +1287,6 @@ fn dispatch_uses_task_base_branch_in_prompt() {
         &task,
         &mock,
         None,
-        None,
         &LearningInjections::default(),
         None,
     )
@@ -1343,7 +1319,6 @@ fn dispatch_fails_fast_if_git_fails() {
         &task,
         &mock,
         None,
-        None,
         &LearningInjections::default(),
         None,
     );
@@ -1374,7 +1349,6 @@ fn quick_dispatch_reuses_existing_worktree() {
     quick_dispatch_agent(
         &task,
         &mock,
-        None,
         None,
         &LearningInjections::default(),
         None,
@@ -1409,7 +1383,6 @@ fn quick_dispatch_sends_rename_prompt() {
     quick_dispatch_agent(
         &task,
         &mock,
-        None,
         None,
         &LearningInjections::default(),
         None,
@@ -1743,7 +1716,6 @@ fn dispatch_agent_fails_fast_with_empty_repo_path() {
         &task,
         &mock,
         None,
-        None,
         &LearningInjections::default(),
         None,
     );
@@ -1885,7 +1857,6 @@ fn dispatch_agent_uses_task_base_branch_in_prompt() {
         &task,
         &mock,
         None,
-        None,
         &LearningInjections::default(),
         None,
     )
@@ -1926,7 +1897,6 @@ fn dispatch_agent_includes_plugin_dir() {
     dispatch_agent(
         &task,
         &mock,
-        None,
         None,
         &LearningInjections::default(),
         None,

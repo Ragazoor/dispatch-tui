@@ -736,7 +736,6 @@ mod tests {
             "desc",
             None,
             None,
-            None,
             &PromptContext::default(),
         );
         assert!(text.starts_with("Your task is:"));

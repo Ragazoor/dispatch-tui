@@ -1,7 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 mod epics;
 mod learnings;
-mod projects;
 mod repo_rag;
 mod tasks;
 mod usage;
@@ -391,7 +390,7 @@ async fn tools_call_without_identity_returns_invalid_request_with_request_id() {
     let resp = call_with_identity(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_projects", "arguments": {} })),
+        Some(json!({ "name": "list_tasks", "arguments": {} })),
         Err(IdentityError::Missing),
     )
     .await;
@@ -409,7 +408,7 @@ async fn tools_call_with_conflict_identity_returns_invalid_request() {
     let resp = call_with_identity(
         &state,
         "tools/call",
-        Some(json!({ "name": "list_projects", "arguments": {} })),
+        Some(json!({ "name": "list_tasks", "arguments": {} })),
         Err(IdentityError::Conflict),
     )
     .await;
@@ -468,7 +467,6 @@ async fn tool_schemas_match_arg_structs() {
                 "sub_status",
                 "epic_id",
                 "base_branch",
-                "project_id",
                 "wrap_up_mode",
             ]),
             BTreeSet::from(["task_id"]),
@@ -491,17 +489,16 @@ async fn tool_schemas_match_arg_structs() {
                 "sort_order",
                 "tag",
                 "base_branch",
-                "project_id",
                 "wrap_up_mode",
             ]),
             BTreeSet::from(["title", "repo_path"]),
-            json!({"title": "t", "repo_path": "/r", "project_id": 1, "description": "d", "plan_path": "/p.md", "sort_order": 10, "tag": "feature"}),
+            json!({"title": "t", "repo_path": "/r", "description": "d", "plan_path": "/p.md", "sort_order": 10, "tag": "feature"}),
         ),
         (
             "list_tasks",
-            BTreeSet::from(["status", "epic_id", "project_id", "repo_paths"]),
+            BTreeSet::from(["status", "epic_id", "repo_paths"]),
             BTreeSet::new(),
-            json!({"status": "backlog", "epic_id": 1, "project_id": 1, "repo_paths": ["/r"]}),
+            json!({"status": "backlog", "epic_id": 1, "repo_paths": ["/r"]}),
         ),
         (
             "claim_task",
@@ -517,7 +514,6 @@ async fn tool_schemas_match_arg_structs() {
                 "description",
                 "sort_order",
                 "parent_epic_id",
-                "project_id",
             ]),
             BTreeSet::from(["title", "repo_path"]),
             json!({"title": "Epic", "repo_path": "/repo", "sort_order": 5}),
@@ -539,7 +535,6 @@ async fn tool_schemas_match_arg_structs() {
                 "plan_path",
                 "sort_order",
                 "repo_path",
-                "project_id",
                 "feed_command",
                 "feed_interval_secs",
                 "group_by_repo",
@@ -572,7 +567,6 @@ async fn tool_schemas_match_arg_structs() {
             BTreeSet::from(["task_id"]),
             json!({"task_id": 1}),
         ),
-        ("list_projects", BTreeSet::new(), BTreeSet::new(), json!({})),
         (
             "record_learning",
             BTreeSet::from([
@@ -688,7 +682,6 @@ async fn tool_schemas_match_arg_structs() {
             "dispatch_task" => {
                 serde_json::from_value::<super::tasks::DispatchTaskArgs>(payload.clone()).unwrap();
             }
-            "list_projects" => {} // no args
             "record_learning" => {
                 serde_json::from_value::<super::learnings::RecordLearningArgs>(payload.clone())
                     .unwrap();
