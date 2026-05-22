@@ -53,6 +53,8 @@ fn is_decl_boundary(line: &str, keywords: &[&str]) -> bool {
     let s = strip_vis(line);
     let s = s.strip_prefix("async ").unwrap_or(s);
     let s = s.strip_prefix("unsafe ").unwrap_or(s);
+    // Handle `unsafe async fn` — after stripping `unsafe `, `async ` may still be present.
+    let s = s.strip_prefix("async ").unwrap_or(s);
     keywords.iter().any(|kw| s.starts_with(kw))
 }
 
@@ -649,6 +651,16 @@ mod tests {
     fn chunk_by_decls_async_prefix_triggers_split() {
         let result = chunk_by_declarations(
             "async fn foo() {}\n\nasync fn bar() {}",
+            &["fn "],
+            |_| false,
+        );
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn chunk_by_decls_unsafe_async_prefix_triggers_split() {
+        let result = chunk_by_declarations(
+            "unsafe async fn foo() {}\n\nunsafe async fn bar() {}",
             &["fn "],
             |_| false,
         );

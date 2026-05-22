@@ -522,7 +522,7 @@ the session.",
         };
 
     async "index_repo" => repo_rag::handle_index_repo,
-        "Index (or re-index) markdown files in a repository for semantic search. Creates .dispatch/rag.db in the repo. Safe to re-run — only changed files are re-embedded. Defaults repo_path to the calling task's repo when omitted.",
+        "Index (or re-index) source files (.md, .rs, .allium) in a repository for semantic search. Creates .dispatch/rag.db in the repo. Safe to re-run — only changed files are re-embedded. Defaults repo_path to the calling task's repo when omitted.",
         {
             "type": "object",
             "properties": {
@@ -539,7 +539,7 @@ the session.",
         };
 
     async "search_docs" => repo_rag::handle_search_docs,
-        "Semantic search over markdown files in a repository. Returns ranked chunks with file path and score. Returns empty results (not an error) when the repo has not been indexed yet — call index_repo first.",
+        "Semantic search over indexed source files (.md, .rs, .allium) in a repository. Returns ranked chunks with file path and score. Returns empty results (not an error) when the repo has not been indexed yet — call index_repo first.",
         {
             "type": "object",
             "properties": {
