@@ -82,6 +82,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (57, migrate_v57_enforce_epic_project_consistency),
     (58, migrate_v58_reset_intermediate_epic_statuses),
     (59, migrate_v59_create_usage_events),
+    (60, migrate_v60_drop_projects),
 ];
 
 fn migrate_v53_add_wrap_up_mode(conn: &Connection) -> Result<()> {
@@ -1289,4 +1290,26 @@ fn migrate_v59_create_usage_events(conn: &Connection) -> Result<()> {
         )",
     )
     .context("Failed to create usage_events table")
+}
+
+fn migrate_v60_drop_projects(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "DROP TRIGGER IF EXISTS enforce_sub_epic_project_insert;
+         DROP TRIGGER IF EXISTS enforce_sub_epic_project_update;
+         DROP TRIGGER IF EXISTS enforce_task_epic_project_insert;
+         DROP TRIGGER IF EXISTS enforce_task_epic_project_update;
+         DROP INDEX IF EXISTS idx_tasks_project_id;
+         DROP INDEX IF EXISTS idx_epics_project_id;",
+    )
+    .context("Failed to drop project triggers and indexes (migration v60)")?;
+    if column_exists(conn, "tasks", "project_id") {
+        conn.execute_batch("ALTER TABLE tasks DROP COLUMN project_id")
+            .context("Failed to drop project_id from tasks (migration v60)")?;
+    }
+    if column_exists(conn, "epics", "project_id") {
+        conn.execute_batch("ALTER TABLE epics DROP COLUMN project_id")
+            .context("Failed to drop project_id from epics (migration v60)")?;
+    }
+    conn.execute_batch("DROP TABLE IF EXISTS projects")
+        .context("Failed to drop projects table (migration v60)")
 }
