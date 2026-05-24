@@ -1329,11 +1329,11 @@ pub(super) fn migrate_v60_drop_projects(conn: &Connection) -> Result<()> {
         conn.execute_batch(
             "INSERT OR IGNORE INTO settings (key, value)
                  SELECT 'repo_filter', value FROM settings
-                 WHERE key LIKE 'repo_filter:%' LIMIT 1;
+                 WHERE key LIKE 'repo_filter:%' ORDER BY key LIMIT 1;
              DELETE FROM settings WHERE key LIKE 'repo_filter:%';
              INSERT OR IGNORE INTO settings (key, value)
                  SELECT 'repo_filter_mode', value FROM settings
-                 WHERE key LIKE 'repo_filter_mode:%' LIMIT 1;
+                 WHERE key LIKE 'repo_filter_mode:%' ORDER BY key LIMIT 1;
              DELETE FROM settings WHERE key LIKE 'repo_filter_mode:%';",
         )
         .context("Failed to migrate repo_filter settings keys (migration v60)")?;
