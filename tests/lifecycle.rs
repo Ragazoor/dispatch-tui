@@ -2,12 +2,12 @@
 //! Integration test: full task lifecycle through App::update() with a real (in-memory) DB.
 
 use dispatch_tui::db::{self, CreateTaskRequest, Database, TaskCrud};
-use dispatch_tui::models::{DispatchMode, ProjectId, Task, TaskId, TaskStatus};
+use dispatch_tui::models::{DispatchMode, Task, TaskId, TaskStatus};
 use dispatch_tui::tui::{App, Command, Message, MoveDirection};
 
 async fn make_app() -> (App, Database) {
     let db = Database::open_in_memory().await.unwrap();
-    let app = App::new(vec![], dispatch_tui::models::ProjectId(1));
+    let app = App::new(vec![]);
     (app, db)
 }
 
@@ -50,7 +50,6 @@ async fn full_lifecycle() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -77,7 +76,6 @@ async fn full_lifecycle() {
                 labels: Vec::new(),
                 created_at: now,
                 updated_at: now,
-                project_id: dispatch_tui::models::ProjectId(1),
                 last_pre_tool_use_at: None,
                 last_notification_at: None,
                 wrap_up_mode: None,

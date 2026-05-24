@@ -5,7 +5,7 @@
 
 use dispatch_tui::db::{CreateTaskRequest, Database, SettingsStore, TaskCrud};
 use dispatch_tui::dispatch::fetch_verify_command;
-use dispatch_tui::models::{ProjectId, TaskStatus};
+use dispatch_tui::models::TaskStatus;
 
 #[tokio::test]
 async fn verify_command_lookup_matches_task_repo_path() {
@@ -29,7 +29,6 @@ async fn verify_command_lookup_matches_task_repo_path() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await

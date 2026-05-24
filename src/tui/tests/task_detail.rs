@@ -6,7 +6,7 @@ use crossterm::event::KeyCode;
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 fn make_app_with_task() -> App {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     app.board.tasks.push({
         let mut t = make_task(1, TaskStatus::Backlog);
         t.description = "line one\nline two\nline three".to_string();
@@ -58,7 +58,7 @@ fn close_task_detail_restores_board_mode() {
 
 #[test]
 fn open_task_detail_from_epic_stores_epic_mode() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     app.board.view_mode = ViewMode::Epic {
         epic_id: crate::models::EpicId(42),
         selection: crate::tui::BoardSelection::new_for_epic(),
@@ -75,7 +75,7 @@ fn open_task_detail_from_epic_stores_epic_mode() {
 
 #[test]
 fn close_task_detail_from_epic_restores_epic_mode() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     app.board.view_mode = ViewMode::Epic {
         epic_id: crate::models::EpicId(42),
         selection: crate::tui::BoardSelection::new_for_epic(),
@@ -273,7 +273,7 @@ fn d_key_is_inert_in_task_detail() {
 
 #[test]
 fn j_key_inert_when_no_description_and_max_scroll_zero() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     app.board.tasks.push(make_task(1, TaskStatus::Backlog)); // empty description
     app.update(Message::Task(
         crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),

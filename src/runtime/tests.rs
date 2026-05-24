@@ -2,7 +2,6 @@
 use super::*;
 
 use crate::db::{CreateLearningRow, CreateTaskRequest, Database};
-use crate::models::ProjectId;
 use crate::process::MockProcessRunner;
 
 /// Timeout for async receive assertions in tests.
@@ -93,7 +92,7 @@ async fn test_runtime() -> (TuiRuntime, App) {
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let rt = make_runtime(db.clone(), tx, runner);
     let tasks = db.list_all().await.unwrap();
-    let app = App::new(tasks, ProjectId(1));
+    let app = App::new(tasks);
     (rt, app)
 }
 
@@ -117,7 +116,6 @@ async fn create_task_returning(
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await?;
@@ -360,7 +358,6 @@ async fn exec_refresh_from_db_syncs_external_changes() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -386,7 +383,6 @@ async fn exec_refresh_from_db_returns_commands_from_refresh() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -428,7 +424,7 @@ async fn exec_jump_to_tmux_calls_select_window() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone());
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1));
+    let mut app = App::new(tasks);
 
     rt.exec_jump_to_tmux(&mut app, "my-window".to_string());
 
@@ -582,7 +578,7 @@ async fn exec_jump_to_tmux_failure_shows_error() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone());
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1));
+    let mut app = App::new(tasks);
 
     rt.exec_jump_to_tmux(&mut app, "nonexistent-window".to_string());
 
@@ -769,7 +765,7 @@ async fn exec_dispatch_epic_creates_planning_subtask() {
     // Create an epic in the DB
     let epic = rt
         .database
-        .create_epic("Auth redesign", "Rework login", "/repo", None, ProjectId(1))
+        .create_epic("Auth redesign", "Rework login", "/repo", None)
         .await
         .unwrap();
 
@@ -973,7 +969,7 @@ async fn exec_quick_dispatch_creates_task_and_dispatches() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock);
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1));
+    let mut app = App::new(tasks);
 
     rt.exec_quick_dispatch(
         &mut app,
@@ -1033,7 +1029,7 @@ async fn exec_quick_dispatch_sets_base_branch_to_repo_default() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock);
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1));
+    let mut app = App::new(tasks);
 
     rt.exec_quick_dispatch(
         &mut app,
@@ -1067,7 +1063,7 @@ async fn exec_quick_dispatch_with_epic_dispatches_successfully() {
 
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let epic = db
-        .create_epic("My Epic", "epic desc", repo, None, ProjectId(1))
+        .create_epic("My Epic", "epic desc", repo, None)
         .await
         .unwrap();
     let (tx, mut rx) = mpsc::unbounded_channel();
@@ -1082,7 +1078,7 @@ async fn exec_quick_dispatch_with_epic_dispatches_successfully() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock);
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1));
+    let mut app = App::new(tasks);
 
     rt.exec_quick_dispatch(
         &mut app,
@@ -1124,7 +1120,7 @@ async fn exec_quick_dispatch_sends_error_on_failure() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock);
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1));
+    let mut app = App::new(tasks);
 
     // /nonexistent won't have .worktrees dir, so provision_worktree fails
     rt.exec_quick_dispatch(
@@ -1164,7 +1160,7 @@ async fn exec_quick_dispatch_failure_sends_dispatch_failed_and_error() {
     )]));
     let rt = make_runtime(db.clone(), tx, mock);
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1));
+    let mut app = App::new(tasks);
 
     rt.exec_quick_dispatch(
         &mut app,
@@ -1480,50 +1476,13 @@ async fn exec_insert_epic_creates_in_db_and_app() {
     assert_eq!(rt.database.list_epics().await.unwrap().len(), 1);
 }
 
-#[tokio::test]
-async fn exec_insert_epic_with_parent_uses_parent_project_id() {
-    let (rt, mut app) = test_runtime().await;
-    // Create a second project and a parent epic in that project
-    let project2 = rt.database.create_project("Project Two", 10).await.unwrap();
-    let parent = rt
-        .database
-        .create_epic("Parent", "", "/repo", None, project2.id)
-        .await
-        .unwrap();
-    assert_eq!(
-        parent.project_id, project2.id,
-        "parent epic must belong to project2"
-    );
-    // app.active_project() returns ProjectId(1), which differs from project2
-    assert_ne!(app.active_project(), project2.id);
-
-    rt.exec_insert_epic(
-        &mut app,
-        "Sub Epic".into(),
-        "".into(),
-        "/repo".into(),
-        Some(parent.id),
-    )
-    .await;
-
-    let epics = rt.database.list_epics().await.unwrap();
-    let sub = epics
-        .iter()
-        .find(|e| e.title == "Sub Epic")
-        .expect("sub epic should be created");
-    assert_eq!(
-        sub.project_id, project2.id,
-        "sub epic should inherit parent epic's project_id, not app.active_project()"
-    );
-    assert!(app.error_popup().is_none());
-}
 
 #[tokio::test]
 async fn exec_delete_epic_removes_from_db() {
     let (rt, mut app) = test_runtime().await;
     let epic = rt
         .database
-        .create_epic("Doomed", "bye", "/repo", None, ProjectId(1))
+        .create_epic("Doomed", "bye", "/repo", None)
         .await
         .unwrap();
     rt.exec_delete_epic(&mut app, epic.id).await;
@@ -1536,7 +1495,7 @@ async fn exec_persist_epic_updates_status() {
     let (rt, mut app) = test_runtime().await;
     let epic = rt
         .database
-        .create_epic("Epic", "desc", "/repo", None, ProjectId(1))
+        .create_epic("Epic", "desc", "/repo", None)
         .await
         .unwrap();
     rt.exec_persist_epic(&mut app, epic.id, Some(models::TaskStatus::Running), None)
@@ -1550,7 +1509,7 @@ async fn exec_persist_epic_noop_when_nothing_to_update() {
     let (rt, mut app) = test_runtime().await;
     let epic = rt
         .database
-        .create_epic("Epic", "desc", "/repo", None, ProjectId(1))
+        .create_epic("Epic", "desc", "/repo", None)
         .await
         .unwrap();
     // Should return early without error
@@ -1563,7 +1522,7 @@ async fn exec_refresh_epics_from_db_syncs_to_app() {
     let (rt, mut app) = test_runtime().await;
     // Insert epic directly into DB, bypassing app
     rt.database
-        .create_epic("Direct", "desc", "/repo", None, ProjectId(1))
+        .create_epic("Direct", "desc", "/repo", None)
         .await
         .unwrap();
     assert!(app.epics().is_empty());
@@ -1586,7 +1545,7 @@ async fn exec_enter_split_mode_opens_pane() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock);
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1));
+    let mut app = App::new(tasks);
 
     rt.exec_enter_split_mode(&mut app);
     assert!(app.error_popup().is_none());
@@ -1601,7 +1560,7 @@ async fn exec_enter_split_mode_no_tmux_shows_status() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock);
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1));
+    let mut app = App::new(tasks);
 
     rt.exec_enter_split_mode(&mut app);
     assert_eq!(app.status_message(), Some("Split mode requires tmux"));
@@ -1618,7 +1577,7 @@ async fn exec_enter_split_mode_with_task_joins_pane() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone());
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1));
+    let mut app = App::new(tasks);
 
     rt.exec_enter_split_mode_with_task(&mut app, TaskId(1), "task-1");
     let calls = mock.recorded_calls();
@@ -1637,7 +1596,7 @@ async fn exec_exit_split_mode_with_restore_breaks_pane() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone());
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1));
+    let mut app = App::new(tasks);
 
     rt.exec_exit_split_mode(&mut app, "%2", Some("task-1"));
     let calls = mock.recorded_calls();
@@ -1654,7 +1613,7 @@ async fn exec_exit_split_mode_without_restore_kills_pane() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone());
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1));
+    let mut app = App::new(tasks);
 
     rt.exec_exit_split_mode(&mut app, "%2", None);
     let calls = mock.recorded_calls();
@@ -1671,7 +1630,7 @@ async fn exec_check_split_pane_existing_pane_no_message() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock);
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1));
+    let mut app = App::new(tasks);
 
     rt.exec_check_split_pane(&mut app, "%2");
     // No error, no SplitPaneClosed
@@ -1687,7 +1646,7 @@ async fn exec_check_split_pane_gone_sends_closed() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock);
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1));
+    let mut app = App::new(tasks);
 
     rt.exec_check_split_pane(&mut app, "%2");
     // SplitPaneClosed was sent via app.update
@@ -1705,7 +1664,7 @@ async fn exec_swap_split_pane_uses_swap_pane() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone());
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1));
+    let mut app = App::new(tasks);
 
     rt.exec_swap_split_pane(&mut app, TaskId(1), "task-1", Some("%2"), None);
     let calls = mock.recorded_calls();
@@ -1733,7 +1692,7 @@ async fn exec_swap_split_pane_renames_old_task_window() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone());
     let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks, ProjectId(1));
+    let mut app = App::new(tasks);
 
     rt.exec_swap_split_pane(
         &mut app,
@@ -1871,7 +1830,7 @@ async fn exec_kill_tmux_window_failure_is_best_effort() {
 // -----------------------------------------------------------------------
 
 fn make_app() -> App {
-    App::new(vec![], ProjectId(1))
+    App::new(vec![])
 }
 
 #[tokio::test]
@@ -1942,7 +1901,7 @@ async fn apply_tmux_focus_warning_returns_status_info_when_disabled() {
 async fn exec_trigger_epic_feed_success() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let epic = db
-        .create_epic("Security Vulnerabilities", "", "/repo", None, ProjectId(1))
+        .create_epic("Security Vulnerabilities", "", "/repo", None)
         .await
         .unwrap();
 
@@ -1973,7 +1932,7 @@ async fn exec_trigger_epic_feed_success() {
 async fn exec_trigger_epic_feed_zero_items() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let epic = db
-        .create_epic("Empty Feed", "", "/repo", None, ProjectId(1))
+        .create_epic("Empty Feed", "", "/repo", None)
         .await
         .unwrap();
 
@@ -1999,7 +1958,7 @@ async fn exec_trigger_epic_feed_zero_items() {
 async fn exec_trigger_epic_feed_command_fails() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let epic = db
-        .create_epic("Failing Feed", "", "/repo", None, ProjectId(1))
+        .create_epic("Failing Feed", "", "/repo", None)
         .await
         .unwrap();
 
@@ -2025,7 +1984,7 @@ async fn exec_trigger_epic_feed_command_fails() {
 async fn exec_trigger_epic_feed_malformed_json() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let epic = db
-        .create_epic("Bad JSON Feed", "", "/repo", None, ProjectId(1))
+        .create_epic("Bad JSON Feed", "", "/repo", None)
         .await
         .unwrap();
 
@@ -2453,7 +2412,7 @@ async fn exec_refresh_epic_updates_app_when_epic_exists() {
     let (rt, mut app) = test_runtime().await;
     let epic = rt
         .database
-        .create_epic("Epic", "desc", "/repo", None, ProjectId(1))
+        .create_epic("Epic", "desc", "/repo", None)
         .await
         .unwrap();
     rt.exec_refresh_epics_from_db(&mut app).await;
@@ -2476,7 +2435,7 @@ async fn exec_refresh_epic_falls_back_when_epic_gone() {
     let (rt, mut app) = test_runtime().await;
     let epic = rt
         .database
-        .create_epic("Gone Epic", "desc", "/repo", None, ProjectId(1))
+        .create_epic("Gone Epic", "desc", "/repo", None)
         .await
         .unwrap();
     rt.exec_refresh_epics_from_db(&mut app).await;
@@ -2494,7 +2453,7 @@ async fn exec_refresh_epic_also_reloads_epic_tasks() {
     let (rt, mut app) = test_runtime().await;
     let epic = rt
         .database
-        .create_epic("Feed Epic", "desc", "/repo", None, ProjectId(1))
+        .create_epic("Feed Epic", "desc", "/repo", None)
         .await
         .unwrap();
     rt.exec_refresh_epics_from_db(&mut app).await;
@@ -2511,7 +2470,6 @@ async fn exec_refresh_epic_also_reloads_epic_tasks() {
             epic_id: Some(epic.id),
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -2534,7 +2492,7 @@ async fn exec_toggle_epic_auto_dispatch_sets_flag_to_false() {
     let (rt, mut app) = test_runtime().await;
     let epic = rt
         .database
-        .create_epic("AutoDispatch Epic", "desc", "/repo", None, ProjectId(1))
+        .create_epic("AutoDispatch Epic", "desc", "/repo", None)
         .await
         .unwrap();
     assert!(epic.auto_dispatch, "default auto_dispatch should be true");
@@ -2552,7 +2510,7 @@ async fn exec_toggle_epic_auto_dispatch_sets_flag_to_true() {
     let (rt, mut app) = test_runtime().await;
     let epic = rt
         .database
-        .create_epic("AutoDispatch Epic", "desc", "/repo", None, ProjectId(1))
+        .create_epic("AutoDispatch Epic", "desc", "/repo", None)
         .await
         .unwrap();
     rt.database
@@ -2573,7 +2531,7 @@ async fn exec_toggle_epic_group_by_repo_sets_flag_to_true() {
     let (rt, mut app) = test_runtime().await;
     let epic = rt
         .database
-        .create_epic("GroupByRepo Epic", "desc", "/repo", None, ProjectId(1))
+        .create_epic("GroupByRepo Epic", "desc", "/repo", None)
         .await
         .unwrap();
     assert!(!epic.group_by_repo, "default group_by_repo should be false");
@@ -2591,7 +2549,7 @@ async fn exec_toggle_epic_group_by_repo_sets_flag_to_false() {
     let (rt, mut app) = test_runtime().await;
     let epic = rt
         .database
-        .create_epic("GroupByRepo Epic", "desc", "/repo", None, ProjectId(1))
+        .create_epic("GroupByRepo Epic", "desc", "/repo", None)
         .await
         .unwrap();
     rt.database
@@ -2623,117 +2581,6 @@ async fn exec_save_tips_state_persists_to_db() {
     assert_eq!(show_mode, models::TipsShowMode::NewOnly);
 }
 
-// ---------------------------------------------------------------------------
-// exec_insert_task / exec_quick_dispatch — project_id defaults
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn exec_insert_task_with_epic_uses_epic_project_id() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
-    let proj2 = db.create_project("Project 2", 2).await.unwrap();
-    let epic = db
-        .create_epic("My Epic", "", "/repo", None, proj2.id)
-        .await
-        .unwrap();
-    let (tx, _rx) = mpsc::unbounded_channel();
-    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let rt = make_runtime(db.clone(), tx, runner);
-    let mut app = App::new(vec![], ProjectId(1));
-    rt.exec_refresh_epics_from_db(&mut app).await;
-
-    rt.exec_insert_task(
-        &mut app,
-        tui::TaskDraft {
-            title: "Cross-project task".into(),
-            description: String::new(),
-            repo_path: "/repo".into(),
-            ..Default::default()
-        },
-        Some(epic.id),
-    )
-    .await;
-
-    let tasks = db.list_all().await.unwrap();
-    assert_eq!(tasks.len(), 1);
-    assert_eq!(
-        tasks[0].project_id, proj2.id,
-        "task should inherit project_id from the epic, not the active project"
-    );
-}
-
-#[tokio::test]
-async fn exec_insert_task_without_epic_uses_active_project() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
-    let proj2 = db.create_project("Project 2", 2).await.unwrap();
-    let (tx, _rx) = mpsc::unbounded_channel();
-    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let rt = make_runtime(db.clone(), tx, runner);
-    let mut app = App::new(vec![], proj2.id);
-
-    rt.exec_insert_task(
-        &mut app,
-        tui::TaskDraft {
-            title: "Active project task".into(),
-            description: String::new(),
-            repo_path: "/repo".into(),
-            ..Default::default()
-        },
-        None,
-    )
-    .await;
-
-    let tasks = db.list_all().await.unwrap();
-    assert_eq!(tasks.len(), 1);
-    assert_eq!(
-        tasks[0].project_id, proj2.id,
-        "task should use the TUI active project when no epic is provided"
-    );
-}
-
-#[tokio::test]
-async fn exec_quick_dispatch_with_epic_uses_epic_project_id() {
-    let dir = tempfile::tempdir().unwrap();
-    let repo = dir.path().to_str().unwrap();
-    std::fs::create_dir_all(format!("{repo}/.worktrees/1-cross-project-task")).unwrap();
-
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
-    let proj2 = db.create_project("Project 2", 2).await.unwrap();
-    let epic = db
-        .create_epic("Cross-project Epic", "", repo, None, proj2.id)
-        .await
-        .unwrap();
-    let (tx, _rx) = mpsc::unbounded_channel();
-    let mock = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"),
-        MockProcessRunner::ok(), // tmux new-window
-        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
-        MockProcessRunner::ok(), // tmux set-hook
-        MockProcessRunner::ok(), // tmux send-keys -l
-        MockProcessRunner::ok(), // tmux send-keys Enter
-    ]));
-    let rt = make_runtime(db.clone(), tx, mock);
-    let mut app = App::new(vec![], ProjectId(1));
-    rt.exec_refresh_epics_from_db(&mut app).await;
-
-    rt.exec_quick_dispatch(
-        &mut app,
-        tui::TaskDraft {
-            title: "Quick task".into(),
-            description: String::new(),
-            repo_path: repo.to_string(),
-            ..Default::default()
-        },
-        Some(epic.id),
-    )
-    .await;
-
-    let tasks = db.list_all().await.unwrap();
-    assert_eq!(tasks.len(), 1);
-    assert_eq!(
-        tasks[0].project_id, proj2.id,
-        "quick dispatch should inherit project_id from the epic, not the active project"
-    );
-}
 
 // ---------------------------------------------------------------------------
 // exec_check_pr_status — closed PR sends no message

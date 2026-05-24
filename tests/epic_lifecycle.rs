@@ -16,7 +16,6 @@ async fn full_epic_lifecycle() {
             "Rewrite auth system",
             "/repo",
             None,
-            ProjectId(1),
         )
         .await
         .unwrap();
@@ -33,7 +32,6 @@ async fn full_epic_lifecycle() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -49,7 +47,6 @@ async fn full_epic_lifecycle() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -107,7 +104,7 @@ async fn soft_archive_epic_does_not_violate_foreign_keys() {
     let db = Database::open_in_memory().await.unwrap();
 
     let epic = db
-        .create_epic("Auth Rewrite", "desc", "/repo", None, ProjectId(1))
+        .create_epic("Auth Rewrite", "desc", "/repo", None)
         .await
         .unwrap();
 
@@ -122,7 +119,6 @@ async fn soft_archive_epic_does_not_violate_foreign_keys() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -167,7 +163,7 @@ async fn epic_stays_in_backlog_while_tasks_active_auto_moves_to_done() {
     let db = Database::open_in_memory().await.unwrap();
 
     let epic = db
-        .create_epic("Feature X", "desc", "/repo", None, ProjectId(1))
+        .create_epic("Feature X", "desc", "/repo", None)
         .await
         .unwrap();
     assert_eq!(epic.status, TaskStatus::Backlog);
@@ -182,7 +178,6 @@ async fn epic_stays_in_backlog_while_tasks_active_auto_moves_to_done() {
         epic_id: None,
         sort_order: None,
         tag: None,
-        project_id: ProjectId(1),
         wrap_up_mode: None,
     };
 

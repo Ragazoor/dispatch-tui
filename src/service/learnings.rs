@@ -295,7 +295,7 @@ mod learning_tests {
     use super::{CreateLearningParams, LearningService, UpdateLearningParams};
     use crate::db::{CreateTaskRequest, Database, TaskStore};
     use crate::models::{
-        LearningId, LearningKind, LearningScope, LearningStatus, LearningVerdict, ProjectId,
+        LearningId, LearningKind, LearningScope, LearningStatus, LearningVerdict,
         RetrievalSource, TaskId, TaskStatus,
     };
     use crate::service::embeddings::EmbeddingService;
@@ -325,7 +325,6 @@ mod learning_tests {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await

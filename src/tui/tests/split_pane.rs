@@ -1,5 +1,5 @@
 use super::*;
-use crate::models::{EpicId, ProjectId, SubStatus, TaskId, TaskStatus};
+use crate::models::{EpicId, SubStatus, TaskId, TaskStatus};
 use crossterm::event::KeyCode;
 
 #[test]
@@ -53,7 +53,7 @@ fn toggle_split_mode_emits_exit_command() {
 fn toggle_split_exit_restores_pinned_task_window() {
     let mut task = make_task(3, TaskStatus::Running);
     task.tmux_window = Some("task-3".to_string());
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%42".to_string());
     app.board.split.pinned_task_id = Some(TaskId(3));
@@ -68,7 +68,7 @@ fn toggle_split_exit_restores_pinned_task_window() {
 fn g_in_split_mode_on_already_pinned_task_does_nothing() {
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some("task-4".to_string());
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%42".to_string());
     app.board.split.pinned_task_id = Some(TaskId(4)); // same task already pinned
@@ -84,7 +84,7 @@ fn g_in_split_mode_on_already_pinned_task_does_nothing() {
 fn g_in_split_mode_emits_swap_command() {
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some("task-4".to_string());
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%42".to_string());
     // No pinned task — different from already-pinned case
@@ -105,7 +105,7 @@ fn g_in_split_mode_emits_swap_command() {
 fn g_outside_split_mode_is_noop() {
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some("task-4".to_string());
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
     // split NOT active
     app.selection_mut().set_column(2);
     let cmds = app.handle_key(make_key(KeyCode::Char('G')));
@@ -115,7 +115,7 @@ fn g_outside_split_mode_is_noop() {
 #[test]
 fn g_in_split_mode_on_task_without_window_shows_status() {
     let task = make_task(4, TaskStatus::Running); // no tmux_window
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%42".to_string());
     app.selection_mut().set_column(2);
@@ -134,7 +134,7 @@ fn g_in_split_mode_on_task_without_window_shows_status() {
 fn g_in_split_mode_emits_jump_command() {
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some("task-4".to_string());
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%42".to_string());
     app.selection_mut().set_column(2);
@@ -150,7 +150,7 @@ fn g_in_split_mode_emits_jump_command() {
 fn g_without_split_mode_emits_jump_command() {
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some("task-4".to_string());
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
     app.selection_mut().set_column(2); // Running column
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert!(matches!(
@@ -165,7 +165,7 @@ fn g_on_pinned_split_task_emits_focus_split_pane() {
     // window no longer exists — [g] must focus the right pane instead.
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some("task-4".to_string());
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%42".to_string());
     app.board.split.pinned_task_id = Some(TaskId(4));
@@ -187,7 +187,7 @@ fn g_on_non_pinned_task_in_split_mode_still_jumps_to_window() {
     task1.tmux_window = Some("task-3".to_string());
     let mut task2 = make_task(4, TaskStatus::Running);
     task2.tmux_window = Some("task-4".to_string());
-    let mut app = App::new(vec![task1, task2], ProjectId(1));
+    let mut app = App::new(vec![task1, task2]);
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%42".to_string());
     app.board.split.pinned_task_id = Some(TaskId(3)); // task3 is pinned, not task4
@@ -234,7 +234,7 @@ fn tick_checks_window_for_non_pinned_tasks_in_split_mode() {
     task3.tmux_window = Some("task-3".to_string());
     let mut task4 = make_task(4, TaskStatus::Running);
     task4.tmux_window = Some("task-4".to_string());
-    let mut app = App::new(vec![task3, task4], ProjectId(1));
+    let mut app = App::new(vec![task3, task4]);
 
     // Pin task 4 in split mode
     app.board.split.active = true;
@@ -259,7 +259,7 @@ fn tick_checks_window_for_non_pinned_tasks_in_split_mode() {
 fn toggle_split_with_selected_tmux_task_emits_enter_with_task() {
     let mut task = make_task(3, TaskStatus::Running);
     task.tmux_window = Some("task-3".to_string());
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
     app.selection_mut().set_column(2); // Running column
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('S'))));
     assert_eq!(cmds.len(), 1);
@@ -273,7 +273,7 @@ fn toggle_split_with_selected_tmux_task_emits_enter_with_task() {
 #[test]
 fn toggle_split_without_tmux_task_emits_plain_enter() {
     let task = make_task(3, TaskStatus::Running);
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
     app.selection_mut().set_column(2); // Running column, task has no tmux_window
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('S'))));
     assert_eq!(cmds.len(), 1);
@@ -300,7 +300,7 @@ fn handle_key_normal_toggle_split_mode() {
 fn confirm_quit_with_active_split_emits_exit_split_mode() {
     let mut task = make_task(3, TaskStatus::Running);
     task.tmux_window = Some("task-3".to_string());
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
 
     // Set up active split with a pinned task
     app.board.split.active = true;
@@ -333,7 +333,6 @@ fn finish_complete_respawns_split_pane_for_pinned_task() {
             t.tmux_window = Some("task-1".to_string());
             t
         }],
-        ProjectId(1),
     );
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%5".to_string());
@@ -376,7 +375,6 @@ fn finish_complete_no_respawn_for_non_pinned_task() {
                 t
             },
         ],
-        ProjectId(1),
     );
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%5".to_string());
@@ -408,7 +406,6 @@ fn finish_complete_no_respawn_without_split() {
             t.tmux_window = Some("task-1".to_string());
             t
         }],
-        ProjectId(1),
     );
     // split is NOT active (default)
 
@@ -430,7 +427,7 @@ fn pr_merged_respawns_split_pane() {
     task.tmux_window = Some("task-1".to_string());
     task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%5".to_string());
     app.board.split.pinned_task_id = Some(TaskId(1));
@@ -452,7 +449,7 @@ fn pr_merged_respawns_split_pane() {
 fn confirm_done_respawns_split_pane() {
     let mut task = make_task(1, TaskStatus::Review);
     task.tmux_window = Some("task-1".to_string());
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%5".to_string());
     app.board.split.pinned_task_id = Some(TaskId(1));
@@ -475,7 +472,7 @@ fn confirm_done_respawns_split_pane() {
 fn archive_respawns_split_pane() {
     let mut task = make_task(1, TaskStatus::Done);
     task.tmux_window = Some("task-1".to_string());
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%5".to_string());
     app.board.split.pinned_task_id = Some(TaskId(1));
@@ -499,7 +496,7 @@ fn retry_resume_respawns_split_pane() {
     task.tmux_window = Some("task-1".to_string());
     task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
     task.sub_status = SubStatus::Crashed;
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%5".to_string());
     app.board.split.pinned_task_id = Some(TaskId(1));
@@ -547,7 +544,6 @@ fn confirm_quit_with_split_no_pinned_task_kills_pane() {
 fn epic_wrap_up_respawns_split_pane_only_once() {
     let mut app = App::new(
         vec![make_review_subtask(1, 10, 2), make_review_subtask(2, 10, 1)],
-        ProjectId(1),
     );
     app.board.epics = vec![make_epic(10)];
     app.board.split.active = true;

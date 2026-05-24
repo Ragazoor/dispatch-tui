@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use crate::db::{self, EpicPatch, TaskPatch};
-use crate::models::{Epic, EpicId, ProjectId, Task, TaskStatus};
+use crate::db::{self, EpicPatch};
+use crate::models::{Epic, EpicId, Task, TaskStatus};
 
 use super::{FieldUpdate, ServiceError};
 
@@ -20,7 +20,6 @@ pub struct UpdateEpicParams {
     pub auto_dispatch: Option<bool>,
     pub feed_command: Option<FieldUpdate>,
     pub feed_interval_secs: Option<Option<i64>>,
-    pub project_id: Option<ProjectId>,
     pub group_by_repo: Option<bool>,
     /// Triple-state: None = no change, Some(Some(id)) = reparent, Some(None) = make root.
     pub parent_epic_id: Option<Option<EpicId>>,
@@ -60,9 +59,6 @@ impl UpdateEpicParams {
         if self.feed_interval_secs.is_some() {
             names.push("feed_interval_secs");
         }
-        if self.project_id.is_some() {
-            names.push("project_id");
-        }
         if self.group_by_repo.is_some() {
             names.push("group_by_repo");
         }
@@ -85,7 +81,6 @@ pub struct CreateEpicParams {
     pub parent_epic_id: Option<EpicId>,
     pub feed_command: Option<String>,
     pub feed_interval_secs: Option<i64>,
-    pub project_id: ProjectId,
 }
 
 // ---------------------------------------------------------------------------
@@ -105,8 +100,8 @@ impl EpicService {
         let repo_path = crate::models::expand_tilde(&params.repo_path);
 
         if let Some(parent_id) = params.parent_epic_id {
-            let parent = match self.db.get_epic(parent_id).await {
-                Ok(Some(p)) => p,
+            match self.db.get_epic(parent_id).await {
+                Ok(Some(_)) => {}
                 Ok(None) => {
                     return Err(ServiceError::NotFound(format!(
                         "Parent epic {} not found",
@@ -119,12 +114,6 @@ impl EpicService {
                     )))
                 }
             };
-            if params.project_id != parent.project_id {
-                return Err(ServiceError::Validation(format!(
-                    "sub-epic project_id ({}) must match parent epic project_id ({})",
-                    params.project_id.0, parent.project_id.0
-                )));
-            }
         }
 
         let epic = self
@@ -134,7 +123,6 @@ impl EpicService {
                 &params.description,
                 &repo_path,
                 params.parent_epic_id,
-                params.project_id,
             )
             .await
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
@@ -281,32 +269,15 @@ impl EpicService {
         if let Some(fi) = params.feed_interval_secs {
             patch = patch.feed_interval_secs(fi);
         }
-        if let Some(pid) = params.project_id {
-            patch = patch.project_id(pid);
-        }
         if let Some(gbr) = params.group_by_repo {
             patch = patch.group_by_repo(gbr);
         }
 
-        let mut reparent_pid: Option<ProjectId> = None;
         match params.parent_epic_id {
             Some(Some(new_parent_id)) => {
                 let parent = self.get_epic(new_parent_id).await?;
                 self.check_no_cycle(params.epic_id, &parent).await?;
                 patch = patch.parent_epic_id(Some(new_parent_id));
-                if params.project_id.is_none() {
-                    match self.db.get_epic(params.epic_id).await {
-                        Ok(Some(current)) if current.project_id != parent.project_id => {
-                            reparent_pid = Some(parent.project_id);
-                            patch = patch.project_id(parent.project_id);
-                        }
-                        Err(e) => tracing::warn!(
-                            "update_epic: failed to check project cascade for epic {}: {e}",
-                            params.epic_id.0
-                        ),
-                        _ => {}
-                    }
-                }
             }
             Some(None) => {
                 patch = patch.parent_epic_id(None);
@@ -319,10 +290,6 @@ impl EpicService {
             .patch_epic(epic_id, &patch)
             .await
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
-
-        if let Some(pid) = params.project_id.or(reparent_pid) {
-            self.cascade_project_id(epic_id, pid).await;
-        }
 
         Ok(epic_id)
     }
@@ -360,50 +327,6 @@ impl EpicService {
     }
 
     /// Recursively update project_id for all direct sub-epics and direct tasks
-    /// of the given epic. Called when an epic's project_id changes.
-    async fn cascade_project_id(&self, epic_id: EpicId, project_id: ProjectId) {
-        let sub_epics = match self.db.list_sub_epics(epic_id).await {
-            Ok(v) => v,
-            Err(e) => {
-                tracing::warn!(
-                    "cascade_project_id: list_sub_epics failed for epic {}: {e}",
-                    epic_id.0
-                );
-                return;
-            }
-        };
-        for sub in sub_epics {
-            if let Err(e) = self
-                .db
-                .patch_epic(sub.id, &EpicPatch::new().project_id(project_id))
-                .await
-            {
-                tracing::warn!("cascade_project_id: patch_epic {} failed: {e}", sub.id.0);
-            }
-            Box::pin(self.cascade_project_id(sub.id, project_id)).await;
-        }
-
-        let tasks = match self.db.list_tasks_for_epic(epic_id).await {
-            Ok(v) => v,
-            Err(e) => {
-                tracing::warn!(
-                    "cascade_project_id: list_tasks_for_epic failed for epic {}: {e}",
-                    epic_id.0
-                );
-                return;
-            }
-        };
-        for task in tasks {
-            if let Err(e) = self
-                .db
-                .patch_task(task.id, &TaskPatch::new().project_id(project_id))
-                .await
-            {
-                tracing::warn!("cascade_project_id: patch_task {} failed: {e}", task.id.0);
-            }
-        }
-    }
-
     pub async fn delete_epic(&self, epic_id: EpicId) -> Result<(), ServiceError> {
         // Verify epic exists
         self.get_epic(epic_id).await?;
@@ -419,14 +342,12 @@ impl EpicService {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::db::{CreateTaskRequest, Database, EpicCrud, ProjectCrud, TaskCrud};
+    use crate::db::{Database, EpicCrud};
 
-    #[test]
-    fn update_epic_params_has_any_field_consistent_with_updated_field_names() {
-        // Same consistency guard for UpdateEpicParams.
-        let with_field = UpdateEpicParams {
-            epic_id: EpicId(1),
-            title: Some("x".to_string()),
+    fn base_params(epic_id: EpicId) -> UpdateEpicParams {
+        UpdateEpicParams {
+            epic_id,
+            title: None,
             description: None,
             status: None,
             plan_path: None,
@@ -435,9 +356,16 @@ mod tests {
             auto_dispatch: None,
             feed_command: None,
             feed_interval_secs: None,
-            project_id: None,
             group_by_repo: None,
             parent_epic_id: None,
+        }
+    }
+
+    #[test]
+    fn update_epic_params_has_any_field_consistent_with_updated_field_names() {
+        let with_field = UpdateEpicParams {
+            title: Some("x".to_string()),
+            ..base_params(EpicId(1))
         };
         assert!(
             with_field.has_any_field(),
@@ -448,21 +376,7 @@ mod tests {
             "updated_field_names should be non-empty when title is set"
         );
 
-        let empty = UpdateEpicParams {
-            epic_id: EpicId(1),
-            title: None,
-            description: None,
-            status: None,
-            plan_path: None,
-            sort_order: None,
-            repo_path: None,
-            auto_dispatch: None,
-            feed_command: None,
-            feed_interval_secs: None,
-            project_id: None,
-            group_by_repo: None,
-            parent_epic_id: None,
-        };
+        let empty = base_params(EpicId(1));
         assert!(
             !empty.has_any_field(),
             "has_any_field should be false when no fields are set"
@@ -475,73 +389,18 @@ mod tests {
 
     #[test]
     fn update_epic_params_every_field_covered() {
-        // Each field set individually must trigger both has_any_field() and
-        // updated_field_names(). Add a case here whenever a new field is added
-        // to UpdateEpicParams so both methods stay in sync.
-        let base = || UpdateEpicParams {
-            epic_id: EpicId(1),
-            title: None,
-            description: None,
-            status: None,
-            plan_path: None,
-            sort_order: None,
-            repo_path: None,
-            auto_dispatch: None,
-            feed_command: None,
-            feed_interval_secs: None,
-            project_id: None,
-            group_by_repo: None,
-            parent_epic_id: None,
-        };
         let cases: Vec<UpdateEpicParams> = vec![
-            UpdateEpicParams {
-                title: Some("t".to_string()),
-                ..base()
-            },
-            UpdateEpicParams {
-                description: Some("d".to_string()),
-                ..base()
-            },
-            UpdateEpicParams {
-                status: Some(TaskStatus::Backlog),
-                ..base()
-            },
-            UpdateEpicParams {
-                plan_path: Some("p".to_string()),
-                ..base()
-            },
-            UpdateEpicParams {
-                sort_order: Some(0),
-                ..base()
-            },
-            UpdateEpicParams {
-                repo_path: Some("r".to_string()),
-                ..base()
-            },
-            UpdateEpicParams {
-                auto_dispatch: Some(true),
-                ..base()
-            },
-            UpdateEpicParams {
-                feed_command: Some(FieldUpdate::Set("cmd".to_string())),
-                ..base()
-            },
-            UpdateEpicParams {
-                feed_interval_secs: Some(Some(300)),
-                ..base()
-            },
-            UpdateEpicParams {
-                project_id: Some(ProjectId(1)),
-                ..base()
-            },
-            UpdateEpicParams {
-                group_by_repo: Some(true),
-                ..base()
-            },
-            UpdateEpicParams {
-                parent_epic_id: Some(Some(EpicId(2))),
-                ..base()
-            },
+            UpdateEpicParams { title: Some("t".to_string()), ..base_params(EpicId(1)) },
+            UpdateEpicParams { description: Some("d".to_string()), ..base_params(EpicId(1)) },
+            UpdateEpicParams { status: Some(TaskStatus::Backlog), ..base_params(EpicId(1)) },
+            UpdateEpicParams { plan_path: Some("p".to_string()), ..base_params(EpicId(1)) },
+            UpdateEpicParams { sort_order: Some(0), ..base_params(EpicId(1)) },
+            UpdateEpicParams { repo_path: Some("r".to_string()), ..base_params(EpicId(1)) },
+            UpdateEpicParams { auto_dispatch: Some(true), ..base_params(EpicId(1)) },
+            UpdateEpicParams { feed_command: Some(FieldUpdate::Set("cmd".to_string())), ..base_params(EpicId(1)) },
+            UpdateEpicParams { feed_interval_secs: Some(Some(300)), ..base_params(EpicId(1)) },
+            UpdateEpicParams { group_by_repo: Some(true), ..base_params(EpicId(1)) },
+            UpdateEpicParams { parent_epic_id: Some(Some(EpicId(2))), ..base_params(EpicId(1)) },
         ];
         for params in &cases {
             assert!(
@@ -558,26 +417,12 @@ mod tests {
     #[tokio::test]
     async fn update_epic_sets_group_by_repo() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
-        let epic = db
-            .create_epic("Test", "", "/repo", None, ProjectId(1))
-            .await
-            .unwrap();
+        let epic = db.create_epic("Test", "", "/repo", None).await.unwrap();
         assert!(!epic.group_by_repo);
         let svc = EpicService::new(db.clone());
         svc.update_epic(UpdateEpicParams {
-            epic_id: epic.id,
-            title: None,
-            description: None,
-            status: None,
-            plan_path: None,
-            sort_order: None,
-            repo_path: None,
-            auto_dispatch: None,
-            feed_command: None,
-            feed_interval_secs: None,
-            project_id: None,
             group_by_repo: Some(true),
-            parent_epic_id: None,
+            ..base_params(epic.id)
         })
         .await
         .unwrap();
@@ -586,45 +431,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_sub_epic_with_mismatched_project_id_returns_error() {
+    async fn create_sub_epic_succeeds() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let svc = EpicService::new(db.clone());
-
-        let parent = db
-            .create_epic("Parent", "", "/r", None, ProjectId(1))
-            .await
-            .unwrap();
-        let proj2 = db.create_project("P2", 2).await.unwrap();
-
-        let result = svc
-            .create_epic(CreateEpicParams {
-                title: "Sub".into(),
-                description: "".into(),
-                repo_path: "/r".into(),
-                sort_order: None,
-                parent_epic_id: Some(parent.id),
-                feed_command: None,
-                feed_interval_secs: None,
-                project_id: proj2.id,
-            })
-            .await;
-
-        assert!(
-            matches!(result, Err(ServiceError::Validation(_))),
-            "expected Validation error for mismatched project_id, got: {result:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn create_sub_epic_with_correct_project_id_succeeds() {
-        let db = Arc::new(Database::open_in_memory().await.unwrap());
-        let svc = EpicService::new(db.clone());
-
-        let parent = db
-            .create_epic("Parent", "", "/r", None, ProjectId(1))
-            .await
-            .unwrap();
-
+        let parent = db.create_epic("Parent", "", "/r", None).await.unwrap();
         let sub = svc
             .create_epic(CreateEpicParams {
                 title: "Sub".into(),
@@ -634,78 +444,30 @@ mod tests {
                 parent_epic_id: Some(parent.id),
                 feed_command: None,
                 feed_interval_secs: None,
-                project_id: ProjectId(1),
             })
             .await
             .unwrap();
-
-        assert_eq!(sub.project_id, ProjectId(1));
         assert_eq!(sub.parent_epic_id, Some(parent.id));
     }
 
     #[tokio::test]
-    async fn update_epic_project_id_cascades_to_children() {
+    async fn create_sub_epic_missing_parent_returns_not_found() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let svc = EpicService::new(db.clone());
-
-        let proj2 = db.create_project("P2", 2).await.unwrap();
-
-        let root = db
-            .create_epic("Root", "", "/r", None, ProjectId(1))
-            .await
-            .unwrap();
-
-        let sub = db
-            .create_epic("Sub", "", "/r", Some(root.id), ProjectId(1))
-            .await
-            .unwrap();
-        assert_eq!(sub.project_id, ProjectId(1));
-
-        let task_id = db
-            .create_task(CreateTaskRequest {
-                title: "T",
-                description: "",
-                repo_path: "/r",
-                plan: None,
-                status: TaskStatus::Backlog,
-                base_branch: "main",
-                epic_id: Some(root.id),
+        let result = svc
+            .create_epic(CreateEpicParams {
+                title: "Sub".into(),
+                description: "".into(),
+                repo_path: "/r".into(),
                 sort_order: None,
-                tag: None,
-                project_id: ProjectId(1),
-                wrap_up_mode: None,
+                parent_epic_id: Some(EpicId(9999)),
+                feed_command: None,
+                feed_interval_secs: None,
             })
-            .await
-            .unwrap();
-
-        svc.update_epic(UpdateEpicParams {
-            epic_id: root.id,
-            title: None,
-            description: None,
-            status: None,
-            plan_path: None,
-            sort_order: None,
-            repo_path: None,
-            auto_dispatch: None,
-            feed_command: None,
-            feed_interval_secs: None,
-            project_id: Some(proj2.id),
-            group_by_repo: None,
-            parent_epic_id: None,
-        })
-        .await
-        .unwrap();
-
-        let root_after = db.get_epic(root.id).await.unwrap().unwrap();
-        assert_eq!(root_after.project_id, proj2.id, "root epic project_id");
-
-        let sub_after = db.get_epic(sub.id).await.unwrap().unwrap();
-        assert_eq!(sub_after.project_id, proj2.id, "sub-epic must follow root");
-
-        let task_after = db.get_task(task_id).await.unwrap().unwrap();
-        assert_eq!(
-            task_after.project_id, proj2.id,
-            "task must follow root epic"
+            .await;
+        assert!(
+            matches!(result, Err(ServiceError::NotFound(_))),
+            "expected NotFound for missing parent, got: {result:?}"
         );
     }
 
@@ -713,35 +475,15 @@ mod tests {
     async fn update_epic_sets_parent() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let svc = EpicService::new(db.clone());
-
-        let parent = db
-            .create_epic("Parent", "", "/r", None, ProjectId(1))
-            .await
-            .unwrap();
-        let child = db
-            .create_epic("Child", "", "/r", None, ProjectId(1))
-            .await
-            .unwrap();
+        let parent = db.create_epic("Parent", "", "/r", None).await.unwrap();
+        let child = db.create_epic("Child", "", "/r", None).await.unwrap();
         assert!(child.parent_epic_id.is_none());
-
         svc.update_epic(UpdateEpicParams {
-            epic_id: child.id,
             parent_epic_id: Some(Some(parent.id)),
-            title: None,
-            description: None,
-            status: None,
-            plan_path: None,
-            sort_order: None,
-            repo_path: None,
-            auto_dispatch: None,
-            feed_command: None,
-            feed_interval_secs: None,
-            project_id: None,
-            group_by_repo: None,
+            ..base_params(child.id)
         })
         .await
         .unwrap();
-
         let updated = db.get_epic(child.id).await.unwrap().unwrap();
         assert_eq!(updated.parent_epic_id, Some(parent.id));
     }
@@ -750,35 +492,15 @@ mod tests {
     async fn update_epic_clears_parent() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let svc = EpicService::new(db.clone());
-
-        let parent = db
-            .create_epic("Parent", "", "/r", None, ProjectId(1))
-            .await
-            .unwrap();
-        let child = db
-            .create_epic("Child", "", "/r", Some(parent.id), ProjectId(1))
-            .await
-            .unwrap();
+        let parent = db.create_epic("Parent", "", "/r", None).await.unwrap();
+        let child = db.create_epic("Child", "", "/r", Some(parent.id)).await.unwrap();
         assert_eq!(child.parent_epic_id, Some(parent.id));
-
         svc.update_epic(UpdateEpicParams {
-            epic_id: child.id,
             parent_epic_id: Some(None),
-            title: None,
-            description: None,
-            status: None,
-            plan_path: None,
-            sort_order: None,
-            repo_path: None,
-            auto_dispatch: None,
-            feed_command: None,
-            feed_interval_secs: None,
-            project_id: None,
-            group_by_repo: None,
+            ..base_params(child.id)
         })
         .await
         .unwrap();
-
         let updated = db.get_epic(child.id).await.unwrap().unwrap();
         assert!(updated.parent_epic_id.is_none());
     }
@@ -787,34 +509,14 @@ mod tests {
     async fn update_epic_parent_id_absent_is_noop() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let svc = EpicService::new(db.clone());
-
-        let parent = db
-            .create_epic("Parent", "", "/r", None, ProjectId(1))
-            .await
-            .unwrap();
-        let child = db
-            .create_epic("Child", "", "/r", Some(parent.id), ProjectId(1))
-            .await
-            .unwrap();
-
+        let parent = db.create_epic("Parent", "", "/r", None).await.unwrap();
+        let child = db.create_epic("Child", "", "/r", Some(parent.id)).await.unwrap();
         svc.update_epic(UpdateEpicParams {
-            epic_id: child.id,
-            parent_epic_id: None, // omitted — no change
             title: Some("New Title".to_string()),
-            description: None,
-            status: None,
-            plan_path: None,
-            sort_order: None,
-            repo_path: None,
-            auto_dispatch: None,
-            feed_command: None,
-            feed_interval_secs: None,
-            project_id: None,
-            group_by_repo: None,
+            ..base_params(child.id)
         })
         .await
         .unwrap();
-
         let updated = db.get_epic(child.id).await.unwrap().unwrap();
         assert_eq!(updated.parent_epic_id, Some(parent.id), "parent unchanged");
     }
@@ -823,35 +525,15 @@ mod tests {
     async fn update_epic_cycle_detection() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let svc = EpicService::new(db.clone());
-
-        let a = db
-            .create_epic("A", "", "/r", None, ProjectId(1))
-            .await
-            .unwrap();
-        let b = db
-            .create_epic("B", "", "/r", Some(a.id), ProjectId(1))
-            .await
-            .unwrap();
-
+        let a = db.create_epic("A", "", "/r", None).await.unwrap();
+        let b = db.create_epic("B", "", "/r", Some(a.id)).await.unwrap();
         // Trying to set A's parent to B would create a cycle: A → B → A
         let result = svc
             .update_epic(UpdateEpicParams {
-                epic_id: a.id,
                 parent_epic_id: Some(Some(b.id)),
-                title: None,
-                description: None,
-                status: None,
-                plan_path: None,
-                sort_order: None,
-                repo_path: None,
-                auto_dispatch: None,
-                feed_command: None,
-                feed_interval_secs: None,
-                project_id: None,
-                group_by_repo: None,
+                ..base_params(a.id)
             })
             .await;
-
         assert!(
             matches!(result, Err(ServiceError::Validation(_))),
             "expected Validation error for cycle, got: {:?}",
@@ -866,80 +548,17 @@ mod tests {
     async fn update_epic_self_parent_rejected() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let svc = EpicService::new(db.clone());
-
-        let epic = db
-            .create_epic("Epic", "", "/r", None, ProjectId(1))
-            .await
-            .unwrap();
-
+        let epic = db.create_epic("Epic", "", "/r", None).await.unwrap();
         let result = svc
             .update_epic(UpdateEpicParams {
-                epic_id: epic.id,
                 parent_epic_id: Some(Some(epic.id)),
-                title: None,
-                description: None,
-                status: None,
-                plan_path: None,
-                sort_order: None,
-                repo_path: None,
-                auto_dispatch: None,
-                feed_command: None,
-                feed_interval_secs: None,
-                project_id: None,
-                group_by_repo: None,
+                ..base_params(epic.id)
             })
             .await;
-
         assert!(
             matches!(result, Err(ServiceError::Validation(_))),
             "expected Validation error for self-parent, got: {:?}",
             result
         );
-    }
-
-    #[tokio::test]
-    async fn update_epic_reparent_cascades_project_id() {
-        let db = Arc::new(Database::open_in_memory().await.unwrap());
-        let svc = EpicService::new(db.clone());
-
-        let proj2 = db.create_project("P2", 2).await.unwrap();
-
-        let parent = db
-            .create_epic("Parent", "", "/r", None, proj2.id)
-            .await
-            .unwrap();
-        let child = db
-            .create_epic("Child", "", "/r", None, ProjectId(1))
-            .await
-            .unwrap();
-        // grandchild to verify deep cascade
-        let grandchild = db
-            .create_epic("GC", "", "/r", Some(child.id), ProjectId(1))
-            .await
-            .unwrap();
-
-        svc.update_epic(UpdateEpicParams {
-            epic_id: child.id,
-            parent_epic_id: Some(Some(parent.id)),
-            title: None,
-            description: None,
-            status: None,
-            plan_path: None,
-            sort_order: None,
-            repo_path: None,
-            auto_dispatch: None,
-            feed_command: None,
-            feed_interval_secs: None,
-            project_id: None,
-            group_by_repo: None,
-        })
-        .await
-        .unwrap();
-
-        let child_after = db.get_epic(child.id).await.unwrap().unwrap();
-        assert_eq!(child_after.project_id, proj2.id, "child project cascaded");
-
-        let gc_after = db.get_epic(grandchild.id).await.unwrap().unwrap();
-        assert_eq!(gc_after.project_id, proj2.id, "grandchild project cascaded");
     }
 }

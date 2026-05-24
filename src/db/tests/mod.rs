@@ -5,7 +5,6 @@ mod async_handle;
 mod epics;
 mod learnings;
 mod migrations;
-mod projects;
 mod settings;
 mod tasks;
 mod usage;
@@ -33,7 +32,6 @@ pub(super) async fn create_task_returning(
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await?;

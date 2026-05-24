@@ -1,5 +1,5 @@
 use super::*;
-use crate::models::{Epic, EpicId, ProjectId, TaskId, TaskStatus};
+use crate::models::{Epic, EpicId, TaskId, TaskStatus};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[test]
@@ -53,7 +53,7 @@ fn close_repo_filter_returns_to_normal() {
 
 #[test]
 fn flattened_board_respects_repo_filter() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     app.board.epics = vec![make_epic(10)];
     let mut in_repo = make_task(1, TaskStatus::Backlog);
     in_repo.epic_id = Some(EpicId(10));
@@ -81,7 +81,7 @@ fn repo_filter_empty_shows_all_tasks() {
 
 #[test]
 fn repo_filter_hides_non_matching_tasks() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     let mut t1 = make_task(1, TaskStatus::Backlog);
     t1.repo_path = "/repo-a".to_string();
     let mut t2 = make_task(2, TaskStatus::Backlog);
@@ -96,7 +96,7 @@ fn repo_filter_hides_non_matching_tasks() {
 
 #[test]
 fn repo_filter_applies_to_epics_in_column_items() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     let now = chrono::Utc::now();
     app.board.epics = vec![
         Epic {
@@ -114,7 +114,6 @@ fn repo_filter_applies_to_epics_in_column_items() {
             group_by_repo: false,
             created_at: now,
             updated_at: now,
-            project_id: ProjectId(1),
         },
         Epic {
             id: EpicId(2),
@@ -131,7 +130,6 @@ fn repo_filter_applies_to_epics_in_column_items() {
             group_by_repo: false,
             created_at: now,
             updated_at: now,
-            project_id: ProjectId(1),
         },
     ];
     app.filter.repos.insert("/repo-a".to_string());
@@ -202,7 +200,7 @@ fn repo_filter_out_of_range_number_ignored() {
 
 #[test]
 fn repo_filter_exclude_hides_matching_tasks() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     let mut t1 = make_task(1, TaskStatus::Backlog);
     t1.repo_path = "/repo-a".to_string();
     let mut t2 = make_task(2, TaskStatus::Backlog);
@@ -218,7 +216,7 @@ fn repo_filter_exclude_hides_matching_tasks() {
 
 #[test]
 fn repo_filter_exclude_empty_shows_all() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     let mut t1 = make_task(1, TaskStatus::Backlog);
     t1.repo_path = "/repo-a".to_string();
     let mut t2 = make_task(2, TaskStatus::Backlog);
@@ -232,7 +230,7 @@ fn repo_filter_exclude_empty_shows_all() {
 
 #[test]
 fn repo_filter_exclude_applies_to_epics() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     let now = chrono::Utc::now();
     app.board.epics = vec![
         Epic {
@@ -250,7 +248,6 @@ fn repo_filter_exclude_applies_to_epics() {
             group_by_repo: false,
             created_at: now,
             updated_at: now,
-            project_id: ProjectId(1),
         },
         Epic {
             id: EpicId(2),
@@ -267,7 +264,6 @@ fn repo_filter_exclude_applies_to_epics() {
             group_by_repo: false,
             created_at: now,
             updated_at: now,
-            project_id: ProjectId(1),
         },
     ];
     app.filter.repos.insert("/repo-a".to_string());
@@ -287,7 +283,7 @@ fn close_repo_filter_persists_mode() {
     app.filter.mode = RepoFilterMode::Exclude;
     app.input.mode = InputMode::RepoFilter;
     let cmds = app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::Close));
-    let expected_key = format!("repo_filter_mode:{}", app.active_project().0);
+    let expected_key = "repo_filter_mode";
     assert!(cmds.iter().any(|c| matches!(c,
         Command::PersistStringSetting { key, value } if *key == expected_key && value == "exclude"
     )));
@@ -295,13 +291,13 @@ fn close_repo_filter_persists_mode() {
 
 
 #[test]
-fn close_repo_filter_persists_per_project_keys() {
-    // The active project's id should appear in the persisted setting keys.
-    let mut app = App::new(vec![], ProjectId(7));
+fn close_repo_filter_persists_keys() {
+    // Closing repo filter should persist repo_filter and repo_filter_mode settings.
+    let mut app = App::new(vec![]);
     app.input.mode = InputMode::RepoFilter;
     let cmds = app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::Close));
-    let want_filter = "repo_filter:7".to_string();
-    let want_mode = "repo_filter_mode:7".to_string();
+    let want_filter = "repo_filter";
+    let want_mode = "repo_filter_mode";
     let keys: Vec<&str> = cmds
         .iter()
         .filter_map(|c| match c {
@@ -310,18 +306,18 @@ fn close_repo_filter_persists_per_project_keys() {
         })
         .collect();
     assert!(
-        keys.iter().any(|k| *k == want_filter),
+        keys.contains(&want_filter),
         "Expected key {want_filter} in {keys:?}"
     );
     assert!(
-        keys.iter().any(|k| *k == want_mode),
+        keys.contains(&want_mode),
         "Expected key {want_mode} in {keys:?}"
     );
 }
 
 #[test]
 fn repo_filter_overlay_shows_mode_in_title() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     app.board.repo_paths = vec!["/repo-a".to_string()];
     app.filter.mode = RepoFilterMode::Exclude;
     app.input.mode = InputMode::RepoFilter;
@@ -390,7 +386,7 @@ fn repo_filter_shift_a_loads_first_preset() {
 
 #[test]
 fn repo_filter_overlay_shows_presets() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
     let repos: HashSet<String> = ["/repo-a".to_string()].into_iter().collect();
     app.filter.presets = vec![("frontend".to_string(), repos, RepoFilterMode::Include)];
@@ -406,7 +402,7 @@ fn repo_filter_overlay_shows_presets() {
 
 #[test]
 fn repo_filter_overlay_shows_name_input() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     app.board.repo_paths = vec!["/repo-a".to_string()];
     app.input.mode = InputMode::InputPresetName;
     app.input.buffer = "myfilter".to_string();
@@ -418,7 +414,7 @@ fn repo_filter_overlay_shows_name_input() {
 
 #[test]
 fn repo_filter_overlay_shows_delete_help() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     app.board.repo_paths = vec!["/repo-a".to_string()];
     let repos: HashSet<String> = ["/repo-a".to_string()].into_iter().collect();
     app.filter.presets = vec![("test".to_string(), repos, RepoFilterMode::Include)];
@@ -502,7 +498,7 @@ fn render_status_bar_repo_filter() {
 
 #[test]
 fn render_repo_filter_overlay_shows_title() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     app.board.repo_paths = vec!["/repo/a".to_string(), "/repo/b".to_string()];
     app.input.mode = InputMode::RepoFilter;
     let buf = render_to_buffer(&mut app, 100, 30);
@@ -514,7 +510,7 @@ fn render_repo_filter_overlay_shows_title() {
 
 #[test]
 fn render_repo_filter_overlay_shows_repos() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     app.board.repo_paths = vec!["/repo/alpha".to_string(), "/repo/beta".to_string()];
     app.input.mode = InputMode::RepoFilter;
     let buf = render_to_buffer(&mut app, 100, 30);
@@ -530,7 +526,7 @@ fn render_repo_filter_overlay_shows_repos() {
 
 #[test]
 fn render_repo_filter_overlay_shows_include_mode() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     app.board.repo_paths = vec!["/repo/a".to_string()];
     app.input.mode = InputMode::RepoFilter;
     let buf = render_to_buffer(&mut app, 100, 30);
@@ -542,7 +538,7 @@ fn render_repo_filter_overlay_shows_include_mode() {
 
 #[test]
 fn render_repo_filter_overlay_shows_navigate_hint() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     app.input.mode = InputMode::RepoFilter;
     let buf = render_to_buffer(&mut app, 100, 30);
     assert!(
@@ -553,7 +549,7 @@ fn render_repo_filter_overlay_shows_navigate_hint() {
 
 #[test]
 fn render_repo_filter_input_preset_name() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     app.board.repo_paths = vec!["/repo/a".to_string()];
     app.input.mode = InputMode::InputPresetName;
     app.input.buffer = "my-preset".to_string();
@@ -570,7 +566,7 @@ fn render_repo_filter_input_preset_name() {
 
 #[test]
 fn render_repo_filter_confirm_delete_preset() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     app.board.repo_paths = vec!["/repo/a".to_string()];
     app.input.mode = InputMode::ConfirmDeletePreset;
     let buf = render_to_buffer(&mut app, 100, 30);
@@ -835,7 +831,7 @@ fn tab_key_toggles_repo_filter_mode() {
 
 #[test]
 fn repo_filter_overlay_shows_tab_hint() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     app.board.repo_paths = vec!["/repo/a".to_string()];
     app.input.mode = InputMode::RepoFilter;
     let buf = render_to_buffer(&mut app, 100, 30);
@@ -1105,7 +1101,7 @@ fn backspace_at_cursor_one_starts_delete() {
 
 #[test]
 fn enter_sub_epic_from_epic_view_nests_parent() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     app.board.epics = vec![make_epic(1), make_epic(2)];
     // Start in Epic view for epic 1
     app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
@@ -1142,7 +1138,7 @@ fn enter_sub_epic_from_epic_view_nests_parent() {
 
 #[test]
 fn only_active_filter_hides_tasks_without_tmux_window() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     let mut t1 = make_task(1, TaskStatus::Running);
     t1.tmux_window = Some("dispatch:1".to_string());
     let mut t2 = make_task(2, TaskStatus::Running);
@@ -1159,7 +1155,7 @@ fn only_active_filter_hides_tasks_without_tmux_window() {
 
 #[test]
 fn only_active_filter_off_shows_all_tasks() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     let mut t1 = make_task(1, TaskStatus::Running);
     t1.tmux_window = Some("dispatch:1".to_string());
     let mut t2 = make_task(2, TaskStatus::Backlog);
@@ -1201,7 +1197,7 @@ fn status_bar_no_active_badge_when_only_active_disabled() {
 
 #[test]
 fn only_active_filter_hides_epic_with_no_active_tasks() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Backlog;
     let mut t = make_task(1, TaskStatus::Backlog);
@@ -1220,7 +1216,7 @@ fn only_active_filter_hides_epic_with_no_active_tasks() {
 
 #[test]
 fn only_active_filter_shows_epic_with_active_task() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Backlog;
     let mut t = make_task(1, TaskStatus::Backlog);
@@ -1241,7 +1237,7 @@ fn only_active_filter_shows_epic_with_active_task() {
 
 #[test]
 fn only_active_filter_off_shows_epics_without_active_tasks() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Backlog;
     app.board.epics = vec![epic];
@@ -1258,7 +1254,7 @@ fn only_active_filter_off_shows_epics_without_active_tasks() {
 
 #[test]
 fn only_active_filter_column_item_count_excludes_inactive_epics() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     let mut epic_active = make_epic(10);
     epic_active.status = TaskStatus::Backlog;
     let mut epic_inactive = make_epic(20);
@@ -1283,7 +1279,7 @@ fn only_active_filter_column_item_count_excludes_inactive_epics() {
 fn only_active_filter_shows_root_epic_when_grandchild_task_is_active() {
     // epic(10) → sub-epic(20) → task(with tmux_window)
     // Root epic should be visible because a descendant task is active.
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
 
     let mut root_epic = make_epic(10);
     root_epic.status = TaskStatus::Backlog;

@@ -88,9 +88,6 @@ macro_rules! define_id_newtype {
     };
 }
 
-pub mod projects;
-pub use projects::*;
-
 pub mod learnings;
 pub use learnings::*;
 
@@ -754,7 +751,6 @@ mod tests {
             labels: Vec::new(),
             created_at: now,
             updated_at: now,
-            project_id: ProjectId(1),
             last_pre_tool_use_at: None,
             last_notification_at: None,
             wrap_up_mode: None,
@@ -784,7 +780,6 @@ mod tests {
             labels: Vec::new(),
             created_at: now,
             updated_at: now,
-            project_id: ProjectId(1),
             last_pre_tool_use_at: None,
             last_notification_at: None,
             wrap_up_mode: None,
@@ -810,7 +805,6 @@ mod tests {
             group_by_repo: false,
             created_at: now,
             updated_at: now,
-            project_id: ProjectId(1),
         };
         assert_eq!(epic.id, EpicId(1));
         assert_eq!(epic.status, TaskStatus::Backlog);
@@ -836,7 +830,6 @@ mod tests {
             group_by_repo: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            project_id: ProjectId(1),
         }
     }
 
@@ -1055,7 +1048,6 @@ mod tests {
             group_by_repo: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            project_id: ProjectId(1),
         }
     }
 
@@ -1079,7 +1071,6 @@ mod tests {
             labels: Vec::new(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            project_id: ProjectId(1),
             last_pre_tool_use_at: None,
             last_notification_at: None,
             wrap_up_mode: None,
@@ -1282,7 +1273,6 @@ mod tests {
             labels: Vec::new(),
             created_at: now,
             updated_at: now,
-            project_id: ProjectId(1),
             last_pre_tool_use_at: None,
             last_notification_at: None,
             wrap_up_mode: None,
@@ -1363,7 +1353,6 @@ mod tests {
             group_by_repo: false,
             created_at: now,
             updated_at: now,
-            project_id: ProjectId(1),
         }
     }
 
@@ -1388,7 +1377,6 @@ mod tests {
             labels: Vec::new(),
             created_at: now,
             updated_at: now,
-            project_id: ProjectId(1),
             last_pre_tool_use_at: None,
             last_notification_at: None,
             wrap_up_mode: None,

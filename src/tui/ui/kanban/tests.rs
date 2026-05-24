@@ -1,13 +1,13 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::super::shared::render_substatus_header;
 use super::*;
-use crate::models::{ProjectId, TaskTag};
+use crate::models::TaskTag;
 use crate::tui::types::TaskDraft;
 use ratatui::buffer::Buffer;
 use ratatui::widgets::ListItem;
 
 fn make_test_app() -> App {
-    App::new(vec![], ProjectId(1))
+    App::new(vec![])
 }
 
 fn dummy_style() -> Style {

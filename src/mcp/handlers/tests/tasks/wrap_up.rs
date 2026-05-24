@@ -35,7 +35,6 @@ async fn wrap_up_rejects_backlog_task() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -82,7 +81,6 @@ async fn wrap_up_accepts_running_blocked_task() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -142,7 +140,6 @@ async fn wrap_up_accepts_running_active_task() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -203,7 +200,6 @@ async fn wrap_up_rebase_response_demands_exit_session_imperatively() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -268,7 +264,6 @@ async fn wrap_up_task_no_worktree() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -301,7 +296,6 @@ async fn wrap_up_invalid_action() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -356,7 +350,6 @@ async fn wrap_up_rebase_returns_started() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -454,7 +447,6 @@ async fn wrap_up_done_returns_exit_token() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -512,7 +504,6 @@ async fn wrap_up_pr_sets_review_and_pr_url() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -570,7 +561,6 @@ async fn wrap_up_pr_without_pr_url_errors() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -621,7 +611,6 @@ async fn wrap_up_pr_response_contains_no_token() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -709,7 +698,6 @@ async fn create_wrappable_task(db: &Arc<dyn db::TaskStore>) -> crate::models::Ta
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -951,7 +939,6 @@ async fn wrap_up_rebase_conflict_returns_error() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1008,7 +995,6 @@ async fn wrap_up_rebase_not_on_main_returns_error() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1044,7 +1030,7 @@ async fn update_task_status_recalculates_epic_status() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .create_epic("E", "", "/repo", None)
         .await
         .unwrap();
     let task_id = state
@@ -1059,7 +1045,6 @@ async fn update_task_status_recalculates_epic_status() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1141,14 +1126,13 @@ async fn update_task_sends_refresh_notification() {
 #[tokio::test]
 async fn create_task_sends_refresh_notification() {
     let (state, mut rx) = test_state_with_notify().await;
-    let default_id = state.db.get_default_project().await.unwrap().id;
 
     let resp = call(
         &state,
         "tools/call",
         Some(json!({
             "name": "create_task",
-            "arguments": { "title": "Notified Task", "repo_path": "/repo", "project_id": default_id }
+            "arguments": { "title": "Notified Task", "repo_path": "/repo" }
         })),
     )
     .await;
@@ -1251,7 +1235,6 @@ async fn seed_task_with_worktree(
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1796,7 +1779,6 @@ async fn wrap_up_rebase_does_not_kill_window() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1941,7 +1923,7 @@ async fn exit_session_recalculates_epic_status() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .create_epic("E", "", "/repo", None)
         .await
         .unwrap();
     let task_id = create_running_task_with_window(&state).await;
@@ -2096,7 +2078,7 @@ async fn wrap_up_then_exit_session_end_to_end() {
     ));
 
     let epic = db
-        .create_epic("E2E Epic", "", "/repo", None, ProjectId(1))
+        .create_epic("E2E Epic", "", "/repo", None)
         .await
         .unwrap();
     let task_id = db
@@ -2110,7 +2092,6 @@ async fn wrap_up_then_exit_session_end_to_end() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -2237,7 +2218,6 @@ async fn wrap_up_done_marks_task_done_without_git_ops() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: Some(crate::models::WrapUpMode::Done),
         })
         .await

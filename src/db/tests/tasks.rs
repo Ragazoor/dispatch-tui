@@ -15,7 +15,6 @@ async fn create_and_get() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -43,7 +42,6 @@ async fn list_all() {
         epic_id: None,
         sort_order: None,
         tag: None,
-        project_id: ProjectId(1),
         wrap_up_mode: None,
     })
     .await
@@ -58,7 +56,6 @@ async fn list_all() {
         epic_id: None,
         sort_order: None,
         tag: None,
-        project_id: ProjectId(1),
         wrap_up_mode: None,
     })
     .await
@@ -73,7 +70,6 @@ async fn list_all() {
         epic_id: None,
         sort_order: None,
         tag: None,
-        project_id: ProjectId(1),
         wrap_up_mode: None,
     })
     .await
@@ -99,7 +95,6 @@ async fn list_by_status() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -115,7 +110,6 @@ async fn list_by_status() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -130,7 +124,6 @@ async fn list_by_status() {
         epic_id: None,
         sort_order: None,
         tag: None,
-        project_id: ProjectId(1),
         wrap_up_mode: None,
     })
     .await
@@ -172,7 +165,6 @@ async fn create_task_with_plan() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -195,7 +187,6 @@ async fn create_task_without_plan() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -218,7 +209,6 @@ async fn find_task_by_plan_returns_match() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -242,7 +232,6 @@ async fn find_task_by_plan_returns_none_when_no_match() {
         epic_id: None,
         sort_order: None,
         tag: None,
-        project_id: ProjectId(1),
         wrap_up_mode: None,
     })
     .await
@@ -265,7 +254,6 @@ async fn find_task_by_plan_ignores_tasks_without_plan() {
         epic_id: None,
         sort_order: None,
         tag: None,
-        project_id: ProjectId(1),
         wrap_up_mode: None,
     })
     .await
@@ -314,7 +302,6 @@ async fn patch_task_applies_all_fields() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -345,7 +332,6 @@ async fn patch_task_none_fields_unchanged() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -372,7 +358,6 @@ async fn create_task_defaults_labels_to_empty() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -395,7 +380,6 @@ async fn patch_task_sets_labels() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -422,7 +406,6 @@ async fn patch_task_clears_labels_to_empty() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -468,7 +451,6 @@ async fn patch_task_round_trips_hook_event_timestamps() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -516,7 +498,6 @@ async fn patch_task_none_preserves_labels() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -547,7 +528,6 @@ async fn list_all_errors_on_corrupt_labels_json() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -584,7 +564,6 @@ async fn patch_task_sets_tag() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -610,7 +589,6 @@ async fn patch_task_clears_tag() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -639,7 +617,6 @@ async fn has_other_tasks_with_worktree_returns_false_when_no_others() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -674,7 +651,6 @@ async fn has_other_tasks_with_worktree_returns_true_when_shared() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -690,7 +666,6 @@ async fn has_other_tasks_with_worktree_returns_true_when_shared() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -738,7 +713,6 @@ async fn has_other_tasks_with_worktree_ignores_done_tasks() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -754,7 +728,6 @@ async fn has_other_tasks_with_worktree_ignores_done_tasks() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -798,7 +771,6 @@ async fn patch_task_clears_plan() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -823,7 +795,6 @@ async fn patch_task_sets_dispatch_fields() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -851,7 +822,6 @@ async fn patch_task_clears_dispatch_fields() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -887,7 +857,6 @@ async fn patch_task_status_and_dispatch_together() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -941,7 +910,6 @@ async fn patch_task_status_change_resets_sub_status_in_db() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -973,7 +941,6 @@ async fn update_status_if_matching() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1003,7 +970,6 @@ async fn update_status_if_not_matching() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1046,7 +1012,6 @@ async fn task_roundtrip_with_pr_fields() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1080,7 +1045,6 @@ async fn task_pr_fields_default_to_none() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1103,7 +1067,6 @@ async fn patch_task_sets_pr_url() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1133,7 +1096,6 @@ async fn patch_task_sets_sort_order() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1159,7 +1121,6 @@ async fn patch_task_clears_sort_order() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1188,7 +1149,6 @@ async fn task_sub_status_persists() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1214,7 +1174,6 @@ async fn task_sub_status_defaults_to_none() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1238,7 +1197,6 @@ async fn create_task_sets_default_sub_status_for_running() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1261,7 +1219,6 @@ async fn create_task_sets_default_sub_status_for_backlog() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1274,7 +1231,7 @@ async fn create_task_sets_default_sub_status_for_backlog() {
 async fn create_task_with_epic_sort_tag_single_insert() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .create_epic("E", "", "/repo", None)
         .await
         .unwrap();
     let id = db
@@ -1288,7 +1245,6 @@ async fn create_task_with_epic_sort_tag_single_insert() {
             epic_id: Some(epic.id),
             sort_order: Some(7),
             tag: Some(TaskTag::Bug),
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1313,7 +1269,6 @@ async fn update_status_if_resets_sub_status_to_default() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1347,7 +1302,6 @@ async fn update_status_if_leaves_sub_status_unchanged_when_condition_fails() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1426,7 +1380,6 @@ async fn delete_task_removes_task() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1471,7 +1424,7 @@ fn main_branches(n: usize) -> Vec<String> {
 async fn upsert_feed_tasks_creates_tasks() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .create_epic("E", "", "/repo", None)
         .await
         .unwrap();
     let items = vec![
@@ -1501,7 +1454,7 @@ async fn upsert_feed_tasks_creates_tasks() {
 async fn upsert_feed_tasks_idempotent() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .create_epic("E", "", "/repo", None)
         .await
         .unwrap();
     let items = vec![make_feed_item("ext-1", "Task One")];
@@ -1524,7 +1477,7 @@ async fn upsert_feed_tasks_idempotent() {
 async fn upsert_feed_tasks_preserves_status() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .create_epic("E", "", "/repo", None)
         .await
         .unwrap();
     let items = vec![make_feed_item("ext-1", "Original Title")];
@@ -1572,7 +1525,7 @@ async fn upsert_feed_tasks_preserves_status() {
 async fn upsert_feed_tasks_adds_new_items() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .create_epic("E", "", "/repo", None)
         .await
         .unwrap();
 
@@ -1605,7 +1558,7 @@ async fn upsert_feed_tasks_adds_new_items() {
 async fn upsert_feed_tasks_removes_stale_items() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .create_epic("E", "", "/repo", None)
         .await
         .unwrap();
 
@@ -1642,7 +1595,7 @@ async fn upsert_feed_tasks_removes_stale_items() {
 async fn upsert_feed_tasks_uses_resolved_repo_path() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/epic-repo", None, ProjectId(1))
+        .create_epic("E", "", "/epic-repo", None)
         .await
         .unwrap();
     let items = vec![make_feed_item("ext-1", "Task One")];
@@ -1661,7 +1614,7 @@ async fn upsert_feed_tasks_uses_resolved_repo_path() {
 async fn upsert_feed_tasks_stores_empty_sentinel_when_unresolved() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/epic-repo", None, ProjectId(1))
+        .create_epic("E", "", "/epic-repo", None)
         .await
         .unwrap();
     let items = vec![make_feed_item("ext-1", "Task One")];
@@ -1680,7 +1633,7 @@ async fn upsert_feed_tasks_stores_empty_sentinel_when_unresolved() {
 async fn upsert_feed_tasks_on_conflict_does_not_update_repo_path() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/epic-repo", None, ProjectId(1))
+        .create_epic("E", "", "/epic-repo", None)
         .await
         .unwrap();
     let items = vec![make_feed_item("ext-1", "Original")];
@@ -1729,7 +1682,7 @@ async fn upsert_feed_tasks_on_conflict_does_not_update_repo_path() {
 async fn upsert_feed_tasks_mixed_batch_resolved_and_unresolved() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/epic-repo", None, ProjectId(1))
+        .create_epic("E", "", "/epic-repo", None)
         .await
         .unwrap();
     let items = vec![
@@ -1760,7 +1713,7 @@ async fn upsert_feed_tasks_mixed_batch_resolved_and_unresolved() {
 async fn upsert_feed_tasks_stores_per_task_base_branch() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .create_epic("E", "", "/repo", None)
         .await
         .unwrap();
     let items = vec![
@@ -1799,7 +1752,7 @@ async fn upsert_feed_tasks_stores_per_task_base_branch() {
 async fn upsert_feed_tasks_does_not_remove_manual_tasks() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .create_epic("E", "", "/repo", None)
         .await
         .unwrap();
 
@@ -1815,7 +1768,6 @@ async fn upsert_feed_tasks_does_not_remove_manual_tasks() {
             epic_id: Some(epic.id),
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1847,7 +1799,7 @@ async fn upsert_feed_tasks_does_not_remove_manual_tasks() {
 async fn upsert_feed_tasks_persists_tag() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .create_epic("E", "", "/repo", None)
         .await
         .unwrap();
     let items = vec![crate::models::FeedItem {
@@ -1874,7 +1826,7 @@ async fn upsert_feed_tasks_persists_tag() {
 async fn upsert_feed_tasks_updates_tag_on_conflict() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .create_epic("E", "", "/repo", None)
         .await
         .unwrap();
     let initial = vec![crate::models::FeedItem {
@@ -1932,7 +1884,7 @@ async fn feed_item_legacy_json_deserializes_with_default_labels_and_sort_order()
 async fn upsert_feed_tasks_writes_labels_and_sort_order_on_insert() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .create_epic("E", "", "/repo", None)
         .await
         .unwrap();
     let items = vec![crate::models::FeedItem {
@@ -1959,7 +1911,7 @@ async fn upsert_feed_tasks_writes_labels_and_sort_order_on_insert() {
 async fn upsert_feed_tasks_replaces_labels_and_sort_order_on_conflict() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .create_epic("E", "", "/repo", None)
         .await
         .unwrap();
     let initial = vec![crate::models::FeedItem {
@@ -2020,7 +1972,7 @@ async fn upsert_feed_tasks_replaces_labels_and_sort_order_on_conflict() {
 async fn upsert_feed_tasks_sets_pr_url_from_item_url_on_insert() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .create_epic("E", "", "/repo", None)
         .await
         .unwrap();
     let items = vec![
@@ -2088,7 +2040,7 @@ async fn upsert_feed_tasks_sets_pr_url_from_item_url_on_insert() {
 async fn upsert_feed_tasks_leaves_pr_url_null_when_item_url_empty() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .create_epic("E", "", "/repo", None)
         .await
         .unwrap();
     let items = vec![crate::models::FeedItem {
@@ -2114,7 +2066,7 @@ async fn upsert_feed_tasks_leaves_pr_url_null_when_item_url_empty() {
 async fn upsert_feed_tasks_backfills_null_pr_url_on_conflict() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .create_epic("E", "", "/repo", None)
         .await
         .unwrap();
     // First emission: no URL — task created with pr_url = NULL.
@@ -2168,7 +2120,7 @@ async fn upsert_feed_tasks_backfills_null_pr_url_on_conflict() {
 async fn upsert_feed_tasks_preserves_pr_url_on_conflict() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .create_epic("E", "", "/repo", None)
         .await
         .unwrap();
     let initial = vec![crate::models::FeedItem {
@@ -2210,7 +2162,7 @@ async fn upsert_feed_tasks_can_purge_task_with_associated_learning() {
 
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .create_epic("E", "", "/repo", None)
         .await
         .unwrap();
 
@@ -2252,7 +2204,7 @@ async fn upsert_feed_tasks_can_purge_task_with_associated_learning() {
 async fn upsert_feed_tasks_can_purge_stale_task() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .create_epic("E", "", "/repo", None)
         .await
         .unwrap();
 
@@ -2298,7 +2250,6 @@ async fn task_patch_each_setter_marks_has_changes() {
     assert!(TaskPatch::new().base_branch("main").has_changes());
     assert!(TaskPatch::new().external_id(Some("x")).has_changes());
     assert!(TaskPatch::new().external_id(None).has_changes());
-    assert!(TaskPatch::new().project_id(ProjectId(1)).has_changes());
     let labels: Vec<String> = vec!["x".into()];
     assert!(TaskPatch::new().labels(&labels).has_changes());
 }
@@ -2438,7 +2389,6 @@ mod property_tests {
                            epic_id: None,
                            sort_order: None,
                            tag: None,
-                           project_id: ProjectId(1),
                            wrap_up_mode: None,
                        })
                        .await
@@ -2486,8 +2436,8 @@ mod property_tests {
                        .create_task(CreateTaskRequest {
                            title: "T", description: "d", repo_path: "/r",
                            plan: None, status: TaskStatus::Backlog, base_branch: "main",
-                           epic_id: None, sort_order: Some(42), tag: None, project_id: ProjectId(1),
-    wrap_up_mode: None,
+                           epic_id: None, sort_order: Some(42), tag: None,
+                           wrap_up_mode: None,
                        })
                        .await
                        .unwrap();
@@ -2518,7 +2468,7 @@ mod property_tests {
                rt.block_on(async {
                    let db = in_memory_db().await;
                    let epic = db
-                       .create_epic("Baseline epic", "baseline", "/baseline", None, ProjectId(1)).await
+                       .create_epic("Baseline epic", "baseline", "/baseline", None).await
                        .unwrap();
                    let baseline = db.get_epic(epic.id).await.unwrap().unwrap();
 
@@ -2563,7 +2513,6 @@ async fn create_task_wrap_up_mode_defaults_to_none() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -2586,7 +2535,6 @@ async fn create_task_with_wrap_up_mode_rebase() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: Some(WrapUpMode::Rebase),
         })
         .await
@@ -2635,7 +2583,6 @@ async fn get_task_errors_on_unknown_tag() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -2672,7 +2619,6 @@ async fn list_all_errors_on_unknown_wrap_up_mode() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -2705,7 +2651,6 @@ async fn row_to_task_sub_status_none_string_maps_to_none_variant() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -2728,7 +2673,6 @@ async fn row_to_task_base_branch_defaults_to_main() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -2754,7 +2698,6 @@ async fn get_task_errors_on_corrupt_sort_order_type() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await

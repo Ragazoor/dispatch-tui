@@ -124,7 +124,6 @@ async fn get_task_found() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -163,7 +162,6 @@ async fn get_task_not_found() {
 #[tokio::test]
 async fn create_task_minimal() {
     let state = test_state().await;
-    let default_id = state.db.get_default_project().await.unwrap().id;
     let resp = call(
         &state,
         "tools/call",
@@ -172,7 +170,6 @@ async fn create_task_minimal() {
             "arguments": {
                 "title": "New Task",
                 "repo_path": "/my/repo",
-                "project_id": default_id,
             }
         })),
     )
@@ -197,7 +194,6 @@ async fn create_task_with_plan_stays_backlog() {
     std::fs::write(&plan_file, "# Plan").unwrap();
 
     let state = test_state().await;
-    let default_id = state.db.get_default_project().await.unwrap().id;
     let resp = call(
         &state,
         "tools/call",
@@ -207,7 +203,6 @@ async fn create_task_with_plan_stays_backlog() {
                 "title": "Planned Task",
                 "repo_path": "/my/repo",
                 "plan_path": plan_file.to_string_lossy(),
-                "project_id": default_id,
             }
         })),
     )
@@ -231,7 +226,6 @@ async fn create_task_with_plan_stays_backlog() {
 #[tokio::test]
 async fn create_task_with_description() {
     let state = test_state().await;
-    let default_id = state.db.get_default_project().await.unwrap().id;
     let resp = call(
         &state,
         "tools/call",
@@ -241,7 +235,6 @@ async fn create_task_with_description() {
                 "title": "Described Task",
                 "repo_path": "/repo",
                 "description": "Some details",
-                "project_id": default_id,
             }
         })),
     )
@@ -255,13 +248,12 @@ async fn create_task_with_description() {
 #[tokio::test]
 async fn create_task_missing_title() {
     let state = test_state().await;
-    let default_id = state.db.get_default_project().await.unwrap().id;
     let resp = call(
         &state,
         "tools/call",
         Some(json!({
             "name": "create_task",
-            "arguments": { "repo_path": "/repo", "project_id": default_id }
+            "arguments": { "repo_path": "/repo" }
         })),
     )
     .await;
@@ -285,7 +277,6 @@ async fn update_task_accepts_string_task_id() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -325,7 +316,6 @@ async fn get_task_accepts_string_task_id() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -365,7 +355,6 @@ async fn update_task_with_plan() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -402,7 +391,6 @@ async fn update_task_title_only() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -443,7 +431,6 @@ async fn update_task_status_optional() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -480,7 +467,6 @@ async fn update_task_title_and_description() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -517,7 +503,6 @@ async fn update_task_repo_path() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -558,7 +543,6 @@ async fn update_task_no_fields_errors() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -591,7 +575,6 @@ async fn patch_task_sets_multiple_fields() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -632,7 +615,6 @@ async fn update_task_without_plan_preserves_existing() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -672,7 +654,6 @@ async fn update_task_sets_pr_fields() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -819,7 +800,6 @@ async fn update_task_rejects_invalid_wrap_up_mode() {
 #[tokio::test]
 async fn create_task_with_wrap_up_mode() {
     let state = test_state().await;
-    let default_id = state.db.get_default_project().await.unwrap().id;
 
     let resp = call(
         &state,
@@ -829,7 +809,6 @@ async fn create_task_with_wrap_up_mode() {
             "arguments": {
                 "title": "Task with mode",
                 "repo_path": "/repo",
-                "project_id": default_id,
                 "wrap_up_mode": "pr"
             }
         })),
@@ -892,7 +871,6 @@ async fn list_tasks_returns_all_when_no_filter() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -909,7 +887,6 @@ async fn list_tasks_returns_all_when_no_filter() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -943,7 +920,6 @@ async fn list_tasks_filters_by_single_status() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -960,7 +936,6 @@ async fn list_tasks_filters_by_single_status() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -994,7 +969,6 @@ async fn list_tasks_filters_by_multiple_statuses() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1011,7 +985,6 @@ async fn list_tasks_filters_by_multiple_statuses() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1028,7 +1001,6 @@ async fn list_tasks_filters_by_multiple_statuses() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1107,10 +1079,9 @@ async fn list_tasks_status_as_number_errors() {
 #[tokio::test]
 async fn create_task_with_epic_id() {
     let state = test_state().await;
-    let default_id = state.db.get_default_project().await.unwrap().id;
     let epic = state
         .db
-        .create_epic("Parent Epic", "", "/repo", None, ProjectId(1))
+        .create_epic("Parent Epic", "", "/repo", None)
         .await
         .unwrap();
 
@@ -1123,7 +1094,6 @@ async fn create_task_with_epic_id() {
                 "title": "Epic Child",
                 "repo_path": "/repo",
                 "epic_id": epic.id.0,
-                "project_id": default_id,
             }
         })),
     )
@@ -1138,10 +1108,9 @@ async fn create_task_with_epic_id() {
 #[tokio::test]
 async fn create_task_with_string_epic_id() {
     let state = test_state().await;
-    let default_id = state.db.get_default_project().await.unwrap().id;
     let epic = state
         .db
-        .create_epic("Parent", "", "/repo", None, ProjectId(1))
+        .create_epic("Parent", "", "/repo", None)
         .await
         .unwrap();
 
@@ -1154,7 +1123,6 @@ async fn create_task_with_string_epic_id() {
                 "title": "String Epic Child",
                 "repo_path": "/repo",
                 "epic_id": epic.id.0.to_string(),
-                "project_id": default_id,
             }
         })),
     )
@@ -1188,7 +1156,6 @@ async fn update_task_sets_sub_status() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1229,7 +1196,6 @@ async fn update_task_rejects_invalid_sub_status_for_status() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1262,7 +1228,6 @@ async fn update_task_rejects_bogus_sub_status() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1295,7 +1260,6 @@ async fn update_task_sub_status_with_status_change() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1333,7 +1297,6 @@ async fn update_task_status_running_with_needs_input() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1373,7 +1336,6 @@ async fn update_task_sub_status_invalid_for_new_status() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1407,7 +1369,6 @@ async fn list_tasks_shows_sub_status() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1449,7 +1410,6 @@ async fn get_task_shows_sub_status() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1567,7 +1527,7 @@ async fn update_task_sets_epic_id() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("Parent", "", "/repo", None, ProjectId(1))
+        .create_epic("Parent", "", "/repo", None)
         .await
         .unwrap();
     let task_id = create_task_fixture(&state).await;
@@ -1619,13 +1579,12 @@ async fn update_task_sort_order() {
 #[tokio::test]
 async fn create_task_invalid_tag() {
     let state = test_state().await;
-    let default_id = state.db.get_default_project().await.unwrap().id;
     let resp = call(
         &state,
         "tools/call",
         Some(json!({
             "name": "create_task",
-            "arguments": { "title": "Tagged", "repo_path": "/repo", "tag": "bogus", "project_id": default_id }
+            "arguments": { "title": "Tagged", "repo_path": "/repo", "tag": "bogus" }
         })),
     )
     .await;
@@ -1635,13 +1594,12 @@ async fn create_task_invalid_tag() {
 #[tokio::test]
 async fn create_task_valid_tag() {
     let state = test_state().await;
-    let default_id = state.db.get_default_project().await.unwrap().id;
     let resp = call(
         &state,
         "tools/call",
         Some(json!({
             "name": "create_task",
-            "arguments": { "title": "Bug Task", "repo_path": "/repo", "tag": "bug", "project_id": default_id }
+            "arguments": { "title": "Bug Task", "repo_path": "/repo", "tag": "bug" }
         })),
     )
     .await;
@@ -1654,13 +1612,12 @@ async fn create_task_valid_tag() {
 #[tokio::test]
 async fn create_task_with_sort_order() {
     let state = test_state().await;
-    let default_id = state.db.get_default_project().await.unwrap().id;
     let resp = call(
         &state,
         "tools/call",
         Some(json!({
             "name": "create_task",
-            "arguments": { "title": "Ordered Task", "repo_path": "/repo", "sort_order": 99, "project_id": default_id }
+            "arguments": { "title": "Ordered Task", "repo_path": "/repo", "sort_order": 99 }
         })),
     )
     .await;
@@ -1673,13 +1630,12 @@ async fn create_task_with_sort_order() {
 #[tokio::test]
 async fn create_task_with_nonexistent_epic() {
     let state = test_state().await;
-    let default_id = state.db.get_default_project().await.unwrap().id;
     let resp = call(
         &state,
         "tools/call",
         Some(json!({
             "name": "create_task",
-            "arguments": { "title": "Orphan", "repo_path": "/repo", "epic_id": 9999, "project_id": default_id }
+            "arguments": { "title": "Orphan", "repo_path": "/repo", "epic_id": 9999 }
         })),
     )
     .await;
@@ -1696,7 +1652,7 @@ async fn list_tasks_filters_by_epic_id() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("My Epic", "", "/repo", None, ProjectId(1))
+        .create_epic("My Epic", "", "/repo", None)
         .await
         .unwrap();
     let t1 = state
@@ -1711,7 +1667,6 @@ async fn list_tasks_filters_by_epic_id() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1728,7 +1683,6 @@ async fn list_tasks_filters_by_epic_id() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1758,7 +1712,7 @@ async fn list_tasks_filters_by_status_and_epic_id() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("Combined Filter", "", "/repo", None, ProjectId(1))
+        .create_epic("Combined Filter", "", "/repo", None)
         .await
         .unwrap();
     let t1 = state
@@ -1773,7 +1727,6 @@ async fn list_tasks_filters_by_status_and_epic_id() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1790,7 +1743,6 @@ async fn list_tasks_filters_by_status_and_epic_id() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1834,7 +1786,6 @@ async fn list_tasks_epic_filter_no_match() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1866,7 +1817,6 @@ async fn list_tasks_done_status_filter() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1883,7 +1833,6 @@ async fn list_tasks_done_status_filter() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1933,7 +1882,6 @@ async fn wrap_up_rebase_does_not_change_status() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1983,7 +1931,7 @@ async fn wrap_up_rebase_does_not_recalculate_epic_status() {
     ));
 
     let epic = db
-        .create_epic("E", "", "/repo", None, ProjectId(1))
+        .create_epic("E", "", "/repo", None)
         .await
         .unwrap();
     let task_id = db
@@ -1997,7 +1945,6 @@ async fn wrap_up_rebase_does_not_recalculate_epic_status() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -2058,7 +2005,6 @@ async fn wrap_up_accepts_string_task_id() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -2095,7 +2041,7 @@ async fn get_task_shows_all_fields() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("Parent Epic", "", "/repo", None, ProjectId(1))
+        .create_epic("Parent Epic", "", "/repo", None)
         .await
         .unwrap();
     let task_id = state
@@ -2110,7 +2056,6 @@ async fn get_task_shows_all_fields() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -2174,7 +2119,6 @@ async fn get_task_without_epic_omits_epic_line() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -2215,7 +2159,6 @@ async fn list_tasks_shows_tag_and_plan_indicators() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -2250,7 +2193,7 @@ async fn list_tasks_shows_epic_indicator() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("Sprint 1", "", "/repo", None, ProjectId(1))
+        .create_epic("Sprint 1", "", "/repo", None)
         .await
         .unwrap();
     let task_id = state
@@ -2265,7 +2208,6 @@ async fn list_tasks_shows_epic_indicator() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -2305,7 +2247,6 @@ async fn list_tasks_truncates_long_descriptions() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -2343,7 +2284,6 @@ async fn list_tasks_excludes_archived_by_default() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -2360,7 +2300,6 @@ async fn list_tasks_excludes_archived_by_default() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -2386,12 +2325,12 @@ async fn list_epics_excludes_archived() {
     let state = test_state().await;
     state
         .db
-        .create_epic("Active Epic", "desc", "/repo", None, ProjectId(1))
+        .create_epic("Active Epic", "desc", "/repo", None)
         .await
         .unwrap();
     let archived_epic = state
         .db
-        .create_epic("Archived Epic", "desc", "/repo", None, ProjectId(1))
+        .create_epic("Archived Epic", "desc", "/repo", None)
         .await
         .unwrap();
     state
@@ -2424,7 +2363,6 @@ async fn list_epics_excludes_archived() {
 #[tokio::test]
 async fn create_task_with_base_branch_stores_it() {
     let state = test_state().await;
-    let default_id = state.db.get_default_project().await.unwrap().id;
 
     let resp = call(
         &state,
@@ -2435,7 +2373,6 @@ async fn create_task_with_base_branch_stores_it() {
                 "title": "My Feature",
                 "repo_path": "/repo",
                 "base_branch": "develop",
-                "project_id": default_id,
             }
         })),
     )
@@ -2450,7 +2387,6 @@ async fn create_task_with_base_branch_stores_it() {
 #[tokio::test]
 async fn create_task_without_base_branch_defaults_to_main() {
     let state = test_state().await;
-    let default_id = state.db.get_default_project().await.unwrap().id;
 
     let resp = call(
         &state,
@@ -2460,7 +2396,6 @@ async fn create_task_without_base_branch_defaults_to_main() {
             "arguments": {
                 "title": "Default Branch Task",
                 "repo_path": "/repo",
-                "project_id": default_id,
             }
         })),
     )
@@ -2491,7 +2426,6 @@ async fn update_task_with_base_branch_updates_it() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -2522,7 +2456,7 @@ async fn dispatch_next_returns_disabled_when_auto_dispatch_off() {
     // Create epic with auto_dispatch = false
     let epic = state
         .db
-        .create_epic("E", "desc", "/repo", None, ProjectId(1))
+        .create_epic("E", "desc", "/repo", None)
         .await
         .unwrap();
     state
@@ -2544,7 +2478,6 @@ async fn dispatch_next_returns_disabled_when_auto_dispatch_off() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -2582,8 +2515,7 @@ async fn dispatch_next_returns_disabled_when_auto_dispatch_off() {
 #[tokio::test]
 async fn list_tasks_task_identity_scopes_to_epic_and_excludes_self() {
     let (state, db) = test_state_with_db().await;
-    let pid = ProjectId(1);
-    let eid = db.create_epic("e", "", "/r", None, pid).await.unwrap().id;
+    let eid = db.create_epic("e", "", "/r", None).await.unwrap().id;
     let me = db
         .create_task(CreateTaskRequest {
             title: "me",
@@ -2595,7 +2527,6 @@ async fn list_tasks_task_identity_scopes_to_epic_and_excludes_self() {
             epic_id: Some(eid),
             sort_order: None,
             tag: None,
-            project_id: pid,
             wrap_up_mode: None,
         })
         .await
@@ -2611,7 +2542,6 @@ async fn list_tasks_task_identity_scopes_to_epic_and_excludes_self() {
             epic_id: Some(eid),
             sort_order: None,
             tag: None,
-            project_id: pid,
             wrap_up_mode: None,
         })
         .await
@@ -2627,7 +2557,6 @@ async fn list_tasks_task_identity_scopes_to_epic_and_excludes_self() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: pid,
             wrap_up_mode: None,
         })
         .await
@@ -2656,7 +2585,6 @@ async fn list_tasks_task_identity_scopes_to_epic_and_excludes_self() {
 #[tokio::test]
 async fn list_tasks_task_identity_scopes_to_project_when_no_epic() {
     let (state, db) = test_state_with_db().await;
-    let pid = ProjectId(1);
     let me = db
         .create_task(CreateTaskRequest {
             title: "me",
@@ -2668,7 +2596,6 @@ async fn list_tasks_task_identity_scopes_to_project_when_no_epic() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: pid,
             wrap_up_mode: None,
         })
         .await
@@ -2684,7 +2611,6 @@ async fn list_tasks_task_identity_scopes_to_project_when_no_epic() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: pid,
             wrap_up_mode: None,
         })
         .await
@@ -2709,95 +2635,36 @@ async fn list_tasks_task_identity_scopes_to_project_when_no_epic() {
 }
 
 #[tokio::test]
-async fn list_tasks_task_identity_explicit_scope_disables_auto_derivation() {
+async fn list_tasks_session_identity_sees_all_tasks() {
     let (state, db) = test_state_with_db().await;
-    let p1 = ProjectId(1);
-    let p2 = db.create_project("p2", 2).await.unwrap().id;
-    let me = db
-        .create_task(CreateTaskRequest {
-            title: "me",
-            description: "",
-            repo_path: "/r",
-            plan: None,
-            status: TaskStatus::Running,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            project_id: p1,
-            wrap_up_mode: None,
-        })
-        .await
-        .unwrap();
-    let _other_p2 = db
-        .create_task(CreateTaskRequest {
-            title: "other",
-            description: "",
-            repo_path: "/r",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            project_id: p2,
-            wrap_up_mode: None,
-        })
-        .await
-        .unwrap();
-
-    let resp = call_as(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "list_tasks",
-            "arguments": { "project_id": p2.0 }
-        })),
-        CallerIdentity::Task(me),
-    )
-    .await;
-    let text = extract_response_text(&resp);
-    // Caller is in p1; explicit project_id=p2 should win over auto-scoping.
-    assert!(text.contains("other"), "expected other:\n{text}");
-}
-
-#[tokio::test]
-async fn list_tasks_session_identity_no_scope_no_exclude() {
-    let (state, db) = test_state_with_db().await;
-    let p1 = ProjectId(1);
-    let p2 = db.create_project("p2", 2).await.unwrap().id;
-    let _t1 = db
-        .create_task(CreateTaskRequest {
-            title: "t1",
-            description: "",
-            repo_path: "/r",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            project_id: p1,
-            wrap_up_mode: None,
-        })
-        .await
-        .unwrap();
-    let _t2 = db
-        .create_task(CreateTaskRequest {
-            title: "t2",
-            description: "",
-            repo_path: "/r",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            project_id: p2,
-            wrap_up_mode: None,
-        })
-        .await
-        .unwrap();
+    db.create_task(CreateTaskRequest {
+        title: "t1",
+        description: "",
+        repo_path: "/r",
+        plan: None,
+        status: TaskStatus::Backlog,
+        base_branch: "main",
+        epic_id: None,
+        sort_order: None,
+        tag: None,
+        wrap_up_mode: None,
+    })
+    .await
+    .unwrap();
+    db.create_task(CreateTaskRequest {
+        title: "t2",
+        description: "",
+        repo_path: "/r",
+        plan: None,
+        status: TaskStatus::Backlog,
+        base_branch: "main",
+        epic_id: None,
+        sort_order: None,
+        tag: None,
+        wrap_up_mode: None,
+    })
+    .await
+    .unwrap();
 
     let resp = call_as(
         &state,
@@ -2827,7 +2694,6 @@ async fn list_tasks_repo_paths_filter() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -2844,7 +2710,6 @@ async fn list_tasks_repo_paths_filter() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -2917,7 +2782,6 @@ async fn list_tasks_includes_plan_goal_in_output() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -2955,7 +2819,6 @@ async fn list_tasks_falls_back_to_description_when_no_plan() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -3016,7 +2879,6 @@ async fn update_task_pr_finalisation_appends_reflection_nudge_by_default() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -3063,7 +2925,6 @@ async fn update_task_pr_finalisation_omits_nudge_when_disabled() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -3108,7 +2969,6 @@ async fn update_task_pr_set_without_status_does_not_nudge() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -3151,7 +3011,6 @@ async fn update_task_status_review_without_pr_url_change_does_not_nudge() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -3195,7 +3054,6 @@ async fn update_task_pr_url_already_set_does_not_nudge_again() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -3244,13 +3102,12 @@ fn extract_created_task_id(resp: &JsonRpcResponse) -> crate::models::TaskId {
 }
 
 #[tokio::test]
-async fn create_task_task_identity_inherits_project_and_epic() {
+async fn create_task_task_identity_inherits_epic() {
     let (state, _db) = test_state_with_db().await;
-    // Create parent task in project 1 with an epic.
-    let parent_project = ProjectId(1);
+    // Create parent task with an epic; child should inherit the epic.
     let parent_epic = state
         .db
-        .create_epic("parent epic", "", "/r", None, parent_project)
+        .create_epic("parent epic", "", "/r", None)
         .await
         .unwrap();
     let parent = state
@@ -3265,7 +3122,6 @@ async fn create_task_task_identity_inherits_project_and_epic() {
             epic_id: Some(parent_epic.id),
             sort_order: None,
             tag: None,
-            project_id: parent_project,
             wrap_up_mode: None,
         })
         .await
@@ -3284,40 +3140,14 @@ async fn create_task_task_identity_inherits_project_and_epic() {
 
     let new_id = extract_created_task_id(&resp);
     let t = state.db.get_task(new_id).await.unwrap().unwrap();
-    assert_eq!(t.project_id, parent_project);
     assert_eq!(t.epic_id, Some(parent_epic.id));
-}
-
-#[tokio::test]
-async fn create_task_session_identity_with_project_id_succeeds() {
-    let (state, db) = test_state_with_db().await;
-    let pid = db.get_default_project().await.unwrap().id;
-    let resp = call_as(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "create_task",
-            "arguments": {
-                "title": "t",
-                "repo_path": "/r",
-                "project_id": pid.0,
-            }
-        })),
-        CallerIdentity::Session,
-    )
-    .await;
-    let new_id = extract_created_task_id(&resp);
-    let t = db.get_task(new_id).await.unwrap().unwrap();
-    assert_eq!(t.project_id, pid);
-    assert_eq!(t.epic_id, None);
 }
 
 #[tokio::test]
 async fn create_task_explicit_null_epic_clears_inheritance() {
     let (state, db) = test_state_with_db().await;
-    let parent_project = ProjectId(1);
     let parent_epic = db
-        .create_epic("e", "", "/r", None, parent_project)
+        .create_epic("e", "", "/r", None)
         .await
         .unwrap();
     let parent = db
@@ -3331,7 +3161,6 @@ async fn create_task_explicit_null_epic_clears_inheritance() {
             epic_id: Some(parent_epic.id),
             sort_order: None,
             tag: None,
-            project_id: parent_project,
             wrap_up_mode: None,
         })
         .await
@@ -3385,7 +3214,6 @@ async fn get_task_shows_wrap_up_mode_when_set() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: Some(crate::models::WrapUpMode::Rebase),
         })
         .await

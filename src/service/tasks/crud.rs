@@ -62,21 +62,8 @@ impl TaskService {
         let expanded_repo_path = params.repo_path.as_deref().map(crate::models::expand_tilde);
         let validated_sub_status = self.validate_sub_status(task_id, &params).await?;
 
-        let epic_project_id = if let Some(eid) = params.epic_id {
-            let epic_pid = self.resolve_epic_project_id(eid).await?;
-            if let Some(explicit_pid) = params.project_id {
-                Self::check_task_project_matches_epic(explicit_pid, epic_pid)?;
-            }
-            Some(epic_pid)
-        } else {
-            None
-        };
-
-        let mut patch =
+        let patch =
             build_task_patch(&params, expanded_repo_path.as_deref(), validated_sub_status);
-        if let Some(pid) = epic_project_id {
-            patch = patch.project_id(pid);
-        }
 
         // Snapshot the task before the patch so we can detect the
         // null-pr_url → set transition without an extra round-trip later.
@@ -129,35 +116,6 @@ impl TaskService {
             task_id,
             was_pr_finalisation,
         })
-    }
-
-    fn check_task_project_matches_epic(
-        explicit: crate::models::ProjectId,
-        epic: crate::models::ProjectId,
-    ) -> Result<(), ServiceError> {
-        if explicit != epic {
-            return Err(ServiceError::Validation(format!(
-                "task project_id ({}) must match epic project_id ({})",
-                explicit.0, epic.0
-            )));
-        }
-        Ok(())
-    }
-
-    async fn resolve_epic_project_id(
-        &self,
-        epic_id: EpicId,
-    ) -> Result<crate::models::ProjectId, ServiceError> {
-        match self.db.get_epic(epic_id).await {
-            Ok(Some(epic)) => Ok(epic.project_id),
-            Ok(None) => Err(ServiceError::NotFound(format!(
-                "Epic {} not found",
-                epic_id.0
-            ))),
-            Err(e) => Err(ServiceError::Internal(format!(
-                "Database error looking up epic: {e}"
-            ))),
-        }
     }
 
     /// Validate `params.sub_status` against the task's effective (current or
@@ -281,12 +239,6 @@ impl TaskService {
     ) -> Result<Task, ServiceError> {
         let repo_path = crate::models::expand_tilde(&params.repo_path);
 
-        if let Some(eid) = params.epic_id {
-            let epic_pid = self.resolve_epic_project_id(eid).await?;
-            Self::check_task_project_matches_epic(params.project_id, epic_pid)?;
-        }
-        let project_id = params.project_id;
-
         let plan = params.plan_path.as_deref().map(|p| {
             std::fs::canonicalize(p)
                 .map(|abs| abs.to_string_lossy().into_owned())
@@ -306,7 +258,6 @@ impl TaskService {
                 epic_id: params.epic_id,
                 sort_order: params.sort_order,
                 tag: params.tag,
-                project_id,
                 wrap_up_mode: params.wrap_up_mode,
             })
             .await
@@ -351,10 +302,6 @@ impl TaskService {
             })
             .filter(|t| match filter.epic_id {
                 Some(eid) => t.epic_id == Some(eid),
-                None => true,
-            })
-            .filter(|t| match filter.project_id {
-                Some(pid) => t.project_id == pid,
                 None => true,
             })
             .filter(|t| match &filter.repo_paths {

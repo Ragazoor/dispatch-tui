@@ -16,21 +16,19 @@ impl super::super::EpicCrud for Database {
         description: &str,
         repo_path: &str,
         parent_epic_id: Option<EpicId>,
-        project_id: crate::models::ProjectId,
     ) -> Result<crate::models::Epic> {
         let title = title.to_string();
         let description = description.to_string();
         let repo_path = repo_path.to_string();
         self.db_call(move |conn| {
             conn.execute(
-                "INSERT INTO epics (title, description, repo_path, parent_epic_id, project_id) \
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                "INSERT INTO epics (title, description, repo_path, parent_epic_id) \
+                 VALUES (?1, ?2, ?3, ?4)",
                 params![
                     title,
                     description,
                     repo_path,
                     parent_epic_id.map(|e| e.0),
-                    project_id.0
                 ],
             )
             .context("Failed to insert epic")?;
@@ -50,7 +48,7 @@ impl super::super::EpicCrud for Database {
             let mut stmt = conn
                 .prepare(
                     "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, \
-                     parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, project_id, group_by_repo \
+                     parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, group_by_repo \
                      FROM epics ORDER BY COALESCE(sort_order, id) ASC, id ASC",
                 )
                 .context("Failed to prepare list_epics")?;
@@ -69,7 +67,7 @@ impl super::super::EpicCrud for Database {
             let mut stmt = conn
                 .prepare(
                     "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, \
-                     parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, project_id, group_by_repo \
+                     parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, group_by_repo \
                      FROM epics WHERE parent_epic_id IS NULL ORDER BY COALESCE(sort_order, id) ASC, id ASC",
                 )
                 .context("Failed to prepare list_root_epics")?;
@@ -88,7 +86,7 @@ impl super::super::EpicCrud for Database {
             let mut stmt = conn
                 .prepare(
                     "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, \
-                     parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, project_id, group_by_repo \
+                     parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, group_by_repo \
                      FROM epics WHERE parent_epic_id = ?1 ORDER BY COALESCE(sort_order, id) ASC, id ASC",
                 )
                 .context("Failed to prepare list_sub_epics")?;
@@ -151,10 +149,6 @@ impl super::super::EpicCrud for Database {
         if let Some(fi) = patch.feed_interval_secs {
             sets.push("feed_interval_secs = ?");
             values.push(Box::new(fi));
-        }
-        if let Some(pid) = patch.project_id {
-            sets.push("project_id = ?");
-            values.push(Box::new(pid.0));
         }
         if let Some(peid) = patch.parent_epic_id {
             sets.push("parent_epic_id = ?");
@@ -274,7 +268,7 @@ impl super::super::EpicCrud for Database {
 fn get_epic_row(conn: &rusqlite::Connection, id: EpicId) -> Result<Option<crate::models::Epic>> {
     conn.query_row(
         "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, \
-         parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, project_id, group_by_repo \
+         parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, group_by_repo \
          FROM epics WHERE id = ?1",
         params![id.0],
         row_to_epic,
@@ -348,7 +342,7 @@ fn recalculate_epic_status_inner(
     let mut stmt = conn
         .prepare(
             "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, \
-             parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, project_id, group_by_repo \
+             parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, group_by_repo \
              FROM epics WHERE parent_epic_id = ?1 ORDER BY COALESCE(sort_order, id) ASC, id ASC",
         )
         .context("Failed to prepare list_sub_epics (recalc)")?;

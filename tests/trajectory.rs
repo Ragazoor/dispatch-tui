@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use dispatch_tui::db::CreateTaskRequest;
 use dispatch_tui::mcp::identity::{HEADER_KIND, HEADER_TASK_ID};
 use dispatch_tui::mcp::trajectory::TRAJECTORIES_SUBDIR;
-use dispatch_tui::models::{ProjectId, TaskId, TaskStatus};
+use dispatch_tui::models::{TaskId, TaskStatus};
 
 /// Happy path: a task-identity call writes one JSONL entry to
 /// `<data_dir>/trajectories/<task_id>.jsonl`.
@@ -28,7 +28,6 @@ async fn task_identity_writes_trajectory_entry() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -109,7 +108,6 @@ async fn task_identity_without_worktree_still_writes_trajectory() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -155,7 +153,7 @@ async fn session_identity_writes_no_trajectory_file() {
         json!({
             "jsonrpc": "2.0", "id": 1,
             "method": "tools/call",
-            "params": { "name": "list_projects", "arguments": {} }
+            "params": { "name": "list_epics", "arguments": {} }
         }),
     )
     .await;

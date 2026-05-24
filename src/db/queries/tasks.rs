@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use rusqlite::{params, OptionalExtension};
 
-use crate::models::{EpicId, FeedItem, ProjectId, SubStatus, TaskId, TaskStatus, WrapUpMode};
+use crate::models::{EpicId, FeedItem, SubStatus, TaskId, TaskStatus, WrapUpMode};
 
 use super::super::{CreateTaskRequest, Database, TaskPatch};
 use super::{row_to_task, write_json_string_vec, TASK_COLUMNS};
@@ -19,7 +19,6 @@ struct OwnedCreateTaskRequest {
     epic_id: Option<EpicId>,
     sort_order: Option<i64>,
     tag: Option<crate::models::TaskTag>,
-    project_id: ProjectId,
     wrap_up_mode: Option<WrapUpMode>,
 }
 
@@ -35,7 +34,6 @@ impl<'a> From<CreateTaskRequest<'a>> for OwnedCreateTaskRequest {
             epic_id: r.epic_id,
             sort_order: r.sort_order,
             tag: r.tag,
-            project_id: r.project_id,
             wrap_up_mode: r.wrap_up_mode,
         }
     }
@@ -57,7 +55,6 @@ struct OwnedTaskPatch {
     sort_order: Option<Option<i64>>,
     base_branch: Option<String>,
     external_id: Option<Option<String>>,
-    project_id: Option<ProjectId>,
     labels: Option<Vec<String>>,
     last_pre_tool_use_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
     last_notification_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
@@ -79,7 +76,6 @@ impl OwnedTaskPatch {
             || self.sort_order.is_some()
             || self.base_branch.is_some()
             || self.external_id.is_some()
-            || self.project_id.is_some()
             || self.labels.is_some()
             || self.last_pre_tool_use_at.is_some()
             || self.last_notification_at.is_some()
@@ -103,7 +99,6 @@ impl<'a> From<&TaskPatch<'a>> for OwnedTaskPatch {
             sort_order: p.sort_order,
             base_branch: p.base_branch.map(|s| s.to_string()),
             external_id: p.external_id.map(|o| o.map(|s| s.to_string())),
-            project_id: p.project_id,
             labels: p.labels.map(|s| s.to_vec()),
             last_pre_tool_use_at: p.last_pre_tool_use_at,
             last_notification_at: p.last_notification_at,
@@ -121,8 +116,8 @@ impl super::super::TaskCrud for Database {
             conn.execute(
                 "INSERT INTO tasks \
                  (title, description, repo_path, plan_path, status, sub_status, base_branch, \
-                  epic_id, sort_order, tag, project_id, wrap_up_mode) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                  epic_id, sort_order, tag, wrap_up_mode) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                 params![
                     req.title,
                     req.description,
@@ -134,7 +129,6 @@ impl super::super::TaskCrud for Database {
                     req.epic_id.map(|e| e.0),
                     req.sort_order,
                     req.tag.map(|t| t.as_str()),
-                    req.project_id.0,
                     req.wrap_up_mode.map(|m| m.as_str()),
                 ],
             )
@@ -315,10 +309,6 @@ impl super::super::TaskCrud for Database {
                 sets.push("external_id = ?");
                 values.push(Box::new(eid));
             }
-            if let Some(pid) = patch.project_id {
-                sets.push("project_id = ?");
-                values.push(Box::new(pid.0));
-            }
             if let Some(json) = labels_json {
                 sets.push("labels = ?");
                 values.push(Box::new(json));
@@ -391,13 +381,19 @@ impl super::super::TaskCrud for Database {
             serde_json::to_string(&items.iter().map(|i| &i.external_id).collect::<Vec<_>>())
                 .context("failed to serialize external_ids for feed task cleanup")?;
         self.db_call(move |conn| {
-            let project_id: ProjectId = conn
+            // Verify epic exists before upserting tasks
+            let epic_exists: bool = conn
                 .query_row(
-                    "SELECT project_id FROM epics WHERE id = ?1",
+                    "SELECT 1 FROM epics WHERE id = ?1",
                     params![epic_id.0],
-                    |row| row.get::<_, i64>(0).map(ProjectId),
+                    |_| Ok(true),
                 )
-                .with_context(|| format!("Epic {} not found for upsert_feed_tasks", epic_id))?;
+                .optional()
+                .with_context(|| format!("Failed to check epic {} for upsert_feed_tasks", epic_id))?
+                .is_some();
+            if !epic_exists {
+                anyhow::bail!("Epic {} not found for upsert_feed_tasks", epic_id);
+            }
 
             let tx = conn.unchecked_transaction()?;
 
@@ -418,8 +414,8 @@ impl super::super::TaskCrud for Database {
                 tx.execute(
                     "INSERT INTO tasks
                          (title, description, repo_path, status, sub_status, base_branch,
-                          epic_id, external_id, project_id, tag, labels, sort_order, pr_url)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                          epic_id, external_id, tag, labels, sort_order, pr_url)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
                      ON CONFLICT(epic_id, external_id) WHERE external_id IS NOT NULL
                      DO UPDATE SET
                          title       = excluded.title,
@@ -438,7 +434,6 @@ impl super::super::TaskCrud for Database {
                         base_branch,
                         epic_id.0,
                         item.external_id,
-                        project_id.0,
                         item.tag.as_str(),
                         labels_json,
                         item.sort_order,

@@ -13,8 +13,6 @@ use crate::editor::{
     apply_epic_editor_fields, apply_task_editor_fields, format_description_for_editor,
     format_editor_content, format_epic_for_editor, parse_editor_content, parse_epic_editor_output,
 };
-#[cfg(test)]
-use crate::models::ProjectId;
 use crate::process::ProcessRunner;
 #[cfg(test)]
 use crate::service::embeddings::EmbeddingService;
@@ -379,7 +377,6 @@ impl TuiRuntime {
                 auto_dispatch: None,
                 feed_command: Some(applied.feed_command.clone()),
                 feed_interval_secs: Some(applied.feed_interval_secs),
-                project_id: None,
                 group_by_repo: None,
                 parent_epic_id: None,
             })
@@ -530,7 +527,7 @@ mod learning_editor_tests {
         let learning = make_learning(id);
         let rt = make_runtime(db.clone());
         // Put app into Learnings view
-        let mut app = App::new(vec![], ProjectId(1));
+        let mut app = App::new(vec![]);
         app.update(Message::Learning(LearningMessage::Show(vec![
             learning.clone()
         ])));
@@ -574,7 +571,7 @@ mod learning_editor_tests {
             .unwrap();
         let learning = make_learning(id);
         let rt = make_runtime(db.clone());
-        let mut app = App::new(vec![], ProjectId(1));
+        let mut app = App::new(vec![]);
         app.update(Message::Learning(LearningMessage::Show(vec![
             learning.clone()
         ])));
@@ -612,7 +609,7 @@ mod learning_editor_tests {
             .unwrap();
         let learning = make_learning(id);
         let rt = make_runtime(db.clone());
-        let mut app = App::new(vec![], ProjectId(1));
+        let mut app = App::new(vec![]);
 
         rt.exec_finalize_editor_result(
             &mut app,
@@ -652,7 +649,7 @@ mod learning_editor_tests {
         .unwrap();
         let learning = make_learning(id);
         let rt = make_runtime(db.clone());
-        let mut app = App::new(vec![], ProjectId(1));
+        let mut app = App::new(vec![]);
 
         rt.exec_finalize_editor_result(
             &mut app,
@@ -815,7 +812,7 @@ mod tests {
             editor_session: Arc::new(Mutex::new(None)),
             emb_svc: EmbeddingService::new_noop(),
         };
-        let app = App::new(vec![], ProjectId(1));
+        let app = App::new(vec![]);
         (rt, app)
     }
 
@@ -855,7 +852,7 @@ mod tests {
                 epic_id: None,
                 sort_order: None,
                 tag: None,
-                project_id: ProjectId(1),
+                
                 wrap_up_mode: None,
             })
             .await
@@ -885,7 +882,7 @@ mod tests {
             editor_session: Arc::new(Mutex::new(None)),
             emb_svc: EmbeddingService::new_noop(),
         };
-        let mut app = App::new(vec![task.clone()], ProjectId(1));
+        let mut app = App::new(vec![task.clone()]);
 
         let edited_text = "--- TITLE ---\nNew title\n\
             --- DESCRIPTION ---\nNew description\n\
@@ -947,7 +944,7 @@ mod tests {
             editor_session: Arc::new(Mutex::new(None)),
             emb_svc: EmbeddingService::new_noop(),
         };
-        let mut app = App::new(vec![task.clone()], ProjectId(1));
+        let mut app = App::new(vec![task.clone()]);
 
         let edited_text = "--- TITLE ---\n\n\
             --- DESCRIPTION ---\n\n\
@@ -996,7 +993,7 @@ mod tests {
             editor_session: Arc::new(Mutex::new(None)),
             emb_svc: EmbeddingService::new_noop(),
         };
-        let mut app = App::new(vec![task.clone()], ProjectId(1));
+        let mut app = App::new(vec![task.clone()]);
 
         // Title change only — REPO_PATH section is empty so the editor
         // applier preserves the prior /orig/repo value.
@@ -1046,7 +1043,7 @@ mod tests {
             editor_session: Arc::new(Mutex::new(None)),
             emb_svc: EmbeddingService::new_noop(),
         };
-        let mut app = App::new(vec![task.clone()], ProjectId(1));
+        let mut app = App::new(vec![task.clone()]);
 
         rt.exec_finalize_editor_result(
             &mut app,

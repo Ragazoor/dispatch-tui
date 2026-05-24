@@ -5,12 +5,7 @@ use super::*;
 // Local helpers
 // ---------------------------------------------------------------------------
 
-async fn default_project_id(state: &Arc<McpState>) -> ProjectId {
-    state.db.get_default_project().await.unwrap().id
-}
-
 async fn create_task_in_repo(state: &Arc<McpState>, repo: &str) -> crate::models::TaskId {
-    let pid = default_project_id(state).await;
     state
         .db
         .create_task(CreateTaskRequest {
@@ -23,7 +18,6 @@ async fn create_task_in_repo(state: &Arc<McpState>, repo: &str) -> crate::models
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: pid,
             wrap_up_mode: None,
         })
         .await
@@ -141,10 +135,9 @@ async fn record_learning_derives_scope_ref_for_repo() {
 #[tokio::test]
 async fn record_learning_derives_scope_ref_for_epic() {
     let state = test_state().await;
-    let pid = default_project_id(&state).await;
     let epic = state
         .db
-        .create_epic("E", "", "/r", None, pid)
+        .create_epic("E", "", "/r", None)
         .await
         .unwrap();
     let task_id = state
@@ -159,7 +152,6 @@ async fn record_learning_derives_scope_ref_for_epic() {
             epic_id: Some(epic.id),
             sort_order: None,
             tag: None,
-            project_id: pid,
             wrap_up_mode: None,
         })
         .await

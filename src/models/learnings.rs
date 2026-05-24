@@ -69,7 +69,6 @@ impl std::str::FromStr for LearningKind {
 #[serde(rename_all = "snake_case")]
 pub enum LearningScope {
     User,
-    Project,
     Repo,
     Epic,
     Task,
@@ -79,7 +78,6 @@ impl LearningScope {
     pub fn as_str(self) -> &'static str {
         match self {
             LearningScope::User => "user",
-            LearningScope::Project => "project",
             LearningScope::Repo => "repo",
             LearningScope::Epic => "epic",
             LearningScope::Task => "task",
@@ -89,7 +87,6 @@ impl LearningScope {
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "user" => Some(LearningScope::User),
-            "project" => Some(LearningScope::Project),
             "repo" => Some(LearningScope::Repo),
             "epic" => Some(LearningScope::Epic),
             "task" => Some(LearningScope::Task),

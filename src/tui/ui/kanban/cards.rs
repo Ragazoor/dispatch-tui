@@ -419,7 +419,7 @@ pub(super) fn render_epic_item(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{ProjectId, SubStatus};
+    use crate::models::SubStatus;
     use crate::tui::tests::make_task;
 
     fn stale_task(last_pre_tool_use_at: Option<DateTime<Utc>>) -> crate::models::Task {
@@ -439,7 +439,7 @@ mod tests {
     fn stale_card_with_known_timestamp_shows_minutes() {
         let now = Utc::now();
         let task = stale_task(Some(now - chrono::Duration::minutes(7)));
-        let app = App::new(vec![], ProjectId(1));
+        let app = App::new(vec![]);
         let indicator = classify_card_indicator(&task, task.status, &app, now);
         assert_eq!(
             indicator,
@@ -455,7 +455,7 @@ mod tests {
     fn stale_card_without_timestamp_omits_minutes() {
         let now = Utc::now();
         let task = stale_task(None);
-        let app = App::new(vec![], ProjectId(1));
+        let app = App::new(vec![]);
         let indicator = classify_card_indicator(&task, task.status, &app, now);
         assert_eq!(
             indicator,

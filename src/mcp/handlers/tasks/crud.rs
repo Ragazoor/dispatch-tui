@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 
 use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
-use crate::models::{EpicId, ProjectId, TaskId, TaskStatus};
+use crate::models::{EpicId, TaskId, TaskStatus};
 use crate::service::{CreateTaskParams, FieldUpdate, ListTasksFilter, ServiceError, UpdateTaskParams};
 
 use super::{
@@ -104,22 +104,19 @@ pub(crate) async fn handle_create_task(
         "MCP create_task"
     );
 
-    let (effective_project_id, effective_epic_id) = match identity {
+    let effective_epic_id = match identity {
         CallerIdentity::Task(caller_id) => {
             let caller = match fetch_caller_task(&*state.db, &id, *caller_id).await {
                 Ok(t) => t,
                 Err(resp) => return resp,
             };
-            let pid = caller.project_id.0;
-            let eid = match parsed.epic_id {
+            match parsed.epic_id {
                 Some(inner) => inner.map(EpicId),
                 None => caller.epic_id,
-            };
-            (pid, eid)
+            }
         }
         CallerIdentity::Session => {
-            let eid = parsed.epic_id.and_then(|inner| inner.map(EpicId));
-            (1_i64, eid)
+            parsed.epic_id.and_then(|inner| inner.map(EpicId))
         }
     };
 
@@ -134,7 +131,6 @@ pub(crate) async fn handle_create_task(
             sort_order: parsed.sort_order,
             tag: parsed.tag,
             base_branch: parsed.base_branch,
-            project_id: ProjectId(effective_project_id),
             wrap_up_mode: parsed.wrap_up_mode,
         })
         .await
@@ -207,7 +203,6 @@ pub(crate) async fn handle_list_tasks(
         .list_tasks(ListTasksFilter {
             statuses: status_filter,
             epic_id,
-            project_id: None,
             repo_paths: parsed.repo_paths,
             exclude_task_id,
         })

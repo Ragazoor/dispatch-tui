@@ -841,7 +841,7 @@ pub type EpicStatsMap = HashMap<EpicId, SubtaskStats>;
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
-    use crate::models::{ProjectId, SubStatus, TaskId};
+    use crate::models::{SubStatus, TaskId};
     use chrono::Utc;
 
     fn make_test_epic(id: i64, parent: Option<i64>) -> Epic {
@@ -859,7 +859,6 @@ mod tests {
             feed_command: None,
             feed_interval_secs: None,
             group_by_repo: false,
-            project_id: ProjectId(1),
             created_at: now,
             updated_at: now,
         }
@@ -884,7 +883,6 @@ mod tests {
             base_branch: "main".to_string(),
             external_id: None,
             labels: Vec::new(),
-            project_id: ProjectId(1),
             created_at: now,
             updated_at: now,
             last_pre_tool_use_at: None,

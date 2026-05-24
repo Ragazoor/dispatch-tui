@@ -36,8 +36,6 @@ pub struct EditorFields {
     pub errors: Vec<EditorParseError>,
 }
 
-#[cfg(test)]
-use crate::models::ProjectId;
 use crate::models::{Epic, Learning, LearningKind, Task};
 use crate::service::FieldUpdate;
 
@@ -383,7 +381,6 @@ mod tests {
             group_by_repo: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            project_id: ProjectId(1),
         }
     }
 
@@ -455,7 +452,6 @@ mod tests {
             labels: Vec::new(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            project_id: ProjectId(1),
             last_pre_tool_use_at: None,
             last_notification_at: None,
             wrap_up_mode: None,

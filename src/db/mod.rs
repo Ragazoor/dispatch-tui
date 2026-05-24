@@ -9,7 +9,7 @@ use std::path::Path;
 
 use crate::models::{
     Epic, EpicId, FeedItem, Learning, LearningId, LearningKind, LearningRetrieval, LearningScope,
-    LearningStatus, LearningVerdict, Project, ProjectId, RetrievalSource, SubStatus, Task, TaskId,
+    LearningStatus, LearningVerdict, RetrievalSource, SubStatus, Task, TaskId,
     TaskStatus, TaskTag, WrapUpMode,
 };
 
@@ -82,7 +82,6 @@ patch_struct! {
         nullable sort_order:   i64,
         plain    base_branch:  &'a str,
         nullable external_id:  &'a str,
-        plain    project_id:   ProjectId,
         plain    labels:       &'a [String],
         nullable last_pre_tool_use_at: chrono::DateTime<chrono::Utc>,
         nullable last_notification_at: chrono::DateTime<chrono::Utc>,
@@ -105,7 +104,6 @@ pub struct CreateTaskRequest<'a> {
     pub epic_id: Option<EpicId>,
     pub sort_order: Option<i64>,
     pub tag: Option<TaskTag>,
-    pub project_id: ProjectId,
     pub wrap_up_mode: Option<WrapUpMode>,
 }
 
@@ -126,7 +124,6 @@ patch_struct! {
         plain    group_by_repo:      bool,
         nullable feed_command:       &'a str,
         nullable feed_interval_secs: i64,
-        plain    project_id:         ProjectId,
         nullable parent_epic_id:     EpicId,
     }
 }
@@ -190,7 +187,6 @@ pub trait EpicCrud: Send + Sync {
         description: &str,
         repo_path: &str,
         parent_epic_id: Option<EpicId>,
-        project_id: ProjectId,
     ) -> Result<Epic>;
     async fn get_epic(&self, id: EpicId) -> Result<Option<Epic>>;
     async fn list_epics(&self) -> Result<Vec<Epic>>;
@@ -250,26 +246,6 @@ pub trait SettingsStore: Send + Sync {
 pub trait TaskAndEpicStore: TaskCrud + EpicCrud {}
 
 impl<T: TaskCrud + EpicCrud> TaskAndEpicStore for T {}
-
-// ---------------------------------------------------------------------------
-// ProjectCrud — CRUD for the projects table
-// ---------------------------------------------------------------------------
-
-#[async_trait::async_trait]
-pub trait ProjectCrud: Send + Sync {
-    async fn create_project(&self, name: &str, sort_order: i64) -> Result<Project>;
-    async fn list_projects(&self) -> Result<Vec<Project>>;
-    async fn get_default_project(&self) -> Result<Project>;
-    async fn rename_project(&self, id: ProjectId, name: &str) -> Result<()>;
-    /// Move all tasks and epics from `from` to `to`, then delete the `from` project.
-    /// The entire operation runs in a single transaction.
-    async fn delete_project_and_move_items(
-        &self,
-        id: ProjectId,
-        default_id: ProjectId,
-    ) -> Result<()>;
-    async fn reorder_project(&self, id: ProjectId, new_sort_order: i64) -> Result<()>;
-}
 
 // ---------------------------------------------------------------------------
 // LearningPatch — builder for partial learning updates
@@ -335,12 +311,11 @@ pub trait LearningStore: Send + Sync {
     /// Atomically increments `upvote_count` and updates `last_upvoted_at` and `updated_at`.
     async fn upvote_learning(&self, id: LearningId) -> Result<()>;
 
-    /// Returns approved learnings for the given task context, unioning user + project + repo + epic
+    /// Returns approved learnings for the given task context, unioning user + repo + epic
     /// scopes. Task-scoped learnings are excluded (they surface via explicit query only).
-    /// Ordered by scope priority (procedural > epic > repo > project > user), then upvote_count DESC.
+    /// Ordered by scope priority (procedural > epic > repo > user), then upvote_count DESC.
     async fn list_learnings_for_dispatch(
         &self,
-        project_id: Option<ProjectId>,
         repo_path: &str,
         epic_id: Option<EpicId>,
     ) -> Result<Vec<Learning>>;
@@ -441,14 +416,13 @@ pub trait UsageStore: Send + Sync {
 // ---------------------------------------------------------------------------
 
 pub trait TaskStore:
-    TaskAndEpicStore + SettingsStore + ProjectCrud + LearningStore + LearningRetrievalStore + UsageStore
+    TaskAndEpicStore + SettingsStore + LearningStore + LearningRetrievalStore + UsageStore
 {
 }
 
 impl<
         T: TaskAndEpicStore
             + SettingsStore
-            + ProjectCrud
             + LearningStore
             + LearningRetrievalStore
             + UsageStore,

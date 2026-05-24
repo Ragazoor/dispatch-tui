@@ -7,31 +7,11 @@
 
 mod common;
 
-use std::sync::Arc;
-
 use serde_json::{json, Value};
 
-use dispatch_tui::db::{self, CreateTaskRequest};
+use dispatch_tui::db::CreateTaskRequest;
 use dispatch_tui::mcp::identity::{HEADER_KIND, HEADER_TASK_ID};
-use dispatch_tui::models::{ProjectId, TaskId, TaskStatus};
-
-async fn create_parent_task(db: &Arc<dyn db::TaskStore>, project_id: ProjectId) -> TaskId {
-    db.create_task(CreateTaskRequest {
-        title: "parent",
-        description: "",
-        repo_path: "/r",
-        plan: None,
-        status: TaskStatus::Running,
-        base_branch: "main",
-        epic_id: None,
-        sort_order: None,
-        tag: None,
-        project_id,
-        wrap_up_mode: None,
-    })
-    .await
-    .unwrap()
-}
+use dispatch_tui::models::{TaskId, TaskStatus};
 
 fn parse_created_task_id(resp: &Value) -> TaskId {
     let text = resp["result"]["content"][0]["text"]
@@ -45,14 +25,28 @@ fn parse_created_task_id(resp: &Value) -> TaskId {
 }
 
 #[tokio::test]
-async fn create_task_via_task_header_inherits_project() {
+async fn create_task_via_task_header_inherits_epic() {
     let (router, db) = common::test_router().await;
-    let project_id = ProjectId(1);
-    let parent = create_parent_task(&db, project_id).await;
+    let epic = db.create_epic("e", "", "/r", None).await.unwrap();
+    let parent_id = db
+        .create_task(CreateTaskRequest {
+            title: "parent",
+            description: "",
+            repo_path: "/r",
+            plan: None,
+            status: TaskStatus::Running,
+            base_branch: "main",
+            epic_id: Some(epic.id),
+            sort_order: None,
+            tag: None,
+            wrap_up_mode: None,
+        })
+        .await
+        .unwrap();
 
     let resp = common::post_mcp(
         router,
-        &[(HEADER_TASK_ID, &parent.0.to_string())],
+        &[(HEADER_TASK_ID, &parent_id.0.to_string())],
         json!({
             "jsonrpc": "2.0", "id": 1,
             "method": "tools/call",
@@ -66,11 +60,11 @@ async fn create_task_via_task_header_inherits_project() {
 
     let new_id = parse_created_task_id(&resp);
     let new_task = db.get_task(new_id).await.unwrap().unwrap();
-    assert_eq!(new_task.project_id, project_id);
+    assert_eq!(new_task.epic_id, Some(epic.id));
 }
 
 #[tokio::test]
-async fn create_task_via_session_with_project_id_succeeds() {
+async fn create_task_via_session_succeeds() {
     let (router, db) = common::test_router().await;
     let resp = common::post_mcp(
         router,
@@ -80,14 +74,14 @@ async fn create_task_via_session_with_project_id_succeeds() {
             "method": "tools/call",
             "params": {
                 "name": "create_task",
-                "arguments": { "title": "t", "repo_path": "/r", "project_id": 1 }
+                "arguments": { "title": "t", "repo_path": "/r" }
             }
         }),
     )
     .await;
     let new_id = parse_created_task_id(&resp);
     let new_task = db.get_task(new_id).await.unwrap().unwrap();
-    assert_eq!(new_task.project_id, ProjectId(1));
+    assert_eq!(new_task.title, "t");
 }
 
 #[tokio::test]
@@ -122,8 +116,8 @@ async fn missing_identity_headers_on_tools_call_returns_32600_with_request_id() 
             "jsonrpc": "2.0", "id": 42,
             "method": "tools/call",
             "params": {
-                "name": "list_projects",
-                "arguments": {}
+                "name": "create_task",
+                "arguments": { "title": "t", "repo_path": "/r" }
             }
         }),
     )

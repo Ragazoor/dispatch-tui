@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
 use crate::models::{
-    DispatchMode, EpicId, ProjectId, SubStatus, TaskId, TaskStatus, TaskTag, ACTIVE_THRESHOLD,
+    DispatchMode, EpicId, SubStatus, TaskId, TaskStatus, TaskTag, ACTIVE_THRESHOLD,
     DEFAULT_QUICK_TASK_TITLE,
 };
 use crossterm::event::KeyCode;
@@ -40,7 +40,7 @@ fn dispatch_only_backlog_tasks() {
 fn tick_checks_window_for_review_task_with_live_window() {
     let mut task = make_task(5, TaskStatus::Review);
     task.tmux_window = Some("task-5".to_string());
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
 
     let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
 
@@ -55,7 +55,7 @@ fn dispatch_from_running_is_noop() {
     let mut task = make_task(4, TaskStatus::Running);
     task.worktree = Some("/repo/.worktrees/4-task-4".to_string());
     task.tmux_window = Some("task-4".to_string());
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
     let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Dispatch(
         TaskId(4),
         DispatchMode::Dispatch,
@@ -68,7 +68,7 @@ fn dispatch_from_review_is_noop() {
     let mut task = make_task(5, TaskStatus::Review);
     task.worktree = Some("/repo/.worktrees/5-task-5".to_string());
     task.tmux_window = Some("task-5".to_string());
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
     let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Dispatch(
         TaskId(5),
         DispatchMode::Dispatch,
@@ -80,7 +80,7 @@ fn dispatch_from_review_is_noop() {
 fn d_key_on_backlog_with_plan_dispatches() {
     let mut task = make_task(3, TaskStatus::Backlog);
     task.plan_path = Some("plan.md".into());
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
     app.selection_mut().set_column(1); // Backlog column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(matches!(
@@ -94,7 +94,7 @@ fn d_key_on_running_with_window_shows_warning() {
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some("task-4".to_string());
     task.worktree = Some("/repo/.worktrees/4-task-4".to_string());
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
     app.selection_mut().set_column(2); // Running column
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('d'))));
     assert!(cmds.is_empty());
@@ -111,7 +111,7 @@ fn d_key_on_running_no_window_resumes() {
     let mut task = make_task(4, TaskStatus::Running);
     task.worktree = Some("/repo/.worktrees/4-task-4".to_string());
     task.tmux_window = None;
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
     app.selection_mut().set_column(2); // Running column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(matches!(
@@ -124,7 +124,7 @@ fn d_key_on_running_no_window_resumes() {
 fn d_key_on_backlog_dispatches() {
     let mut task = make_task(1, TaskStatus::Backlog);
     task.tag = Some(TaskTag::Feature);
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
     app.selection_mut().set_column(1); // Backlog column
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('d'))));
     assert_eq!(cmds.len(), 1);
@@ -135,7 +135,7 @@ fn d_key_on_backlog_dispatches() {
 
 #[test]
 fn d_key_on_done_shows_warning() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Done)], ProjectId(1));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Done)]);
     app.selection_mut().set_column(4); // Done column
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('d'))));
     assert!(cmds.is_empty());
@@ -147,7 +147,7 @@ fn d_key_on_running_no_worktree_no_window_shows_warning() {
     let mut task = make_task(4, TaskStatus::Running);
     task.worktree = None;
     task.tmux_window = None;
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
     app.selection_mut().set_column(2); // Running column
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('d'))));
     assert!(cmds.is_empty());
@@ -161,7 +161,7 @@ fn d_key_on_running_no_worktree_no_window_shows_warning() {
 
 #[test]
 fn shift_d_with_one_repo_emits_quick_dispatch() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     app.board.repo_paths = vec!["/repo".to_string()];
     let cmds = without_usage(app.handle_key(make_shift_key(KeyCode::Char('D'))));
     assert_eq!(cmds.len(), 1);
@@ -173,7 +173,7 @@ fn shift_d_with_one_repo_emits_quick_dispatch() {
 
 #[test]
 fn shift_d_with_no_repos_shows_error() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     app.board.repo_paths = vec![];
     let cmds = without_usage(app.handle_key(make_shift_key(KeyCode::Char('D'))));
     assert!(cmds.is_empty());
@@ -183,7 +183,7 @@ fn shift_d_with_no_repos_shows_error() {
 
 #[test]
 fn shift_d_with_multiple_repos_enters_quick_dispatch_mode() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     app.board.repo_paths = vec!["/repo1".to_string(), "/repo2".to_string()];
     let cmds = without_usage(app.handle_key(make_shift_key(KeyCode::Char('D'))));
     assert!(cmds.is_empty());
@@ -192,7 +192,7 @@ fn shift_d_with_multiple_repos_enters_quick_dispatch_mode() {
 
 #[test]
 fn quick_dispatch_mode_typed_digit_filters_not_selects() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     app.board.repo_paths = vec!["/repo1".to_string(), "/repo2".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     let cmds = app.handle_key(make_key(KeyCode::Char('2')));
@@ -203,7 +203,7 @@ fn quick_dispatch_mode_typed_digit_filters_not_selects() {
 
 #[test]
 fn quick_dispatch_mode_invalid_number_appends_to_buffer() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     app.board.repo_paths = vec!["/repo1".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     let cmds = app.handle_key(make_key(KeyCode::Char('3')));
@@ -214,7 +214,7 @@ fn quick_dispatch_mode_invalid_number_appends_to_buffer() {
 
 #[test]
 fn quick_dispatch_mode_esc_cancels() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     app.board.repo_paths = vec!["/repo1".to_string(), "/repo2".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     let cmds = app.handle_key(make_key(KeyCode::Esc));
@@ -224,7 +224,7 @@ fn quick_dispatch_mode_esc_cancels() {
 
 #[test]
 fn quick_dispatch_message_emits_command() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     let cmds = app.update(Message::Task(
         crate::tui::messages::TaskMessage::QuickDispatch {
             repo_path: "/my/repo".to_string(),
@@ -240,7 +240,7 @@ fn quick_dispatch_message_emits_command() {
 
 #[test]
 fn shift_d_in_epic_view_quick_dispatches_subtask_single_repo() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     let epic = make_epic(10);
     app.board.epics = vec![epic];
     app.board.repo_paths = vec!["/my/repo".to_string()];
@@ -259,7 +259,7 @@ fn shift_d_in_epic_view_quick_dispatches_subtask_single_repo() {
 
 #[test]
 fn shift_d_in_epic_view_shows_repo_selection_with_multiple_repos() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     let epic = make_epic(10);
     app.board.epics = vec![epic];
     app.board.repo_paths = vec!["/repo/a".to_string(), "/repo/b".to_string()];
@@ -276,7 +276,7 @@ fn shift_d_in_epic_view_shows_repo_selection_with_multiple_repos() {
 
 #[test]
 fn shift_d_in_epic_view_repo_selection_dispatches_with_epic_id() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     let epic = make_epic(10);
     app.board.epics = vec![epic];
     app.board.repo_paths = vec!["/repo/a".to_string(), "/repo/b".to_string()];
@@ -303,7 +303,7 @@ fn stale_agent_detected_when_last_pre_tool_use_old() {
     task.tmux_window = Some("task-4".to_string());
     // Pre-tool-use older than ACTIVE_THRESHOLD → classifier returns Stale.
     task.last_pre_tool_use_at = Some(chrono::Utc::now() - chrono::Duration::minutes(10));
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
 
     let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
     assert!(app.is_stale(TaskId(4)));
@@ -318,7 +318,7 @@ fn stale_agent_detected_when_last_pre_tool_use_old() {
 
 #[test]
 fn window_gone_on_running_task_marks_crashed() {
-    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], ProjectId(1));
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
 
     let cmds = app.update(Message::Task(
@@ -335,7 +335,7 @@ fn window_gone_on_running_task_marks_crashed() {
 
 #[test]
 fn window_gone_on_review_task_clears_window() {
-    let mut app = App::new(vec![make_task(4, TaskStatus::Review)], ProjectId(1));
+    let mut app = App::new(vec![make_task(4, TaskStatus::Review)]);
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
 
     let cmds = app.update(Message::Task(
@@ -353,7 +353,7 @@ fn window_gone_on_review_task_clears_window() {
 fn dispatched_sets_fields_and_transitions_to_running() {
     let mut task = make_task(3, TaskStatus::Backlog);
     task.plan_path = Some("plan.md".into());
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
     let cmds = app.update(Message::Task(
         crate::tui::messages::TaskMessage::Dispatched {
             id: TaskId(3),
@@ -390,7 +390,7 @@ fn dispatched_sets_fields_and_transitions_to_running() {
 fn dispatched_with_switch_focus_emits_jump() {
     let mut task = make_task(3, TaskStatus::Backlog);
     task.plan_path = Some("plan.md".into());
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
     let cmds = app.update(Message::Task(
         crate::tui::messages::TaskMessage::Dispatched {
             id: TaskId(3),
@@ -415,7 +415,7 @@ fn dispatched_with_switch_focus_emits_jump() {
 
 #[test]
 fn dispatched_unknown_id_is_noop() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     let cmds = app.update(Message::Task(
         crate::tui::messages::TaskMessage::Dispatched {
             id: TaskId(999),
@@ -433,7 +433,7 @@ fn d_key_on_review_with_window_shows_warning() {
     let mut task = make_task(5, TaskStatus::Review);
     task.tmux_window = Some("task-5".to_string());
     task.worktree = Some("/repo/.worktrees/5-task-5".to_string());
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
     app.selection_mut().set_column(3); // Review column
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('d'))));
     assert!(cmds.is_empty());
@@ -450,7 +450,7 @@ fn d_key_on_review_no_window_with_worktree_resumes() {
     let mut task = make_task(5, TaskStatus::Review);
     task.worktree = Some("/repo/.worktrees/5-task-5".to_string());
     task.tmux_window = None;
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
     app.selection_mut().set_column(3); // Review column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(matches!(
@@ -464,7 +464,7 @@ fn d_key_on_review_no_worktree_no_window_shows_warning() {
     let mut task = make_task(5, TaskStatus::Review);
     task.worktree = None;
     task.tmux_window = None;
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
     app.selection_mut().set_column(3); // Review column
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('d'))));
     assert!(cmds.is_empty());
@@ -478,7 +478,7 @@ fn d_key_on_review_no_worktree_no_window_shows_warning() {
 
 #[test]
 fn d_key_on_empty_column_is_noop() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     app.selection_mut().set_column(1);
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('d'))));
     assert!(cmds.is_empty());
@@ -486,7 +486,7 @@ fn d_key_on_empty_column_is_noop() {
 
 #[test]
 fn kill_and_retry_enters_confirm_mode() {
-    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], ProjectId(1));
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
     app.board.tasks[0].sub_status = SubStatus::Stale;
 
@@ -498,7 +498,7 @@ fn kill_and_retry_enters_confirm_mode() {
 
 #[test]
 fn retry_resume_emits_kill_and_resume() {
-    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], ProjectId(1));
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
     app.board.tasks[0].worktree = Some("/repo/.worktrees/4-task-4".to_string());
     app.board.tasks[0].sub_status = SubStatus::Stale;
@@ -542,7 +542,7 @@ fn retry_resume_emits_kill_and_resume() {
 
 #[test]
 fn retry_fresh_emits_cleanup_and_dispatch() {
-    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], ProjectId(1));
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
     app.board.tasks[0].worktree = Some("/repo/.worktrees/4-task-4".to_string());
     app.board.tasks[0].sub_status = SubStatus::Stale;
@@ -567,7 +567,7 @@ fn retry_fresh_emits_cleanup_and_dispatch() {
 
 #[test]
 fn d_key_on_stale_running_task_enters_retry_mode() {
-    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], ProjectId(1));
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
     app.board.tasks[0].sub_status = SubStatus::Stale;
     // Navigate to Running column (index 2)
@@ -580,7 +580,7 @@ fn d_key_on_stale_running_task_enters_retry_mode() {
 
 #[test]
 fn d_key_on_crashed_running_task_enters_retry_mode() {
-    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], ProjectId(1));
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
     app.board.tasks[0].sub_status = SubStatus::Crashed;
     // Navigate to Running column (index 2)
@@ -598,7 +598,7 @@ fn crashed_card_with_no_window_shows_detached_not_crashed() {
     task.sub_status = SubStatus::Crashed;
     task.worktree = Some("/repo/.worktrees/1-fix".to_string());
     task.tmux_window = None;
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
     let buf = render_to_buffer(&mut app, 120, 20);
     assert!(buffer_contains(&buf, "○ detached"), "expected '○ detached'");
     assert!(
@@ -619,7 +619,7 @@ fn d_key_on_backlog_epic_dispatches_epic() {
 
 #[test]
 fn d_key_in_epic_view_with_no_subtasks_dispatches_epic() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     let epic = make_epic(10);
     app.board.epics = vec![epic];
     app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
@@ -652,7 +652,6 @@ fn dispatch_epic_on_non_backlog_shows_status() {
             t.epic_id = Some(EpicId(10));
             t
         }],
-        ProjectId(1),
     );
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
@@ -673,7 +672,7 @@ fn dispatch_epic_on_non_backlog_shows_status() {
 
 #[test]
 fn dispatch_epic_with_plan_dispatches_next_backlog_subtask() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     let mut epic = make_epic(10);
     epic.plan_path = Some("docs/plan.md".to_string());
     app.board.epics = vec![epic];
@@ -703,7 +702,7 @@ fn dispatch_epic_with_plan_dispatches_next_backlog_subtask() {
 
 #[test]
 fn dispatch_epic_with_plan_dispatches_subtask_without_plan() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     let mut epic = make_epic(10);
     epic.plan_path = Some("docs/plan.md".to_string());
     app.board.epics = vec![epic];
@@ -726,7 +725,7 @@ fn dispatch_epic_with_plan_dispatches_subtask_without_plan() {
 
 #[test]
 fn dispatch_epic_with_plan_no_backlog_subtasks_shows_status() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     let mut epic = make_epic(10);
     epic.plan_path = Some("docs/plan.md".to_string());
     app.board.epics = vec![epic];
@@ -748,7 +747,7 @@ fn dispatch_epic_with_plan_no_backlog_subtasks_shows_status() {
 
 #[test]
 fn quick_dispatch_zero_is_noop() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     app.board.repo_paths = vec!["/repo".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     let cmds = app.handle_key(make_key(KeyCode::Char('0')));
@@ -758,7 +757,7 @@ fn quick_dispatch_zero_is_noop() {
 
 #[test]
 fn quick_dispatch_non_digit_is_noop() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     app.board.repo_paths = vec!["/repo".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     let cmds = app.handle_key(make_key(KeyCode::Char('a')));
@@ -773,7 +772,7 @@ fn resumed_seeds_last_pre_tool_use_at() {
     // matching DispatchTask behaviour.
     let mut t = make_task(1, TaskStatus::Running);
     t.worktree = Some("/repo/.worktrees/1-t".to_string());
-    let mut app = App::new(vec![t], ProjectId(1));
+    let mut app = App::new(vec![t]);
     let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Resumed {
         id: TaskId(1),
         tmux_window: "task-1".to_string(),
@@ -802,7 +801,6 @@ fn conflict_flag_clears_on_dispatch() {
             t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
             t
         }],
-        ProjectId(1),
     );
 
     app.update(Message::Task(
@@ -833,7 +831,6 @@ fn conflict_flag_clears_on_move_backward() {
             t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
             t
         }],
-        ProjectId(1),
     );
 
     app.update(Message::Task(
@@ -867,7 +864,7 @@ fn pr_merged_moves_to_done_and_detaches() {
     task.tmux_window = Some("task-1".to_string());
     task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
     app.set_notifications_enabled(true);
 
     let cmds = app.update(Message::Pr(crate::tui::messages::PrMessage::Merged(
@@ -894,7 +891,7 @@ fn pr_merged_preserves_worktree() {
     let mut task = make_task(1, TaskStatus::Review);
     task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
 
     let cmds = app.update(Message::Pr(crate::tui::messages::PrMessage::Merged(
         TaskId(1),
@@ -911,7 +908,7 @@ fn pr_merged_preserves_worktree() {
 fn pr_polling_skips_done_tasks() {
     let mut task = make_task(1, TaskStatus::Done);
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
 
     let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
     // Should NOT contain any CheckPrStatus command
@@ -925,7 +922,7 @@ fn pr_polling_skips_done_tasks() {
 fn pr_polling_emits_check_for_review_tasks() {
     let mut task = make_task(1, TaskStatus::Review);
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
 
     let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
     assert!(cmds.iter().any(|c| matches!(c, Command::Pr(crate::tui::commands::PrCommand::CheckStatus { ref pr_url, .. }) if pr_url == "https://github.com/org/repo/pull/42")));
@@ -1052,7 +1049,7 @@ fn dispatch_epic_all_done_shows_message() {
 
 #[test]
 fn tick_reclassifies_running_task_to_stale_when_pre_tool_use_is_old() {
-    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], ProjectId(1));
+    let mut app = App::new(vec![make_task(3, TaskStatus::Running)]);
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
     app.board.tasks[0].sub_status = SubStatus::Active;
     let old = chrono::Utc::now() - ACTIVE_THRESHOLD - chrono::Duration::seconds(5);
@@ -1068,7 +1065,7 @@ fn tick_reclassifies_running_task_to_stale_when_pre_tool_use_is_old() {
 
 #[test]
 fn tick_reclassifies_running_task_to_needs_input_when_notification_newer() {
-    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], ProjectId(1));
+    let mut app = App::new(vec![make_task(3, TaskStatus::Running)]);
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
     app.board.tasks[0].sub_status = SubStatus::Active;
     let now = chrono::Utc::now();
@@ -1082,7 +1079,7 @@ fn tick_reclassifies_running_task_to_needs_input_when_notification_newer() {
 
 #[test]
 fn tick_does_not_overwrite_crashed() {
-    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], ProjectId(1));
+    let mut app = App::new(vec![make_task(3, TaskStatus::Running)]);
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
     app.board.tasks[0].sub_status = SubStatus::Crashed;
     let old = chrono::Utc::now() - chrono::Duration::minutes(5);
@@ -1095,7 +1092,7 @@ fn tick_does_not_overwrite_crashed() {
 
 #[test]
 fn tick_does_not_overwrite_conflict() {
-    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], ProjectId(1));
+    let mut app = App::new(vec![make_task(3, TaskStatus::Running)]);
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
     app.board.tasks[0].sub_status = SubStatus::Conflict;
     let old = chrono::Utc::now() - chrono::Duration::minutes(5);
@@ -1108,7 +1105,7 @@ fn tick_does_not_overwrite_conflict() {
 
 #[test]
 fn crashed_detection_sets_substatus_and_persists() {
-    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], ProjectId(1));
+    let mut app = App::new(vec![make_task(3, TaskStatus::Running)]);
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
 
     let cmds = app.update(Message::Task(
@@ -1123,7 +1120,7 @@ fn crashed_detection_sets_substatus_and_persists() {
 
 #[test]
 fn crashed_skips_non_running_task() {
-    let mut app = App::new(vec![make_task(3, TaskStatus::Review)], ProjectId(1));
+    let mut app = App::new(vec![make_task(3, TaskStatus::Review)]);
 
     let cmds = app.update(Message::Task(
         crate::tui::messages::TaskMessage::AgentCrashed(TaskId(3)),
@@ -1135,7 +1132,7 @@ fn crashed_skips_non_running_task() {
 
 #[test]
 fn crashed_notification_sent_urgent_when_enabled() {
-    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], ProjectId(1));
+    let mut app = App::new(vec![make_task(3, TaskStatus::Running)]);
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
     app.set_notifications_enabled(true);
 
@@ -1150,7 +1147,7 @@ fn crashed_notification_sent_urgent_when_enabled() {
 
 #[test]
 fn crashed_notification_not_sent_when_disabled() {
-    let mut app = App::new(vec![make_task(3, TaskStatus::Running)], ProjectId(1));
+    let mut app = App::new(vec![make_task(3, TaskStatus::Running)]);
     app.board.tasks[0].tmux_window = Some("win-3".to_string());
     app.set_notifications_enabled(false);
 
@@ -1243,7 +1240,7 @@ fn pr_review_state_preserves_conflict_substatus() {
 
 #[test]
 fn quick_dispatch_down_arrow_moves_cursor_down() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     app.board.repo_paths = vec!["/a".to_string(), "/b".to_string(), "/c".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     app.input.repo_cursor = 0;
@@ -1253,7 +1250,7 @@ fn quick_dispatch_down_arrow_moves_cursor_down() {
 
 #[test]
 fn quick_dispatch_j_typed_into_filter_buffer() {
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     app.board.repo_paths = vec!["/jkl".to_string(), "/abc".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     app.input.repo_cursor = 0;
@@ -1264,7 +1261,7 @@ fn quick_dispatch_j_typed_into_filter_buffer() {
 
 #[test]
 fn quick_dispatch_enter_selects_cursor_repo() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     app.board.repo_paths = vec![
         "/repo1".to_string(),
         "/repo2".to_string(),
@@ -1282,7 +1279,7 @@ fn quick_dispatch_enter_selects_cursor_repo() {
 
 #[test]
 fn quick_dispatch_clears_buffer_on_entry() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     app.board.repo_paths = vec!["/repo1".to_string(), "/repo2".to_string()];
     app.input.buffer = "leftover".to_string();
     app.update(Message::Input(
@@ -1294,7 +1291,7 @@ fn quick_dispatch_clears_buffer_on_entry() {
 
 #[test]
 fn quick_dispatch_typing_updates_buffer() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     app.board.repo_paths = vec!["/api-service".to_string(), "/frontend".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     app.handle_key(make_key(KeyCode::Char('a')));
@@ -1303,7 +1300,7 @@ fn quick_dispatch_typing_updates_buffer() {
 
 #[test]
 fn quick_dispatch_typing_resets_cursor() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     app.board.repo_paths = vec![
         "/api".to_string(),
         "/backend".to_string(),
@@ -1317,7 +1314,7 @@ fn quick_dispatch_typing_resets_cursor() {
 
 #[test]
 fn quick_dispatch_backspace_shrinks_buffer_and_resets_cursor() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     app.board.repo_paths = vec!["/api".to_string(), "/backend".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     app.input.buffer = "ap".to_string();
@@ -1329,7 +1326,7 @@ fn quick_dispatch_backspace_shrinks_buffer_and_resets_cursor() {
 
 #[test]
 fn quick_dispatch_enter_selects_from_filtered_list() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     app.board.repo_paths = vec![
         "/api-service".to_string(),
         "/backend".to_string(),
@@ -1349,7 +1346,7 @@ fn quick_dispatch_enter_selects_from_filtered_list() {
 fn quick_dispatch_enter_uses_buffer_as_new_repo_when_no_match() {
     // When the typed path matches no existing repos, Enter should dispatch
     // to the literal buffer value as a brand-new repo path.
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     app.board.repo_paths = vec!["/api-service".to_string(), "/backend".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     app.input.buffer = "/home/user/brand-new-project".to_string();
@@ -1368,7 +1365,7 @@ fn quick_dispatch_enter_uses_buffer_when_cursor_on_new_entry() {
     // trailing "new path" entry, Enter dispatches with the raw buffer value.
     // repos = ["/home/code/project-work"]; buffer = "/home/code/work"
     // filtered = ["/home/code/project-work"] (fuzzy match), new entry at idx 1
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     app.board.repo_paths = vec!["/home/code/project-work".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     app.input.buffer = "/home/code/work".to_string();
@@ -1385,7 +1382,7 @@ fn quick_dispatch_enter_uses_buffer_when_cursor_on_new_entry() {
 fn quick_dispatch_cursor_navigates_to_new_entry() {
     // Down arrow should be able to move the cursor past the filtered list to
     // the new-path entry when the buffer is non-empty and not an exact match.
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     app.board.repo_paths = vec!["/home/code/project-work".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     app.input.buffer = "/home/code/work".to_string(); // fuzzy-matches repo, but not exact
@@ -1399,7 +1396,7 @@ fn quick_dispatch_cursor_navigates_to_new_entry() {
 fn quick_dispatch_no_new_entry_when_buffer_exactly_matches_repo() {
     // When the buffer is an exact match for an existing repo path, there
     // is no new-entry slot, so Down wraps within the filtered list.
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     app.board.repo_paths = vec!["/repo/a".to_string(), "/repo/b".to_string()];
     app.input.mode = InputMode::QuickDispatch;
     app.input.buffer = "/repo/a".to_string(); // exact match → no new entry
@@ -1412,7 +1409,7 @@ fn quick_dispatch_no_new_entry_when_buffer_exactly_matches_repo() {
 
 #[test]
 fn quick_dispatch_enter_uses_cursor_within_filtered_list() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], ProjectId(1));
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     app.board.repo_paths = vec![
         "/api-service".to_string(),
         "/backend".to_string(),
@@ -1545,7 +1542,7 @@ fn dispatch_failed_clears_mark_dispatching_guard() {
 fn window_gone_ignored_for_split_pinned_task() {
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some("task-4".to_string());
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
 
     // Pin task 4 in split mode
     app.board.split.active = true;
@@ -1741,7 +1738,7 @@ fn quick_dispatch_status_uses_freshly_created_title() {
     // Quick dispatch sends TaskCreated *then* MarkDispatching. The status
     // helper must look up the freshly-created task by ID — silently
     // reordering those two messages would silently break the title.
-    let mut app = App::new(vec![], ProjectId(1));
+    let mut app = App::new(vec![]);
     let now = chrono::Utc::now();
     let task = Task {
         id: TaskId(42),
@@ -1762,7 +1759,6 @@ fn quick_dispatch_status_uses_freshly_created_title() {
         labels: Vec::new(),
         created_at: now,
         updated_at: now,
-        project_id: ProjectId(1),
         last_pre_tool_use_at: None,
         last_notification_at: None,
         wrap_up_mode: None,
@@ -1786,7 +1782,7 @@ fn manual_move_review_to_running_seeds_last_pre_tool_use_at() {
     task.last_pre_tool_use_at = None;
     task.last_notification_at = None;
     task.sub_status = SubStatus::AwaitingReview;
-    let mut app = App::new(vec![task], ProjectId(1));
+    let mut app = App::new(vec![task]);
 
     let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Move {
         id: TaskId(1),

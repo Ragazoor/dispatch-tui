@@ -134,7 +134,7 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
     });
 
     // 3. Create App and load saved repo paths
-    let mut app = App::new(tasks, crate::models::ProjectId(1));
+    let mut app = App::new(tasks);
     let paths = database.list_repo_paths().await.unwrap_or_default();
     app.update(Message::RepoPathsUpdated(paths));
     load_notifications_pref(&*database, &mut app).await;
@@ -542,13 +542,12 @@ async fn load_notifications_pref(db: &dyn db::SettingsStore, app: &mut App) {
 }
 
 async fn load_repo_filter(db: &dyn db::SettingsStore, app: &mut App) {
-    let pid = app.active_project().0;
-    if let Ok(Some(val)) = db.get_setting_string(&format!("repo_filter:{pid}")).await {
+    if let Ok(Some(val)) = db.get_setting_string("repo_filter").await {
         if let Ok(paths) = serde_json::from_str::<Vec<String>>(&val) {
             app.set_repo_filter(paths.into_iter().collect());
         }
     }
-    if let Ok(Some(mode_str)) = db.get_setting_string(&format!("repo_filter_mode:{pid}")).await {
+    if let Ok(Some(mode_str)) = db.get_setting_string("repo_filter_mode").await {
         if let Ok(mode) = mode_str.parse::<RepoFilterMode>() {
             app.set_repo_filter_mode(mode);
         }

@@ -9,25 +9,6 @@ impl TuiRuntime {
         repo_path: String,
         parent_epic_id: Option<crate::models::EpicId>,
     ) {
-        let project_id = if let Some(pid) = parent_epic_id {
-            match self.database.get_epic(pid).await {
-                Ok(Some(parent)) => parent.project_id,
-                Ok(None) => {
-                    app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                        format!("Parent epic {} not found", pid.0),
-                    )));
-                    return;
-                }
-                Err(e) => {
-                    app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                        Self::db_error("finding parent epic", e),
-                    )));
-                    return;
-                }
-            }
-        } else {
-            app.active_project()
-        };
         match self
             .epic_svc
             .create_epic(crate::service::CreateEpicParams {
@@ -38,7 +19,6 @@ impl TuiRuntime {
                 parent_epic_id,
                 feed_command: None,
                 feed_interval_secs: None,
-                project_id,
             })
             .await
         {
@@ -86,7 +66,6 @@ impl TuiRuntime {
                 auto_dispatch: None,
                 feed_command: None,
                 feed_interval_secs: None,
-                project_id: None,
                 group_by_repo: None,
                 parent_epic_id: None,
             },
@@ -127,7 +106,6 @@ impl TuiRuntime {
                 auto_dispatch: Some(auto_dispatch),
                 feed_command: None,
                 feed_interval_secs: None,
-                project_id: None,
                 group_by_repo: None,
                 parent_epic_id: None,
             },
@@ -155,7 +133,6 @@ impl TuiRuntime {
                 auto_dispatch: None,
                 feed_command: None,
                 feed_interval_secs: None,
-                project_id: None,
                 group_by_repo: Some(group_by_repo),
                 parent_epic_id: None,
             },
@@ -198,7 +175,6 @@ impl TuiRuntime {
                 sort_order: None,
                 tag: None,
                 base_branch: None,
-                project_id: epic.project_id,
                 wrap_up_mode: None,
             })
             .await

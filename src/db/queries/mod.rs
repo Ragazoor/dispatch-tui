@@ -1,6 +1,5 @@
 mod epics;
 mod learnings;
-mod projects;
 mod settings;
 mod tasks;
 mod usage;
@@ -9,7 +8,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 
 use crate::models::{
-    Epic, EpicId, ProjectId, SubStatus, Task, TaskId, TaskStatus, TaskTag, WrapUpMode,
+    Epic, EpicId, SubStatus, Task, TaskId, TaskStatus, TaskTag, WrapUpMode,
 };
 
 /// Build a `FromSqlConversionFailure` error for an unrecognised enum string.
@@ -25,7 +24,7 @@ pub(super) fn unknown_enum(field: &'static str, raw: &str) -> rusqlite::Error {
 pub(super) const TASK_COLUMNS: &str =
     "id, title, description, repo_path, status, worktree, tmux_window, \
      plan_path, epic_id, sub_status, pr_url, tag, sort_order, base_branch, external_id, \
-     created_at, updated_at, project_id, labels, last_pre_tool_use_at, last_notification_at, \
+     created_at, updated_at, labels, last_pre_tool_use_at, last_notification_at, \
      wrap_up_mode";
 
 pub(super) fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
@@ -52,7 +51,6 @@ pub(super) fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         sort_order: row.get("sort_order")?,
         base_branch: row.get("base_branch")?,
         external_id: row.get("external_id")?,
-        project_id: ProjectId(row.get::<_, i64>("project_id")?),
         labels: read_json_string_vec(row, "labels")?,
         created_at: parse_datetime(&created_str)?,
         updated_at: parse_datetime(&updated_str)?,
@@ -81,7 +79,6 @@ pub(super) fn row_to_epic(row: &rusqlite::Row<'_>) -> rusqlite::Result<Epic> {
         feed_command: row.get("feed_command")?,
         feed_interval_secs: row.get("feed_interval_secs")?,
         group_by_repo: row.get::<_, bool>("group_by_repo")?,
-        project_id: ProjectId(row.get::<_, i64>("project_id")?),
         created_at: parse_datetime(&created_str)?,
         updated_at: parse_datetime(&updated_str)?,
     })

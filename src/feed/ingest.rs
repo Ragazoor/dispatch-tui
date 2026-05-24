@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::db::TaskStore;
-use crate::models::{EpicId, FeedItem, ProjectId};
+use crate::models::{EpicId, FeedItem};
 
 /// Group feed items by repo name and upsert each group into its own sub-epic.
 /// Clears any flat feed tasks on the parent epic (migration + ongoing hygiene).
@@ -10,7 +10,6 @@ use crate::models::{EpicId, FeedItem, ProjectId};
 pub(super) async fn sync_grouped_feed(
     db: &dyn TaskStore,
     parent_id: EpicId,
-    project_id: ProjectId,
     items: &[FeedItem],
     repo_paths: &[String],
     base_branches: &[String],
@@ -60,7 +59,7 @@ pub(super) async fn sync_grouped_feed(
                 existing.id
             } else {
                 match db
-                    .create_epic(repo_name, "", "", Some(parent_id), project_id)
+                    .create_epic(repo_name, "", "", Some(parent_id))
                     .await
                 {
                     Ok(e) => e.id,
@@ -138,13 +137,13 @@ mod tests {
     async fn archived_sub_epic_not_reused() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let parent = db
-            .create_epic("Reviews", "", "", None, ProjectId(1))
+            .create_epic("Reviews", "", "", None)
             .await
             .unwrap();
 
         // Create a sub-epic that is then archived.
         let archived_sub = db
-            .create_epic("repo-a", "", "", Some(parent.id), ProjectId(1))
+            .create_epic("repo-a", "", "", Some(parent.id))
             .await
             .unwrap();
         db.patch_epic(
@@ -162,7 +161,7 @@ mod tests {
         let base_branches = vec!["main".to_string()];
 
         let sub_ids =
-            sync_grouped_feed(&*db, parent.id, ProjectId(1), &items, &repo_paths, &base_branches)
+            sync_grouped_feed(&*db, parent.id, &items, &repo_paths, &base_branches)
                 .await;
 
         assert_eq!(sub_ids.len(), 1, "should return exactly one sub-epic ID");
@@ -190,7 +189,7 @@ mod tests {
     async fn items_grouped_by_repo_name() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let parent = db
-            .create_epic("Reviews", "", "", None, ProjectId(1))
+            .create_epic("Reviews", "", "", None)
             .await
             .unwrap();
 
@@ -201,7 +200,7 @@ mod tests {
         let repo_paths = vec!["".to_string(), "".to_string()];
         let base_branches = vec!["main".to_string(), "main".to_string()];
 
-        sync_grouped_feed(&*db, parent.id, ProjectId(1), &items, &repo_paths, &base_branches)
+        sync_grouped_feed(&*db, parent.id, &items, &repo_paths, &base_branches)
             .await;
 
         let subs = db.list_sub_epics(parent.id).await.unwrap();
@@ -223,7 +222,7 @@ mod tests {
     async fn no_url_groups_as_other() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let parent = db
-            .create_epic("Reviews", "", "", None, ProjectId(1))
+            .create_epic("Reviews", "", "", None)
             .await
             .unwrap();
 
@@ -240,7 +239,7 @@ mod tests {
         let repo_paths = vec!["".to_string()];
         let base_branches = vec!["main".to_string()];
 
-        sync_grouped_feed(&*db, parent.id, ProjectId(1), &items, &repo_paths, &base_branches)
+        sync_grouped_feed(&*db, parent.id, &items, &repo_paths, &base_branches)
             .await;
 
         let subs = db.list_sub_epics(parent.id).await.unwrap();
@@ -252,13 +251,13 @@ mod tests {
     async fn existing_active_sub_epic_reused() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let parent = db
-            .create_epic("Reviews", "", "", None, ProjectId(1))
+            .create_epic("Reviews", "", "", None)
             .await
             .unwrap();
 
         // Pre-create the sub-epic as active.
         let pre_existing = db
-            .create_epic("repo-a", "", "", Some(parent.id), ProjectId(1))
+            .create_epic("repo-a", "", "", Some(parent.id))
             .await
             .unwrap();
 
@@ -267,7 +266,7 @@ mod tests {
         let base_branches = vec!["main".to_string()];
 
         let sub_ids =
-            sync_grouped_feed(&*db, parent.id, ProjectId(1), &items, &repo_paths, &base_branches)
+            sync_grouped_feed(&*db, parent.id, &items, &repo_paths, &base_branches)
                 .await;
 
         assert_eq!(sub_ids, vec![pre_existing.id], "should reuse existing active sub-epic");

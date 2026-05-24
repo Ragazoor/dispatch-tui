@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 #[cfg(test)]
 use crate::models::ReviewDecision;
 use crate::models::{
-    epic_substatus, Epic, EpicId, EpicSubstatus, ProjectId, SubStatus, Task, TaskId,
+    epic_substatus, Epic, EpicId, EpicSubstatus, SubStatus, Task, TaskId,
     TaskStatus, VisualColumn,
 };
 
@@ -57,7 +57,6 @@ pub struct App {
     pub(in crate::tui) input: InputState,
     pub(in crate::tui) agents: AgentTracking,
     pub(in crate::tui) archive: ArchiveState,
-    pub(in crate::tui) active_project: ProjectId,
     pub(in crate::tui) select: SelectionState,
     pub(in crate::tui) filter: FilterState,
     pub(in crate::tui) merge_queue: Option<MergeQueue>,
@@ -120,7 +119,7 @@ pub(in crate::tui) fn has_new_repo_option(buffer: &str, filtered: &[String]) -> 
 }
 
 impl App {
-    pub fn new(tasks: Vec<Task>, default_project_id: ProjectId) -> Self {
+    pub fn new(tasks: Vec<Task>) -> Self {
         let mut app = App {
             board: BoardState {
                 tasks,
@@ -136,7 +135,6 @@ impl App {
             input: InputState::default(),
             agents: AgentTracking::new(),
             archive: ArchiveState::default(),
-            active_project: default_project_id,
             select: SelectionState::default(),
             filter: FilterState::default(),
             merge_queue: None,
@@ -234,9 +232,6 @@ impl App {
     }
     pub fn selected_archive_row(&self) -> usize {
         self.selection().row(TaskStatus::COLUMN_COUNT + 1)
-    }
-    pub fn active_project(&self) -> ProjectId {
-        self.active_project
     }
     pub fn selected_tasks(&self) -> &HashSet<TaskId> {
         &self.select.tasks
@@ -403,10 +398,6 @@ impl App {
         self.filter.matches(repo_path)
     }
 
-    pub(in crate::tui) fn project_matches(&self, _project_id: ProjectId) -> bool {
-        true
-    }
-
     pub(in crate::tui) fn epic_matches(&self, epic_id: EpicId) -> bool {
         if !self.filter.only_active {
             return true;
@@ -422,7 +413,6 @@ impl App {
     /// Epic view: only subtasks of the active epic.
     pub fn tasks_for_current_view(&self) -> Vec<&Task> {
         let repo_match = |t: &&Task| self.repo_matches(&t.repo_path);
-        let project_match = |t: &&Task| self.project_matches(t.project_id);
         let active_match = |t: &&Task| self.filter.task_matches(t);
         match self.effective_view_mode() {
             ViewMode::Board(_) => self
@@ -434,7 +424,6 @@ impl App {
                         && (self.board.flattened || t.epic_id.is_none())
                 })
                 .filter(repo_match)
-                .filter(project_match)
                 .filter(active_match)
                 .collect(),
             ViewMode::Epic { epic_id, .. } => {
@@ -450,7 +439,6 @@ impl App {
                         .iter()
                         .filter(|t| subtree.contains(&t.id) && t.status != TaskStatus::Archived)
                         .filter(repo_match)
-                        .filter(project_match)
                         .filter(active_match)
                         .collect()
                 } else {
@@ -459,7 +447,6 @@ impl App {
                         .iter()
                         .filter(|t| t.epic_id == Some(current) && t.status != TaskStatus::Archived)
                         .filter(repo_match)
-                        .filter(project_match)
                         .filter(active_match)
                         .collect()
                 }
@@ -485,7 +472,6 @@ impl App {
             .iter()
             .filter(|t| t.status == TaskStatus::Archived)
             .filter(|t| self.repo_matches(&t.repo_path))
-            .filter(|t| self.project_matches(t.project_id))
             .collect()
     }
 
@@ -496,7 +482,6 @@ impl App {
             .iter()
             .filter(|e| e.status == TaskStatus::Archived)
             .filter(|e| self.repo_matches(&e.repo_path))
-            .filter(|e| self.project_matches(e.project_id))
             .collect()
     }
 
@@ -613,9 +598,6 @@ impl App {
                     if !self.repo_matches(&epic.repo_path) {
                         continue;
                     }
-                    if !self.project_matches(epic.project_id) {
-                        continue;
-                    }
                     if !self.epic_matches(epic.id) {
                         continue;
                     }
@@ -692,7 +674,6 @@ impl App {
                 .filter(|e| {
                     e.parent_epic_id.is_none()
                         && self.repo_matches(&e.repo_path)
-                        && self.project_matches(e.project_id)
                         && e.status == status
                         && self.epic_matches(e.id)
                 })
@@ -742,7 +723,6 @@ impl App {
                 .filter(|e| {
                     e.parent_epic_id.is_none()
                         && self.repo_matches(&e.repo_path)
-                        && self.project_matches(e.project_id)
                         && self.epic_matches(e.id)
                 })
                 .collect(),

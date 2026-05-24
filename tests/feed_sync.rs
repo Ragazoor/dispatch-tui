@@ -12,7 +12,7 @@ use tokio::sync::mpsc;
 use dispatch_tui::db::{Database, EpicCrud, EpicPatch};
 use dispatch_tui::feed::FeedRunner;
 use dispatch_tui::mcp::McpEvent;
-use dispatch_tui::models::ProjectId;
+
 use dispatch_tui::process::{MockProcessRunner, ProcessRunner};
 
 /// Always-failing runner: each `git symbolic-ref` call falls back to "main".
@@ -35,7 +35,7 @@ async fn wait_for_refresh(rx: &mut mpsc::UnboundedReceiver<McpEvent>) {
 async fn feed_sync_creates_then_updates_tasks_via_external_id() {
     let db = Arc::new(Database::open_in_memory().await.unwrap());
     let epic = db
-        .create_epic("Feed Epic", "", "/repo", None, ProjectId(1))
+        .create_epic("Feed Epic", "", "/repo", None)
         .await
         .unwrap();
 

@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::{EpicId, ProjectId};
+use super::EpicId;
 
 define_id_newtype!(TaskId, task_id_tests);
 
@@ -324,7 +324,6 @@ pub struct Task {
     pub sort_order: Option<i64>,
     pub base_branch: String,
     pub external_id: Option<String>,
-    pub project_id: ProjectId,
     /// Free-form badges rendered on the kanban card alongside derived
     /// indicators. Order is preserved so feed scripts can control rendering
     /// order.

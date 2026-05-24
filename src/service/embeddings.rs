@@ -161,13 +161,12 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 }
 
 /// Returns scope multiplier for a learning given current task context.
-/// task_epic_id / task_repo / task_project are the current task's values.
+/// task_epic_id / task_repo are the current task's values.
 pub fn scope_multiplier_for(
     scope: LearningScope,
     scope_ref: Option<&str>,
     task_epic_id: Option<&str>,
     task_repo: Option<&str>,
-    task_project: Option<&str>,
 ) -> f32 {
     match scope {
         LearningScope::Epic => {
@@ -180,13 +179,6 @@ pub fn scope_multiplier_for(
         LearningScope::Repo => {
             if matches!((scope_ref, task_repo), (Some(a), Some(b)) if a == b) {
                 0.20
-            } else {
-                0.0
-            }
-        }
-        LearningScope::Project => {
-            if matches!((scope_ref, task_project), (Some(a), Some(b)) if a == b) {
-                0.10
             } else {
                 0.0
             }
@@ -220,7 +212,6 @@ pub struct RagRankParams<'a> {
     pub query_vec: &'a [f32],
     pub task_epic_id: Option<&'a str>,
     pub task_repo: Option<&'a str>,
-    pub task_project: Option<&'a str>,
     pub threshold: f32,
     pub tag_filter: &'a [String],
     pub limit: usize,
@@ -248,7 +239,6 @@ pub fn rag_rank_learnings<'a>(
                 learning.scope_ref.as_deref(),
                 params.task_epic_id,
                 params.task_repo,
-                params.task_project,
             );
             let tag_boost = if tag_set.is_empty() {
                 0.0
@@ -410,7 +400,6 @@ mod tests {
                 query_vec: &query,
                 task_epic_id: None,
                 task_repo: Some("my-repo"),
-                task_project: None,
                 threshold: 0.0,
                 tag_filter: &[],
                 limit: 10,

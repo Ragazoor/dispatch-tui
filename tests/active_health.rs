@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use dispatch_tui::db::{self, Database};
-use dispatch_tui::models::{HookEventKind, ProjectId, SubStatus, TaskStatus};
+use dispatch_tui::models::{HookEventKind, SubStatus, TaskStatus};
 use dispatch_tui::service::{ClaimTaskParams, CreateTaskParams, TaskService};
 
 #[tokio::test]
@@ -23,7 +23,6 @@ async fn hook_event_flow_drives_sub_status_and_lifecycle() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await

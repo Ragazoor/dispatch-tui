@@ -4,7 +4,7 @@
 //! TUI commands) construct one of these and pass it to the corresponding
 //! `TaskService` method.
 
-use crate::models::{EpicId, ProjectId, SubStatus, TaskId, TaskStatus, TaskTag, WrapUpMode};
+use crate::models::{EpicId, SubStatus, TaskId, TaskStatus, TaskTag, WrapUpMode};
 use crate::service::FieldUpdate;
 
 // ---------------------------------------------------------------------------
@@ -26,7 +26,6 @@ pub struct UpdateTaskParams {
     pub worktree: Option<FieldUpdate>,
     pub tmux_window: Option<FieldUpdate>,
     pub base_branch: Option<String>,
-    pub project_id: Option<ProjectId>,
     /// Outer `Some` means "write this column", inner value is the value to write
     /// (with `None` meaning clear-to-NULL).
     pub last_pre_tool_use_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
@@ -80,9 +79,6 @@ impl UpdateTaskParams {
         if self.base_branch.is_some() {
             names.push("base_branch");
         }
-        if self.project_id.is_some() {
-            names.push("project_id");
-        }
         if self.last_pre_tool_use_at.is_some() {
             names.push("last_pre_tool_use_at");
         }
@@ -109,7 +105,6 @@ impl UpdateTaskParams {
             worktree: None,
             tmux_window: None,
             base_branch: None,
-            project_id: None,
             last_pre_tool_use_at: None,
             wrap_up_mode: None,
         }
@@ -180,11 +175,6 @@ impl UpdateTaskParams {
         self
     }
 
-    pub fn project_id(mut self, project_id: ProjectId) -> Self {
-        self.project_id = Some(project_id);
-        self
-    }
-
     pub fn last_pre_tool_use_at(mut self, value: Option<chrono::DateTime<chrono::Utc>>) -> Self {
         self.last_pre_tool_use_at = Some(value);
         self
@@ -209,7 +199,6 @@ pub struct CreateTaskParams {
     pub sort_order: Option<i64>,
     pub tag: Option<TaskTag>,
     pub base_branch: Option<String>,
-    pub project_id: ProjectId,
     pub wrap_up_mode: Option<WrapUpMode>,
 }
 
@@ -231,7 +220,6 @@ pub struct ClaimTaskParams {
 pub struct ListTasksFilter {
     pub statuses: Option<Vec<TaskStatus>>,
     pub epic_id: Option<EpicId>,
-    pub project_id: Option<ProjectId>,
     pub repo_paths: Option<Vec<String>>,
     pub exclude_task_id: Option<TaskId>,
 }
@@ -243,7 +231,7 @@ pub struct ListTasksFilter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{EpicId, ProjectId, SubStatus, TaskId, TaskStatus, TaskTag, WrapUpMode};
+    use crate::models::{EpicId, SubStatus, TaskId, TaskStatus, TaskTag, WrapUpMode};
     use crate::service::FieldUpdate;
 
     #[test]
@@ -299,7 +287,6 @@ mod tests {
             UpdateTaskParams::for_task(TaskId(1)).worktree(FieldUpdate::Set("w".to_string())),
             UpdateTaskParams::for_task(TaskId(1)).tmux_window(FieldUpdate::Set("tw".to_string())),
             UpdateTaskParams::for_task(TaskId(1)).base_branch(Some("main".to_string())),
-            UpdateTaskParams::for_task(TaskId(1)).project_id(ProjectId(1)),
             UpdateTaskParams::for_task(TaskId(1)).last_pre_tool_use_at(Some(chrono::Utc::now())),
             UpdateTaskParams::for_task(TaskId(1)).wrap_up_mode(Some(WrapUpMode::Rebase)),
         ];

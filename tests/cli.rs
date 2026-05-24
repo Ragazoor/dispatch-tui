@@ -10,7 +10,7 @@ use std::path::Path;
 use std::process::Command;
 use tempfile::NamedTempFile;
 
-use dispatch_tui::db::{CreateTaskRequest, Database, ProjectCrud, TaskCrud, TaskPatch};
+use dispatch_tui::db::{CreateTaskRequest, Database, TaskCrud, TaskPatch};
 use dispatch_tui::models::{SubStatus, TaskId, TaskStatus};
 
 fn binary() -> Command {
@@ -32,7 +32,6 @@ fn make_plan_file(title: &str, goal: &str) -> NamedTempFile {
 /// subcommand.
 async fn seed_task(db_path: &Path, title: &str) -> TaskId {
     let db = Database::open(db_path).await.unwrap();
-    let project_id = db.get_default_project().await.unwrap().id;
     db.create_task(CreateTaskRequest {
         title,
         description: "",
@@ -43,7 +42,6 @@ async fn seed_task(db_path: &Path, title: &str) -> TaskId {
         epic_id: None,
         sort_order: None,
         tag: None,
-        project_id,
         wrap_up_mode: None,
     })
     .await

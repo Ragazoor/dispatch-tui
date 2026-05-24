@@ -494,14 +494,12 @@ pub async fn list_learnings_for_dispatch_rag(
     let candidates = deserialize_candidate_rows(rows);
 
     let epic_id_str = task.epic_id.map(|e| e.0.to_string());
-    let project_id_str = task.project_id.0.to_string();
     let all_ranked = rag_rank_learnings(
         &candidates,
         &RagRankParams {
             query_vec: &query_vec,
             task_epic_id: epic_id_str.as_deref(),
             task_repo: Some(task.repo_path.as_str()),
-            task_project: Some(project_id_str.as_str()),
             threshold,
             tag_filter: &[],
             limit: DISPATCH_INJECTION_CAP,
@@ -940,7 +938,7 @@ mod rag_dispatch_tests {
         CreateLearningRow, CreateTaskRequest, Database, LearningRetrievalStore, LearningStore,
         TaskCrud,
     };
-    use crate::models::{LearningKind, LearningScope, ProjectId, TaskStatus};
+    use crate::models::{LearningKind, LearningScope, TaskStatus};
     use crate::service::embeddings::{serialize_embedding, EmbeddingService};
 
     use super::{
@@ -969,7 +967,6 @@ mod rag_dispatch_tests {
                 epic_id: None,
                 sort_order: None,
                 tag: None,
-                project_id: ProjectId(1),
                 wrap_up_mode: None,
             })
             .await

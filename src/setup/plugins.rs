@@ -9,7 +9,6 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use crate::db::{Database, EpicCrud, EpicPatch};
-use crate::models::ProjectId;
 
 // The entire plugin/ directory is embedded at compile time. Any file added to
 // plugin/ is automatically picked up — no manual registration required.
@@ -265,7 +264,7 @@ pub async fn seed_feed_epics(db: &Database, data_dir: &Path) -> Result<()> {
     }
 
     let epic = db
-        .create_epic("Dependabot", "", "", None, ProjectId(1))
+        .create_epic("Dependabot", "", "", None)
         .await?;
     db.patch_epic(
         epic.id,

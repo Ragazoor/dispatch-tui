@@ -1,7 +1,5 @@
 use super::*;
 use crate::db;
-#[cfg(test)]
-use crate::models::ProjectId;
 use crate::models::{LearningId, LearningStatus};
 #[cfg(test)]
 use crate::service::embeddings::EmbeddingService;
@@ -208,7 +206,7 @@ mod tests {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let id = insert_learning(&db).await;
         let rt = make_runtime(db.clone());
-        let mut app = App::new(vec![], ProjectId(1));
+        let mut app = App::new(vec![]);
         // Put the app in Learnings view with the learning
         let learning = make_learning(id);
         app.update(Message::Learning(LearningMessage::Show(vec![learning])));
@@ -230,7 +228,7 @@ mod tests {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let id = insert_learning(&db).await;
         let rt = make_runtime(db.clone());
-        let mut app = App::new(vec![], ProjectId(1));
+        let mut app = App::new(vec![]);
         let learning = make_learning(id);
         app.update(Message::Learning(LearningMessage::Show(vec![learning])));
 
@@ -280,7 +278,7 @@ mod tests {
         db.upvote_learning(id2).await.unwrap();
 
         let rt = make_runtime(db.clone());
-        let mut app = App::new(vec![], ProjectId(1));
+        let mut app = App::new(vec![]);
 
         rt.exec_load_learnings(&mut app).await;
 

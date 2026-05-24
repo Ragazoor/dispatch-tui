@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 
 use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
-use crate::models::{EpicId, ProjectId, TaskStatus};
+use crate::models::{EpicId, TaskStatus};
 use crate::service::{CreateEpicParams, EpicService, ServiceError, UpdateEpicParams};
 
 use super::types::{
@@ -76,7 +76,6 @@ pub(super) async fn handle_create_epic(
     tracing::info!(title = %parsed.title, "MCP create_epic");
 
     let svc = EpicService::new(state.db.clone());
-    let project_id = ProjectId(1);
     match svc
         .create_epic(CreateEpicParams {
             title: parsed.title,
@@ -86,7 +85,6 @@ pub(super) async fn handle_create_epic(
             parent_epic_id: parsed.parent_epic_id.map(EpicId),
             feed_command: None,
             feed_interval_secs: None,
-            project_id,
         })
         .await
     {
@@ -233,7 +231,6 @@ pub(super) async fn handle_update_epic(
             None => crate::service::FieldUpdate::Clear,
         }),
         feed_interval_secs: parsed.feed_interval_secs,
-        project_id: None,
         group_by_repo: parsed.group_by_repo,
         parent_epic_id: parsed.parent_epic_id.map(|o| o.map(EpicId)),
     };

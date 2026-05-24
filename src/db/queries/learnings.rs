@@ -5,7 +5,7 @@ use rusqlite::{params, OptionalExtension};
 
 use crate::models::{
     EpicId, Learning, LearningId, LearningKind, LearningRetrieval, LearningScope, LearningStatus,
-    LearningVerdict, ProjectId, RetrievalSource, TaskId,
+    LearningVerdict, RetrievalSource, TaskId,
 };
 
 use super::super::{CreateLearningRow, Database, LearningFilter, LearningPatch};
@@ -245,13 +245,11 @@ impl super::super::LearningStore for Database {
 
     async fn list_learnings_for_dispatch(
         &self,
-        project_id: Option<ProjectId>,
         repo_path: &str,
         epic_id: Option<EpicId>,
     ) -> Result<Vec<Learning>> {
         let repo_path = repo_path.to_owned();
         self.db_call(move |conn| {
-            let project_ref = project_id.map(|id| id.to_string());
             let epic_ref = epic_id.map(|id| id.0.to_string());
 
             let mut scope_conditions: Vec<String> = vec!["scope = 'user'".to_string()];
@@ -260,13 +258,6 @@ impl super::super::LearningStore for Database {
             bind.push(Box::new(repo_path));
             scope_conditions.push(format!("(scope = 'repo' AND scope_ref = ?{})", bind.len()));
 
-            if let Some(pref) = project_ref {
-                bind.push(Box::new(pref));
-                scope_conditions.push(format!(
-                    "(scope = 'project' AND scope_ref = ?{})",
-                    bind.len()
-                ));
-            }
             if let Some(eref) = epic_ref {
                 bind.push(Box::new(eref));
                 scope_conditions.push(format!("(scope = 'epic' AND scope_ref = ?{})", bind.len()));
@@ -283,9 +274,8 @@ impl super::super::LearningStore for Database {
                    CASE scope
                      WHEN 'epic'    THEN 1
                      WHEN 'repo'    THEN 2
-                     WHEN 'project' THEN 3
-                     WHEN 'user'    THEN 4
-                     ELSE 5
+                     WHEN 'user'    THEN 3
+                     ELSE 4
                    END,
                    upvote_count DESC
                  LIMIT 10"

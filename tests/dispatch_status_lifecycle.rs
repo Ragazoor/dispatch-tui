@@ -5,7 +5,7 @@
 //! breaks the user-facing feedback contract is caught even if the
 //! TUI-internal helpers are refactored.
 
-use dispatch_tui::models::{ProjectId, SubStatus, Task, TaskId, TaskStatus};
+use dispatch_tui::models::{SubStatus, Task, TaskId, TaskStatus};
 use dispatch_tui::tui::{App, Message};
 
 fn make_task(id: i64, title: &str) -> Task {
@@ -29,7 +29,6 @@ fn make_task(id: i64, title: &str) -> Task {
         labels: Vec::new(),
         created_at: now,
         updated_at: now,
-        project_id: ProjectId(1),
         last_pre_tool_use_at: None,
         last_notification_at: None,
         wrap_up_mode: None,
@@ -37,7 +36,7 @@ fn make_task(id: i64, title: &str) -> Task {
 }
 
 fn make_app(task: Task) -> App {
-    App::new(vec![task], ProjectId(1))
+    App::new(vec![task])
 }
 
 #[tokio::test]
@@ -108,7 +107,6 @@ async fn dispatching_status_visible_across_lifecycle_failure() {
 async fn multiple_dispatches_show_pluralized_status() {
     let mut app = App::new(
         vec![make_task(1, "Task A"), make_task(2, "Task B")],
-        ProjectId(1),
     );
 
     app.update(Message::Task(

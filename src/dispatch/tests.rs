@@ -8,7 +8,7 @@ use super::prompts::{
 use super::worktree::provision_worktree;
 use super::*;
 
-use crate::models::{EpicId, ProjectId, Task, TaskId, TaskStatus};
+use crate::models::{EpicId, Task, TaskId, TaskStatus};
 use crate::process::{exit_fail, MockProcessRunner};
 use chrono::Utc;
 use std::process::Output;
@@ -90,7 +90,6 @@ fn make_task(repo_path: &str) -> Task {
         labels: Vec::new(),
         created_at: Utc::now(),
         updated_at: Utc::now(),
-        project_id: ProjectId(1),
         last_pre_tool_use_at: None,
         last_notification_at: None,
         wrap_up_mode: None,

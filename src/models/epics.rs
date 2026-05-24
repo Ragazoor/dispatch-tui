@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-use super::{ProjectId, SubStatus, Task, TaskId, TaskStatus};
+use super::{SubStatus, Task, TaskId, TaskStatus};
 
 define_id_newtype!(EpicId, epic_id_tests);
 
@@ -24,7 +24,6 @@ pub struct Epic {
     pub feed_command: Option<String>,
     pub feed_interval_secs: Option<i64>,
     pub group_by_repo: bool,
-    pub project_id: ProjectId,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -172,7 +171,7 @@ pub fn descendant_task_ids(root: EpicId, epics: &[Epic], tasks: &[Task]) -> Hash
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
-    use crate::models::{ProjectId, SubStatus, Task, TaskId, TaskStatus};
+    use crate::models::{SubStatus, Task, TaskId, TaskStatus};
     use chrono::Utc;
 
     fn make_epic(
@@ -196,7 +195,6 @@ mod tests {
             group_by_repo: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            project_id: ProjectId(1),
         }
     }
 
@@ -220,7 +218,6 @@ mod tests {
             labels: Vec::new(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            project_id: ProjectId(1),
             last_pre_tool_use_at: None,
             last_notification_at: None,
             wrap_up_mode: None,

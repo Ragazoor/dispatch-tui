@@ -19,7 +19,7 @@ use serde_json::{json, Value};
 use crate::db::{self, CreateLearningRow, CreateTaskRequest, Database};
 use crate::mcp::identity::{CallerIdentity, IdentityError};
 use crate::mcp::McpState;
-use crate::models::{ProjectId, SubStatus, TaskStatus};
+use crate::models::{SubStatus, TaskStatus};
 use crate::process::{MockProcessRunner, ProcessRunner};
 use crate::service::embeddings::{serialize_embedding, EmbeddingService};
 
@@ -133,7 +133,6 @@ async fn create_task_fixture_at(state: &Arc<McpState>, repo_path: &str) -> crate
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -154,7 +153,6 @@ async fn create_running_task_with_window(state: &Arc<McpState>) -> crate::models
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -732,7 +730,7 @@ async fn list_projects_tool_is_removed() {
 }
 
 #[tokio::test]
-async fn create_task_from_session_without_project_id_uses_default() {
+async fn create_task_from_session_succeeds() {
     let (state, db) = test_state_with_db().await;
     let resp = call(
         &state,
@@ -752,5 +750,5 @@ async fn create_task_from_session_without_project_id_uses_default() {
     );
     let tasks = db.list_all().await.unwrap();
     assert_eq!(tasks.len(), 1);
-    assert_eq!(tasks[0].project_id, crate::models::ProjectId(1));
+    assert_eq!(tasks[0].title, "T");
 }

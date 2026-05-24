@@ -2,8 +2,8 @@
 use std::sync::Arc;
 
 use super::{ClaimTaskParams, CreateTaskParams, ListTasksFilter, TaskService, UpdateTaskParams};
-use crate::db::{self, Database, EpicCrud, ProjectCrud, TaskCrud};
-use crate::models::{EpicId, HookEventKind, ProjectId, SubStatus, TaskId, TaskStatus, TaskTag};
+use crate::db::{self, Database, EpicCrud};
+use crate::models::{EpicId, HookEventKind, SubStatus, TaskId, TaskStatus, TaskTag};
 use crate::service::epics::{CreateEpicParams, EpicService, UpdateEpicParams};
 use crate::service::{FieldUpdate, ServiceError};
 
@@ -31,7 +31,6 @@ fn make_task_params(repo_path: &str) -> CreateTaskParams {
         sort_order: None,
         tag: None,
         base_branch: None,
-        project_id: ProjectId(1),
         wrap_up_mode: None,
     }
 }
@@ -53,7 +52,6 @@ async fn create_and_get_task() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -79,7 +77,6 @@ async fn create_task_with_tag() {
             sort_order: Some(5),
             tag: Some(TaskTag::Bug),
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -105,7 +102,6 @@ async fn create_task_with_sort_order() {
             sort_order: Some(42),
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -130,7 +126,6 @@ async fn update_task_status() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -162,7 +157,6 @@ async fn update_task_no_fields_returns_error() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -190,7 +184,6 @@ async fn update_task_params_builder_compiles() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -219,7 +212,6 @@ async fn update_task_invalid_substatus_for_status() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -248,7 +240,6 @@ async fn claim_task_success() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -287,7 +278,6 @@ async fn claim_task_seeds_last_pre_tool_use_at() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -325,7 +315,6 @@ async fn claim_task_wrong_repo() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -357,7 +346,6 @@ async fn claim_task_not_backlog() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -393,7 +381,6 @@ async fn list_tasks_with_filter() {
         sort_order: None,
         tag: None,
         base_branch: None,
-        project_id: ProjectId(1),
         wrap_up_mode: None,
     })
     .await
@@ -441,7 +428,6 @@ async fn update_task_with_epic_linkage() {
             parent_epic_id: None,
             feed_command: None,
             feed_interval_secs: None,
-            project_id: ProjectId(1),
         })
         .await
         .unwrap();
@@ -456,7 +442,6 @@ async fn update_task_with_epic_linkage() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -488,7 +473,6 @@ async fn update_task_status_recalculates_parent_epic() {
             parent_epic_id: None,
             feed_command: None,
             feed_interval_secs: None,
-            project_id: ProjectId(1),
         })
         .await
         .unwrap();
@@ -503,7 +487,6 @@ async fn update_task_status_recalculates_parent_epic() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -536,7 +519,6 @@ async fn update_task_relink_recalculates_old_and_new_epic() {
             parent_epic_id: None,
             feed_command: None,
             feed_interval_secs: None,
-            project_id: ProjectId(1),
         })
         .await
         .unwrap();
@@ -549,7 +531,6 @@ async fn update_task_relink_recalculates_old_and_new_epic() {
             parent_epic_id: None,
             feed_command: None,
             feed_interval_secs: None,
-            project_id: ProjectId(1),
         })
         .await
         .unwrap();
@@ -564,7 +545,6 @@ async fn update_task_relink_recalculates_old_and_new_epic() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -612,7 +592,6 @@ async fn create_and_get_epic() {
             parent_epic_id: None,
             feed_command: None,
             feed_interval_secs: None,
-            project_id: ProjectId(1),
         })
         .await
         .unwrap();
@@ -643,7 +622,6 @@ async fn update_epic_status() {
             parent_epic_id: None,
             feed_command: None,
             feed_interval_secs: None,
-            project_id: ProjectId(1),
         })
         .await
         .unwrap();
@@ -659,7 +637,6 @@ async fn update_epic_status() {
         auto_dispatch: None,
         feed_command: None,
         feed_interval_secs: None,
-        project_id: None,
         group_by_repo: None,
         parent_epic_id: None,
     })
@@ -684,7 +661,6 @@ async fn update_epic_no_fields_returns_error() {
             parent_epic_id: None,
             feed_command: None,
             feed_interval_secs: None,
-            project_id: ProjectId(1),
         })
         .await
         .unwrap();
@@ -701,7 +677,6 @@ async fn update_epic_no_fields_returns_error() {
             auto_dispatch: None,
             feed_command: None,
             feed_interval_secs: None,
-            project_id: None,
             group_by_repo: None,
             parent_epic_id: None,
         })
@@ -724,7 +699,6 @@ async fn update_epic_auto_dispatch_persists() {
             parent_epic_id: None,
             feed_command: None,
             feed_interval_secs: None,
-            project_id: ProjectId(1),
         })
         .await
         .unwrap();
@@ -742,7 +716,6 @@ async fn update_epic_auto_dispatch_persists() {
         auto_dispatch: Some(false),
         feed_command: None,
         feed_interval_secs: None,
-        project_id: None,
         group_by_repo: None,
         parent_epic_id: None,
     })
@@ -767,7 +740,6 @@ async fn list_epics_with_progress() {
             parent_epic_id: None,
             feed_command: None,
             feed_interval_secs: None,
-            project_id: ProjectId(1),
         })
         .await
         .unwrap();
@@ -782,7 +754,6 @@ async fn list_epics_with_progress() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -810,7 +781,6 @@ async fn list_epics_with_progress_multiple_epics() {
             parent_epic_id: None,
             feed_command: None,
             feed_interval_secs: None,
-            project_id: ProjectId(1),
         })
         .await
         .unwrap();
@@ -823,7 +793,6 @@ async fn list_epics_with_progress_multiple_epics() {
             parent_epic_id: None,
             feed_command: None,
             feed_interval_secs: None,
-            project_id: ProjectId(1),
         })
         .await
         .unwrap();
@@ -839,7 +808,6 @@ async fn list_epics_with_progress_multiple_epics() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -854,7 +822,6 @@ async fn list_epics_with_progress_multiple_epics() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -870,7 +837,6 @@ async fn list_epics_with_progress_multiple_epics() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -907,7 +873,6 @@ async fn update_task_status_recalculates_epic() {
             parent_epic_id: None,
             feed_command: None,
             feed_interval_secs: None,
-            project_id: ProjectId(1),
         })
         .await
         .unwrap();
@@ -922,7 +887,6 @@ async fn update_task_status_recalculates_epic() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -952,7 +916,6 @@ async fn get_epic_with_subtasks() {
             parent_epic_id: None,
             feed_command: None,
             feed_interval_secs: None,
-            project_id: ProjectId(1),
         })
         .await
         .unwrap();
@@ -967,7 +930,6 @@ async fn get_epic_with_subtasks() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -995,7 +957,6 @@ async fn next_backlog_task_returns_first_by_sort_order() {
             parent_epic_id: None,
             feed_command: None,
             feed_interval_secs: None,
-            project_id: ProjectId(1),
         })
         .await
         .unwrap();
@@ -1010,7 +971,6 @@ async fn next_backlog_task_returns_first_by_sort_order() {
             sort_order: Some(20),
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1026,7 +986,6 @@ async fn next_backlog_task_returns_first_by_sort_order() {
             sort_order: Some(10),
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1051,7 +1010,6 @@ async fn next_backlog_task_skips_non_backlog() {
             parent_epic_id: None,
             feed_command: None,
             feed_interval_secs: None,
-            project_id: ProjectId(1),
         })
         .await
         .unwrap();
@@ -1066,7 +1024,6 @@ async fn next_backlog_task_skips_non_backlog() {
             sort_order: Some(1),
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1107,7 +1064,6 @@ async fn create_task_returning_gives_full_task() {
             sort_order: None,
             tag: Some(TaskTag::Feature),
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1134,7 +1090,6 @@ async fn create_task_returning_with_epic() {
             parent_epic_id: None,
             feed_command: None,
             feed_interval_secs: None,
-            project_id: ProjectId(1),
         })
         .await
         .unwrap();
@@ -1149,7 +1104,6 @@ async fn create_task_returning_with_epic() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1173,7 +1127,6 @@ async fn create_task_returning_sets_all_optional_fields_atomically() {
             parent_epic_id: None,
             feed_command: None,
             feed_interval_secs: None,
-            project_id: ProjectId(1),
         })
         .await
         .unwrap();
@@ -1188,7 +1141,6 @@ async fn create_task_returning_sets_all_optional_fields_atomically() {
             sort_order: Some(3),
             tag: Some(TaskTag::Feature),
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1216,7 +1168,6 @@ async fn delete_task_removes_it() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1253,7 +1204,6 @@ async fn update_task_sets_worktree_and_tmux_window() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1288,7 +1238,6 @@ async fn update_task_clears_worktree() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1336,7 +1285,6 @@ async fn update_task_allows_done_status() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1366,7 +1314,6 @@ async fn delete_epic_removes_it() {
             parent_epic_id: None,
             feed_command: None,
             feed_interval_secs: None,
-            project_id: ProjectId(1),
         })
         .await
         .unwrap();
@@ -1413,7 +1360,6 @@ async fn update_task_worktree_set_persists() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1445,7 +1391,6 @@ async fn update_task_worktree_clear_sets_null() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1486,7 +1431,6 @@ async fn update_task_pr_url_set_and_clear() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1525,7 +1469,6 @@ async fn list_tasks_filters_by_epic_id() {
             parent_epic_id: None,
             feed_command: None,
             feed_interval_secs: None,
-            project_id: ProjectId(1),
         })
         .await
         .unwrap();
@@ -1540,7 +1483,6 @@ async fn list_tasks_filters_by_epic_id() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1556,7 +1498,6 @@ async fn list_tasks_filters_by_epic_id() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1588,7 +1529,6 @@ async fn list_tasks_excludes_archived_by_default() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1607,51 +1547,6 @@ async fn list_tasks_excludes_archived_by_default() {
     assert!(tasks.is_empty());
 }
 
-#[tokio::test]
-async fn list_tasks_filters_by_project_id() {
-    let db = test_db().await;
-    let svc = task_svc(&db);
-
-    svc.create_task(CreateTaskParams {
-        title: "P1 task".into(),
-        description: "".into(),
-        repo_path: "/repo".into(),
-        plan_path: None,
-        epic_id: None,
-        sort_order: None,
-        tag: None,
-        base_branch: None,
-        project_id: ProjectId(1),
-        wrap_up_mode: None,
-    })
-    .await
-    .unwrap();
-
-    svc.create_task(CreateTaskParams {
-        title: "P2 task".into(),
-        description: "".into(),
-        repo_path: "/repo".into(),
-        plan_path: None,
-        epic_id: None,
-        sort_order: None,
-        tag: None,
-        base_branch: None,
-        project_id: ProjectId(2),
-        wrap_up_mode: None,
-    })
-    .await
-    .unwrap();
-
-    let tasks = svc
-        .list_tasks(ListTasksFilter {
-            project_id: Some(ProjectId(2)),
-            ..Default::default()
-        })
-        .await
-        .unwrap();
-    assert_eq!(tasks.len(), 1);
-    assert_eq!(tasks[0].title, "P2 task");
-}
 
 #[tokio::test]
 async fn list_tasks_filters_by_repo_paths() {
@@ -1667,7 +1562,6 @@ async fn list_tasks_filters_by_repo_paths() {
         sort_order: None,
         tag: None,
         base_branch: None,
-        project_id: ProjectId(1),
         wrap_up_mode: None,
     })
     .await
@@ -1682,7 +1576,6 @@ async fn list_tasks_filters_by_repo_paths() {
         sort_order: None,
         tag: None,
         base_branch: None,
-        project_id: ProjectId(1),
         wrap_up_mode: None,
     })
     .await
@@ -1714,7 +1607,6 @@ async fn list_tasks_excludes_caller_task() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1729,7 +1621,6 @@ async fn list_tasks_excludes_caller_task() {
         sort_order: None,
         tag: None,
         base_branch: None,
-        project_id: ProjectId(1),
         wrap_up_mode: None,
     })
     .await
@@ -1761,7 +1652,6 @@ async fn validate_send_message_missing_worktree() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1778,7 +1668,6 @@ async fn validate_send_message_missing_worktree() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1804,7 +1693,6 @@ async fn validate_send_message_missing_tmux_window() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1820,7 +1708,6 @@ async fn validate_send_message_missing_tmux_window() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1855,7 +1742,6 @@ async fn validate_send_message_target_not_found() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1866,42 +1752,6 @@ async fn validate_send_message_target_not_found() {
         .await
         .unwrap_err();
     assert!(matches!(err, ServiceError::NotFound(_)));
-}
-
-// -------------------------------------------------------------------------
-// project_id propagation tests
-// -------------------------------------------------------------------------
-
-#[tokio::test]
-async fn create_task_with_explicit_project_id() {
-    let db = Arc::new(Database::open_in_memory().await.unwrap());
-    let svc = TaskService::new(db.clone() as Arc<dyn db::TaskAndEpicStore>);
-    let default_id = db.get_default_project().await.unwrap().id;
-    let other = db.create_project("Other", 1).await.unwrap();
-
-    let result = svc
-        .create_task(CreateTaskParams {
-            title: "T".to_string(),
-            description: String::new(),
-            repo_path: "/r".to_string(),
-            plan_path: None,
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            project_id: other.id,
-            wrap_up_mode: None,
-        })
-        .await;
-    assert!(result.is_ok());
-    let task_id = result.unwrap();
-    let task = db
-        .get_task(crate::models::TaskId(task_id.0))
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(task.project_id, other.id);
-    assert_ne!(task.project_id, default_id);
 }
 
 // -------------------------------------------------------------------------
@@ -1922,7 +1772,6 @@ async fn create_sub_epic_links_parent() {
             parent_epic_id: None,
             feed_command: None,
             feed_interval_secs: None,
-            project_id: ProjectId(1),
         })
         .await
         .unwrap();
@@ -1936,7 +1785,6 @@ async fn create_sub_epic_links_parent() {
             parent_epic_id: Some(parent.id),
             feed_command: None,
             feed_interval_secs: None,
-            project_id: ProjectId(1),
         })
         .await
         .unwrap();
@@ -1961,7 +1809,6 @@ async fn list_root_epics_service() {
             parent_epic_id: None,
             feed_command: None,
             feed_interval_secs: None,
-            project_id: ProjectId(1),
         })
         .await
         .unwrap();
@@ -1973,7 +1820,6 @@ async fn list_root_epics_service() {
         parent_epic_id: Some(parent.id),
         feed_command: None,
         feed_interval_secs: None,
-        project_id: ProjectId(1),
     })
     .await
     .unwrap();
@@ -1997,7 +1843,6 @@ async fn list_sub_epics_service() {
             parent_epic_id: None,
             feed_command: None,
             feed_interval_secs: None,
-            project_id: ProjectId(1),
         })
         .await
         .unwrap();
@@ -2010,7 +1855,6 @@ async fn list_sub_epics_service() {
             parent_epic_id: Some(parent.id),
             feed_command: None,
             feed_interval_secs: None,
-            project_id: ProjectId(1),
         })
         .await
         .unwrap();
@@ -2018,87 +1862,6 @@ async fn list_sub_epics_service() {
     let subs = svc.list_sub_epics(parent.id).await.unwrap();
     assert_eq!(subs.len(), 1);
     assert_eq!(subs[0].id, child.id);
-}
-
-// -- project_id in update_task --------------------------------------------
-
-#[tokio::test]
-async fn update_task_project_id_moves_task() {
-    let db = test_db().await;
-    let svc = task_svc(&db);
-    let d: Arc<dyn db::ProjectCrud> = db.clone();
-    let other = d.create_project("Dispatch", 1).await.unwrap();
-
-    let id = svc
-        .create_task(CreateTaskParams {
-            title: "T".into(),
-            description: "".into(),
-            repo_path: "/repo".into(),
-            plan_path: None,
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            project_id: ProjectId(1),
-            wrap_up_mode: None,
-        })
-        .await
-        .unwrap();
-
-    svc.update_task(UpdateTaskParams::for_task(id).project_id(other.id))
-        .await
-        .unwrap();
-
-    let db2: Arc<dyn db::TaskCrud> = db.clone();
-    let task = db2.get_task(id).await.unwrap().unwrap();
-    assert_eq!(task.project_id, other.id);
-}
-
-// -- project_id in update_epic --------------------------------------------
-
-#[tokio::test]
-async fn update_epic_project_id_moves_epic() {
-    let db = test_db().await;
-    let svc = epic_svc(&db);
-    let d: Arc<dyn db::ProjectCrud> = db.clone();
-    let other = d.create_project("Dispatch", 1).await.unwrap();
-
-    let epic = svc
-        .create_epic(CreateEpicParams {
-            title: "E".into(),
-            description: "".into(),
-            repo_path: "/repo".into(),
-            sort_order: None,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-            project_id: ProjectId(1),
-        })
-        .await
-        .unwrap();
-
-    svc.update_epic(UpdateEpicParams {
-        epic_id: epic.id,
-        title: None,
-        description: None,
-        status: None,
-        plan_path: None,
-        sort_order: None,
-        repo_path: None,
-        auto_dispatch: None,
-        feed_command: None,
-        feed_interval_secs: None,
-        project_id: Some(other.id),
-        group_by_repo: None,
-        parent_epic_id: None,
-    })
-    .await
-    .unwrap();
-
-    let d2: Arc<dyn db::EpicCrud> = db.clone();
-    let epics = d2.list_epics().await.unwrap();
-    let updated = epics.iter().find(|e| e.id == epic.id).unwrap();
-    assert_eq!(updated.project_id, other.id);
 }
 
 // -- TOCTOU regression -----------------------------------------------------
@@ -2126,7 +1889,6 @@ async fn update_task_toctou_last_write_wins() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -2180,7 +1942,6 @@ async fn update_task_sub_status_validated_against_persisted_status() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -2318,7 +2079,6 @@ async fn record_hook_event_noop_for_non_running_task() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -2425,151 +2185,6 @@ mod property_tests {
             );
         }
     }
-}
-
-// -- EpicProjectConsistency validation ------------------------------------
-
-#[tokio::test]
-async fn create_task_with_epic_id_wrong_project_id_returns_error() {
-    let db = test_db().await;
-    let svc = task_svc(&db);
-    let esvc = epic_svc(&db);
-
-    let epic = esvc
-        .create_epic(CreateEpicParams {
-            title: "E".into(),
-            description: "".into(),
-            repo_path: "/r".into(),
-            sort_order: None,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-            project_id: ProjectId(1),
-        })
-        .await
-        .unwrap();
-
-    let proj2 = db.create_project("P2", 2).await.unwrap();
-
-    let result = svc
-        .create_task(CreateTaskParams {
-            title: "T".into(),
-            description: "".into(),
-            repo_path: "/r".into(),
-            plan_path: None,
-            epic_id: Some(epic.id),
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            project_id: proj2.id,
-            wrap_up_mode: None,
-        })
-        .await;
-
-    assert!(
-        matches!(result, Err(ServiceError::Validation(_))),
-        "expected Validation error for mismatched project_id, got: {result:?}"
-    );
-}
-
-#[tokio::test]
-async fn update_task_with_new_epic_id_and_wrong_project_id_returns_error() {
-    let db = test_db().await;
-    let svc = task_svc(&db);
-    let esvc = epic_svc(&db);
-
-    let epic = esvc
-        .create_epic(CreateEpicParams {
-            title: "E".into(),
-            description: "".into(),
-            repo_path: "/r".into(),
-            sort_order: None,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-            project_id: ProjectId(1),
-        })
-        .await
-        .unwrap();
-
-    let proj2 = db.create_project("P2", 2).await.unwrap();
-
-    let id = svc
-        .create_task(CreateTaskParams {
-            title: "T".into(),
-            description: "".into(),
-            repo_path: "/r".into(),
-            plan_path: None,
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            project_id: ProjectId(1),
-            wrap_up_mode: None,
-        })
-        .await
-        .unwrap();
-
-    let result = svc
-        .update_task(
-            UpdateTaskParams::for_task(id)
-                .epic_id(epic.id)
-                .project_id(proj2.id),
-        )
-        .await;
-
-    assert!(
-        matches!(result, Err(ServiceError::Validation(_))),
-        "expected Validation error for mismatched project_id on update, got: {result:?}"
-    );
-}
-
-#[tokio::test]
-async fn update_task_changing_epic_id_without_project_id_derives_project() {
-    let db = test_db().await;
-    let svc = task_svc(&db);
-    let esvc = epic_svc(&db);
-
-    let proj2 = db.create_project("P2", 2).await.unwrap();
-
-    let epic = esvc
-        .create_epic(CreateEpicParams {
-            title: "E".into(),
-            description: "".into(),
-            repo_path: "/r".into(),
-            sort_order: None,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-            project_id: proj2.id,
-        })
-        .await
-        .unwrap();
-
-    let id = svc
-        .create_task(CreateTaskParams {
-            title: "T".into(),
-            description: "".into(),
-            repo_path: "/r".into(),
-            plan_path: None,
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            base_branch: None,
-            project_id: ProjectId(1),
-            wrap_up_mode: None,
-        })
-        .await
-        .unwrap();
-
-    // Change epic_id without passing project_id — project should follow the epic.
-    svc.update_task(UpdateTaskParams::for_task(id).epic_id(epic.id))
-        .await
-        .unwrap();
-
-    let task = svc.get_task(id).await.unwrap();
-    assert_eq!(task.epic_id, Some(epic.id));
-    assert_eq!(task.project_id, proj2.id, "project_id must follow epic");
 }
 
 // -- cli_update_task -------------------------------------------------------
@@ -2689,7 +2304,6 @@ async fn cli_update_task_recalculates_parent_epic() {
             parent_epic_id: None,
             feed_command: None,
             feed_interval_secs: None,
-            project_id: ProjectId(1),
         })
         .await
         .unwrap();
@@ -2875,7 +2489,6 @@ async fn update_task_propagates_db_error_on_prior_task_read() {
             sort_order: None,
             tag: None,
             base_branch: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -2897,7 +2510,7 @@ async fn update_task_propagates_db_error_on_prior_task_read() {
 
     // Create an epic so we can link to it (epic_id triggers needs_prior=true)
     let epic = db
-        .create_epic("E", "D", "/repo", None, ProjectId(1))
+        .create_epic("E", "D", "/repo", None)
         .await
         .unwrap();
 

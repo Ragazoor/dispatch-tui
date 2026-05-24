@@ -65,9 +65,6 @@ pub(super) fn build_task_patch<'a>(
     if let Some(ss) = sub_status {
         patch = patch.sub_status(ss);
     }
-    if let Some(pid) = params.project_id {
-        patch = patch.project_id(pid);
-    }
     if let Some(ts) = params.last_pre_tool_use_at {
         patch = patch.last_pre_tool_use_at(ts);
     }
@@ -82,7 +79,7 @@ pub(super) fn build_task_patch<'a>(
 mod tests {
     use super::super::params::UpdateTaskParams;
     use super::build_task_patch;
-    use crate::models::{ProjectId, SubStatus, TaskId, TaskStatus, TaskTag, WrapUpMode};
+    use crate::models::{SubStatus, TaskId, TaskStatus, TaskTag, WrapUpMode};
 
     #[test]
     fn all_none_produces_empty_patch() {
@@ -166,13 +163,6 @@ mod tests {
         let params = UpdateTaskParams::for_task(TaskId(1));
         let patch = build_task_patch(&params, None, None);
         assert_eq!(patch.sub_status, None);
-    }
-
-    #[test]
-    fn project_id_mapped_to_plain_field() {
-        let params = UpdateTaskParams::for_task(TaskId(1)).project_id(ProjectId(42));
-        let patch = build_task_patch(&params, None, None);
-        assert_eq!(patch.project_id, Some(ProjectId(42)));
     }
 
     #[test]

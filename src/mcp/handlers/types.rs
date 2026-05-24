@@ -486,7 +486,7 @@ mod flexible_i64_tests {
 mod fetch_caller_task_tests {
     use super::fetch_caller_task;
     use crate::db::{CreateTaskRequest, Database, TaskCrud};
-    use crate::models::{ProjectId, TaskId, TaskStatus};
+    use crate::models::{TaskId, TaskStatus};
     use serde_json::json;
 
     #[tokio::test]
@@ -503,7 +503,6 @@ mod fetch_caller_task_tests {
                 epic_id: None,
                 sort_order: None,
                 tag: None,
-                project_id: ProjectId(1),
                 wrap_up_mode: None,
             })
             .await

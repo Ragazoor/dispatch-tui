@@ -8,7 +8,7 @@ use ratatui::Frame;
 
 use super::palette::{BLUE, CYAN, GREEN, PURPLE, RED, YELLOW};
 use super::shared::truncate;
-use crate::models::{EpicId, Learning, LearningKind, LearningScope, LearningStatus, ProjectId};
+use crate::models::{EpicId, Learning, LearningKind, LearningScope, LearningStatus};
 use crate::tui::types::LearningsView;
 use crate::tui::{App, ViewMode};
 
@@ -37,7 +37,6 @@ fn kind_color(kind: LearningKind) -> Style {
 fn scope_badge(scope: LearningScope, scope_ref: Option<&str>) -> String {
     match scope {
         LearningScope::User => "global".to_string(),
-        LearningScope::Project => format!("project:{}", scope_ref.unwrap_or("?")),
         LearningScope::Repo => {
             let basename = scope_ref
                 .and_then(|p| std::path::Path::new(p).file_name()?.to_str())
@@ -125,11 +124,6 @@ pub fn render_learnings(frame: &mut Frame, app: &App, area: Rect) {
                                 .scope_ref
                                 .as_ref()
                                 .map(|r| format!("repo:{r}"))
-                                .unwrap_or_default(),
-                            LearningScope::Project => l
-                                .scope_ref
-                                .as_ref()
-                                .map(|r| format!("project:{r}"))
                                 .unwrap_or_default(),
                             LearningScope::Epic => l
                                 .scope_ref
@@ -356,9 +350,7 @@ pub fn build_learning_tree(
         tui_tree_widget::TreeItem::new_leaf(format!("learning:{}", l.id), text)
     }
 
-    // Build lookup maps once — O(N) instead of O(N²)
-    let epic_project: HashMap<i64, ProjectId> =
-        app.epics().iter().map(|e| (e.id.0, e.project_id)).collect();
+    // Build epic label lookup once — O(N) instead of O(N²)
     let epic_label_map: HashMap<i64, String> = app
         .epics()
         .iter()
@@ -380,97 +372,46 @@ pub fn build_learning_tree(
                 format!("Global ({})", user_leaves.len()),
                 user_leaves,
             )
-            // identifiers are unique: "user", "project:{id}", "epic:{id}", "repo:{path}", "tasks"
+            // identifiers are unique: "user", "epic:{id}", "repo:{path}", "tasks"
             .unwrap(),
         );
     }
 
-    // --- Per-project (project-scoped + epic-scoped nested under project) ---
-    let mut project_ids: Vec<ProjectId> = Vec::new();
-    for l in learnings {
-        match l.scope {
-            LearningScope::Project => {
-                if let Some(id) = l.scope_ref.as_ref().and_then(|s| s.parse::<i64>().ok()) {
-                    let pid = ProjectId(id);
-                    if !project_ids.contains(&pid) {
-                        project_ids.push(pid);
-                    }
+    // --- Per-epic (epic-scoped) ---
+    let mut epic_ids: Vec<EpicId> = Vec::new();
+    for l in learnings.iter().filter(|l| l.scope == LearningScope::Epic) {
+        if let Some(ref sr) = l.scope_ref {
+            if let Ok(eid) = sr.parse::<i64>() {
+                let eid = EpicId(eid);
+                if !epic_ids.contains(&eid) {
+                    epic_ids.push(eid);
                 }
             }
-            LearningScope::Epic => {
-                if let Some(ref sr) = l.scope_ref {
-                    if let Ok(eid) = sr.parse::<i64>() {
-                        if let Some(&proj_id) = epic_project.get(&eid) {
-                            if !project_ids.contains(&proj_id) {
-                                project_ids.push(proj_id);
-                            }
-                        }
-                    }
-                }
-            }
-            _ => {}
         }
     }
-    project_ids.sort_by_key(|p| p.0);
+    epic_ids.sort_by_key(|e| e.0);
 
-    for pid in project_ids {
-        let proj_label = format!("Project {}", pid.0);
-        let mut children: Vec<tui_tree_widget::TreeItem<'static, String>> = Vec::new();
-
-        // Direct project-scoped leaves
-        for l in learnings.iter().filter(|l| {
-            l.scope == LearningScope::Project && l.scope_ref.as_deref() == Some(&pid.0.to_string())
-        }) {
-            children.push(leaf(l));
-        }
-
-        // Epic sub-nodes under this project
-        let mut epic_ids: Vec<EpicId> = Vec::new();
-        for l in learnings.iter().filter(|l| l.scope == LearningScope::Epic) {
-            if let Some(ref sr) = l.scope_ref {
-                if let Ok(eid) = sr.parse::<i64>() {
-                    if epic_project.get(&eid) == Some(&pid) && !epic_ids.contains(&EpicId(eid)) {
-                        epic_ids.push(EpicId(eid));
-                    }
-                }
-            }
-        }
-        epic_ids.sort_by_key(|e| e.0);
-
-        for eid in epic_ids {
-            let epic_label = epic_label_map
-                .get(&eid.0)
-                .cloned()
-                .unwrap_or_else(|| format!("Epic {}", eid.0));
-            let epic_leaves: Vec<_> = learnings
-                .iter()
-                .filter(|l| {
-                    l.scope == LearningScope::Epic
-                        && l.scope_ref.as_deref() == Some(&eid.0.to_string())
-                })
-                .map(leaf)
-                .collect();
-            if !epic_leaves.is_empty() {
-                children.push(
-                    tui_tree_widget::TreeItem::new(
-                        format!("epic:{}", eid.0),
-                        format!("Epic: {} ({})", epic_label, epic_leaves.len()),
-                        epic_leaves,
-                    )
-                    // identifiers are unique: "user", "project:{id}", "epic:{id}", "repo:{path}", "tasks"
-                    .unwrap(),
-                );
-            }
-        }
-
-        if !children.is_empty() {
+    for eid in epic_ids {
+        let epic_label = epic_label_map
+            .get(&eid.0)
+            .cloned()
+            .unwrap_or_else(|| format!("Epic {}", eid.0));
+        let epic_leaves: Vec<_> = learnings
+            .iter()
+            .filter(|l| {
+                l.scope == LearningScope::Epic
+                    && l.scope_ref.as_deref() == Some(&eid.0.to_string())
+            })
+            .map(leaf)
+            .collect();
+        if !epic_leaves.is_empty() {
             roots.push(
                 tui_tree_widget::TreeItem::new(
-                    format!("project:{}", pid.0),
-                    format!("Project: {} ({})", proj_label, children.len()),
-                    children,
+                    format!("epic:{}", eid.0),
+                    format!("Epic: {} ({})", epic_label, epic_leaves.len()),
+                    epic_leaves,
                 )
-                // identifiers are unique: "user", "project:{id}", "epic:{id}", "repo:{path}", "tasks"
+                // identifiers are unique: "user", "epic:{id}", "repo:{path}", "tasks"
                 .unwrap(),
             );
         }
@@ -503,7 +444,7 @@ pub fn build_learning_tree(
                 format!("Repo: {} ({})", basename, leaves.len()),
                 leaves,
             )
-            // identifiers are unique: "user", "project:{id}", "epic:{id}", "repo:{path}", "tasks"
+            // identifiers are unique: "user", "epic:{id}", "repo:{path}", "tasks"
             .unwrap(),
         );
     }
@@ -521,7 +462,7 @@ pub fn build_learning_tree(
                 format!("Tasks ({})", task_leaves.len()),
                 task_leaves,
             )
-            // identifiers are unique: "user", "project:{id}", "epic:{id}", "repo:{path}", "tasks"
+            // identifiers are unique: "user", "epic:{id}", "repo:{path}", "tasks"
             .unwrap(),
         );
     }
@@ -530,7 +471,7 @@ pub fn build_learning_tree(
 }
 
 // Tree::new returns Err only if top-level items share identifiers, which cannot happen
-// here because identifiers are unique across root nodes ("user", "project:{id}", etc.).
+// here because identifiers are unique across root nodes ("user", "epic:{id}", "repo:{path}", etc.).
 #[allow(clippy::expect_used)]
 fn render_tree(
     frame: &mut Frame,
@@ -603,7 +544,7 @@ mod tests {
     }
 
     fn make_app() -> App {
-        App::new(vec![], ProjectId(1))
+        App::new(vec![])
     }
 
     #[test]
@@ -671,12 +612,12 @@ mod tests {
     }
 
     #[test]
-    fn build_learning_tree_project_scoped_without_matching_epic() {
-        let learnings = vec![make_learning(1, LearningScope::Project, Some("1"))];
+    fn build_learning_tree_epic_scoped_at_top_level() {
+        let learnings = vec![make_learning(1, LearningScope::Epic, Some("10"))];
         let app = make_app();
         let tree = build_learning_tree(&learnings, &app);
         assert_eq!(tree.len(), 1);
-        assert_eq!(tree[0].identifier(), "project:1");
+        assert_eq!(tree[0].identifier(), "epic:10");
         assert_eq!(tree[0].children().len(), 1);
     }
 }

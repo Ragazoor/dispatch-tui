@@ -87,7 +87,6 @@ pub(super) async fn handle_record_learning(
         None => match parsed.scope {
             LearningScope::User => None,
             LearningScope::Repo => Some(task.repo_path.clone()),
-            LearningScope::Project => Some(task.project_id.to_string()),
             LearningScope::Epic => match task.epic_id {
                 Some(eid) => Some(eid.0.to_string()),
                 None => {
@@ -208,14 +207,12 @@ pub(super) async fn handle_query_learnings(
     let limit = parsed.limit.unwrap_or(50).min(50) as usize;
 
     let epic_id_str = task.epic_id.map(|e| e.0.to_string());
-    let project_id_str = task.project_id.0.to_string();
     let ranked = rag_rank_learnings(
         &candidates,
         &RagRankParams {
             query_vec: &query_vec,
             task_epic_id: epic_id_str.as_deref(),
             task_repo: Some(task.repo_path.as_str()),
-            task_project: Some(project_id_str.as_str()),
             threshold: RAG_SIMILARITY_THRESHOLD,
             tag_filter: &tag_filter,
             limit,

@@ -18,7 +18,6 @@ async fn claim_task_success() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -67,7 +66,6 @@ async fn claim_task_rejects_running_task() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -105,7 +103,6 @@ async fn claim_task_rejects_different_repo() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -166,7 +163,6 @@ async fn claim_task_accepts_string_task_id() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -207,7 +203,6 @@ async fn claim_task_rejects_done_task() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -244,7 +239,6 @@ async fn claim_task_rejects_review_task() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -283,7 +277,6 @@ async fn claim_task_worktree_without_worktrees_dir() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -323,7 +316,6 @@ async fn claim_task_updates_status_to_running() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -390,7 +382,6 @@ async fn send_message_writes_file_and_sends_keys() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -406,7 +397,6 @@ async fn send_message_writes_file_and_sends_keys() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -482,7 +472,6 @@ async fn send_message_target_not_found() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -526,7 +515,6 @@ async fn send_message_target_no_worktree() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -543,7 +531,6 @@ async fn send_message_target_no_worktree() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -590,7 +577,6 @@ async fn send_message_target_no_tmux_window() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -607,7 +593,6 @@ async fn send_message_target_no_tmux_window() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -667,7 +652,7 @@ async fn dispatch_next_no_backlog_returns_success_noop() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("Test Epic", "desc", "/repo", None, ProjectId(1))
+        .create_epic("Test Epic", "desc", "/repo", None)
         .await
         .unwrap();
 
@@ -684,7 +669,6 @@ async fn dispatch_next_no_backlog_returns_success_noop() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -735,7 +719,7 @@ async fn dispatch_next_picks_first_backlog_subtask() {
     ));
 
     let epic = db
-        .create_epic("Test Epic", "desc", &repo_path, None, ProjectId(1))
+        .create_epic("Test Epic", "desc", &repo_path, None)
         .await
         .unwrap();
     let task1_id = db
@@ -749,7 +733,6 @@ async fn dispatch_next_picks_first_backlog_subtask() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -765,7 +748,6 @@ async fn dispatch_next_picks_first_backlog_subtask() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -838,7 +820,7 @@ async fn dispatch_next_respects_sort_order() {
     ));
 
     let epic = db
-        .create_epic("Test Epic", "desc", &repo_path, None, ProjectId(1))
+        .create_epic("Test Epic", "desc", &repo_path, None)
         .await
         .unwrap();
 
@@ -854,7 +836,6 @@ async fn dispatch_next_respects_sort_order() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -870,7 +851,6 @@ async fn dispatch_next_respects_sort_order() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -934,7 +914,7 @@ async fn dispatch_next_respects_tag_routing() {
     ));
 
     let epic = db
-        .create_epic("Test Epic", "desc", &repo_path, None, ProjectId(1))
+        .create_epic("Test Epic", "desc", &repo_path, None)
         .await
         .unwrap();
 
@@ -950,7 +930,6 @@ async fn dispatch_next_respects_tag_routing() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1022,7 +1001,6 @@ async fn wrap_up_rebase_preserves_tmux_window() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1092,7 +1070,6 @@ async fn wrap_up_rebase_conflict_sets_conflict_substatus() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1160,7 +1137,6 @@ async fn wrap_up_rebase_clears_conflict_substatus_on_non_conflict_error() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1233,7 +1209,6 @@ async fn dispatch_task_dispatches_backlog_task() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1295,7 +1270,6 @@ async fn dispatch_task_returns_error_for_non_backlog_task() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1366,7 +1340,6 @@ async fn dispatch_task_respects_tag_routing() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1442,7 +1415,6 @@ async fn dispatch_task_dependabot_tag_routes_through_dispatch_agent() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await
@@ -1533,7 +1505,6 @@ async fn dispatch_task_returns_error_when_dispatch_fails() {
             epic_id: None,
             sort_order: None,
             tag: None,
-            project_id: ProjectId(1),
             wrap_up_mode: None,
         })
         .await

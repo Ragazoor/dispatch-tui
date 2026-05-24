@@ -408,7 +408,7 @@ async fn list_learnings_for_dispatch_unions_scopes() {
     }
 
     let results = db
-        .list_learnings_for_dispatch(None, "/repo/a", None)
+        .list_learnings_for_dispatch("/repo/a", None)
         .await
         .unwrap();
     let ids: Vec<_> = results.iter().map(|l| l.id).collect();
@@ -461,7 +461,7 @@ async fn list_learnings_for_dispatch_procedural_first() {
     }
 
     let results = db
-        .list_learnings_for_dispatch(None, "/any", None)
+        .list_learnings_for_dispatch("/any", None)
         .await
         .unwrap();
     assert_eq!(
@@ -513,7 +513,7 @@ async fn list_learnings_for_dispatch_excludes_non_approved() {
         .unwrap();
 
     let results = db
-        .list_learnings_for_dispatch(None, "/any", None)
+        .list_learnings_for_dispatch("/any", None)
         .await
         .unwrap();
     let ids: Vec<_> = results.iter().map(|l| l.id).collect();
@@ -666,7 +666,7 @@ async fn list_learnings_for_dispatch_excludes_needs_review() {
         .unwrap();
 
     let results = db
-        .list_learnings_for_dispatch(None, "/repo/a", None)
+        .list_learnings_for_dispatch("/repo/a", None)
         .await
         .unwrap();
     let ids: Vec<_> = results.iter().map(|l| l.id).collect();
