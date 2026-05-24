@@ -2633,3 +2633,137 @@ async fn migration_v60_drops_projects_table_and_columns() {
         "epics.project_id should be dropped by v60"
     );
 }
+
+#[test]
+fn migration_v60_migrates_project_namespaced_repo_filter_settings() {
+    use crate::db::migrations::migrate_v60_drop_projects;
+    use rusqlite::{Connection as RawConn, OptionalExtension};
+    let conn = RawConn::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+         CREATE TABLE tasks (id INTEGER PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', repo_path TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'backlog', sub_status TEXT NOT NULL DEFAULT 'none', base_branch TEXT NOT NULL DEFAULT 'main', project_id INTEGER NOT NULL DEFAULT 1);
+         CREATE TABLE epics (id INTEGER PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', repo_path TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'backlog', project_id INTEGER NOT NULL DEFAULT 1);
+         CREATE TABLE learnings (id INTEGER PRIMARY KEY, scope TEXT NOT NULL, content TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending');
+         CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0);
+         INSERT INTO settings VALUES ('repo_filter:1', 'myrepo');
+         INSERT INTO settings VALUES ('repo_filter_mode:1', 'include');
+         INSERT INTO settings VALUES ('other_key', 'untouched');",
+    )
+    .unwrap();
+
+    migrate_v60_drop_projects(&conn).unwrap();
+
+    let filter: Option<String> = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'repo_filter'",
+            [],
+            |r| r.get(0),
+        )
+        .optional()
+        .unwrap();
+    assert_eq!(
+        filter.as_deref(),
+        Some("myrepo"),
+        "repo_filter:1 should be promoted to repo_filter"
+    );
+
+    let mode: Option<String> = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'repo_filter_mode'",
+            [],
+            |r| r.get(0),
+        )
+        .optional()
+        .unwrap();
+    assert_eq!(
+        mode.as_deref(),
+        Some("include"),
+        "repo_filter_mode:1 should be promoted to repo_filter_mode"
+    );
+
+    let old_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM settings WHERE key LIKE 'repo_filter:%'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(old_count, 0, "namespaced repo_filter keys should be deleted");
+
+    let other: String = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'other_key'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(other, "untouched", "unrelated settings should not be touched");
+}
+
+#[test]
+fn migration_v60_repo_filter_does_not_overwrite_existing_unnamespaced_key() {
+    use crate::db::migrations::migrate_v60_drop_projects;
+    use rusqlite::Connection as RawConn;
+    let conn = RawConn::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+         CREATE TABLE tasks (id INTEGER PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', repo_path TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'backlog', sub_status TEXT NOT NULL DEFAULT 'none', base_branch TEXT NOT NULL DEFAULT 'main', project_id INTEGER NOT NULL DEFAULT 1);
+         CREATE TABLE epics (id INTEGER PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', repo_path TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'backlog', project_id INTEGER NOT NULL DEFAULT 1);
+         CREATE TABLE learnings (id INTEGER PRIMARY KEY, scope TEXT NOT NULL, content TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending');
+         CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0);
+         INSERT INTO settings VALUES ('repo_filter', 'already-set');
+         INSERT INTO settings VALUES ('repo_filter:1', 'old-value');",
+    )
+    .unwrap();
+
+    migrate_v60_drop_projects(&conn).unwrap();
+
+    let filter: String = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'repo_filter'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        filter, "already-set",
+        "existing unnamespaced key must not be overwritten"
+    );
+}
+
+#[test]
+fn migration_v60_deletes_project_scoped_learnings() {
+    use crate::db::migrations::migrate_v60_drop_projects;
+    use rusqlite::Connection as RawConn;
+    let conn = RawConn::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+         CREATE TABLE tasks (id INTEGER PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', repo_path TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'backlog', sub_status TEXT NOT NULL DEFAULT 'none', base_branch TEXT NOT NULL DEFAULT 'main', project_id INTEGER NOT NULL DEFAULT 1);
+         CREATE TABLE epics (id INTEGER PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', repo_path TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'backlog', project_id INTEGER NOT NULL DEFAULT 1);
+         CREATE TABLE learnings (id INTEGER PRIMARY KEY, scope TEXT NOT NULL, content TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending');
+         CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0);
+         INSERT INTO learnings (scope, content, status) VALUES ('project', 'old learning', 'approved');
+         INSERT INTO learnings (scope, content, status) VALUES ('user', 'keep me', 'approved');
+         INSERT INTO learnings (scope, content, status) VALUES ('repo', 'keep me too', 'pending');",
+    )
+    .unwrap();
+
+    migrate_v60_drop_projects(&conn).unwrap();
+
+    let project_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM learnings WHERE scope = 'project'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        project_count, 0,
+        "project-scoped learnings should be deleted by v60"
+    );
+
+    let remaining: i64 = conn
+        .query_row("SELECT COUNT(*) FROM learnings", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(remaining, 2, "non-project learnings should be preserved");
+}

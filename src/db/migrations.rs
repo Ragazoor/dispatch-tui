@@ -12,6 +12,16 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 pub(super) type Migration = (i64, fn(&Connection) -> Result<()>);
 
+fn table_exists(conn: &Connection, table: &str) -> bool {
+    conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+        params![table],
+        |r| r.get::<_, i64>(0),
+    )
+    .unwrap_or(0)
+        > 0
+}
+
 fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
     conn.query_row(
         "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name = ?2",
@@ -1292,7 +1302,7 @@ fn migrate_v59_create_usage_events(conn: &Connection) -> Result<()> {
     .context("Failed to create usage_events table")
 }
 
-fn migrate_v60_drop_projects(conn: &Connection) -> Result<()> {
+pub(super) fn migrate_v60_drop_projects(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "DROP TRIGGER IF EXISTS enforce_sub_epic_project_insert;
          DROP TRIGGER IF EXISTS enforce_sub_epic_project_update;
@@ -1311,5 +1321,28 @@ fn migrate_v60_drop_projects(conn: &Connection) -> Result<()> {
             .context("Failed to drop project_id from epics (migration v60)")?;
     }
     conn.execute_batch("DROP TABLE IF EXISTS projects")
-        .context("Failed to drop projects table (migration v60)")
+        .context("Failed to drop projects table (migration v60)")?;
+    // Promote the first project-namespaced repo_filter settings key (e.g.
+    // "repo_filter:1") to the new unnamespaced key. INSERT OR IGNORE ensures we
+    // don't overwrite a key that was already written unnamespaced.
+    if table_exists(conn, "settings") {
+        conn.execute_batch(
+            "INSERT OR IGNORE INTO settings (key, value)
+                 SELECT 'repo_filter', value FROM settings
+                 WHERE key LIKE 'repo_filter:%' LIMIT 1;
+             DELETE FROM settings WHERE key LIKE 'repo_filter:%';
+             INSERT OR IGNORE INTO settings (key, value)
+                 SELECT 'repo_filter_mode', value FROM settings
+                 WHERE key LIKE 'repo_filter_mode:%' LIMIT 1;
+             DELETE FROM settings WHERE key LIKE 'repo_filter_mode:%';",
+        )
+        .context("Failed to migrate repo_filter settings keys (migration v60)")?;
+    }
+    // Drop project-scoped learnings — LearningScope::Project no longer exists
+    // and any rows with scope='project' would cause deserialization errors.
+    if table_exists(conn, "learnings") {
+        conn.execute_batch("DELETE FROM learnings WHERE scope = 'project'")
+            .context("Failed to delete project-scoped learnings (migration v60)")?;
+    }
+    Ok(())
 }
