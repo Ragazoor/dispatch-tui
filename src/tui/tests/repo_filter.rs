@@ -103,7 +103,6 @@ fn repo_filter_applies_to_epics_in_column_items() {
             id: EpicId(1),
             title: "A".into(),
             description: "".into(),
-            repo_path: "/repo-a".into(),
             status: TaskStatus::Backlog,
             plan_path: None,
             sort_order: None,
@@ -119,7 +118,6 @@ fn repo_filter_applies_to_epics_in_column_items() {
             id: EpicId(2),
             title: "B".into(),
             description: "".into(),
-            repo_path: "/repo-b".into(),
             status: TaskStatus::Backlog,
             plan_path: None,
             sort_order: None,
@@ -132,6 +130,15 @@ fn repo_filter_applies_to_epics_in_column_items() {
             updated_at: now,
         },
     ];
+    // Epic A has a task in /repo-a; epic B has a task in /repo-b.
+    // Filtering by /repo-a should show only epic A.
+    let mut task_a = make_task(1, TaskStatus::Backlog);
+    task_a.epic_id = Some(EpicId(1));
+    task_a.repo_path = "/repo-a".to_string();
+    let mut task_b = make_task(2, TaskStatus::Backlog);
+    task_b.epic_id = Some(EpicId(2));
+    task_b.repo_path = "/repo-b".to_string();
+    app.board.tasks = vec![task_a, task_b];
     app.filter.repos.insert("/repo-a".to_string());
 
     let items = app.column_items_for_status(TaskStatus::Backlog);
@@ -237,7 +244,6 @@ fn repo_filter_exclude_applies_to_epics() {
             id: EpicId(1),
             title: "A".into(),
             description: "".into(),
-            repo_path: "/repo-a".into(),
             status: TaskStatus::Backlog,
             plan_path: None,
             sort_order: None,
@@ -253,7 +259,6 @@ fn repo_filter_exclude_applies_to_epics() {
             id: EpicId(2),
             title: "B".into(),
             description: "".into(),
-            repo_path: "/repo-b".into(),
             status: TaskStatus::Backlog,
             plan_path: None,
             sort_order: None,
@@ -266,6 +271,15 @@ fn repo_filter_exclude_applies_to_epics() {
             updated_at: now,
         },
     ];
+    // Epic A has a task in /repo-a; epic B has a task in /repo-b.
+    // Excluding /repo-a should hide epic A and show only epic B.
+    let mut task_a = make_task(1, TaskStatus::Backlog);
+    task_a.epic_id = Some(EpicId(1));
+    task_a.repo_path = "/repo-a".to_string();
+    let mut task_b = make_task(2, TaskStatus::Backlog);
+    task_b.epic_id = Some(EpicId(2));
+    task_b.repo_path = "/repo-b".to_string();
+    app.board.tasks = vec![task_a, task_b];
     app.filter.repos.insert("/repo-a".to_string());
     app.filter.mode = RepoFilterMode::Exclude;
 

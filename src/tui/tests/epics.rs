@@ -702,7 +702,7 @@ fn epic_repo_path_enter_with_text_completes() {
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::Epic(crate::tui::commands::EpicCommand::Insert(ref d)) if d.repo_path == "/tmp")));
+        .any(|c| matches!(c, Command::Epic(crate::tui::commands::EpicCommand::Insert(_)))));
 }
 
 #[test]
@@ -720,7 +720,7 @@ fn epic_repo_path_enter_empty_uses_saved_path() {
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::Epic(crate::tui::commands::EpicCommand::Insert(ref d)) if d.repo_path == "/tmp")));
+        .any(|c| matches!(c, Command::Epic(crate::tui::commands::EpicCommand::Insert(_)))));
 }
 
 #[test]
@@ -2798,4 +2798,64 @@ fn flat_view_orphan_separator_resets_on_substatus_boundary() {
         .filter(|i| matches!(i, ColumnItem::OrphanSeparator))
         .count();
     assert_eq!(separator_count, 1, "exactly one separator at the NeedsInput epic→orphan transition");
+}
+
+// ---------------------------------------------------------------------------
+// epic_repo_matches
+// ---------------------------------------------------------------------------
+
+#[test]
+fn epic_repo_matches_no_filter_always_true() {
+    let mut app = make_app();
+    app.board.epics = vec![make_epic(1)];
+    // No filter active → always true regardless of tasks
+    assert!(app.epic_repo_matches(EpicId(1)));
+}
+
+#[test]
+fn epic_repo_matches_empty_epic_with_active_filter_true() {
+    let mut app = make_app();
+    app.board.epics = vec![make_epic(1)];
+    // Filter active but no tasks → empty epic is always shown
+    app.filter.repos = std::collections::HashSet::from(["/other/repo".to_string()]);
+    assert!(app.epic_repo_matches(EpicId(1)));
+}
+
+#[test]
+fn epic_repo_matches_with_matching_task_true() {
+    let mut app = make_app();
+    app.board.epics = vec![make_epic(1)];
+    let mut task = make_task(10, crate::models::TaskStatus::Backlog);
+    task.epic_id = Some(EpicId(1));
+    task.repo_path = "/my/repo".to_string();
+    app.board.tasks = vec![task];
+    app.filter.repos = std::collections::HashSet::from(["/my/repo".to_string()]);
+    assert!(app.epic_repo_matches(EpicId(1)));
+}
+
+#[test]
+fn epic_repo_matches_with_no_matching_task_false() {
+    let mut app = make_app();
+    app.board.epics = vec![make_epic(1)];
+    let mut task = make_task(10, crate::models::TaskStatus::Backlog);
+    task.epic_id = Some(EpicId(1));
+    task.repo_path = "/other/repo".to_string();
+    app.board.tasks = vec![task];
+    app.filter.repos = std::collections::HashSet::from(["/my/repo".to_string()]);
+    assert!(!app.epic_repo_matches(EpicId(1)));
+}
+
+#[test]
+fn epic_repo_matches_archived_tasks_excluded() {
+    let mut app = make_app();
+    app.board.epics = vec![make_epic(1)];
+    // Only archived task with matching repo → archived tasks don't count,
+    // so epic has no "active" tasks → behaves like empty epic → true
+    let mut task = make_task(10, crate::models::TaskStatus::Archived);
+    task.epic_id = Some(EpicId(1));
+    task.repo_path = "/my/repo".to_string();
+    app.board.tasks = vec![task];
+    app.filter.repos = std::collections::HashSet::from(["/my/repo".to_string()]);
+    // No non-archived tasks → always show
+    assert!(app.epic_repo_matches(EpicId(1)));
 }

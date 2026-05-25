@@ -398,6 +398,31 @@ impl App {
         self.filter.matches(repo_path)
     }
 
+    /// Returns whether the given epic should be shown under the current repo filter.
+    /// An epic matches if:
+    /// - No repo filter is active, OR
+    /// - The epic has no non-archived subtasks (always show empty epics), OR
+    /// - At least one non-archived subtask's repo_path matches the filter.
+    ///
+    pub(in crate::tui) fn epic_repo_matches(&self, epic_id: EpicId) -> bool {
+        if self.filter.repos.is_empty() {
+            return true;
+        }
+        let epic_ids = crate::models::descendant_epic_ids(epic_id, &self.board.epics);
+        let has_active_tasks = self.board.tasks.iter().any(|t| {
+            matches!(t.epic_id, Some(eid) if epic_ids.contains(&eid))
+                && t.status != TaskStatus::Archived
+        });
+        if !has_active_tasks {
+            return true;
+        }
+        self.board.tasks.iter().any(|t| {
+            matches!(t.epic_id, Some(eid) if epic_ids.contains(&eid))
+                && t.status != TaskStatus::Archived
+                && self.repo_matches(&t.repo_path)
+        })
+    }
+
     pub(in crate::tui) fn epic_matches(&self, epic_id: EpicId) -> bool {
         if !self.filter.only_active {
             return true;
@@ -481,7 +506,6 @@ impl App {
             .epics
             .iter()
             .filter(|e| e.status == TaskStatus::Archived)
-            .filter(|e| self.repo_matches(&e.repo_path))
             .collect()
     }
 
@@ -596,10 +620,7 @@ impl App {
                     if epic.parent_epic_id.is_some() {
                         continue;
                     }
-                    if !self.repo_matches(&epic.repo_path) {
-                        continue;
-                    }
-                    if !self.epic_matches(epic.id) {
+                    if !self.epic_matches(epic.id) || !self.epic_repo_matches(epic.id) {
                         continue;
                     }
                     if epic.status == status {
@@ -614,7 +635,7 @@ impl App {
                     if epic.parent_epic_id != Some(current) {
                         continue;
                     }
-                    if !self.epic_matches(epic.id) {
+                    if !self.epic_matches(epic.id) || !self.epic_repo_matches(epic.id) {
                         continue;
                     }
                     if epic.status == status {
@@ -674,9 +695,9 @@ impl App {
                 .iter()
                 .filter(|e| {
                     e.parent_epic_id.is_none()
-                        && self.repo_matches(&e.repo_path)
                         && e.status == status
                         && self.epic_matches(e.id)
+                        && self.epic_repo_matches(e.id)
                 })
                 .count(),
             ViewMode::Epic { epic_id, .. } => {
@@ -688,6 +709,7 @@ impl App {
                         e.parent_epic_id == Some(current)
                             && e.status == status
                             && self.epic_matches(e.id)
+                            && self.epic_repo_matches(e.id)
                     })
                     .count()
             }
@@ -723,7 +745,6 @@ impl App {
                 .iter()
                 .filter(|e| {
                     e.parent_epic_id.is_none()
-                        && self.repo_matches(&e.repo_path)
                         && self.epic_matches(e.id)
                 })
                 .collect(),
@@ -1063,8 +1084,7 @@ impl App {
     }
 
     pub(in crate::tui) fn finish_epic_creation(&mut self, repo_path: String) -> Vec<Command> {
-        let mut draft = self.input.epic_draft.take().unwrap_or_default();
-        draft.repo_path = repo_path.clone();
+        let draft = self.input.epic_draft.take().unwrap_or_default();
         self.input.mode = InputMode::Normal;
         self.clear_status();
         vec![
