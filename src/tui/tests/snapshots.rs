@@ -251,7 +251,6 @@ fn make_feed_epic(id: i64, title: &str, sort_order: i64) -> crate::models::Epic 
         id: crate::models::EpicId(id),
         title: title.to_string(),
         description: String::new(),
-        repo_path: "/repo".to_string(),
         status: crate::models::TaskStatus::Backlog,
         plan_path: None,
         sort_order: Some(sort_order),

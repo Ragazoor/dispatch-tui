@@ -652,7 +652,7 @@ async fn dispatch_next_no_backlog_returns_success_noop() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("Test Epic", "desc", "/repo", None)
+        .create_epic("Test Epic", "desc", None)
         .await
         .unwrap();
 
@@ -719,7 +719,7 @@ async fn dispatch_next_picks_first_backlog_subtask() {
     ));
 
     let epic = db
-        .create_epic("Test Epic", "desc", &repo_path, None)
+        .create_epic("Test Epic", "desc", None)
         .await
         .unwrap();
     let task1_id = db
@@ -820,7 +820,7 @@ async fn dispatch_next_respects_sort_order() {
     ));
 
     let epic = db
-        .create_epic("Test Epic", "desc", &repo_path, None)
+        .create_epic("Test Epic", "desc", None)
         .await
         .unwrap();
 
@@ -914,7 +914,7 @@ async fn dispatch_next_respects_tag_routing() {
     ));
 
     let epic = db
-        .create_epic("Test Epic", "desc", &repo_path, None)
+        .create_epic("Test Epic", "desc", None)
         .await
         .unwrap();
 

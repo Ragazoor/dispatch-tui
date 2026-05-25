@@ -259,7 +259,6 @@ impl App {
         if let Some(e) = self.board.epics.iter_mut().find(|e| e.id == epic.id) {
             e.title = epic.title;
             e.description = epic.description;
-            e.repo_path = epic.repo_path;
             e.updated_at = chrono::Utc::now();
         }
         vec![]
@@ -449,7 +448,6 @@ impl App {
             self.input.epic_draft = Some(EpicDraft {
                 title: value,
                 description: String::new(),
-                repo_path: String::new(),
                 parent_epic_id,
             });
             self.input.mode = InputMode::InputEpicDescription;

@@ -6,7 +6,6 @@ impl TuiRuntime {
         app: &mut App,
         title: String,
         description: String,
-        repo_path: String,
         parent_epic_id: Option<crate::models::EpicId>,
     ) {
         match self
@@ -14,7 +13,6 @@ impl TuiRuntime {
             .create_epic(crate::service::CreateEpicParams {
                 title,
                 description,
-                repo_path,
                 sort_order: None,
                 parent_epic_id,
                 feed_command: None,
@@ -62,7 +60,6 @@ impl TuiRuntime {
                 status,
                 plan_path: None,
                 sort_order,
-                repo_path: None,
                 auto_dispatch: None,
                 feed_command: None,
                 feed_interval_secs: None,
@@ -102,7 +99,6 @@ impl TuiRuntime {
                 status: None,
                 plan_path: None,
                 sort_order: None,
-                repo_path: None,
                 auto_dispatch: Some(auto_dispatch),
                 feed_command: None,
                 feed_interval_secs: None,
@@ -129,7 +125,6 @@ impl TuiRuntime {
                 status: None,
                 plan_path: None,
                 sort_order: None,
-                repo_path: None,
                 auto_dispatch: None,
                 feed_command: None,
                 feed_interval_secs: None,
@@ -169,7 +164,7 @@ impl TuiRuntime {
             .create_task_returning(crate::service::CreateTaskParams {
                 title: title.clone(),
                 description: description.clone(),
-                repo_path: epic.repo_path.clone(),
+                repo_path: String::new(),
                 plan_path: None,
                 epic_id: Some(epic.id),
                 sort_order: None,

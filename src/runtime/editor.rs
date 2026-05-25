@@ -373,7 +373,6 @@ impl TuiRuntime {
                 status: None,
                 plan_path: None,
                 sort_order: None,
-                repo_path: Some(applied.repo_path.clone()),
                 auto_dispatch: None,
                 feed_command: Some(applied.feed_command.clone()),
                 feed_interval_secs: Some(applied.feed_interval_secs),
@@ -389,7 +388,6 @@ impl TuiRuntime {
         let mut updated = epic;
         updated.title = applied.title;
         updated.description = applied.description;
-        updated.repo_path = applied.repo_path;
         if let crate::service::FieldUpdate::Set(ref cmd) = applied.feed_command {
             updated.feed_command = Some(cmd.clone());
         } else {

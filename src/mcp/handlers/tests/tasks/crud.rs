@@ -1081,7 +1081,7 @@ async fn create_task_with_epic_id() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("Parent Epic", "", "/repo", None)
+        .create_epic("Parent Epic", "", None)
         .await
         .unwrap();
 
@@ -1110,7 +1110,7 @@ async fn create_task_with_string_epic_id() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("Parent", "", "/repo", None)
+        .create_epic("Parent", "", None)
         .await
         .unwrap();
 
@@ -1527,7 +1527,7 @@ async fn update_task_sets_epic_id() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("Parent", "", "/repo", None)
+        .create_epic("Parent", "", None)
         .await
         .unwrap();
     let task_id = create_task_fixture(&state).await;
@@ -1652,7 +1652,7 @@ async fn list_tasks_filters_by_epic_id() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("My Epic", "", "/repo", None)
+        .create_epic("My Epic", "", None)
         .await
         .unwrap();
     let t1 = state
@@ -1712,7 +1712,7 @@ async fn list_tasks_filters_by_status_and_epic_id() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("Combined Filter", "", "/repo", None)
+        .create_epic("Combined Filter", "", None)
         .await
         .unwrap();
     let t1 = state
@@ -1931,7 +1931,7 @@ async fn wrap_up_rebase_does_not_recalculate_epic_status() {
     ));
 
     let epic = db
-        .create_epic("E", "", "/repo", None)
+        .create_epic("E", "", None)
         .await
         .unwrap();
     let task_id = db
@@ -2041,7 +2041,7 @@ async fn get_task_shows_all_fields() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("Parent Epic", "", "/repo", None)
+        .create_epic("Parent Epic", "", None)
         .await
         .unwrap();
     let task_id = state
@@ -2193,7 +2193,7 @@ async fn list_tasks_shows_epic_indicator() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("Sprint 1", "", "/repo", None)
+        .create_epic("Sprint 1", "", None)
         .await
         .unwrap();
     let task_id = state
@@ -2325,12 +2325,12 @@ async fn list_epics_excludes_archived() {
     let state = test_state().await;
     state
         .db
-        .create_epic("Active Epic", "desc", "/repo", None)
+        .create_epic("Active Epic", "desc", None)
         .await
         .unwrap();
     let archived_epic = state
         .db
-        .create_epic("Archived Epic", "desc", "/repo", None)
+        .create_epic("Archived Epic", "desc", None)
         .await
         .unwrap();
     state
@@ -2456,7 +2456,7 @@ async fn dispatch_next_returns_disabled_when_auto_dispatch_off() {
     // Create epic with auto_dispatch = false
     let epic = state
         .db
-        .create_epic("E", "desc", "/repo", None)
+        .create_epic("E", "desc", None)
         .await
         .unwrap();
     state
@@ -2515,7 +2515,7 @@ async fn dispatch_next_returns_disabled_when_auto_dispatch_off() {
 #[tokio::test]
 async fn list_tasks_task_identity_scopes_to_epic_and_excludes_self() {
     let (state, db) = test_state_with_db().await;
-    let eid = db.create_epic("e", "", "/r", None).await.unwrap().id;
+    let eid = db.create_epic("e", "", None).await.unwrap().id;
     let me = db
         .create_task(CreateTaskRequest {
             title: "me",
@@ -3107,7 +3107,7 @@ async fn create_task_task_identity_inherits_epic() {
     // Create parent task with an epic; child should inherit the epic.
     let parent_epic = state
         .db
-        .create_epic("parent epic", "", "/r", None)
+        .create_epic("parent epic", "", None)
         .await
         .unwrap();
     let parent = state
@@ -3147,7 +3147,7 @@ async fn create_task_task_identity_inherits_epic() {
 async fn create_task_explicit_null_epic_clears_inheritance() {
     let (state, db) = test_state_with_db().await;
     let parent_epic = db
-        .create_epic("e", "", "/r", None)
+        .create_epic("e", "", None)
         .await
         .unwrap();
     let parent = db

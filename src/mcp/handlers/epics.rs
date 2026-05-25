@@ -18,7 +18,6 @@ use super::types::{
 #[derive(Deserialize)]
 pub(super) struct CreateEpicArgs {
     pub(super) title: String,
-    pub(super) repo_path: String,
     #[serde(default)]
     pub(super) description: String,
     #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
@@ -47,8 +46,6 @@ pub(super) struct UpdateEpicArgs {
     pub(super) plan_path: Option<String>,
     #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
     pub(super) sort_order: Option<i64>,
-    #[serde(default)]
-    pub(super) repo_path: Option<String>,
     #[serde(default, deserialize_with = "deserialize_nullable_string")]
     pub(super) feed_command: Option<Option<String>>,
     #[serde(default, deserialize_with = "deserialize_nullable_flexible_i64")]
@@ -80,7 +77,6 @@ pub(super) async fn handle_create_epic(
         .create_epic(CreateEpicParams {
             title: parsed.title,
             description: parsed.description,
-            repo_path: parsed.repo_path,
             sort_order: parsed.sort_order,
             parent_epic_id: parsed.parent_epic_id.map(EpicId),
             feed_command: None,
@@ -120,11 +116,10 @@ pub(super) async fn handle_get_epic(
                 .count();
             let total = subtasks.len();
             let mut text = format!(
-                "Epic {id}: {title}\nDescription: {desc}\nRepo: {repo}\nStatus: {status}",
+                "Epic {id}: {title}\nDescription: {desc}\nStatus: {status}",
                 id = epic.id,
                 title = epic.title,
                 desc = epic.description,
-                repo = epic.repo_path,
                 status = epic.status.as_str(),
             );
             if let Some(ref p) = epic.plan_path {
@@ -224,7 +219,6 @@ pub(super) async fn handle_update_epic(
         status: parsed.status,
         plan_path: parsed.plan_path,
         sort_order: parsed.sort_order,
-        repo_path: parsed.repo_path,
         auto_dispatch: None,
         feed_command: parsed.feed_command.map(|v| match v {
             Some(s) => crate::service::FieldUpdate::Set(s),

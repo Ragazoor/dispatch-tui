@@ -763,7 +763,7 @@ async fn exec_dispatch_epic_creates_planning_subtask() {
     // Create an epic in the DB
     let epic = rt
         .database
-        .create_epic("Auth redesign", "Rework login", "/repo", None)
+        .create_epic("Auth redesign", "Rework login", None)
         .await
         .unwrap();
 
@@ -774,7 +774,6 @@ async fn exec_dispatch_epic_creates_planning_subtask() {
     let task = &app.tasks()[0];
     assert_eq!(task.title, "Plan: Auth redesign");
     assert_eq!(task.epic_id, Some(epic.id));
-    assert_eq!(task.repo_path, "/repo");
     assert_eq!(task.status, models::TaskStatus::Backlog);
 
     // Verify description contains epic info
@@ -1061,7 +1060,7 @@ async fn exec_quick_dispatch_with_epic_dispatches_successfully() {
 
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let epic = db
-        .create_epic("My Epic", "epic desc", repo, None)
+        .create_epic("My Epic", "epic desc", None)
         .await
         .unwrap();
     let (tx, mut rx) = mpsc::unbounded_channel();
@@ -1464,7 +1463,6 @@ async fn exec_insert_epic_creates_in_db_and_app() {
         &mut app,
         "My Epic".into(),
         "description".into(),
-        "/repo".into(),
         None,
     )
     .await;
@@ -1479,7 +1477,7 @@ async fn exec_delete_epic_removes_from_db() {
     let (rt, mut app) = test_runtime().await;
     let epic = rt
         .database
-        .create_epic("Doomed", "bye", "/repo", None)
+        .create_epic("Doomed", "bye", None)
         .await
         .unwrap();
     rt.exec_delete_epic(&mut app, epic.id).await;
@@ -1492,7 +1490,7 @@ async fn exec_persist_epic_updates_status() {
     let (rt, mut app) = test_runtime().await;
     let epic = rt
         .database
-        .create_epic("Epic", "desc", "/repo", None)
+        .create_epic("Epic", "desc", None)
         .await
         .unwrap();
     rt.exec_persist_epic(&mut app, epic.id, Some(models::TaskStatus::Running), None)
@@ -1506,7 +1504,7 @@ async fn exec_persist_epic_noop_when_nothing_to_update() {
     let (rt, mut app) = test_runtime().await;
     let epic = rt
         .database
-        .create_epic("Epic", "desc", "/repo", None)
+        .create_epic("Epic", "desc", None)
         .await
         .unwrap();
     // Should return early without error
@@ -1519,7 +1517,7 @@ async fn exec_refresh_epics_from_db_syncs_to_app() {
     let (rt, mut app) = test_runtime().await;
     // Insert epic directly into DB, bypassing app
     rt.database
-        .create_epic("Direct", "desc", "/repo", None)
+        .create_epic("Direct", "desc", None)
         .await
         .unwrap();
     assert!(app.epics().is_empty());
@@ -1896,7 +1894,7 @@ async fn apply_tmux_focus_warning_returns_status_info_when_disabled() {
 async fn exec_trigger_epic_feed_success() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let epic = db
-        .create_epic("Security Vulnerabilities", "", "/repo", None)
+        .create_epic("Security Vulnerabilities", "", None)
         .await
         .unwrap();
 
@@ -1927,7 +1925,7 @@ async fn exec_trigger_epic_feed_success() {
 async fn exec_trigger_epic_feed_zero_items() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let epic = db
-        .create_epic("Empty Feed", "", "/repo", None)
+        .create_epic("Empty Feed", "", None)
         .await
         .unwrap();
 
@@ -1953,7 +1951,7 @@ async fn exec_trigger_epic_feed_zero_items() {
 async fn exec_trigger_epic_feed_command_fails() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let epic = db
-        .create_epic("Failing Feed", "", "/repo", None)
+        .create_epic("Failing Feed", "", None)
         .await
         .unwrap();
 
@@ -1979,7 +1977,7 @@ async fn exec_trigger_epic_feed_command_fails() {
 async fn exec_trigger_epic_feed_malformed_json() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let epic = db
-        .create_epic("Bad JSON Feed", "", "/repo", None)
+        .create_epic("Bad JSON Feed", "", None)
         .await
         .unwrap();
 
@@ -2407,7 +2405,7 @@ async fn exec_refresh_epic_updates_app_when_epic_exists() {
     let (rt, mut app) = test_runtime().await;
     let epic = rt
         .database
-        .create_epic("Epic", "desc", "/repo", None)
+        .create_epic("Epic", "desc", None)
         .await
         .unwrap();
     rt.exec_refresh_epics_from_db(&mut app).await;
@@ -2430,7 +2428,7 @@ async fn exec_refresh_epic_falls_back_when_epic_gone() {
     let (rt, mut app) = test_runtime().await;
     let epic = rt
         .database
-        .create_epic("Gone Epic", "desc", "/repo", None)
+        .create_epic("Gone Epic", "desc", None)
         .await
         .unwrap();
     rt.exec_refresh_epics_from_db(&mut app).await;
@@ -2448,7 +2446,7 @@ async fn exec_refresh_epic_also_reloads_epic_tasks() {
     let (rt, mut app) = test_runtime().await;
     let epic = rt
         .database
-        .create_epic("Feed Epic", "desc", "/repo", None)
+        .create_epic("Feed Epic", "desc", None)
         .await
         .unwrap();
     rt.exec_refresh_epics_from_db(&mut app).await;
@@ -2487,7 +2485,7 @@ async fn exec_toggle_epic_auto_dispatch_sets_flag_to_false() {
     let (rt, mut app) = test_runtime().await;
     let epic = rt
         .database
-        .create_epic("AutoDispatch Epic", "desc", "/repo", None)
+        .create_epic("AutoDispatch Epic", "desc", None)
         .await
         .unwrap();
     assert!(epic.auto_dispatch, "default auto_dispatch should be true");
@@ -2505,7 +2503,7 @@ async fn exec_toggle_epic_auto_dispatch_sets_flag_to_true() {
     let (rt, mut app) = test_runtime().await;
     let epic = rt
         .database
-        .create_epic("AutoDispatch Epic", "desc", "/repo", None)
+        .create_epic("AutoDispatch Epic", "desc", None)
         .await
         .unwrap();
     rt.database
@@ -2526,7 +2524,7 @@ async fn exec_toggle_epic_group_by_repo_sets_flag_to_true() {
     let (rt, mut app) = test_runtime().await;
     let epic = rt
         .database
-        .create_epic("GroupByRepo Epic", "desc", "/repo", None)
+        .create_epic("GroupByRepo Epic", "desc", None)
         .await
         .unwrap();
     assert!(!epic.group_by_repo, "default group_by_repo should be false");
@@ -2544,7 +2542,7 @@ async fn exec_toggle_epic_group_by_repo_sets_flag_to_false() {
     let (rt, mut app) = test_runtime().await;
     let epic = rt
         .database
-        .create_epic("GroupByRepo Epic", "desc", "/repo", None)
+        .create_epic("GroupByRepo Epic", "desc", None)
         .await
         .unwrap();
     rt.database

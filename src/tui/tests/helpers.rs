@@ -99,7 +99,6 @@ pub(in crate::tui) fn make_epic(id: i64) -> Epic {
         id: EpicId(id),
         title: format!("Epic {id}"),
         description: String::new(),
-        repo_path: "/repo".to_string(),
         status: TaskStatus::Backlog,
         plan_path: None,
         sort_order: None,

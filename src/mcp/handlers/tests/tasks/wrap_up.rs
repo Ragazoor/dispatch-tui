@@ -1030,7 +1030,7 @@ async fn update_task_status_recalculates_epic_status() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("E", "", "/repo", None)
+        .create_epic("E", "", None)
         .await
         .unwrap();
     let task_id = state
@@ -1923,7 +1923,7 @@ async fn exit_session_recalculates_epic_status() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("E", "", "/repo", None)
+        .create_epic("E", "", None)
         .await
         .unwrap();
     let task_id = create_running_task_with_window(&state).await;
@@ -2078,7 +2078,7 @@ async fn wrap_up_then_exit_session_end_to_end() {
     ));
 
     let epic = db
-        .create_epic("E2E Epic", "", "/repo", None)
+        .create_epic("E2E Epic", "", None)
         .await
         .unwrap();
     let task_id = db

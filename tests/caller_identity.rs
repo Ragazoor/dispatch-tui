@@ -27,7 +27,7 @@ fn parse_created_task_id(resp: &Value) -> TaskId {
 #[tokio::test]
 async fn create_task_via_task_header_inherits_epic() {
     let (router, db) = common::test_router().await;
-    let epic = db.create_epic("e", "", "/r", None).await.unwrap();
+    let epic = db.create_epic("e", "", None).await.unwrap();
     let parent_id = db
         .create_task(CreateTaskRequest {
             title: "parent",

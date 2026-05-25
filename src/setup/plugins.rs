@@ -264,7 +264,7 @@ pub async fn seed_feed_epics(db: &Database, data_dir: &Path) -> Result<()> {
     }
 
     let epic = db
-        .create_epic("Dependabot", "", "", None)
+        .create_epic("Dependabot", "", None)
         .await?;
     db.patch_epic(
         epic.id,

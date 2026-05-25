@@ -226,7 +226,6 @@ async fn dispatch_epic(
                 app,
                 draft.title,
                 draft.description,
-                draft.repo_path,
                 draft.parent_epic_id,
             )
             .await

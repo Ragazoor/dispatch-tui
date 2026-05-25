@@ -197,7 +197,7 @@ mod tests {
     async fn tick_does_not_block_event_loop() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic = db
-            .create_epic("Slow Epic", "", "/repo", None)
+            .create_epic("Slow Epic", "", None)
             .await
             .unwrap();
         db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some("sleep 5")))
@@ -220,7 +220,7 @@ mod tests {
     async fn tick_background_task_upserts_tasks() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic = db
-            .create_epic("BG Epic", "", "/repo", None)
+            .create_epic("BG Epic", "", None)
             .await
             .unwrap();
         db.patch_epic(
@@ -248,7 +248,7 @@ mod tests {
     async fn tick_valid_json_upserts_tasks() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic = db
-            .create_epic("My Epic", "", "/repo", None)
+            .create_epic("My Epic", "", None)
             .await
             .unwrap();
         db.patch_epic(
@@ -277,7 +277,7 @@ mod tests {
     async fn tick_persists_feed_tag() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic = db
-            .create_epic("Tagged Epic", "", "/repo", None)
+            .create_epic("Tagged Epic", "", None)
             .await
             .unwrap();
         db.patch_epic(
@@ -305,7 +305,7 @@ mod tests {
     async fn tick_missing_tag_rejects_item() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic = db
-            .create_epic("Untagged Epic", "", "/repo", None)
+            .create_epic("Untagged Epic", "", None)
             .await
             .unwrap();
         db.patch_epic(
@@ -335,7 +335,7 @@ mod tests {
     async fn tick_nonzero_exit_no_panic() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic = db
-            .create_epic("Err Epic", "", "/repo", None)
+            .create_epic("Err Epic", "", None)
             .await
             .unwrap();
         db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some("exit 1")))
@@ -357,7 +357,7 @@ mod tests {
     async fn tick_malformed_json_no_panic() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic = db
-            .create_epic("Bad JSON Epic", "", "/repo", None)
+            .create_epic("Bad JSON Epic", "", None)
             .await
             .unwrap();
         db.patch_epic(
@@ -381,7 +381,7 @@ mod tests {
     async fn tick_interval_not_elapsed_skips_command() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic = db
-            .create_epic("Interval Epic", "", "/repo", None)
+            .create_epic("Interval Epic", "", None)
             .await
             .unwrap();
 
@@ -428,7 +428,7 @@ mod tests {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         // Epic with no feed_command (default)
         let epic = db
-            .create_epic("Plain Epic", "", "/repo", None)
+            .create_epic("Plain Epic", "", None)
             .await
             .unwrap();
 
@@ -452,7 +452,7 @@ mod tests {
     async fn tick_grouped_creates_sub_epics_per_repo() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic = db
-            .create_epic("Dependabot", "", "", None)
+            .create_epic("Dependabot", "", None)
             .await
             .unwrap();
         db.patch_epic(
@@ -501,7 +501,7 @@ mod tests {
     async fn tick_grouped_migrates_existing_flat_tasks() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic = db
-            .create_epic("Dependabot", "", "", None)
+            .create_epic("Dependabot", "", None)
             .await
             .unwrap();
         // First run: flat (group_by_repo = false by default)
@@ -552,7 +552,7 @@ mod tests {
     async fn tick_grouped_uses_other_for_no_url() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic = db
-            .create_epic("Feed", "", "", None)
+            .create_epic("Feed", "", None)
             .await
             .unwrap();
         db.patch_epic(
@@ -584,7 +584,7 @@ mod tests {
         let feed_cmd = r#"echo '[{"external_id":"1","title":"A","description":"","url":"https://github.com/org/repo-a/pull/1","status":"backlog","tag":"pr-review"}]'"#;
 
         let epic = db
-            .create_epic("Reviews", "", "", None)
+            .create_epic("Reviews", "", None)
             .await
             .unwrap();
         db.patch_epic(
@@ -651,7 +651,7 @@ mod tests {
     async fn start_returns_immediately_without_blocking() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic = db
-            .create_epic("Slow Epic", "", "/repo", None)
+            .create_epic("Slow Epic", "", None)
             .await
             .unwrap();
         // A command that would block for 5 seconds if awaited inline.
@@ -678,7 +678,7 @@ mod tests {
     async fn start_background_task_eventually_runs_feed_command() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic = db
-            .create_epic("BG Feed Epic", "", "/repo", None)
+            .create_epic("BG Feed Epic", "", None)
             .await
             .unwrap();
         db.patch_epic(
@@ -721,7 +721,7 @@ mod tests {
         // Register a known repo path matching "myrepo"
         db.save_repo_path("/home/user/code/myrepo").await.unwrap();
         let epic = db
-            .create_epic("Feed Epic", "", "/fallback", None)
+            .create_epic("Feed Epic", "", None)
             .await
             .unwrap();
         let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","url":"https://github.com/org/myrepo/pull/42","status":"backlog","tag":"bug"}]'"#;
@@ -751,7 +751,7 @@ mod tests {
             .await
             .unwrap();
         let epic = db
-            .create_epic("Feed Epic", "", "/fallback", None)
+            .create_epic("Feed Epic", "", None)
             .await
             .unwrap();
         let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","url":"https://github.com/org/myrepo/pull/42","status":"backlog","tag":"bug"}]'"#;
@@ -777,7 +777,7 @@ mod tests {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         db.save_repo_path("/home/user/code/myrepo").await.unwrap();
         let epic = db
-            .create_epic("Feed Epic", "", "/fallback", None)
+            .create_epic("Feed Epic", "", None)
             .await
             .unwrap();
         let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","status":"backlog","tag":"bug"}]'"#;
@@ -852,7 +852,7 @@ mod tests {
         db.save_repo_path("/home/user/code/repo-a").await.unwrap();
         db.save_repo_path("/home/user/code/repo-b").await.unwrap();
         let epic = db
-            .create_epic("Feed Epic", "", "/fallback", None)
+            .create_epic("Feed Epic", "", None)
             .await
             .unwrap();
         // Three items: two for repo-a (master), one for repo-b (develop).
@@ -902,7 +902,7 @@ mod tests {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         db.save_repo_path("/home/user/code/repo-a").await.unwrap();
         let epic = db
-            .create_epic("Feed Epic", "", "/fallback", None)
+            .create_epic("Feed Epic", "", None)
             .await
             .unwrap();
         let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","url":"https://github.com/org/repo-a/pull/1","status":"backlog","tag":"bug"}]'"#;
@@ -924,7 +924,7 @@ mod tests {
     async fn tick_twice_is_idempotent() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic = db
-            .create_epic("Idem Epic", "", "/repo", None)
+            .create_epic("Idem Epic", "", None)
             .await
             .unwrap();
         db.patch_epic(
@@ -973,7 +973,7 @@ mod tests {
     async fn tick_empty_array_creates_no_tasks() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic = db
-            .create_epic("Empty Epic", "", "/repo", None)
+            .create_epic("Empty Epic", "", None)
             .await
             .unwrap();
         db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some("echo '[]'")))
@@ -994,7 +994,7 @@ mod tests {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         db.save_repo_path("/home/user/code/myrepo").await.unwrap();
         let epic = db
-            .create_epic("Feed Epic", "", "/fallback", None)
+            .create_epic("Feed Epic", "", None)
             .await
             .unwrap();
         let cmd = r#"echo '[{"external_id":"1","title":"T","description":"","url":"https://jira.company.com/PROJ-123","status":"backlog","tag":"bug"}]'"#;

@@ -69,7 +69,6 @@ pub(super) fn row_to_epic(row: &rusqlite::Row<'_>) -> rusqlite::Result<Epic> {
         id: EpicId(row.get("id")?),
         title: row.get("title")?,
         description: row.get("description")?,
-        repo_path: row.get("repo_path")?,
         status: TaskStatus::parse(&status_str)
             .ok_or_else(|| unknown_enum("epic_status", &status_str))?,
         plan_path: row.get("plan_path")?,

@@ -16,7 +16,6 @@ pub struct UpdateEpicParams {
     pub status: Option<TaskStatus>,
     pub plan_path: Option<String>,
     pub sort_order: Option<i64>,
-    pub repo_path: Option<String>,
     pub auto_dispatch: Option<bool>,
     pub feed_command: Option<FieldUpdate>,
     pub feed_interval_secs: Option<Option<i64>>,
@@ -47,9 +46,6 @@ impl UpdateEpicParams {
         if self.sort_order.is_some() {
             names.push("sort_order");
         }
-        if self.repo_path.is_some() {
-            names.push("repo_path");
-        }
         if self.auto_dispatch.is_some() {
             names.push("auto_dispatch");
         }
@@ -76,7 +72,6 @@ impl UpdateEpicParams {
 pub struct CreateEpicParams {
     pub title: String,
     pub description: String,
-    pub repo_path: String,
     pub sort_order: Option<i64>,
     pub parent_epic_id: Option<EpicId>,
     pub feed_command: Option<String>,
@@ -97,8 +92,6 @@ impl EpicService {
     }
 
     pub async fn create_epic(&self, params: CreateEpicParams) -> Result<Epic, ServiceError> {
-        let repo_path = crate::models::expand_tilde(&params.repo_path);
-
         if let Some(parent_id) = params.parent_epic_id {
             match self.db.get_epic(parent_id).await {
                 Ok(Some(_)) => {}
@@ -121,7 +114,6 @@ impl EpicService {
             .create_epic(
                 &params.title,
                 &params.description,
-                &repo_path,
                 params.parent_epic_id,
             )
             .await
@@ -237,7 +229,6 @@ impl EpicService {
             ));
         }
 
-        let repo_path = params.repo_path.as_deref().map(crate::models::expand_tilde);
         let mut patch = EpicPatch::new();
         if let Some(ref t) = params.title {
             patch = patch.title(t);
@@ -253,9 +244,6 @@ impl EpicService {
         }
         if let Some(so) = params.sort_order {
             patch = patch.sort_order(Some(so));
-        }
-        if let Some(ref rp) = repo_path {
-            patch = patch.repo_path(rp);
         }
         if let Some(ad) = params.auto_dispatch {
             patch = patch.auto_dispatch(ad);
@@ -352,7 +340,6 @@ mod tests {
             status: None,
             plan_path: None,
             sort_order: None,
-            repo_path: None,
             auto_dispatch: None,
             feed_command: None,
             feed_interval_secs: None,
@@ -395,7 +382,6 @@ mod tests {
             UpdateEpicParams { status: Some(TaskStatus::Backlog), ..base_params(EpicId(1)) },
             UpdateEpicParams { plan_path: Some("p".to_string()), ..base_params(EpicId(1)) },
             UpdateEpicParams { sort_order: Some(0), ..base_params(EpicId(1)) },
-            UpdateEpicParams { repo_path: Some("r".to_string()), ..base_params(EpicId(1)) },
             UpdateEpicParams { auto_dispatch: Some(true), ..base_params(EpicId(1)) },
             UpdateEpicParams { feed_command: Some(FieldUpdate::Set("cmd".to_string())), ..base_params(EpicId(1)) },
             UpdateEpicParams { feed_interval_secs: Some(Some(300)), ..base_params(EpicId(1)) },
@@ -417,7 +403,7 @@ mod tests {
     #[tokio::test]
     async fn update_epic_sets_group_by_repo() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
-        let epic = db.create_epic("Test", "", "/repo", None).await.unwrap();
+        let epic = db.create_epic("Test", "", None).await.unwrap();
         assert!(!epic.group_by_repo);
         let svc = EpicService::new(db.clone());
         svc.update_epic(UpdateEpicParams {
@@ -434,12 +420,11 @@ mod tests {
     async fn create_sub_epic_succeeds() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let svc = EpicService::new(db.clone());
-        let parent = db.create_epic("Parent", "", "/r", None).await.unwrap();
+        let parent = db.create_epic("Parent", "", None).await.unwrap();
         let sub = svc
             .create_epic(CreateEpicParams {
                 title: "Sub".into(),
                 description: "".into(),
-                repo_path: "/r".into(),
                 sort_order: None,
                 parent_epic_id: Some(parent.id),
                 feed_command: None,
@@ -458,7 +443,6 @@ mod tests {
             .create_epic(CreateEpicParams {
                 title: "Sub".into(),
                 description: "".into(),
-                repo_path: "/r".into(),
                 sort_order: None,
                 parent_epic_id: Some(EpicId(9999)),
                 feed_command: None,
@@ -475,8 +459,8 @@ mod tests {
     async fn update_epic_sets_parent() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let svc = EpicService::new(db.clone());
-        let parent = db.create_epic("Parent", "", "/r", None).await.unwrap();
-        let child = db.create_epic("Child", "", "/r", None).await.unwrap();
+        let parent = db.create_epic("Parent", "", None).await.unwrap();
+        let child = db.create_epic("Child", "", None).await.unwrap();
         assert!(child.parent_epic_id.is_none());
         svc.update_epic(UpdateEpicParams {
             parent_epic_id: Some(Some(parent.id)),
@@ -492,8 +476,8 @@ mod tests {
     async fn update_epic_clears_parent() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let svc = EpicService::new(db.clone());
-        let parent = db.create_epic("Parent", "", "/r", None).await.unwrap();
-        let child = db.create_epic("Child", "", "/r", Some(parent.id)).await.unwrap();
+        let parent = db.create_epic("Parent", "", None).await.unwrap();
+        let child = db.create_epic("Child", "", Some(parent.id)).await.unwrap();
         assert_eq!(child.parent_epic_id, Some(parent.id));
         svc.update_epic(UpdateEpicParams {
             parent_epic_id: Some(None),
@@ -509,8 +493,8 @@ mod tests {
     async fn update_epic_parent_id_absent_is_noop() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let svc = EpicService::new(db.clone());
-        let parent = db.create_epic("Parent", "", "/r", None).await.unwrap();
-        let child = db.create_epic("Child", "", "/r", Some(parent.id)).await.unwrap();
+        let parent = db.create_epic("Parent", "", None).await.unwrap();
+        let child = db.create_epic("Child", "", Some(parent.id)).await.unwrap();
         svc.update_epic(UpdateEpicParams {
             title: Some("New Title".to_string()),
             ..base_params(child.id)
@@ -525,8 +509,8 @@ mod tests {
     async fn update_epic_cycle_detection() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let svc = EpicService::new(db.clone());
-        let a = db.create_epic("A", "", "/r", None).await.unwrap();
-        let b = db.create_epic("B", "", "/r", Some(a.id)).await.unwrap();
+        let a = db.create_epic("A", "", None).await.unwrap();
+        let b = db.create_epic("B", "", Some(a.id)).await.unwrap();
         // Trying to set A's parent to B would create a cycle: A → B → A
         let result = svc
             .update_epic(UpdateEpicParams {
@@ -548,7 +532,7 @@ mod tests {
     async fn update_epic_self_parent_rejected() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let svc = EpicService::new(db.clone());
-        let epic = db.create_epic("Epic", "", "/r", None).await.unwrap();
+        let epic = db.create_epic("Epic", "", None).await.unwrap();
         let result = svc
             .update_epic(UpdateEpicParams {
                 parent_epic_id: Some(Some(epic.id)),

@@ -25,7 +25,7 @@ fn make_task_params(repo_path: &str) -> CreateTaskParams {
     CreateTaskParams {
         title: "T".into(),
         description: "".into(),
-        repo_path: repo_path.into(),
+        repo_path: repo_path.to_string(),
         plan_path: None,
         epic_id: None,
         sort_order: None,
@@ -46,7 +46,7 @@ async fn create_and_get_task() {
         .create_task(CreateTaskParams {
             title: "Test".into(),
             description: "desc".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: None,
@@ -71,7 +71,7 @@ async fn create_task_with_tag() {
         .create_task(CreateTaskParams {
             title: "Bug fix".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: Some(5),
@@ -96,7 +96,7 @@ async fn create_task_with_sort_order() {
         .create_task(CreateTaskParams {
             title: "Sorted".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: Some(42),
@@ -120,7 +120,7 @@ async fn update_task_status() {
         .create_task(CreateTaskParams {
             title: "T".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: None,
@@ -151,7 +151,7 @@ async fn update_task_no_fields_returns_error() {
         .create_task(CreateTaskParams {
             title: "T".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: None,
@@ -178,7 +178,7 @@ async fn update_task_params_builder_compiles() {
         .create_task(CreateTaskParams {
             title: "T".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: None,
@@ -206,7 +206,7 @@ async fn update_task_invalid_substatus_for_status() {
         .create_task(CreateTaskParams {
             title: "T".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: None,
@@ -234,7 +234,7 @@ async fn claim_task_success() {
         .create_task(CreateTaskParams {
             title: "T".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: None,
@@ -272,7 +272,7 @@ async fn claim_task_seeds_last_pre_tool_use_at() {
         .create_task(CreateTaskParams {
             title: "T".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: None,
@@ -309,7 +309,7 @@ async fn claim_task_wrong_repo() {
         .create_task(CreateTaskParams {
             title: "T".into(),
             description: "".into(),
-            repo_path: "/repo-a".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: None,
@@ -340,7 +340,7 @@ async fn claim_task_not_backlog() {
         .create_task(CreateTaskParams {
             title: "T".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: None,
@@ -375,7 +375,7 @@ async fn list_tasks_with_filter() {
     svc.create_task(CreateTaskParams {
         title: "T1".into(),
         description: "".into(),
-        repo_path: "/repo".into(),
+        repo_path: "/repo".to_string(),
         plan_path: None,
         epic_id: None,
         sort_order: None,
@@ -423,7 +423,6 @@ async fn update_task_with_epic_linkage() {
         .create_epic(CreateEpicParams {
             title: "Epic".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
             sort_order: None,
             parent_epic_id: None,
             feed_command: None,
@@ -436,7 +435,7 @@ async fn update_task_with_epic_linkage() {
         .create_task(CreateTaskParams {
             title: "T".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: None,
@@ -468,7 +467,6 @@ async fn update_task_status_recalculates_parent_epic() {
         .create_epic(CreateEpicParams {
             title: "E".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
             sort_order: None,
             parent_epic_id: None,
             feed_command: None,
@@ -481,7 +479,7 @@ async fn update_task_status_recalculates_parent_epic() {
         .create_task(CreateTaskParams {
             title: "T".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: Some(epic.id),
             sort_order: None,
@@ -514,7 +512,6 @@ async fn update_task_relink_recalculates_old_and_new_epic() {
         .create_epic(CreateEpicParams {
             title: "A".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
             sort_order: None,
             parent_epic_id: None,
             feed_command: None,
@@ -526,7 +523,6 @@ async fn update_task_relink_recalculates_old_and_new_epic() {
         .create_epic(CreateEpicParams {
             title: "B".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
             sort_order: None,
             parent_epic_id: None,
             feed_command: None,
@@ -539,7 +535,7 @@ async fn update_task_relink_recalculates_old_and_new_epic() {
         .create_task(CreateTaskParams {
             title: "T".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: Some(epic_a.id),
             sort_order: None,
@@ -587,7 +583,6 @@ async fn create_and_get_epic() {
         .create_epic(CreateEpicParams {
             title: "Epic 1".into(),
             description: "desc".into(),
-            repo_path: "/repo".into(),
             sort_order: None,
             parent_epic_id: None,
             feed_command: None,
@@ -617,7 +612,6 @@ async fn update_epic_status() {
         .create_epic(CreateEpicParams {
             title: "E".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
             sort_order: None,
             parent_epic_id: None,
             feed_command: None,
@@ -633,7 +627,6 @@ async fn update_epic_status() {
         status: Some(TaskStatus::Running),
         plan_path: None,
         sort_order: None,
-        repo_path: None,
         auto_dispatch: None,
         feed_command: None,
         feed_interval_secs: None,
@@ -656,7 +649,6 @@ async fn update_epic_no_fields_returns_error() {
         .create_epic(CreateEpicParams {
             title: "E".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
             sort_order: None,
             parent_epic_id: None,
             feed_command: None,
@@ -673,7 +665,6 @@ async fn update_epic_no_fields_returns_error() {
             status: None,
             plan_path: None,
             sort_order: None,
-            repo_path: None,
             auto_dispatch: None,
             feed_command: None,
             feed_interval_secs: None,
@@ -694,7 +685,6 @@ async fn update_epic_auto_dispatch_persists() {
         .create_epic(CreateEpicParams {
             title: "E".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
             sort_order: None,
             parent_epic_id: None,
             feed_command: None,
@@ -712,7 +702,6 @@ async fn update_epic_auto_dispatch_persists() {
         status: None,
         plan_path: None,
         sort_order: None,
-        repo_path: None,
         auto_dispatch: Some(false),
         feed_command: None,
         feed_interval_secs: None,
@@ -735,7 +724,6 @@ async fn list_epics_with_progress() {
         .create_epic(CreateEpicParams {
             title: "E".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
             sort_order: None,
             parent_epic_id: None,
             feed_command: None,
@@ -748,7 +736,7 @@ async fn list_epics_with_progress() {
         .create_task(CreateTaskParams {
             title: "Sub1".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: Some(epic.id),
             sort_order: None,
@@ -776,7 +764,6 @@ async fn list_epics_with_progress_multiple_epics() {
         .create_epic(CreateEpicParams {
             title: "E1".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
             sort_order: None,
             parent_epic_id: None,
             feed_command: None,
@@ -788,7 +775,6 @@ async fn list_epics_with_progress_multiple_epics() {
         .create_epic(CreateEpicParams {
             title: "E2".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
             sort_order: None,
             parent_epic_id: None,
             feed_command: None,
@@ -802,7 +788,7 @@ async fn list_epics_with_progress_multiple_epics() {
         .create_task(CreateTaskParams {
             title: "T1".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: Some(e1.id),
             sort_order: None,
@@ -816,7 +802,7 @@ async fn list_epics_with_progress_multiple_epics() {
         .create_task(CreateTaskParams {
             title: "T2".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: Some(e1.id),
             sort_order: None,
@@ -831,7 +817,7 @@ async fn list_epics_with_progress_multiple_epics() {
         .create_task(CreateTaskParams {
             title: "T3".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: Some(e2.id),
             sort_order: None,
@@ -868,7 +854,6 @@ async fn update_task_status_recalculates_epic() {
         .create_epic(CreateEpicParams {
             title: "E".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
             sort_order: None,
             parent_epic_id: None,
             feed_command: None,
@@ -881,7 +866,7 @@ async fn update_task_status_recalculates_epic() {
         .create_task(CreateTaskParams {
             title: "Sub".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: Some(epic.id),
             sort_order: None,
@@ -911,7 +896,6 @@ async fn get_epic_with_subtasks() {
         .create_epic(CreateEpicParams {
             title: "E".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
             sort_order: None,
             parent_epic_id: None,
             feed_command: None,
@@ -924,7 +908,7 @@ async fn get_epic_with_subtasks() {
         .create_task(CreateTaskParams {
             title: "Sub".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: Some(epic.id),
             sort_order: None,
@@ -952,7 +936,6 @@ async fn next_backlog_task_returns_first_by_sort_order() {
         .create_epic(CreateEpicParams {
             title: "E".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
             sort_order: None,
             parent_epic_id: None,
             feed_command: None,
@@ -965,7 +948,7 @@ async fn next_backlog_task_returns_first_by_sort_order() {
         .create_task(CreateTaskParams {
             title: "Second".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: Some(epic.id),
             sort_order: Some(20),
@@ -980,7 +963,7 @@ async fn next_backlog_task_returns_first_by_sort_order() {
         .create_task(CreateTaskParams {
             title: "First".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: Some(epic.id),
             sort_order: Some(10),
@@ -1005,7 +988,6 @@ async fn next_backlog_task_skips_non_backlog() {
         .create_epic(CreateEpicParams {
             title: "E".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
             sort_order: None,
             parent_epic_id: None,
             feed_command: None,
@@ -1018,7 +1000,7 @@ async fn next_backlog_task_skips_non_backlog() {
         .create_task(CreateTaskParams {
             title: "Running".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: Some(epic.id),
             sort_order: Some(1),
@@ -1058,7 +1040,7 @@ async fn create_task_returning_gives_full_task() {
         .create_task_returning(CreateTaskParams {
             title: "Full task".into(),
             description: "desc".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: None,
@@ -1085,7 +1067,6 @@ async fn create_task_returning_with_epic() {
         .create_epic(CreateEpicParams {
             title: "E".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
             sort_order: None,
             parent_epic_id: None,
             feed_command: None,
@@ -1098,7 +1079,7 @@ async fn create_task_returning_with_epic() {
         .create_task_returning(CreateTaskParams {
             title: "Sub".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: Some(epic.id),
             sort_order: None,
@@ -1122,7 +1103,6 @@ async fn create_task_returning_sets_all_optional_fields_atomically() {
         .create_epic(CreateEpicParams {
             title: "E".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
             sort_order: None,
             parent_epic_id: None,
             feed_command: None,
@@ -1135,7 +1115,7 @@ async fn create_task_returning_sets_all_optional_fields_atomically() {
         .create_task_returning(CreateTaskParams {
             title: "Atomic".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: Some(epic.id),
             sort_order: Some(3),
@@ -1162,7 +1142,7 @@ async fn delete_task_removes_it() {
         .create_task(CreateTaskParams {
             title: "T".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: None,
@@ -1198,7 +1178,7 @@ async fn update_task_sets_worktree_and_tmux_window() {
         .create_task(CreateTaskParams {
             title: "T".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: None,
@@ -1232,7 +1212,7 @@ async fn update_task_clears_worktree() {
         .create_task(CreateTaskParams {
             title: "T".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: None,
@@ -1279,7 +1259,7 @@ async fn update_task_allows_done_status() {
         .create_task(CreateTaskParams {
             title: "T".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: None,
@@ -1309,7 +1289,6 @@ async fn delete_epic_removes_it() {
         .create_epic(CreateEpicParams {
             title: "E".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
             sort_order: None,
             parent_epic_id: None,
             feed_command: None,
@@ -1354,7 +1333,7 @@ async fn update_task_worktree_set_persists() {
         .create_task(CreateTaskParams {
             title: "t".into(),
             description: "d".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: None,
@@ -1385,7 +1364,7 @@ async fn update_task_worktree_clear_sets_null() {
         .create_task(CreateTaskParams {
             title: "t".into(),
             description: "d".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: None,
@@ -1425,7 +1404,7 @@ async fn update_task_pr_url_set_and_clear() {
         .create_task(CreateTaskParams {
             title: "t".into(),
             description: "d".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: None,
@@ -1464,7 +1443,6 @@ async fn list_tasks_filters_by_epic_id() {
         .create_epic(CreateEpicParams {
             title: "E".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
             sort_order: None,
             parent_epic_id: None,
             feed_command: None,
@@ -1477,7 +1455,7 @@ async fn list_tasks_filters_by_epic_id() {
         .create_task(CreateTaskParams {
             title: "In epic".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: Some(epic.id),
             sort_order: None,
@@ -1492,7 +1470,7 @@ async fn list_tasks_filters_by_epic_id() {
         .create_task(CreateTaskParams {
             title: "No epic".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: None,
@@ -1523,7 +1501,7 @@ async fn list_tasks_excludes_archived_by_default() {
         .create_task(CreateTaskParams {
             title: "T".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: None,
@@ -1556,7 +1534,7 @@ async fn list_tasks_filters_by_repo_paths() {
     svc.create_task(CreateTaskParams {
         title: "Repo A".into(),
         description: "".into(),
-        repo_path: "/repo/a".into(),
+        repo_path: "/repo/a".to_string(),
         plan_path: None,
         epic_id: None,
         sort_order: None,
@@ -1570,7 +1548,7 @@ async fn list_tasks_filters_by_repo_paths() {
     svc.create_task(CreateTaskParams {
         title: "Repo B".into(),
         description: "".into(),
-        repo_path: "/repo/b".into(),
+        repo_path: "/repo/b".to_string(),
         plan_path: None,
         epic_id: None,
         sort_order: None,
@@ -1601,7 +1579,7 @@ async fn list_tasks_excludes_caller_task() {
         .create_task(CreateTaskParams {
             title: "T1".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: None,
@@ -1615,7 +1593,7 @@ async fn list_tasks_excludes_caller_task() {
     svc.create_task(CreateTaskParams {
         title: "T2".into(),
         description: "".into(),
-        repo_path: "/repo".into(),
+        repo_path: "/repo".to_string(),
         plan_path: None,
         epic_id: None,
         sort_order: None,
@@ -1646,7 +1624,7 @@ async fn validate_send_message_missing_worktree() {
         .create_task(CreateTaskParams {
             title: "Sender".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: None,
@@ -1662,7 +1640,7 @@ async fn validate_send_message_missing_worktree() {
         .create_task(CreateTaskParams {
             title: "Receiver".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: None,
@@ -1687,7 +1665,7 @@ async fn validate_send_message_missing_tmux_window() {
         .create_task(CreateTaskParams {
             title: "Sender".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: None,
@@ -1702,7 +1680,7 @@ async fn validate_send_message_missing_tmux_window() {
         .create_task(CreateTaskParams {
             title: "Receiver".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: None,
@@ -1736,7 +1714,7 @@ async fn validate_send_message_target_not_found() {
         .create_task(CreateTaskParams {
             title: "Sender".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: None,
@@ -1767,7 +1745,6 @@ async fn create_sub_epic_links_parent() {
         .create_epic(CreateEpicParams {
             title: "Parent".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
             sort_order: None,
             parent_epic_id: None,
             feed_command: None,
@@ -1780,7 +1757,6 @@ async fn create_sub_epic_links_parent() {
         .create_epic(CreateEpicParams {
             title: "Child".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
             sort_order: None,
             parent_epic_id: Some(parent.id),
             feed_command: None,
@@ -1804,7 +1780,6 @@ async fn list_root_epics_service() {
         .create_epic(CreateEpicParams {
             title: "Root".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
             sort_order: None,
             parent_epic_id: None,
             feed_command: None,
@@ -1815,7 +1790,6 @@ async fn list_root_epics_service() {
     svc.create_epic(CreateEpicParams {
         title: "Sub".into(),
         description: "".into(),
-        repo_path: "/repo".into(),
         sort_order: None,
         parent_epic_id: Some(parent.id),
         feed_command: None,
@@ -1838,7 +1812,6 @@ async fn list_sub_epics_service() {
         .create_epic(CreateEpicParams {
             title: "Parent".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
             sort_order: None,
             parent_epic_id: None,
             feed_command: None,
@@ -1850,7 +1823,6 @@ async fn list_sub_epics_service() {
         .create_epic(CreateEpicParams {
             title: "Child".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
             sort_order: None,
             parent_epic_id: Some(parent.id),
             feed_command: None,
@@ -1883,7 +1855,7 @@ async fn update_task_toctou_last_write_wins() {
         .create_task(CreateTaskParams {
             title: "T".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: None,
@@ -1936,7 +1908,7 @@ async fn update_task_sub_status_validated_against_persisted_status() {
         .create_task(CreateTaskParams {
             title: "T".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: None,
@@ -2073,7 +2045,7 @@ async fn record_hook_event_noop_for_non_running_task() {
         .create_task(CreateTaskParams {
             title: "T".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: None,
@@ -2299,7 +2271,6 @@ async fn cli_update_task_recalculates_parent_epic() {
         .create_epic(CreateEpicParams {
             title: "E".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
             sort_order: None,
             parent_epic_id: None,
             feed_command: None,
@@ -2483,7 +2454,7 @@ async fn update_task_propagates_db_error_on_prior_task_read() {
         .create_task(CreateTaskParams {
             title: "T".into(),
             description: "".into(),
-            repo_path: "/repo".into(),
+            repo_path: "/repo".to_string(),
             plan_path: None,
             epic_id: None,
             sort_order: None,
@@ -2510,7 +2481,7 @@ async fn update_task_propagates_db_error_on_prior_task_read() {
 
     // Create an epic so we can link to it (epic_id triggers needs_prior=true)
     let epic = db
-        .create_epic("E", "D", "/repo", None)
+        .create_epic("E", "D", None)
         .await
         .unwrap();
 

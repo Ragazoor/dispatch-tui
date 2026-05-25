@@ -1231,7 +1231,7 @@ async fn create_task_sets_default_sub_status_for_backlog() {
 async fn create_task_with_epic_sort_tag_single_insert() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None)
+        .create_epic("E", "", None)
         .await
         .unwrap();
     let id = db
@@ -1424,7 +1424,7 @@ fn main_branches(n: usize) -> Vec<String> {
 async fn upsert_feed_tasks_creates_tasks() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None)
+        .create_epic("E", "", None)
         .await
         .unwrap();
     let items = vec![
@@ -1454,7 +1454,7 @@ async fn upsert_feed_tasks_creates_tasks() {
 async fn upsert_feed_tasks_idempotent() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None)
+        .create_epic("E", "", None)
         .await
         .unwrap();
     let items = vec![make_feed_item("ext-1", "Task One")];
@@ -1477,7 +1477,7 @@ async fn upsert_feed_tasks_idempotent() {
 async fn upsert_feed_tasks_preserves_status() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None)
+        .create_epic("E", "", None)
         .await
         .unwrap();
     let items = vec![make_feed_item("ext-1", "Original Title")];
@@ -1525,7 +1525,7 @@ async fn upsert_feed_tasks_preserves_status() {
 async fn upsert_feed_tasks_adds_new_items() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None)
+        .create_epic("E", "", None)
         .await
         .unwrap();
 
@@ -1558,7 +1558,7 @@ async fn upsert_feed_tasks_adds_new_items() {
 async fn upsert_feed_tasks_removes_stale_items() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None)
+        .create_epic("E", "", None)
         .await
         .unwrap();
 
@@ -1595,7 +1595,7 @@ async fn upsert_feed_tasks_removes_stale_items() {
 async fn upsert_feed_tasks_uses_resolved_repo_path() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/epic-repo", None)
+        .create_epic("E", "", None)
         .await
         .unwrap();
     let items = vec![make_feed_item("ext-1", "Task One")];
@@ -1614,7 +1614,7 @@ async fn upsert_feed_tasks_uses_resolved_repo_path() {
 async fn upsert_feed_tasks_stores_empty_sentinel_when_unresolved() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/epic-repo", None)
+        .create_epic("E", "", None)
         .await
         .unwrap();
     let items = vec![make_feed_item("ext-1", "Task One")];
@@ -1633,7 +1633,7 @@ async fn upsert_feed_tasks_stores_empty_sentinel_when_unresolved() {
 async fn upsert_feed_tasks_on_conflict_does_not_update_repo_path() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/epic-repo", None)
+        .create_epic("E", "", None)
         .await
         .unwrap();
     let items = vec![make_feed_item("ext-1", "Original")];
@@ -1682,7 +1682,7 @@ async fn upsert_feed_tasks_on_conflict_does_not_update_repo_path() {
 async fn upsert_feed_tasks_mixed_batch_resolved_and_unresolved() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/epic-repo", None)
+        .create_epic("E", "", None)
         .await
         .unwrap();
     let items = vec![
@@ -1713,7 +1713,7 @@ async fn upsert_feed_tasks_mixed_batch_resolved_and_unresolved() {
 async fn upsert_feed_tasks_stores_per_task_base_branch() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None)
+        .create_epic("E", "", None)
         .await
         .unwrap();
     let items = vec![
@@ -1752,7 +1752,7 @@ async fn upsert_feed_tasks_stores_per_task_base_branch() {
 async fn upsert_feed_tasks_does_not_remove_manual_tasks() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None)
+        .create_epic("E", "", None)
         .await
         .unwrap();
 
@@ -1799,7 +1799,7 @@ async fn upsert_feed_tasks_does_not_remove_manual_tasks() {
 async fn upsert_feed_tasks_persists_tag() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None)
+        .create_epic("E", "", None)
         .await
         .unwrap();
     let items = vec![crate::models::FeedItem {
@@ -1826,7 +1826,7 @@ async fn upsert_feed_tasks_persists_tag() {
 async fn upsert_feed_tasks_updates_tag_on_conflict() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None)
+        .create_epic("E", "", None)
         .await
         .unwrap();
     let initial = vec![crate::models::FeedItem {
@@ -1884,7 +1884,7 @@ async fn feed_item_legacy_json_deserializes_with_default_labels_and_sort_order()
 async fn upsert_feed_tasks_writes_labels_and_sort_order_on_insert() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None)
+        .create_epic("E", "", None)
         .await
         .unwrap();
     let items = vec![crate::models::FeedItem {
@@ -1911,7 +1911,7 @@ async fn upsert_feed_tasks_writes_labels_and_sort_order_on_insert() {
 async fn upsert_feed_tasks_replaces_labels_and_sort_order_on_conflict() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None)
+        .create_epic("E", "", None)
         .await
         .unwrap();
     let initial = vec![crate::models::FeedItem {
@@ -1972,7 +1972,7 @@ async fn upsert_feed_tasks_replaces_labels_and_sort_order_on_conflict() {
 async fn upsert_feed_tasks_sets_pr_url_from_item_url_on_insert() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None)
+        .create_epic("E", "", None)
         .await
         .unwrap();
     let items = vec![
@@ -2040,7 +2040,7 @@ async fn upsert_feed_tasks_sets_pr_url_from_item_url_on_insert() {
 async fn upsert_feed_tasks_leaves_pr_url_null_when_item_url_empty() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None)
+        .create_epic("E", "", None)
         .await
         .unwrap();
     let items = vec![crate::models::FeedItem {
@@ -2066,7 +2066,7 @@ async fn upsert_feed_tasks_leaves_pr_url_null_when_item_url_empty() {
 async fn upsert_feed_tasks_backfills_null_pr_url_on_conflict() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None)
+        .create_epic("E", "", None)
         .await
         .unwrap();
     // First emission: no URL — task created with pr_url = NULL.
@@ -2120,7 +2120,7 @@ async fn upsert_feed_tasks_backfills_null_pr_url_on_conflict() {
 async fn upsert_feed_tasks_preserves_pr_url_on_conflict() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None)
+        .create_epic("E", "", None)
         .await
         .unwrap();
     let initial = vec![crate::models::FeedItem {
@@ -2162,7 +2162,7 @@ async fn upsert_feed_tasks_can_purge_task_with_associated_learning() {
 
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None)
+        .create_epic("E", "", None)
         .await
         .unwrap();
 
@@ -2204,7 +2204,7 @@ async fn upsert_feed_tasks_can_purge_task_with_associated_learning() {
 async fn upsert_feed_tasks_can_purge_stale_task() {
     let db = in_memory_db().await;
     let epic = db
-        .create_epic("E", "", "/repo", None)
+        .create_epic("E", "", None)
         .await
         .unwrap();
 
@@ -2328,15 +2328,12 @@ mod property_tests {
             p = p.sort_order(Some(1));
         }
         if bits & (1 << 5) != 0 {
-            p = p.repo_path("/repo");
-        }
-        if bits & (1 << 6) != 0 {
             p = p.auto_dispatch(true);
         }
-        if bits & (1 << 7) != 0 {
+        if bits & (1 << 6) != 0 {
             p = p.feed_command(Some("cmd"));
         }
-        if bits & (1 << 8) != 0 {
+        if bits & (1 << 7) != 0 {
             p = p.feed_interval_secs(Some(60));
         }
         p
@@ -2350,7 +2347,7 @@ mod property_tests {
            }
 
            #[test]
-           fn epicpatch_has_changes_iff_any_field_set(bits in 0u16..512) {
+           fn epicpatch_has_changes_iff_any_field_set(bits in 0u16..256) {
                let patch = epicpatch_from_bits(bits);
                prop_assert_eq!(patch.has_changes(), bits != 0);
            }
@@ -2457,7 +2454,6 @@ mod property_tests {
            fn epicpatch_roundtrip(
                title       in proptest::option::of("[a-zA-Z0-9 ]{1,32}"),
                description in proptest::option::of("[a-zA-Z0-9 ]{0,32}"),
-               repo_path   in proptest::option::of("/[a-z]{1,16}"),
                plan_path   in proptest::option::of(proptest::option::of("[a-z]{1,16}\\.md")),
                sort_order  in proptest::option::of(proptest::option::of(any::<i64>())),
                auto_dispatch in proptest::option::of(any::<bool>()),
@@ -2468,14 +2464,13 @@ mod property_tests {
                rt.block_on(async {
                    let db = in_memory_db().await;
                    let epic = db
-                       .create_epic("Baseline epic", "baseline", "/baseline", None).await
+                       .create_epic("Baseline epic", "baseline", None).await
                        .unwrap();
                    let baseline = db.get_epic(epic.id).await.unwrap().unwrap();
 
                    let mut p = EpicPatch::new();
                    if let Some(t)  = title.as_deref()       { p = p.title(t); }
                    if let Some(d)  = description.as_deref() { p = p.description(d); }
-                   if let Some(r)  = repo_path.as_deref()   { p = p.repo_path(r); }
                    if let Some(ref pp) = plan_path { p = p.plan_path(pp.as_deref()); }
                    if let Some(so) = sort_order    { p = p.sort_order(so); }
                    if let Some(ad) = auto_dispatch { p = p.auto_dispatch(ad); }
@@ -2487,7 +2482,6 @@ mod property_tests {
 
                    prop_assert_eq!(&after.title,         &title.unwrap_or(baseline.title));
                    prop_assert_eq!(&after.description,   &description.unwrap_or(baseline.description));
-                   prop_assert_eq!(&after.repo_path,     &repo_path.unwrap_or(baseline.repo_path));
                    prop_assert_eq!(&after.plan_path,     &plan_path.unwrap_or(baseline.plan_path));
                    prop_assert_eq!(after.sort_order,     sort_order.unwrap_or(baseline.sort_order));
                    prop_assert_eq!(after.auto_dispatch,  auto_dispatch.unwrap_or(baseline.auto_dispatch));

@@ -43,7 +43,6 @@ use crate::service::FieldUpdate;
 pub struct EpicEditorFields {
     pub title: String,
     pub description: String,
-    pub repo_path: String,
     pub feed_command: String, // "" → Clear, non-empty → Set
     /// Parsed seconds, or `None` if the section was empty or unparseable.
     /// Parse failures are recorded in `errors`.
@@ -97,8 +96,8 @@ pub fn format_epic_for_editor(epic: &Epic) -> String {
         .map(|n| n.to_string())
         .unwrap_or_default();
     format!(
-        "--- TITLE ---\n{}\n--- DESCRIPTION ---\n{}\n--- REPO_PATH ---\n{}\n--- FEED_COMMAND ---\n{}\n--- FEED_INTERVAL_SECS ---\n{}\n",
-        epic.title, epic.description, epic.repo_path, feed_cmd, feed_interval
+        "--- TITLE ---\n{}\n--- DESCRIPTION ---\n{}\n--- FEED_COMMAND ---\n{}\n--- FEED_INTERVAL_SECS ---\n{}\n",
+        epic.title, epic.description, feed_cmd, feed_interval
     )
 }
 
@@ -143,7 +142,6 @@ pub fn parse_epic_editor_output(input: &str) -> EpicEditorFields {
     EpicEditorFields {
         title: s.remove("TITLE").unwrap_or_default(),
         description: s.remove("DESCRIPTION").unwrap_or_default(),
-        repo_path: s.remove("REPO_PATH").unwrap_or_default(),
         feed_command: s.remove("FEED_COMMAND").unwrap_or_default(),
         feed_interval_secs,
         errors,
@@ -227,7 +225,6 @@ pub fn apply_task_editor_fields(task: &Task, fields: EditorFields) -> TaskEditAp
 pub struct EpicEditApplied {
     pub title: String,
     pub description: String,
-    pub repo_path: String,
     pub feed_command: FieldUpdate,
     pub feed_interval_secs: Option<i64>,
 }
@@ -245,11 +242,6 @@ pub fn apply_epic_editor_fields(epic: &Epic, fields: EpicEditorFields) -> EpicEd
             epic.description.clone()
         } else {
             fields.description
-        },
-        repo_path: if fields.repo_path.is_empty() {
-            epic.repo_path.clone()
-        } else {
-            fields.repo_path
         },
         feed_command: if fields.feed_command.is_empty() {
             FieldUpdate::Clear
@@ -365,12 +357,11 @@ mod tests {
     const FEED_INTERVAL_MED_SECS: i64 = 120;
     const FEED_INTERVAL_FAST_SECS: i64 = 60;
 
-    fn make_epic(title: &str, description: &str, repo_path: &str) -> Epic {
+    fn make_epic(title: &str, description: &str) -> Epic {
         Epic {
             id: EpicId(1),
             title: title.to_string(),
             description: description.to_string(),
-            repo_path: repo_path.to_string(),
             status: TaskStatus::Backlog,
             plan_path: None,
             sort_order: None,
@@ -386,17 +377,16 @@ mod tests {
 
     #[test]
     fn epic_editor_roundtrip_basic() {
-        let epic = make_epic("My Epic", "A description", "/repo");
+        let epic = make_epic("My Epic", "A description");
         let content = format_epic_for_editor(&epic);
         let fields = parse_epic_editor_output(&content);
         assert_eq!(fields.title, "My Epic");
         assert_eq!(fields.description, "A description");
-        assert_eq!(fields.repo_path, "/repo");
     }
 
     #[test]
     fn epic_editor_roundtrip_multiline_description() {
-        let epic = make_epic("Title", "Line 1\nLine 2\nLine 3", "/repo");
+        let epic = make_epic("Title", "Line 1\nLine 2\nLine 3");
         let content = format_epic_for_editor(&epic);
         let fields = parse_epic_editor_output(&content);
         assert_eq!(fields.description, "Line 1\nLine 2\nLine 3");
@@ -404,7 +394,7 @@ mod tests {
 
     #[test]
     fn epic_editor_roundtrip_colons_in_title() {
-        let epic = make_epic("Fix: auth system", "desc", "/repo");
+        let epic = make_epic("Fix: auth system", "desc");
         let content = format_epic_for_editor(&epic);
         let fields = parse_epic_editor_output(&content);
         assert_eq!(fields.title, "Fix: auth system");
@@ -423,7 +413,6 @@ mod tests {
         let fields = parse_epic_editor_output("");
         assert_eq!(fields.title, "");
         assert_eq!(fields.description, "");
-        assert_eq!(fields.repo_path, "");
     }
 
     fn make_task(
@@ -776,20 +765,19 @@ mod tests {
 
     #[test]
     fn apply_epic_editor_fields_roundtrip() {
-        let epic = make_epic("E title", "E desc", "/repo");
+        let epic = make_epic("E title", "E desc");
         let content = format_epic_for_editor(&epic);
         let fields = parse_epic_editor_output(&content);
         let applied = apply_epic_editor_fields(&epic, fields);
         assert_eq!(applied.title, epic.title);
         assert_eq!(applied.description, epic.description);
-        assert_eq!(applied.repo_path, epic.repo_path);
         assert_eq!(applied.feed_command, FieldUpdate::Clear);
         assert_eq!(applied.feed_interval_secs, None);
     }
 
     #[test]
     fn apply_epic_empty_fields_preserve_prior() {
-        let epic = make_epic("E title", "E desc", "/repo");
+        let epic = make_epic("E title", "E desc");
         let fields = EpicEditorFields {
             description: "new desc".into(),
             ..Default::default()
@@ -797,14 +785,13 @@ mod tests {
         let applied = apply_epic_editor_fields(&epic, fields);
         assert_eq!(applied.title, "E title");
         assert_eq!(applied.description, "new desc");
-        assert_eq!(applied.repo_path, "/repo");
         assert_eq!(applied.feed_command, FieldUpdate::Clear);
         assert_eq!(applied.feed_interval_secs, None);
     }
 
     #[test]
     fn epic_editor_includes_feed_command_section() {
-        let mut epic = make_epic("T", "D", "/repo");
+        let mut epic = make_epic("T", "D");
         epic.feed_command = Some("scripts/fetch-dependabot.sh".into());
         let content = format_epic_for_editor(&epic);
         assert!(content.contains("--- FEED_COMMAND ---"));
@@ -813,7 +800,7 @@ mod tests {
 
     #[test]
     fn epic_editor_includes_feed_interval_section() {
-        let mut epic = make_epic("T", "D", "/repo");
+        let mut epic = make_epic("T", "D");
         epic.feed_interval_secs = Some(FEED_INTERVAL_SLOW_SECS);
         let content = format_epic_for_editor(&epic);
         assert!(content.contains("--- FEED_INTERVAL_SECS ---"));
@@ -822,7 +809,7 @@ mod tests {
 
     #[test]
     fn epic_editor_roundtrip_feed_command_set() {
-        let mut epic = make_epic("T", "D", "/repo");
+        let mut epic = make_epic("T", "D");
         epic.feed_command = Some("my-script.sh".into());
         let content = format_epic_for_editor(&epic);
         let fields = parse_epic_editor_output(&content);
@@ -831,7 +818,7 @@ mod tests {
 
     #[test]
     fn epic_editor_roundtrip_feed_command_empty() {
-        let epic = make_epic("T", "D", "/repo");
+        let epic = make_epic("T", "D");
         let content = format_epic_for_editor(&epic);
         let fields = parse_epic_editor_output(&content);
         assert_eq!(fields.feed_command, "");
@@ -839,7 +826,7 @@ mod tests {
 
     #[test]
     fn epic_editor_roundtrip_feed_interval_set() {
-        let mut epic = make_epic("T", "D", "/repo");
+        let mut epic = make_epic("T", "D");
         epic.feed_interval_secs = Some(FEED_INTERVAL_MED_SECS);
         let content = format_epic_for_editor(&epic);
         let fields = parse_epic_editor_output(&content);
@@ -858,11 +845,10 @@ mod tests {
 
     #[test]
     fn apply_epic_feed_command_set() {
-        let epic = make_epic("T", "D", "/repo");
+        let epic = make_epic("T", "D");
         let fields = EpicEditorFields {
             title: "T".into(),
             description: "D".into(),
-            repo_path: "/repo".into(),
             feed_command: "my-script.sh".into(),
             feed_interval_secs: None,
             errors: Vec::new(),
@@ -877,12 +863,11 @@ mod tests {
 
     #[test]
     fn apply_epic_feed_command_clear() {
-        let mut epic = make_epic("T", "D", "/repo");
+        let mut epic = make_epic("T", "D");
         epic.feed_command = Some("old-script.sh".into());
         let fields = EpicEditorFields {
             title: "T".into(),
             description: "D".into(),
-            repo_path: "/repo".into(),
             feed_command: String::new(),
             feed_interval_secs: None,
             errors: Vec::new(),
@@ -893,11 +878,10 @@ mod tests {
 
     #[test]
     fn apply_epic_feed_interval_valid() {
-        let epic = make_epic("T", "D", "/repo");
+        let epic = make_epic("T", "D");
         let fields = EpicEditorFields {
             title: "T".into(),
             description: "D".into(),
-            repo_path: "/repo".into(),
             feed_command: String::new(),
             feed_interval_secs: Some(FEED_INTERVAL_SLOW_SECS),
             errors: Vec::new(),
@@ -908,7 +892,7 @@ mod tests {
 
     #[test]
     fn apply_epic_editor_fields_full_roundtrip() {
-        let mut epic = make_epic("E title", "E desc", "/repo");
+        let mut epic = make_epic("E title", "E desc");
         epic.feed_command = Some("scripts/fetch-dependabot.sh".into());
         epic.feed_interval_secs = Some(FEED_INTERVAL_FAST_SECS);
         let content = format_epic_for_editor(&epic);

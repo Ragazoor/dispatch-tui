@@ -119,7 +119,6 @@ patch_struct! {
         plain    status:             TaskStatus,
         nullable plan_path:          &'a str,
         nullable sort_order:         i64,
-        plain    repo_path:          &'a str,
         plain    auto_dispatch:      bool,
         plain    group_by_repo:      bool,
         nullable feed_command:       &'a str,
@@ -185,7 +184,6 @@ pub trait EpicCrud: Send + Sync {
         &self,
         title: &str,
         description: &str,
-        repo_path: &str,
         parent_epic_id: Option<EpicId>,
     ) -> Result<Epic>;
     async fn get_epic(&self, id: EpicId) -> Result<Option<Epic>>;

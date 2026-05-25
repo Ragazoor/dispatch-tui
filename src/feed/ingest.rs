@@ -59,7 +59,7 @@ pub(super) async fn sync_grouped_feed(
                 existing.id
             } else {
                 match db
-                    .create_epic(repo_name, "", "", Some(parent_id))
+                    .create_epic(repo_name, "", Some(parent_id))
                     .await
                 {
                     Ok(e) => e.id,
@@ -137,13 +137,13 @@ mod tests {
     async fn archived_sub_epic_not_reused() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let parent = db
-            .create_epic("Reviews", "", "", None)
+            .create_epic("Reviews", "", None)
             .await
             .unwrap();
 
         // Create a sub-epic that is then archived.
         let archived_sub = db
-            .create_epic("repo-a", "", "", Some(parent.id))
+            .create_epic("repo-a", "", Some(parent.id))
             .await
             .unwrap();
         db.patch_epic(
@@ -189,7 +189,7 @@ mod tests {
     async fn items_grouped_by_repo_name() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let parent = db
-            .create_epic("Reviews", "", "", None)
+            .create_epic("Reviews", "", None)
             .await
             .unwrap();
 
@@ -222,7 +222,7 @@ mod tests {
     async fn no_url_groups_as_other() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let parent = db
-            .create_epic("Reviews", "", "", None)
+            .create_epic("Reviews", "", None)
             .await
             .unwrap();
 
@@ -251,13 +251,13 @@ mod tests {
     async fn existing_active_sub_epic_reused() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let parent = db
-            .create_epic("Reviews", "", "", None)
+            .create_epic("Reviews", "", None)
             .await
             .unwrap();
 
         // Pre-create the sub-epic as active.
         let pre_existing = db
-            .create_epic("repo-a", "", "", Some(parent.id))
+            .create_epic("repo-a", "", Some(parent.id))
             .await
             .unwrap();
 

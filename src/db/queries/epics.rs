@@ -14,20 +14,17 @@ impl super::super::EpicCrud for Database {
         &self,
         title: &str,
         description: &str,
-        repo_path: &str,
         parent_epic_id: Option<EpicId>,
     ) -> Result<crate::models::Epic> {
         let title = title.to_string();
         let description = description.to_string();
-        let repo_path = repo_path.to_string();
         self.db_call(move |conn| {
             conn.execute(
-                "INSERT INTO epics (title, description, repo_path, parent_epic_id) \
-                 VALUES (?1, ?2, ?3, ?4)",
+                "INSERT INTO epics (title, description, parent_epic_id) \
+                 VALUES (?1, ?2, ?3)",
                 params![
                     title,
                     description,
-                    repo_path,
                     parent_epic_id.map(|e| e.0),
                 ],
             )
@@ -47,7 +44,7 @@ impl super::super::EpicCrud for Database {
         self.db_call(move |conn| {
             let mut stmt = conn
                 .prepare(
-                    "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, \
+                    "SELECT id, title, description, status, plan_path, sort_order, auto_dispatch, \
                      parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, group_by_repo \
                      FROM epics ORDER BY COALESCE(sort_order, id) ASC, id ASC",
                 )
@@ -66,7 +63,7 @@ impl super::super::EpicCrud for Database {
         self.db_call(move |conn| {
             let mut stmt = conn
                 .prepare(
-                    "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, \
+                    "SELECT id, title, description, status, plan_path, sort_order, auto_dispatch, \
                      parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, group_by_repo \
                      FROM epics WHERE parent_epic_id IS NULL ORDER BY COALESCE(sort_order, id) ASC, id ASC",
                 )
@@ -85,7 +82,7 @@ impl super::super::EpicCrud for Database {
         self.db_call(move |conn| {
             let mut stmt = conn
                 .prepare(
-                    "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, \
+                    "SELECT id, title, description, status, plan_path, sort_order, auto_dispatch, \
                      parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, group_by_repo \
                      FROM epics WHERE parent_epic_id = ?1 ORDER BY COALESCE(sort_order, id) ASC, id ASC",
                 )
@@ -129,10 +126,6 @@ impl super::super::EpicCrud for Database {
         if let Some(so) = patch.sort_order {
             sets.push("sort_order = ?");
             values.push(Box::new(so));
-        }
-        if let Some(rp) = patch.repo_path {
-            sets.push("repo_path = ?");
-            values.push(Box::new(rp.to_string()));
         }
         if let Some(ad) = patch.auto_dispatch {
             sets.push("auto_dispatch = ?");
@@ -267,7 +260,7 @@ impl super::super::EpicCrud for Database {
 
 fn get_epic_row(conn: &rusqlite::Connection, id: EpicId) -> Result<Option<crate::models::Epic>> {
     conn.query_row(
-        "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, \
+        "SELECT id, title, description, status, plan_path, sort_order, auto_dispatch, \
          parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, group_by_repo \
          FROM epics WHERE id = ?1",
         params![id.0],
@@ -341,7 +334,7 @@ fn recalculate_epic_status_inner(
     // Active sub-epic statuses
     let mut stmt = conn
         .prepare(
-            "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, \
+            "SELECT id, title, description, status, plan_path, sort_order, auto_dispatch, \
              parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, group_by_repo \
              FROM epics WHERE parent_epic_id = ?1 ORDER BY COALESCE(sort_order, id) ASC, id ASC",
         )

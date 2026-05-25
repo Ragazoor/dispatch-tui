@@ -13,7 +13,7 @@ async fn create_epic_minimal() {
         "tools/call",
         Some(json!({
             "name": "create_epic",
-            "arguments": { "title": "My Epic", "repo_path": "/repo" }
+            "arguments": { "title": "My Epic" }
         })),
     )
     .await;
@@ -24,7 +24,6 @@ async fn create_epic_minimal() {
     let epics = state.db.list_epics().await.unwrap();
     assert_eq!(epics.len(), 1);
     assert_eq!(epics[0].title, "My Epic");
-    assert_eq!(epics[0].repo_path, "/repo");
 }
 
 #[tokio::test]
@@ -37,7 +36,6 @@ async fn create_epic_with_all_fields() {
             "name": "create_epic",
             "arguments": {
                 "title": "Full Epic",
-                "repo_path": "/repo",
                 "description": "Epic desc"
             }
         })),
@@ -57,22 +55,7 @@ async fn create_epic_missing_title() {
         "tools/call",
         Some(json!({
             "name": "create_epic",
-            "arguments": { "repo_path": "/repo" }
-        })),
-    )
-    .await;
-    assert_error(&resp, "Invalid arguments");
-}
-
-#[tokio::test]
-async fn create_epic_missing_repo_path() {
-    let state = test_state().await;
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "create_epic",
-            "arguments": { "title": "No Repo" }
+            "arguments": {}
         })),
     )
     .await;
@@ -84,7 +67,7 @@ async fn get_epic_found() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("Get Me", "desc", "/repo", None)
+        .create_epic("Get Me", "desc", None)
         .await
         .unwrap();
 
@@ -100,7 +83,6 @@ async fn get_epic_found() {
     let text = extract_response_text(&resp);
     assert!(text.contains("Get Me"));
     assert!(text.contains("desc"));
-    assert!(text.contains("/repo"));
 }
 
 #[tokio::test]
@@ -123,7 +105,7 @@ async fn get_epic_shows_subtask_summary() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("With Tasks", "", "/repo", None)
+        .create_epic("With Tasks", "", None)
         .await
         .unwrap();
     let t1 = state
@@ -182,7 +164,7 @@ async fn get_epic_accepts_string_id() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("String ID", "", "/repo", None)
+        .create_epic("String ID", "", None)
         .await
         .unwrap();
 
@@ -222,12 +204,12 @@ async fn list_epics_with_items() {
     let state = test_state().await;
     state
         .db
-        .create_epic("Epic A", "desc a", "/repo", None)
+        .create_epic("Epic A", "desc a", None)
         .await
         .unwrap();
     state
         .db
-        .create_epic("Epic B", "desc b", "/repo", None)
+        .create_epic("Epic B", "desc b", None)
         .await
         .unwrap();
 
@@ -247,7 +229,7 @@ async fn list_epics_shows_subtask_counts() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("Tracked", "", "/repo", None)
+        .create_epic("Tracked", "", None)
         .await
         .unwrap();
     let t1 = state
@@ -303,12 +285,12 @@ async fn list_epics_excludes_archived() {
     let state = test_state().await;
     state
         .db
-        .create_epic("Active Epic", "desc", "/repo", None)
+        .create_epic("Active Epic", "desc", None)
         .await
         .unwrap();
     let archived_epic = state
         .db
-        .create_epic("Archived Epic", "desc", "/repo", None)
+        .create_epic("Archived Epic", "desc", None)
         .await
         .unwrap();
     state
@@ -339,7 +321,7 @@ async fn update_epic_title() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("Old Title", "", "/repo", None)
+        .create_epic("Old Title", "", None)
         .await
         .unwrap();
 
@@ -365,7 +347,7 @@ async fn update_epic_mark_done() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("To Finish", "", "/repo", None)
+        .create_epic("To Finish", "", None)
         .await
         .unwrap();
 
@@ -393,7 +375,7 @@ async fn update_epic_multiple_fields() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("Old", "old desc", "/repo", None)
+        .create_epic("Old", "old desc", None)
         .await
         .unwrap();
 
@@ -422,7 +404,7 @@ async fn update_epic_accepts_string_id() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("Str Epic", "", "/repo", None)
+        .create_epic("Str Epic", "", None)
         .await
         .unwrap();
 
@@ -447,7 +429,7 @@ async fn update_epic_plan() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("Planned Epic", "", "/repo", None)
+        .create_epic("Planned Epic", "", None)
         .await
         .unwrap();
 
@@ -478,7 +460,7 @@ async fn update_epic_no_fields_errors() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("Test", "", "/repo", None)
+        .create_epic("Test", "", None)
         .await
         .unwrap();
 
@@ -499,7 +481,7 @@ async fn update_epic_feed_command_set() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("Feed Epic", "", "/repo", None)
+        .create_epic("Feed Epic", "", None)
         .await
         .unwrap();
 
@@ -523,7 +505,7 @@ async fn update_epic_feed_command_clear() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("Feed Epic", "", "/repo", None)
+        .create_epic("Feed Epic", "", None)
         .await
         .unwrap();
     state
@@ -558,7 +540,7 @@ async fn update_epic_feed_command_absent_preserves_existing() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("Feed Epic", "", "/repo", None)
+        .create_epic("Feed Epic", "", None)
         .await
         .unwrap();
     state
@@ -590,7 +572,7 @@ async fn update_epic_feed_interval_secs_set() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("Feed Epic", "", "/repo", None)
+        .create_epic("Feed Epic", "", None)
         .await
         .unwrap();
 
@@ -614,7 +596,7 @@ async fn update_epic_feed_interval_secs_clear() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("Feed Epic", "", "/repo", None)
+        .create_epic("Feed Epic", "", None)
         .await
         .unwrap();
     state
@@ -649,7 +631,7 @@ async fn get_epic_shows_feed_command() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("Feed Epic", "", "/repo", None)
+        .create_epic("Feed Epic", "", None)
         .await
         .unwrap();
     state
@@ -694,7 +676,7 @@ async fn mcp_create_sub_epic() {
     // Create parent epic first
     let parent = state
         .db
-        .create_epic("Parent Epic", "desc", "/tmp", None)
+        .create_epic("Parent Epic", "desc", None)
         .await
         .unwrap();
 
@@ -738,7 +720,7 @@ async fn update_epic_group_by_repo() {
     let state = test_state().await;
     let epic = state
         .db
-        .create_epic("Test", "", "/repo", None)
+        .create_epic("Test", "", None)
         .await
         .unwrap();
 
@@ -766,12 +748,12 @@ async fn update_epic_parent_id_set() {
     let state = test_state().await;
     let parent = state
         .db
-        .create_epic("Parent", "", "/repo", None)
+        .create_epic("Parent", "", None)
         .await
         .unwrap();
     let child = state
         .db
-        .create_epic("Child", "", "/repo", None)
+        .create_epic("Child", "", None)
         .await
         .unwrap();
 
@@ -795,12 +777,12 @@ async fn update_epic_parent_id_clear() {
     let state = test_state().await;
     let parent = state
         .db
-        .create_epic("Parent", "", "/repo", None)
+        .create_epic("Parent", "", None)
         .await
         .unwrap();
     let child = state
         .db
-        .create_epic("Child", "", "/repo", Some(parent.id))
+        .create_epic("Child", "", Some(parent.id))
         .await
         .unwrap();
     assert_eq!(child.parent_epic_id, Some(parent.id));
@@ -828,12 +810,12 @@ async fn update_epic_parent_id_absent_preserves_existing() {
     let state = test_state().await;
     let parent = state
         .db
-        .create_epic("Parent", "", "/repo", None)
+        .create_epic("Parent", "", None)
         .await
         .unwrap();
     let child = state
         .db
-        .create_epic("Child", "", "/repo", Some(parent.id))
+        .create_epic("Child", "", Some(parent.id))
         .await
         .unwrap();
 
@@ -862,12 +844,12 @@ async fn update_epic_parent_id_cycle_returns_error() {
     let state = test_state().await;
     let a = state
         .db
-        .create_epic("A", "", "/repo", None)
+        .create_epic("A", "", None)
         .await
         .unwrap();
     let b = state
         .db
-        .create_epic("B", "", "/repo", Some(a.id))
+        .create_epic("B", "", Some(a.id))
         .await
         .unwrap();
 

@@ -751,7 +751,6 @@ impl<'a> ColumnLayout<'a> {
 pub struct EpicDraft {
     pub title: String,
     pub description: String,
-    pub repo_path: String,
     pub parent_epic_id: Option<EpicId>,
 }
 
@@ -850,7 +849,6 @@ mod tests {
             id: EpicId(id),
             title: format!("Epic {id}"),
             description: String::new(),
-            repo_path: "/repo".to_string(),
             status: TaskStatus::Backlog,
             plan_path: None,
             sort_order: None,
