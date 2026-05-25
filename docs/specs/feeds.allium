@@ -27,7 +27,7 @@ use "./core.allium" as core
 -- (e.g. calling `gh api`, scraping a dashboard). The dispatch runtime is
 -- only responsible for invocation, parsing, and persistence.
 
-concept FeedItem {
+value FeedItem {
     external_id: String       -- stable, unique-per-feed identifier (e.g. "pr:acme/app#42")
     title: String
     description: String

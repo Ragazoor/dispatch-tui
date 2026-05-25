@@ -78,7 +78,7 @@ rule CreateQuickTask {
             repo_path: repo_path,
             status: backlog,
             sub_status: core/SubStatus.default_for(backlog),
-            epic: if epic_id != null then core/Epic.find(epic_id) else null,
+            epic: if epic_id != null: core/Epic{id: epic_id} else: null,
             base_branch: detect_default_branch(repo_path),
             project_id: effective_project_id,
             created_at: now,
@@ -222,13 +222,13 @@ rule ReorderItem {
     -- direction: +1 (down) or -1 (up)
 
     let items = column_items(item)
-    let current_index = items.index_of(item)
+    let current_index = index_of(items, item)
     let target_index = current_index + direction
 
     requires: target_index >= 0
     requires: target_index < items.count
 
-    let target = items[target_index]
+    let target = element_at(items, target_index)
     let item_eff = item.sort_order ?? item.id
     let target_eff = target.sort_order ?? target.id
 
@@ -366,24 +366,18 @@ rule EditTask {
     ensures:
         let edited = EditorSession(task)
         if edited.title != "": task.title = edited.title
-    ensures:
         if edited.description != "": task.description = edited.description
-    ensures:
         if edited.repo_path != "": task.repo_path = edited.repo_path
-    ensures:
         if edited.status != null:
             task.status = edited.status
             task.sub_status = core/SubStatus.default_for(edited.status)
-    ensures:
         if edited.plan != "": task.plan_path = edited.plan
         else: task.plan_path = null
-    ensures:
         if edited.tag != "": task.tag = edited.tag
         else: task.tag = null
-    ensures:
         if edited.base_branch != "": task.base_branch = edited.base_branch
-    ensures: task.wrap_up_mode = edited.wrap_up_mode
-    ensures: task.updated_at = now
+        task.wrap_up_mode = edited.wrap_up_mode
+        task.updated_at = now
 
     @guidance
         -- Status changes via the editor bypass normal transition

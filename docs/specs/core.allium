@@ -398,12 +398,12 @@ entity TipsState {
 
 -- Tip is a runtime-only concept (embedded at compile time, never persisted).
 -- Tips are loaded from numbered markdown files in src/tips/ via include_str!.
-concept Tip {
+value Tip {
     id: Integer       -- numeric prefix from filename (e.g., 001 → 1)
     title: String     -- extracted from the first ## heading in the file
     body: String      -- everything after the first ## heading
 
-    is_new(state: TipsState): id > state.seen_up_to
+    is_new(state): id > state.seen_up_to
 }
 
 ------------------------------------------------------------
@@ -502,10 +502,10 @@ config {
 --   - The Default project (is_default = true) is a catch-all: selecting it
 --     shows all tasks and epics regardless of their project_id.
 
-concept VisualColumn {
+value VisualColumn {
     label: String
     parent_status: TaskStatus
-    sub_statuses: SubStatus[]
+    sub_statuses: List<SubStatus>
 
     -- A task belongs to this column when:
     --   task.status = parent_status and task.sub_status in sub_statuses
@@ -556,8 +556,8 @@ concept VisualColumn {
 --   - To navigate into an epic, the user first turns flattened mode
 --     off; epic cards then become visible and selectable.
 
-concept FlattenedView {
-    active: Bool
+value FlattenedView {
+    active: Boolean
 
     -- In flattened mode, the board renders only tasks in scope, never
     -- epics. In hierarchical mode (active = false), rendering follows
@@ -574,26 +574,26 @@ concept FlattenedView {
 
 -- == Only Active Filter ==
 
-rule only_active_filter:
-    When view.only_active is true, only tasks where tmux_window is set
-    are included in tasks_for_current_view. This filter is applied in
-    addition to the repo filter and project filter.
-    The filter is toggled via the [f] overlay's "Active sessions only"
-    row (cursor position 0, Space to toggle).
-    The filter is session-scoped and does not persist across app restarts.
+-- only_active_filter:
+--   When view.only_active is true, only tasks where tmux_window is set
+--   are included in tasks_for_current_view. This filter is applied in
+--   addition to the repo filter and project filter.
+--   The filter is toggled via the [f] overlay's "Active sessions only"
+--   row (cursor position 0, Space to toggle).
+--   The filter is session-scoped and does not persist across app restarts.
 
 -- == Cursor Selection Preservation ==
 
-rule selection_preservation:
-    When the cursor has an anchor (a task or epic ID) and column items are recomputed
-    (on any status change, task movement, filter change, or data refresh), the cursor
-    position is resolved by locating the anchor item in the new item list.
-
-    If the anchor item is found: the cursor moves to the item's new column and row,
-    following the item if it changed columns.
-
-    If the anchor item is not present (deleted or moved outside board scope): the cursor
-    clamps to the nearest valid position in the current column.
-
-    When the cursor is on the select-all column header (on_select_all = true), the anchor
-    is None and the header state is preserved across refreshes.
+-- selection_preservation:
+--   When the cursor has an anchor (a task or epic ID) and column items are recomputed
+--   (on any status change, task movement, filter change, or data refresh), the cursor
+--   position is resolved by locating the anchor item in the new item list.
+--
+--   If the anchor item is found: the cursor moves to the item's new column and row,
+--   following the item if it changed columns.
+--
+--   If the anchor item is not present (deleted or moved outside board scope): the cursor
+--   clamps to the nearest valid position in the current column.
+--
+--   When the cursor is on the select-all column header (on_select_all = true), the anchor
+--   is None and the header state is preserved across refreshes.

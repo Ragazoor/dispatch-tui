@@ -9,6 +9,14 @@
 use "./core.allium" as core
 
 ------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    active_threshold: Duration = 10.minutes
+}
+
+------------------------------------------------------------
 -- Rules
 ------------------------------------------------------------
 
@@ -16,21 +24,19 @@ use "./core.allium" as core
 
 rule ClassifyAgentActivity {
     -- Derives sub_status for running tasks from hook event timestamps.
-    -- ACTIVE_THRESHOLD = 2 minutes.
-    when: tick
-
-    requires: task.status = running
-    requires: task.sub_status not in {crashed, conflict}
-
-    ensures:
-        if task.last_notification_at > task.last_pre_tool_use_at:
-            task.sub_status = needs_input
-        else if now - task.last_pre_tool_use_at <= 2.minutes:
-            task.sub_status = active
-        else:
-            task.sub_status = stale
+    when: Tick()
+    for task in core/Tasks where status = running and tmux_window != null and sub_status not in {crashed, conflict}:
+        ensures:
+            if task.last_notification_at != null and (task.last_pre_tool_use_at = null or task.last_notification_at > task.last_pre_tool_use_at):
+                task.sub_status = needs_input
+            else if task.last_pre_tool_use_at != null and now - task.last_pre_tool_use_at <= config.active_threshold:
+                task.sub_status = active
+            else:
+                task.sub_status = stale
 
     @guidance
+        -- config.active_threshold (default 10 minutes) is the window after
+        -- the last PreToolUse hook before a task is considered Stale.
         -- Crashed and Conflict are orthogonal — set by DetectCrashedAgent
         -- and conflict detectors respectively, never overridden here.
         -- The wallclock Staleness enum (Fresh/Aging/Stale at 3d/7d) is
@@ -38,7 +44,7 @@ rule ClassifyAgentActivity {
         -- Every transition into running stamps last_pre_tool_use_at = now
         -- (DispatchTask on Backlog→Running, ResumeTask on resume, and the
         -- manual move handler on Review→Running) so this classifier returns
-        -- Active through the ACTIVE_THRESHOLD window before the agent's first
+        -- Active through the active_threshold window before the agent's first
         -- real PreToolUse hook fires. Without seeding on the manual Review→
         -- Running path, a task whose Stop hook cleared the timestamp would
         -- be classified Stale on the very next tick — and because the card
@@ -58,6 +64,8 @@ rule ClassifyAgentActivity {
         -- last_pre_tool_use_at is null (legacy pre-v50 rows, or a transient
         -- window before the seed write commits), the card renders just
         -- "stale" with no minute suffix rather than "stale · 0m".
+        -- Only tasks with a live tmux_window are classified (tasks without
+        -- one have no running agent to observe).
 }
 
 rule DetectCrashedAgent {
@@ -138,37 +146,13 @@ rule NotifyReview {
         -- stale entries do not suppress notifications after re-enabling.
 }
 
-rule ClearNeedsInput {
-    -- When HookPreToolUse fires, update_status_if(running, running) resets
-    -- sub_status to active via the auto-reset behavior.
-    when: HookFired(hook: pre_tool_use, task: task)
-
-    requires: task.sub_status = needs_input
-
-    ensures: task.sub_status = core/SubStatus.default_for(running)  -- i.e. active
-
-    @guidance
-        -- sub_status = needs_input is set by HookNotification when the agent
-        -- raises a notification. It is cleared when the agent resumes and
-        -- HookPreToolUse fires, which calls:
-        --   dispatch update <id> running
-        -- The update_status_if auto-reset sets sub_status = active.
-        -- This allows re-notification if the agent raises another notification.
-}
-
 -- == Hook-Based Status Transitions ==
 -- Claude Code hooks (PreToolUse, Stop, Notification) bridge the agent
 -- session lifecycle to task status. These rules describe the CLI hook
 -- script installed by `dispatch setup`.
 
 rule HookPreToolUse {
-    when: PreToolUse(task, tool_name)
-
-    -- Skip dispatch MCP tool calls: these are management operations
-    -- (get_task, wrap_up, update_task, etc.), not implementation work.
-    -- Without this filter, wrap-up fails because get_task and wrap_up
-    -- calls clobber review status before the handler can check it.
-    requires: not tool_name starts_with "mcp__dispatch__"
+    when: PreToolUse(task)
 
     ensures: task.status = running
     ensures: task.sub_status = core/SubStatus.default_for(running)
@@ -182,6 +166,11 @@ rule HookPreToolUse {
         -- but agents are never dispatched into done/archived worktrees.
         -- The sub_status reset to active (default for running) also
         -- clears needs_input when the agent resumes after a notification.
+        -- Filtering of dispatch MCP calls (mcp__dispatch__*) happens in
+        -- the shell hook script (task-status-hook) before calling
+        -- `dispatch hook`. The Rust service layer never sees the tool
+        -- name; it only receives the HookEventKind (PreToolUse,
+        -- Notification, Stop).
 }
 
 rule HookStop {
@@ -196,7 +185,7 @@ rule HookStop {
 }
 
 rule HookNotification {
-    when: HookFired(hook: notification, task: task)
+    when: Notification(task)
     requires: task.status = running
 
     ensures: task.sub_status = needs_input
