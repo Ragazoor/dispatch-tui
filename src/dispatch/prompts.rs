@@ -359,52 +359,6 @@ Do NOT make code changes.\n\
     )
 }
 
-pub(super) fn build_epic_planning_prompt(
-    task_id: TaskId,
-    task_title: &str,
-    task_description: &str,
-    epic: &EpicContext,
-) -> String {
-    let block = task_block(
-        task_id,
-        task_title,
-        task_description,
-        Some(epic),
-    );
-    let addendum = format!(
-        "Your goal is to explore the codebase, write an implementation plan, and break \
-it into work packages on the kanban board.\n\
-\n\
-Steps:\n\
-1. Explore the codebase to understand what needs to change.\n\
-2. Use /brainstorming to write the plan. When done, attach it to the epic by calling \
-`update_epic` with `epic_id={epic_id}` and `plan=<absolute path to plan file>`.\n\
-3. Create work packages from the plan using `create_task`. Work packages are kanban \
-tasks — do not confuse them with subtasks inside the plan document itself:\n\
-   - Set `epic_id={epic_id}` on every work package\n\
-   - Use `sort_order` to control execution order (1, 2, 3, \u{2026})\n\
-   - Work packages at the same sort_order in different repositories run in parallel\n\
-   - Work packages in the same repository must have different sort_order values\n\
-   - Set `repo_path` to the absolute path of the repository each work package targets\n\
-\n\
-After creating the work packages, confirm with the user before doing anything further.\n\
-\n\
-IMPORTANT: Do NOT start implementing. Your job ends after creating the work packages.",
-        epic_id = epic.epic_id,
-    );
-
-    format!(
-        "You are planning an epic.\n\
-\n\
-{block}\n\
-\n\
-{addendum}\n\
-\n\
-{trailing}",
-        trailing = trailing_block(),
-    )
-}
-
 /// Maximum total learnings injected into a dispatch prompt via RAG.
 pub const DISPATCH_INJECTION_CAP: usize = 5;
 

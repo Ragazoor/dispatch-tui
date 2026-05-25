@@ -2,12 +2,12 @@ use anyhow::{Context, Result};
 use std::fs;
 
 use crate::git::detect_default_branch;
-use crate::models::{expand_tilde, DispatchResult, EpicId, ResumeResult, Task, TaskId, TaskStatus};
+use crate::models::{expand_tilde, DispatchResult, ResumeResult, Task, TaskId, TaskStatus};
 use crate::process::ProcessRunner;
 use crate::tmux;
 
 use super::prompts::{
-    build_epic_planning_prompt, build_prompt, build_quick_dispatch_prompt, build_research_prompt,
+    build_prompt, build_quick_dispatch_prompt, build_research_prompt,
     build_tmux_window_name, rebase_preamble, EpicContext, LearningInjections,
     PromptContext, DISPATCH_PLUGIN_DIR,
 };
@@ -146,25 +146,6 @@ pub fn quick_dispatch_agent(
                 &ctx,
             )
         },
-        runner,
-        Some(&task.base_branch),
-        None,
-    )
-}
-
-pub fn epic_planning_agent(
-    task: &Task,
-    epic_id: EpicId,
-    epic_title: &str,
-    runner: &dyn ProcessRunner,
-) -> Result<DispatchResult> {
-    let epic = EpicContext {
-        epic_id,
-        epic_title: epic_title.to_string(),
-    };
-    dispatch_with_prompt(
-        task,
-        || build_epic_planning_prompt(task.id, &task.title, &task.description, &epic),
         runner,
         Some(&task.base_branch),
         None,

@@ -1,6 +1,6 @@
 //! Epic side-effect commands.
 
-use crate::models::{Epic, EpicId, TaskStatus};
+use crate::models::{EpicId, TaskStatus};
 
 use super::super::types::EpicDraft;
 
@@ -10,9 +10,6 @@ use super::super::types::EpicDraft;
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum EpicCommand {
-    Dispatch {
-        epic: Epic,
-    },
     Insert(EpicDraft),
     Delete(EpicId),
     Persist {

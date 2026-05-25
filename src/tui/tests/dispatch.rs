@@ -608,17 +608,18 @@ fn crashed_card_with_no_window_shows_detached_not_crashed() {
 }
 
 #[test]
-fn d_key_on_backlog_epic_dispatches_epic() {
+fn d_key_on_backlog_epic_no_plan_shows_cannot_dispatch() {
     let mut app = make_app_with_epic_selected(); // epic at row 1 in Backlog
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('d'))));
-    assert_eq!(cmds.len(), 1);
-    assert!(
-        matches!(cmds[0], Command::Epic(crate::tui::commands::EpicCommand::Dispatch { ref epic }) if epic.id == EpicId(10))
+    assert!(cmds.is_empty());
+    assert_eq!(
+        app.status.message.as_deref(),
+        Some("Cannot dispatch an epic")
     );
 }
 
 #[test]
-fn d_key_in_epic_view_with_no_subtasks_dispatches_epic() {
+fn d_key_in_epic_view_with_no_subtasks_shows_cannot_dispatch() {
     let mut app = App::new(vec![]);
     let epic = make_epic(10);
     app.board.epics = vec![epic];
@@ -626,21 +627,24 @@ fn d_key_in_epic_view_with_no_subtasks_dispatches_epic() {
         EpicId(10),
     )));
 
-    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::Epic(crate::tui::commands::EpicCommand::Dispatch { ref epic }) if epic.id == EpicId(10))));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('d'))));
+    assert!(cmds.is_empty());
+    assert_eq!(
+        app.status.message.as_deref(),
+        Some("Cannot dispatch an epic")
+    );
 }
 
 #[test]
-fn dispatch_epic_on_backlog_epic_produces_command() {
+fn dispatch_epic_on_backlog_epic_no_plan_shows_cannot_dispatch() {
     let mut app = make_app_with_epic_selected(); // epic at row 1, Backlog column
     let cmds = app.update(Message::Epic(crate::tui::messages::EpicMessage::Dispatch(
         EpicId(10),
     )));
-    assert_eq!(cmds.len(), 1);
-    assert!(
-        matches!(cmds[0], Command::Epic(crate::tui::commands::EpicCommand::Dispatch { ref epic }) if epic.id == EpicId(10))
+    assert!(cmds.is_empty());
+    assert_eq!(
+        app.status.message.as_deref(),
+        Some("Cannot dispatch an epic")
     );
 }
 
@@ -961,7 +965,7 @@ fn dispatch_epic_with_backlog_subtasks_dispatches_first_by_sort_order() {
 }
 
 #[test]
-fn dispatch_epic_no_subtasks_falls_back_to_planning() {
+fn dispatch_epic_no_subtasks_shows_cannot_dispatch() {
     let mut app = make_app();
 
     let epic = make_epic(1);
@@ -972,11 +976,11 @@ fn dispatch_epic_no_subtasks_falls_back_to_planning() {
         EpicId(1),
     )));
 
-    // Should fall back to planning dispatch
-    assert!(cmds.iter().any(|c| matches!(
-        c,
-        Command::Epic(crate::tui::commands::EpicCommand::Dispatch { .. })
-    )));
+    assert!(cmds.is_empty());
+    assert_eq!(
+        app.status.message.as_deref(),
+        Some("Cannot dispatch an epic")
+    );
 }
 
 #[test]
@@ -1016,9 +1020,12 @@ fn dispatch_epic_no_plan_with_backlog_subtask_does_not_create_planning() {
     let cmds = app.update(Message::Epic(crate::tui::messages::EpicMessage::Dispatch(
         EpicId(1),
     )));
-    // Should NOT create planning subtask since subtasks already exist
+    // Should NOT dispatch since there is no plan
     assert!(cmds.is_empty());
-    assert!(app.status.message.as_deref().unwrap().contains("no plan"));
+    assert_eq!(
+        app.status.message.as_deref(),
+        Some("Cannot dispatch an epic")
+    );
 }
 
 #[test]

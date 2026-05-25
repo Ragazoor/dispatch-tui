@@ -1558,19 +1558,19 @@ fn handle_key_e_in_tag_input_does_not_set_a_tag() {
 }
 
 #[test]
-fn handle_key_normal_dispatch_in_epic_view_with_no_items() {
+fn handle_key_normal_dispatch_in_epic_view_with_no_items_shows_cannot_dispatch() {
     let mut app = App::new(vec![]);
     app.board.epics = vec![make_epic(10)];
     app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
         EpicId(10),
     )));
-    // No subtasks, cursor on empty column
-    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
-    // Should dispatch the epic itself
-    assert!(cmds.iter().any(|c| matches!(
-        c,
-        Command::Epic(crate::tui::commands::EpicCommand::Dispatch { .. })
-    )));
+    // No subtasks, cursor on empty column, epic has no plan
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('d'))));
+    assert!(cmds.is_empty());
+    assert_eq!(
+        app.status.message.as_deref(),
+        Some("Cannot dispatch an epic")
+    );
 }
 
 #[test]

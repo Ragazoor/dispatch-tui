@@ -188,20 +188,8 @@ impl App {
                 }
             }
         } else {
-            // No plan — only spawn planning subtask if epic has no active subtasks
-            let has_subtasks = self
-                .board
-                .tasks
-                .iter()
-                .any(|t| t.epic_id == Some(id) && t.status != TaskStatus::Archived);
-            if has_subtasks {
-                self.set_status("Epic has subtasks but no plan".to_string());
-                vec![]
-            } else {
-                vec![Command::Epic(crate::tui::commands::EpicCommand::Dispatch {
-                    epic: epic.clone(),
-                })]
-            }
+            self.set_status("Cannot dispatch an epic".to_string());
+            vec![]
         }
     }
 

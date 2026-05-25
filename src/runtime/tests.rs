@@ -757,36 +757,6 @@ async fn exec_finish_conflict_sends_failed() {
 }
 
 #[tokio::test]
-async fn exec_dispatch_epic_creates_planning_subtask() {
-    let (rt, mut app) = test_runtime().await;
-
-    // Create an epic in the DB
-    let epic = rt
-        .database
-        .create_epic("Auth redesign", "Rework login", None)
-        .await
-        .unwrap();
-
-    rt.exec_dispatch_epic(&mut app, epic.clone()).await;
-
-    // Planning subtask was created in DB and added to app
-    assert_eq!(app.tasks().len(), 1);
-    let task = &app.tasks()[0];
-    assert_eq!(task.title, "Plan: Auth redesign");
-    assert_eq!(task.epic_id, Some(epic.id));
-    assert_eq!(task.status, models::TaskStatus::Backlog);
-
-    // Verify description contains epic info
-    assert!(task.description.contains("Auth redesign"));
-    assert!(task.description.contains("Rework login"));
-
-    // Verify the task is also in the DB
-    let db_tasks = rt.database.list_all().await.unwrap();
-    assert_eq!(db_tasks.len(), 1);
-    assert_eq!(db_tasks[0].title, "Plan: Auth redesign");
-}
-
-#[tokio::test]
 async fn exec_finish_not_on_main_sends_failed() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, mut rx) = mpsc::unbounded_channel();

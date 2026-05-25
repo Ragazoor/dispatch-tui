@@ -220,7 +220,6 @@ async fn dispatch_epic(
 ) {
     use crate::tui::commands::EpicCommand::*;
     match cmd {
-        Dispatch { epic } => rt.exec_dispatch_epic(app, epic).await,
         Insert(draft) => {
             rt.exec_insert_epic(
                 app,

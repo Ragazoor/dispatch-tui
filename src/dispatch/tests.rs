@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::prompts::{
-    allium_instruction, build_epic_planning_prompt, build_prompt, build_quick_dispatch_prompt,
+    allium_instruction, build_prompt, build_quick_dispatch_prompt,
     build_tmux_window_name, epic_preamble, mcp_tools_instruction, plan_and_attach_instruction,
     rebase_preamble, task_block, tdd_instruction, wrap_up_instruction, EpicContext,
     LearningInjections, PromptContext,
@@ -581,15 +581,7 @@ const SHARED_TRAILING_LINES: &[&str] = &[
     "/wrap-up",                      // wrap_up_instruction (universal)
 ];
 
-fn epic_ctx() -> EpicContext {
-    EpicContext {
-        epic_id: EpicId(7),
-        epic_title: "My Epic".to_string(),
-    }
-}
-
-fn all_aligned_prompts() -> [(&'static str, String); 4] {
-    let epic = epic_ctx();
+fn all_aligned_prompts() -> [(&'static str, String); 3] {
     [
         (
             "standard-no-plan",
@@ -621,15 +613,6 @@ fn all_aligned_prompts() -> [(&'static str, String); 4] {
                 "",
                 None,
                 &PromptContext::default(),
-            ),
-        ),
-        (
-            "epic-planning",
-            build_epic_planning_prompt(
-                TaskId(42),
-                "Plan: My Epic",
-                "Planning subtask for epic",
-                &epic,
             ),
         ),
     ]
@@ -664,52 +647,6 @@ fn every_prompt_uses_task_block_format() {
             "{name} prompt should have `Description:`"
         );
     }
-}
-
-#[test]
-fn epic_planning_prompt_uses_task_block_not_epic_header() {
-    let epic = epic_ctx();
-    let prompt = build_epic_planning_prompt(
-        TaskId(42),
-        "Plan: My Epic",
-        "Planning subtask",
-        &epic,
-    );
-    assert!(
-        prompt.starts_with("You are planning an epic."),
-        "epic-planning prompt should open with the planning preamble, got: {}",
-        prompt.lines().next().unwrap_or("(empty)")
-    );
-    assert!(
-        prompt.contains("Task:"),
-        "epic-planning should reuse task_block (Task: header), not custom Epic: header"
-    );
-    assert!(
-        !prompt.contains("\nEpic:\n  ID:"),
-        "epic-planning must not use the legacy `Epic:` header in the task block"
-    );
-    assert!(
-        prompt.contains("EpicId: 7"),
-        "epic-planning should surface the epic id via the task_block EpicId line"
-    );
-    assert!(
-        prompt.contains("ID: 42"),
-        "epic-planning should use the planning subtask's real id, not a placeholder"
-    );
-}
-
-#[test]
-fn epic_planning_prompt_includes_work_package_steps_and_no_implement_guard() {
-    let epic = epic_ctx();
-    let prompt = build_epic_planning_prompt(TaskId(1), "Plan", "Desc", &epic);
-    assert!(prompt.contains("create_task"), "should mention create_task");
-    assert!(prompt.contains("update_epic"), "should mention update_epic");
-    assert!(prompt.contains("sort_order"), "should mention sort_order");
-    assert!(prompt.contains("repo_path"), "should mention repo_path");
-    assert!(
-        prompt.contains("Do NOT") || prompt.contains("do not start implementing"),
-        "epic-planning should keep the do-not-implement guard"
-    );
 }
 
 #[test]
@@ -944,29 +881,6 @@ fn quick_dispatch_agent_uses_default_permission_mode() {
     assert!(
         !send_keys_arg.contains("--permission-mode"),
         "quick_dispatch_agent should use default (auto) mode — no --permission-mode flag, got: {send_keys_arg}"
-    );
-}
-
-#[test]
-fn epic_planning_agent_uses_default_permission_mode() {
-    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
-
-    let mock = MockProcessRunner::new(vec![
-        MockProcessRunner::ok(), // tmux new-window
-        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
-        MockProcessRunner::ok(), // tmux set-hook
-        MockProcessRunner::ok(), // tmux send-keys -l
-        MockProcessRunner::ok(), // tmux send-keys Enter
-    ]);
-
-    let task = make_task(&repo_path);
-    epic_planning_agent(&task, EpicId(7), "Big Epic", &mock).unwrap();
-
-    let calls = mock.recorded_calls();
-    let send_keys_arg = find_call_arg(&calls, 3, "claude");
-    assert!(
-        !send_keys_arg.contains("--permission-mode"),
-        "epic_planning_agent should use default (auto) mode — no --permission-mode flag, got: {send_keys_arg}"
     );
 }
 
@@ -1427,53 +1341,6 @@ fn check_pr_status_empty_output_returns_error() {
 }
 
 // --- finish_task tests ---
-
-#[test]
-fn epic_planning_prompt_contains_epic_context() {
-    let epic = EpicContext {
-        epic_id: EpicId(42),
-        epic_title: "Redesign auth".to_string(),
-    };
-    let prompt = build_epic_planning_prompt(
-        TaskId(99),
-        "Plan: Redesign auth",
-        "Rework the login flow",
-        &epic,
-    );
-    assert!(prompt.contains("EpicId: 42"));
-    assert!(prompt.contains("Redesign auth"));
-    assert!(prompt.contains("Rework the login flow"));
-    assert!(prompt.contains("Do NOT start implementing"));
-    // Work package instructions
-    assert!(
-        prompt.contains("create_task"),
-        "prompt should instruct using create_task"
-    );
-    assert!(
-        prompt.contains("sort_order"),
-        "prompt should explain sort_order for ordering"
-    );
-    assert!(
-        prompt.contains("update_epic"),
-        "prompt should instruct attaching plan to epic"
-    );
-    assert!(
-        prompt.contains("repo_path"),
-        "prompt should explain repo_path for parallelization"
-    );
-    assert!(
-        prompt.contains("epic_id=42"),
-        "update_epic call should include the resolved epic id"
-    );
-    assert!(
-        prompt.contains("/brainstorm"),
-        "prompt should direct agent to use the brainstorm skill"
-    );
-    assert!(
-        prompt.contains("work package"),
-        "prompt should use 'work package' terminology"
-    );
-}
 
 #[test]
 fn finish_task_happy_path() {
