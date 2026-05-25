@@ -224,14 +224,14 @@ impl TuiRuntime {
         }
     }
 
-    pub(super) fn exec_kill_tmux_window(&self, window: String) {
+    pub(super) fn exec_kill_tmux_window(&self, window: String) -> tokio::task::JoinHandle<()> {
         let runner = self.runner.clone();
 
         tokio::task::spawn_blocking(move || {
             if let Err(e) = tmux::kill_window(&window, &*runner) {
                 tracing::warn!(%window, "failed to kill tmux window (best-effort): {e:#}");
             }
-        });
+        })
     }
 
     pub(super) fn exec_focus_split_pane(&self, pane_id: String) {

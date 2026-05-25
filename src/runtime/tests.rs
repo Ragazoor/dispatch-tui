@@ -558,9 +558,9 @@ async fn exec_check_window_sends_nothing_when_present() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock);
 
-    rt.exec_check_window(TaskId(1), "task-1".to_string());
-
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    rt.exec_check_window(TaskId(1), "task-1".to_string())
+        .await
+        .unwrap();
     assert!(
         rx.try_recv().is_err(),
         "Expected no message but received one"
@@ -1284,10 +1284,9 @@ async fn exec_kill_tmux_window_failure_does_not_send_error() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock);
 
-    rt.exec_kill_tmux_window("task-99".to_string());
-
-    // Give the spawned task time to complete
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    rt.exec_kill_tmux_window("task-99".to_string())
+        .await
+        .unwrap();
 
     // Channel should be empty — no error message sent
     assert!(rx.try_recv().is_err(), "Expected no message, but got one");
@@ -1775,10 +1774,9 @@ async fn exec_open_in_browser_calls_xdg_open() {
     ]));
     let rt = make_runtime(db, tx, mock.clone());
 
-    rt.exec_open_in_browser("https://github.com/org/repo/pull/1".into());
-
-    // Give the spawn_blocking time to run
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    rt.exec_open_in_browser("https://github.com/org/repo/pull/1".into())
+        .await
+        .unwrap();
     let calls = mock.recorded_calls();
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].0, "xdg-open");
@@ -1796,9 +1794,9 @@ async fn exec_kill_tmux_window_calls_kill() {
     ]));
     let rt = make_runtime(db, tx, mock.clone());
 
-    rt.exec_kill_tmux_window("task-1".into());
-
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    rt.exec_kill_tmux_window("task-1".into())
+        .await
+        .unwrap();
     let calls = mock.recorded_calls();
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].0, "tmux");
@@ -1815,10 +1813,9 @@ async fn exec_kill_tmux_window_failure_is_best_effort() {
     )]));
     let rt = make_runtime(db, tx, mock);
 
-    rt.exec_kill_tmux_window("gone-window".into());
-
-    // Give the spawned task time to complete
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    rt.exec_kill_tmux_window("gone-window".into())
+        .await
+        .unwrap();
 
     // Kill-window failure is best-effort — no error message sent
     assert!(rx.try_recv().is_err(), "Expected no message, but got one");
@@ -2593,10 +2590,11 @@ async fn exec_check_pr_status_closed_sends_no_message() {
     ]));
     let rt = make_runtime(db, tx, mock);
 
-    rt.exec_check_pr_status(TaskId(1), "https://github.com/org/repo/pull/42".to_string());
+    rt.exec_check_pr_status(TaskId(1), "https://github.com/org/repo/pull/42".to_string())
+        .await
+        .unwrap();
 
     // Closed PRs intentionally produce no message
-    tokio::time::sleep(Duration::from_millis(100)).await;
     assert!(
         rx.try_recv().is_err(),
         "Expected no message for closed PR, but got one"

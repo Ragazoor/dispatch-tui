@@ -283,7 +283,7 @@ impl TuiRuntime {
         });
     }
 
-    pub(super) fn exec_check_window(&self, id: TaskId, window: String) {
+    pub(super) fn exec_check_window(&self, id: TaskId, window: String) -> tokio::task::JoinHandle<()> {
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
 
@@ -293,7 +293,7 @@ impl TuiRuntime {
                     crate::tui::messages::TaskMessage::WindowGone(id),
                 ));
             }
-        });
+        })
     }
 
     pub(super) async fn exec_save_repo_path(&self, app: &mut App, path: String) {

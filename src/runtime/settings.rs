@@ -53,13 +53,13 @@ impl TuiRuntime {
         }
     }
 
-    pub(super) fn exec_open_in_browser(&self, url: String) {
+    pub(super) fn exec_open_in_browser(&self, url: String) -> tokio::task::JoinHandle<()> {
         let runner = self.runner.clone();
         tokio::task::spawn_blocking(move || {
             if let Err(e) = runner.run("xdg-open", &[&url]) {
                 tracing::warn!("Failed to open browser: {e}");
             }
-        });
+        })
     }
 
     pub(super) async fn exec_save_tips_state(

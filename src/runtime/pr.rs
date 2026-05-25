@@ -1,7 +1,7 @@
 use super::*;
 
 impl TuiRuntime {
-    pub(super) fn exec_check_pr_status(&self, id: TaskId, pr_url: String) {
+    pub(super) fn exec_check_pr_status(&self, id: TaskId, pr_url: String) -> tokio::task::JoinHandle<()> {
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
 
@@ -23,7 +23,7 @@ impl TuiRuntime {
                     tracing::warn!(task_id = id.0, "PR status check failed: {e}");
                 }
             }
-        });
+        })
     }
 
     pub(super) fn exec_merge_pr(&self, id: TaskId, pr_url: String) {

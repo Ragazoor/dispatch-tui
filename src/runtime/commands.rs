@@ -181,7 +181,7 @@ async fn dispatch_task(
             vec![]
         }
         CheckWindow { id, window } => {
-            rt.exec_check_window(id, window);
+            drop(rt.exec_check_window(id, window));
             vec![]
         }
         Resume { task } => {
@@ -197,7 +197,7 @@ async fn dispatch_task(
             vec![]
         }
         KillTmuxWindow { window } => {
-            rt.exec_kill_tmux_window(window);
+            drop(rt.exec_kill_tmux_window(window));
             vec![]
         }
         PatchSubStatus { id, sub_status } => {
@@ -258,7 +258,7 @@ fn dispatch_system(rt: &super::TuiRuntime, cmd: crate::tui::commands::SystemComm
             body,
             urgent,
         } => rt.exec_send_notification(&title, &body, urgent),
-        OpenInBrowser { url } => rt.exec_open_in_browser(url),
+        OpenInBrowser { url } => drop(rt.exec_open_in_browser(url)),
     }
 }
 
@@ -266,7 +266,7 @@ fn dispatch_system(rt: &super::TuiRuntime, cmd: crate::tui::commands::SystemComm
 fn dispatch_pr(rt: &super::TuiRuntime, cmd: crate::tui::commands::PrCommand) {
     use crate::tui::commands::PrCommand::*;
     match cmd {
-        CheckStatus { id, pr_url } => rt.exec_check_pr_status(id, pr_url),
+        CheckStatus { id, pr_url } => drop(rt.exec_check_pr_status(id, pr_url)),
         Merge { id, pr_url } => rt.exec_merge_pr(id, pr_url),
     }
 }
