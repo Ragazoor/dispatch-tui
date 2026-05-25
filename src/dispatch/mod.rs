@@ -180,3 +180,5 @@ pub fn resolve_repo_path(github_repo: &str, known_paths: &[String]) -> Option<St
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod prompts_snapshots;

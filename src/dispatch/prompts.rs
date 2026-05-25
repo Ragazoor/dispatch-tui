@@ -233,66 +233,24 @@ making any changes."
     )
 }
 
-/// Dependabot PR review guidance, inlined into the unified dispatch prompt
-/// when `task.tag == Dependabot`. The agent vets a dependency-bump PR and
-/// auto-approves/merges if clearly safe, otherwise asks the user. It does
-/// NOT call /wrap-up — the task is auto-cleaned when the PR merges.
+/// Substitute a `{{KEY}}` placeholder in a prompt template loaded via
+/// `include_str!`. Trims the trailing newline added by editors so the
+/// inlined block composes cleanly with surrounding `format!` blocks.
+fn render_template(template: &str, key: &str, value: &str) -> String {
+    template
+        .trim_end_matches('\n')
+        .replace(&format!("{{{{{key}}}}}"), value)
+}
+
+/// Dependabot PR review guidance, loaded from `prompts/dependabot.md`.
+/// The agent vets a dependency-bump PR and auto-approves/merges if clearly
+/// safe, otherwise asks the user. It does NOT call /wrap-up — the task is
+/// auto-cleaned when the PR merges.
 fn dependabot_review_addendum(task_id: TaskId) -> String {
-    format!(
-        "This is a Dependabot PR review, not a code-edit task. Do NOT edit \
-files, write a plan, or call /wrap-up — the task is auto-cleaned when the \
-PR merges (or the user takes over).\n\
-\n\
-1. Extract the PR URL and number from the task description.\n\
-2. If the task's pr_url is empty, call update_task(task_id={tid}, pr_url=<URL>).\n\
-3. Verify the PR is dependency-bump-only:\n\
-   - Run: gh pr view <number> --repo <owner/repo> --json author,commits,files\n\
-   - Run: gh pr diff <number> --repo <owner/repo>\n\
-   - Every commit author login (under `.commits[].authors[].login` in the \
-JSON above) must be `app/dependabot` or `dependabot[bot]`.\n\
-   - Every changed file path must match one of: Cargo.toml, Cargo.lock, \
-package.json, package-lock.json, pnpm-lock.yaml, yarn.lock, requirements*.txt, \
-pyproject.toml, uv.lock, go.mod, go.sum, Gemfile, Gemfile.lock, composer.json, \
-composer.lock, .github/workflows/*.\n\
-   - If either check fails, jump to step 7 and ASK the user.\n\
-4. Parse the bump from the PR title (format: `Bump <pkg> from <X.Y.Z> to <A.B.C>`). \
-Classify as patch / minor / major using semver.\n\
-   - 0.x.y bumps: treat `0.X.y -> 0.X.(y+1)` as patch and `0.X.* -> 0.(X+1).*` \
-as major (0.x is unstable; minor in 0.x can break).\n\
-5. Check CI: gh pr checks <number> --repo <owner/repo>.\n\
-   - All checks passing -> continue to step 6.\n\
-   - Any check pending -> jump to step 7 and ASK whether to wait.\n\
-   - Any check failing -> jump to step 7 and ASK with the failure summary.\n\
-6. Decide by bump kind:\n\
-   - patch: auto-approve + merge (step 6a).\n\
-   - minor: try to find the changelog, in order:\n\
-       a. gh release view v<A.B.C> --repo <pkg-owner/pkg-repo> (and any \
-intermediate tags between <X.Y.Z> and <A.B.C>).\n\
-       b. The package repo's CHANGELOG.md between the two versions.\n\
-       c. The GitHub compare view if neither exists.\n\
-     Scan release notes for tokens (case-insensitive): BREAKING, breaking \
-change, removed, deprecat, incompatible, migration, major rewrite.\n\
-     - Changelog found AND no tokens matched -> auto-approve + merge (step 6a).\n\
-     - No changelog found OR any token matched -> jump to step 7.\n\
-   - major: read the changes carefully, post a PR comment summarising \
-breaking changes via `gh pr comment <number> --repo <owner/repo> --body \
-\"<summary>\"`, then jump to step 7 (always ASK).\n\
-6a. Auto-approve + merge:\n\
-   - gh pr review <number> --repo <owner/repo> --approve --body \"Auto-approved \
-by dispatch dependabot agent: <patch|minor> bump, CI green, dep-only, \
-changelog OK.\"\n\
-   - gh pr merge <number> --repo <owner/repo> --squash --auto\n\
-   - Note: --auto requires the repo to have branch protection with required \
-checks; without it, the PR merges immediately.\n\
-   - Done. Do NOT call /wrap-up — the task is auto-cleaned on merge.\n\
-7. Ask the user:\n\
-   - Write ONE direct question that includes: the bump kind, the dep-only \
-verdict, CI status summary, changelog summary or its absence, and the \
-specific reason you are not auto-merging.\n\
-   - Call update_task(task_id={tid}, sub_status=\"needs_input\") to flag the \
-task on the kanban board.\n\
-   - Stop and wait for the user's reply. Do NOT call /wrap-up.",
-        tid = task_id.0,
+    render_template(
+        include_str!("prompts/dependabot.md"),
+        "TASK_ID",
+        &task_id.0.to_string(),
     )
 }
 

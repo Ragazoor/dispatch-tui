@@ -1,0 +1,49 @@
+---
+source: src/dispatch/prompts_snapshots.rs
+expression: prompt
+---
+Your task is:
+Task:
+  ID: 42
+  Title: Bump serde from 1.0.195 to 1.0.197
+  Description: https://github.com/example/repo/pull/42
+
+This is a Dependabot PR review, not a code-edit task. Do NOT edit files, write a plan, or call /wrap-up — the task is auto-cleaned when the PR merges (or the user takes over).
+
+1. Extract the PR URL and number from the task description.
+2. If the task's pr_url is empty, call update_task(task_id=42, pr_url=<URL>).
+3. Verify the PR is dependency-bump-only:
+   - Run: gh pr view <number> --repo <owner/repo> --json author,commits,files
+   - Run: gh pr diff <number> --repo <owner/repo>
+   - Every commit author login (under `.commits[].authors[].login` in the JSON above) must be `app/dependabot` or `dependabot[bot]`.
+   - Every changed file path must match one of: Cargo.toml, Cargo.lock, package.json, package-lock.json, pnpm-lock.yaml, yarn.lock, requirements*.txt, pyproject.toml, uv.lock, go.mod, go.sum, Gemfile, Gemfile.lock, composer.json, composer.lock, .github/workflows/*.
+   - If either check fails, jump to step 7 and ASK the user.
+4. Parse the bump from the PR title (format: `Bump <pkg> from <X.Y.Z> to <A.B.C>`). Classify as patch / minor / major using semver.
+   - 0.x.y bumps: treat `0.X.y -> 0.X.(y+1)` as patch and `0.X.* -> 0.(X+1).*` as major (0.x is unstable; minor in 0.x can break).
+5. Check CI: gh pr checks <number> --repo <owner/repo>.
+   - All checks passing -> continue to step 6.
+   - Any check pending -> jump to step 7 and ASK whether to wait.
+   - Any check failing -> jump to step 7 and ASK with the failure summary.
+6. Decide by bump kind:
+   - patch: auto-approve + merge (step 6a).
+   - minor: try to find the changelog, in order:
+       a. gh release view v<A.B.C> --repo <pkg-owner/pkg-repo> (and any intermediate tags between <X.Y.Z> and <A.B.C>).
+       b. The package repo's CHANGELOG.md between the two versions.
+       c. The GitHub compare view if neither exists.
+     Scan release notes for tokens (case-insensitive): BREAKING, breaking change, removed, deprecat, incompatible, migration, major rewrite.
+     - Changelog found AND no tokens matched -> auto-approve + merge (step 6a).
+     - No changelog found OR any token matched -> jump to step 7.
+   - major: read the changes carefully, post a PR comment summarising breaking changes via `gh pr comment <number> --repo <owner/repo> --body "<summary>"`, then jump to step 7 (always ASK).
+6a. Auto-approve + merge:
+   - gh pr review <number> --repo <owner/repo> --approve --body "Auto-approved by dispatch dependabot agent: <patch|minor> bump, CI green, dep-only, changelog OK."
+   - gh pr merge <number> --repo <owner/repo> --squash --auto
+   - Note: --auto requires the repo to have branch protection with required checks; without it, the PR merges immediately.
+   - Done. Do NOT call /wrap-up — the task is auto-cleaned on merge.
+7. Ask the user:
+   - Write ONE direct question that includes: the bump kind, the dep-only verdict, CI status summary, changelog summary or its absence, and the specific reason you are not auto-merging.
+   - Call update_task(task_id=42, sub_status="needs_input") to flag the task on the kanban board.
+   - Stop and wait for the user's reply. Do NOT call /wrap-up.
+
+The dispatch MCP tools are available — use them to query and update this task (get_task, update_task).
+
+Knowledge base: when anything is unclear, call `query_learnings` to check the knowledge base before guessing or asking. Use `/learnings` to record useful findings or upvote entries that helped.

@@ -50,12 +50,16 @@ cargo test tui::tests::snapshots          # ratatui buffer rendering tests
 
 Snapshots live in `src/tui/tests/snapshots/` and render to a 120×40 `TestBackend`. **Do not change the backend size** — it breaks all existing diffs.
 
+Agent prompt snapshots live in `src/dispatch/snapshots/` and lock the rendered output of every `build_*_prompt` variant. Agent prompt bodies live in `src/dispatch/prompts/` as markdown files.
+
 To accept intentional UI changes:
 
 ```bash
 cargo insta review                                  # interactive
 INSTA_UPDATE=always cargo test tui::tests::snapshots # auto-accept
+INSTA_UPDATE=always cargo test dispatch::prompts_snapshots # auto-accept prompt snapshots
 rm src/tui/tests/snapshots/*.snap.new                # always clean up
+rm src/dispatch/snapshots/*.snap.new                 # always clean up
 ```
 
 ### Where new tests go
@@ -68,6 +72,7 @@ rm src/tui/tests/snapshots/*.snap.new                # always clean up
 | MCP JSON-RPC handler behaviour | `src/mcp/handlers/tests/` |
 | Full task/epic lifecycle | `tests/` (integration tests) |
 | Domain-type invariants | inline in the owning module |
+| Agent prompt rendering (all variants) | `src/dispatch/prompts_snapshots.rs` |
 
 Property tests live alongside unit tests in a nested `mod property_tests` block.
 
