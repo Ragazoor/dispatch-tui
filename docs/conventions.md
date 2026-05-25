@@ -64,6 +64,17 @@ Used in `UpdateTaskParams` for `pr_url`, `worktree`, and `tmux_window`. When add
 
 The service layer bridges the two patterns before writing a patch: `FieldUpdate::Set(v)` becomes `Some(Some(v))` and `FieldUpdate::Clear` becomes `Some(None)`. When adding a new nullable field, use `FieldUpdate` in `UpdateTaskParams`/`UpdateEpicParams` and double-Option in the corresponding patch struct.
 
+### OwnedTaskPatch (and OwnedCreateTaskRequest)
+
+`db_call` closures must be `Send + 'static`, so borrowed fields from `TaskPatch<'_>` cannot
+cross the boundary. `OwnedTaskPatch` and `OwnedCreateTaskRequest` in `src/db/queries/tasks.rs`
+are owned mirrors that exist solely to satisfy this constraint. Convert via the `From` impl:
+`OwnedTaskPatch::from(patch)`.
+
+**Maintenance:** every field added to `TaskPatch` or `CreateTaskRequest` in `src/db/mod.rs`
+must be added to the corresponding owned mirror **and** its `From` impl. There is no
+compile-time check — a missing field will silently omit the column from the DB write.
+
 ## DB trait narrowing — take the narrowest sub-trait you need
 
 `TaskStore` is a supertrait of `TaskAndEpicStore + PrStore + AlertStore + SettingsStore`. New consumers should hold the narrowest sub-trait they actually call:

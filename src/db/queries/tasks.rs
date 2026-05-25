@@ -39,7 +39,13 @@ impl<'a> From<CreateTaskRequest<'a>> for OwnedCreateTaskRequest {
     }
 }
 
-/// Owned mirror of [`TaskPatch`] suitable for moving into a `db_call` closure.
+/// Owned mirror of [`TaskPatch`] suitable for moving into a `db_call` closure
+/// (the closure must be `Send + 'static`, so borrowed fields cannot cross the boundary).
+///
+/// **Maintenance:** keep every field in sync with [`TaskPatch`] in `src/db/mod.rs`.
+/// The [`From<&TaskPatch<'_>>`] implementation below is the single conversion point —
+/// if you add a field to `TaskPatch`, add it here and in the `From` impl too.
+/// There is no compile-time guarantee of sync; the convention enforces it.
 #[derive(Debug, Default)]
 struct OwnedTaskPatch {
     status: Option<TaskStatus>,
