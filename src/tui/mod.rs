@@ -504,9 +504,10 @@ impl App {
     /// In board view, epics are included (positioned by derived status).
     /// In epic view, only subtasks are included (no epic cards).
     ///
-    /// **Test-only.** Passes `stats = None`, which causes epic sort order to be derived by
-    /// cloning subtasks on every call. Use [`Self::column_items_for_status_with_stats`] with
-    /// pre-computed stats in production render paths to avoid per-frame allocations.
+    /// Passes `stats = None`, so epic sort order is derived by cloning subtasks on each call.
+    /// Suitable for keystroke handlers and navigation paths where the cost is bounded by a
+    /// single user action. For render-hot paths, use [`Self::column_items_for_status_with_stats`]
+    /// with pre-computed stats to avoid per-frame allocations.
     pub fn column_items_for_status(&self, status: TaskStatus) -> Vec<ColumnItem<'_>> {
         self.column_items_for_status_with_stats(status, None)
     }
