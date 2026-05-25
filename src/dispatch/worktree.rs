@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
+use std::time::Duration;
 
 use crate::models::{expand_tilde, slugify, Task};
 use crate::process::ProcessRunner;
@@ -48,6 +49,7 @@ pub(crate) fn ensure_dispatch_dir_and_gitignore(worktree: &Path) -> Result<()> {
         .with_context(|| format!("failed to write {}", gitignore_path.display()))
 }
 
+#[derive(Debug)]
 pub(super) struct ProvisionResult {
     pub(super) worktree_path: String,
     pub(super) tmux_window: String,
@@ -55,10 +57,15 @@ pub(super) struct ProvisionResult {
 
 /// Create a git worktree and open a tmux window.
 /// Shared by both `dispatch_agent` and `brainstorm_agent`.
+///
+/// `timeout` is passed to `run_with_timeout` for long-running git subprocesses
+/// (`git fetch`, `git worktree add`). Use [`crate::process::SUBPROCESS_TIMEOUT`]
+/// in production; pass a short duration in tests.
 pub(super) fn provision_worktree(
     task: &Task,
     runner: &dyn ProcessRunner,
     base_branch: Option<&str>,
+    timeout: Duration,
 ) -> Result<ProvisionResult> {
     let repo_path = expand_tilde(&task.repo_path);
     let slug = slugify(&task.title);
@@ -80,7 +87,7 @@ pub(super) fn provision_worktree(
         // back to the local branch and continue — dispatch is not blocked.
         let start_point: Option<String> = if let Some(base) = base_branch {
             let fetch_ok = runner
-                .run("git", &["-C", &repo_path, "fetch", "origin", base])
+                .run_with_timeout("git", &["-C", &repo_path, "fetch", "origin", base], timeout)
                 .map(|o| o.status.success())
                 .unwrap_or(false);
             if fetch_ok {
@@ -109,7 +116,7 @@ pub(super) fn provision_worktree(
             args.push(sp.as_str());
         }
         let output = runner
-            .run("git", &args)
+            .run_with_timeout("git", &args, timeout)
             .context("failed to run git worktree add")?;
         anyhow::ensure!(
             output.status.success(),

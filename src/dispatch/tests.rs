@@ -9,9 +9,10 @@ use super::worktree::provision_worktree;
 use super::*;
 
 use crate::models::{EpicId, Task, TaskId, TaskStatus};
-use crate::process::{exit_fail, MockProcessRunner};
+use crate::process::{exit_fail, MockProcessRunner, SUBPROCESS_TIMEOUT};
 use chrono::Utc;
 use std::process::Output;
+use std::time::Duration;
 
 // -----------------------------------------------------------------------
 // Shared helper tests
@@ -897,7 +898,7 @@ fn provision_worktree_creates_new_when_dir_missing() {
     ]);
 
     let task = make_task(&repo_path);
-    let result = provision_worktree(&task, &mock, None).unwrap();
+    let result = provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT).unwrap();
 
     let calls = mock.recorded_calls();
     assert_eq!(calls[0].0, "git", "first call should be git worktree add");
@@ -921,7 +922,7 @@ fn provision_worktree_skips_git_when_dir_exists() {
     ]);
 
     let task = make_task(&repo_path);
-    let result = provision_worktree(&task, &mock, None).unwrap();
+    let result = provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT).unwrap();
 
     let calls = mock.recorded_calls();
     assert!(
@@ -946,7 +947,7 @@ fn provision_worktree_with_base_branch_passes_start_point() {
     ]);
 
     let task = make_task(&repo_path);
-    let result = provision_worktree(&task, &mock, Some("99-prev-task")).unwrap();
+    let result = provision_worktree(&task, &mock, Some("99-prev-task"), SUBPROCESS_TIMEOUT).unwrap();
 
     let calls = mock.recorded_calls();
     // call[0] = fetch
@@ -980,7 +981,7 @@ fn provision_worktree_fetches_origin_before_create() {
     ]);
 
     let task = make_task(&repo_path);
-    provision_worktree(&task, &mock, Some("main")).unwrap();
+    provision_worktree(&task, &mock, Some("main"), SUBPROCESS_TIMEOUT).unwrap();
 
     let calls = mock.recorded_calls();
     // call[0] = git fetch origin main
@@ -1018,7 +1019,7 @@ fn provision_worktree_fetch_failure_falls_back_to_local() {
 
     let task = make_task(&repo_path);
     // Should NOT return an error — soft fail
-    provision_worktree(&task, &mock, Some("main")).unwrap();
+    provision_worktree(&task, &mock, Some("main"), SUBPROCESS_TIMEOUT).unwrap();
 
     let calls = mock.recorded_calls();
     // call[0] = fetch (failed)
@@ -1049,7 +1050,7 @@ fn provision_worktree_fetch_uses_custom_base_branch() {
     ]);
 
     let task = make_task(&repo_path);
-    provision_worktree(&task, &mock, Some("develop")).unwrap();
+    provision_worktree(&task, &mock, Some("develop"), SUBPROCESS_TIMEOUT).unwrap();
 
     let calls = mock.recorded_calls();
     assert!(
@@ -1077,7 +1078,7 @@ fn provision_worktree_skips_fetch_when_dir_exists() {
     ]);
 
     let task = make_task(&repo_path);
-    provision_worktree(&task, &mock, Some("main")).unwrap();
+    provision_worktree(&task, &mock, Some("main"), SUBPROCESS_TIMEOUT).unwrap();
 
     let calls = mock.recorded_calls();
     assert!(
@@ -1820,7 +1821,7 @@ fn provision_worktree_does_not_create_dispatch_dir() {
     ]);
 
     let task = make_task(&repo_path);
-    provision_worktree(&task, &mock, None).unwrap();
+    provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT).unwrap();
 
     assert!(
         !worktree_dir.join(".dispatch").exists(),
@@ -1837,7 +1838,7 @@ fn provision_worktree_git_add_fails_returns_error() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("fatal: not a git repository")]);
 
     let task = make_task(&repo_path);
-    let result = provision_worktree(&task, &mock, None);
+    let result = provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT);
 
     assert!(result.is_err(), "git worktree add failure should propagate");
 }
@@ -2110,6 +2111,70 @@ fn branch_from_worktree_returns_none_for_empty() {
 #[test]
 fn branch_from_worktree_returns_none_for_root() {
     assert_eq!(branch_from_worktree("/"), None);
+}
+
+// ---------------------------------------------------------------------------
+// provision_worktree — timeout tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn provision_worktree_kills_git_fetch_on_timeout_and_falls_back() {
+    // git fetch times out → process is killed and treated as soft-fail (fallback to local branch).
+    // Before fix (using run): mock sleeps 100ms then succeeds → start_point = "origin/main".
+    // After fix (using run_with_timeout): timeout error caught → falls back to local "main".
+    let (_dir, repo_path) = make_test_repo();
+    let short_timeout = Duration::from_millis(10);
+
+    let mock = MockProcessRunner::new_with_delays(vec![
+        (Some(Duration::from_millis(100)), MockProcessRunner::ok()), // git fetch → timeout (killed)
+        (None, MockProcessRunner::ok()),                             // git worktree add (local fallback)
+        (None, MockProcessRunner::ok()),                             // tmux new-window
+        (None, MockProcessRunner::ok()),                             // tmux set-option
+        (None, MockProcessRunner::ok()),                             // tmux set-hook
+    ]);
+
+    let task = make_task(&repo_path);
+    // Soft-fail: provision_worktree succeeds despite fetch timeout
+    let result = provision_worktree(&task, &mock, Some("main"), short_timeout);
+    assert!(result.is_ok(), "fetch timeout should soft-fail, got: {result:?}");
+
+    // After fetch timeout, worktree add must use local "main" (not "origin/main")
+    let calls = mock.recorded_calls();
+    let worktree_call = calls
+        .iter()
+        .find(|c| c.1.contains(&"worktree".to_string()))
+        .expect("expected git worktree add call");
+    assert_eq!(
+        worktree_call.1.last().unwrap(),
+        "main",
+        "after fetch timeout, start point should be local 'main', got: {:?}",
+        worktree_call.1
+    );
+}
+
+#[test]
+fn provision_worktree_kills_git_worktree_add_on_timeout() {
+    // git worktree add times out → hard error (not soft-fail).
+    // No base_branch → no git fetch; first runner call is git worktree add.
+    // Before fix (using run): mock sleeps 100ms then succeeds → returns Ok().
+    // After fix (using run_with_timeout): timeout error propagates → Err().
+    let (_dir, repo_path) = make_test_repo();
+    let short_timeout = Duration::from_millis(10);
+
+    let mock = MockProcessRunner::new_with_delays(vec![(
+        Some(Duration::from_millis(100)), // delay > short_timeout → timeout error
+        MockProcessRunner::ok(),
+    )]);
+
+    let task = make_task(&repo_path);
+    let result = provision_worktree(&task, &mock, None, short_timeout);
+    assert!(result.is_err(), "expected error when git worktree add times out");
+    // anyhow error chain: use {:#} to traverse all causes
+    let msg = format!("{:#}", result.unwrap_err());
+    assert!(
+        msg.contains("timed out") || msg.contains("killed"),
+        "expected timeout in error chain, got: {msg}"
+    );
 }
 
 // ---------------------------------------------------------------------------

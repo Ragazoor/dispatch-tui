@@ -3,7 +3,7 @@ use std::fs;
 
 use crate::git::detect_default_branch;
 use crate::models::{expand_tilde, DispatchResult, ResumeResult, Task, TaskId, TaskStatus};
-use crate::process::ProcessRunner;
+use crate::process::{ProcessRunner, SUBPROCESS_TIMEOUT};
 use crate::tmux;
 
 use super::prompts::{
@@ -49,7 +49,7 @@ fn dispatch_with_prompt(
         }
     };
 
-    let provision = provision_worktree(task, runner, Some(resolved))?;
+    let provision = provision_worktree(task, runner, Some(resolved), SUBPROCESS_TIMEOUT)?;
 
     let prompt = make_prompt();
     let full_prompt = format!(
