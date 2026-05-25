@@ -143,7 +143,7 @@ impl App {
                 if matches!(self.board.view_mode, ViewMode::Epic { .. }) {
                     self.update(Message::Epic(crate::tui::messages::EpicMessage::Exit))
                 } else {
-                    vec![]
+                    self.update(Message::System(crate::tui::messages::SystemMessage::Quit))
                 }
             }
 

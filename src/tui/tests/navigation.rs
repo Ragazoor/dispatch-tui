@@ -75,6 +75,15 @@ fn quit_enters_confirm_mode() {
 }
 
 #[test]
+fn pressing_q_on_board_enters_confirm_quit() {
+    let mut app = make_app();
+    assert_eq!(app.input.mode, InputMode::Normal);
+    app.handle_key(make_key(KeyCode::Char('q')));
+    assert!(!app.should_quit);
+    assert_eq!(app.input.mode, InputMode::ConfirmQuit);
+}
+
+#[test]
 fn navigate_column_clamps() {
     let mut app = make_app();
     // Backlog column (1) is the leftmost; navigating further left is a no-op.
