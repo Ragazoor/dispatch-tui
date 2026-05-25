@@ -9,9 +9,9 @@ use crate::tmux;
 use super::prompts::build_tmux_window_name;
 use super::stderr_str;
 
-/// Directory inside each worktree where dispatch stores per-worktree artefacts.
-/// Always added to `<worktree>/.gitignore` so a casual
-/// `git add .` from an agent does not stage these files.
+/// Directory inside a repo where dispatch stores artefacts (e.g. `rag.db` for semantic search).
+/// Created on demand when actively used, not for every dispatched worktree.
+/// Added to `.gitignore` when first created so agents cannot accidentally stage it.
 pub(crate) const DISPATCH_DIR: &str = ".dispatch";
 const GITIGNORE_FILE: &str = ".gitignore";
 const DISPATCH_GITIGNORE_LINE: &str = ".dispatch/";
@@ -115,14 +115,6 @@ pub(super) fn provision_worktree(
             output.status.success(),
             "git worktree add failed: {}",
             stderr_str(&output)
-        );
-    }
-
-    if let Err(e) = ensure_dispatch_dir_and_gitignore(Path::new(&worktree_path)) {
-        tracing::warn!(
-            error = ?e,
-            %worktree_path,
-            "failed to set up .dispatch/ directory"
         );
     }
 
