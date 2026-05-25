@@ -16,8 +16,8 @@ rule EditEpic {
     when: EditEpic(epic)
 
     -- Opens $EDITOR with a structured file containing the epic's
-    -- title, description, and repo_path. The file uses "--- SECTION ---"
-    -- delimiters (TITLE, DESCRIPTION, REPO_PATH).
+    -- title and description. The file uses "--- SECTION ---"
+    -- delimiters (TITLE, DESCRIPTION).
     -- The user edits the file; on save, fields are parsed back.
     -- Empty fields retain their previous values.
     -- Status, plan_path, sort_order and auto_dispatch are not editable
@@ -28,8 +28,6 @@ rule EditEpic {
         if edited.title != "": epic.title = edited.title
     ensures:
         if edited.description != "": epic.description = edited.description
-    ensures:
-        if edited.repo_path != "": epic.repo_path = edited.repo_path
 
     @guidance
         -- Unlike EditTask, the epic editor does not expose status.
@@ -49,13 +47,12 @@ rule EditEpic {
 -- == Epic Lifecycle ==
 
 rule CreateEpic {
-    when: CreateEpic(title, description?, repo_path, sort_order?, parent?,
+    when: CreateEpic(title, description?, sort_order?, parent?,
                      feed_command?, feed_interval_secs?)
 
     ensures: core/Epic.created(
         title: title,
         description: description,
-        repo_path: repo_path,
         status: backlog,
         sort_order: sort_order,
         parent: parent,
@@ -67,80 +64,12 @@ rule CreateEpic {
 
     @guidance
         -- When parent is provided, this creates a sub-epic nested inside
-        -- the given parent. The TUI sets repo_path to the parent's repo_path
-        -- by default. Root epics (parent = null) appear on the main board;
+        -- the given parent. Root epics (parent = null) appear on the main board;
         -- sub-epics appear only inside their parent's epic view.
         --
         -- This grouping is bypassed when the board is in flattened mode
         -- (see core/FlattenedView): epic cards are hidden and every
         -- descendant task surfaces directly in its status column.
-}
-
-rule RecordRepoPathFromEpic {
-    when: CreateEpic(_, _, repo_path: path, _, _)
-
-    ensures: core/SavedRepoPath.created_or_updated(
-        path: path,
-        last_used: now
-    )
-
-    @guidance
-        -- Mirrors RecordRepoPath in dispatch.allium but fires on the
-        -- TUI-driven CreateEpic trigger. Same upsert semantics: update
-        -- last_used if the path exists, create if not.
-        -- Note: MCP-created epics (via the create_epic tool) do not
-        -- record the repo path. Only the TUI's epic creation flow
-        -- emits the save.
-}
-
-rule DispatchEpicPlanning {
-    when: DispatchEpic(epic)
-
-    requires: epic.status = backlog
-    requires: not epic.has_plan
-    requires: epic.active_subtasks.count = 0
-
-    -- Creates a planning subtask and dispatches a planning agent.
-    -- The planning agent brainstorms and writes an implementation plan
-    -- for this epic.
-    ensures:
-        let planning_task = core/Task.created(
-            title: "Plan: " + epic.title,
-            description: "Planning subtask for epic: " + epic.title + "\n\n" + epic.description,
-            repo_path: epic.repo_path,
-            status: backlog,
-            sub_status: core/SubStatus.default_for(backlog),
-            epic: epic,
-            created_at: now,
-            updated_at: now
-        )
-        AgentLaunched(task: planning_task, mode: epic_planning)
-
-    @guidance
-        -- The planning task is dispatched directly via epic_planning
-        -- mode, bypassing the standard DispatchTask flow. This is
-        -- because the planning task has no plan — the agent's job is
-        -- to create one. The dispatch provisions a worktree and tmux
-        -- window and transitions the task to Running.
-        -- The "no active children" guard in the TUI looks only at
-        -- non-archived subtasks (tasks), not sub-epics. Sub-epics of
-        -- an unplanned epic do not currently block planning dispatch.
-        -- When an epic has no plan but already has active subtasks,
-        -- neither this rule nor DispatchEpicSubtask applies. The TUI
-        -- shows "Epic has subtasks but no plan" without taking any
-        -- action.
-        --
-        -- Prompt: build_epic_planning_prompt produces a prompt that
-        -- shares the unified task skeleton (preamble + task_block +
-        -- addendum + tdd + allium + mcp_tools + wrap_up) with all
-        -- other dispatched agents. The task_block surfaces the
-        -- planning subtask's id/title/description plus its EpicId,
-        -- so the agent has a clean reference to the parent epic. The
-        -- mode-specific bits are: preamble "You are planning an
-        -- epic." and a work-package-creation addendum that lists the
-        -- explore → /brainstorming → attach via update_epic →
-        -- create_task work-package steps and ends with an explicit
-        -- "do NOT implement" guard.
 }
 
 rule DispatchEpicSubtask {
@@ -345,7 +274,7 @@ rule DeleteEpic {
 -- == MCP Epic Tools ==
 
 rule CreateEpicViaMcp {
-    when: McpCreateEpic(title, repo_path, description?, sort_order?,
+    when: McpCreateEpic(title, description?, sort_order?,
                         parent_epic_id?, project_id?)
 
     -- parent_epic_id, when given, must refer to an existing epic
@@ -364,7 +293,6 @@ rule CreateEpicViaMcp {
     ensures: core/Epic.created(
         title: title,
         description: description,
-        repo_path: repo_path,
         status: backlog,
         sort_order: sort_order,
         parent_epic_id: parent_epic_id,
@@ -401,7 +329,7 @@ rule GetEpicViaMcp {
     ensures: EpicRetrieved(epic_id)
 
     @guidance
-        -- Returns the epic's core fields (title, description, repo_path,
+        -- Returns the epic's core fields (title, description,
         -- status, plan_path, sort_order, feed_command, feed_interval_secs,
         -- created_at, updated_at) plus a "Subtasks: D/T done" line
         -- where D counts direct subtasks with status = done and T is
@@ -429,11 +357,11 @@ rule ListEpicsViaMcp {
 }
 
 rule UpdateEpicViaMcp {
-    when: McpUpdateEpic(epic, title?, description?, status?, plan?, sort_order?, repo_path?,
+    when: McpUpdateEpic(epic, title?, description?, status?, plan?, sort_order?,
                         project_id?, feed_command?, feed_interval_secs?, parent_epic_id?)
 
     requires: title != null or description != null or status != null
-              or plan != null or sort_order != null or repo_path != null
+              or plan != null or sort_order != null
               or project_id != null or feed_command != omitted
               or feed_interval_secs != omitted or parent_epic_id != omitted
 
@@ -465,8 +393,6 @@ rule UpdateEpicViaMcp {
     ensures:
         if sort_order != null: epic.sort_order = sort_order
     ensures:
-        if repo_path != null: epic.repo_path = repo_path
-    ensures:
         if project_id != null: epic.project_id = project_id
     ensures:
         -- feed_command supports three states: omitted (no change), a string
@@ -494,8 +420,6 @@ rule UpdateEpicViaMcp {
         -- explicitly.
         -- The auto_dispatch flag is not exposed via the MCP update
         -- tool; it is toggled only from the TUI through ToggleAutoDispatch.
-        -- repo_path is expanded through expand_tilde before being
-        -- stored (so "~/proj" becomes "$HOME/proj").
         -- project_id must refer to an existing project; an unknown ID
         -- returns a -32602 validation error.
         -- feed_command and feed_interval_secs use triple-state JSON

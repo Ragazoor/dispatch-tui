@@ -204,7 +204,6 @@ entity Task {
 entity Epic {
     title: String
     description: String
-    repo_path: String
     status: TaskStatus
     plan_path: String?    -- filesystem path to the implementation plan file
     sort_order: Integer?
