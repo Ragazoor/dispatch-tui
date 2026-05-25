@@ -1,7 +1,7 @@
 //! First-run setup: MCP config merging, plugin installation (hooks, skills, commands).
 //!
 //! Split into submodules:
-//! - `config` — Claude Code MCP config + permissions read/write/merge
+//! - `config` — Claude Code MCP config read/write/merge
 //! - `plugins` — embedded plugin install (skills, slash commands, hooks, example feed script)
 //! - `hooks` — tests for the embedded hook scripts (the install path lives in `plugins`)
 
@@ -19,10 +19,7 @@ use crate::db::Database;
 use crate::process::RealProcessRunner;
 use crate::tmux;
 
-pub use config::{
-    merge_mcp_config, merge_permissions, remove_mcp_config, remove_permissions, MergeResult,
-    PermissionsMergeResult,
-};
+pub use config::{merge_mcp_config, remove_mcp_config, MergeResult};
 pub use plugins::{install_example_script, install_plugin, remove_plugin, seed_feed_epics};
 
 // ---------------------------------------------------------------------------
@@ -202,33 +199,7 @@ pub async fn run_setup(port: u16, yes: bool, db_path: &Path) -> Result<()> {
         any_changes = true;
     }
 
-    // 2. Permissions
-    let settings_path = claude_dir.join("settings.json");
-    let existing_settings = read_json_file(&settings_path)?;
-    let perms_result = merge_permissions(existing_settings);
-    if perms_result.added_count > 0 {
-        if yes
-            || confirm(&format!(
-                "Add {} dispatch tool permission(s) to ~/.claude/settings.json?",
-                perms_result.added_count
-            ))?
-        {
-            write_json_file(&settings_path, &perms_result.value)?;
-            println!(
-                "Permissions: added {} MCP tool permission(s) to ~/.claude/settings.json",
-                perms_result.added_count
-            );
-            any_changes = true;
-        } else {
-            println!("Permissions: skipped");
-        }
-    } else {
-        println!(
-            "Permissions: all MCP tool permissions already present in ~/.claude/settings.json"
-        );
-    }
-
-    // 3. Plugin (hooks, skills, commands)
+    // 2. Plugin (hooks, skills, commands)
     if plugins::plugin_needs_update()? {
         if yes || confirm("Install dispatch plugin (skills, hooks, commands) to ~/.claude/plugins/local/dispatch/?")? {
             install_plugin()?;
@@ -273,7 +244,7 @@ pub async fn run_setup(port: u16, yes: bool, db_path: &Path) -> Result<()> {
         println!("Plugin: dispatch plugin already up to date");
     }
 
-    // 4. Tmux focus-events
+    // 3. Tmux focus-events
     let runner = RealProcessRunner;
     if !tmux::focus_events_enabled(&runner) {
         if yes || confirm("Enable tmux focus-events? (will run `tmux set-option -g focus-events on` and add `set -g focus-events on` to ~/.tmux.conf)")? {
@@ -306,7 +277,6 @@ pub fn run_uninstall(yes: bool, purge: bool) -> Result<()> {
     let claude_dir = claude_dir()?;
     let mcp_path = user_global_config_path()?;
     let legacy_mcp_path = claude_dir.join(".mcp.json");
-    let settings_path = claude_dir.join("settings.json");
     let plugin_path = plugins::plugin_dir()?;
     let db_path = crate::default_db_path();
 
@@ -320,10 +290,6 @@ pub fn run_uninstall(yes: bool, purge: bool) -> Result<()> {
     eprintln!(
         "  Legacy MCP:  mcpServers.dispatch from {} (if present)",
         legacy_mcp_path.display()
-    );
-    eprintln!(
-        "  Permissions: mcp__dispatch__* from {}",
-        settings_path.display()
     );
     if purge {
         eprintln!("  Database:    {}", db_path.display());
@@ -368,14 +334,11 @@ pub fn run_uninstall(yes: bool, purge: bool) -> Result<()> {
         Err(e) => eprintln!("Warning: failed to clean up legacy MCP config: {e}"),
     }
 
-    match remove_permissions(&settings_path) {
-        Ok(true) => {
-            println!("Removed dispatch permissions");
-            any_removed = true;
-        }
-        Ok(false) => println!("No dispatch permissions found, skipping"),
-        Err(e) => eprintln!("Warning: failed to update permissions: {e}"),
-    }
+    // Note: ~/.claude/settings.json is intentionally not touched. Dispatch no
+    // longer manages permissions in that file — it is user-owned config. Users
+    // who ran an older `dispatch setup` may have stale mcp__dispatch__* entries
+    // in settings.json; those are inert once the MCP server is removed and can
+    // be cleaned up manually.
 
     if purge {
         if db_path.exists() {
@@ -590,5 +553,22 @@ mod tests {
 
         let removed = remove_database(&db_path).unwrap();
         assert!(!removed);
+    }
+
+    #[test]
+    fn setup_does_not_write_settings_json() {
+        // Regression guard: the setup flow must not create or modify settings.json.
+        // That file is user-owned config; dispatch must not add permissions to it.
+        let dir = tempfile::tempdir().unwrap();
+        let claude_json = dir.path().join(".claude.json");
+        let legacy = dir.path().join(".mcp.json");
+        let settings = dir.path().join("settings.json");
+
+        apply_mcp_setup(&claude_json, &legacy, 3142, true).unwrap();
+
+        assert!(
+            !settings.exists(),
+            "setup must not create settings.json; permissions are user-managed"
+        );
     }
 }
