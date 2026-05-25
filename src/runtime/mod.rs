@@ -226,8 +226,8 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
     tracing::info!(port, db = %db_path.display(), "TUI started, MCP server on port {port}");
 
     let mut runtime = TuiRuntime {
-        task_svc: crate::service::TaskService::new(database.clone()),
-        epic_svc: crate::service::EpicService::new(database.clone()),
+        task_svc: Arc::new(crate::service::TaskService::new(database.clone())),
+        epic_svc: Arc::new(crate::service::EpicService::new(database.clone())),
         feed_runner: Some(crate::feed::FeedRunner::new(
             database.clone(),
             feed_notify_tx,
@@ -310,8 +310,8 @@ struct TuiRuntime {
     // AlertStore, SettingsStore). See docs/conventions.md §"DB trait narrowing" for the
     // narrowing discipline applied in TaskService and EpicService.
     database: Arc<dyn db::TaskStore>,
-    task_svc: crate::service::TaskService,
-    epic_svc: crate::service::EpicService,
+    task_svc: Arc<dyn crate::service::TaskServiceApi>,
+    epic_svc: Arc<dyn crate::service::EpicServiceApi>,
     msg_tx: mpsc::UnboundedSender<Message>,
     runner: Arc<dyn ProcessRunner>,
     /// Holds the in-flight pop-out editor session, if any. `None` means no

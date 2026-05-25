@@ -69,8 +69,7 @@ pub(crate) async fn handle_update_task(
     }
     let fields_display = params.updated_field_names().join(", ");
 
-    let svc = state.task_service();
-    match svc.update_task(params).await {
+    match state.task_svc.update_task(params).await {
         Ok(result) => {
             state.notify_task_changed(TaskId(parsed.task_id));
             let nudge = if result.was_pr_finalisation {
@@ -120,8 +119,8 @@ pub(crate) async fn handle_create_task(
         }
     };
 
-    let svc = state.task_service();
-    match svc
+    match state
+        .task_svc
         .create_task(CreateTaskParams {
             title: parsed.title,
             description: parsed.description,
@@ -158,8 +157,7 @@ pub(crate) async fn handle_get_task(
     };
     tracing::info!(task_id = parsed.task_id, "MCP get_task");
 
-    let svc = state.task_service();
-    match svc.get_task(TaskId(parsed.task_id)).await {
+    match state.task_svc.get_task(TaskId(parsed.task_id)).await {
         Ok(task) => {
             let epic_titles = super::build_epic_titles(state).await;
             let text = super::format_task_detail(&task, &epic_titles);
@@ -198,8 +196,8 @@ pub(crate) async fn handle_list_tasks(
 
     let epic_id = parsed.epic_id.map(EpicId).or(derived_epic_id);
 
-    let svc = state.task_service();
-    match svc
+    match state
+        .task_svc
         .list_tasks(ListTasksFilter {
             statuses: status_filter,
             epic_id,

@@ -71,8 +71,8 @@ fn make_runtime(
 ) -> TuiRuntime {
     let (feed_tx, _) = mpsc::unbounded_channel();
     TuiRuntime {
-        task_svc: crate::service::TaskService::new(db.clone()),
-        epic_svc: crate::service::EpicService::new(db.clone()),
+        task_svc: Arc::new(crate::service::TaskService::new(db.clone())),
+        epic_svc: Arc::new(crate::service::EpicService::new(db.clone())),
         feed_runner: Some(crate::feed::FeedRunner::new(
             db.clone(),
             feed_tx,

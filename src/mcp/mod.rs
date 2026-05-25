@@ -15,7 +15,7 @@ use crate::db;
 use crate::models::{EpicId, TaskId};
 use crate::process::ProcessRunner;
 use crate::service::embeddings::EmbeddingService;
-use crate::service::TaskService;
+use crate::service::{EpicService, EpicServiceApi, TaskService, TaskServiceApi};
 
 /// Events sent from the MCP server to the TUI runtime.
 #[derive(Debug)]
@@ -41,6 +41,8 @@ pub(crate) struct ExitToken {
 
 pub struct McpState {
     pub db: Arc<dyn db::TaskStore>,
+    pub task_svc: Arc<dyn TaskServiceApi>,
+    pub epic_svc: Arc<dyn EpicServiceApi>,
     /// When set, MCP sends events after mutations to trigger TUI updates.
     pub notify_tx: Option<mpsc::UnboundedSender<McpEvent>>,
     /// Process runner shared with TuiRuntime for executing git/tmux operations.
@@ -63,8 +65,12 @@ impl McpState {
         embedding_service: Arc<EmbeddingService>,
         data_dir: std::path::PathBuf,
     ) -> Self {
+        let task_svc: Arc<dyn TaskServiceApi> = Arc::new(TaskService::new(db.clone()));
+        let epic_svc: Arc<dyn EpicServiceApi> = Arc::new(EpicService::new(db.clone()));
         Self {
             db,
+            task_svc,
+            epic_svc,
             notify_tx,
             runner,
             embedding_service,
@@ -119,9 +125,6 @@ impl McpState {
         token
     }
 
-    pub fn task_service(&self) -> TaskService {
-        TaskService::new(self.db.clone())
-    }
 }
 
 pub fn router(

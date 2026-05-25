@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
 use crate::models::{EpicId, TaskStatus};
-use crate::service::{CreateEpicParams, EpicService, ServiceError, UpdateEpicParams};
+use crate::service::{CreateEpicParams, ServiceError, UpdateEpicParams};
 
 use super::types::{
     deserialize_flexible_i64, deserialize_nullable_flexible_i64, deserialize_nullable_string,
@@ -72,8 +72,8 @@ pub(super) async fn handle_create_epic(
     };
     tracing::info!(title = %parsed.title, "MCP create_epic");
 
-    let svc = EpicService::new(state.db.clone());
-    match svc
+    match state
+        .epic_svc
         .create_epic(CreateEpicParams {
             title: parsed.title,
             description: parsed.description,
@@ -107,8 +107,7 @@ pub(super) async fn handle_get_epic(
     };
     tracing::info!(epic_id = parsed.epic_id, "MCP get_epic");
 
-    let svc = EpicService::new(state.db.clone());
-    match svc.get_epic_with_subtasks(EpicId(parsed.epic_id)).await {
+    match state.epic_svc.get_epic_with_subtasks(EpicId(parsed.epic_id)).await {
         Ok((epic, subtasks)) => {
             let done_count = subtasks
                 .iter()
@@ -157,8 +156,7 @@ pub(super) async fn handle_list_epics(
 ) -> JsonRpcResponse {
     tracing::info!("MCP list_epics");
 
-    let svc = EpicService::new(state.db.clone());
-    match svc.list_epics_with_progress().await {
+    match state.epic_svc.list_epics_with_progress().await {
         Ok(epics) => {
             if epics.is_empty() {
                 return JsonRpcResponse::ok(
@@ -234,8 +232,7 @@ pub(super) async fn handle_update_epic(
         .map(String::from)
         .collect();
 
-    let svc = EpicService::new(state.db.clone());
-    match svc.update_epic(params).await {
+    match state.epic_svc.update_epic(params).await {
         Ok(epic_id) => {
             state.notify_epic_changed(epic_id);
             JsonRpcResponse::ok(

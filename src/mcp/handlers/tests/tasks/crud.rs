@@ -301,6 +301,170 @@ async fn update_task_accepts_string_task_id() {
     assert_eq!(task.status, crate::models::TaskStatus::Running);
 }
 
+// ---------------------------------------------------------------------------
+// Mock service injection — demonstrates the TaskServiceApi seam
+// ---------------------------------------------------------------------------
+
+/// A minimal mock that satisfies `TaskServiceApi` without a database.
+/// Unused methods return `ServiceError::Internal` so test panics are obvious.
+struct MockTaskService {
+    tasks: Vec<crate::models::Task>,
+}
+
+#[async_trait::async_trait]
+impl crate::service::TaskServiceApi for MockTaskService {
+    async fn list_tasks(
+        &self,
+        _filter: crate::service::ListTasksFilter,
+    ) -> Result<Vec<crate::models::Task>, crate::service::ServiceError> {
+        Ok(self.tasks.clone())
+    }
+
+    async fn update_task(
+        &self,
+        _p: crate::service::UpdateTaskParams,
+    ) -> Result<crate::service::UpdateTaskResult, crate::service::ServiceError> {
+        Err(crate::service::ServiceError::Internal("not mocked".into()))
+    }
+    async fn cli_update_task(
+        &self,
+        _id: crate::models::TaskId,
+        _s: crate::models::TaskStatus,
+        _o: Option<crate::models::TaskStatus>,
+        _ss: Option<crate::models::SubStatus>,
+    ) -> Result<bool, crate::service::ServiceError> {
+        Err(crate::service::ServiceError::Internal("not mocked".into()))
+    }
+    async fn create_task(
+        &self,
+        _p: crate::service::CreateTaskParams,
+    ) -> Result<crate::models::TaskId, crate::service::ServiceError> {
+        Err(crate::service::ServiceError::Internal("not mocked".into()))
+    }
+    async fn create_task_returning(
+        &self,
+        _p: crate::service::CreateTaskParams,
+    ) -> Result<crate::models::Task, crate::service::ServiceError> {
+        Err(crate::service::ServiceError::Internal("not mocked".into()))
+    }
+    async fn delete_task(
+        &self,
+        _id: crate::models::TaskId,
+    ) -> Result<(), crate::service::ServiceError> {
+        Err(crate::service::ServiceError::Internal("not mocked".into()))
+    }
+    async fn get_task(
+        &self,
+        _id: crate::models::TaskId,
+    ) -> Result<crate::models::Task, crate::service::ServiceError> {
+        Err(crate::service::ServiceError::Internal("not mocked".into()))
+    }
+    async fn claim_task(
+        &self,
+        _p: crate::service::ClaimTaskParams,
+    ) -> Result<crate::models::Task, crate::service::ServiceError> {
+        Err(crate::service::ServiceError::Internal("not mocked".into()))
+    }
+    async fn validate_wrap_up(
+        &self,
+        _id: crate::models::TaskId,
+    ) -> Result<crate::models::Task, crate::service::ServiceError> {
+        Err(crate::service::ServiceError::Internal("not mocked".into()))
+    }
+    async fn validate_send_message(
+        &self,
+        _from: crate::models::TaskId,
+        _to: crate::models::TaskId,
+    ) -> Result<(crate::models::Task, crate::models::Task), crate::service::ServiceError> {
+        Err(crate::service::ServiceError::Internal("not mocked".into()))
+    }
+    async fn record_hook_event(
+        &self,
+        _id: crate::models::TaskId,
+        _kind: crate::models::HookEventKind,
+    ) -> Result<(), crate::service::ServiceError> {
+        Err(crate::service::ServiceError::Internal("not mocked".into()))
+    }
+    async fn next_backlog_task(
+        &self,
+        _epic_id: crate::models::EpicId,
+    ) -> Result<Option<crate::models::Task>, crate::service::ServiceError> {
+        Err(crate::service::ServiceError::Internal("not mocked".into()))
+    }
+}
+
+fn mock_task(id: i64, title: &str) -> crate::models::Task {
+    crate::models::Task {
+        id: crate::models::TaskId(id),
+        title: title.to_string(),
+        description: "mock description".to_string(),
+        repo_path: "/mock/repo".to_string(),
+        status: crate::models::TaskStatus::Backlog,
+        worktree: None,
+        tmux_window: None,
+        plan_path: None,
+        epic_id: None,
+        sub_status: crate::models::SubStatus::None,
+        pr_url: None,
+        tag: None,
+        sort_order: None,
+        base_branch: "main".to_string(),
+        external_id: None,
+        labels: vec![],
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+        last_pre_tool_use_at: None,
+        last_notification_at: None,
+        wrap_up_mode: None,
+    }
+}
+
+/// Constructs McpState with `task_svc` injected directly — no `new()` needed.
+async fn state_with_mock_task_svc(
+    task_svc: Arc<dyn crate::service::TaskServiceApi>,
+) -> Arc<McpState> {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let epic_svc: Arc<dyn crate::service::EpicServiceApi> =
+        Arc::new(crate::service::EpicService::new(db.clone()));
+    Arc::new(McpState {
+        db,
+        task_svc,
+        epic_svc,
+        notify_tx: None,
+        runner: Arc::new(MockProcessRunner::new(vec![])),
+        embedding_service: EmbeddingService::new_test(),
+        exit_tokens: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        data_dir: std::env::temp_dir(),
+    })
+}
+
+/// `list_tasks` returns whatever the service layer provides, independently of
+/// what is stored in the DB. This test proves the handler calls `task_svc`,
+/// not a raw DB query — and that the seam is injectable in unit tests.
+#[tokio::test]
+async fn list_tasks_uses_service_not_db_directly() {
+    let mock_svc = Arc::new(MockTaskService {
+        tasks: vec![
+            mock_task(101, "Alpha task"),
+            mock_task(102, "Beta task"),
+        ],
+    });
+    let state = state_with_mock_task_svc(mock_svc).await;
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "list_tasks", "arguments": {} })),
+    )
+    .await;
+
+    assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
+    let text = extract_response_text(&resp);
+    // Both mock tasks appear in the response; neither was in the database.
+    assert!(text.contains("Alpha task"), "expected mock task in: {text}");
+    assert!(text.contains("Beta task"), "expected mock task in: {text}");
+}
+
 #[tokio::test]
 async fn get_task_accepts_string_task_id() {
     let state = test_state().await;

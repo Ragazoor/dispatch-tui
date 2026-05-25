@@ -49,8 +49,8 @@ pub(crate) async fn handle_claim_task(
     };
     tracing::info!(task_id = parsed.task_id, worktree = %parsed.worktree, "MCP claim_task");
 
-    let svc = state.task_service();
-    match svc
+    match state
+        .task_svc
         .claim_task(ClaimTaskParams {
             task_id: TaskId(parsed.task_id),
             worktree: parsed.worktree,
@@ -109,8 +109,7 @@ pub(crate) async fn handle_dispatch_next(
         }
     }
 
-    let svc = state.task_service();
-    let next_task = match svc.next_backlog_task(EpicId(parsed.epic_id)).await {
+    let next_task = match state.task_svc.next_backlog_task(EpicId(parsed.epic_id)).await {
         Ok(Some(task)) => task,
         Ok(None) => {
             return JsonRpcResponse::ok(
@@ -301,8 +300,8 @@ pub(crate) async fn handle_send_message(
         Err(e) => return e,
     };
 
-    let svc = state.task_service();
-    let (from_task, to_task) = match svc
+    let (from_task, to_task) = match state
+        .task_svc
         .validate_send_message(TaskId(parsed.from_task_id), TaskId(parsed.to_task_id))
         .await
     {

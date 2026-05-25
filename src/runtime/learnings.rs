@@ -153,8 +153,8 @@ mod tests {
         let runner: Arc<dyn crate::process::ProcessRunner> =
             Arc::new(crate::process::MockProcessRunner::new(vec![]));
         TuiRuntime {
-            task_svc: crate::service::TaskService::new(db_arc.clone()),
-            epic_svc: crate::service::EpicService::new(db_arc.clone()),
+            task_svc: Arc::new(crate::service::TaskService::new(db_arc.clone())),
+            epic_svc: Arc::new(crate::service::EpicService::new(db_arc.clone())),
             feed_runner: Some(crate::feed::FeedRunner::new(
                 db_arc.clone(),
                 feed_tx,

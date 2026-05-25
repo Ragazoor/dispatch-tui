@@ -87,6 +87,19 @@ compile-time check — a missing field will silently omit the column from the DB
 
 `Arc<dyn TaskStore>` coerces to any narrower trait object at call sites via Rust's trait-object upcasting (stabilised in 1.86). If you need to split a wide `Arc<dyn TaskStore>` into a narrower one, use a typed `let` binding: `let d: Arc<dyn EpicCrud> = task_store_arc.clone();`.
 
+## Service trait narrowing — `Arc<dyn TaskServiceApi>` / `Arc<dyn EpicServiceApi>`
+
+Parallel to DB trait narrowing, the service layer exposes two traits defined in `src/service/api.rs`:
+
+| Trait | Production impl | Where held |
+|-------|----------------|------------|
+| `TaskServiceApi` | `TaskService` | `TuiRuntime::task_svc`, `McpState::task_svc` |
+| `EpicServiceApi` | `EpicService` | `TuiRuntime::epic_svc`, `McpState::epic_svc` |
+
+Consumers that call task or epic operations should hold `Arc<dyn TaskServiceApi>` / `Arc<dyn EpicServiceApi>` rather than the concrete struct. This lets unit tests inject a mock service without a real database — construct `McpState` directly (all fields are `pub` or `pub(crate)`) and pass a custom `Arc<dyn TaskServiceApi>`.
+
+The concrete structs (`TaskService`, `EpicService`) delegate via UFCS (`TaskService::method(self, …)`) inside the `impl` blocks to avoid shadowing the inherent methods.
+
 ## DB access — `db_call`
 
 `Database` (`src/db/mod.rs`) wraps a single [`tokio_rusqlite::Connection`] — a dedicated worker thread owning the underlying `rusqlite::Connection`. There is no sync handle or mutex; every store impl, schema init, and migration runs through that worker.
