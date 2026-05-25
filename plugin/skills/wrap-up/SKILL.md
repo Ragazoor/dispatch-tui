@@ -52,10 +52,10 @@ git diff {base_branch}..HEAD --name-only
 git diff --name-only
 ```
 
-If the combined output includes any source code files (`.rs`, `.py`, `.ts`, `.js`, `.tsx`, `.jsx`, `.go`, `.java`, `.cpp`, `.c`, `.h`, `.swift`, `.kt`, `.rb`, `.cs`) — i.e., not only docs, configs, snapshots, or lock files — invoke the simplify skill:
+If the combined output includes any source code files (`.rs`, `.py`, `.ts`, `.js`, `.tsx`, `.jsx`, `.go`, `.java`, `.cpp`, `.c`, `.h`, `.swift`, `.kt`, `.rb`, `.cs`) — i.e., not only docs, configs, snapshots, or lock files — invoke the `code-simplifier` skill (not `kognic-code-quality` or any other code review skill):
 
 ```
-Skill({ skill: "simplify" })
+Skill({ skill: "code-simplifier:code-simplifier" })
 ```
 
 Wait for the skill to complete before proceeding. If it makes additional changes, those will be picked up in Step 3.

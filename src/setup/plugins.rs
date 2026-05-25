@@ -483,6 +483,19 @@ mod tests {
     }
 
     #[test]
+    fn wrap_up_skill_does_not_reference_nonexistent_simplify_skill() {
+        let content = PLUGIN_DIR
+            .get_file("skills/wrap-up/SKILL.md")
+            .expect("wrap-up SKILL.md must be embedded")
+            .contents_utf8()
+            .expect("wrap-up SKILL.md must be UTF-8");
+        assert!(
+            !content.contains("simplify"),
+            "wrap-up skill must not reference the nonexistent 'simplify' skill"
+        );
+    }
+
+    #[test]
     fn plugin_hook_scripts_are_executable() {
         let hooks_scripts = PLUGIN_DIR
             .get_dir("hooks/scripts")
