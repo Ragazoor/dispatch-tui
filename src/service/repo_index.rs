@@ -704,6 +704,118 @@ mod tests {
         assert_eq!(result.len(), 2, "adjacent decls should each be their own chunk: {:?}", result);
     }
 
+    #[test]
+    fn chunk_by_decls_single_fn_returns_one_chunk() {
+        let result = chunk_by_declarations("fn foo() {}", &["fn "], |_| false);
+        assert_eq!(result.len(), 1);
+        assert!(result[0].contains("fn foo()"));
+    }
+
+    #[test]
+    fn chunk_by_decls_doc_comment_before_decl_stays_with_it() {
+        let content = "fn foo() {}\n\n/// Does bar.\nfn bar() {}";
+        let result = chunk_by_declarations(content, &["fn "], |l| l.starts_with("///"));
+        assert_eq!(result.len(), 2);
+        assert!(
+            !result[0].contains("/// Does bar."),
+            "doc comment must not be in foo chunk: {}",
+            result[0]
+        );
+        assert!(
+            result[1].contains("/// Does bar."),
+            "doc comment must be in bar chunk: {}",
+            result[1]
+        );
+    }
+
+    #[test]
+    fn chunk_by_decls_indented_fn_is_not_a_boundary() {
+        let content = "fn outer() {\n    fn inner() {}\n}";
+        let result = chunk_by_declarations(content, &["fn "], |_| false);
+        assert_eq!(result.len(), 1, "indented fn must not split: {:?}", result);
+        assert!(result[0].contains("fn inner()"));
+    }
+
+    #[test]
+    fn chunk_by_decls_only_attr_lines_no_decls_returns_single_chunk() {
+        let content = "#[derive(Debug)]\n#[allow(dead_code)]";
+        let result = chunk_by_declarations(content, &["fn "], |l| l.starts_with("#["));
+        assert_eq!(result.len(), 1, "attr-only content must not be empty: {:?}", result);
+        assert!(result[0].contains("#[derive(Debug)]"));
+    }
+
+    // --- is_decl_boundary ---
+
+    #[test]
+    fn is_decl_boundary_fn_at_col0_returns_true() {
+        assert!(is_decl_boundary("fn foo()", &["fn "]));
+    }
+
+    #[test]
+    fn is_decl_boundary_async_fn_returns_true() {
+        assert!(is_decl_boundary("async fn foo()", &["fn "]));
+    }
+
+    #[test]
+    fn is_decl_boundary_pub_fn_returns_true() {
+        assert!(is_decl_boundary("pub fn foo()", &["fn "]));
+    }
+
+    #[test]
+    fn is_decl_boundary_pub_async_fn_returns_true() {
+        assert!(is_decl_boundary("pub async fn foo()", &["fn "]));
+    }
+
+    #[test]
+    fn is_decl_boundary_pub_crate_async_fn_returns_true() {
+        assert!(is_decl_boundary("pub(crate) async fn foo()", &["fn "]));
+    }
+
+    #[test]
+    fn is_decl_boundary_pub_super_fn_returns_true() {
+        assert!(is_decl_boundary("pub(super) fn foo()", &["fn "]));
+    }
+
+    #[test]
+    fn is_decl_boundary_unsafe_fn_returns_true() {
+        assert!(is_decl_boundary("unsafe fn foo()", &["fn "]));
+    }
+
+    #[test]
+    fn is_decl_boundary_unsafe_async_fn_returns_true() {
+        assert!(is_decl_boundary("unsafe async fn foo()", &["fn "]));
+    }
+
+    #[test]
+    fn is_decl_boundary_struct_returns_true() {
+        assert!(is_decl_boundary("struct Foo", &["fn ", "struct "]));
+    }
+
+    #[test]
+    fn is_decl_boundary_enum_returns_true() {
+        assert!(is_decl_boundary("enum Bar", &["fn ", "enum "]));
+    }
+
+    #[test]
+    fn is_decl_boundary_impl_returns_true() {
+        assert!(is_decl_boundary("impl Foo", &["fn ", "impl "]));
+    }
+
+    #[test]
+    fn is_decl_boundary_indented_fn_returns_false() {
+        assert!(!is_decl_boundary("    fn foo()", &["fn "]));
+    }
+
+    #[test]
+    fn is_decl_boundary_comment_returns_false() {
+        assert!(!is_decl_boundary("// fn foo()", &["fn "]));
+    }
+
+    #[test]
+    fn is_decl_boundary_let_stmt_returns_false() {
+        assert!(!is_decl_boundary("let x = fn_call()", &["fn "]));
+    }
+
     // --- chunk_rust ---
 
     #[test]
