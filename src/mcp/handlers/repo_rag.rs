@@ -3,22 +3,18 @@ use serde_json::{json, Value};
 
 use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
-use crate::service::repo_index::RepoIndexService;
+use crate::service::repo_index::{RepoIndexService, BATCH_SIZE};
 
-use super::types::{deserialize_flexible_i64, parse_args, tool_error, JsonRpcResponse};
+use super::types::{parse_args, tool_error, JsonRpcResponse};
 
 #[derive(Deserialize)]
 pub(super) struct IndexRepoArgs {
-    #[serde(deserialize_with = "deserialize_flexible_i64")]
-    pub(super) task_id: i64,
     #[serde(default)]
     pub(super) repo_path: Option<String>,
 }
 
 #[derive(Deserialize)]
 pub(super) struct SearchDocsArgs {
-    #[serde(deserialize_with = "deserialize_flexible_i64")]
-    pub(super) task_id: i64,
     pub(super) query: String,
     #[serde(default)]
     pub(super) repo_path: Option<String>,
@@ -28,20 +24,26 @@ pub(super) struct SearchDocsArgs {
 
 async fn resolve_repo_path(
     id: &Option<Value>,
-    task_id: i64,
+    identity: &CallerIdentity,
     override_path: Option<String>,
     state: &McpState,
 ) -> Result<std::path::PathBuf, JsonRpcResponse> {
     if let Some(p) = override_path {
-        return Ok(std::path::PathBuf::from(p));
+        return Ok(std::path::PathBuf::from(crate::models::expand_tilde(&p)));
     }
-    let tid = crate::models::TaskId(task_id);
-    match state.db.get_task(tid).await {
-        Ok(Some(t)) => Ok(std::path::PathBuf::from(t.repo_path)),
+    let CallerIdentity::Task(tid) = identity else {
+        return Err(JsonRpcResponse::err(
+            id.clone(),
+            -32602,
+            "repo_path is required when called outside a task session",
+        ));
+    };
+    match state.db.get_task(*tid).await {
+        Ok(Some(t)) => Ok(std::path::PathBuf::from(crate::models::expand_tilde(&t.repo_path))),
         Ok(None) => Err(JsonRpcResponse::err(
             id.clone(),
             -32602,
-            format!("task {task_id} not found — pass repo_path explicitly"),
+            format!("task {} not found — pass repo_path explicitly", tid.0),
         )),
         Err(e) => Err(JsonRpcResponse::err(
             id.clone(),
@@ -54,7 +56,7 @@ async fn resolve_repo_path(
 pub(super) async fn handle_index_repo(
     state: &McpState,
     id: Option<Value>,
-    _identity: &CallerIdentity,
+    identity: &CallerIdentity,
     args: Value,
 ) -> JsonRpcResponse {
     let parsed = match parse_args::<IndexRepoArgs>(&id, args) {
@@ -62,23 +64,24 @@ pub(super) async fn handle_index_repo(
         Err(e) => return e,
     };
 
-    let repo_path = match resolve_repo_path(&id, parsed.task_id, parsed.repo_path, state).await {
+    let repo_path = match resolve_repo_path(&id, identity, parsed.repo_path, state).await {
         Ok(p) => p,
         Err(e) => return e,
     };
 
     let svc = RepoIndexService::new(state.embedding_service.clone());
-    match svc.index_repo(&repo_path).await {
+    match svc.index_repo(&repo_path, BATCH_SIZE).await {
         Ok(result) => JsonRpcResponse::ok(
             id,
             json!({
                 "content": [{
                     "type": "text",
                     "text": format!(
-                        "Indexed {repo} — files_indexed: {fi}, files_skipped: {fs}, chunks_total: {ct}, duration_ms: {ms}",
+                        "Indexed {repo} — files_indexed: {fi}, files_skipped: {fs}, files_remaining: {fr}, chunks_total: {ct}, duration_ms: {ms}",
                         repo = repo_path.display(),
                         fi = result.files_indexed,
                         fs = result.files_skipped,
+                        fr = result.files_remaining,
                         ct = result.chunks_total,
                         ms = result.duration_ms,
                     )
@@ -93,7 +96,7 @@ pub(super) async fn handle_index_repo(
 pub(super) async fn handle_search_docs(
     state: &McpState,
     id: Option<Value>,
-    _identity: &CallerIdentity,
+    identity: &CallerIdentity,
     args: Value,
 ) -> JsonRpcResponse {
     let parsed = match parse_args::<SearchDocsArgs>(&id, args) {
@@ -101,7 +104,7 @@ pub(super) async fn handle_search_docs(
         Err(e) => return e,
     };
 
-    let repo_path = match resolve_repo_path(&id, parsed.task_id, parsed.repo_path, state).await {
+    let repo_path = match resolve_repo_path(&id, identity, parsed.repo_path, state).await {
         Ok(p) => p,
         Err(e) => return e,
     };

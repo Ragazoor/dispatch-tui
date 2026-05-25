@@ -605,15 +605,15 @@ async fn tool_schemas_match_arg_structs() {
         ),
         (
             "index_repo",
-            BTreeSet::from(["task_id", "repo_path"]),
-            BTreeSet::from(["task_id"]),
-            json!({"task_id": 1, "repo_path": "/some/path"}),
+            BTreeSet::from(["repo_path"]),
+            BTreeSet::new(),
+            json!({"repo_path": "/some/path"}),
         ),
         (
             "search_docs",
-            BTreeSet::from(["task_id", "query", "repo_path", "limit"]),
-            BTreeSet::from(["task_id", "query"]),
-            json!({"task_id": 1, "query": "escalation patterns"}),
+            BTreeSet::from(["query", "repo_path", "limit"]),
+            BTreeSet::from(["query"]),
+            json!({"query": "escalation patterns"}),
         ),
         (
             "query_usage",

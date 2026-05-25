@@ -504,31 +504,23 @@ the session.",
         };
 
     async "index_repo" => repo_rag::handle_index_repo,
-        "Index (or re-index) source files (.md, .rs, .allium) in a repository for semantic search. Creates .dispatch/rag.db in the repo. Safe to re-run — only changed files are re-embedded. Defaults repo_path to the calling task's repo when omitted.",
+        "Index (or re-index) source files (.md, .rs, .allium) in a repository for semantic search. Creates .dispatch/rag.db in the repo. Indexes up to 50 files per call — if files_remaining > 0, call again until it reaches 0. Safe to re-run; only changed files are re-embedded. Omit repo_path to use the calling task's repo (derived from caller identity).",
         {
             "type": "object",
             "properties": {
-                "task_id": {
-                    "type": "integer",
-                    "description": "ID of the calling task — used to look up repo_path when repo_path is omitted"
-                },
                 "repo_path": {
                     "type": "string",
                     "description": "Absolute path to the repository root. Omit to use the calling task's repo_path."
                 }
             },
-            "required": ["task_id"]
+            "required": []
         };
 
     async "search_docs" => repo_rag::handle_search_docs,
-        "Semantic search over indexed source files (.md, .rs, .allium) in a repository. Returns ranked chunks with file path and score. Returns empty results (not an error) when the repo has not been indexed yet — call index_repo first.",
+        "Semantic search over indexed source files (.md, .rs, .allium) in a repository. Returns ranked chunks with file path and score. Returns empty results (not an error) when the repo has not been indexed yet — call index_repo first. Omit repo_path to use the calling task's repo.",
         {
             "type": "object",
             "properties": {
-                "task_id": {
-                    "type": "integer",
-                    "description": "ID of the calling task — used to look up repo_path when repo_path is omitted"
-                },
                 "query": {
                     "type": "string",
                     "description": "Natural language search query"
@@ -542,7 +534,7 @@ the session.",
                     "description": "Maximum results to return (default 5, max 20)"
                 }
             },
-            "required": ["task_id", "query"]
+            "required": ["query"]
         };
 
     async "query_usage" => tasks::handle_query_usage,

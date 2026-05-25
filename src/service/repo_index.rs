@@ -11,9 +11,16 @@ use crate::service::embeddings::{
     RAG_SIMILARITY_THRESHOLD,
 };
 
+/// Number of files embedded per `index_repo` call.
+///
+/// Keeps each MCP call well within client timeouts. Callers loop until
+/// `files_remaining` is zero.
+pub const BATCH_SIZE: usize = 50;
+
 pub struct IndexResult {
     pub files_indexed: usize,
     pub files_skipped: usize,
+    pub files_remaining: usize,
     pub chunks_total: usize,
     pub duration_ms: u64,
 }
@@ -280,7 +287,7 @@ impl RepoIndexService {
         Self { embedding_service }
     }
 
-    pub async fn index_repo(&self, repo_path: &Path) -> Result<IndexResult> {
+    pub async fn index_repo(&self, repo_path: &Path, batch_size: usize) -> Result<IndexResult> {
         let start = std::time::Instant::now();
         let repo_path = repo_path.to_owned();
 
@@ -288,8 +295,8 @@ impl RepoIndexService {
         let (to_index, to_delete, skipped_count) = tokio::task::spawn_blocking({
             let repo_path = repo_path.clone();
             move || -> Result<DiffResult> {
-                let conn = open_rag_db(&repo_path)?;
                 ensure_dispatch_dir_and_gitignore(&repo_path)?;
+                let conn = open_rag_db(&repo_path)?;
                 let on_disk = walk_indexable_files(&repo_path)?;
 
                 let in_db: std::collections::HashMap<String, String> = {
@@ -324,6 +331,10 @@ impl RepoIndexService {
             }
         })
         .await??;
+
+        let files_remaining = to_index.len().saturating_sub(batch_size);
+        let mut to_index = to_index;
+        to_index.truncate(batch_size);
 
         // Phase 2 (async): read all changed files and embed their chunks in one batch.
         let mut file_chunks: Vec<(String, String, Vec<String>)> = Vec::new();
@@ -418,6 +429,7 @@ impl RepoIndexService {
         Ok(IndexResult {
             files_indexed,
             files_skipped: skipped_count,
+            files_remaining,
             chunks_total,
             duration_ms: start.elapsed().as_millis() as u64,
         })
@@ -1019,7 +1031,7 @@ mod tests {
         .unwrap();
 
         let svc = RepoIndexService::new(EmbeddingService::new_test());
-        let result = svc.index_repo(dir.path()).await.unwrap();
+        let result = svc.index_repo(dir.path(), BATCH_SIZE).await.unwrap();
 
         assert_eq!(result.files_indexed, 1);
         assert_eq!(result.files_skipped, 0);
@@ -1038,9 +1050,9 @@ mod tests {
         std::fs::write(dir.path().join("note.md"), "# Note\n\nContent.").unwrap();
 
         let svc = RepoIndexService::new(EmbeddingService::new_test());
-        svc.index_repo(dir.path()).await.unwrap();
+        svc.index_repo(dir.path(), BATCH_SIZE).await.unwrap();
 
-        let result2 = svc.index_repo(dir.path()).await.unwrap();
+        let result2 = svc.index_repo(dir.path(), BATCH_SIZE).await.unwrap();
         assert_eq!(result2.files_indexed, 0);
         assert_eq!(result2.files_skipped, 1);
     }
@@ -1052,10 +1064,10 @@ mod tests {
         std::fs::write(&path, "# Note\n\nOriginal.").unwrap();
 
         let svc = RepoIndexService::new(EmbeddingService::new_test());
-        svc.index_repo(dir.path()).await.unwrap();
+        svc.index_repo(dir.path(), BATCH_SIZE).await.unwrap();
 
         std::fs::write(&path, "# Note\n\nModified.").unwrap();
-        let result = svc.index_repo(dir.path()).await.unwrap();
+        let result = svc.index_repo(dir.path(), BATCH_SIZE).await.unwrap();
         assert_eq!(result.files_indexed, 1);
         assert_eq!(result.files_skipped, 0);
     }
@@ -1067,10 +1079,10 @@ mod tests {
         std::fs::write(&path, "# Note\n\nContent.").unwrap();
 
         let svc = RepoIndexService::new(EmbeddingService::new_test());
-        svc.index_repo(dir.path()).await.unwrap();
+        svc.index_repo(dir.path(), BATCH_SIZE).await.unwrap();
 
         std::fs::remove_file(&path).unwrap();
-        svc.index_repo(dir.path()).await.unwrap();
+        svc.index_repo(dir.path(), BATCH_SIZE).await.unwrap();
 
         let conn = open_rag_db(dir.path()).unwrap();
         let count: i64 = conn
@@ -1084,7 +1096,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("note.md"), "# Note").unwrap();
         let svc = RepoIndexService::new(EmbeddingService::new_test());
-        svc.index_repo(dir.path()).await.unwrap();
+        svc.index_repo(dir.path(), BATCH_SIZE).await.unwrap();
         let content = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
         assert!(content.contains(".dispatch/"));
     }
@@ -1109,7 +1121,7 @@ mod tests {
         .unwrap();
 
         let svc = RepoIndexService::new(EmbeddingService::new_test());
-        svc.index_repo(dir.path()).await.unwrap();
+        svc.index_repo(dir.path(), BATCH_SIZE).await.unwrap();
 
         let results = svc.search_docs(dir.path(), "escalation", 5).await.unwrap();
         assert!(!results.is_empty());
@@ -1126,7 +1138,7 @@ mod tests {
         .unwrap();
 
         let svc = RepoIndexService::new(EmbeddingService::new_test());
-        svc.index_repo(dir.path()).await.unwrap();
+        svc.index_repo(dir.path(), BATCH_SIZE).await.unwrap();
 
         let results = svc.search_docs(dir.path(), "query", 2).await.unwrap();
         assert_eq!(results.len(), 2);
@@ -1138,7 +1150,7 @@ mod tests {
         std::fs::write(dir.path().join("my-note.md"), "# My Note\n\nHello world.").unwrap();
 
         let svc = RepoIndexService::new(EmbeddingService::new_test());
-        svc.index_repo(dir.path()).await.unwrap();
+        svc.index_repo(dir.path(), BATCH_SIZE).await.unwrap();
 
         let results = svc.search_docs(dir.path(), "hello", 5).await.unwrap();
         assert!(!results.is_empty());
@@ -1158,7 +1170,7 @@ mod tests {
         .unwrap();
 
         let svc = RepoIndexService::new(EmbeddingService::new_test());
-        let result = svc.index_repo(dir.path()).await.unwrap();
+        let result = svc.index_repo(dir.path(), BATCH_SIZE).await.unwrap();
 
         assert_eq!(result.files_indexed, 1);
         assert_eq!(result.files_skipped, 0);
@@ -1181,7 +1193,7 @@ mod tests {
         .unwrap();
 
         let svc = RepoIndexService::new(EmbeddingService::new_test());
-        let result = svc.index_repo(dir.path()).await.unwrap();
+        let result = svc.index_repo(dir.path(), BATCH_SIZE).await.unwrap();
 
         assert_eq!(result.files_indexed, 1);
         assert!(result.chunks_total >= 1);
@@ -1197,7 +1209,7 @@ mod tests {
         .unwrap();
 
         let svc = RepoIndexService::new(EmbeddingService::new_test());
-        svc.index_repo(dir.path()).await.unwrap();
+        svc.index_repo(dir.path(), BATCH_SIZE).await.unwrap();
 
         let results = svc.search_docs(dir.path(), "add integers", 5).await.unwrap();
         assert!(!results.is_empty(), "expected at least one result");
