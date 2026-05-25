@@ -11,7 +11,7 @@ async fn fresh_db_has_latest_schema_version() {
         })
         .await
         .unwrap();
-    assert_eq!(version, 60);
+    assert_eq!(version, 61);
 }
 
 #[tokio::test]
@@ -358,7 +358,7 @@ async fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 60);
+    assert_eq!(version, 61);
 }
 
 #[tokio::test]
@@ -447,7 +447,7 @@ async fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 60);
+    assert_eq!(version, 61);
 }
 
 #[tokio::test]
@@ -552,7 +552,7 @@ async fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 60);
+    assert_eq!(version, 61);
 }
 
 #[tokio::test]
@@ -633,7 +633,7 @@ async fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 60);
+    assert_eq!(version, 61);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -754,7 +754,7 @@ async fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 60);
+    assert_eq!(version, 61);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -830,16 +830,16 @@ async fn migration_v4_preserves_epic_data_after_table_rebuild() {
     super::super::init_schema_sync(&conn).unwrap();
 
     // Epic core data preserved through v4 table rebuild
-    let (title, desc, repo): (String, String, String) = conn
+    // Note: epics.repo_path was dropped in v61, so we only check title and description
+    let (title, desc): (String, String) = conn
         .query_row(
-            "SELECT title, description, repo_path FROM epics WHERE id = 1",
+            "SELECT title, description FROM epics WHERE id = 1",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();
     assert_eq!(title, "Active Epic");
     assert_eq!(desc, "Active desc");
-    assert_eq!(repo, "/repo/a");
 
     // v4 dropped plan; v8 re-added it (NULL); v25 renamed to plan_path
     let plan_path: Option<String> = conn
@@ -1132,12 +1132,8 @@ async fn migration_v18_expands_tilde_paths() {
         .unwrap();
     assert_eq!(abs_path, "/absolute/path");
 
-    let epic_path: String = conn
-        .query_row("SELECT repo_path FROM epics WHERE id = 1", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
-    assert_eq!(epic_path, format!("{home}/project/b"));
+    // Note: epics.repo_path was dropped in v61, so we can't verify it here
+    // The v18 migration itself (tilde expansion) ran successfully before v61 dropped the column
 
     let rp: String = conn
         .query_row("SELECT path FROM repo_paths", [], |row| row.get(0))
@@ -1705,13 +1701,8 @@ async fn migration_31_re_expands_tilde_paths() {
         .unwrap();
     assert_eq!(repo2, "/absolute/path");
 
-    // epics.repo_path expanded
-    let epic_repo: String = conn
-        .query_row("SELECT repo_path FROM epics WHERE id = 1", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
-    assert_eq!(epic_repo, format!("{home}/code/epic"));
+    // Note: epics.repo_path was dropped in v61, so we can't verify it here
+    // The v31 migration itself (re-expand tilde) ran successfully before v61 dropped the column
 
     // repo_paths.path expanded
     let rp: String = conn
@@ -1754,7 +1745,7 @@ async fn migration_31_re_expands_tilde_paths() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 60);
+    assert_eq!(version, 61);
 }
 
 #[tokio::test]
@@ -1830,7 +1821,7 @@ async fn migrate_v32_adds_base_branch_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 60);
+    assert_eq!(version, 61);
 }
 
 #[tokio::test]
@@ -1933,7 +1924,7 @@ async fn migration_v38_feed_epic_columns() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 60);
+    assert_eq!(version, 61);
 }
 
 #[tokio::test]
@@ -1946,7 +1937,7 @@ async fn fresh_db_schema_version_is_58() {
         })
         .await
         .unwrap();
-    assert_eq!(version, 60);
+    assert_eq!(version, 61);
 }
 
 #[tokio::test]
@@ -2016,7 +2007,7 @@ async fn migration_v40_creates_learnings_table() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 60);
+    assert_eq!(version, 61);
 }
 
 #[tokio::test]
@@ -2103,7 +2094,7 @@ async fn migration_v41_drops_cost_usd_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 60);
+    assert_eq!(version, 61);
     // task_usage dropped entirely by v56
     let table_count: i64 = conn
         .query_row(
@@ -2217,7 +2208,7 @@ async fn test_migrate_v43_proposed_to_approved() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 60);
+    assert_eq!(version, 61);
 }
 
 #[tokio::test]

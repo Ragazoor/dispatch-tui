@@ -93,6 +93,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (58, migrate_v58_reset_intermediate_epic_statuses),
     (59, migrate_v59_create_usage_events),
     (60, migrate_v60_drop_projects),
+    (61, migrate_v61_drop_epic_repo_path),
 ];
 
 fn migrate_v53_add_wrap_up_mode(conn: &Connection) -> Result<()> {
@@ -1343,6 +1344,14 @@ pub(super) fn migrate_v60_drop_projects(conn: &Connection) -> Result<()> {
     if table_exists(conn, "learnings") {
         conn.execute_batch("DELETE FROM learnings WHERE scope = 'project'")
             .context("Failed to delete project-scoped learnings (migration v60)")?;
+    }
+    Ok(())
+}
+
+fn migrate_v61_drop_epic_repo_path(conn: &Connection) -> Result<()> {
+    if column_exists(conn, "epics", "repo_path") {
+        conn.execute_batch("ALTER TABLE epics DROP COLUMN repo_path")
+            .context("Failed to drop repo_path from epics (migration v61)")?;
     }
     Ok(())
 }
