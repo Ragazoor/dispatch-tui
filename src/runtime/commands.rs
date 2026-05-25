@@ -156,7 +156,7 @@ async fn dispatch_task(
             vec![]
         }
         DispatchAgent { task, mode } => {
-            rt.exec_dispatch_agent(task, mode).await;
+            rt.exec_dispatch_agent(task, mode);
             vec![]
         }
         Cleanup {

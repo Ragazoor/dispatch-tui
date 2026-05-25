@@ -465,8 +465,7 @@ async fn exec_dispatch_sends_dispatched_message() {
     )
     .await
     .unwrap();
-    rt.exec_dispatch_agent(task, models::DispatchMode::Dispatch)
-        .await;
+    rt.exec_dispatch_agent(task, models::DispatchMode::Dispatch);
 
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
@@ -500,8 +499,7 @@ async fn exec_dispatch_sends_error_on_failure() {
     )
     .await
     .unwrap();
-    rt.exec_dispatch_agent(task.clone(), models::DispatchMode::Dispatch)
-        .await;
+    rt.exec_dispatch_agent(task.clone(), models::DispatchMode::Dispatch);
 
     let msg1 = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await

@@ -66,41 +66,70 @@ impl TuiRuntime {
         let _ = self.database.save_repo_path(&expanded).await;
         let paths = self.database.list_repo_paths().await.unwrap_or_default();
         app.update(Message::RepoPathsUpdated(paths));
-        let epic_ctx = dispatch::EpicContext::from_db(&task, &*self.database).await;
-        let injected =
-            dispatch::build_and_record_injections(&*self.database, &task, &self.emb_svc).await;
-        let verify_command = dispatch::fetch_verify_command(&*self.database, &task.repo_path).await;
-        let tx = self.msg_tx.clone();
-        let runner = self.runner.clone();
-        tokio::task::spawn_blocking(move || {
-            let id = task.id;
-            let injections = dispatch::LearningInjections::from(&*injected);
-            match dispatch::quick_dispatch_agent(
-                &task,
-                &*runner,
-                epic_ctx.as_ref(),
-                &injections,
-                verify_command.as_deref(),
-            ) {
-                Ok(result) => {
-                    let _ = tx.send(Message::Task(
-                        crate::tui::messages::TaskMessage::Dispatched {
-                            id,
-                            worktree: result.worktree_path,
-                            tmux_window: result.tmux_window,
-                            switch_focus: true,
-                        },
-                    ));
+        let db = Arc::clone(&self.database);
+        let emb_svc = Arc::clone(&self.emb_svc);
+        let msg_tx = self.msg_tx.clone();
+        let runner = Arc::clone(&self.runner);
+
+        // Spawn a background task so the TUI command loop is never blocked
+        // waiting for the embedding thread (which may be busy with index_repo).
+        tokio::spawn(async move {
+            let epic_ctx = dispatch::EpicContext::from_db(&task, &*db).await;
+            let injected =
+                dispatch::build_and_record_injections(&*db, &task, &emb_svc).await;
+            let verify_command =
+                dispatch::fetch_verify_command(&*db, &task.repo_path).await;
+            tokio::task::spawn_blocking(move || {
+                let id = task.id;
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let injections = dispatch::LearningInjections::from(&*injected);
+                    dispatch::quick_dispatch_agent(
+                        &task,
+                        &*runner,
+                        epic_ctx.as_ref(),
+                        &injections,
+                        verify_command.as_deref(),
+                    )
+                }));
+                match result {
+                    Ok(Ok(r)) => {
+                        let _ = msg_tx.send(Message::Task(
+                            crate::tui::messages::TaskMessage::Dispatched {
+                                id,
+                                worktree: r.worktree_path,
+                                tmux_window: r.tmux_window,
+                                switch_focus: true,
+                            },
+                        ));
+                    }
+                    Ok(Err(e)) => {
+                        let _ = msg_tx.send(Message::Task(
+                            crate::tui::messages::TaskMessage::DispatchFailed(id),
+                        ));
+                        let _ = msg_tx.send(Message::System(
+                            crate::tui::messages::SystemMessage::Error(
+                                format!("Quick dispatch failed: {e:#}"),
+                            ),
+                        ));
+                    }
+                    Err(panic) => {
+                        let detail = panic
+                            .downcast_ref::<&'static str>()
+                            .map(|s| s.to_string())
+                            .or_else(|| panic.downcast_ref::<String>().cloned())
+                            .unwrap_or_else(|| "unknown".to_string());
+                        tracing::error!(task_id = id.0, "quick dispatch panicked: {detail}");
+                        let _ = msg_tx.send(Message::Task(
+                            crate::tui::messages::TaskMessage::DispatchFailed(id),
+                        ));
+                        let _ = msg_tx.send(Message::System(
+                            crate::tui::messages::SystemMessage::Error(
+                                format!("Quick dispatch panicked: {detail}"),
+                            ),
+                        ));
+                    }
                 }
-                Err(e) => {
-                    let _ = tx.send(Message::Task(
-                        crate::tui::messages::TaskMessage::DispatchFailed(id),
-                    ));
-                    let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
-                        format!("Quick dispatch failed: {e:#}"),
-                    )));
-                }
-            }
+            });
         });
     }
 
@@ -175,34 +204,83 @@ impl TuiRuntime {
         }
     }
 
-    pub(super) async fn exec_dispatch_agent(&self, task: models::Task, mode: models::DispatchMode) {
-        let epic_ctx = dispatch::EpicContext::from_db(&task, &*self.database).await;
-        let injected =
-            dispatch::build_and_record_injections(&*self.database, &task, &self.emb_svc).await;
-        let verify_command = dispatch::fetch_verify_command(&*self.database, &task.repo_path).await;
-        let label = mode.label();
-        self.spawn_dispatch(
-            task,
-            move |t, r| {
-                let injections = dispatch::LearningInjections::from(&*injected);
-                match mode {
-                    models::DispatchMode::Dispatch => dispatch::dispatch_agent(
-                        t,
-                        r,
-                        epic_ctx.as_ref(),
-                        &injections,
-                        verify_command.as_deref(),
-                    ),
-                    models::DispatchMode::Research => dispatch::research_agent(
-                        t,
-                        r,
-                        epic_ctx.as_ref(),
-                        verify_command.as_deref(),
-                    ),
+    pub(super) fn exec_dispatch_agent(&self, task: models::Task, mode: models::DispatchMode) {
+        let db = Arc::clone(&self.database);
+        let emb_svc = Arc::clone(&self.emb_svc);
+        let msg_tx = self.msg_tx.clone();
+        let runner = Arc::clone(&self.runner);
+
+        // Spawn a background task so the TUI command loop is never blocked
+        // waiting for the embedding thread (which may be busy with index_repo).
+        tokio::spawn(async move {
+            let epic_ctx = dispatch::EpicContext::from_db(&task, &*db).await;
+            let injected =
+                dispatch::build_and_record_injections(&*db, &task, &emb_svc).await;
+            let verify_command =
+                dispatch::fetch_verify_command(&*db, &task.repo_path).await;
+            let label = mode.label();
+            let id = task.id;
+            tracing::info!(task_id = id.0, label, "dispatching");
+
+            tokio::task::spawn_blocking(move || {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let injections = dispatch::LearningInjections::from(&*injected);
+                    match mode {
+                        models::DispatchMode::Dispatch => dispatch::dispatch_agent(
+                            &task,
+                            &*runner,
+                            epic_ctx.as_ref(),
+                            &injections,
+                            verify_command.as_deref(),
+                        ),
+                        models::DispatchMode::Research => dispatch::research_agent(
+                            &task,
+                            &*runner,
+                            epic_ctx.as_ref(),
+                            verify_command.as_deref(),
+                        ),
+                    }
+                }));
+                match result {
+                    Ok(Ok(r)) => {
+                        let _ = msg_tx.send(Message::Task(
+                            crate::tui::messages::TaskMessage::Dispatched {
+                                id,
+                                worktree: r.worktree_path,
+                                tmux_window: r.tmux_window,
+                                switch_focus: false,
+                            },
+                        ));
+                    }
+                    Ok(Err(e)) => {
+                        let _ = msg_tx.send(Message::Task(
+                            crate::tui::messages::TaskMessage::DispatchFailed(id),
+                        ));
+                        let _ = msg_tx.send(Message::System(
+                            crate::tui::messages::SystemMessage::Error(
+                                format!("{label} failed: {e:#}"),
+                            ),
+                        ));
+                    }
+                    Err(panic) => {
+                        let detail = panic
+                            .downcast_ref::<&'static str>()
+                            .map(|s| s.to_string())
+                            .or_else(|| panic.downcast_ref::<String>().cloned())
+                            .unwrap_or_else(|| "unknown".to_string());
+                        tracing::error!(task_id = id.0, label, "dispatch panicked: {detail}");
+                        let _ = msg_tx.send(Message::Task(
+                            crate::tui::messages::TaskMessage::DispatchFailed(id),
+                        ));
+                        let _ = msg_tx.send(Message::System(
+                            crate::tui::messages::SystemMessage::Error(
+                                format!("{label} panicked: {detail}"),
+                            ),
+                        ));
+                    }
                 }
-            },
-            label,
-        );
+            });
+        });
     }
 
     pub(super) fn exec_check_window(&self, id: TaskId, window: String) {
