@@ -46,6 +46,8 @@ cargo test tui::tests::scenarios          # key-sequence integration tests
 cargo test tui::tests::snapshots          # ratatui buffer rendering tests
 ```
 
+Suite is green; if a runtime test fails locally, suspect timing — `spawn_blocking`-based tests are timing-sensitive.
+
 ### Snapshot tests
 
 Snapshots live in `src/tui/tests/snapshots/` and render to a 120×40 `TestBackend`. **Do not change the backend size** — it breaks all existing diffs.
@@ -77,6 +79,8 @@ rm src/dispatch/snapshots/*.snap.new                 # always clean up
 Property tests live alongside unit tests in a nested `mod property_tests` block.
 
 Inline test modules (`mod tests`, `mod property_tests`) must have `#[allow(clippy::unwrap_used, clippy::expect_used)]` at the top — the workspace `-D warnings` policy otherwise rejects bare `unwrap()`/`expect()` calls. See `src/db/tests/mod.rs` for the canonical pattern.
+
+When writing async tests over `spawn_blocking` work, use a oneshot/Notify to await completion — never `tokio::time::sleep`. See `docs/conventions.md` for the canonical pattern.
 
 ### Coverage
 
@@ -121,6 +125,8 @@ Tags (`TaskTag` in `src/models/tasks.rs`: `Bug`, `Feature`, `Chore`, `PrReview`,
 This file is intentionally slim — it is loaded into every agent's context. Read these on demand:
 
 > **Key pattern**: `FieldUpdate` / `TaskPatch` is the most-touched pattern in the codebase (nullable field mutations). Read [docs/conventions.md](docs/conventions.md) before writing any update handler.
+
+> Bare `unwrap()`/`expect()` are clippy-warned outside tests — see the soft-fail-decoding section of `docs/conventions.md` for the canonical fallback pattern.
 
 - [docs/architecture.md](docs/architecture.md) — Message→Command, ProcessRunner, command queue draining, editor session invariant, review/security agent state machine, error handling, quick dispatch
 - [docs/conventions.md](docs/conventions.md) — `FieldUpdate`, `TaskPatch`/`EpicPatch` double-Option, DB trait narrowing, `conn()`, inline-mutation boundary, `let _`, dead code, sub-status TOCTOU, immutable `parent_epic_id`, Clippy, visibility, performance footguns (`column_items_for_status` test-only; no `std::fs` in async)
